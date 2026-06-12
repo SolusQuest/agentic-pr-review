@@ -84,6 +84,10 @@ export async function resolveTarget(
       patch,
     };
   });
+  const headRepoFullName = pull.data.head.repo?.full_name;
+  if (!headRepoFullName) {
+    throw new Error('Pull request head repository metadata is required for same-repo validation');
+  }
 
   return {
     mode: 'pull-request',
@@ -94,7 +98,7 @@ export async function resolveTarget(
     baseSha: String(pull.data.base.sha),
     headRef: String(pull.data.head.ref),
     headSha: String(pull.data.head.sha),
-    headRepoFullName: pull.data.head.repo?.full_name ?? undefined,
+    headRepoFullName,
     draft: Boolean(pull.data.draft),
     changedFiles,
     htmlUrl: pull.data.html_url,

@@ -297,8 +297,11 @@ function validateRestoredState(
 }
 
 function validateSameRepositoryTarget(target: Awaited<ReturnType<typeof resolveTarget>>): void {
-  if (target.mode !== 'pull-request' || !target.headRepoFullName) {
+  if (target.mode !== 'pull-request') {
     return;
+  }
+  if (!target.headRepoFullName) {
+    throw new Error('Pull request head repository metadata is required for same-repo validation');
   }
   const expected = `${github.context.repo.owner}/${github.context.repo.repo}`;
   if (target.headRepoFullName !== expected) {

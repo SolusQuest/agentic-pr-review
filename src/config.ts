@@ -10,7 +10,7 @@ import {
   oneOf,
   parseBoolean,
   parseInteger,
-  parseOptionalInteger,
+  parseOptionalPositiveInteger,
   required,
 } from './utils.js';
 
@@ -68,9 +68,9 @@ export function parseActionConfig(
     runtimeProvider,
     targetMode,
     reviewMode,
-    prNumber: parseOptionalInteger(optionalInput(reader, 'pr_number'), 'pr_number'),
+    prNumber: parseOptionalPositiveInteger(optionalInput(reader, 'pr_number'), 'pr_number'),
     stateKey: optionalInput(reader, 'state_key'),
-    stateArtifactRunId: parseOptionalInteger(
+    stateArtifactRunId: parseOptionalPositiveInteger(
       optionalInput(reader, 'state_artifact_run_id'),
       'state_artifact_run_id',
     ),

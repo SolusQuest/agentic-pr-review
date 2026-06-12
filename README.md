@@ -35,6 +35,11 @@ jobs:
 `GITHUB_TOKEN` must be passed explicitly because the JavaScript action reads
 `process.env.GITHUB_TOKEN`.
 
+Path inputs such as `instructions_path`, `bootstrap_context_path`, and `incremental_context_path`
+are read from `GITHUB_WORKSPACE`. When a workflow uses live provider secrets, check out a trusted
+ref such as the repository default branch before using path inputs. Do not combine live secrets with
+files read from an untrusted pull request head checkout.
+
 For a live runtime, pass provider configuration as inputs and the API key as an env secret:
 
 ```yaml
@@ -151,10 +156,16 @@ compares the prior reviewed head to the current head:
 Fork pull requests are not supported. The action reads PR metadata and patches through GitHub APIs, but
 session continuity and comment lineage are scoped to same-repository pull requests.
 
+Public CI covers no-secret action wiring with the `test` runtime, including local artifact restore and
+real action artifact upload in the synthetic fixture workflow. Full provider execution and provider
+session resume are covered by the manual live smoke workflow after repository variables and secrets are
+configured.
+
 ## Live Smoke
 
 `.github/workflows/live-smoke.yml` is a manual `workflow_dispatch` workflow for trusted maintainers.
 It uses `target_mode=synthetic-fixture`, `runtime_provider=claude-code-cli`, and `post_comment=false`.
+The workflow fails unless it is dispatched from the repository default branch.
 
 Required repository variables:
 

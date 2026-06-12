@@ -26,6 +26,28 @@ export function parseOptionalInteger(value: string | undefined, name: string): n
   return parseInteger(value, name, 0);
 }
 
+export function parsePositiveInteger(
+  value: string | undefined,
+  name: string,
+  fallback: number,
+): number {
+  const parsed = parseInteger(value, name, fallback);
+  if (parsed <= 0) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return parsed;
+}
+
+export function parseOptionalPositiveInteger(
+  value: string | undefined,
+  name: string,
+): number | undefined {
+  if (!value || value.trim() === '') {
+    return undefined;
+  }
+  return parsePositiveInteger(value, name, 1);
+}
+
 export function parseBoolean(value: string | undefined, name: string, fallback: boolean): boolean {
   if (!value || value.trim() === '') {
     return fallback;

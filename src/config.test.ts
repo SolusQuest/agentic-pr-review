@@ -41,6 +41,15 @@ describe('parseActionConfig', () => {
     ).toThrow(/mutually exclusive/);
   });
 
+  it('requires positive integer ids', () => {
+    expect(() =>
+      parseActionConfig(new Inputs({ pr_number: '0' }), baseEnv, 'pull_request'),
+    ).toThrow(/pr_number must be a positive integer/);
+    expect(() =>
+      parseActionConfig(new Inputs({ state_artifact_run_id: '0' }), baseEnv, 'pull_request'),
+    ).toThrow(/state_artifact_run_id must be a positive integer/);
+  });
+
   it('requires live runtime configuration', () => {
     expect(() =>
       parseActionConfig(

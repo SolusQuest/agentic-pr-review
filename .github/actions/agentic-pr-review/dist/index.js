@@ -97650,11 +97650,18 @@ function parseInteger(value, name, fallback) {
   }
   return Number.parseInt(value, 10);
 }
-function parseOptionalInteger(value, name) {
+function parsePositiveInteger(value, name, fallback) {
+  const parsed = parseInteger(value, name, fallback);
+  if (parsed <= 0) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return parsed;
+}
+function parseOptionalPositiveInteger(value, name) {
   if (!value || value.trim() === "") {
     return void 0;
   }
-  return parseInteger(value, name, 0);
+  return parsePositiveInteger(value, name, 1);
 }
 function parseBoolean(value, name, fallback) {
   if (!value || value.trim() === "") {
@@ -97885,9 +97892,9 @@ function parseActionConfig(reader, env, eventName) {
     runtimeProvider,
     targetMode,
     reviewMode,
-    prNumber: parseOptionalInteger(optionalInput(reader, "pr_number"), "pr_number"),
+    prNumber: parseOptionalPositiveInteger(optionalInput(reader, "pr_number"), "pr_number"),
     stateKey: optionalInput(reader, "state_key"),
-    stateArtifactRunId: parseOptionalInteger(
+    stateArtifactRunId: parseOptionalPositiveInteger(
       optionalInput(reader, "state_artifact_run_id"),
       "state_artifact_run_id"
     ),
@@ -99058,6 +99065,10 @@ async function resolveTarget(config, octokit, context5) {
       patch
     };
   });
+  const headRepoFullName = pull.data.head.repo?.full_name;
+  if (!headRepoFullName) {
+    throw new Error("Pull request head repository metadata is required for same-repo validation");
+  }
   return {
     mode: "pull-request",
     prNumber,
@@ -99067,7 +99078,7 @@ async function resolveTarget(config, octokit, context5) {
     baseSha: String(pull.data.base.sha),
     headRef: String(pull.data.head.ref),
     headSha: String(pull.data.head.sha),
-    headRepoFullName: pull.data.head.repo?.full_name ?? void 0,
+    headRepoFullName,
     draft: Boolean(pull.data.draft),
     changedFiles,
     htmlUrl: pull.data.html_url
@@ -99350,8 +99361,11 @@ function validateRestoredState(restoredState, stateKey, runtimeProvider) {
   }
 }
 function validateSameRepositoryTarget(target) {
-  if (target.mode !== "pull-request" || !target.headRepoFullName) {
+  if (target.mode !== "pull-request") {
     return;
+  }
+  if (!target.headRepoFullName) {
+    throw new Error("Pull request head repository metadata is required for same-repo validation");
   }
   const expected = `${context2.repo.owner}/${context2.repo.repo}`;
   if (target.headRepoFullName !== expected) {

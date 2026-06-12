@@ -30,6 +30,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate trusted dispatch ref
+        env:
+          TRUSTED_REF: refs/heads/${{ github.event.repository.default_branch }}
+        run: |
+          if [ "${GITHUB_REF}" != "${TRUSTED_REF}" ]; then
+            echo "::error::Live smoke may only run from ${TRUSTED_REF}; got ${GITHUB_REF}"
+            exit 1
+          fi
       - uses: ./.github/actions/agentic-pr-review
         with:
           runtime_provider: claude-code-cli
