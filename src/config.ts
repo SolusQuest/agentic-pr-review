@@ -106,6 +106,11 @@ export function parseActionConfig(
       'max_review_chars',
       12000,
     ),
+    disablePromptCaching: parseBoolean(
+      optionalInput(reader, 'disable_prompt_caching'),
+      'disable_prompt_caching',
+      false,
+    ),
     debugCaptureRawApiBodies: parseBoolean(
       optionalInput(reader, 'debug_capture_raw_api_bodies'),
       'debug_capture_raw_api_bodies',

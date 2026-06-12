@@ -1,4 +1,9 @@
-import { type ActionConfig, type ChangedFile, type ReviewTarget } from './types.js';
+import {
+  type ActionConfig,
+  type ChangedFile,
+  type PullRequestCompare,
+  type ReviewTarget,
+} from './types.js';
 import { truncateText } from './utils.js';
 
 export interface GitHubContextLike {
@@ -16,12 +21,19 @@ export async function resolveTarget(
     return {
       mode: 'synthetic-fixture',
       title: 'Synthetic agentic PR review fixture',
+      body: 'Synthetic fixture for action smoke validation.',
+      baseRef: 'synthetic-base',
       baseSha: 'synthetic-base-sha',
+      headRef: 'synthetic-head',
       headSha: context.sha || 'synthetic-head-sha',
+      draft: false,
       changedFiles: [
         {
           filename: 'synthetic-review-fixture.md',
           status: 'modified',
+          additions: 4,
+          deletions: 0,
+          changes: 4,
           patch: [
             '@@ -1,3 +1,7 @@',
             ' # Synthetic fixture',
@@ -46,7 +58,14 @@ export async function resolveTarget(
     repo,
     pull_number: prNumber,
     per_page: 100,
-  })) as Array<{ filename: string; status: string; patch?: string }>;
+  })) as Array<{
+    filename: string;
+    status: string;
+    additions: number;
+    deletions: number;
+    changes: number;
+    patch?: string;
+  }>;
 
   let remainingPatchChars = config.maxPatchChars;
   const changedFiles: ChangedFile[] = files.map((file) => {
@@ -59,6 +78,9 @@ export async function resolveTarget(
     return {
       filename: file.filename,
       status: file.status,
+      additions: file.additions,
+      deletions: file.deletions,
+      changes: file.changes,
       patch,
     };
   });
@@ -67,11 +89,64 @@ export async function resolveTarget(
     mode: 'pull-request',
     prNumber,
     title: String(pull.data.title ?? `PR #${prNumber}`),
+    body: String(pull.data.body ?? ''),
+    baseRef: String(pull.data.base.ref),
     baseSha: String(pull.data.base.sha),
+    headRef: String(pull.data.head.ref),
     headSha: String(pull.data.head.sha),
+    headRepoFullName: pull.data.head.repo?.full_name ?? undefined,
+    draft: Boolean(pull.data.draft),
     changedFiles,
     htmlUrl: pull.data.html_url,
   };
+}
+
+export async function fetchTargetCompare(
+  octokit: any,
+  context: GitHubContextLike,
+  baseSha: string,
+  headSha: string,
+  maxPatchChars: number,
+): Promise<PullRequestCompare | undefined> {
+  const { owner, repo } = context.repo;
+  try {
+    const response = await octokit.rest.repos.compareCommitsWithBasehead({
+      owner,
+      repo,
+      basehead: `${baseSha}...${headSha}`,
+    });
+    let remainingPatchChars = maxPatchChars;
+    const changedFiles = (response.data.files ?? []).map((file: any) => {
+      const patch = file.patch
+        ? truncateText(String(file.patch), Math.max(0, remainingPatchChars))
+        : undefined;
+      if (patch) {
+        remainingPatchChars = Math.max(0, remainingPatchChars - patch.length);
+      }
+      return {
+        filename: String(file.filename),
+        status: String(file.status),
+        additions: Number(file.additions ?? 0),
+        deletions: Number(file.deletions ?? 0),
+        changes: Number(file.changes ?? 0),
+        patch,
+      };
+    });
+    return {
+      baseSha,
+      headSha,
+      htmlUrl: String(response.data.html_url),
+      status: String(response.data.status),
+      aheadBy: Number(response.data.ahead_by),
+      behindBy: Number(response.data.behind_by),
+      changedFiles,
+    };
+  } catch (error: any) {
+    if (error?.status === 404) {
+      return undefined;
+    }
+    throw error;
+  }
 }
 
 export function deriveStateKey(config: ActionConfig, target: ReviewTarget): string {

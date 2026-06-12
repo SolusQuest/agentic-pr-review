@@ -5129,8 +5129,8 @@ var require_formdata_parser = __commonJS({
         return false;
       }
       for (let i = 0; i < length; ++i) {
-        const cp2 = boundary.charCodeAt(i);
-        if (!(cp2 >= 48 && cp2 <= 57 || cp2 >= 65 && cp2 <= 90 || cp2 >= 97 && cp2 <= 122 || cp2 === 39 || cp2 === 45 || cp2 === 95)) {
+        const cp3 = boundary.charCodeAt(i);
+        if (!(cp3 >= 48 && cp3 <= 57 || cp3 >= 65 && cp3 <= 90 || cp3 >= 97 && cp3 <= 122 || cp3 === 39 || cp3 === 45 || cp3 === 95)) {
           return false;
         }
       }
@@ -26086,7 +26086,7 @@ var require_readdir_glob = __commonJS({
         });
       });
     }
-    function stat3(file, followSymlinks) {
+    function stat5(file, followSymlinks) {
       return new Promise((resolve3, reject) => {
         const statFunc = followSymlinks ? fs8.stat : fs8.lstat;
         statFunc(file, (err, stats) => {
@@ -26094,7 +26094,7 @@ var require_readdir_glob = __commonJS({
             switch (err.code) {
               case "ENOENT":
                 if (followSymlinks) {
-                  resolve3(stat3(file, false));
+                  resolve3(stat5(file, false));
                 } else {
                   resolve3(null);
                 }
@@ -26122,7 +26122,7 @@ var require_readdir_glob = __commonJS({
         const absolute = path9 + "/" + relative;
         let stats = null;
         if (useStat || followSymlinks) {
-          stats = await stat3(absolute, followSymlinks);
+          stats = await stat5(absolute, followSymlinks);
         }
         if (!stats && file.name !== void 0) {
           stats = file;
@@ -28619,8 +28619,8 @@ var require_graceful_fs = __commonJS({
       fs9.createReadStream = createReadStream2;
       fs9.createWriteStream = createWriteStream2;
       var fs$readFile = fs9.readFile;
-      fs9.readFile = readFile3;
-      function readFile3(path9, options, cb) {
+      fs9.readFile = readFile4;
+      function readFile4(path9, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
         return go$readFile(path9, options, cb);
@@ -28636,8 +28636,8 @@ var require_graceful_fs = __commonJS({
         }
       }
       var fs$writeFile = fs9.writeFile;
-      fs9.writeFile = writeFile3;
-      function writeFile3(path9, data, options, cb) {
+      fs9.writeFile = writeFile5;
+      function writeFile5(path9, data, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
         return go$writeFile(path9, data, options, cb);
@@ -52425,8 +52425,8 @@ var require_mkdirp = __commonJS({
           // there already.  If so, then hooray!  If not, then something
           // is borked.
           default:
-            xfs.stat(p, function(er2, stat3) {
-              if (er2 || !stat3.isDirectory()) cb(er, made);
+            xfs.stat(p, function(er2, stat5) {
+              if (er2 || !stat5.isDirectory()) cb(er, made);
               else cb(null, made);
             });
             break;
@@ -52457,13 +52457,13 @@ var require_mkdirp = __commonJS({
           // there already.  If so, then hooray!  If not, then something
           // is borked.
           default:
-            var stat3;
+            var stat5;
             try {
-              stat3 = xfs.statSync(p);
+              stat5 = xfs.statSync(p);
             } catch (err1) {
               throw err0;
             }
-            if (!stat3.isDirectory()) throw err0;
+            if (!stat5.isDirectory()) throw err0;
             break;
         }
       }
@@ -55031,6 +55031,7 @@ var Summary = class {
   }
 };
 var _summary = new Summary();
+var summary = _summary;
 
 // node_modules/@actions/core/lib/platform.js
 import os3 from "os";
@@ -67656,11 +67657,11 @@ var EntityDecoder = class {
    * @param {number} cp  — codepoint
    * @returns {number}   — minimum NCR_LEVEL value, or -1 for no restriction
    */
-  _classifyNCR(cp2) {
-    if (cp2 === 0) return this._ncrNullLevel;
-    if (cp2 >= 55296 && cp2 <= 57343) return NCR_LEVEL.remove;
+  _classifyNCR(cp3) {
+    if (cp3 === 0) return this._ncrNullLevel;
+    if (cp3 >= 55296 && cp3 <= 57343) return NCR_LEVEL.remove;
     if (this._ncrXmlVersion === 1) {
-      if (cp2 >= 1 && cp2 <= 31 && !XML10_ALLOWED_C0.has(cp2)) return NCR_LEVEL.remove;
+      if (cp3 >= 1 && cp3 <= 31 && !XML10_ALLOWED_C0.has(cp3)) return NCR_LEVEL.remove;
     }
     return -1;
   }
@@ -67676,10 +67677,10 @@ var EntityDecoder = class {
    *   - undefined                 → 'leave' (caller must skip past '&' only)
    *   - throws Error              → 'throw'
    */
-  _applyNCRAction(action5, token, cp2) {
+  _applyNCRAction(action5, token, cp3) {
     switch (action5) {
       case NCR_LEVEL.allow:
-        return String.fromCodePoint(cp2);
+        return String.fromCodePoint(cp3);
       case NCR_LEVEL.remove:
         return "";
       case NCR_LEVEL.leave:
@@ -67687,10 +67688,10 @@ var EntityDecoder = class {
       // signal: keep literal
       case NCR_LEVEL.throw:
         throw new Error(
-          `[EntityDecoder] Prohibited numeric character reference &${token}; (U+${cp2.toString(16).toUpperCase().padStart(4, "0")})`
+          `[EntityDecoder] Prohibited numeric character reference &${token}; (U+${cp3.toString(16).toUpperCase().padStart(4, "0")})`
         );
       default:
-        return String.fromCodePoint(cp2);
+        return String.fromCodePoint(cp3);
     }
   }
   /**
@@ -67711,17 +67712,17 @@ var EntityDecoder = class {
    */
   _resolveNCR(token) {
     const second = token.charCodeAt(1);
-    let cp2;
+    let cp3;
     if (second === 120 || second === 88) {
-      cp2 = parseInt(token.slice(2), 16);
+      cp3 = parseInt(token.slice(2), 16);
     } else {
-      cp2 = parseInt(token.slice(1), 10);
+      cp3 = parseInt(token.slice(1), 10);
     }
-    if (Number.isNaN(cp2) || cp2 < 0 || cp2 > 1114111) return void 0;
-    const minimum = this._classifyNCR(cp2);
+    if (Number.isNaN(cp3) || cp3 < 0 || cp3 > 1114111) return void 0;
+    const minimum = this._classifyNCR(cp3);
     if (!this._numericAllowed && minimum < NCR_LEVEL.remove) return void 0;
     const effective = minimum === -1 ? this._ncrOnLevel : Math.max(this._ncrOnLevel, minimum);
-    return this._applyNCRAction(effective, token, cp2);
+    return this._applyNCRAction(effective, token, cp3);
   }
 };
 
@@ -68336,11 +68337,11 @@ var TABLE_SIZE = LOW_MAX - LOW_MIN + 1;
 var TABLE = new Uint8Array(TABLE_SIZE).fill(NOT_DIGIT);
 for (const zero of SCRIPT_ZEROS) {
   for (let d = 0; d < 10; d++) {
-    const cp2 = zero + d;
-    if (cp2 <= LOW_MAX) {
-      TABLE[cp2 - TABLE_OFFSET] = d;
+    const cp3 = zero + d;
+    if (cp3 <= LOW_MAX) {
+      TABLE[cp3 - TABLE_OFFSET] = d;
     } else {
-      HIGH_MAP.set(cp2, d);
+      HIGH_MAP.set(cp3, d);
     }
   }
 }
@@ -68369,8 +68370,8 @@ function anynum(str) {
       if (i + 1 < len) {
         const low = str.charCodeAt(i + 1);
         if (low >= 56320 && low <= 57343) {
-          const cp2 = 65536 + (cc - 55296 << 10) + (low - 56320);
-          if (HIGH_MAP.has(cp2)) {
+          const cp3 = 65536 + (cc - 55296 << 10) + (low - 56320);
+          if (HIGH_MAP.has(cp3)) {
             firstHit = i;
             break;
           }
@@ -68400,8 +68401,8 @@ function anynum(str) {
       if (i + 1 < len) {
         const low = str.charCodeAt(i + 1);
         if (low >= 56320 && low <= 57343) {
-          const cp2 = 65536 + (cc - 55296 << 10) + (low - 56320);
-          const d2 = HIGH_MAP.get(cp2);
+          const cp3 = 65536 + (cc - 55296 << 10) + (low - 56320);
+          const d2 = HIGH_MAP.get(cp3);
           if (d2 !== void 0) {
             chars.push(String.fromCharCode(d2 + 48));
             i++;
@@ -97922,6 +97923,11 @@ function parseActionConfig(reader, env, eventName) {
       "max_review_chars",
       12e3
     ),
+    disablePromptCaching: parseBoolean(
+      optionalInput(reader, "disable_prompt_caching"),
+      "disable_prompt_caching",
+      false
+    ),
     debugCaptureRawApiBodies: parseBoolean(
       optionalInput(reader, "debug_capture_raw_api_bodies"),
       "debug_capture_raw_api_bodies",
@@ -98026,63 +98032,296 @@ async function loadContextBlocks(config, workspace, phase) {
 
 // src/comments.ts
 var STICKY_COMMENT_MARKER = "<!-- agentic-pr-review:v1 -->";
-function buildStickyComment(target, reviewMarkdown, stateKey) {
-  const meta = `<!-- agentic-pr-review:meta ${JSON.stringify({
-    state_key: stateKey,
-    head_sha: target.headSha
-  })} -->`;
-  return [
-    STICKY_COMMENT_MARKER,
-    meta,
-    "## Agentic PR Review",
-    "",
-    truncateText(reviewMarkdown, 12e3)
-  ].join("\n");
-}
-async function upsertStickyComment(options) {
+var LINEAGE_META_PREFIX = "<!-- agentic-pr-review:meta";
+var LINEAGE_META_SUFFIX = "-->";
+var CURRENT_BLOCK_START = "<!-- agentic-pr-review:current:start -->";
+var CURRENT_BLOCK_END = "<!-- agentic-pr-review:current:end -->";
+var HISTORY_BLOCK_START = "<!-- agentic-pr-review:history:start -->";
+var HISTORY_BLOCK_END = "<!-- agentic-pr-review:history:end -->";
+var HISTORY_ENTRY_START = "<!-- agentic-pr-review:history-entry:start -->";
+var HISTORY_ENTRY_END = "<!-- agentic-pr-review:history-entry:end -->";
+var COMMENT_MAX_CHARS = 5e4;
+var HISTORY_RETAIN_COUNT = 3;
+async function upsertLineageComment(options) {
+  if (options.phase === "bootstrap") {
+    const body3 = buildLineageCommentBody(options, "create");
+    const created = await options.octokit.rest.issues.createComment({
+      owner: options.owner,
+      repo: options.repo,
+      issue_number: options.prNumber,
+      body: body3
+    });
+    return {
+      commentUrl: String(created.data.html_url),
+      lineageAction: "create",
+      lineageReason: options.lineageReason
+    };
+  }
   const comments = await options.octokit.paginate(options.octokit.rest.issues.listComments, {
     owner: options.owner,
     repo: options.repo,
     issue_number: options.prNumber,
     per_page: 100
   });
-  const body2 = buildStickyComment(options.target, options.reviewMarkdown, options.stateKey);
-  const existing = comments.find((comment) => comment.body?.includes(STICKY_COMMENT_MARKER));
-  if (existing) {
-    const updated = await options.octokit.rest.issues.updateComment({
+  const match = findLineageComment(comments, options);
+  if (match.action === "create") {
+    const body3 = buildLineageCommentBody(
+      { ...options, lineageReason: match.lineageReason },
+      "create"
+    );
+    const created = await options.octokit.rest.issues.createComment({
       owner: options.owner,
       repo: options.repo,
-      comment_id: existing.id,
-      body: body2
+      issue_number: options.prNumber,
+      body: body3
     });
     return {
-      commentUrl: String(updated.data.html_url),
-      lineageAction: "updated",
-      lineageReason: "existing sticky comment marker found"
+      commentUrl: String(created.data.html_url),
+      lineageAction: "create",
+      lineageReason: match.lineageReason
     };
   }
-  const created = await options.octokit.rest.issues.createComment({
+  const body2 = buildLineageCommentBody(
+    { ...options, lineageReason: match.meta.lineage_reason },
+    match.action,
+    match.meta,
+    match.comment.body
+  );
+  const updated = await options.octokit.rest.issues.updateComment({
     owner: options.owner,
     repo: options.repo,
-    issue_number: options.prNumber,
+    comment_id: match.comment.id,
     body: body2
   });
   return {
-    commentUrl: String(created.data.html_url),
-    lineageAction: "created",
-    lineageReason: "no existing sticky comment marker found"
+    commentUrl: String(updated.data.html_url),
+    lineageAction: match.action,
+    lineageReason: match.meta.lineage_reason
   };
+}
+function buildLineageCommentBody(input, action5, existingMeta, existingBody) {
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const chainStart = existingMeta?.lineage_id.split(":").at(-1) ?? shortSha(input.currentHeadSha);
+  const lineageId = existingMeta?.lineage_id ?? `${input.stateKey}:${input.runtimeProvider}:${input.runId}:${chainStart}`;
+  const meta = {
+    version: 1,
+    lineage_id: lineageId,
+    state_key: input.stateKey,
+    runtime_provider: input.runtimeProvider,
+    session_id: input.sessionId,
+    from_head_sha: input.previousHeadSha ?? null,
+    to_head_sha: input.currentHeadSha,
+    phase: input.phase,
+    run_id: String(input.runId),
+    run_attempt: String(input.runAttempt),
+    lineage_reason: action5 === "create" ? input.lineageReason : existingMeta?.lineage_reason ?? input.lineageReason,
+    created_at: existingMeta?.created_at ?? now,
+    updated_at: now
+  };
+  const repository = input.target.htmlUrl ? repositoryFromUrl(input.target.htmlUrl) : void 0;
+  const runValue = repository ? `[${input.runId}.${input.runAttempt}](https://github.com/${repository}/actions/runs/${input.runId})` : `${input.runId}.${input.runAttempt}`;
+  const previous = input.previousHeadSha ? shortSha(input.previousHeadSha) : "n/a";
+  const header = [
+    STICKY_COMMENT_MARKER,
+    `${LINEAGE_META_PREFIX}
+${JSON.stringify(meta)}
+${LINEAGE_META_SUFFIX}`,
+    "",
+    "## Agentic PR Review",
+    "",
+    "| Field | Value |",
+    "| --- | --- |",
+    `| Mode | ${input.phase} |`,
+    `| Range | \`${previous}\` -> \`${shortSha(input.currentHeadSha)}\` |`,
+    `| Runtime | ${input.runtimeProvider} |`,
+    `| Session | \`${input.sessionId}\` |`,
+    `| State artifact | \`${input.artifactName}\` |`,
+    `| Run | ${runValue} |`,
+    `| Usage | ${formatUsage(input.usage)} |`,
+    ""
+  ].join("\n");
+  const currentBlock = [
+    CURRENT_BLOCK_START,
+    "### Current Review",
+    "",
+    truncateText(input.reviewMarkdown, input.maxReviewChars),
+    CURRENT_BLOCK_END
+  ].join("\n");
+  const historyBlock = buildHistoryBlock(action5, existingMeta, existingBody);
+  return enforceMaxChars(header, currentBlock, historyBlock);
+}
+function findLineageComment(comments, input) {
+  const candidates = comments.map((comment) => ({ comment, meta: parseLineageMeta(comment.body ?? "") })).filter(
+    (candidate) => Boolean(
+      candidate.meta && candidate.meta.state_key === input.stateKey && candidate.meta.runtime_provider === input.runtimeProvider
+    )
+  ).sort((left, right) => {
+    const leftUpdated = left.comment.updated_at ? Date.parse(left.comment.updated_at) : 0;
+    const rightUpdated = right.comment.updated_at ? Date.parse(right.comment.updated_at) : 0;
+    return rightUpdated - leftUpdated || right.comment.id - left.comment.id;
+  });
+  const sameRange = candidates.find(
+    (candidate) => candidate.meta.from_head_sha === (input.previousHeadSha ?? null) && candidate.meta.to_head_sha === input.currentHeadSha && candidate.meta.session_id === input.sessionId
+  );
+  if (sameRange) {
+    return { action: "update_in_place", comment: sameRange.comment, meta: sameRange.meta };
+  }
+  const continuation = candidates.find(
+    (candidate) => input.previousHeadSha && candidate.meta.to_head_sha === input.previousHeadSha
+  );
+  if (continuation) {
+    return { action: "update", comment: continuation.comment, meta: continuation.meta };
+  }
+  return { action: "create", lineageReason: "continuity_mismatch" };
+}
+function parseLineageMeta(body2) {
+  if (!body2.includes(STICKY_COMMENT_MARKER)) {
+    return void 0;
+  }
+  const start = body2.indexOf(LINEAGE_META_PREFIX);
+  if (start === -1) {
+    return void 0;
+  }
+  const jsonStart = start + LINEAGE_META_PREFIX.length;
+  const end = body2.indexOf(LINEAGE_META_SUFFIX, jsonStart);
+  if (end === -1) {
+    return void 0;
+  }
+  try {
+    const parsed = JSON.parse(body2.slice(jsonStart, end).trim());
+    return parsed.version === 1 ? parsed : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function buildHistoryBlock(action5, existingMeta, existingBody) {
+  if (!existingBody || action5 === "create") {
+    return "";
+  }
+  const existingHistory = extractBlock(existingBody, HISTORY_BLOCK_START, HISTORY_BLOCK_END);
+  if (action5 === "update_in_place") {
+    return existingHistory ? ["", "---", "", HISTORY_BLOCK_START, existingHistory, HISTORY_BLOCK_END].join("\n") : "";
+  }
+  const oldCurrent = extractBlock(existingBody, CURRENT_BLOCK_START, CURRENT_BLOCK_END);
+  if (!oldCurrent) {
+    return existingHistory ? ["", "---", "", HISTORY_BLOCK_START, existingHistory, HISTORY_BLOCK_END].join("\n") : "";
+  }
+  const entry = [
+    HISTORY_ENTRY_START,
+    buildHistoryEntrySummary(existingMeta),
+    "",
+    truncateText(oldCurrent, 4e3),
+    "</details>",
+    HISTORY_ENTRY_END
+  ].join("\n");
+  const previousEntries = existingHistory ? extractAllBlocks(existingHistory, HISTORY_ENTRY_START, HISTORY_ENTRY_END) : [];
+  return [
+    "",
+    "---",
+    "",
+    HISTORY_BLOCK_START,
+    ...[entry, ...previousEntries].slice(0, HISTORY_RETAIN_COUNT),
+    HISTORY_BLOCK_END
+  ].join("\n");
+}
+function buildHistoryEntrySummary(meta) {
+  if (!meta) {
+    return "<details><summary>Previous review</summary>";
+  }
+  const from = meta.from_head_sha ? shortSha(meta.from_head_sha) : "base";
+  const to = shortSha(meta.to_head_sha);
+  return `<details><summary>${meta.phase} ${from} -> ${to} ${meta.runtime_provider}</summary>`;
+}
+function enforceMaxChars(header, currentBlock, historyBlock) {
+  let body2 = header + currentBlock + historyBlock;
+  if (body2.length <= COMMENT_MAX_CHARS || !historyBlock) {
+    return body2;
+  }
+  const entries = extractAllBlocks(historyBlock, HISTORY_ENTRY_START, HISTORY_ENTRY_END);
+  for (let count = entries.length; count >= 0; count -= 1) {
+    const trimmedHistory = count > 0 ? ["", "---", "", HISTORY_BLOCK_START, ...entries.slice(0, count), HISTORY_BLOCK_END].join(
+      "\n"
+    ) : "";
+    body2 = header + currentBlock + trimmedHistory;
+    if (body2.length <= COMMENT_MAX_CHARS) {
+      return body2;
+    }
+  }
+  return truncateText(header + currentBlock, COMMENT_MAX_CHARS);
+}
+function extractBlock(body2, startMarker, endMarker) {
+  const start = body2.indexOf(startMarker);
+  if (start === -1) {
+    return void 0;
+  }
+  const contentStart = start + startMarker.length;
+  const end = body2.indexOf(endMarker, contentStart);
+  if (end === -1) {
+    return void 0;
+  }
+  return body2.slice(contentStart, end).trim();
+}
+function extractAllBlocks(body2, startMarker, endMarker) {
+  const result = [];
+  let index = 0;
+  while (index < body2.length) {
+    const start = body2.indexOf(startMarker, index);
+    if (start === -1) {
+      break;
+    }
+    const end = body2.indexOf(endMarker, start + startMarker.length);
+    if (end === -1) {
+      break;
+    }
+    result.push(body2.slice(start, end + endMarker.length));
+    index = end + endMarker.length;
+  }
+  return result;
+}
+function formatUsage(usage) {
+  if (!usage) {
+    return "not exposed";
+  }
+  return [
+    `cache_read=${usage.cacheReadInputTokens ?? usage.promptCacheHitTokens ?? "n/a"}`,
+    `input=${usage.inputTokens ?? "n/a"}`,
+    `output=${usage.outputTokens ?? "n/a"}`
+  ].join(", ");
+}
+function repositoryFromUrl(url2) {
+  const match = url2.match(/^https:\/\/github\.com\/([^/]+\/[^/]+)/);
+  return match ? match[1] : void 0;
+}
+function shortSha(value) {
+  return value.slice(0, 12);
 }
 
 // src/prompt.ts
-function formatFile(file) {
+function formatChangedFiles(files) {
+  if (files.length === 0) {
+    return "- none";
+  }
+  const lines = files.slice(0, 100).map(
+    (file) => `- ${file.filename} (${file.status}, +${file.additions}/-${file.deletions}, ${file.changes} changes)`
+  );
+  if (files.length > lines.length) {
+    lines.push(`- ... ${files.length - lines.length} additional file(s) omitted`);
+  }
+  return lines.join("\n");
+}
+function formatPatch(file) {
   const patch = file.patch ? `
 
 ${file.patch}` : "\n\n[patch unavailable]";
   return `### ${file.filename}
 Status: ${file.status}${patch}`;
 }
-function buildReviewPrompt(target, phase, blocks2, maxPatchChars) {
+function fenced(value, language = "") {
+  return `\`\`\`${language}
+${value.replaceAll("```", "TRIPLE_BACKTICK")}
+\`\`\``;
+}
+function buildReviewPrompt(target, phase, blocks2, maxPatchChars, compare, priorReviewedHeadSha) {
   const sections = [
     "# Agentic PR Review Task",
     "",
@@ -98090,16 +98329,53 @@ function buildReviewPrompt(target, phase, blocks2, maxPatchChars) {
     `Target mode: ${target.mode}`,
     target.prNumber ? `Pull request: #${target.prNumber}` : void 0,
     `Title: ${target.title}`,
-    `Base SHA: ${target.baseSha}`,
-    `Head SHA: ${target.headSha}`,
+    target.htmlUrl ? `URL: ${target.htmlUrl}` : void 0,
+    `Base: ${target.baseRef} ${target.baseSha}`,
+    `Head: ${target.headRef} ${target.headSha}`,
+    `Draft: ${String(target.draft)}`,
     "",
     "Review the supplied pull request context. Return concise Markdown with actionable findings first. If there are no findings, say so clearly and mention residual test or validation risk."
   ].filter(Boolean);
   for (const block of blocks2) {
     sections.push("", `## ${block.name}`, block.text);
   }
-  const files = target.changedFiles.map(formatFile).join("\n\n");
-  sections.push("", "## Changed Files", truncateText(files, maxPatchChars));
+  if (phase === "incremental") {
+    const compareFiles = compare?.changedFiles ?? target.changedFiles;
+    sections.push(
+      "",
+      "## Incremental Review Instructions",
+      `Prior reviewed head SHA: ${priorReviewedHeadSha ?? "unknown"}`,
+      `Current head SHA: ${target.headSha}`,
+      "Focus on changes since the prior reviewed head. Do not repeat previously covered findings unless the issue remains important."
+    );
+    if (compare) {
+      sections.push(
+        "",
+        "## Compare Range",
+        `Base SHA: ${compare.baseSha}`,
+        `Head SHA: ${compare.headSha}`,
+        `Status: ${compare.status}`,
+        `Ahead by: ${compare.aheadBy}`,
+        `Behind by: ${compare.behindBy}`,
+        `URL: ${compare.htmlUrl}`
+      );
+    }
+    sections.push("", "## Changed Files Since Prior Review", formatChangedFiles(compareFiles));
+    sections.push(
+      "",
+      "## Bounded Patch Context",
+      truncateText(compareFiles.map(formatPatch).join("\n\n"), maxPatchChars)
+    );
+  } else {
+    sections.push("", "## Bootstrap Review Instructions", "Review the PR as an initial full pass.");
+    sections.push("", "## PR Body", fenced(target.body || "(empty)"));
+    sections.push("", "## Changed Files", formatChangedFiles(target.changedFiles));
+    sections.push(
+      "",
+      "## Bounded Patch Context",
+      truncateText(target.changedFiles.map(formatPatch).join("\n\n"), maxPatchChars)
+    );
+  }
   const text = `${sections.join("\n")}
 `;
   return { text, sha256: sha256(text) };
@@ -98107,11 +98383,19 @@ function buildReviewPrompt(target, phase, blocks2, maxPatchChars) {
 
 // src/runtime.ts
 import { spawn } from "node:child_process";
+import { cp as cp2, mkdir as mkdir4, readFile as readFile2, rm as rm3, stat as stat3, writeFile as writeFile3 } from "node:fs/promises";
 import os7 from "node:os";
 import path6 from "node:path";
 var TestRuntime = class {
   async run(options) {
     const sessionId = options.phase === "incremental" && options.restoredState ? options.restoredState.sessionId : `test-${sha256(`${options.stateKey}:${options.promptHash}`).slice(0, 20)}`;
+    const sessionName = options.restoredState?.sessionName ?? `agentic-pr-review-${options.stateKey}`;
+    const transcriptPath = path6.join(
+      options.runtimeDir,
+      "sessions",
+      options.stateKey,
+      `${sessionId}.jsonl`
+    );
     const reviewMarkdown = [
       "## Agentic PR Review",
       "",
@@ -98121,71 +98405,126 @@ var TestRuntime = class {
       `- Session: ${sessionId}`,
       `- Prompt hash: ${options.promptHash}`
     ].join("\n");
-    return { sessionId, reviewMarkdown, debugFiles: [] };
+    await writeTextFile(
+      transcriptPath,
+      `${JSON.stringify({
+        type: "assistant",
+        session_id: sessionId,
+        session_name: sessionName,
+        state_key: options.stateKey,
+        phase: options.phase,
+        prompt_hash: options.promptHash
+      })}
+${JSON.stringify({ type: "result", session_id: sessionId, result: reviewMarkdown })}
+`
+    );
+    return { sessionId, sessionName, reviewMarkdown, debugFiles: [] };
   }
 };
 var ClaudeCodeRuntime = class {
   async run(options) {
     const cliPath = await installClaudeCode(options.config.claudeCodeVersion, options.tempDir);
+    const sessionName = options.restoredState?.sessionName ?? `agentic-pr-review-${options.stateKey}`;
+    const configDir = path6.join(options.runtimeDir, "config");
+    const outputPath = path6.join(
+      options.tempDir,
+      "outputs",
+      `claude-output-${Date.now()}.stream-jsonl`
+    );
     const debugFiles = [];
-    const args = ["--bare"];
-    if (options.phase === "incremental" && options.restoredState?.sessionId) {
-      args.push("--resume", options.restoredState.sessionId);
+    const rawDebugDir = options.config.debugCaptureRawApiBodies ? path6.join(options.tempDir, "raw-provider-debug", "raw-api-bodies") : void 0;
+    await ensureDir(configDir);
+    await ensureDir(path6.dirname(outputPath));
+    if (rawDebugDir) {
+      await ensureDir(rawDebugDir);
     }
-    if (options.config.debugCaptureRawApiBodies) {
-      const debugFile = path6.join(options.tempDir, "raw-provider-debug", "claude-debug.log");
-      await ensureDir(path6.dirname(debugFile));
-      debugFiles.push(debugFile);
-      args.push("--debug", "api", "--debug-file", debugFile);
-    }
-    args.push(
-      "--tools",
-      "",
+    const args = [
+      "-p",
+      "--output-format",
+      "stream-json",
+      "--verbose",
       "--max-turns",
       "3",
       "--model",
       options.config.modelName,
-      "-p",
-      options.prompt,
-      "--output-format",
-      "json"
-    );
-    const env = buildClaudeEnv(options.config, process.env);
+      "--exclude-dynamic-system-prompt-sections",
+      "--tools",
+      ""
+    ];
+    if (options.phase === "incremental") {
+      const sessionId = options.restoredState?.sessionId;
+      if (!sessionId) {
+        throw new Error("incremental phase requires a restored Claude session id");
+      }
+      args.push("--resume", sessionId);
+    } else {
+      args.push("--name", sessionName);
+    }
+    args.push("Run the PR review instructions from stdin. Do not edit files.");
+    const env = buildClaudeEnv(options.config, process.env, configDir, rawDebugDir);
     const result = await runProcess(cliPath, args, {
       cwd: options.workspace,
       env,
+      stdin: options.prompt,
       timeoutMs: 20 * 60 * 1e3
     });
+    await writeFile3(outputPath, result.stdout, "utf8");
     if (result.exitCode !== 0) {
       throw new Error(
-        `claude-code-cli exited with ${result.exitCode}: ${truncateText(result.stderr, 2e3)}`
+        `claude-code-cli exited with ${result.exitCode}: ${summarizeDiagnostic(
+          result.stderr || result.stdout,
+          env
+        )}`
       );
     }
-    const parsed = parseClaudeJson(result.stdout);
-    const reviewMarkdown = truncateText(
-      parsed.result || result.stdout,
-      options.config.maxReviewChars
-    );
-    const sessionId = parsed.session_id || parsed.sessionId || options.restoredState?.sessionId || `claude-${sha256(`${options.stateKey}:${options.promptHash}:${result.stdout}`).slice(0, 20)}`;
-    return { sessionId, reviewMarkdown, debugFiles };
+    if (rawDebugDir) {
+      const rawFiles = await walkFiles(rawDebugDir);
+      if (rawFiles.length === 0) {
+        const notePath = path6.join(rawDebugDir, "diagnostic-note.txt");
+        await writeTextFile(notePath, "No raw provider body files were emitted by this run.\n");
+        rawFiles.push(notePath);
+      }
+      debugFiles.push(...rawFiles);
+    }
+    return {
+      sessionId: await discoverSessionId(outputPath, options.runtimeDir),
+      sessionName,
+      reviewMarkdown: await extractReviewMarkdown(outputPath, options.config.maxReviewChars),
+      debugFiles,
+      usage: await parseUsage(outputPath)
+    };
   }
 };
-function buildClaudeEnv(config, baseEnv) {
+function buildClaudeEnv(config, baseEnv, configDir, rawDebugDir) {
   const env = { ...baseEnv };
   delete env.AGENTIC_REVIEW_API_KEY;
   env.ANTHROPIC_BASE_URL = config.modelBaseUrl;
   env.ANTHROPIC_MODEL = config.modelName;
+  env.ANTHROPIC_DEFAULT_OPUS_MODEL = config.modelName;
+  env.ANTHROPIC_DEFAULT_SONNET_MODEL = config.modelName;
+  env.ANTHROPIC_DEFAULT_HAIKU_MODEL = config.smallModelName ?? config.modelName;
+  env.CLAUDE_CODE_SUBAGENT_MODEL = config.smallModelName ?? config.modelName;
+  env.CLAUDE_CONFIG_DIR = configDir;
   env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
   env.DISABLE_TELEMETRY = "1";
   env.DO_NOT_TRACK = "1";
-  if (config.smallModelName) {
-    env.ANTHROPIC_SMALL_FAST_MODEL = config.smallModelName;
+  if (config.disablePromptCaching) {
+    env.DISABLE_PROMPT_CACHING = "1";
   }
   if (config.apiKeyMode === "auth-token" || config.apiKeyMode === "both") {
     env.ANTHROPIC_AUTH_TOKEN = config.apiKey;
+  } else {
+    delete env.ANTHROPIC_AUTH_TOKEN;
   }
   if (config.apiKeyMode === "api-key" || config.apiKeyMode === "both") {
     env.ANTHROPIC_API_KEY = config.apiKey;
+  } else {
+    delete env.ANTHROPIC_API_KEY;
+  }
+  if (rawDebugDir) {
+    env.CLAUDE_CODE_ENABLE_TELEMETRY = "1";
+    env.OTEL_LOGS_EXPORTER = "console";
+    env.OTEL_LOG_RAW_API_BODIES = `file:${rawDebugDir}`;
   }
   return env;
 }
@@ -98212,19 +98551,12 @@ async function installClaudeCode(version3, tempDir) {
   const binName = process.platform === "win32" ? "claude.cmd" : "claude";
   return path6.join(installDir, "node_modules", ".bin", binName);
 }
-function parseClaudeJson(stdout) {
-  try {
-    return JSON.parse(stdout);
-  } catch {
-    return { result: stdout };
-  }
-}
 function runProcess(command, args, options) {
   return new Promise((resolve2, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: options.env,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [options.stdin === void 0 ? "ignore" : "pipe", "pipe", "pipe"],
       windowsHide: true
     });
     let stdout = "";
@@ -98233,12 +98565,12 @@ function runProcess(command, args, options) {
       child.kill("SIGTERM");
       reject(new Error(`process timed out after ${options.timeoutMs}ms: ${command}`));
     }, options.timeoutMs);
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk) => {
       stdout += chunk;
     });
-    child.stderr.on("data", (chunk) => {
+    child.stderr?.on("data", (chunk) => {
       stderr += chunk;
     });
     child.on("error", (error2) => {
@@ -98249,7 +98581,210 @@ function runProcess(command, args, options) {
       clearTimeout(timeout);
       resolve2({ exitCode, stdout, stderr });
     });
+    if (options.stdin !== void 0 && child.stdin) {
+      child.stdin.end(options.stdin);
+    }
   });
+}
+async function restoreRuntimeState(restoreDir, runtimeProvider, runtimeDir) {
+  await rm3(runtimeDir, { recursive: true, force: true });
+  await mkdir4(runtimeDir, { recursive: true });
+  if (!restoreDir) {
+    return;
+  }
+  const source = path6.join(restoreDir, "runtime", runtimeProvider);
+  try {
+    await cp2(source, runtimeDir, { recursive: true, force: true });
+  } catch (error2) {
+    if (error2.code !== "ENOENT") {
+      throw error2;
+    }
+  }
+}
+async function copyRuntimeStateToBundle(runtimeDir, runtimeProvider, bundleDir) {
+  const destination = path6.join(bundleDir, "runtime", runtimeProvider);
+  await rm3(destination, { recursive: true, force: true });
+  await mkdir4(destination, { recursive: true });
+  await cp2(runtimeDir, destination, { recursive: true, force: true });
+  return await walkFiles(destination);
+}
+async function discoverSessionId(outputPath, runtimeDir) {
+  const output = await readFile2(outputPath, "utf8").catch(() => "");
+  for (const line of output.split(/\r?\n/)) {
+    const parsed = safeParseJson(line);
+    const sessionId = parsed ? findStringKey(parsed, ["session_id", "sessionId"]) : void 0;
+    if (sessionId) {
+      return sessionId;
+    }
+  }
+  const jsonlFiles = (await walkFiles(runtimeDir)).filter((file) => file.endsWith(".jsonl"));
+  const withStats = await Promise.all(
+    jsonlFiles.map(async (file) => ({
+      file,
+      stat: await stat3(file)
+    }))
+  );
+  const newest = withStats.sort((left, right) => right.stat.mtimeMs - left.stat.mtimeMs)[0];
+  if (!newest) {
+    throw new Error("Unable to discover Claude session id from output or session files");
+  }
+  return path6.basename(newest.file, ".jsonl");
+}
+async function extractReviewMarkdown(outputPath, maxChars) {
+  const output = await readFile2(outputPath, "utf8");
+  let resultText;
+  const assistantTexts = [];
+  for (const line of output.split(/\r?\n/)) {
+    const parsed = safeParseJson(line);
+    if (!parsed || typeof parsed !== "object") {
+      continue;
+    }
+    const record = parsed;
+    if (record.type === "result" && typeof record.result === "string" && record.result.trim()) {
+      resultText = record.result;
+    } else if (record.type === "assistant") {
+      assistantTexts.push(...findTextBlocks(record));
+    }
+  }
+  const selected = (resultText ?? assistantTexts.join("\n\n")).trim();
+  return truncateText(selected || "No review text was emitted by the runtime.", maxChars);
+}
+async function parseUsage(outputPath) {
+  const output = await readFile2(outputPath, "utf8").catch(() => "");
+  let promptCacheHitTokens;
+  let cacheReadInputTokens;
+  let inputTokens;
+  let outputTokens;
+  for (const line of output.split(/\r?\n/)) {
+    const parsed = safeParseJson(line);
+    if (!parsed) {
+      continue;
+    }
+    promptCacheHitTokens = preferLatestMeaningful(
+      promptCacheHitTokens,
+      findNumberKey(parsed, ["prompt_cache_hit_tokens", "promptCacheHitTokens"])
+    );
+    cacheReadInputTokens = preferLatestMeaningful(
+      cacheReadInputTokens,
+      findNumberKey(parsed, ["cache_read_input_tokens", "cacheReadInputTokens"])
+    );
+    inputTokens = preferLatestMeaningful(
+      inputTokens,
+      findNumberKey(parsed, ["input_tokens", "inputTokens"])
+    );
+    outputTokens = preferLatestMeaningful(
+      outputTokens,
+      findNumberKey(parsed, ["output_tokens", "outputTokens"])
+    );
+  }
+  promptCacheHitTokens ??= cacheReadInputTokens;
+  return promptCacheHitTokens === void 0 && cacheReadInputTokens === void 0 && inputTokens === void 0 && outputTokens === void 0 ? void 0 : {
+    promptCacheHitTokens,
+    cacheReadInputTokens,
+    inputTokens,
+    outputTokens
+  };
+}
+function preferLatestMeaningful(current, next) {
+  if (next === void 0) {
+    return current;
+  }
+  if (current === void 0) {
+    return next;
+  }
+  if (next === 0 && current !== 0) {
+    return current;
+  }
+  return next;
+}
+function summarizeDiagnostic(value, env) {
+  let sanitized = value;
+  for (const secret of [env.ANTHROPIC_API_KEY, env.ANTHROPIC_AUTH_TOKEN].filter(
+    (item) => Boolean(item && item.length > 4)
+  )) {
+    sanitized = sanitized.replaceAll(secret, "***");
+  }
+  sanitized = sanitized.replace(/Authorization:\s*Bearer\s+\S+/gi, "Authorization: Bearer ***").replace(/x-api-key:\s*\S+/gi, "x-api-key: ***").trim();
+  for (const line of sanitized.split(/\r?\n/).reverse()) {
+    const parsed = safeParseJson(line);
+    if (parsed && typeof parsed === "object" && "type" in parsed) {
+      const record = parsed;
+      return JSON.stringify({
+        type: record.type,
+        subtype: record.subtype,
+        stop_reason: record.stop_reason,
+        terminal_reason: record.terminal_reason,
+        session_id: record.session_id,
+        errors: record.errors
+      });
+    }
+  }
+  return sanitized.replace(/\s+/g, " ").slice(-600) || "no stderr/stdout captured";
+}
+function findTextBlocks(value) {
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+  const record = value;
+  const result = [];
+  if (record.type === "text" && typeof record.text === "string" && record.text.trim()) {
+    result.push(record.text);
+  }
+  for (const child of Object.values(record)) {
+    if (Array.isArray(child)) {
+      for (const item of child) {
+        result.push(...findTextBlocks(item));
+      }
+    } else {
+      result.push(...findTextBlocks(child));
+    }
+  }
+  return result;
+}
+function safeParseJson(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return void 0;
+  }
+}
+function findStringKey(value, keys) {
+  if (!value || typeof value !== "object") {
+    return void 0;
+  }
+  const record = value;
+  for (const key of keys) {
+    const candidate = record[key];
+    if (typeof candidate === "string" && candidate.length > 0) {
+      return candidate;
+    }
+  }
+  for (const child of Object.values(record)) {
+    const candidate = findStringKey(child, keys);
+    if (candidate) {
+      return candidate;
+    }
+  }
+  return void 0;
+}
+function findNumberKey(value, keys) {
+  if (!value || typeof value !== "object") {
+    return void 0;
+  }
+  const record = value;
+  for (const key of keys) {
+    const candidate = record[key];
+    if (typeof candidate === "number") {
+      return candidate;
+    }
+  }
+  for (const child of Object.values(record)) {
+    const candidate = findNumberKey(child, keys);
+    if (candidate !== void 0) {
+      return candidate;
+    }
+  }
+  return void 0;
 }
 function createRuntime(provider) {
   return provider === "test" ? new TestRuntime() : new ClaudeCodeRuntime();
@@ -98259,8 +98794,12 @@ function defaultTempDir() {
 }
 
 // src/state.ts
-import { readFile as readFile2 } from "node:fs/promises";
+import { readFile as readFile3, rm as rm4, stat as stat4, writeFile as writeFile4 } from "node:fs/promises";
 import path7 from "node:path";
+var SECRET_FILE_PATTERN = /(^|[\\/])(\.env|credentials?|secrets?|tokens?|settings\.local)(\.|[\\/]|$)/i;
+var SECRET_CONTENT_PATTERN = /(ghp_|github_pat_|sk-[a-zA-Z0-9]|authorization:\s*bearer)/i;
+var AUTH_HEADER_KEYS = /* @__PURE__ */ new Set(["authorization", "x-api-key", "x-api-token"]);
+var HIGH_RISK_TOKEN_PATTERN = /(ghp_|github_pat_|sk-[a-zA-Z0-9])\S*/g;
 async function readRestoredState(root) {
   const manifestPath = path7.join(root, "manifest.json");
   const manifest = await readJsonFile(manifestPath);
@@ -98270,13 +98809,24 @@ async function readRestoredState(root) {
   return {
     stateKey: manifest.stateKey,
     sessionId: manifest.sessionId,
+    sessionName: manifest.sessionName ?? `agentic-pr-review-${manifest.stateKey}`,
     runtimeProvider: manifest.runtimeProvider,
     reviewedHeadSha: manifest.reviewedHeadSha,
+    createdAt: manifest.createdAt,
+    usage: manifest.usage,
     manifestPath
   };
 }
 async function writeStateBundle(options) {
+  await rm4(options.bundleDir, { recursive: true, force: true });
   await ensureDir(options.bundleDir);
+  await copyRuntimeStateToBundle(
+    options.runtimeDir,
+    options.config.runtimeProvider,
+    options.bundleDir
+  );
+  await sanitizeRuntimeFiles(path7.join(options.bundleDir, "runtime"), knownSecrets(options.config));
+  const now = (/* @__PURE__ */ new Date()).toISOString();
   const manifest = {
     version: 1,
     workflow: "agentic-pr-review",
@@ -98284,38 +98834,164 @@ async function writeStateBundle(options) {
     phase: options.phase,
     runtimeProvider: options.config.runtimeProvider,
     sessionId: options.runtimeResult.sessionId,
+    sessionName: options.runtimeResult.sessionName,
     reviewedHeadSha: options.target.headSha,
     promptSha256: options.promptSha256,
-    generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    createdAt: options.createdAt ?? now,
+    updatedAt: now,
+    usage: options.runtimeResult.usage,
     contextBlocks: options.blocks.map((block) => ({
       name: block.name,
       source: block.source,
       bytes: block.bytes,
       sha256: block.sha256
-    }))
+    })),
+    target: {
+      mode: options.target.mode,
+      prNumber: options.target.prNumber,
+      baseSha: options.target.baseSha,
+      headSha: options.target.headSha,
+      changedFiles: options.target.changedFiles.length
+    }
   };
   await writeJsonFile(path7.join(options.bundleDir, "manifest.json"), manifest);
   await writeTextFile(
     path7.join(options.bundleDir, "review.md"),
     options.runtimeResult.reviewMarkdown
   );
-  await sanitizeStateBundle(options.bundleDir, options.config.apiKey);
+  await sanitizeStateBundle(options.bundleDir, options.config);
   return await walkFiles(options.bundleDir);
 }
-async function sanitizeStateBundle(bundleDir, apiKey) {
+async function sanitizeStateBundle(bundleDir, config) {
+  const secrets = knownSecrets(config);
   const files = await walkFiles(bundleDir);
   for (const file of files) {
-    const rel = relativePosix(bundleDir, file).toLowerCase();
-    if (rel.includes("raw") || rel.includes("debug")) {
+    const rel = relativePosix(bundleDir, file);
+    const lower = rel.toLowerCase();
+    const isRuntimeFile = lower.startsWith("runtime/");
+    if (lower.includes("raw") || lower.includes("debug")) {
       throw new Error(`normal state artifact cannot include diagnostic file: ${rel}`);
     }
-    const content = await readFile2(file, "utf8");
-    if (apiKey && apiKey.length >= 8 && content.includes(apiKey)) {
-      throw new Error(`normal state artifact contains a configured secret: ${rel}`);
+    if (!isRuntimeFile && SECRET_FILE_PATTERN.test(rel)) {
+      throw new Error(`normal state artifact cannot include sensitive-looking file: ${rel}`);
     }
-    if (content.includes("ANTHROPIC_API_KEY") || content.includes("ANTHROPIC_AUTH_TOKEN")) {
-      throw new Error(`normal state artifact contains runtime credential names: ${rel}`);
+    const fileStat = await stat4(file);
+    if (fileStat.size > 1024 * 1024) {
+      throw new Error(`normal state artifact file is too large to scan safely: ${rel}`);
     }
+    const content = await readFile3(file, "utf8").catch(() => "");
+    const contentWithoutRedactions = content.replaceAll("***REDACTED***", "");
+    if (!isRuntimeFile && SECRET_CONTENT_PATTERN.test(contentWithoutRedactions)) {
+      throw new Error(`normal state artifact contains sensitive-looking content: ${rel}`);
+    }
+    if (hasUnredactedAuthHeader(content)) {
+      throw new Error(`normal state artifact contains unredacted auth header: ${rel}`);
+    }
+    for (const secret of secrets) {
+      if (content.includes(secret)) {
+        throw new Error(`normal state artifact contains a configured secret: ${rel}`);
+      }
+    }
+  }
+}
+async function sanitizeRuntimeFiles(runtimeRoot, secrets) {
+  const files = await walkFiles(runtimeRoot);
+  for (const file of files) {
+    const fileStat = await stat4(file);
+    if (fileStat.size > 1024 * 1024) {
+      continue;
+    }
+    const content = await readFile3(file, "utf8").catch(() => "");
+    if (!content) {
+      continue;
+    }
+    const sanitized = content.split(/\r?\n/).map((line) => sanitizeLine(line, secrets)).join("\n");
+    if (sanitized !== content) {
+      await writeFile4(file, sanitized, "utf8");
+    }
+  }
+}
+function sanitizeLine(line, secrets) {
+  if (!line.trim()) {
+    return line;
+  }
+  const parsed = safeParseJson2(line);
+  if (parsed !== void 0) {
+    return JSON.stringify(sanitizeJsonValue(parsed, secrets));
+  }
+  return sanitizeText(line, secrets);
+}
+function sanitizeJsonValue(value, secrets) {
+  if (typeof value === "string") {
+    return sanitizeText(value, secrets);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeJsonValue(item, secrets));
+  }
+  if (value && typeof value === "object") {
+    const result = {};
+    for (const [key, child] of Object.entries(value)) {
+      if (AUTH_HEADER_KEYS.has(key.toLowerCase()) && typeof child === "string") {
+        result[key] = "***REDACTED***";
+      } else {
+        result[key] = sanitizeJsonValue(child, secrets);
+      }
+    }
+    return result;
+  }
+  return value;
+}
+function sanitizeText(value, secrets) {
+  let result = value;
+  for (const secret of secrets) {
+    result = result.replaceAll(secret, "***REDACTED***");
+  }
+  return result.replace(HIGH_RISK_TOKEN_PATTERN, "***REDACTED***").replace(
+    /(Authorization|x-api-key|x-api-token)(["\s]*:?\s*(?:Bearer\s+)?)(?!\*\*\*)\S+/gi,
+    "$1$2***REDACTED***"
+  );
+}
+function hasUnredactedAuthHeader(content) {
+  for (const line of content.split(/\r?\n/)) {
+    const parsed = safeParseJson2(line);
+    if (parsed !== void 0 && hasUnredactedJsonAuthHeader(parsed)) {
+      return true;
+    }
+    const sanitized = sanitizeText(line, []);
+    if (sanitized !== line && !line.includes("***REDACTED***")) {
+      return true;
+    }
+  }
+  return false;
+}
+function hasUnredactedJsonAuthHeader(value) {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    return value.some(hasUnredactedJsonAuthHeader);
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (AUTH_HEADER_KEYS.has(key.toLowerCase())) {
+      if (typeof child === "string" && child !== "***REDACTED***") {
+        return true;
+      }
+    } else if (hasUnredactedJsonAuthHeader(child)) {
+      return true;
+    }
+  }
+  return false;
+}
+function knownSecrets(config) {
+  return [config.apiKey, config.githubToken].filter(
+    (value) => Boolean(value && value.length >= 8)
+  );
+}
+function safeParseJson2(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return void 0;
   }
 }
 function stateArtifactName(stateKey) {
@@ -98331,12 +99007,19 @@ async function resolveTarget(config, octokit, context5) {
     return {
       mode: "synthetic-fixture",
       title: "Synthetic agentic PR review fixture",
+      body: "Synthetic fixture for action smoke validation.",
+      baseRef: "synthetic-base",
       baseSha: "synthetic-base-sha",
+      headRef: "synthetic-head",
       headSha: context5.sha || "synthetic-head-sha",
+      draft: false,
       changedFiles: [
         {
           filename: "synthetic-review-fixture.md",
           status: "modified",
+          additions: 4,
+          deletions: 0,
+          changes: 4,
           patch: [
             "@@ -1,3 +1,7 @@",
             " # Synthetic fixture",
@@ -98369,6 +99052,9 @@ async function resolveTarget(config, octokit, context5) {
     return {
       filename: file.filename,
       status: file.status,
+      additions: file.additions,
+      deletions: file.deletions,
+      changes: file.changes,
       patch
     };
   });
@@ -98376,11 +99062,55 @@ async function resolveTarget(config, octokit, context5) {
     mode: "pull-request",
     prNumber,
     title: String(pull.data.title ?? `PR #${prNumber}`),
+    body: String(pull.data.body ?? ""),
+    baseRef: String(pull.data.base.ref),
     baseSha: String(pull.data.base.sha),
+    headRef: String(pull.data.head.ref),
     headSha: String(pull.data.head.sha),
+    headRepoFullName: pull.data.head.repo?.full_name ?? void 0,
+    draft: Boolean(pull.data.draft),
     changedFiles,
     htmlUrl: pull.data.html_url
   };
+}
+async function fetchTargetCompare(octokit, context5, baseSha, headSha, maxPatchChars) {
+  const { owner, repo } = context5.repo;
+  try {
+    const response = await octokit.rest.repos.compareCommitsWithBasehead({
+      owner,
+      repo,
+      basehead: `${baseSha}...${headSha}`
+    });
+    let remainingPatchChars = maxPatchChars;
+    const changedFiles = (response.data.files ?? []).map((file) => {
+      const patch = file.patch ? truncateText(String(file.patch), Math.max(0, remainingPatchChars)) : void 0;
+      if (patch) {
+        remainingPatchChars = Math.max(0, remainingPatchChars - patch.length);
+      }
+      return {
+        filename: String(file.filename),
+        status: String(file.status),
+        additions: Number(file.additions ?? 0),
+        deletions: Number(file.deletions ?? 0),
+        changes: Number(file.changes ?? 0),
+        patch
+      };
+    });
+    return {
+      baseSha,
+      headSha,
+      htmlUrl: String(response.data.html_url),
+      status: String(response.data.status),
+      aheadBy: Number(response.data.ahead_by),
+      behindBy: Number(response.data.behind_by),
+      changedFiles
+    };
+  } catch (error2) {
+    if (error2?.status === 404) {
+      return void 0;
+    }
+    throw error2;
+  }
 }
 function deriveStateKey(config, target) {
   if (config.stateKey) {
@@ -98404,36 +99134,88 @@ async function run() {
   if (config.apiKey) {
     setSecret(config.apiKey);
   }
+  setSecret(config.githubToken);
   const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
   const tempRoot = path8.join(defaultTempDir(), "agentic-pr-review");
+  const runtimeDir = path8.join(tempRoot, "runtime", config.runtimeProvider);
   await ensureDir(tempRoot);
   const octokit = getOctokit(config.githubToken);
   const target = await resolveTarget(config, octokit, context2);
+  validateSameRepositoryTarget(target);
   const stateKey = sanitizeStateKey(deriveStateKey(config, target));
   const artifactName = stateArtifactName(stateKey);
   const store = createArtifactStore(config.githubToken, octokit);
-  const restoredState = await restoreStateIfAvailable(
-    store,
-    artifactName,
-    config.stateArtifactRunId,
-    tempRoot
-  );
-  if (restoredState) {
-    validateRestoredState(restoredState, stateKey, config.runtimeProvider);
+  let resolution = await resolvePhase(config, store, artifactName, tempRoot, stateKey);
+  let compare = resolution.phase === "incremental" && target.mode === "pull-request" ? await fetchTargetCompare(
+    octokit,
+    context2,
+    resolution.restoredState?.reviewedHeadSha ?? target.baseSha,
+    target.headSha,
+    config.maxPatchChars
+  ) : void 0;
+  if (resolution.phase === "incremental" && target.mode === "pull-request") {
+    if (!compare) {
+      if (config.reviewMode === "auto") {
+        resolution = {
+          phase: "bootstrap",
+          lineageReason: "compare_unavailable"
+        };
+      } else {
+        throw new Error(
+          "Unable to compare prior reviewed head to current head. Use review_mode=bootstrap or review_mode=auto to recover."
+        );
+      }
+    } else if (compare.status === "identical") {
+      await restoreRuntimeState(resolution.restoreDir, config.runtimeProvider, runtimeDir);
+      await finishSkippedIdentical({
+        config,
+        store,
+        target,
+        stateKey,
+        artifactName,
+        runtimeDir,
+        restoredState: requireRestoredState(resolution.restoredState)
+      });
+      return;
+    } else if (compare.status === "diverged" || compare.status === "behind") {
+      if (config.reviewMode === "auto") {
+        resolution = {
+          phase: "bootstrap",
+          lineageReason: "compare_diverged"
+        };
+        compare = void 0;
+      } else {
+        throw new Error(
+          `Compare status is "${compare.status}". Use review_mode=bootstrap or review_mode=auto to recover.`
+        );
+      }
+    }
   }
-  const phase = decidePhase(config.reviewMode, restoredState);
-  const blocks2 = await loadContextBlocks(config, workspace, phase);
-  const prompt = buildReviewPrompt(target, phase, blocks2, config.maxPatchChars);
+  await restoreRuntimeState(
+    resolution.restoredState ? resolution.restoreDir : void 0,
+    config.runtimeProvider,
+    runtimeDir
+  );
+  const blocks2 = await loadContextBlocks(config, workspace, resolution.phase);
+  const prompt = buildReviewPrompt(
+    target,
+    resolution.phase,
+    blocks2,
+    config.maxPatchChars,
+    compare,
+    resolution.restoredState?.reviewedHeadSha
+  );
   const runtime = createRuntime(config.runtimeProvider);
   const runtimeResult = await runtime.run({
     config,
-    phase,
+    phase: resolution.phase,
     stateKey,
     prompt: prompt.text,
     promptHash: prompt.sha256,
-    restoredState,
+    restoredState: resolution.restoredState,
     workspace,
-    tempDir: tempRoot
+    tempDir: tempRoot,
+    runtimeDir
   });
   const reviewMarkdownPath = path8.join(tempRoot, "review.md");
   await writeTextFile(reviewMarkdownPath, runtimeResult.reviewMarkdown);
@@ -98443,10 +99225,12 @@ async function run() {
     config,
     target,
     stateKey,
-    phase,
+    phase: resolution.phase,
     promptSha256: prompt.sha256,
     blocks: blocks2,
-    runtimeResult
+    runtimeResult,
+    runtimeDir,
+    createdAt: resolution.restoredState?.createdAt
   });
   const uploadedState = await store.upload(
     artifactName,
@@ -98458,39 +99242,47 @@ async function run() {
   if (config.debugCaptureRawApiBodies) {
     debugArtifact = await uploadDebugArtifact(store, stateKey, runtimeResult.debugFiles);
   }
-  let commentUrl = "";
-  let lineageAction = "";
-  let lineageReason = "";
-  if (config.postComment) {
-    if (target.mode !== "pull-request" || !target.prNumber) {
-      throw new Error("post_comment=true requires target_mode=pull-request");
-    }
-    const comment = await upsertStickyComment({
-      octokit,
-      owner: context2.repo.owner,
-      repo: context2.repo.repo,
-      prNumber: target.prNumber,
-      target,
-      reviewMarkdown: runtimeResult.reviewMarkdown,
-      stateKey
-    });
-    commentUrl = comment.commentUrl;
-    lineageAction = comment.lineageAction;
-    lineageReason = comment.lineageReason;
-  }
+  const comment = await maybePostComment({
+    config,
+    target,
+    runtimeResult,
+    stateKey,
+    phase: resolution.phase,
+    artifactName,
+    lineageReason: resolution.lineageReason,
+    previousHeadSha: resolution.restoredState?.reviewedHeadSha,
+    reviewMarkdown: runtimeResult.reviewMarkdown,
+    octokit
+  });
   setOutputs({
     stateKey,
     reviewMode: config.reviewMode,
-    phase,
+    phase: resolution.phase,
+    reviewPhase: resolution.phase,
     runtimeProvider: config.runtimeProvider,
     sessionId: runtimeResult.sessionId,
     reviewedHeadSha: target.headSha,
     artifact: uploadedState,
     reviewMarkdownPath,
-    commentUrl,
-    lineageAction,
-    lineageReason,
+    commentUrl: comment.commentUrl,
+    lineageAction: comment.lineageAction,
+    lineageReason: comment.lineageReason,
     debugArtifact
+  });
+  await writeSummary({
+    config,
+    target,
+    stateKey,
+    phase: resolution.phase,
+    reviewPhase: resolution.phase,
+    runtimeResult,
+    promptSha256: prompt.sha256,
+    promptBytes: Buffer.byteLength(prompt.text, "utf8"),
+    restored: resolution,
+    compareUrl: compare?.htmlUrl,
+    artifactName,
+    commentUrl: comment.commentUrl,
+    bundleDir
   });
 }
 function createArtifactStore(token, octokit) {
@@ -98506,26 +99298,43 @@ function createArtifactStore(token, octokit) {
     context2.runId
   );
 }
-async function restoreStateIfAvailable(store, artifactName, explicitRunId, tempRoot) {
-  const artifact = await store.findStateArtifact(artifactName, explicitRunId);
+async function resolvePhase(config, store, artifactName, tempRoot, stateKey) {
+  if (config.reviewMode === "bootstrap") {
+    return { phase: "bootstrap", lineageReason: "manual_bootstrap" };
+  }
+  const artifact = await store.findStateArtifact(artifactName, config.stateArtifactRunId);
   if (!artifact) {
-    return void 0;
+    if (config.reviewMode === "incremental") {
+      throw new Error(`review_mode=incremental requires a state artifact named ${artifactName}`);
+    }
+    return { phase: "bootstrap", lineageReason: "auto_bootstrap_no_state" };
   }
   const restoreDir = path8.join(tempRoot, "restored-state");
   await store.download(artifact, restoreDir);
-  return await readRestoredState(restoreDir);
-}
-function decidePhase(reviewMode, restoredState) {
-  if (reviewMode === "bootstrap") {
-    return "bootstrap";
-  }
-  if (reviewMode === "incremental") {
-    if (!restoredState) {
-      throw new Error("review_mode=incremental requires a valid restored state artifact");
+  let restoredState;
+  try {
+    restoredState = await readRestoredState(restoreDir);
+    validateRestoredState(restoredState, stateKey, config.runtimeProvider);
+  } catch (error2) {
+    if (config.reviewMode === "auto") {
+      const reason = messageOf(error2).includes("runtime_provider") ? "auto_bootstrap_runtime" : "auto_bootstrap_invalid";
+      warning(
+        `Restored state artifact is not usable; falling back to bootstrap: ${messageOf(error2)}`
+      );
+      return { phase: "bootstrap", lineageReason: reason };
     }
-    return "incremental";
+    throw error2;
   }
-  return restoredState ? "incremental" : "bootstrap";
+  return {
+    phase: "incremental",
+    restoredState,
+    restoreDir,
+    lineageReason: "continuity_mismatch",
+    restoredArtifact: {
+      id: artifact.id,
+      workflowRunId: artifact.workflowRunId
+    }
+  };
 }
 function validateRestoredState(restoredState, stateKey, runtimeProvider) {
   if (restoredState.stateKey !== stateKey) {
@@ -98535,6 +99344,130 @@ function validateRestoredState(restoredState, stateKey, runtimeProvider) {
     throw new Error(
       "restored state artifact runtime_provider does not match the requested runtime_provider"
     );
+  }
+  if (!restoredState.sessionId) {
+    throw new Error("restored state artifact is missing session_id");
+  }
+}
+function validateSameRepositoryTarget(target) {
+  if (target.mode !== "pull-request" || !target.headRepoFullName) {
+    return;
+  }
+  const expected = `${context2.repo.owner}/${context2.repo.repo}`;
+  if (target.headRepoFullName !== expected) {
+    throw new Error(
+      `Fork pull requests are not supported. Expected head repository ${expected}, got ${target.headRepoFullName}.`
+    );
+  }
+}
+async function finishSkippedIdentical(options) {
+  const runtimeResult = {
+    sessionId: options.restoredState.sessionId,
+    sessionName: options.restoredState.sessionName,
+    reviewMarkdown: `No changes since prior review for ${options.target.headSha}. Provider call skipped.`,
+    debugFiles: [],
+    usage: options.restoredState.usage
+  };
+  const bundleDir = path8.join(defaultTempDir(), "agentic-pr-review", "state-bundle");
+  const bundleFiles = await writeStateBundle({
+    bundleDir,
+    config: options.config,
+    target: options.target,
+    stateKey: options.stateKey,
+    phase: "incremental",
+    promptSha256: "skipped-identical",
+    blocks: [],
+    runtimeResult,
+    runtimeDir: options.runtimeDir,
+    createdAt: options.restoredState.createdAt
+  });
+  const uploadedState = await options.store.upload(
+    options.artifactName,
+    bundleDir,
+    bundleFiles,
+    options.config.artifactRetentionDays
+  );
+  setOutputs({
+    stateKey: options.stateKey,
+    reviewMode: options.config.reviewMode,
+    phase: "incremental",
+    reviewPhase: "skipped-identical",
+    runtimeProvider: options.config.runtimeProvider,
+    sessionId: runtimeResult.sessionId,
+    reviewedHeadSha: options.target.headSha,
+    artifact: uploadedState,
+    reviewMarkdownPath: path8.join(bundleDir, "review.md"),
+    commentUrl: "skipped-identical",
+    lineageAction: "",
+    lineageReason: ""
+  });
+  await writeSummary({
+    config: options.config,
+    target: options.target,
+    stateKey: options.stateKey,
+    phase: "incremental",
+    reviewPhase: "skipped-identical",
+    runtimeResult,
+    promptSha256: "skipped-identical",
+    promptBytes: 0,
+    restored: {
+      phase: "incremental",
+      restoredState: options.restoredState,
+      lineageReason: "continuity_mismatch"
+    },
+    compareUrl: void 0,
+    artifactName: options.artifactName,
+    commentUrl: "skipped-identical",
+    bundleDir
+  });
+}
+function requireRestoredState(restoredState) {
+  if (!restoredState) {
+    throw new Error("internal error: identical incremental requires restored state");
+  }
+  return restoredState;
+}
+async function maybePostComment(options) {
+  if (!options.config.postComment) {
+    return { commentUrl: "", lineageAction: "", lineageReason: "" };
+  }
+  if (options.target.mode !== "pull-request" || !options.target.prNumber) {
+    throw new Error("post_comment=true requires target_mode=pull-request");
+  }
+  try {
+    const comment = await upsertLineageComment({
+      octokit: options.octokit,
+      owner: context2.repo.owner,
+      repo: context2.repo.repo,
+      prNumber: options.target.prNumber,
+      target: options.target,
+      reviewMarkdown: options.reviewMarkdown,
+      stateKey: options.stateKey,
+      phase: options.phase,
+      runtimeProvider: options.config.runtimeProvider,
+      sessionId: options.runtimeResult.sessionId,
+      previousHeadSha: options.previousHeadSha,
+      currentHeadSha: options.target.headSha,
+      artifactName: options.artifactName,
+      runId: context2.runId,
+      runAttempt: context2.runAttempt,
+      lineageReason: options.lineageReason,
+      usage: options.runtimeResult.usage,
+      maxReviewChars: options.config.maxReviewChars
+    });
+    return {
+      commentUrl: comment.commentUrl,
+      lineageAction: comment.lineageAction,
+      lineageReason: comment.lineageReason
+    };
+  } catch (error2) {
+    const message = messageOf(error2);
+    warning(`sticky comment update failed after state artifact upload: ${message}`);
+    return {
+      commentUrl: `failed: ${message}`,
+      lineageAction: "failed",
+      lineageReason: options.lineageReason
+    };
   }
 }
 async function uploadDebugArtifact(store, stateKey, debugFiles) {
@@ -98549,6 +99482,7 @@ function setOutputs(options) {
   setOutput("state_key", options.stateKey);
   setOutput("review_mode", options.reviewMode);
   setOutput("phase", options.phase);
+  setOutput("review_phase", options.reviewPhase);
   setOutput("runtime_provider", options.runtimeProvider);
   setOutput("session_id", options.sessionId);
   setOutput("reviewed_head_sha", options.reviewedHeadSha);
@@ -98566,8 +99500,45 @@ function setOutputs(options) {
     setOutput("debug_artifact_url", options.debugArtifact.url ?? "");
   }
 }
+async function writeSummary(input) {
+  const restored = input.restored.restoredState ? `yes, head ${input.restored.restoredState.reviewedHeadSha ?? "unknown"}` : "no";
+  const usage = input.runtimeResult.usage ? [
+    `cache_read=${input.runtimeResult.usage.cacheReadInputTokens ?? input.runtimeResult.usage.promptCacheHitTokens ?? "n/a"}`,
+    `input=${input.runtimeResult.usage.inputTokens ?? "n/a"}`,
+    `output=${input.runtimeResult.usage.outputTokens ?? "n/a"}`
+  ].join(", ") : "not exposed";
+  const lines = [
+    "### Agentic PR Review",
+    "",
+    `- Requested mode: ${input.config.reviewMode}`,
+    `- Resolved phase: ${input.phase}`,
+    `- Review phase: ${input.reviewPhase}`,
+    `- Runtime: ${input.config.runtimeProvider}`,
+    `- State key: ${input.stateKey}`,
+    `- Session id: ${input.runtimeResult.sessionId}`,
+    `- Restored previous state: ${restored}`,
+    `- Previous reviewed head: ${input.restored.restoredState?.reviewedHeadSha ?? "n/a"}`,
+    `- Current head: ${input.target.headSha}`,
+    `- Prompt sha256: ${input.promptSha256}`,
+    `- Prompt bytes: ${input.promptBytes}`,
+    `- Usage: ${usage}`,
+    `- Compare URL: ${input.compareUrl ?? "n/a"}`,
+    `- Sticky comment: ${input.commentUrl || "not requested"}`,
+    `- State artifact: ${input.artifactName}`,
+    `- Artifact retention days: ${input.config.artifactRetentionDays}`,
+    `- Local bundle path: ${input.bundleDir}`
+  ];
+  try {
+    await summary.addRaw(lines.join("\n")).write();
+  } catch (error2) {
+    info(`Unable to write job summary: ${messageOf(error2)}`);
+  }
+}
+function messageOf(error2) {
+  return error2 instanceof Error ? error2.message : String(error2);
+}
 run().catch((error2) => {
-  setFailed(error2 instanceof Error ? error2 : String(error2));
+  setFailed(messageOf(error2));
 });
 export {
   run

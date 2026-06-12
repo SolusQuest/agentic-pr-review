@@ -19,6 +19,16 @@ describe('parseActionConfig', () => {
     expect(config.targetMode).toBe('pull-request');
     expect(config.reviewMode).toBe('auto');
     expect(config.apiKeyMode).toBe('auth-token');
+    expect(config.disablePromptCaching).toBe(false);
+  });
+
+  it('parses explicit prompt caching disable switch', () => {
+    const config = parseActionConfig(
+      new Inputs({ disable_prompt_caching: 'true' }),
+      baseEnv,
+      'pull_request',
+    );
+    expect(config.disablePromptCaching).toBe(true);
   });
 
   it('rejects mutually exclusive instruction inputs', () => {

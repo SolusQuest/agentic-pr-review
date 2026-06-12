@@ -42,6 +42,7 @@ jobs:
           small_model_name: ${{ vars.AGENTIC_REVIEW_CLAUDE_CODE_SMALL_MODEL }}
           api_key_mode: ${{ vars.AGENTIC_REVIEW_CLAUDE_CODE_API_KEY_MODE || 'auth-token' }}
           claude_code_version: ${{ vars.AGENTIC_REVIEW_CLAUDE_CODE_VERSION }}
+          disable_prompt_caching: 'false'
           instructions: 'Review this synthetic fixture and return a concise public-safe smoke result.'
           debug_capture_raw_api_bodies: ${{ inputs.debug_capture_raw_api_bodies }}
           debug_acknowledgement: ${{ inputs.debug_acknowledgement }}

@@ -15,8 +15,10 @@ describe('action contract', () => {
       'target_mode',
       'review_mode',
       'api_key_mode',
+      'disable_prompt_caching',
       'debug_acknowledgement',
       'artifact_name',
+      'review_phase',
       'review_markdown_path',
     ]) {
       expect(action).toContain(name);

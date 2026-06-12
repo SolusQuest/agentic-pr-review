@@ -27,6 +27,7 @@ export interface ActionConfig {
   maxContextChars: number;
   maxPatchChars: number;
   maxReviewChars: number;
+  disablePromptCaching: boolean;
   debugCaptureRawApiBodies: boolean;
   debugAcknowledgement?: string;
   githubToken: string;
@@ -44,6 +45,9 @@ export interface LoadedBlock {
 export interface ChangedFile {
   filename: string;
   status: string;
+  additions: number;
+  deletions: number;
+  changes: number;
   patch?: string;
 }
 
@@ -51,8 +55,13 @@ export interface ReviewTarget {
   mode: TargetMode;
   prNumber?: number;
   title: string;
+  body: string;
+  baseRef: string;
   baseSha: string;
+  headRef: string;
   headSha: string;
+  headRepoFullName?: string;
+  draft: boolean;
   changedFiles: ChangedFile[];
   htmlUrl?: string;
 }
@@ -60,15 +69,27 @@ export interface ReviewTarget {
 export interface RestoredState {
   stateKey: string;
   sessionId: string;
+  sessionName: string;
   runtimeProvider: RuntimeProvider;
   reviewedHeadSha?: string;
+  createdAt?: string;
+  usage?: RuntimeUsage;
   manifestPath: string;
 }
 
 export interface RuntimeResult {
   sessionId: string;
+  sessionName: string;
   reviewMarkdown: string;
   debugFiles: string[];
+  usage?: RuntimeUsage;
+}
+
+export interface RuntimeUsage {
+  promptCacheHitTokens?: number;
+  cacheReadInputTokens?: number;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 export interface UploadedArtifact {
@@ -77,3 +98,24 @@ export interface UploadedArtifact {
   url?: string;
   retentionDays: number;
 }
+
+export interface PullRequestCompare {
+  baseSha: string;
+  headSha: string;
+  htmlUrl: string;
+  status: string;
+  aheadBy: number;
+  behindBy: number;
+  changedFiles: ChangedFile[];
+}
+
+export type LineageReason =
+  | 'manual_bootstrap'
+  | 'auto_bootstrap_no_state'
+  | 'auto_bootstrap_invalid'
+  | 'auto_bootstrap_runtime'
+  | 'compare_unavailable'
+  | 'compare_diverged'
+  | 'continuity_mismatch';
+
+export type LineageAction = 'create' | 'update' | 'update_in_place';

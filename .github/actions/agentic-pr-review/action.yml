@@ -77,6 +77,10 @@ inputs:
     description: Maximum characters retained from the runtime review output.
     required: false
     default: '12000'
+  disable_prompt_caching:
+    description: Whether to set DISABLE_PROMPT_CACHING=1 for claude-code-cli runtime.
+    required: false
+    default: 'false'
   debug_capture_raw_api_bodies:
     description: Restricted manual diagnostic capture for live synthetic workflow_dispatch runs.
     required: false
@@ -92,6 +96,8 @@ outputs:
     description: Requested review mode.
   phase:
     description: Actual executed phase, bootstrap or incremental.
+  review_phase:
+    description: 'Provider execution result: bootstrap, incremental, or skipped-identical.'
   runtime_provider:
     description: Runtime provider used.
   session_id:

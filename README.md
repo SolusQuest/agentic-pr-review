@@ -48,6 +48,7 @@ For a live runtime, pass provider configuration as inputs and the API key as an 
     small_model_name: ${{ vars.AGENTIC_REVIEW_CLAUDE_CODE_SMALL_MODEL }}
     api_key_mode: ${{ vars.AGENTIC_REVIEW_CLAUDE_CODE_API_KEY_MODE || 'auth-token' }}
     claude_code_version: ${{ vars.AGENTIC_REVIEW_CLAUDE_CODE_VERSION }}
+    disable_prompt_caching: 'false'
     instructions_path: .github/agentic-pr-review-instructions.md
   env:
     GITHUB_TOKEN: ${{ github.token }}
@@ -97,30 +98,32 @@ permissions:
 | `max_context_chars`                                | `60000`        | Per instruction/context block                              |
 | `max_patch_chars`                                  | `120000`       | PR patch context bound                                     |
 | `max_review_chars`                                 | `12000`        | Review output bound                                        |
+| `disable_prompt_caching`                           | `false`        | Sets `DISABLE_PROMPT_CACHING=1` for live runtime           |
 | `debug_capture_raw_api_bodies`                     | `false`        | Restricted trusted manual diagnostic mode                  |
 | `debug_acknowledgement`                            | empty          | Must be `allow-raw-provider-debug` for diagnostic mode     |
 
 ## Outputs
 
-| Output                    | Notes                                              |
-| ------------------------- | -------------------------------------------------- |
-| `state_key`               | Resolved state key                                 |
-| `review_mode`             | Requested review mode                              |
-| `phase`                   | Actual phase: `bootstrap` or `incremental`         |
-| `runtime_provider`        | Runtime used                                       |
-| `session_id`              | Runtime session id                                 |
-| `reviewed_head_sha`       | Reviewed target head SHA                           |
-| `artifact_name`           | Uploaded state artifact name                       |
-| `artifact_id`             | Uploaded state artifact id when available          |
-| `artifact_url`            | Uploaded state artifact URL when available         |
-| `artifact_retention_days` | Effective retention                                |
-| `review_markdown_path`    | Bounded review markdown path                       |
-| `comment_url`             | Sticky comment URL when comment posting is enabled |
-| `lineage_action`          | Sticky comment lineage action                      |
-| `lineage_reason`          | Sticky comment lineage reason                      |
-| `debug_artifact_name`     | Restricted diagnostic artifact name when enabled   |
-| `debug_artifact_id`       | Restricted diagnostic artifact id when enabled     |
-| `debug_artifact_url`      | Restricted diagnostic artifact URL when enabled    |
+| Output                    | Notes                                                               |
+| ------------------------- | ------------------------------------------------------------------- |
+| `state_key`               | Resolved state key                                                  |
+| `review_mode`             | Requested review mode                                               |
+| `phase`                   | Actual phase: `bootstrap` or `incremental`                          |
+| `review_phase`            | Provider result: `bootstrap`, `incremental`, or `skipped-identical` |
+| `runtime_provider`        | Runtime used                                                        |
+| `session_id`              | Runtime session id                                                  |
+| `reviewed_head_sha`       | Reviewed target head SHA                                            |
+| `artifact_name`           | Uploaded state artifact name                                        |
+| `artifact_id`             | Uploaded state artifact id when available                           |
+| `artifact_url`            | Uploaded state artifact URL when available                          |
+| `artifact_retention_days` | Effective retention                                                 |
+| `review_markdown_path`    | Bounded review markdown path                                        |
+| `comment_url`             | Sticky comment URL when comment posting is enabled                  |
+| `lineage_action`          | Sticky comment lineage action                                       |
+| `lineage_reason`          | Sticky comment lineage reason                                       |
+| `debug_artifact_name`     | Restricted diagnostic artifact name when enabled                    |
+| `debug_artifact_id`       | Restricted diagnostic artifact id when enabled                      |
+| `debug_artifact_url`      | Restricted diagnostic artifact URL when enabled                     |
 
 ## State Artifacts
 
@@ -133,8 +136,20 @@ State artifact names use:
 agentic-pr-review-state-${state_key}
 ```
 
+The state bundle includes a manifest, the bounded review markdown, and the sanitized runtime session
+directory needed for the next incremental run. Normal state artifacts reject raw/debug files, configured
+secret values, high-risk token prefixes, and unredacted auth headers.
+
 `review_mode=incremental` fails if no valid state can be restored. `review_mode=auto` restores when a
-matching state exists and otherwise starts a bootstrap phase.
+matching state exists and otherwise starts a bootstrap phase. For pull request targets, incremental mode
+compares the prior reviewed head to the current head:
+
+- compare 404 or diverged history falls back to bootstrap in `auto` and fails in forced `incremental`
+- identical ranges upload refreshed state and set `review_phase=skipped-identical` without calling the provider
+- non-identical ahead ranges send only the compare-range patch plus incremental context
+
+Fork pull requests are not supported. The action reads PR metadata and patches through GitHub APIs, but
+session continuity and comment lineage are scoped to same-repository pull requests.
 
 ## Live Smoke
 
