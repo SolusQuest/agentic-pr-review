@@ -5,11 +5,20 @@
   "type": "module",
   "scripts": {
     "check": "npm run format:check && npm run typecheck && npm test",
+    "build": "node scripts/build.mjs",
+    "dist:check": "npm run build && git diff --exit-code -- .github/actions/agentic-pr-review/dist/index.js .github/actions/agentic-pr-review/dist/index.js.LEGAL.txt",
     "format:check": "prettier --check .",
+    "format": "prettier --write .",
+    "synthetic": "node scripts/run-local-synthetic.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "devDependencies": {
+    "@actions/artifact": "^6.2.1",
+    "@actions/core": "^3.0.1",
+    "@actions/github": "^9.1.1",
+    "@types/node": "^25.9.3",
+    "esbuild": "^0.28.1",
     "prettier": "^3.0.0",
     "typescript": "^5.0.0",
     "vitest": "^3.0.0"
