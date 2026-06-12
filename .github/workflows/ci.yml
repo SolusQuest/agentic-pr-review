@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   check:
@@ -15,7 +16,26 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: npm ci
       - run: npm run check
+      - run: npm run build
+      - run: npm run dist:check
+      - run: npm run synthetic
+
+  action-smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/agentic-pr-review
+        with:
+          runtime_provider: test
+          target_mode: synthetic-fixture
+          review_mode: auto
+          state_key: ci-synthetic-smoke
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

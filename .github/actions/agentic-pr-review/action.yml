@@ -1,0 +1,126 @@
+name: Agentic PR Review
+description: Session-aware agentic pull request review with state artifact restore.
+
+inputs:
+  runtime_provider:
+    description: 'Runtime to use for review generation: test or claude-code-cli.'
+    required: false
+    default: test
+  target_mode:
+    description: 'Review target source: pull-request or synthetic-fixture.'
+    required: false
+    default: pull-request
+  review_mode:
+    description: 'State behavior: auto, bootstrap, or incremental.'
+    required: false
+    default: auto
+  pr_number:
+    description: Pull request number. Inferred from pull_request events when omitted.
+    required: false
+  state_key:
+    description: Optional deterministic state key. Defaults to the target and runtime.
+    required: false
+  state_artifact_run_id:
+    description: Optional workflow run id to restore the previous state artifact from.
+    required: false
+  artifact_retention_days:
+    description: Retention for state artifacts, clamped to 1 through 7 days.
+    required: false
+    default: '7'
+  post_comment:
+    description: Whether to create or update the sticky top-level PR comment.
+    required: false
+    default: 'false'
+  model_base_url:
+    description: Anthropic-compatible base URL for claude-code-cli runtime.
+    required: false
+  model_name:
+    description: Primary model for claude-code-cli runtime.
+    required: false
+  small_model_name:
+    description: Optional small/background model for claude-code-cli runtime.
+    required: false
+  api_key_mode:
+    description: How AGENTIC_REVIEW_API_KEY is exposed to the runtime.
+    required: false
+    default: auth-token
+  claude_code_version:
+    description: Explicit Claude Code CLI semver to install for live runtime.
+    required: false
+  instructions:
+    description: Stable review instructions. Mutually exclusive with instructions_path.
+    required: false
+  instructions_path:
+    description: Path to stable review instructions. Mutually exclusive with instructions.
+    required: false
+  bootstrap_context:
+    description: Context used only for bootstrap / auto-bootstrap.
+    required: false
+  bootstrap_context_path:
+    description: Path to bootstrap context. Mutually exclusive with bootstrap_context.
+    required: false
+  incremental_context:
+    description: Context used only for incremental review.
+    required: false
+  incremental_context_path:
+    description: Path to incremental context. Mutually exclusive with incremental_context.
+    required: false
+  max_context_chars:
+    description: Maximum characters allowed for each instruction/context block.
+    required: false
+    default: '60000'
+  max_patch_chars:
+    description: Maximum patch characters included in the review prompt.
+    required: false
+    default: '120000'
+  max_review_chars:
+    description: Maximum characters retained from the runtime review output.
+    required: false
+    default: '12000'
+  debug_capture_raw_api_bodies:
+    description: Restricted manual diagnostic capture for live synthetic workflow_dispatch runs.
+    required: false
+    default: 'false'
+  debug_acknowledgement:
+    description: Must equal allow-raw-provider-debug when diagnostic capture is enabled.
+    required: false
+
+outputs:
+  state_key:
+    description: Resolved state key.
+  review_mode:
+    description: Requested review mode.
+  phase:
+    description: Actual executed phase, bootstrap or incremental.
+  runtime_provider:
+    description: Runtime provider used.
+  session_id:
+    description: Runtime session id.
+  reviewed_head_sha:
+    description: Reviewed target head SHA when available.
+  artifact_name:
+    description: Uploaded state artifact name.
+  artifact_id:
+    description: Uploaded state artifact id when available.
+  artifact_url:
+    description: Uploaded state artifact URL when available.
+  artifact_retention_days:
+    description: Effective artifact retention.
+  review_markdown_path:
+    description: Path to bounded review markdown output.
+  comment_url:
+    description: Sticky comment URL when post_comment is enabled.
+  lineage_action:
+    description: Sticky comment lineage action when post_comment is enabled.
+  lineage_reason:
+    description: Sticky comment lineage reason when post_comment is enabled.
+  debug_artifact_name:
+    description: Restricted diagnostic artifact name when debug capture is enabled.
+  debug_artifact_id:
+    description: Restricted diagnostic artifact id when debug capture is enabled.
+  debug_artifact_url:
+    description: Restricted diagnostic artifact URL when debug capture is enabled.
+
+runs:
+  using: node24
+  main: dist/index.js

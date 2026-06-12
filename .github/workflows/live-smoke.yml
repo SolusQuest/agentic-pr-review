@@ -1,0 +1,50 @@
+name: Live Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      review_mode:
+        description: Review mode for the live synthetic smoke.
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - bootstrap
+          - incremental
+      debug_capture_raw_api_bodies:
+        description: Enable restricted raw provider diagnostic artifact.
+        required: true
+        default: false
+        type: boolean
+      debug_acknowledgement:
+        description: Must equal allow-raw-provider-debug when diagnostic capture is enabled.
+        required: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  live-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/agentic-pr-review
+        with:
+          runtime_provider: claude-code-cli
+          target_mode: synthetic-fixture
+          review_mode: ${{ inputs.review_mode }}
+          state_key: live-synthetic-smoke
+          post_comment: 'false'
+          model_base_url: ${{ vars.AGENTIC_REVIEW_CLAUDE_CODE_BASE_URL }}
+          model_name: ${{ vars.AGENTIC_REVIEW_CLAUDE_CODE_MODEL }}
+          small_model_name: ${{ vars.AGENTIC_REVIEW_CLAUDE_CODE_SMALL_MODEL }}
+          api_key_mode: ${{ vars.AGENTIC_REVIEW_CLAUDE_CODE_API_KEY_MODE || 'auth-token' }}
+          claude_code_version: ${{ vars.AGENTIC_REVIEW_CLAUDE_CODE_VERSION }}
+          instructions: 'Review this synthetic fixture and return a concise public-safe smoke result.'
+          debug_capture_raw_api_bodies: ${{ inputs.debug_capture_raw_api_bodies }}
+          debug_acknowledgement: ${{ inputs.debug_acknowledgement }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          AGENTIC_REVIEW_API_KEY: ${{ secrets.AGENTIC_REVIEW_CLAUDE_CODE_API_KEY }}
