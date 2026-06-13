@@ -97858,6 +97858,8 @@ var RUNTIME_PROVIDERS = ["test", "claude-code-cli"];
 var TARGET_MODES = ["pull-request", "synthetic-fixture"];
 var REVIEW_MODES = ["auto", "bootstrap", "incremental"];
 var API_KEY_MODES = ["auth-token", "api-key", "both"];
+var SYNTHETIC_RAW_DEBUG_ACKNOWLEDGEMENT = "allow-raw-provider-debug";
+var PUBLIC_PR_RAW_DEBUG_ACKNOWLEDGEMENT = "allow-raw-provider-debug-public-pr";
 function optionalInput(reader, name) {
   const value = reader.getInput(name).trim();
   return value === "" ? void 0 : value;
@@ -97970,17 +97972,23 @@ function validateDebugCapture(config, eventName) {
   if (config.runtimeProvider !== "claude-code-cli") {
     throw new Error("debug_capture_raw_api_bodies requires runtime_provider=claude-code-cli");
   }
-  if (config.targetMode !== "synthetic-fixture") {
-    throw new Error("debug_capture_raw_api_bodies requires target_mode=synthetic-fixture");
-  }
   if (eventName !== "workflow_dispatch") {
     throw new Error("debug_capture_raw_api_bodies is only allowed on workflow_dispatch");
   }
-  if (config.debugAcknowledgement !== "allow-raw-provider-debug") {
+  if (config.targetMode === "synthetic-fixture" && config.debugAcknowledgement === SYNTHETIC_RAW_DEBUG_ACKNOWLEDGEMENT) {
+    return;
+  }
+  if (config.targetMode === "pull-request" && config.debugAcknowledgement === PUBLIC_PR_RAW_DEBUG_ACKNOWLEDGEMENT) {
+    return;
+  }
+  if (config.targetMode === "pull-request") {
     throw new Error(
-      "debug_capture_raw_api_bodies requires debug_acknowledgement=allow-raw-provider-debug"
+      `debug_capture_raw_api_bodies with target_mode=pull-request requires debug_acknowledgement=${PUBLIC_PR_RAW_DEBUG_ACKNOWLEDGEMENT}`
     );
   }
+  throw new Error(
+    `debug_capture_raw_api_bodies requires debug_acknowledgement=${SYNTHETIC_RAW_DEBUG_ACKNOWLEDGEMENT}`
+  );
 }
 
 // src/context-blocks.ts

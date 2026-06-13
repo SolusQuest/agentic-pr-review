@@ -91,4 +91,37 @@ describe('parseActionConfig', () => {
     );
     expect(config.debugCaptureRawApiBodies).toBe(true);
   });
+
+  it('requires stronger acknowledgement for pull request raw diagnostics', () => {
+    expect(() =>
+      parseActionConfig(
+        new Inputs({
+          runtime_provider: 'claude-code-cli',
+          target_mode: 'pull-request',
+          model_base_url: 'https://example.invalid',
+          model_name: 'model',
+          claude_code_version: '2.1.118',
+          debug_capture_raw_api_bodies: 'true',
+          debug_acknowledgement: 'allow-raw-provider-debug',
+        }),
+        { ...baseEnv, AGENTIC_REVIEW_API_KEY: 'secret-value' },
+        'workflow_dispatch',
+      ),
+    ).toThrow(/allow-raw-provider-debug-public-pr/);
+
+    const config = parseActionConfig(
+      new Inputs({
+        runtime_provider: 'claude-code-cli',
+        target_mode: 'pull-request',
+        model_base_url: 'https://example.invalid',
+        model_name: 'model',
+        claude_code_version: '2.1.118',
+        debug_capture_raw_api_bodies: 'true',
+        debug_acknowledgement: 'allow-raw-provider-debug-public-pr',
+      }),
+      { ...baseEnv, AGENTIC_REVIEW_API_KEY: 'secret-value' },
+      'workflow_dispatch',
+    );
+    expect(config.debugCaptureRawApiBodies).toBe(true);
+  });
 });

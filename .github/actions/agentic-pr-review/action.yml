@@ -82,11 +82,11 @@ inputs:
     required: false
     default: 'false'
   debug_capture_raw_api_bodies:
-    description: Restricted manual diagnostic capture for live synthetic workflow_dispatch runs.
+    description: Restricted manual diagnostic capture for trusted workflow_dispatch runs.
     required: false
     default: 'false'
   debug_acknowledgement:
-    description: Must equal allow-raw-provider-debug when diagnostic capture is enabled.
+    description: Must equal allow-raw-provider-debug for synthetic diagnostics or allow-raw-provider-debug-public-pr for same-repo public PR diagnostics.
     required: false
 
 outputs:

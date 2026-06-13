@@ -12,18 +12,39 @@ on:
           - auto
           - bootstrap
           - incremental
+      target_mode:
+        description: Diagnostic target mode.
+        required: true
+        default: synthetic-fixture
+        type: choice
+        options:
+          - synthetic-fixture
+          - pull-request
+      pr_number:
+        description: Same-repo public PR number when target_mode=pull-request.
+        required: false
+      state_key:
+        description: Diagnostic state key. Use distinct values for independent probes.
+        required: true
+        default: live-synthetic-smoke
+      allow_non_default_ref_diagnostic:
+        description: Allow trusted maintainer diagnostic dispatch from a non-default ref.
+        required: true
+        default: false
+        type: boolean
       debug_capture_raw_api_bodies:
         description: Enable restricted raw provider diagnostic artifact.
         required: true
         default: false
         type: boolean
       debug_acknowledgement:
-        description: Must equal allow-raw-provider-debug when diagnostic capture is enabled.
+        description: Must equal the required diagnostic acknowledgement when raw capture is enabled.
         required: false
 
 permissions:
   contents: read
   actions: read
+  pull-requests: read
 
 jobs:
   live-smoke:
@@ -33,17 +54,28 @@ jobs:
       - name: Validate trusted dispatch ref
         env:
           TRUSTED_REF: refs/heads/${{ github.event.repository.default_branch }}
+          ALLOW_NON_DEFAULT_REF_DIAGNOSTIC: ${{ inputs.allow_non_default_ref_diagnostic }}
+          DEBUG_CAPTURE_RAW_API_BODIES: ${{ inputs.debug_capture_raw_api_bodies }}
+          DEBUG_ACKNOWLEDGEMENT: ${{ inputs.debug_acknowledgement }}
         run: |
           if [ "${GITHUB_REF}" != "${TRUSTED_REF}" ]; then
+            if [ "${ALLOW_NON_DEFAULT_REF_DIAGNOSTIC}" = "true" ] && \
+               [ "${DEBUG_CAPTURE_RAW_API_BODIES}" = "true" ] && \
+               { [ "${DEBUG_ACKNOWLEDGEMENT}" = "allow-raw-provider-debug" ] || \
+                 [ "${DEBUG_ACKNOWLEDGEMENT}" = "allow-raw-provider-debug-public-pr" ]; }; then
+              echo "::warning::Trusted diagnostic dispatch allowed from ${GITHUB_REF}; default branch is ${TRUSTED_REF}"
+              exit 0
+            fi
             echo "::error::Live smoke may only run from ${TRUSTED_REF}; got ${GITHUB_REF}"
             exit 1
           fi
       - uses: ./.github/actions/agentic-pr-review
         with:
           runtime_provider: claude-code-cli
-          target_mode: synthetic-fixture
+          target_mode: ${{ inputs.target_mode }}
+          pr_number: ${{ inputs.pr_number }}
           review_mode: ${{ inputs.review_mode }}
-          state_key: live-synthetic-smoke
+          state_key: ${{ inputs.state_key }}
           post_comment: 'false'
           model_base_url: ${{ vars.AGENTIC_REVIEW_CLAUDE_CODE_BASE_URL }}
           model_name: ${{ vars.AGENTIC_REVIEW_CLAUDE_CODE_MODEL }}

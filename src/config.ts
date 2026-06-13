@@ -22,6 +22,8 @@ const RUNTIME_PROVIDERS = ['test', 'claude-code-cli'] as const satisfies readonl
 const TARGET_MODES = ['pull-request', 'synthetic-fixture'] as const satisfies readonly TargetMode[];
 const REVIEW_MODES = ['auto', 'bootstrap', 'incremental'] as const satisfies readonly ReviewMode[];
 const API_KEY_MODES = ['auth-token', 'api-key', 'both'] as const satisfies readonly ApiKeyMode[];
+const SYNTHETIC_RAW_DEBUG_ACKNOWLEDGEMENT = 'allow-raw-provider-debug';
+const PUBLIC_PR_RAW_DEBUG_ACKNOWLEDGEMENT = 'allow-raw-provider-debug-public-pr';
 
 function optionalInput(reader: InputReader, name: string): string | undefined {
   const value = reader.getInput(name).trim();
@@ -149,15 +151,31 @@ export function validateDebugCapture(config: ActionConfig, eventName: string): v
   if (config.runtimeProvider !== 'claude-code-cli') {
     throw new Error('debug_capture_raw_api_bodies requires runtime_provider=claude-code-cli');
   }
-  if (config.targetMode !== 'synthetic-fixture') {
-    throw new Error('debug_capture_raw_api_bodies requires target_mode=synthetic-fixture');
-  }
   if (eventName !== 'workflow_dispatch') {
     throw new Error('debug_capture_raw_api_bodies is only allowed on workflow_dispatch');
   }
-  if (config.debugAcknowledgement !== 'allow-raw-provider-debug') {
+
+  if (
+    config.targetMode === 'synthetic-fixture' &&
+    config.debugAcknowledgement === SYNTHETIC_RAW_DEBUG_ACKNOWLEDGEMENT
+  ) {
+    return;
+  }
+
+  if (
+    config.targetMode === 'pull-request' &&
+    config.debugAcknowledgement === PUBLIC_PR_RAW_DEBUG_ACKNOWLEDGEMENT
+  ) {
+    return;
+  }
+
+  if (config.targetMode === 'pull-request') {
     throw new Error(
-      'debug_capture_raw_api_bodies requires debug_acknowledgement=allow-raw-provider-debug',
+      `debug_capture_raw_api_bodies with target_mode=pull-request requires debug_acknowledgement=${PUBLIC_PR_RAW_DEBUG_ACKNOWLEDGEMENT}`,
     );
   }
+
+  throw new Error(
+    `debug_capture_raw_api_bodies requires debug_acknowledgement=${SYNTHETIC_RAW_DEBUG_ACKNOWLEDGEMENT}`,
+  );
 }

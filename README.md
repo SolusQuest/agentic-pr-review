@@ -105,7 +105,7 @@ permissions:
 | `max_review_chars`                                 | `12000`        | Review output bound                                        |
 | `disable_prompt_caching`                           | `false`        | Sets `DISABLE_PROMPT_CACHING=1` for live runtime           |
 | `debug_capture_raw_api_bodies`                     | `false`        | Restricted trusted manual diagnostic mode                  |
-| `debug_acknowledgement`                            | empty          | Must be `allow-raw-provider-debug` for diagnostic mode     |
+| `debug_acknowledgement`                            | empty          | Required acknowledgement phrase for diagnostic mode        |
 
 ## Outputs
 
@@ -183,13 +183,17 @@ Required repository secret:
 
 Raw provider diagnostic capture is disabled by default and is not enabled in examples.
 
-It is only allowed when all gates are true:
+It is only allowed when all gates are true for synthetic diagnostics:
 
 - `runtime_provider=claude-code-cli`
 - `target_mode=synthetic-fixture`
 - workflow event is `workflow_dispatch`
 - `debug_capture_raw_api_bodies=true`
 - `debug_acknowledgement=allow-raw-provider-debug`
+
+For same-repository public pull request diagnostics, use `target_mode=pull-request`,
+`workflow_dispatch`, and `debug_acknowledgement=allow-raw-provider-debug-public-pr`.
+Do not use this mode with private repository context, private instructions, or fork pull requests.
 
 The diagnostic artifact is separate from the normal state artifact, its name includes `raw`, and its
 retention is exactly 1 day. This mode is for trusted manual diagnostic runs only.
