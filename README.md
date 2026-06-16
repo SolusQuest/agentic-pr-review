@@ -127,10 +127,13 @@ When live provider secrets are available, the checked-out workspace is a caller-
 boundary. If a downstream workflow wants readonly tools to inspect reviewed code, check out the
 reviewed head by immutable SHA into the review workspace before running the action.
 
-Usage watchdogs parse Claude Code `stream-json` usage records during the live run. If a non-zero
-budget is exceeded, the action terminates the process and fails with a sanitized
-`usage_budget_exceeded` diagnostic. If any usage budget is non-zero and the live runtime exposes no
-usage records, the action fails closed after the run. The watchdog stops later turns, but it cannot
+Usage watchdogs parse Claude Code `stream-json` usage records during the live run. Delta-style usage
+records are summed; cumulative records replace earlier cumulative totals and take precedence. Cache-hit
+aliases such as `prompt_cache_hit_tokens` count as cached input. Missing categories are treated as zero,
+so a budget only constrains categories observed or inferred from the stream. If a non-zero budget is
+exceeded, the action terminates the process and fails with a sanitized `usage_budget_exceeded`
+diagnostic. If any usage budget is non-zero and the live runtime exposes no usage records, the action
+fails closed after the run. The watchdog acts after observed usage, so it stops later turns but cannot
 preempt the provider call that emitted the over-budget usage record.
 
 ## Outputs

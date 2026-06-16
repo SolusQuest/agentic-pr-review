@@ -27,6 +27,30 @@ on:
         description: Diagnostic state key. Use distinct values for independent probes.
         required: true
         default: live-synthetic-smoke
+      tool_mode:
+        description: Runtime tool access mode.
+        required: true
+        default: none
+        type: choice
+        options:
+          - none
+          - readonly
+      claude_max_turns:
+        description: Maximum Claude Code turns.
+        required: true
+        default: '6'
+      max_uncached_input_tokens:
+        description: Maximum observed uncached input tokens before failing. 0 disables.
+        required: true
+        default: '0'
+      max_cached_input_tokens:
+        description: Maximum observed cached input tokens before failing. 0 disables.
+        required: true
+        default: '0'
+      max_output_tokens:
+        description: Maximum observed output tokens before failing. 0 disables.
+        required: true
+        default: '0'
       allow_non_default_ref_diagnostic:
         description: Allow trusted maintainer diagnostic dispatch from a non-default ref.
         required: true
@@ -82,6 +106,11 @@ jobs:
           small_model_name: ${{ vars.AGENTIC_REVIEW_CLAUDE_CODE_SMALL_MODEL }}
           api_key_mode: ${{ vars.AGENTIC_REVIEW_CLAUDE_CODE_API_KEY_MODE || 'auth-token' }}
           claude_code_version: ${{ vars.AGENTIC_REVIEW_CLAUDE_CODE_VERSION }}
+          tool_mode: ${{ inputs.tool_mode }}
+          claude_max_turns: ${{ inputs.claude_max_turns }}
+          max_uncached_input_tokens: ${{ inputs.max_uncached_input_tokens }}
+          max_cached_input_tokens: ${{ inputs.max_cached_input_tokens }}
+          max_output_tokens: ${{ inputs.max_output_tokens }}
           disable_prompt_caching: 'false'
           instructions: 'Review this synthetic fixture and return a concise public-safe smoke result.'
           debug_capture_raw_api_bodies: ${{ inputs.debug_capture_raw_api_bodies }}
