@@ -37,8 +37,9 @@ jobs:
 
 Path inputs such as `instructions_path`, `bootstrap_context_path`, and `incremental_context_path`
 are read from `GITHUB_WORKSPACE`. When a workflow uses live provider secrets, check out a trusted
-ref such as the repository default branch before using path inputs. Do not combine live secrets with
-files read from an untrusted pull request head checkout.
+ref such as the repository default branch before using path inputs. If `tool_mode=readonly` should
+inspect pull request files, place the reviewed head checkout in the review workspace separately from
+trusted instruction and context files.
 
 For a live runtime, pass provider configuration as inputs and the API key as an env secret:
 

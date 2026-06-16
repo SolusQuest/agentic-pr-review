@@ -139,6 +139,24 @@ describe('UsageTracker', () => {
     expect(tracker.getUsage()).toMatchObject({ inputTokens: 30, outputTokens: 10 });
   });
 
+  it('treats categories omitted from final cumulative records as zero', () => {
+    const tracker = disabledTracker();
+    observe(tracker, {
+      type: 'assistant',
+      message: { usage: { cache_read_input_tokens: 20 } },
+    });
+    observe(tracker, {
+      type: 'result',
+      usage: { input_tokens: 30, output_tokens: 10 },
+    });
+    expect(tracker.getUsage()).toMatchObject({
+      inputTokens: 30,
+      cacheReadInputTokens: 0,
+      promptCacheHitTokens: 0,
+      outputTokens: 10,
+    });
+  });
+
   it('treats cache-hit field names as aliases within a record', () => {
     const tracker = disabledTracker();
     observe(tracker, {
