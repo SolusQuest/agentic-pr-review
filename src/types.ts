@@ -3,6 +3,24 @@ export type TargetMode = 'pull-request' | 'synthetic-fixture';
 export type ReviewMode = 'auto' | 'bootstrap' | 'incremental';
 export type Phase = 'bootstrap' | 'incremental';
 export type ApiKeyMode = 'auth-token' | 'api-key' | 'both';
+export type ToolMode = 'none' | 'readonly';
+
+export interface UsageBudgetLimits {
+  maxUncachedInputTokens: number;
+  maxCachedInputTokens: number;
+  maxOutputTokens: number;
+}
+
+export interface UsageBudgetStatus {
+  status: 'disabled' | 'within_limit' | 'exceeded' | 'not_applicable';
+  limits: UsageBudgetLimits;
+  usageRecordsObserved: number;
+  exceeded?: {
+    category: 'uncached_input' | 'cached_input' | 'output';
+    limit: number;
+    observed: number;
+  };
+}
 
 export interface ActionConfig {
   runtimeProvider: RuntimeProvider;
@@ -18,6 +36,8 @@ export interface ActionConfig {
   smallModelName?: string;
   apiKeyMode: ApiKeyMode;
   claudeCodeVersion?: string;
+  toolMode: ToolMode;
+  claudeMaxTurns: number;
   instructions?: string;
   instructionsPath?: string;
   bootstrapContext?: string;
@@ -27,6 +47,7 @@ export interface ActionConfig {
   maxContextChars: number;
   maxPatchChars: number;
   maxReviewChars: number;
+  usageBudgetLimits: UsageBudgetLimits;
   disablePromptCaching: boolean;
   debugCaptureRawApiBodies: boolean;
   debugAcknowledgement?: string;
@@ -82,13 +103,17 @@ export interface RuntimeResult {
   sessionName: string;
   reviewMarkdown: string;
   debugFiles: string[];
+  toolMode: ToolMode;
+  allowedTools: string[];
   usage?: RuntimeUsage;
+  usageBudgetStatus: UsageBudgetStatus;
 }
 
 export interface RuntimeUsage {
-  promptCacheHitTokens?: number;
-  cacheReadInputTokens?: number;
   inputTokens?: number;
+  cacheReadInputTokens?: number;
+  promptCacheHitTokens?: number;
+  cacheCreationInputTokens?: number;
   outputTokens?: number;
 }
 

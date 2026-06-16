@@ -8,6 +8,9 @@ import {
   type RestoredState,
   type RuntimeResult,
   type RuntimeUsage,
+  type ToolMode,
+  type UsageBudgetLimits,
+  type UsageBudgetStatus,
 } from './types.js';
 import { ensureDir, sha256, truncateText, walkFiles, writeTextFile } from './utils.js';
 
@@ -63,7 +66,19 @@ export class TestRuntime implements ReviewRuntime {
       })}\n${JSON.stringify({ type: 'result', session_id: sessionId, result: reviewMarkdown })}\n`,
     );
 
-    return { sessionId, sessionName, reviewMarkdown, debugFiles: [] };
+    return {
+      sessionId,
+      sessionName,
+      reviewMarkdown,
+      debugFiles: [],
+      toolMode: options.config.toolMode,
+      allowedTools: [],
+      usageBudgetStatus: {
+        status: 'not_applicable',
+        limits: options.config.usageBudgetLimits,
+        usageRecordsObserved: 0,
+      },
+    };
   }
 }
 
@@ -89,31 +104,15 @@ export class ClaudeCodeRuntime implements ReviewRuntime {
       await ensureDir(rawDebugDir);
     }
 
-    const args = [
-      '-p',
-      '--output-format',
-      'stream-json',
-      '--verbose',
-      '--max-turns',
-      '3',
-      '--model',
-      options.config.modelName!,
-      '--exclude-dynamic-system-prompt-sections',
-      '--tools',
-      '',
-    ];
-
-    if (options.phase === 'incremental') {
-      const sessionId = options.restoredState?.sessionId;
-      if (!sessionId) {
-        throw new Error('incremental phase requires a restored Claude session id');
-      }
-      args.push('--resume', sessionId);
-    } else {
-      args.push('--name', sessionName);
-    }
-
-    args.push('Run the PR review instructions from stdin. Do not edit files.');
+    const allowedTools = allowedToolsForMode(options.config.toolMode);
+    const usageTracker = new UsageTracker(options.config.usageBudgetLimits);
+    const args = buildClaudeArgs({
+      config: options.config,
+      phase: options.phase,
+      restoredState: options.restoredState,
+      sessionName,
+      allowedTools,
+    });
 
     const env = buildClaudeEnv(options.config, process.env, configDir, rawDebugDir);
     const result = await runProcess(cliPath, args, {
@@ -121,8 +120,13 @@ export class ClaudeCodeRuntime implements ReviewRuntime {
       env,
       stdin: options.prompt,
       timeoutMs: 20 * 60 * 1000,
+      onStdoutLine: (line) => usageTracker.observeLine(line),
     });
     await writeFile(outputPath, result.stdout, 'utf8');
+
+    if (result.streamError) {
+      throw result.streamError;
+    }
 
     if (result.exitCode !== 0) {
       throw new Error(
@@ -130,6 +134,17 @@ export class ClaudeCodeRuntime implements ReviewRuntime {
           result.stderr || result.stdout,
           env,
         )}`,
+      );
+    }
+
+    const usage = usageTracker.getUsage();
+    const usageBudgetStatus = usageTracker.getStatus();
+    if (usageBudgetStatus.status === 'exceeded') {
+      throw new UsageBudgetExceededError(usageBudgetStatus);
+    }
+    if (usageBudgetStatus.status === 'within_limit' && usageTracker.recordsObserved === 0) {
+      throw new Error(
+        'usage_budget_exceeded: usage budgets are configured but claude-code-cli did not expose usage records',
       );
     }
 
@@ -148,9 +163,53 @@ export class ClaudeCodeRuntime implements ReviewRuntime {
       sessionName,
       reviewMarkdown: await extractReviewMarkdown(outputPath, options.config.maxReviewChars),
       debugFiles,
-      usage: await parseUsage(outputPath),
+      toolMode: options.config.toolMode,
+      allowedTools,
+      usage,
+      usageBudgetStatus,
     };
   }
+}
+
+export function allowedToolsForMode(toolMode: ToolMode): string[] {
+  return toolMode === 'readonly' ? ['Read', 'Glob', 'Grep'] : [];
+}
+
+export function buildClaudeArgs(input: {
+  config: Pick<ActionConfig, 'modelName' | 'claudeMaxTurns' | 'toolMode'>;
+  phase: Phase;
+  restoredState?: RestoredState;
+  sessionName: string;
+  allowedTools: string[];
+}): string[] {
+  const args = [
+    '-p',
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    '--max-turns',
+    String(input.config.claudeMaxTurns),
+    '--model',
+    input.config.modelName!,
+    '--exclude-dynamic-system-prompt-sections',
+    '--disable-slash-commands',
+    '--strict-mcp-config',
+    '--tools',
+    input.allowedTools.join(','),
+  ];
+
+  if (input.phase === 'incremental') {
+    const sessionId = input.restoredState?.sessionId;
+    if (!sessionId) {
+      throw new Error('incremental phase requires a restored Claude session id');
+    }
+    args.push('--resume', sessionId);
+  } else {
+    args.push('--name', input.sessionName);
+  }
+
+  args.push('Run the PR review instructions from stdin. Do not edit files.');
+  return args;
 }
 
 function buildClaudeEnv(
@@ -224,8 +283,9 @@ function runProcess(
     env: NodeJS.ProcessEnv;
     timeoutMs: number;
     stdin?: string;
+    onStdoutLine?: (line: string) => void;
   },
-): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
+): Promise<{ exitCode: number | null; stdout: string; stderr: string; streamError?: Error }> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
@@ -235,6 +295,8 @@ function runProcess(
     });
     let stdout = '';
     let stderr = '';
+    let pendingStdoutLine = '';
+    let streamError: Error | undefined;
     const timeout = setTimeout(() => {
       child.kill('SIGTERM');
       reject(new Error(`process timed out after ${options.timeoutMs}ms: ${command}`));
@@ -243,6 +305,20 @@ function runProcess(
     child.stderr?.setEncoding('utf8');
     child.stdout?.on('data', (chunk: string) => {
       stdout += chunk;
+      if (options.onStdoutLine && !streamError) {
+        pendingStdoutLine += chunk;
+        const lines = pendingStdoutLine.split(/\r?\n/);
+        pendingStdoutLine = lines.pop() ?? '';
+        for (const line of lines) {
+          try {
+            options.onStdoutLine(line);
+          } catch (error) {
+            streamError = error instanceof Error ? error : new Error(String(error));
+            child.kill('SIGTERM');
+            break;
+          }
+        }
+      }
     });
     child.stderr?.on('data', (chunk: string) => {
       stderr += chunk;
@@ -253,7 +329,14 @@ function runProcess(
     });
     child.on('close', (exitCode) => {
       clearTimeout(timeout);
-      resolve({ exitCode, stdout, stderr });
+      if (options.onStdoutLine && pendingStdoutLine && !streamError) {
+        try {
+          options.onStdoutLine(pendingStdoutLine);
+        } catch (error) {
+          streamError = error instanceof Error ? error : new Error(String(error));
+        }
+      }
+      resolve({ exitCode, stdout, stderr, streamError });
     });
     if (options.stdin !== undefined && child.stdin) {
       child.stdin.end(options.stdin);
@@ -342,62 +425,227 @@ export async function extractReviewMarkdown(outputPath: string, maxChars: number
 
 export async function parseUsage(outputPath: string): Promise<RuntimeUsage | undefined> {
   const output = await readFile(outputPath, 'utf8').catch(() => '');
-  let promptCacheHitTokens: number | undefined;
-  let cacheReadInputTokens: number | undefined;
-  let inputTokens: number | undefined;
-  let outputTokens: number | undefined;
-
+  const tracker = new UsageTracker({
+    maxUncachedInputTokens: 0,
+    maxCachedInputTokens: 0,
+    maxOutputTokens: 0,
+  });
   for (const line of output.split(/\r?\n/)) {
-    const parsed = safeParseJson(line);
-    if (!parsed) {
-      continue;
-    }
-    promptCacheHitTokens = preferLatestMeaningful(
-      promptCacheHitTokens,
-      findNumberKey(parsed, ['prompt_cache_hit_tokens', 'promptCacheHitTokens']),
-    );
-    cacheReadInputTokens = preferLatestMeaningful(
-      cacheReadInputTokens,
-      findNumberKey(parsed, ['cache_read_input_tokens', 'cacheReadInputTokens']),
-    );
-    inputTokens = preferLatestMeaningful(
-      inputTokens,
-      findNumberKey(parsed, ['input_tokens', 'inputTokens']),
-    );
-    outputTokens = preferLatestMeaningful(
-      outputTokens,
-      findNumberKey(parsed, ['output_tokens', 'outputTokens']),
-    );
+    tracker.observeLine(line);
   }
-
-  promptCacheHitTokens ??= cacheReadInputTokens;
-  return promptCacheHitTokens === undefined &&
-    cacheReadInputTokens === undefined &&
-    inputTokens === undefined &&
-    outputTokens === undefined
-    ? undefined
-    : {
-        promptCacheHitTokens,
-        cacheReadInputTokens,
-        inputTokens,
-        outputTokens,
-      };
+  return tracker.getUsage();
 }
 
-function preferLatestMeaningful(
-  current: number | undefined,
-  next: number | undefined,
-): number | undefined {
-  if (next === undefined) {
-    return current;
+interface UsageRecord {
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  cacheReadInputTokens?: number;
+  promptCacheHitTokens?: number;
+  cacheCreationInputTokens?: number;
+  outputTokens?: number;
+  cumulative: boolean;
+}
+
+export class UsageBudgetExceededError extends Error {
+  constructor(readonly status: UsageBudgetStatus) {
+    const exceeded = status.exceeded;
+    super(
+      exceeded
+        ? `usage_budget_exceeded: ${exceeded.category} tokens ${exceeded.observed} exceeded limit ${exceeded.limit}`
+        : 'usage_budget_exceeded',
+    );
   }
-  if (current === undefined) {
-    return next;
+}
+
+export class UsageTracker {
+  private deltaUsage: Required<RuntimeUsage> = {
+    inputTokens: 0,
+    cacheReadInputTokens: 0,
+    promptCacheHitTokens: 0,
+    cacheCreationInputTokens: 0,
+    outputTokens: 0,
+  };
+  private cumulativeUsage: Required<RuntimeUsage> | undefined;
+  private exceeded: UsageBudgetStatus['exceeded'];
+  recordsObserved = 0;
+
+  constructor(private readonly limits: UsageBudgetLimits) {}
+
+  observeLine(line: string): void {
+    const parsed = safeParseJson(line);
+    if (!parsed) {
+      return;
+    }
+    const record = extractUsageRecord(parsed);
+    if (!record) {
+      return;
+    }
+    this.recordsObserved += 1;
+    if (record.cumulative) {
+      this.cumulativeUsage = mergeCumulativeUsage(this.cumulativeUsage, record);
+    } else {
+      this.deltaUsage.inputTokens += record.inputTokens ?? 0;
+      this.deltaUsage.cacheReadInputTokens += record.cacheReadInputTokens ?? 0;
+      this.deltaUsage.promptCacheHitTokens += record.promptCacheHitTokens ?? 0;
+      this.deltaUsage.cacheCreationInputTokens += record.cacheCreationInputTokens ?? 0;
+      this.deltaUsage.outputTokens += record.outputTokens ?? 0;
+    }
+    const exceeded = this.findExceededBudget();
+    if (exceeded) {
+      this.exceeded = exceeded;
+      throw new UsageBudgetExceededError(this.getStatus());
+    }
   }
-  if (next === 0 && current !== 0) {
-    return current;
+
+  getUsage(): RuntimeUsage | undefined {
+    if (this.recordsObserved === 0) {
+      return undefined;
+    }
+    const source = this.cumulativeUsage ?? this.deltaUsage;
+    return {
+      inputTokens: source.inputTokens,
+      cacheReadInputTokens: source.cacheReadInputTokens,
+      promptCacheHitTokens: source.promptCacheHitTokens,
+      cacheCreationInputTokens: source.cacheCreationInputTokens,
+      outputTokens: source.outputTokens,
+    };
   }
-  return next;
+
+  getStatus(): UsageBudgetStatus {
+    if (!hasUsageBudget(this.limits)) {
+      return {
+        status: 'disabled',
+        limits: this.limits,
+        usageRecordsObserved: this.recordsObserved,
+      };
+    }
+    return {
+      status: this.exceeded ? 'exceeded' : 'within_limit',
+      limits: this.limits,
+      usageRecordsObserved: this.recordsObserved,
+      exceeded: this.exceeded,
+    };
+  }
+
+  private findExceededBudget(): UsageBudgetStatus['exceeded'] | undefined {
+    const usage = this.getUsage();
+    if (!usage) {
+      return undefined;
+    }
+    const checks: Array<UsageBudgetStatus['exceeded']> = [
+      {
+        category: 'uncached_input',
+        limit: this.limits.maxUncachedInputTokens,
+        observed: usage.inputTokens ?? 0,
+      },
+      {
+        category: 'cached_input',
+        limit: this.limits.maxCachedInputTokens,
+        observed: usage.cacheReadInputTokens ?? usage.promptCacheHitTokens ?? 0,
+      },
+      {
+        category: 'output',
+        limit: this.limits.maxOutputTokens,
+        observed: usage.outputTokens ?? 0,
+      },
+    ];
+    return checks.find((check) => check && check.limit > 0 && check.observed > check.limit);
+  }
+}
+
+function hasUsageBudget(limits: UsageBudgetLimits): boolean {
+  return (
+    limits.maxUncachedInputTokens > 0 ||
+    limits.maxCachedInputTokens > 0 ||
+    limits.maxOutputTokens > 0
+  );
+}
+
+function mergeCumulativeUsage(
+  current: Required<RuntimeUsage> | undefined,
+  record: UsageRecord,
+): Required<RuntimeUsage> {
+  return {
+    inputTokens: record.inputTokens ?? current?.inputTokens ?? 0,
+    cacheReadInputTokens: record.cacheReadInputTokens ?? current?.cacheReadInputTokens ?? 0,
+    promptCacheHitTokens: record.promptCacheHitTokens ?? current?.promptCacheHitTokens ?? 0,
+    cacheCreationInputTokens:
+      record.cacheCreationInputTokens ?? current?.cacheCreationInputTokens ?? 0,
+    outputTokens: record.outputTokens ?? current?.outputTokens ?? 0,
+  };
+}
+
+function extractUsageRecord(value: unknown): UsageRecord | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const usageRoot = findUsageRoot(record) ?? record;
+  const inputTokens = findNumberKey(usageRoot, ['input_tokens', 'inputTokens']);
+  const cacheReadInputTokens = findNumberKey(usageRoot, [
+    'cache_read_input_tokens',
+    'cacheReadInputTokens',
+  ]);
+  const promptCacheHitTokens = findNumberKey(usageRoot, [
+    'prompt_cache_hit_tokens',
+    'promptCacheHitTokens',
+  ]);
+  const cachedInputTokens = maxDefined(cacheReadInputTokens, promptCacheHitTokens);
+  const cacheCreationInputTokens = findNumberKey(usageRoot, [
+    'cache_creation_input_tokens',
+    'cacheCreationInputTokens',
+  ]);
+  const outputTokens = findNumberKey(usageRoot, ['output_tokens', 'outputTokens']);
+
+  if (
+    inputTokens === undefined &&
+    cachedInputTokens === undefined &&
+    cacheCreationInputTokens === undefined &&
+    outputTokens === undefined
+  ) {
+    return undefined;
+  }
+
+  return {
+    inputTokens,
+    cachedInputTokens,
+    cacheReadInputTokens: cachedInputTokens,
+    promptCacheHitTokens: cachedInputTokens,
+    cacheCreationInputTokens,
+    outputTokens,
+    cumulative: record.type === 'result' || record.subtype === 'success',
+  };
+}
+
+function findUsageRoot(value: unknown): unknown | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.usage && typeof record.usage === 'object') {
+    return record.usage;
+  }
+  for (const child of Object.values(record)) {
+    if (Array.isArray(child)) {
+      for (const item of child) {
+        const candidate = findUsageRoot(item);
+        if (candidate) {
+          return candidate;
+        }
+      }
+    } else {
+      const candidate = findUsageRoot(child);
+      if (candidate) {
+        return candidate;
+      }
+    }
+  }
+  return undefined;
+}
+
+function maxDefined(...values: Array<number | undefined>): number | undefined {
+  const defined = values.filter((value): value is number => value !== undefined);
+  return defined.length === 0 ? undefined : Math.max(...defined);
 }
 
 function summarizeDiagnostic(value: string, env: NodeJS.ProcessEnv): string {

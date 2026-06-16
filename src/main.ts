@@ -6,7 +6,12 @@ import { parseActionConfig, type InputReader } from './config.js';
 import { loadContextBlocks } from './context-blocks.js';
 import { upsertLineageComment } from './comments.js';
 import { buildReviewPrompt } from './prompt.js';
-import { createRuntime, defaultTempDir, restoreRuntimeState } from './runtime.js';
+import {
+  allowedToolsForMode,
+  createRuntime,
+  defaultTempDir,
+  restoreRuntimeState,
+} from './runtime.js';
 import {
   debugArtifactName,
   readRestoredState,
@@ -325,7 +330,14 @@ async function finishSkippedIdentical(options: {
     sessionName: options.restoredState.sessionName,
     reviewMarkdown: `No changes since prior review for ${options.target.headSha}. Provider call skipped.`,
     debugFiles: [],
+    toolMode: options.config.toolMode,
+    allowedTools: allowedToolsForMode(options.config.toolMode),
     usage: options.restoredState.usage,
+    usageBudgetStatus: {
+      status: 'not_applicable',
+      limits: options.config.usageBudgetLimits,
+      usageRecordsObserved: 0,
+    },
   };
   const bundleDir = path.join(defaultTempDir(), 'agentic-pr-review', 'state-bundle');
   const bundleFiles = await writeStateBundle({
@@ -515,10 +527,16 @@ async function writeSummary(input: {
   const usage = input.runtimeResult.usage
     ? [
         `cache_read=${input.runtimeResult.usage.cacheReadInputTokens ?? input.runtimeResult.usage.promptCacheHitTokens ?? 'n/a'}`,
+        `cache_creation=${input.runtimeResult.usage.cacheCreationInputTokens ?? 'n/a'}`,
         `input=${input.runtimeResult.usage.inputTokens ?? 'n/a'}`,
         `output=${input.runtimeResult.usage.outputTokens ?? 'n/a'}`,
       ].join(', ')
     : 'not exposed';
+  const allowedTools =
+    input.runtimeResult.allowedTools.length > 0
+      ? input.runtimeResult.allowedTools.join(', ')
+      : 'none';
+  const budgetStatus = formatUsageBudgetStatus(input.runtimeResult.usageBudgetStatus);
   const lines = [
     '### Agentic PR Review',
     '',
@@ -526,6 +544,8 @@ async function writeSummary(input: {
     `- Resolved phase: ${input.phase}`,
     `- Review phase: ${input.reviewPhase}`,
     `- Runtime: ${input.config.runtimeProvider}`,
+    `- Tool mode: ${input.runtimeResult.toolMode}`,
+    `- Allowed tools: ${allowedTools}`,
     `- State key: ${input.stateKey}`,
     `- Session id: ${input.runtimeResult.sessionId}`,
     `- Restored previous state: ${restored}`,
@@ -534,6 +554,7 @@ async function writeSummary(input: {
     `- Prompt sha256: ${input.promptSha256}`,
     `- Prompt bytes: ${input.promptBytes}`,
     `- Usage: ${usage}`,
+    `- Usage budget: ${budgetStatus}`,
     `- Compare URL: ${input.compareUrl ?? 'n/a'}`,
     `- Sticky comment: ${input.commentUrl || 'not requested'}`,
     `- State artifact: ${input.artifactName}`,
@@ -545,6 +566,13 @@ async function writeSummary(input: {
   } catch (error) {
     core.info(`Unable to write job summary: ${messageOf(error)}`);
   }
+}
+
+function formatUsageBudgetStatus(status: RuntimeResult['usageBudgetStatus']): string {
+  if (status.status === 'exceeded' && status.exceeded) {
+    return `${status.status} (${status.exceeded.category} ${status.exceeded.observed}/${status.exceeded.limit})`;
+  }
+  return `${status.status} (records=${status.usageRecordsObserved})`;
 }
 
 function messageOf(error: unknown): string {
