@@ -25,6 +25,8 @@ interface StateManifest {
   stateKey: string;
   phase: Phase;
   runtimeProvider: ActionConfig['runtimeProvider'];
+  toolMode: ActionConfig['toolMode'];
+  allowedTools: string[];
   sessionId: string;
   sessionName: string;
   reviewedHeadSha?: string;
@@ -32,6 +34,7 @@ interface StateManifest {
   createdAt: string;
   updatedAt: string;
   usage?: RuntimeUsage;
+  usageBudgetStatus: RuntimeResult['usageBudgetStatus'];
   contextBlocks: Array<Pick<LoadedBlock, 'name' | 'source' | 'bytes' | 'sha256'>>;
   target: {
     mode: ReviewTarget['mode'];
@@ -95,6 +98,8 @@ export async function writeStateBundle(options: {
     stateKey: options.stateKey,
     phase: options.phase,
     runtimeProvider: options.config.runtimeProvider,
+    toolMode: options.runtimeResult.toolMode,
+    allowedTools: options.runtimeResult.allowedTools,
     sessionId: options.runtimeResult.sessionId,
     sessionName: options.runtimeResult.sessionName,
     reviewedHeadSha: options.target.headSha,
@@ -102,6 +107,7 @@ export async function writeStateBundle(options: {
     createdAt: options.createdAt ?? now,
     updatedAt: now,
     usage: options.runtimeResult.usage,
+    usageBudgetStatus: options.runtimeResult.usageBudgetStatus,
     contextBlocks: options.blocks.map((block) => ({
       name: block.name,
       source: block.source,

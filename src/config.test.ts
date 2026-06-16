@@ -19,7 +19,47 @@ describe('parseActionConfig', () => {
     expect(config.targetMode).toBe('pull-request');
     expect(config.reviewMode).toBe('auto');
     expect(config.apiKeyMode).toBe('auth-token');
+    expect(config.toolMode).toBe('none');
+    expect(config.claudeMaxTurns).toBe(6);
+    expect(config.usageBudgetLimits).toEqual({
+      maxUncachedInputTokens: 0,
+      maxCachedInputTokens: 0,
+      maxOutputTokens: 0,
+    });
     expect(config.disablePromptCaching).toBe(false);
+  });
+
+  it('parses readonly tool mode and usage watchdog limits', () => {
+    const config = parseActionConfig(
+      new Inputs({
+        tool_mode: 'readonly',
+        claude_max_turns: '4',
+        max_uncached_input_tokens: '100',
+        max_cached_input_tokens: '200',
+        max_output_tokens: '300',
+      }),
+      baseEnv,
+      'pull_request',
+    );
+    expect(config.toolMode).toBe('readonly');
+    expect(config.claudeMaxTurns).toBe(4);
+    expect(config.usageBudgetLimits).toEqual({
+      maxUncachedInputTokens: 100,
+      maxCachedInputTokens: 200,
+      maxOutputTokens: 300,
+    });
+  });
+
+  it('rejects invalid tool mode and claude turn values', () => {
+    expect(() =>
+      parseActionConfig(new Inputs({ tool_mode: 'write' }), baseEnv, 'pull_request'),
+    ).toThrow(/tool_mode must be one of/);
+    expect(() =>
+      parseActionConfig(new Inputs({ claude_max_turns: '0' }), baseEnv, 'pull_request'),
+    ).toThrow(/claude_max_turns must be a positive integer/);
+    expect(() =>
+      parseActionConfig(new Inputs({ max_uncached_input_tokens: '-1' }), baseEnv, 'pull_request'),
+    ).toThrow(/max_uncached_input_tokens must be an integer/);
   });
 
   it('parses explicit prompt caching disable switch', () => {

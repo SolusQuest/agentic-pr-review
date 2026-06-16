@@ -47,6 +47,14 @@ inputs:
   claude_code_version:
     description: Explicit Claude Code CLI semver to install for live runtime.
     required: false
+  tool_mode:
+    description: 'Runtime tool access mode: none or readonly.'
+    required: false
+    default: none
+  claude_max_turns:
+    description: Maximum Claude Code agent turns for live runtime.
+    required: false
+    default: '6'
   instructions:
     description: Stable review instructions. Mutually exclusive with instructions_path.
     required: false
@@ -77,6 +85,18 @@ inputs:
     description: Maximum characters retained from the runtime review output.
     required: false
     default: '12000'
+  max_uncached_input_tokens:
+    description: 'Maximum current-run uncached input tokens before failing. 0 disables.'
+    required: false
+    default: '0'
+  max_cached_input_tokens:
+    description: 'Maximum current-run cached input tokens before failing. 0 disables.'
+    required: false
+    default: '0'
+  max_output_tokens:
+    description: 'Maximum current-run output tokens before failing. 0 disables.'
+    required: false
+    default: '0'
   disable_prompt_caching:
     description: Whether to set DISABLE_PROMPT_CACHING=1 for claude-code-cli runtime.
     required: false

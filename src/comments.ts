@@ -386,6 +386,7 @@ function formatUsage(usage: RuntimeUsage | undefined): string {
   }
   return [
     `cache_read=${usage.cacheReadInputTokens ?? usage.promptCacheHitTokens ?? 'n/a'}`,
+    `cache_creation=${usage.cacheCreationInputTokens ?? 'n/a'}`,
     `input=${usage.inputTokens ?? 'n/a'}`,
     `output=${usage.outputTokens ?? 'n/a'}`,
   ].join(', ');

@@ -37,8 +37,9 @@ jobs:
 
 Path inputs such as `instructions_path`, `bootstrap_context_path`, and `incremental_context_path`
 are read from `GITHUB_WORKSPACE`. When a workflow uses live provider secrets, check out a trusted
-ref such as the repository default branch before using path inputs. Do not combine live secrets with
-files read from an untrusted pull request head checkout.
+ref such as the repository default branch before using path inputs. If `tool_mode=readonly` should
+inspect pull request files, place the reviewed head checkout in the review workspace separately from
+trusted instruction and context files.
 
 For a live runtime, pass provider configuration as inputs and the API key as an env secret:
 
@@ -53,6 +54,11 @@ For a live runtime, pass provider configuration as inputs and the API key as an 
     small_model_name: ${{ vars.AGENTIC_REVIEW_CLAUDE_CODE_SMALL_MODEL }}
     api_key_mode: ${{ vars.AGENTIC_REVIEW_CLAUDE_CODE_API_KEY_MODE || 'auth-token' }}
     claude_code_version: ${{ vars.AGENTIC_REVIEW_CLAUDE_CODE_VERSION }}
+    tool_mode: none
+    claude_max_turns: '6'
+    max_uncached_input_tokens: '0'
+    max_cached_input_tokens: '0'
+    max_output_tokens: '0'
     disable_prompt_caching: 'false'
     instructions_path: .github/agentic-pr-review-instructions.md
   env:
@@ -82,30 +88,54 @@ permissions:
 
 ## Inputs
 
-| Input                                              | Default        | Notes                                                      |
-| -------------------------------------------------- | -------------- | ---------------------------------------------------------- |
-| `runtime_provider`                                 | `test`         | `test` or `claude-code-cli`                                |
-| `target_mode`                                      | `pull-request` | `pull-request` or `synthetic-fixture`                      |
-| `review_mode`                                      | `auto`         | `auto`, `bootstrap`, or `incremental`                      |
-| `pr_number`                                        | inferred       | Required for pull-request mode outside pull request events |
-| `state_key`                                        | derived        | Defaults to the target and runtime                         |
-| `state_artifact_run_id`                            | empty          | Optional explicit run id to restore from                   |
-| `artifact_retention_days`                          | `7`            | Clamped to 1 through 7                                     |
-| `post_comment`                                     | `false`        | Creates or updates a sticky top-level PR comment           |
-| `model_base_url`                                   | empty          | Required for `claude-code-cli`                             |
-| `model_name`                                       | empty          | Required for `claude-code-cli`                             |
-| `small_model_name`                                 | empty          | Optional small/background model                            |
-| `api_key_mode`                                     | `auth-token`   | `auth-token`, `api-key`, or `both`                         |
-| `claude_code_version`                              | empty          | Required explicit semver for `claude-code-cli`             |
-| `instructions` / `instructions_path`               | empty          | Mutually exclusive stable review instructions              |
-| `bootstrap_context` / `bootstrap_context_path`     | empty          | Mutually exclusive bootstrap-only context                  |
-| `incremental_context` / `incremental_context_path` | empty          | Mutually exclusive incremental-only context                |
-| `max_context_chars`                                | `60000`        | Per instruction/context block                              |
-| `max_patch_chars`                                  | `120000`       | PR patch context bound                                     |
-| `max_review_chars`                                 | `12000`        | Review output bound                                        |
-| `disable_prompt_caching`                           | `false`        | Sets `DISABLE_PROMPT_CACHING=1` for live runtime           |
-| `debug_capture_raw_api_bodies`                     | `false`        | Restricted trusted manual diagnostic mode                  |
-| `debug_acknowledgement`                            | empty          | Required acknowledgement phrase for diagnostic mode        |
+| Input                                              | Default        | Notes                                                                                                         |
+| -------------------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------- |
+| `runtime_provider`                                 | `test`         | `test` or `claude-code-cli`                                                                                   |
+| `target_mode`                                      | `pull-request` | `pull-request` or `synthetic-fixture`                                                                         |
+| `review_mode`                                      | `auto`         | `auto`, `bootstrap`, or `incremental`                                                                         |
+| `pr_number`                                        | inferred       | Required for pull-request mode outside pull request events                                                    |
+| `state_key`                                        | derived        | Defaults to the target and runtime                                                                            |
+| `state_artifact_run_id`                            | empty          | Optional explicit run id to restore from                                                                      |
+| `artifact_retention_days`                          | `7`            | Clamped to 1 through 7                                                                                        |
+| `post_comment`                                     | `false`        | Creates or updates a sticky top-level PR comment                                                              |
+| `model_base_url`                                   | empty          | Required for `claude-code-cli`                                                                                |
+| `model_name`                                       | empty          | Required for `claude-code-cli`                                                                                |
+| `small_model_name`                                 | empty          | Optional small/background model                                                                               |
+| `api_key_mode`                                     | `auth-token`   | `auth-token`, `api-key`, or `both`                                                                            |
+| `claude_code_version`                              | empty          | Required explicit semver for `claude-code-cli`                                                                |
+| `tool_mode`                                        | `none`         | `none` disables runtime tools; `readonly` allows only Claude Code `Read`, `Glob`, and `Grep` for live runtime |
+| `claude_max_turns`                                 | `6`            | Positive integer passed to Claude Code `--max-turns`                                                          |
+| `instructions` / `instructions_path`               | empty          | Mutually exclusive stable review instructions                                                                 |
+| `bootstrap_context` / `bootstrap_context_path`     | empty          | Mutually exclusive bootstrap-only context                                                                     |
+| `incremental_context` / `incremental_context_path` | empty          | Mutually exclusive incremental-only context                                                                   |
+| `max_context_chars`                                | `60000`        | Per instruction/context block                                                                                 |
+| `max_patch_chars`                                  | `120000`       | PR patch context bound                                                                                        |
+| `max_review_chars`                                 | `12000`        | Review output bound                                                                                           |
+| `max_uncached_input_tokens`                        | `0`            | Current-run `input_tokens` watchdog; `0` disables                                                             |
+| `max_cached_input_tokens`                          | `0`            | Current-run cache-read/cache-hit token watchdog; `0` disables                                                 |
+| `max_output_tokens`                                | `0`            | Current-run `output_tokens` watchdog; `0` disables                                                            |
+| `disable_prompt_caching`                           | `false`        | Sets `DISABLE_PROMPT_CACHING=1` for live runtime                                                              |
+| `debug_capture_raw_api_bodies`                     | `false`        | Restricted trusted manual diagnostic mode                                                                     |
+| `debug_acknowledgement`                            | empty          | Required acknowledgement phrase for diagnostic mode                                                           |
+
+`tool_mode=readonly` is only meaningful for `runtime_provider=claude-code-cli`. It restricts the
+Claude Code built-in tool surface to `Read`, `Glob`, and `Grep`; shell, network, edit/write,
+subagent, skill, and MCP tool surfaces are not enabled by this mode. Readonly tools supplement the
+deterministic PR metadata, changed file list, bounded patch context, and incremental compare patch
+that the action already supplies. They do not replace that deterministic context.
+
+When live provider secrets are available, the checked-out workspace is a caller-controlled trust
+boundary. If a downstream workflow wants readonly tools to inspect reviewed code, check out the
+reviewed head by immutable SHA into the review workspace before running the action.
+
+Usage watchdogs parse Claude Code `stream-json` usage records during the live run. Delta-style usage
+records are summed; cumulative records replace earlier cumulative totals and take precedence. Cache-hit
+aliases such as `prompt_cache_hit_tokens` count as cached input. Missing categories are treated as zero,
+so a budget only constrains categories observed or inferred from the stream. If a non-zero budget is
+exceeded, the action terminates the process and fails with a sanitized `usage_budget_exceeded`
+diagnostic. If any usage budget is non-zero and the live runtime exposes no usage records, the action
+fails closed after the run. The watchdog acts after observed usage, so it stops later turns but cannot
+preempt the provider call that emitted the over-budget usage record.
 
 ## Outputs
 

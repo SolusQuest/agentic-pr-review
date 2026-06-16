@@ -4,6 +4,7 @@ import {
   type ReviewMode,
   type RuntimeProvider,
   type TargetMode,
+  type ToolMode,
 } from './types.js';
 import {
   clamp,
@@ -11,6 +12,7 @@ import {
   parseBoolean,
   parseInteger,
   parseOptionalPositiveInteger,
+  parsePositiveInteger,
   required,
 } from './utils.js';
 
@@ -22,6 +24,7 @@ const RUNTIME_PROVIDERS = ['test', 'claude-code-cli'] as const satisfies readonl
 const TARGET_MODES = ['pull-request', 'synthetic-fixture'] as const satisfies readonly TargetMode[];
 const REVIEW_MODES = ['auto', 'bootstrap', 'incremental'] as const satisfies readonly ReviewMode[];
 const API_KEY_MODES = ['auth-token', 'api-key', 'both'] as const satisfies readonly ApiKeyMode[];
+const TOOL_MODES = ['none', 'readonly'] as const satisfies readonly ToolMode[];
 const SYNTHETIC_RAW_DEBUG_ACKNOWLEDGEMENT = 'allow-raw-provider-debug';
 const PUBLIC_PR_RAW_DEBUG_ACKNOWLEDGEMENT = 'allow-raw-provider-debug-public-pr';
 
@@ -65,6 +68,7 @@ export function parseActionConfig(
     'api_key_mode',
     API_KEY_MODES,
   );
+  const toolMode = oneOf(optionalInput(reader, 'tool_mode') ?? 'none', 'tool_mode', TOOL_MODES);
 
   const config: ActionConfig = {
     runtimeProvider,
@@ -87,6 +91,12 @@ export function parseActionConfig(
     smallModelName: optionalInput(reader, 'small_model_name'),
     apiKeyMode,
     claudeCodeVersion: optionalInput(reader, 'claude_code_version'),
+    toolMode,
+    claudeMaxTurns: parsePositiveInteger(
+      optionalInput(reader, 'claude_max_turns'),
+      'claude_max_turns',
+      6,
+    ),
     instructions: optionalInput(reader, 'instructions'),
     instructionsPath: optionalInput(reader, 'instructions_path'),
     bootstrapContext: optionalInput(reader, 'bootstrap_context'),
@@ -108,6 +118,23 @@ export function parseActionConfig(
       'max_review_chars',
       12000,
     ),
+    usageBudgetLimits: {
+      maxUncachedInputTokens: parseInteger(
+        optionalInput(reader, 'max_uncached_input_tokens'),
+        'max_uncached_input_tokens',
+        0,
+      ),
+      maxCachedInputTokens: parseInteger(
+        optionalInput(reader, 'max_cached_input_tokens'),
+        'max_cached_input_tokens',
+        0,
+      ),
+      maxOutputTokens: parseInteger(
+        optionalInput(reader, 'max_output_tokens'),
+        'max_output_tokens',
+        0,
+      ),
+    },
     disablePromptCaching: parseBoolean(
       optionalInput(reader, 'disable_prompt_caching'),
       'disable_prompt_caching',
