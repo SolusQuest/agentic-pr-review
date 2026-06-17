@@ -11,6 +11,7 @@ import {
   computeLineageTotals,
   createRuntime,
   defaultTempDir,
+  preserveLineageTotalsForSkipped,
   restoreRuntimeState,
 } from './runtime.js';
 import {
@@ -327,7 +328,7 @@ async function finishSkippedIdentical(options: {
   runtimeDir: string;
   restoredState: RestoredState;
 }): Promise<void> {
-  const lineageTotals = computeLineageTotals(options.restoredState, 0, null);
+  const lineageTotals = preserveLineageTotalsForSkipped(options.restoredState);
   const runtimeResult: RuntimeResult = {
     sessionId: options.restoredState.sessionId,
     sessionName: options.restoredState.sessionName,
@@ -343,10 +344,7 @@ async function finishSkippedIdentical(options: {
       limits: options.config.usageBudgetLimits,
       usageRecordsObserved: 0,
     },
-    lineageTotals: {
-      ...lineageTotals,
-      source: 'restored_manifest_preserved_for_skipped',
-    },
+    lineageTotals,
   };
   const bundleDir = path.join(defaultTempDir(), 'agentic-pr-review', 'state-bundle');
   const bundleFiles = await writeStateBundle({

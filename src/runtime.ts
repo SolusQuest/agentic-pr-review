@@ -123,7 +123,7 @@ export class ClaudeCodeRuntime implements ReviewRuntime {
 
     const allowedTools = allowedToolsForMode(options.config.toolMode);
     const usageTracker = new UsageTracker(options.config.usageBudgetLimits);
-    const turnIds = new Set<string>();
+    const observationTracker = new RuntimeObservationTracker();
     const args = buildClaudeArgs({
       config: options.config,
       phase: options.phase,
@@ -140,20 +140,7 @@ export class ClaudeCodeRuntime implements ReviewRuntime {
       timeoutMs: 20 * 60 * 1000,
       onStdoutLine: (line) => {
         usageTracker.observeLine(line);
-        const parsed = safeParseJson(line);
-        if (parsed && typeof parsed === 'object') {
-          const record = parsed as Record<string, unknown>;
-          if (record.type === 'assistant') {
-            const msg = record.message;
-            if (msg && typeof msg === 'object') {
-              const msgObj = msg as Record<string, unknown>;
-              const id = msgObj.id;
-              if (typeof id === 'string') {
-                turnIds.add(id);
-              }
-            }
-          }
-        }
+        observationTracker.observeLine(line);
       },
     });
     await writeFile(outputPath, result.stdout, 'utf8');
@@ -192,9 +179,8 @@ export class ClaudeCodeRuntime implements ReviewRuntime {
       debugFiles.push(...rawFiles);
     }
 
-    const observedTurns = turnIds.size > 0 ? turnIds.size : null;
-    const observedTurnSource: RuntimeResult['observedTurnSource'] =
-      turnIds.size > 0 ? 'unique_assistant_message_ids' : 'unavailable';
+    const observedTurns = observationTracker.getObservedTurns();
+    const observedTurnSource = observationTracker.getObservedTurnSource();
     const lineageTotals = computeLineageTotals(options.restoredState, observedTurns, usage);
 
     return {
@@ -270,8 +256,15 @@ export function computeLineageTotals(
       outputTokens: 0,
     } as RuntimeUsage);
 
+  const observedTurns =
+    currentObservedTurns === null
+      ? null
+      : priorLineage.observedTurns === null
+        ? null
+        : priorLineage.observedTurns + currentObservedTurns;
+
   return {
-    observedTurns: (priorLineage.observedTurns ?? 0) + (currentObservedTurns ?? 0),
+    observedTurns,
     usage: {
       inputTokens: priorLineage.usage.inputTokens + curTokens.inputTokens,
       cacheReadInputTokens:
@@ -282,6 +275,29 @@ export function computeLineageTotals(
     },
     source: 'restored_manifest_plus_current_run',
     partial: priorLineage.partial,
+  };
+}
+
+export function preserveLineageTotalsForSkipped(
+  restoredState: RestoredState,
+): RuntimeLineageTotals {
+  if (restoredState.lineageTotals) {
+    return {
+      ...restoredState.lineageTotals,
+      source: 'restored_manifest_preserved_for_skipped' as const,
+    };
+  }
+
+  return {
+    observedTurns: 0,
+    usage: {
+      inputTokens: 0,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      outputTokens: 0,
+    },
+    source: 'legacy_manifest_fallback' as const,
+    partial: true,
   };
 }
 
@@ -548,6 +564,33 @@ export async function parseUsage(outputPath: string): Promise<RuntimeUsage | nul
     tracker.observeLine(line);
   }
   return tracker.getUsage();
+}
+
+export class RuntimeObservationTracker {
+  private turnIds = new Set<string>();
+
+  observeLine(line: string): void {
+    const parsed = safeParseJson(line);
+    if (!parsed || typeof parsed !== 'object') {
+      return;
+    }
+    const record = parsed as Record<string, unknown>;
+    // Only count top-level assistant records with a non-empty message.id
+    if (record.type === 'assistant' && record.message && typeof record.message === 'object') {
+      const msg = record.message as Record<string, unknown>;
+      if (msg.role === 'assistant' && typeof msg.id === 'string' && msg.id.length > 0) {
+        this.turnIds.add(msg.id);
+      }
+    }
+  }
+
+  getObservedTurns(): number | null {
+    return this.turnIds.size > 0 ? this.turnIds.size : null;
+  }
+
+  getObservedTurnSource(): RuntimeResult['observedTurnSource'] {
+    return this.turnIds.size > 0 ? 'unique_assistant_message_ids' : 'unavailable';
+  }
 }
 
 interface UsageRecord {

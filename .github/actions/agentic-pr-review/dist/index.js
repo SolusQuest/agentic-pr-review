@@ -98527,7 +98527,7 @@ var ClaudeCodeRuntime = class {
     }
     const allowedTools = allowedToolsForMode(options.config.toolMode);
     const usageTracker = new UsageTracker(options.config.usageBudgetLimits);
-    const turnIds = /* @__PURE__ */ new Set();
+    const observationTracker = new RuntimeObservationTracker();
     const args = buildClaudeArgs({
       config: options.config,
       phase: options.phase,
@@ -98543,20 +98543,7 @@ var ClaudeCodeRuntime = class {
       timeoutMs: 20 * 60 * 1e3,
       onStdoutLine: (line) => {
         usageTracker.observeLine(line);
-        const parsed = safeParseJson(line);
-        if (parsed && typeof parsed === "object") {
-          const record = parsed;
-          if (record.type === "assistant") {
-            const msg = record.message;
-            if (msg && typeof msg === "object") {
-              const msgObj = msg;
-              const id = msgObj.id;
-              if (typeof id === "string") {
-                turnIds.add(id);
-              }
-            }
-          }
-        }
+        observationTracker.observeLine(line);
       }
     });
     await writeFile3(outputPath, result.stdout, "utf8");
@@ -98590,8 +98577,8 @@ var ClaudeCodeRuntime = class {
       }
       debugFiles.push(...rawFiles);
     }
-    const observedTurns = turnIds.size > 0 ? turnIds.size : null;
-    const observedTurnSource = turnIds.size > 0 ? "unique_assistant_message_ids" : "unavailable";
+    const observedTurns = observationTracker.getObservedTurns();
+    const observedTurnSource = observationTracker.getObservedTurnSource();
     const lineageTotals = computeLineageTotals(options.restoredState, observedTurns, usage);
     return {
       sessionId: await discoverSessionId(outputPath, options.runtimeDir),
@@ -98648,8 +98635,9 @@ function computeLineageTotals(restoredState, currentObservedTurns, currentUsage)
     cacheCreationInputTokens: 0,
     outputTokens: 0
   };
+  const observedTurns = currentObservedTurns === null ? null : priorLineage.observedTurns === null ? null : priorLineage.observedTurns + currentObservedTurns;
   return {
-    observedTurns: (priorLineage.observedTurns ?? 0) + (currentObservedTurns ?? 0),
+    observedTurns,
     usage: {
       inputTokens: priorLineage.usage.inputTokens + curTokens.inputTokens,
       cacheReadInputTokens: priorLineage.usage.cacheReadInputTokens + curTokens.cacheReadInputTokens,
@@ -98658,6 +98646,25 @@ function computeLineageTotals(restoredState, currentObservedTurns, currentUsage)
     },
     source: "restored_manifest_plus_current_run",
     partial: priorLineage.partial
+  };
+}
+function preserveLineageTotalsForSkipped(restoredState) {
+  if (restoredState.lineageTotals) {
+    return {
+      ...restoredState.lineageTotals,
+      source: "restored_manifest_preserved_for_skipped"
+    };
+  }
+  return {
+    observedTurns: 0,
+    usage: {
+      inputTokens: 0,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      outputTokens: 0
+    },
+    source: "legacy_manifest_fallback",
+    partial: true
   };
 }
 function allowedToolsForMode(toolMode) {
@@ -98868,6 +98875,28 @@ async function extractReviewMarkdown(outputPath, maxChars) {
   const selected = (resultText ?? assistantTexts.join("\n\n")).trim();
   return truncateText(selected || "No review text was emitted by the runtime.", maxChars);
 }
+var RuntimeObservationTracker = class {
+  turnIds = /* @__PURE__ */ new Set();
+  observeLine(line) {
+    const parsed = safeParseJson(line);
+    if (!parsed || typeof parsed !== "object") {
+      return;
+    }
+    const record = parsed;
+    if (record.type === "assistant" && record.message && typeof record.message === "object") {
+      const msg = record.message;
+      if (msg.role === "assistant" && typeof msg.id === "string" && msg.id.length > 0) {
+        this.turnIds.add(msg.id);
+      }
+    }
+  }
+  getObservedTurns() {
+    return this.turnIds.size > 0 ? this.turnIds.size : null;
+  }
+  getObservedTurnSource() {
+    return this.turnIds.size > 0 ? "unique_assistant_message_ids" : "unavailable";
+  }
+};
 var UsageBudgetExceededError = class extends Error {
   constructor(status) {
     const exceeded = status.exceeded;
@@ -99729,7 +99758,7 @@ function validateSameRepositoryTarget(target) {
   }
 }
 async function finishSkippedIdentical(options) {
-  const lineageTotals = computeLineageTotals(options.restoredState, 0, null);
+  const lineageTotals = preserveLineageTotalsForSkipped(options.restoredState);
   const runtimeResult = {
     sessionId: options.restoredState.sessionId,
     sessionName: options.restoredState.sessionName,
@@ -99745,10 +99774,7 @@ async function finishSkippedIdentical(options) {
       limits: options.config.usageBudgetLimits,
       usageRecordsObserved: 0
     },
-    lineageTotals: {
-      ...lineageTotals,
-      source: "restored_manifest_preserved_for_skipped"
-    }
+    lineageTotals
   };
   const bundleDir = path8.join(defaultTempDir(), "agentic-pr-review", "state-bundle");
   const bundleFiles = await writeStateBundle({
