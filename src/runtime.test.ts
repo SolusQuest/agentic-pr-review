@@ -5,11 +5,14 @@ import { describe, expect, it } from 'vitest';
 import {
   allowedToolsForMode,
   buildClaudeArgs,
+  computeLineageTotals,
+  preserveLineageTotalsForSkipped,
+  RuntimeObservationTracker,
   TestRuntime,
   UsageBudgetExceededError,
   UsageTracker,
 } from './runtime.js';
-import { type ActionConfig } from './types.js';
+import { type ActionConfig, type RestoredState } from './types.js';
 
 function observe(tracker: UsageTracker, value: unknown): void {
   tracker.observeLine(JSON.stringify(value));
@@ -152,7 +155,6 @@ describe('UsageTracker', () => {
     expect(tracker.getUsage()).toMatchObject({
       inputTokens: 30,
       cacheReadInputTokens: 0,
-      promptCacheHitTokens: 0,
       outputTokens: 10,
     });
   });
@@ -171,7 +173,6 @@ describe('UsageTracker', () => {
     });
     expect(tracker.getUsage()).toMatchObject({
       cacheReadInputTokens: 100,
-      promptCacheHitTokens: 100,
       cacheCreationInputTokens: 25,
     });
   });
@@ -225,5 +226,358 @@ describe('UsageTracker', () => {
       status: 'within_limit',
       usageRecordsObserved: 0,
     });
+  });
+
+  it('returns null getUsage() when no records observed', () => {
+    const tracker = disabledTracker();
+    expect(tracker.getUsage()).toBeNull();
+  });
+
+  it('includes recordsObserved in getUsage() result', () => {
+    const tracker = disabledTracker();
+    observe(tracker, {
+      type: 'result',
+      usage: { input_tokens: 30, output_tokens: 10 },
+    });
+    const usage = tracker.getUsage();
+    expect(usage).not.toBeNull();
+    expect(usage!.recordsObserved).toBe(1);
+  });
+});
+
+describe('TestRuntime', () => {
+  it('returns null usage and not_applicable turn source', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'agentic-pr-review-runtime-'));
+    try {
+      const config: ActionConfig = {
+        runtimeProvider: 'test',
+        targetMode: 'synthetic-fixture',
+        reviewMode: 'auto',
+        artifactRetentionDays: 7,
+        postComment: false,
+        apiKeyMode: 'auth-token',
+        toolMode: 'none',
+        claudeMaxTurns: 6,
+        maxContextChars: 1000,
+        maxPatchChars: 1000,
+        maxReviewChars: 1000,
+        usageBudgetLimits: {
+          maxUncachedInputTokens: 0,
+          maxCachedInputTokens: 0,
+          maxOutputTokens: 0,
+        },
+        disablePromptCaching: false,
+        debugCaptureRawApiBodies: false,
+        githubToken: 'token',
+      };
+      const result = await new TestRuntime().run({
+        config,
+        phase: 'bootstrap',
+        stateKey: 'synthetic',
+        prompt: 'review',
+        promptHash: 'hash',
+        workspace: dir,
+        tempDir: dir,
+        runtimeDir: path.join(dir, 'runtime'),
+      });
+      expect(result.observedTurns).toBe(0);
+      expect(result.observedTurnSource).toBe('not_applicable');
+      expect(result.usage).toBeNull();
+      expect(result.lineageTotals.source).toBe('current_run_only');
+      expect(result.lineageTotals.observedTurns).toBe(0);
+      expect(result.lineageTotals.partial).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('RuntimeObservationTracker', () => {
+  function observe(tracker: RuntimeObservationTracker, obj: unknown): void {
+    tracker.observeLine(JSON.stringify(obj));
+  }
+
+  it('counts distinct assistant message IDs', () => {
+    const tracker = new RuntimeObservationTracker();
+    observe(tracker, {
+      type: 'assistant',
+      message: { role: 'assistant', id: 'msg_a', content: [] },
+    });
+    observe(tracker, {
+      type: 'assistant',
+      message: { role: 'assistant', id: 'msg_b', content: [] },
+    });
+    expect(tracker.getObservedTurns()).toBe(2);
+    expect(tracker.getObservedTurnSource()).toBe('unique_assistant_message_ids');
+  });
+
+  it('deduplicates shared message IDs', () => {
+    const tracker = new RuntimeObservationTracker();
+    observe(tracker, {
+      type: 'assistant',
+      message: { role: 'assistant', id: 'msg_a', content: [] },
+    });
+    observe(tracker, {
+      type: 'assistant',
+      message: { role: 'assistant', id: 'msg_a', content: [] },
+    });
+    expect(tracker.getObservedTurns()).toBe(1);
+  });
+
+  it('ignores non-assistant type records', () => {
+    const tracker = new RuntimeObservationTracker();
+    observe(tracker, { type: 'custom-title', message: { id: 'x' } });
+    observe(tracker, { type: 'agent-name', message: { id: 'x' } });
+    observe(tracker, { type: 'queue-operation', message: { id: 'x' } });
+    observe(tracker, { type: 'last-prompt', message: { id: 'x' } });
+    expect(tracker.getObservedTurns()).toBeNull();
+    expect(tracker.getObservedTurnSource()).toBe('unavailable');
+  });
+
+  it('ignores records with non-assistant message role', () => {
+    const tracker = new RuntimeObservationTracker();
+    observe(tracker, {
+      type: 'assistant',
+      message: { role: 'user', id: 'msg_a', content: [] },
+    });
+    expect(tracker.getObservedTurns()).toBeNull();
+    expect(tracker.getObservedTurnSource()).toBe('unavailable');
+  });
+
+  it('ignores empty message id', () => {
+    const tracker = new RuntimeObservationTracker();
+    observe(tracker, {
+      type: 'assistant',
+      message: { role: 'assistant', id: '', content: [] },
+    });
+    expect(tracker.getObservedTurns()).toBeNull();
+  });
+
+  it('returns null when no assistant records seen', () => {
+    const tracker = new RuntimeObservationTracker();
+    expect(tracker.getObservedTurns()).toBeNull();
+    expect(tracker.getObservedTurnSource()).toBe('unavailable');
+  });
+});
+
+describe('computeLineageTotals', () => {
+  it('returns current_run_only for bootstrap without prior state', () => {
+    const result = computeLineageTotals(undefined, 3, {
+      inputTokens: 100,
+      cacheReadInputTokens: 50,
+      cacheCreationInputTokens: 25,
+      outputTokens: 30,
+      recordsObserved: 1,
+    });
+    expect(result.source).toBe('current_run_only');
+    expect(result.observedTurns).toBe(3);
+    expect(result.usage.inputTokens).toBe(100);
+    expect(result.partial).toBe(false);
+  });
+
+  it('returns restored_manifest_plus_current_run for incremental with prior lineage', () => {
+    const restoredState: RestoredState = {
+      stateKey: 'test',
+      sessionId: 's1',
+      sessionName: 'sn',
+      runtimeProvider: 'test',
+      usage: null,
+      manifestPath: '',
+      lineageTotals: {
+        observedTurns: 5,
+        usage: {
+          inputTokens: 200,
+          cacheReadInputTokens: 100,
+          cacheCreationInputTokens: 50,
+          outputTokens: 60,
+        },
+        source: 'current_run_only',
+        partial: false,
+      },
+    };
+    const result = computeLineageTotals(restoredState, 3, {
+      inputTokens: 100,
+      cacheReadInputTokens: 50,
+      cacheCreationInputTokens: 25,
+      outputTokens: 30,
+      recordsObserved: 1,
+    });
+    expect(result.source).toBe('restored_manifest_plus_current_run');
+    expect(result.observedTurns).toBe(8);
+    expect(result.usage.inputTokens).toBe(300);
+    expect(result.usage.cacheReadInputTokens).toBe(150);
+    expect(result.usage.outputTokens).toBe(90);
+    expect(result.partial).toBe(false);
+  });
+
+  it('treats null current usage as zero for lineage math', () => {
+    const restoredState: RestoredState = {
+      stateKey: 'test',
+      sessionId: 's1',
+      sessionName: 'sn',
+      runtimeProvider: 'test',
+      usage: null,
+      manifestPath: '',
+      lineageTotals: {
+        observedTurns: 5,
+        usage: {
+          inputTokens: 200,
+          cacheReadInputTokens: 100,
+          cacheCreationInputTokens: 50,
+          outputTokens: 60,
+        },
+        source: 'current_run_only',
+        partial: false,
+      },
+    };
+    const result = computeLineageTotals(restoredState, 2, null);
+    expect(result.observedTurns).toBe(7);
+    expect(result.usage.inputTokens).toBe(200);
+  });
+
+  it('propagates null observed turns when current is null', () => {
+    const restoredState: RestoredState = {
+      stateKey: 'test',
+      sessionId: 's1',
+      sessionName: 'sn',
+      runtimeProvider: 'test',
+      usage: null,
+      manifestPath: '',
+      lineageTotals: {
+        observedTurns: 5,
+        usage: {
+          inputTokens: 200,
+          cacheReadInputTokens: 100,
+          cacheCreationInputTokens: 50,
+          outputTokens: 60,
+        },
+        source: 'current_run_only',
+        partial: false,
+      },
+    };
+    const result = computeLineageTotals(restoredState, null, null);
+    expect(result.observedTurns).toBeNull();
+    expect(result.partial).toBe(true);
+    expect(result.usage.inputTokens).toBe(200);
+  });
+
+  it('propagates null when prior lineage turns is null', () => {
+    const restoredState: RestoredState = {
+      stateKey: 'test',
+      sessionId: 's1',
+      sessionName: 'sn',
+      runtimeProvider: 'test',
+      usage: null,
+      manifestPath: '',
+      lineageTotals: {
+        observedTurns: null,
+        usage: {
+          inputTokens: 200,
+          cacheReadInputTokens: 100,
+          cacheCreationInputTokens: 50,
+          outputTokens: 60,
+        },
+        source: 'current_run_only',
+        partial: true,
+      },
+    };
+    const result = computeLineageTotals(restoredState, 3, null);
+    expect(result.observedTurns).toBeNull();
+  });
+
+  it('detects legacy manifest fallback', () => {
+    const restoredState: RestoredState = {
+      stateKey: 'test',
+      sessionId: 's1',
+      sessionName: 'sn',
+      runtimeProvider: 'test',
+      usage: {
+        inputTokens: 50,
+        cacheReadInputTokens: 20,
+        cacheCreationInputTokens: 10,
+        outputTokens: 15,
+        recordsObserved: 0,
+      },
+      manifestPath: '',
+    };
+    const result = computeLineageTotals(restoredState, 3, {
+      inputTokens: 100,
+      cacheReadInputTokens: 50,
+      cacheCreationInputTokens: 25,
+      outputTokens: 30,
+      recordsObserved: 1,
+    });
+    expect(result.source).toBe('legacy_manifest_fallback');
+    expect(result.partial).toBe(true);
+    expect(result.observedTurns).toBe(3);
+  });
+});
+
+describe('preserveLineageTotalsForSkipped', () => {
+  it('preserves prior lineage and sets skipped source', () => {
+    const restoredState: RestoredState = {
+      stateKey: 'test',
+      sessionId: 's1',
+      sessionName: 'sn',
+      runtimeProvider: 'test',
+      usage: null,
+      manifestPath: '',
+      lineageTotals: {
+        observedTurns: 5,
+        usage: {
+          inputTokens: 200,
+          cacheReadInputTokens: 100,
+          cacheCreationInputTokens: 50,
+          outputTokens: 60,
+        },
+        source: 'restored_manifest_plus_current_run',
+        partial: false,
+      },
+    };
+    const result = preserveLineageTotalsForSkipped(restoredState);
+    expect(result.source).toBe('restored_manifest_preserved_for_skipped');
+    expect(result.observedTurns).toBe(5);
+    expect(result.usage.inputTokens).toBe(200);
+    expect(result.partial).toBe(false);
+  });
+
+  it('preserves null observedTurns in prior lineage', () => {
+    const restoredState: RestoredState = {
+      stateKey: 'test',
+      sessionId: 's1',
+      sessionName: 'sn',
+      runtimeProvider: 'test',
+      usage: null,
+      manifestPath: '',
+      lineageTotals: {
+        observedTurns: null,
+        usage: {
+          inputTokens: 200,
+          cacheReadInputTokens: 100,
+          cacheCreationInputTokens: 50,
+          outputTokens: 60,
+        },
+        source: 'unavailable',
+        partial: true,
+      },
+    };
+    const result = preserveLineageTotalsForSkipped(restoredState);
+    expect(result.source).toBe('restored_manifest_preserved_for_skipped');
+    expect(result.observedTurns).toBeNull();
+  });
+
+  it('falls back to legacy when no prior lineage', () => {
+    const restoredState: RestoredState = {
+      stateKey: 'test',
+      sessionId: 's1',
+      sessionName: 'sn',
+      runtimeProvider: 'test',
+      usage: null,
+      manifestPath: '',
+    };
+    const result = preserveLineageTotalsForSkipped(restoredState);
+    expect(result.source).toBe('legacy_manifest_fallback');
+    expect(result.partial).toBe(true);
+    expect(result.observedTurns).toBe(0);
   });
 });

@@ -98178,6 +98178,8 @@ ${LINEAGE_META_SUFFIX}`,
     `| State artifact | \`${input.artifactName}\` |`,
     `| Run | ${runValue} |`,
     `| Usage | ${formatUsage(input.usage)} |`,
+    `| Turns | ${formatTurns(input.observedTurns, input.maxTurns)} |`,
+    `| Lineage | ${input.lineageTotals ? formatLineageTable(input.lineageTotals) : "not available"} |`,
     ""
   ].join("\n");
   const currentBlock = [
@@ -98323,11 +98325,26 @@ function formatUsage(usage) {
     return "not exposed";
   }
   return [
-    `cache_read=${usage.cacheReadInputTokens ?? usage.promptCacheHitTokens ?? "n/a"}`,
-    `cache_creation=${usage.cacheCreationInputTokens ?? "n/a"}`,
-    `input=${usage.inputTokens ?? "n/a"}`,
-    `output=${usage.outputTokens ?? "n/a"}`
+    `cache_read=${usage.cacheReadInputTokens}`,
+    `cache_creation=${usage.cacheCreationInputTokens}`,
+    `input=${usage.inputTokens}`,
+    `output=${usage.outputTokens}`
   ].join(", ");
+}
+function formatLineageTable(lineage) {
+  return [
+    `turns=${lineage.observedTurns ?? "n/a"}`,
+    `input=${lineage.usage.inputTokens}`,
+    `cache_read=${lineage.usage.cacheReadInputTokens}`,
+    `output=${lineage.usage.outputTokens}`
+  ].join(", ");
+}
+function formatTurns(observedTurns, maxTurns) {
+  if (observedTurns === null || observedTurns === void 0) {
+    return "not exposed";
+  }
+  const max = maxTurns !== void 0 ? ` / max ${maxTurns}` : "";
+  return `${observedTurns}${max}`;
 }
 function repositoryFromUrl(url2) {
   const match = url2.match(/^https:\/\/github\.com\/([^/]+\/[^/]+)/);
@@ -98461,6 +98478,12 @@ var TestRuntime = class {
 ${JSON.stringify({ type: "result", session_id: sessionId, result: reviewMarkdown })}
 `
     );
+    const lineageZeroUsage = {
+      inputTokens: 0,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      outputTokens: 0
+    };
     return {
       sessionId,
       sessionName,
@@ -98468,10 +98491,19 @@ ${JSON.stringify({ type: "result", session_id: sessionId, result: reviewMarkdown
       debugFiles: [],
       toolMode: options.config.toolMode,
       allowedTools: [],
+      observedTurns: 0,
+      observedTurnSource: "not_applicable",
+      usage: null,
       usageBudgetStatus: {
         status: "not_applicable",
         limits: options.config.usageBudgetLimits,
         usageRecordsObserved: 0
+      },
+      lineageTotals: {
+        observedTurns: 0,
+        usage: lineageZeroUsage,
+        source: "current_run_only",
+        partial: false
       }
     };
   }
@@ -98495,6 +98527,7 @@ var ClaudeCodeRuntime = class {
     }
     const allowedTools = allowedToolsForMode(options.config.toolMode);
     const usageTracker = new UsageTracker(options.config.usageBudgetLimits);
+    const observationTracker = new RuntimeObservationTracker();
     const args = buildClaudeArgs({
       config: options.config,
       phase: options.phase,
@@ -98508,7 +98541,10 @@ var ClaudeCodeRuntime = class {
       env,
       stdin: options.prompt,
       timeoutMs: 20 * 60 * 1e3,
-      onStdoutLine: (line) => usageTracker.observeLine(line)
+      onStdoutLine: (line) => {
+        usageTracker.observeLine(line);
+        observationTracker.observeLine(line);
+      }
     });
     await writeFile3(outputPath, result.stdout, "utf8");
     if (result.streamError) {
@@ -98541,6 +98577,9 @@ var ClaudeCodeRuntime = class {
       }
       debugFiles.push(...rawFiles);
     }
+    const observedTurns = observationTracker.getObservedTurns();
+    const observedTurnSource = observationTracker.getObservedTurnSource();
+    const lineageTotals = computeLineageTotals(options.restoredState, observedTurns, usage);
     return {
       sessionId: await discoverSessionId(outputPath, options.runtimeDir),
       sessionName,
@@ -98548,11 +98587,86 @@ var ClaudeCodeRuntime = class {
       debugFiles,
       toolMode: options.config.toolMode,
       allowedTools,
+      observedTurns,
+      observedTurnSource,
       usage,
-      usageBudgetStatus
+      usageBudgetStatus,
+      lineageTotals
     };
   }
 };
+function computeLineageTotals(restoredState, currentObservedTurns, currentUsage) {
+  const zeroTotals = {
+    inputTokens: 0,
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+    outputTokens: 0
+  };
+  const priorLineage = restoredState?.lineageTotals;
+  if (!priorLineage) {
+    if (restoredState) {
+      return {
+        observedTurns: currentObservedTurns,
+        usage: currentUsage ? {
+          inputTokens: currentUsage.inputTokens,
+          cacheReadInputTokens: currentUsage.cacheReadInputTokens,
+          cacheCreationInputTokens: currentUsage.cacheCreationInputTokens,
+          outputTokens: currentUsage.outputTokens
+        } : zeroTotals,
+        source: "legacy_manifest_fallback",
+        partial: true
+      };
+    }
+    return {
+      observedTurns: currentObservedTurns,
+      usage: currentUsage ? {
+        inputTokens: currentUsage.inputTokens,
+        cacheReadInputTokens: currentUsage.cacheReadInputTokens,
+        cacheCreationInputTokens: currentUsage.cacheCreationInputTokens,
+        outputTokens: currentUsage.outputTokens
+      } : zeroTotals,
+      source: "current_run_only",
+      partial: currentObservedTurns === null
+    };
+  }
+  const curTokens = currentUsage ?? {
+    inputTokens: 0,
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+    outputTokens: 0
+  };
+  const observedTurns = currentObservedTurns === null ? null : priorLineage.observedTurns === null ? null : priorLineage.observedTurns + currentObservedTurns;
+  return {
+    observedTurns,
+    usage: {
+      inputTokens: priorLineage.usage.inputTokens + curTokens.inputTokens,
+      cacheReadInputTokens: priorLineage.usage.cacheReadInputTokens + curTokens.cacheReadInputTokens,
+      cacheCreationInputTokens: priorLineage.usage.cacheCreationInputTokens + curTokens.cacheCreationInputTokens,
+      outputTokens: priorLineage.usage.outputTokens + curTokens.outputTokens
+    },
+    source: "restored_manifest_plus_current_run",
+    partial: priorLineage.partial || currentObservedTurns === null
+  };
+}
+function preserveLineageTotalsForSkipped(restoredState) {
+  if (restoredState.lineageTotals) {
+    return {
+      ...restoredState.lineageTotals,
+      source: "restored_manifest_preserved_for_skipped"
+    };
+  }
+  return {
+    observedTurns: 0,
+    usage: {
+      inputTokens: 0,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      outputTokens: 0
+    },
+    source: "legacy_manifest_fallback",
+    partial: true
+  };
+}
 function allowedToolsForMode(toolMode) {
   return toolMode === "readonly" ? ["Read", "Glob", "Grep"] : [];
 }
@@ -98761,6 +98875,28 @@ async function extractReviewMarkdown(outputPath, maxChars) {
   const selected = (resultText ?? assistantTexts.join("\n\n")).trim();
   return truncateText(selected || "No review text was emitted by the runtime.", maxChars);
 }
+var RuntimeObservationTracker = class {
+  turnIds = /* @__PURE__ */ new Set();
+  observeLine(line) {
+    const parsed = safeParseJson(line);
+    if (!parsed || typeof parsed !== "object") {
+      return;
+    }
+    const record = parsed;
+    if (record.type === "assistant" && record.message && typeof record.message === "object") {
+      const msg = record.message;
+      if (msg.role === "assistant" && typeof msg.id === "string" && msg.id.length > 0) {
+        this.turnIds.add(msg.id);
+      }
+    }
+  }
+  getObservedTurns() {
+    return this.turnIds.size > 0 ? this.turnIds.size : null;
+  }
+  getObservedTurnSource() {
+    return this.turnIds.size > 0 ? "unique_assistant_message_ids" : "unavailable";
+  }
+};
 var UsageBudgetExceededError = class extends Error {
   constructor(status) {
     const exceeded = status.exceeded;
@@ -98779,7 +98915,6 @@ var UsageTracker = class {
   deltaUsage = {
     inputTokens: 0,
     cacheReadInputTokens: 0,
-    promptCacheHitTokens: 0,
     cacheCreationInputTokens: 0,
     outputTokens: 0
   };
@@ -98801,7 +98936,6 @@ var UsageTracker = class {
     } else {
       this.deltaUsage.inputTokens += record.inputTokens ?? 0;
       this.deltaUsage.cacheReadInputTokens += record.cacheReadInputTokens ?? 0;
-      this.deltaUsage.promptCacheHitTokens += record.promptCacheHitTokens ?? 0;
       this.deltaUsage.cacheCreationInputTokens += record.cacheCreationInputTokens ?? 0;
       this.deltaUsage.outputTokens += record.outputTokens ?? 0;
     }
@@ -98813,15 +98947,15 @@ var UsageTracker = class {
   }
   getUsage() {
     if (this.recordsObserved === 0) {
-      return void 0;
+      return null;
     }
     const source = this.cumulativeUsage ?? this.deltaUsage;
     return {
       inputTokens: source.inputTokens,
       cacheReadInputTokens: source.cacheReadInputTokens,
-      promptCacheHitTokens: source.promptCacheHitTokens,
       cacheCreationInputTokens: source.cacheCreationInputTokens,
-      outputTokens: source.outputTokens
+      outputTokens: source.outputTokens,
+      recordsObserved: this.recordsObserved
     };
   }
   getStatus() {
@@ -98848,17 +98982,17 @@ var UsageTracker = class {
       {
         category: "uncached_input",
         limit: this.limits.maxUncachedInputTokens,
-        observed: usage.inputTokens ?? 0
+        observed: usage.inputTokens
       },
       {
         category: "cached_input",
         limit: this.limits.maxCachedInputTokens,
-        observed: usage.cacheReadInputTokens ?? usage.promptCacheHitTokens ?? 0
+        observed: usage.cacheReadInputTokens
       },
       {
         category: "output",
         limit: this.limits.maxOutputTokens,
-        observed: usage.outputTokens ?? 0
+        observed: usage.outputTokens
       }
     ];
     return checks.find((check) => check && check.limit > 0 && check.observed > check.limit);
@@ -98871,7 +99005,6 @@ function mergeCumulativeUsage(current, record) {
   return {
     inputTokens: record.inputTokens ?? current?.inputTokens ?? 0,
     cacheReadInputTokens: record.cacheReadInputTokens ?? current?.cacheReadInputTokens ?? 0,
-    promptCacheHitTokens: record.promptCacheHitTokens ?? current?.promptCacheHitTokens ?? 0,
     cacheCreationInputTokens: record.cacheCreationInputTokens ?? current?.cacheCreationInputTokens ?? 0,
     outputTokens: record.outputTokens ?? current?.outputTokens ?? 0
   };
@@ -98904,7 +99037,6 @@ function extractUsageRecord(value) {
     inputTokens,
     cachedInputTokens,
     cacheReadInputTokens: cachedInputTokens,
-    promptCacheHitTokens: cachedInputTokens,
     cacheCreationInputTokens,
     outputTokens,
     cumulative: record.type === "result" || record.subtype === "success"
@@ -99055,7 +99187,16 @@ async function readRestoredState(root) {
     runtimeProvider: manifest.runtimeProvider,
     reviewedHeadSha: manifest.reviewedHeadSha,
     createdAt: manifest.createdAt,
-    usage: manifest.usage,
+    usage: manifest.usage ? {
+      inputTokens: manifest.usage.inputTokens ?? 0,
+      cacheReadInputTokens: manifest.usage.cacheReadInputTokens ?? 0,
+      cacheCreationInputTokens: manifest.usage.cacheCreationInputTokens ?? 0,
+      outputTokens: manifest.usage.outputTokens ?? 0,
+      recordsObserved: manifest.usage.recordsObserved ?? 0
+    } : null,
+    observedTurns: manifest.observedTurns,
+    observedTurnSource: manifest.observedTurnSource,
+    lineageTotals: manifest.lineageTotals,
     manifestPath
   };
 }
@@ -99084,6 +99225,9 @@ async function writeStateBundle(options) {
     createdAt: options.createdAt ?? now,
     updatedAt: now,
     usage: options.runtimeResult.usage,
+    observedTurns: options.runtimeResult.observedTurns,
+    observedTurnSource: options.runtimeResult.observedTurnSource,
+    lineageTotals: options.runtimeResult.lineageTotals,
     usageBudgetStatus: options.runtimeResult.usageBudgetStatus,
     contextBlocks: options.blocks.map((block) => ({
       name: block.name,
@@ -99516,7 +99660,8 @@ async function run() {
     commentUrl: comment.commentUrl,
     lineageAction: comment.lineageAction,
     lineageReason: comment.lineageReason,
-    debugArtifact
+    debugArtifact,
+    runtimeResult
   });
   await writeSummary({
     config,
@@ -99613,6 +99758,7 @@ function validateSameRepositoryTarget(target) {
   }
 }
 async function finishSkippedIdentical(options) {
+  const lineageTotals = preserveLineageTotalsForSkipped(options.restoredState);
   const runtimeResult = {
     sessionId: options.restoredState.sessionId,
     sessionName: options.restoredState.sessionName,
@@ -99620,12 +99766,15 @@ async function finishSkippedIdentical(options) {
     debugFiles: [],
     toolMode: options.config.toolMode,
     allowedTools: allowedToolsForMode(options.config.toolMode),
-    usage: options.restoredState.usage,
+    observedTurns: 0,
+    observedTurnSource: "not_applicable",
+    usage: null,
     usageBudgetStatus: {
       status: "not_applicable",
       limits: options.config.usageBudgetLimits,
       usageRecordsObserved: 0
-    }
+    },
+    lineageTotals
   };
   const bundleDir = path8.join(defaultTempDir(), "agentic-pr-review", "state-bundle");
   const bundleFiles = await writeStateBundle({
@@ -99658,7 +99807,8 @@ async function finishSkippedIdentical(options) {
     reviewMarkdownPath: path8.join(bundleDir, "review.md"),
     commentUrl: "skipped-identical",
     lineageAction: "",
-    lineageReason: ""
+    lineageReason: "",
+    runtimeResult
   });
   await writeSummary({
     config: options.config,
@@ -99712,6 +99862,9 @@ async function maybePostComment(options) {
       runAttempt: context2.runAttempt,
       lineageReason: options.lineageReason,
       usage: options.runtimeResult.usage,
+      observedTurns: options.runtimeResult.observedTurns,
+      maxTurns: options.config.claudeMaxTurns,
+      lineageTotals: options.runtimeResult.lineageTotals,
       maxReviewChars: options.config.maxReviewChars
     });
     return {
@@ -99753,6 +99906,32 @@ function setOutputs(options) {
   setOutput("comment_url", options.commentUrl);
   setOutput("lineage_action", options.lineageAction);
   setOutput("lineage_reason", options.lineageReason);
+  if (options.runtimeResult) {
+    setOutput("observed_turns", String(options.runtimeResult.observedTurns ?? ""));
+    setOutput("observed_turn_source", options.runtimeResult.observedTurnSource);
+    setOutput(
+      "lineage_observed_turns",
+      String(options.runtimeResult.lineageTotals.observedTurns ?? "")
+    );
+    setOutput("lineage_totals_source", options.runtimeResult.lineageTotals.source);
+    setOutput("lineage_totals_partial", String(options.runtimeResult.lineageTotals.partial));
+    setOutput(
+      "lineage_usage_input_tokens",
+      String(options.runtimeResult.lineageTotals.usage.inputTokens)
+    );
+    setOutput(
+      "lineage_usage_cache_read_input_tokens",
+      String(options.runtimeResult.lineageTotals.usage.cacheReadInputTokens)
+    );
+    setOutput(
+      "lineage_usage_cache_creation_input_tokens",
+      String(options.runtimeResult.lineageTotals.usage.cacheCreationInputTokens)
+    );
+    setOutput(
+      "lineage_usage_output_tokens",
+      String(options.runtimeResult.lineageTotals.usage.outputTokens)
+    );
+  }
   if (options.debugArtifact) {
     setOutput("debug_artifact_name", options.debugArtifact.name);
     setOutput("debug_artifact_id", options.debugArtifact.id ?? "");
@@ -99762,13 +99941,21 @@ function setOutputs(options) {
 async function writeSummary(input) {
   const restored = input.restored.restoredState ? `yes, head ${input.restored.restoredState.reviewedHeadSha ?? "unknown"}` : "no";
   const usage = input.runtimeResult.usage ? [
-    `cache_read=${input.runtimeResult.usage.cacheReadInputTokens ?? input.runtimeResult.usage.promptCacheHitTokens ?? "n/a"}`,
-    `cache_creation=${input.runtimeResult.usage.cacheCreationInputTokens ?? "n/a"}`,
-    `input=${input.runtimeResult.usage.inputTokens ?? "n/a"}`,
-    `output=${input.runtimeResult.usage.outputTokens ?? "n/a"}`
+    `cache_read=${input.runtimeResult.usage.cacheReadInputTokens}`,
+    `cache_creation=${input.runtimeResult.usage.cacheCreationInputTokens}`,
+    `input=${input.runtimeResult.usage.inputTokens}`,
+    `output=${input.runtimeResult.usage.outputTokens}`
   ].join(", ") : "not exposed";
+  const lineageUsage = [
+    `cache_read=${input.runtimeResult.lineageTotals.usage.cacheReadInputTokens}`,
+    `cache_creation=${input.runtimeResult.lineageTotals.usage.cacheCreationInputTokens}`,
+    `input=${input.runtimeResult.lineageTotals.usage.inputTokens}`,
+    `output=${input.runtimeResult.lineageTotals.usage.outputTokens}`
+  ].join(", ");
+  const lineageSourceDetail = input.runtimeResult.lineageTotals.partial ? `${input.runtimeResult.lineageTotals.source}, partial` : `${input.runtimeResult.lineageTotals.source}, complete`;
   const allowedTools = input.runtimeResult.allowedTools.length > 0 ? input.runtimeResult.allowedTools.join(", ") : "none";
   const budgetStatus = formatUsageBudgetStatus(input.runtimeResult.usageBudgetStatus);
+  const maxTurns = input.config.claudeMaxTurns;
   const lines = [
     "### Agentic PR Review",
     "",
@@ -99785,8 +99972,12 @@ async function writeSummary(input) {
     `- Current head: ${input.target.headSha}`,
     `- Prompt sha256: ${input.promptSha256}`,
     `- Prompt bytes: ${input.promptBytes}`,
+    `- Observed turns: ${input.runtimeResult.observedTurns ?? "n/a"} / max ${maxTurns}`,
     `- Usage: ${usage}`,
     `- Usage budget: ${budgetStatus}`,
+    `- Lineage turns: ${input.runtimeResult.lineageTotals.observedTurns ?? "n/a"}`,
+    `- Lineage usage: ${lineageUsage}`,
+    `- Lineage source: ${lineageSourceDetail}`,
     `- Compare URL: ${input.compareUrl ?? "n/a"}`,
     `- Sticky comment: ${input.commentUrl || "not requested"}`,
     `- State artifact: ${input.artifactName}`,

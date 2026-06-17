@@ -3,6 +3,7 @@ import {
   type LineageReason,
   type Phase,
   type ReviewTarget,
+  type RuntimeLineageTotals,
   type RuntimeUsage,
 } from './types.js';
 import { truncateText } from './utils.js';
@@ -59,7 +60,10 @@ export interface LineageCommentInput {
   runId: number;
   runAttempt: number;
   lineageReason: LineageReason;
-  usage?: RuntimeUsage;
+  usage?: RuntimeUsage | null;
+  observedTurns?: number | null;
+  maxTurns?: number;
+  lineageTotals?: RuntimeLineageTotals;
   maxReviewChars: number;
 }
 
@@ -200,6 +204,8 @@ export function buildLineageCommentBody(
     `| State artifact | \`${input.artifactName}\` |`,
     `| Run | ${runValue} |`,
     `| Usage | ${formatUsage(input.usage)} |`,
+    `| Turns | ${formatTurns(input.observedTurns, input.maxTurns)} |`,
+    `| Lineage | ${input.lineageTotals ? formatLineageTable(input.lineageTotals) : 'not available'} |`,
     '',
   ].join('\n');
 
@@ -380,16 +386,36 @@ function extractAllBlocks(body: string, startMarker: string, endMarker: string):
   return result;
 }
 
-function formatUsage(usage: RuntimeUsage | undefined): string {
+function formatUsage(usage: RuntimeUsage | undefined | null): string {
   if (!usage) {
     return 'not exposed';
   }
   return [
-    `cache_read=${usage.cacheReadInputTokens ?? usage.promptCacheHitTokens ?? 'n/a'}`,
-    `cache_creation=${usage.cacheCreationInputTokens ?? 'n/a'}`,
-    `input=${usage.inputTokens ?? 'n/a'}`,
-    `output=${usage.outputTokens ?? 'n/a'}`,
+    `cache_read=${usage.cacheReadInputTokens}`,
+    `cache_creation=${usage.cacheCreationInputTokens}`,
+    `input=${usage.inputTokens}`,
+    `output=${usage.outputTokens}`,
   ].join(', ');
+}
+
+function formatLineageTable(lineage: RuntimeLineageTotals): string {
+  return [
+    `turns=${lineage.observedTurns ?? 'n/a'}`,
+    `input=${lineage.usage.inputTokens}`,
+    `cache_read=${lineage.usage.cacheReadInputTokens}`,
+    `output=${lineage.usage.outputTokens}`,
+  ].join(', ');
+}
+
+function formatTurns(
+  observedTurns: number | null | undefined,
+  maxTurns: number | undefined,
+): string {
+  if (observedTurns === null || observedTurns === undefined) {
+    return 'not exposed';
+  }
+  const max = maxTurns !== undefined ? ` / max ${maxTurns}` : '';
+  return `${observedTurns}${max}`;
 }
 
 function repositoryFromUrl(url: string): string | undefined {

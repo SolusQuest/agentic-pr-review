@@ -94,7 +94,10 @@ export interface RestoredState {
   runtimeProvider: RuntimeProvider;
   reviewedHeadSha?: string;
   createdAt?: string;
-  usage?: RuntimeUsage;
+  usage: RuntimeUsage | null;
+  observedTurns?: number | null;
+  observedTurnSource?: string;
+  lineageTotals?: RuntimeLineageTotals;
   manifestPath: string;
 }
 
@@ -105,16 +108,38 @@ export interface RuntimeResult {
   debugFiles: string[];
   toolMode: ToolMode;
   allowedTools: string[];
-  usage?: RuntimeUsage;
+  observedTurns: number | null;
+  observedTurnSource: 'unique_assistant_message_ids' | 'not_applicable' | 'unavailable';
+  usage: RuntimeUsage | null;
   usageBudgetStatus: UsageBudgetStatus;
+  lineageTotals: RuntimeLineageTotals;
 }
 
 export interface RuntimeUsage {
-  inputTokens?: number;
-  cacheReadInputTokens?: number;
-  promptCacheHitTokens?: number;
-  cacheCreationInputTokens?: number;
-  outputTokens?: number;
+  inputTokens: number;
+  cacheReadInputTokens: number;
+  cacheCreationInputTokens: number;
+  outputTokens: number;
+  recordsObserved: number;
+}
+
+export interface RuntimeUsageTotals {
+  inputTokens: number;
+  cacheReadInputTokens: number;
+  cacheCreationInputTokens: number;
+  outputTokens: number;
+}
+
+export interface RuntimeLineageTotals {
+  observedTurns: number | null;
+  usage: RuntimeUsageTotals;
+  source:
+    | 'current_run_only'
+    | 'restored_manifest_plus_current_run'
+    | 'restored_manifest_preserved_for_skipped'
+    | 'legacy_manifest_fallback'
+    | 'unavailable';
+  partial: boolean;
 }
 
 export interface UploadedArtifact {

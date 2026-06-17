@@ -130,35 +130,66 @@ reviewed head by immutable SHA into the review workspace before running the acti
 
 Usage watchdogs parse Claude Code `stream-json` usage records during the live run. Delta-style usage
 records are summed; cumulative records replace earlier cumulative totals and take precedence. Cache-hit
-aliases such as `prompt_cache_hit_tokens` count as cached input. Missing categories are treated as zero,
-so a budget only constrains categories observed or inferred from the stream. If a non-zero budget is
-exceeded, the action terminates the process and fails with a sanitized `usage_budget_exceeded`
-diagnostic. If any usage budget is non-zero and the live runtime exposes no usage records, the action
+field names such as `prompt_cache_hit_tokens` are normalized into `cache_read_input_tokens`. Missing
+categories are treated as zero, so a budget only constrains categories observed or inferred from the
+stream. If a non-zero budget is exceeded, the action terminates the process and fails with a sanitized
+`usage_budget_exceeded` diagnostic. If any usage budget is non-zero and the live runtime exposes no usage records, the action
 fails closed after the run. The watchdog acts after observed usage, so it stops later turns but cannot
 preempt the provider call that emitted the over-budget usage record.
 
 ## Outputs
 
-| Output                    | Notes                                                               |
-| ------------------------- | ------------------------------------------------------------------- |
-| `state_key`               | Resolved state key                                                  |
-| `review_mode`             | Requested review mode                                               |
-| `phase`                   | Actual phase: `bootstrap` or `incremental`                          |
-| `review_phase`            | Provider result: `bootstrap`, `incremental`, or `skipped-identical` |
-| `runtime_provider`        | Runtime used                                                        |
-| `session_id`              | Runtime session id                                                  |
-| `reviewed_head_sha`       | Reviewed target head SHA                                            |
-| `artifact_name`           | Uploaded state artifact name                                        |
-| `artifact_id`             | Uploaded state artifact id when available                           |
-| `artifact_url`            | Uploaded state artifact URL when available                          |
-| `artifact_retention_days` | Effective retention                                                 |
-| `review_markdown_path`    | Bounded review markdown path                                        |
-| `comment_url`             | Sticky comment URL when comment posting is enabled                  |
-| `lineage_action`          | Sticky comment lineage action                                       |
-| `lineage_reason`          | Sticky comment lineage reason                                       |
-| `debug_artifact_name`     | Restricted diagnostic artifact name when enabled                    |
-| `debug_artifact_id`       | Restricted diagnostic artifact id when enabled                      |
-| `debug_artifact_url`      | Restricted diagnostic artifact URL when enabled                     |
+| Output                                      | Notes                                                                                 |
+| ------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `state_key`                                 | Resolved state key                                                                    |
+| `review_mode`                               | Requested review mode                                                                 |
+| `phase`                                     | Actual phase: `bootstrap` or `incremental`                                            |
+| `review_phase`                              | Provider result: `bootstrap`, `incremental`, or `skipped-identical`                   |
+| `runtime_provider`                          | Runtime used                                                                          |
+| `session_id`                                | Runtime session id                                                                    |
+| `reviewed_head_sha`                         | Reviewed target head SHA                                                              |
+| `artifact_name`                             | Uploaded state artifact name                                                          |
+| `artifact_id`                               | Uploaded state artifact id when available                                             |
+| `artifact_url`                              | Uploaded state artifact URL when available                                            |
+| `artifact_retention_days`                   | Effective retention                                                                   |
+| `review_markdown_path`                      | Bounded review markdown path                                                          |
+| `comment_url`                               | Sticky comment URL when comment posting is enabled                                    |
+| `lineage_action`                            | Sticky comment lineage action                                                         |
+| `lineage_reason`                            | Sticky comment lineage reason                                                         |
+| `debug_artifact_name`                       | Restricted diagnostic artifact name when enabled                                      |
+| `debug_artifact_id`                         | Restricted diagnostic artifact id when enabled                                        |
+| `debug_artifact_url`                        | Restricted diagnostic artifact URL when enabled                                       |
+| `observed_turns`                            | Current-run observed agent turns (empty string when unavailable)                      |
+| `observed_turn_source`                      | Turn count source: `unique_assistant_message_ids`, `not_applicable`, or `unavailable` |
+| `lineage_observed_turns`                    | Lineage cumulative observed turns                                                     |
+| `lineage_totals_source`                     | Lineage data source                                                                   |
+| `lineage_totals_partial`                    | Whether lineage totals are partial (legacy manifest)                                  |
+| `lineage_usage_input_tokens`                | Lineage cumulative input tokens                                                       |
+| `lineage_usage_cache_read_input_tokens`     | Lineage cumulative cache-read tokens                                                  |
+| `lineage_usage_cache_creation_input_tokens` | Lineage cumulative cache-creation tokens                                              |
+| `lineage_usage_output_tokens`               | Lineage cumulative output tokens                                                      |
+
+## Observed Turns and Lineage Totals
+
+The action tracks agent turns and cumulative lineage totals across review runs.
+
+**Current-run turn tracking**: The action counts distinct assistant message IDs from the
+`stream-json` output. Each top-level `type: "assistant"` record contributes its `message.id`
+to a distinct set. The count is exposed as `observed_turns` (null when no assistant records
+are observed) with `observed_turn_source` set to `unique_assistant_message_ids`,
+`not_applicable` (test runtime), or `unavailable`.
+
+**Lineage totals** accumulate turns and token usage across runs within a review lineage:
+
+- `current_run_only` -- bootstrap or first run in a lineage
+- `restored_manifest_plus_current_run` -- incremental run adding current to prior lineage totals
+- `restored_manifest_preserved_for_skipped` -- skipped-identical; prior lineage preserved unchanged
+- `legacy_manifest_fallback` -- old manifest without lineage data; partial totals from current run only
+- `unavailable` -- no data available
+
+**Token field normalization**: The `cacheReadInputTokens` field is the normalized cache-hit
+total. The legacy `prompt_cache_hit_tokens` field name in stream records is read and normalized
+into `cacheReadInputTokens` but is no longer exposed separately.
 
 ## State Artifacts
 

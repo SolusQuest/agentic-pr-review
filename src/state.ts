@@ -7,6 +7,7 @@ import {
   type Phase,
   type RestoredState,
   type ReviewTarget,
+  type RuntimeLineageTotals,
   type RuntimeResult,
   type RuntimeUsage,
 } from './types.js';
@@ -33,7 +34,10 @@ interface StateManifest {
   promptSha256: string;
   createdAt: string;
   updatedAt: string;
-  usage?: RuntimeUsage;
+  usage: RuntimeUsage | null;
+  observedTurns?: number | null;
+  observedTurnSource?: string;
+  lineageTotals?: RuntimeLineageTotals;
   usageBudgetStatus: RuntimeResult['usageBudgetStatus'];
   contextBlocks: Array<Pick<LoadedBlock, 'name' | 'source' | 'bytes' | 'sha256'>>;
   target: {
@@ -64,7 +68,18 @@ export async function readRestoredState(root: string): Promise<RestoredState> {
     runtimeProvider: manifest.runtimeProvider,
     reviewedHeadSha: manifest.reviewedHeadSha,
     createdAt: manifest.createdAt,
-    usage: manifest.usage,
+    usage: manifest.usage
+      ? {
+          inputTokens: manifest.usage.inputTokens ?? 0,
+          cacheReadInputTokens: manifest.usage.cacheReadInputTokens ?? 0,
+          cacheCreationInputTokens: manifest.usage.cacheCreationInputTokens ?? 0,
+          outputTokens: manifest.usage.outputTokens ?? 0,
+          recordsObserved: manifest.usage.recordsObserved ?? 0,
+        }
+      : null,
+    observedTurns: manifest.observedTurns,
+    observedTurnSource: manifest.observedTurnSource,
+    lineageTotals: manifest.lineageTotals,
     manifestPath,
   };
 }
@@ -107,6 +122,9 @@ export async function writeStateBundle(options: {
     createdAt: options.createdAt ?? now,
     updatedAt: now,
     usage: options.runtimeResult.usage,
+    observedTurns: options.runtimeResult.observedTurns,
+    observedTurnSource: options.runtimeResult.observedTurnSource,
+    lineageTotals: options.runtimeResult.lineageTotals,
     usageBudgetStatus: options.runtimeResult.usageBudgetStatus,
     contextBlocks: options.blocks.map((block) => ({
       name: block.name,
