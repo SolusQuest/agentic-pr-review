@@ -6,8 +6,10 @@ import {
   type ActionConfig,
   type Phase,
   type RestoredState,
+  type RuntimeLineageTotals,
   type RuntimeResult,
   type RuntimeUsage,
+  type RuntimeUsageTotals,
   type ToolMode,
   type UsageBudgetLimits,
   type UsageBudgetStatus,
@@ -66,6 +68,12 @@ export class TestRuntime implements ReviewRuntime {
       })}\n${JSON.stringify({ type: 'result', session_id: sessionId, result: reviewMarkdown })}\n`,
     );
 
+    const lineageZeroUsage: RuntimeUsageTotals = {
+      inputTokens: 0,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      outputTokens: 0,
+    };
     return {
       sessionId,
       sessionName,
@@ -73,10 +81,19 @@ export class TestRuntime implements ReviewRuntime {
       debugFiles: [],
       toolMode: options.config.toolMode,
       allowedTools: [],
+      observedTurns: 0,
+      observedTurnSource: 'not_applicable',
+      usage: null,
       usageBudgetStatus: {
         status: 'not_applicable',
         limits: options.config.usageBudgetLimits,
         usageRecordsObserved: 0,
+      },
+      lineageTotals: {
+        observedTurns: 0,
+        usage: lineageZeroUsage,
+        source: 'current_run_only',
+        partial: false,
       },
     };
   }
@@ -106,6 +123,7 @@ export class ClaudeCodeRuntime implements ReviewRuntime {
 
     const allowedTools = allowedToolsForMode(options.config.toolMode);
     const usageTracker = new UsageTracker(options.config.usageBudgetLimits);
+    const turnIds = new Set<string>();
     const args = buildClaudeArgs({
       config: options.config,
       phase: options.phase,
@@ -120,7 +138,23 @@ export class ClaudeCodeRuntime implements ReviewRuntime {
       env,
       stdin: options.prompt,
       timeoutMs: 20 * 60 * 1000,
-      onStdoutLine: (line) => usageTracker.observeLine(line),
+      onStdoutLine: (line) => {
+        usageTracker.observeLine(line);
+        const parsed = safeParseJson(line);
+        if (parsed && typeof parsed === 'object') {
+          const record = parsed as Record<string, unknown>;
+          if (record.type === 'assistant') {
+            const msg = record.message;
+            if (msg && typeof msg === 'object') {
+              const msgObj = msg as Record<string, unknown>;
+              const id = msgObj.id;
+              if (typeof id === 'string') {
+                turnIds.add(id);
+              }
+            }
+          }
+        }
+      },
     });
     await writeFile(outputPath, result.stdout, 'utf8');
 
@@ -158,6 +192,11 @@ export class ClaudeCodeRuntime implements ReviewRuntime {
       debugFiles.push(...rawFiles);
     }
 
+    const observedTurns = turnIds.size > 0 ? turnIds.size : null;
+    const observedTurnSource: RuntimeResult['observedTurnSource'] =
+      turnIds.size > 0 ? 'unique_assistant_message_ids' : 'unavailable';
+    const lineageTotals = computeLineageTotals(options.restoredState, observedTurns, usage);
+
     return {
       sessionId: await discoverSessionId(outputPath, options.runtimeDir),
       sessionName,
@@ -165,10 +204,85 @@ export class ClaudeCodeRuntime implements ReviewRuntime {
       debugFiles,
       toolMode: options.config.toolMode,
       allowedTools,
+      observedTurns,
+      observedTurnSource,
       usage,
       usageBudgetStatus,
+      lineageTotals,
     };
   }
+}
+
+export function computeLineageTotals(
+  restoredState: RestoredState | undefined,
+  currentObservedTurns: number | null,
+  currentUsage: RuntimeUsage | null,
+): RuntimeLineageTotals {
+  const zeroTotals: RuntimeUsageTotals = {
+    inputTokens: 0,
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+    outputTokens: 0,
+  };
+
+  const priorLineage = restoredState?.lineageTotals;
+
+  // Bootstrap without prior lineage: current run only
+  if (!priorLineage) {
+    // Check for legacy manifest (restored state exists but no lineage data)
+    if (restoredState) {
+      return {
+        observedTurns: currentObservedTurns,
+        usage: currentUsage
+          ? {
+              inputTokens: currentUsage.inputTokens,
+              cacheReadInputTokens: currentUsage.cacheReadInputTokens,
+              cacheCreationInputTokens: currentUsage.cacheCreationInputTokens,
+              outputTokens: currentUsage.outputTokens,
+            }
+          : zeroTotals,
+        source: 'legacy_manifest_fallback',
+        partial: true,
+      };
+    }
+    return {
+      observedTurns: currentObservedTurns,
+      usage: currentUsage
+        ? {
+            inputTokens: currentUsage.inputTokens,
+            cacheReadInputTokens: currentUsage.cacheReadInputTokens,
+            cacheCreationInputTokens: currentUsage.cacheCreationInputTokens,
+            outputTokens: currentUsage.outputTokens,
+          }
+        : zeroTotals,
+      source: 'current_run_only',
+      partial: false,
+    };
+  }
+
+  // Prior lineage exists: add current to prior
+  const curTokens =
+    currentUsage ??
+    ({
+      inputTokens: 0,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      outputTokens: 0,
+    } as RuntimeUsage);
+
+  return {
+    observedTurns: (priorLineage.observedTurns ?? 0) + (currentObservedTurns ?? 0),
+    usage: {
+      inputTokens: priorLineage.usage.inputTokens + curTokens.inputTokens,
+      cacheReadInputTokens:
+        priorLineage.usage.cacheReadInputTokens + curTokens.cacheReadInputTokens,
+      cacheCreationInputTokens:
+        priorLineage.usage.cacheCreationInputTokens + curTokens.cacheCreationInputTokens,
+      outputTokens: priorLineage.usage.outputTokens + curTokens.outputTokens,
+    },
+    source: 'restored_manifest_plus_current_run',
+    partial: priorLineage.partial,
+  };
 }
 
 export function allowedToolsForMode(toolMode: ToolMode): string[] {
@@ -423,7 +537,7 @@ export async function extractReviewMarkdown(outputPath: string, maxChars: number
   return truncateText(selected || 'No review text was emitted by the runtime.', maxChars);
 }
 
-export async function parseUsage(outputPath: string): Promise<RuntimeUsage | undefined> {
+export async function parseUsage(outputPath: string): Promise<RuntimeUsage | null> {
   const output = await readFile(outputPath, 'utf8').catch(() => '');
   const tracker = new UsageTracker({
     maxUncachedInputTokens: 0,
@@ -440,7 +554,6 @@ interface UsageRecord {
   inputTokens?: number;
   cachedInputTokens?: number;
   cacheReadInputTokens?: number;
-  promptCacheHitTokens?: number;
   cacheCreationInputTokens?: number;
   outputTokens?: number;
   cumulative: boolean;
@@ -458,14 +571,13 @@ export class UsageBudgetExceededError extends Error {
 }
 
 export class UsageTracker {
-  private deltaUsage: Required<RuntimeUsage> = {
+  private deltaUsage: Required<Omit<RuntimeUsage, 'recordsObserved'>> = {
     inputTokens: 0,
     cacheReadInputTokens: 0,
-    promptCacheHitTokens: 0,
     cacheCreationInputTokens: 0,
     outputTokens: 0,
   };
-  private cumulativeUsage: Required<RuntimeUsage> | undefined;
+  private cumulativeUsage: Required<Omit<RuntimeUsage, 'recordsObserved'>> | undefined;
   private exceeded: UsageBudgetStatus['exceeded'];
   recordsObserved = 0;
 
@@ -486,7 +598,6 @@ export class UsageTracker {
     } else {
       this.deltaUsage.inputTokens += record.inputTokens ?? 0;
       this.deltaUsage.cacheReadInputTokens += record.cacheReadInputTokens ?? 0;
-      this.deltaUsage.promptCacheHitTokens += record.promptCacheHitTokens ?? 0;
       this.deltaUsage.cacheCreationInputTokens += record.cacheCreationInputTokens ?? 0;
       this.deltaUsage.outputTokens += record.outputTokens ?? 0;
     }
@@ -497,17 +608,17 @@ export class UsageTracker {
     }
   }
 
-  getUsage(): RuntimeUsage | undefined {
+  getUsage(): RuntimeUsage | null {
     if (this.recordsObserved === 0) {
-      return undefined;
+      return null;
     }
     const source = this.cumulativeUsage ?? this.deltaUsage;
     return {
       inputTokens: source.inputTokens,
       cacheReadInputTokens: source.cacheReadInputTokens,
-      promptCacheHitTokens: source.promptCacheHitTokens,
       cacheCreationInputTokens: source.cacheCreationInputTokens,
       outputTokens: source.outputTokens,
+      recordsObserved: this.recordsObserved,
     };
   }
 
@@ -536,17 +647,17 @@ export class UsageTracker {
       {
         category: 'uncached_input',
         limit: this.limits.maxUncachedInputTokens,
-        observed: usage.inputTokens ?? 0,
+        observed: usage.inputTokens,
       },
       {
         category: 'cached_input',
         limit: this.limits.maxCachedInputTokens,
-        observed: usage.cacheReadInputTokens ?? usage.promptCacheHitTokens ?? 0,
+        observed: usage.cacheReadInputTokens,
       },
       {
         category: 'output',
         limit: this.limits.maxOutputTokens,
-        observed: usage.outputTokens ?? 0,
+        observed: usage.outputTokens,
       },
     ];
     return checks.find((check) => check && check.limit > 0 && check.observed > check.limit);
@@ -562,13 +673,12 @@ function hasUsageBudget(limits: UsageBudgetLimits): boolean {
 }
 
 function mergeCumulativeUsage(
-  current: Required<RuntimeUsage> | undefined,
+  current: Required<Omit<RuntimeUsage, 'recordsObserved'>> | undefined,
   record: UsageRecord,
-): Required<RuntimeUsage> {
+): Required<Omit<RuntimeUsage, 'recordsObserved'>> {
   return {
     inputTokens: record.inputTokens ?? current?.inputTokens ?? 0,
     cacheReadInputTokens: record.cacheReadInputTokens ?? current?.cacheReadInputTokens ?? 0,
-    promptCacheHitTokens: record.promptCacheHitTokens ?? current?.promptCacheHitTokens ?? 0,
     cacheCreationInputTokens:
       record.cacheCreationInputTokens ?? current?.cacheCreationInputTokens ?? 0,
     outputTokens: record.outputTokens ?? current?.outputTokens ?? 0,
@@ -610,7 +720,6 @@ function extractUsageRecord(value: unknown): UsageRecord | undefined {
     inputTokens,
     cachedInputTokens,
     cacheReadInputTokens: cachedInputTokens,
-    promptCacheHitTokens: cachedInputTokens,
     cacheCreationInputTokens,
     outputTokens,
     cumulative: record.type === 'result' || record.subtype === 'success',

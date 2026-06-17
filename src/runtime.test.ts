@@ -5,11 +5,12 @@ import { describe, expect, it } from 'vitest';
 import {
   allowedToolsForMode,
   buildClaudeArgs,
+  computeLineageTotals,
   TestRuntime,
   UsageBudgetExceededError,
   UsageTracker,
 } from './runtime.js';
-import { type ActionConfig } from './types.js';
+import { type ActionConfig, type RestoredState } from './types.js';
 
 function observe(tracker: UsageTracker, value: unknown): void {
   tracker.observeLine(JSON.stringify(value));
@@ -152,7 +153,6 @@ describe('UsageTracker', () => {
     expect(tracker.getUsage()).toMatchObject({
       inputTokens: 30,
       cacheReadInputTokens: 0,
-      promptCacheHitTokens: 0,
       outputTokens: 10,
     });
   });
@@ -171,7 +171,6 @@ describe('UsageTracker', () => {
     });
     expect(tracker.getUsage()).toMatchObject({
       cacheReadInputTokens: 100,
-      promptCacheHitTokens: 100,
       cacheCreationInputTokens: 25,
     });
   });
@@ -225,5 +224,171 @@ describe('UsageTracker', () => {
       status: 'within_limit',
       usageRecordsObserved: 0,
     });
+  });
+
+  it('returns null getUsage() when no records observed', () => {
+    const tracker = disabledTracker();
+    expect(tracker.getUsage()).toBeNull();
+  });
+
+  it('includes recordsObserved in getUsage() result', () => {
+    const tracker = disabledTracker();
+    observe(tracker, {
+      type: 'result',
+      usage: { input_tokens: 30, output_tokens: 10 },
+    });
+    const usage = tracker.getUsage();
+    expect(usage).not.toBeNull();
+    expect(usage!.recordsObserved).toBe(1);
+  });
+});
+
+describe('TestRuntime', () => {
+  it('returns null usage and not_applicable turn source', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'agentic-pr-review-runtime-'));
+    try {
+      const config: ActionConfig = {
+        runtimeProvider: 'test',
+        targetMode: 'synthetic-fixture',
+        reviewMode: 'auto',
+        artifactRetentionDays: 7,
+        postComment: false,
+        apiKeyMode: 'auth-token',
+        toolMode: 'none',
+        claudeMaxTurns: 6,
+        maxContextChars: 1000,
+        maxPatchChars: 1000,
+        maxReviewChars: 1000,
+        usageBudgetLimits: {
+          maxUncachedInputTokens: 0,
+          maxCachedInputTokens: 0,
+          maxOutputTokens: 0,
+        },
+        disablePromptCaching: false,
+        debugCaptureRawApiBodies: false,
+        githubToken: 'token',
+      };
+      const result = await new TestRuntime().run({
+        config,
+        phase: 'bootstrap',
+        stateKey: 'synthetic',
+        prompt: 'review',
+        promptHash: 'hash',
+        workspace: dir,
+        tempDir: dir,
+        runtimeDir: path.join(dir, 'runtime'),
+      });
+      expect(result.observedTurns).toBe(0);
+      expect(result.observedTurnSource).toBe('not_applicable');
+      expect(result.usage).toBeNull();
+      expect(result.lineageTotals.source).toBe('current_run_only');
+      expect(result.lineageTotals.observedTurns).toBe(0);
+      expect(result.lineageTotals.partial).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('computeLineageTotals', () => {
+  it('returns current_run_only for bootstrap without prior state', () => {
+    const result = computeLineageTotals(undefined, 3, {
+      inputTokens: 100,
+      cacheReadInputTokens: 50,
+      cacheCreationInputTokens: 25,
+      outputTokens: 30,
+      recordsObserved: 1,
+    });
+    expect(result.source).toBe('current_run_only');
+    expect(result.observedTurns).toBe(3);
+    expect(result.usage.inputTokens).toBe(100);
+    expect(result.partial).toBe(false);
+  });
+
+  it('returns restored_manifest_plus_current_run for incremental with prior lineage', () => {
+    const restoredState: RestoredState = {
+      stateKey: 'test',
+      sessionId: 's1',
+      sessionName: 'sn',
+      runtimeProvider: 'test',
+      usage: null,
+      manifestPath: '',
+      lineageTotals: {
+        observedTurns: 5,
+        usage: {
+          inputTokens: 200,
+          cacheReadInputTokens: 100,
+          cacheCreationInputTokens: 50,
+          outputTokens: 60,
+        },
+        source: 'current_run_only',
+        partial: false,
+      },
+    };
+    const result = computeLineageTotals(restoredState, 3, {
+      inputTokens: 100,
+      cacheReadInputTokens: 50,
+      cacheCreationInputTokens: 25,
+      outputTokens: 30,
+      recordsObserved: 1,
+    });
+    expect(result.source).toBe('restored_manifest_plus_current_run');
+    expect(result.observedTurns).toBe(8);
+    expect(result.usage.inputTokens).toBe(300);
+    expect(result.usage.cacheReadInputTokens).toBe(150);
+    expect(result.usage.outputTokens).toBe(90);
+    expect(result.partial).toBe(false);
+  });
+
+  it('treats null current usage as zero for lineage math', () => {
+    const restoredState: RestoredState = {
+      stateKey: 'test',
+      sessionId: 's1',
+      sessionName: 'sn',
+      runtimeProvider: 'test',
+      usage: null,
+      manifestPath: '',
+      lineageTotals: {
+        observedTurns: 5,
+        usage: {
+          inputTokens: 200,
+          cacheReadInputTokens: 100,
+          cacheCreationInputTokens: 50,
+          outputTokens: 60,
+        },
+        source: 'current_run_only',
+        partial: false,
+      },
+    };
+    const result = computeLineageTotals(restoredState, null, null);
+    expect(result.observedTurns).toBe(5);
+    expect(result.usage.inputTokens).toBe(200);
+  });
+
+  it('detects legacy manifest fallback', () => {
+    const restoredState: RestoredState = {
+      stateKey: 'test',
+      sessionId: 's1',
+      sessionName: 'sn',
+      runtimeProvider: 'test',
+      usage: {
+        inputTokens: 50,
+        cacheReadInputTokens: 20,
+        cacheCreationInputTokens: 10,
+        outputTokens: 15,
+        recordsObserved: 0,
+      },
+      manifestPath: '',
+    };
+    const result = computeLineageTotals(restoredState, 3, {
+      inputTokens: 100,
+      cacheReadInputTokens: 50,
+      cacheCreationInputTokens: 25,
+      outputTokens: 30,
+      recordsObserved: 1,
+    });
+    expect(result.source).toBe('legacy_manifest_fallback');
+    expect(result.partial).toBe(true);
+    expect(result.observedTurns).toBe(3);
   });
 });

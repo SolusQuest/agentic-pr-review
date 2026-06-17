@@ -146,6 +146,24 @@ outputs:
     description: Restricted diagnostic artifact id when debug capture is enabled.
   debug_artifact_url:
     description: Restricted diagnostic artifact URL when debug capture is enabled.
+  observed_turns:
+    description: 'Current-run observed agent turns'
+  observed_turn_source:
+    description: 'Turn count source: unique_assistant_message_ids, not_applicable, or unavailable'
+  lineage_observed_turns:
+    description: 'Lineage cumulative observed turns'
+  lineage_totals_source:
+    description: 'Lineage data source'
+  lineage_totals_partial:
+    description: 'Whether lineage totals are partial (legacy manifest)'
+  lineage_usage_input_tokens:
+    description: 'Lineage cumulative input tokens'
+  lineage_usage_cache_read_input_tokens:
+    description: 'Lineage cumulative cache-read tokens'
+  lineage_usage_cache_creation_input_tokens:
+    description: 'Lineage cumulative cache-creation tokens'
+  lineage_usage_output_tokens:
+    description: 'Lineage cumulative output tokens'
 
 runs:
   using: node24

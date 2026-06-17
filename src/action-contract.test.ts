@@ -25,6 +25,15 @@ describe('action contract', () => {
       'artifact_name',
       'review_phase',
       'review_markdown_path',
+      'observed_turns',
+      'observed_turn_source',
+      'lineage_observed_turns',
+      'lineage_totals_source',
+      'lineage_totals_partial',
+      'lineage_usage_input_tokens',
+      'lineage_usage_cache_read_input_tokens',
+      'lineage_usage_cache_creation_input_tokens',
+      'lineage_usage_output_tokens',
     ]) {
       expect(action).toContain(name);
     }

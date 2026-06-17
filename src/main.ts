@@ -8,6 +8,7 @@ import { upsertLineageComment } from './comments.js';
 import { buildReviewPrompt } from './prompt.js';
 import {
   allowedToolsForMode,
+  computeLineageTotals,
   createRuntime,
   defaultTempDir,
   restoreRuntimeState,
@@ -199,6 +200,7 @@ export async function run(): Promise<void> {
     lineageAction: comment.lineageAction,
     lineageReason: comment.lineageReason,
     debugArtifact,
+    runtimeResult,
   });
 
   await writeSummary({
@@ -325,6 +327,7 @@ async function finishSkippedIdentical(options: {
   runtimeDir: string;
   restoredState: RestoredState;
 }): Promise<void> {
+  const lineageTotals = computeLineageTotals(options.restoredState, 0, null);
   const runtimeResult: RuntimeResult = {
     sessionId: options.restoredState.sessionId,
     sessionName: options.restoredState.sessionName,
@@ -332,11 +335,17 @@ async function finishSkippedIdentical(options: {
     debugFiles: [],
     toolMode: options.config.toolMode,
     allowedTools: allowedToolsForMode(options.config.toolMode),
-    usage: options.restoredState.usage,
+    observedTurns: 0,
+    observedTurnSource: 'not_applicable',
+    usage: null,
     usageBudgetStatus: {
       status: 'not_applicable',
       limits: options.config.usageBudgetLimits,
       usageRecordsObserved: 0,
+    },
+    lineageTotals: {
+      ...lineageTotals,
+      source: 'restored_manifest_preserved_for_skipped',
     },
   };
   const bundleDir = path.join(defaultTempDir(), 'agentic-pr-review', 'state-bundle');
@@ -371,6 +380,7 @@ async function finishSkippedIdentical(options: {
     commentUrl: 'skipped-identical',
     lineageAction: '',
     lineageReason: '',
+    runtimeResult,
   });
   await writeSummary({
     config: options.config,
@@ -438,6 +448,9 @@ async function maybePostComment(options: {
       runAttempt: github.context.runAttempt,
       lineageReason: options.lineageReason,
       usage: options.runtimeResult.usage,
+      observedTurns: options.runtimeResult.observedTurns,
+      maxTurns: options.config.claudeMaxTurns,
+      lineageTotals: options.runtimeResult.lineageTotals,
       maxReviewChars: options.config.maxReviewChars,
     });
     return {
@@ -483,6 +496,7 @@ function setOutputs(options: {
   lineageAction: string;
   lineageReason: string;
   debugArtifact?: UploadedArtifact;
+  runtimeResult?: RuntimeResult;
 }): void {
   core.setOutput('state_key', options.stateKey);
   core.setOutput('review_mode', options.reviewMode);
@@ -499,6 +513,32 @@ function setOutputs(options: {
   core.setOutput('comment_url', options.commentUrl);
   core.setOutput('lineage_action', options.lineageAction);
   core.setOutput('lineage_reason', options.lineageReason);
+  if (options.runtimeResult) {
+    core.setOutput('observed_turns', String(options.runtimeResult.observedTurns ?? ''));
+    core.setOutput('observed_turn_source', options.runtimeResult.observedTurnSource);
+    core.setOutput(
+      'lineage_observed_turns',
+      String(options.runtimeResult.lineageTotals.observedTurns ?? ''),
+    );
+    core.setOutput('lineage_totals_source', options.runtimeResult.lineageTotals.source);
+    core.setOutput('lineage_totals_partial', String(options.runtimeResult.lineageTotals.partial));
+    core.setOutput(
+      'lineage_usage_input_tokens',
+      String(options.runtimeResult.lineageTotals.usage.inputTokens),
+    );
+    core.setOutput(
+      'lineage_usage_cache_read_input_tokens',
+      String(options.runtimeResult.lineageTotals.usage.cacheReadInputTokens),
+    );
+    core.setOutput(
+      'lineage_usage_cache_creation_input_tokens',
+      String(options.runtimeResult.lineageTotals.usage.cacheCreationInputTokens),
+    );
+    core.setOutput(
+      'lineage_usage_output_tokens',
+      String(options.runtimeResult.lineageTotals.usage.outputTokens),
+    );
+  }
   if (options.debugArtifact) {
     core.setOutput('debug_artifact_name', options.debugArtifact.name);
     core.setOutput('debug_artifact_id', options.debugArtifact.id ?? '');
@@ -526,17 +566,27 @@ async function writeSummary(input: {
     : 'no';
   const usage = input.runtimeResult.usage
     ? [
-        `cache_read=${input.runtimeResult.usage.cacheReadInputTokens ?? input.runtimeResult.usage.promptCacheHitTokens ?? 'n/a'}`,
-        `cache_creation=${input.runtimeResult.usage.cacheCreationInputTokens ?? 'n/a'}`,
-        `input=${input.runtimeResult.usage.inputTokens ?? 'n/a'}`,
-        `output=${input.runtimeResult.usage.outputTokens ?? 'n/a'}`,
+        `cache_read=${input.runtimeResult.usage.cacheReadInputTokens}`,
+        `cache_creation=${input.runtimeResult.usage.cacheCreationInputTokens}`,
+        `input=${input.runtimeResult.usage.inputTokens}`,
+        `output=${input.runtimeResult.usage.outputTokens}`,
       ].join(', ')
     : 'not exposed';
+  const lineageUsage = [
+    `cache_read=${input.runtimeResult.lineageTotals.usage.cacheReadInputTokens}`,
+    `cache_creation=${input.runtimeResult.lineageTotals.usage.cacheCreationInputTokens}`,
+    `input=${input.runtimeResult.lineageTotals.usage.inputTokens}`,
+    `output=${input.runtimeResult.lineageTotals.usage.outputTokens}`,
+  ].join(', ');
+  const lineageSourceDetail = input.runtimeResult.lineageTotals.partial
+    ? `${input.runtimeResult.lineageTotals.source}, partial`
+    : `${input.runtimeResult.lineageTotals.source}, complete`;
   const allowedTools =
     input.runtimeResult.allowedTools.length > 0
       ? input.runtimeResult.allowedTools.join(', ')
       : 'none';
   const budgetStatus = formatUsageBudgetStatus(input.runtimeResult.usageBudgetStatus);
+  const maxTurns = input.config.claudeMaxTurns;
   const lines = [
     '### Agentic PR Review',
     '',
@@ -553,8 +603,12 @@ async function writeSummary(input: {
     `- Current head: ${input.target.headSha}`,
     `- Prompt sha256: ${input.promptSha256}`,
     `- Prompt bytes: ${input.promptBytes}`,
+    `- Observed turns: ${input.runtimeResult.observedTurns ?? 'n/a'} / max ${maxTurns}`,
     `- Usage: ${usage}`,
     `- Usage budget: ${budgetStatus}`,
+    `- Lineage turns: ${input.runtimeResult.lineageTotals.observedTurns ?? 'n/a'}`,
+    `- Lineage usage: ${lineageUsage}`,
+    `- Lineage source: ${lineageSourceDetail}`,
     `- Compare URL: ${input.compareUrl ?? 'n/a'}`,
     `- Sticky comment: ${input.commentUrl || 'not requested'}`,
     `- State artifact: ${input.artifactName}`,
