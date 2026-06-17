@@ -9,3 +9,5 @@ real checkout workspace files during a same-repo PR review.
 - Validates: Raw debug artifact is disabled.
 
 This file contains only public-safe content.
+
+- Incremental validation line: This confirms the second commit changes are detected.
