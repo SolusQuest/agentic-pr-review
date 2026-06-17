@@ -98626,7 +98626,7 @@ function computeLineageTotals(restoredState, currentObservedTurns, currentUsage)
         outputTokens: currentUsage.outputTokens
       } : zeroTotals,
       source: "current_run_only",
-      partial: false
+      partial: currentObservedTurns === null
     };
   }
   const curTokens = currentUsage ?? {
@@ -98645,7 +98645,7 @@ function computeLineageTotals(restoredState, currentObservedTurns, currentUsage)
       outputTokens: priorLineage.usage.outputTokens + curTokens.outputTokens
     },
     source: "restored_manifest_plus_current_run",
-    partial: priorLineage.partial
+    partial: priorLineage.partial || currentObservedTurns === null
   };
 }
 function preserveLineageTotalsForSkipped(restoredState) {
@@ -99224,7 +99224,7 @@ async function writeStateBundle(options) {
     promptSha256: options.promptSha256,
     createdAt: options.createdAt ?? now,
     updatedAt: now,
-    usage: options.runtimeResult.usage ?? void 0,
+    usage: options.runtimeResult.usage,
     observedTurns: options.runtimeResult.observedTurns,
     observedTurnSource: options.runtimeResult.observedTurnSource,
     lineageTotals: options.runtimeResult.lineageTotals,

@@ -242,7 +242,7 @@ export function computeLineageTotals(
           }
         : zeroTotals,
       source: 'current_run_only',
-      partial: false,
+      partial: currentObservedTurns === null,
     };
   }
 
@@ -274,7 +274,7 @@ export function computeLineageTotals(
       outputTokens: priorLineage.usage.outputTokens + curTokens.outputTokens,
     },
     source: 'restored_manifest_plus_current_run',
-    partial: priorLineage.partial,
+    partial: priorLineage.partial || currentObservedTurns === null,
   };
 }
 

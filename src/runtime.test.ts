@@ -457,6 +457,7 @@ describe('computeLineageTotals', () => {
     };
     const result = computeLineageTotals(restoredState, null, null);
     expect(result.observedTurns).toBeNull();
+    expect(result.partial).toBe(true);
     expect(result.usage.inputTokens).toBe(200);
   });
 

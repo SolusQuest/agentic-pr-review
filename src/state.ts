@@ -34,7 +34,7 @@ interface StateManifest {
   promptSha256: string;
   createdAt: string;
   updatedAt: string;
-  usage?: RuntimeUsage;
+  usage: RuntimeUsage | null;
   observedTurns?: number | null;
   observedTurnSource?: string;
   lineageTotals?: RuntimeLineageTotals;
@@ -121,7 +121,7 @@ export async function writeStateBundle(options: {
     promptSha256: options.promptSha256,
     createdAt: options.createdAt ?? now,
     updatedAt: now,
-    usage: options.runtimeResult.usage ?? undefined,
+    usage: options.runtimeResult.usage,
     observedTurns: options.runtimeResult.observedTurns,
     observedTurnSource: options.runtimeResult.observedTurnSource,
     lineageTotals: options.runtimeResult.lineageTotals,

@@ -159,7 +159,7 @@ preempt the provider call that emitted the over-budget usage record.
 | `debug_artifact_name`                       | Restricted diagnostic artifact name when enabled                                      |
 | `debug_artifact_id`                         | Restricted diagnostic artifact id when enabled                                        |
 | `debug_artifact_url`                        | Restricted diagnostic artifact URL when enabled                                       |
-| `observed_turns`                            | Current-run observed agent turns                                                      |
+| `observed_turns`                            | Current-run observed agent turns (empty string when unavailable)                      |
 | `observed_turn_source`                      | Turn count source: `unique_assistant_message_ids`, `not_applicable`, or `unavailable` |
 | `lineage_observed_turns`                    | Lineage cumulative observed turns                                                     |
 | `lineage_totals_source`                     | Lineage data source                                                                   |
