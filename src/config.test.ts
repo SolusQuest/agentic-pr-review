@@ -21,6 +21,8 @@ describe('parseActionConfig', () => {
     expect(config.apiKeyMode).toBe('auth-token');
     expect(config.toolMode).toBe('none');
     expect(config.claudeMaxTurns).toBe(6);
+    expect(config.maxFindings).toBe(50);
+    expect(config.testRuntimeFixture).toBe('valid');
     expect(config.usageBudgetLimits).toEqual({
       maxUncachedInputTokens: 0,
       maxCachedInputTokens: 0,
@@ -50,6 +52,19 @@ describe('parseActionConfig', () => {
     });
   });
 
+  it('parses structured fixture selector and finding cap', () => {
+    const config = parseActionConfig(
+      new Inputs({
+        test_runtime_fixture: 'many_findings',
+        max_findings: '12',
+      }),
+      baseEnv,
+      'pull_request',
+    );
+    expect(config.testRuntimeFixture).toBe('many_findings');
+    expect(config.maxFindings).toBe(12);
+  });
+
   it('rejects invalid tool mode and claude turn values', () => {
     expect(() =>
       parseActionConfig(new Inputs({ tool_mode: 'write' }), baseEnv, 'pull_request'),
@@ -60,6 +75,12 @@ describe('parseActionConfig', () => {
     expect(() =>
       parseActionConfig(new Inputs({ max_uncached_input_tokens: '-1' }), baseEnv, 'pull_request'),
     ).toThrow(/max_uncached_input_tokens must be an integer/);
+    expect(() =>
+      parseActionConfig(new Inputs({ max_findings: '0' }), baseEnv, 'pull_request'),
+    ).toThrow(/max_findings must be a positive integer/);
+    expect(() =>
+      parseActionConfig(new Inputs({ test_runtime_fixture: 'unknown' }), baseEnv, 'pull_request'),
+    ).toThrow(/test_runtime_fixture must be one of/);
   });
 
   it('parses explicit prompt caching disable switch', () => {

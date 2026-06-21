@@ -5,6 +5,8 @@ import {
   type ReviewTarget,
   type RuntimeLineageTotals,
   type RuntimeUsage,
+  type StructuredFindingV1,
+  type StructuredReviewEnvelopeV1,
 } from './types.js';
 import { truncateText } from './utils.js';
 
@@ -49,7 +51,7 @@ export interface LineageCommentInput {
   repo: string;
   prNumber: number;
   target: ReviewTarget;
-  reviewMarkdown: string;
+  structuredReview: StructuredReviewEnvelopeV1;
   stateKey: string;
   phase: Phase;
   runtimeProvider: string;
@@ -69,13 +71,13 @@ export interface LineageCommentInput {
 
 export function buildStickyComment(
   target: ReviewTarget,
-  reviewMarkdown: string,
+  structuredReview: StructuredReviewEnvelopeV1,
   stateKey: string,
 ): string {
   return buildLineageCommentBody(
     {
       target,
-      reviewMarkdown,
+      structuredReview,
       stateKey,
       phase: 'bootstrap',
       runtimeProvider: 'test',
@@ -206,18 +208,132 @@ export function buildLineageCommentBody(
     `| Usage | ${formatUsage(input.usage)} |`,
     `| Turns | ${formatTurns(input.observedTurns, input.maxTurns)} |`,
     `| Lineage | ${input.lineageTotals ? formatLineageTable(input.lineageTotals) : 'not available'} |`,
+    `| Findings | ${formatFindingCounts(input.structuredReview)} |`,
     '',
   ].join('\n');
 
+  const renderedReviewMarkdown = renderStructuredReviewMarkdown(input.structuredReview);
+  if (renderedReviewMarkdown.length > input.maxReviewChars) {
+    throw new Error(
+      `structured review markdown exceeds max_review_chars (${renderedReviewMarkdown.length}/${input.maxReviewChars}); cap the structured review before posting`,
+    );
+  }
   const currentBlock = [
     CURRENT_BLOCK_START,
     '### Current Review',
     '',
-    truncateText(input.reviewMarkdown, input.maxReviewChars),
+    renderedReviewMarkdown,
     CURRENT_BLOCK_END,
   ].join('\n');
   const historyBlock = buildHistoryBlock(action, existingMeta, existingBody);
   return enforceMaxChars(header, currentBlock, historyBlock);
+}
+
+export function capStructuredReviewForMarkdownLimit(
+  review: StructuredReviewEnvelopeV1,
+  maxReviewChars: number,
+): StructuredReviewEnvelopeV1 {
+  let candidate = withRenderedFindings(review, review.findings);
+  while (renderStructuredReviewMarkdown(candidate).length > maxReviewChars) {
+    if (candidate.findings.length === 0) {
+      throw new Error(
+        `structured review metadata exceeds max_review_chars without findings (${renderStructuredReviewMarkdown(candidate).length}/${maxReviewChars})`,
+      );
+    }
+    candidate = withRenderedFindings(candidate, candidate.findings.slice(0, -1));
+  }
+  return candidate;
+}
+
+export function renderStructuredReviewMarkdown(review: StructuredReviewEnvelopeV1): string {
+  const lines = ['### Summary', '', sanitizeMarkdownText(review.summary), '', '### Findings', ''];
+
+  if (review.findings.length === 0) {
+    lines.push('No findings.', '');
+  } else {
+    for (const [index, finding] of review.findings.entries()) {
+      lines.push(
+        `#### ${index + 1}. ${sanitizeMarkdownText(finding.title)}`,
+        '',
+        `- Severity: ${finding.severity}`,
+        `- Confidence: ${finding.confidence}`,
+        `- Category: ${finding.category}`,
+        `- Location: ${formatFindingLocation(finding)}`,
+        `- Fingerprint: \`${finding.fingerprint}\``,
+        '',
+        sanitizeMarkdownText(finding.body),
+        '',
+      );
+      if (finding.suggestedAction) {
+        lines.push('Suggested action:', '', sanitizeMarkdownText(finding.suggestedAction), '');
+      }
+    }
+  }
+
+  if (review.result.findingsTruncated) {
+    const reason = review.result.truncationReason
+      ? ` Reason: ${review.result.truncationReason}.`
+      : '';
+    lines.push(
+      `Finding list truncated from ${review.result.inputFindingCount} to ${review.result.renderedFindingCount}.${reason}`,
+      '',
+    );
+  }
+
+  lines.push('### Limitations', '');
+  if (review.limitations.length === 0) {
+    lines.push('None reported.', '');
+  } else {
+    for (const limitation of review.limitations) {
+      lines.push(`- ${sanitizeMarkdownText(limitation)}`);
+    }
+    lines.push('');
+  }
+
+  lines.push(
+    '### Review Metadata',
+    '',
+    '| Field | Value |',
+    '| --- | --- |',
+    `| Phase | ${review.phase} |`,
+    `| Range | ${review.reviewedRange.kind} \`${formatOptionalSha(review.reviewedRange.fromSha)}\` -> \`${shortSha(review.reviewedRange.toSha)}\` |`,
+    `| Tool mode | ${review.toolMode} |`,
+    `| Runtime | ${review.runtimeProvider} |`,
+    `| Usage | ${formatUsage(review.usage)} |`,
+    `| Turns | ${review.observedTurns ?? 'not exposed'} |`,
+    `| Lineage | ${formatLineageTable(review.lineageTotals)} |`,
+  );
+
+  return lines.join('\n');
+}
+
+function withRenderedFindings(
+  review: StructuredReviewEnvelopeV1,
+  findings: StructuredFindingV1[],
+): StructuredReviewEnvelopeV1 {
+  const postFindingCapCount =
+    review.result.postFindingCapCount ?? review.result.renderedFindingCount;
+  const truncatedByMaxFindings = review.result.inputFindingCount > postFindingCapCount;
+  const truncatedByReviewChars = findings.length < postFindingCapCount;
+  const truncationReason =
+    truncatedByMaxFindings && truncatedByReviewChars
+      ? 'both'
+      : truncatedByReviewChars
+        ? 'max_review_chars'
+        : truncatedByMaxFindings
+          ? 'max_findings'
+          : undefined;
+  return {
+    ...review,
+    findings,
+    result: {
+      ...review.result,
+      postFindingCapCount,
+      renderedFindingCount: findings.length,
+      findingsTruncated: review.result.inputFindingCount > findings.length,
+      truncationReason,
+    },
+  };
 }
 
 function findLineageComment(
@@ -386,6 +502,29 @@ function extractAllBlocks(body: string, startMarker: string, endMarker: string):
   return result;
 }
 
+function formatFindingCounts(review: StructuredReviewEnvelopeV1): string {
+  const base = `${review.result.renderedFindingCount}/${review.result.postFindingCapCount}/${review.result.inputFindingCount}`;
+  return review.result.findingsTruncated ? `${base} rendered, truncated` : `${base} rendered`;
+}
+
+function formatFindingLocation(finding: StructuredFindingV1): string {
+  if (!finding.path) {
+    return 'No file location';
+  }
+  const path = `\`${finding.path}\``;
+  if (finding.startLine === null) {
+    return path;
+  }
+  if (finding.endLine !== null && finding.endLine !== finding.startLine) {
+    return `${path}:${finding.startLine}-${finding.endLine}`;
+  }
+  return `${path}:${finding.startLine}`;
+}
+
+function sanitizeMarkdownText(value: string): string {
+  return value.replace(/<!--/g, '&lt;!--').replace(/-->/g, '--&gt;');
+}
+
 function formatUsage(usage: RuntimeUsage | undefined | null): string {
   if (!usage) {
     return 'not exposed';
@@ -425,4 +564,8 @@ function repositoryFromUrl(url: string): string | undefined {
 
 function shortSha(value: string): string {
   return value.slice(0, 12);
+}
+
+function formatOptionalSha(value: string | null): string {
+  return value ? shortSha(value) : 'n/a';
 }

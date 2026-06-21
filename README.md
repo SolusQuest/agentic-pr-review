@@ -2,6 +2,11 @@
 
 Session-aware agentic PR review tooling for GitHub Actions.
 
+The action uses a structured-first review contract. Runtime providers must emit a
+`ModelReviewContentV1` JSON object; the action validates it, injects trusted workflow metadata,
+generates finding fingerprints, caps findings, writes a structured result artifact, and renders the
+sticky top-level PR comment from the validated structured data.
+
 This repository is experimental public tooling. The initial v0.x line is not a stable public API.
 
 The action uses the GitHub Actions `node24` runtime.
@@ -88,35 +93,37 @@ permissions:
 
 ## Inputs
 
-| Input                                              | Default        | Notes                                                                                                         |
-| -------------------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------- |
-| `runtime_provider`                                 | `test`         | `test` or `claude-code-cli`                                                                                   |
-| `target_mode`                                      | `pull-request` | `pull-request` or `synthetic-fixture`                                                                         |
-| `review_mode`                                      | `auto`         | `auto`, `bootstrap`, or `incremental`                                                                         |
-| `pr_number`                                        | inferred       | Required for pull-request mode outside pull request events                                                    |
-| `state_key`                                        | derived        | Defaults to the target and runtime                                                                            |
-| `state_artifact_run_id`                            | empty          | Optional explicit run id to restore from                                                                      |
-| `artifact_retention_days`                          | `7`            | Clamped to 1 through 7                                                                                        |
-| `post_comment`                                     | `false`        | Creates or updates a sticky top-level PR comment                                                              |
-| `model_base_url`                                   | empty          | Required for `claude-code-cli`                                                                                |
-| `model_name`                                       | empty          | Required for `claude-code-cli`                                                                                |
-| `small_model_name`                                 | empty          | Optional small/background model                                                                               |
-| `api_key_mode`                                     | `auth-token`   | `auth-token`, `api-key`, or `both`                                                                            |
-| `claude_code_version`                              | empty          | Required explicit semver for `claude-code-cli`                                                                |
-| `tool_mode`                                        | `none`         | `none` disables runtime tools; `readonly` allows only Claude Code `Read`, `Glob`, and `Grep` for live runtime |
-| `claude_max_turns`                                 | `6`            | Positive integer passed to Claude Code `--max-turns`                                                          |
-| `instructions` / `instructions_path`               | empty          | Mutually exclusive stable review instructions                                                                 |
-| `bootstrap_context` / `bootstrap_context_path`     | empty          | Mutually exclusive bootstrap-only context                                                                     |
-| `incremental_context` / `incremental_context_path` | empty          | Mutually exclusive incremental-only context                                                                   |
-| `max_context_chars`                                | `60000`        | Per instruction/context block                                                                                 |
-| `max_patch_chars`                                  | `120000`       | PR patch context bound                                                                                        |
-| `max_review_chars`                                 | `12000`        | Review output bound                                                                                           |
-| `max_uncached_input_tokens`                        | `0`            | Current-run `input_tokens` watchdog; `0` disables                                                             |
-| `max_cached_input_tokens`                          | `0`            | Current-run cache-read/cache-hit token watchdog; `0` disables                                                 |
-| `max_output_tokens`                                | `0`            | Current-run `output_tokens` watchdog; `0` disables                                                            |
-| `disable_prompt_caching`                           | `false`        | Sets `DISABLE_PROMPT_CACHING=1` for live runtime                                                              |
-| `debug_capture_raw_api_bodies`                     | `false`        | Restricted trusted manual diagnostic mode                                                                     |
-| `debug_acknowledgement`                            | empty          | Required acknowledgement phrase for diagnostic mode                                                           |
+| Input                                              | Default        | Notes                                                                                                                                         |
+| -------------------------------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runtime_provider`                                 | `test`         | `test` or `claude-code-cli`                                                                                                                   |
+| `target_mode`                                      | `pull-request` | `pull-request` or `synthetic-fixture`                                                                                                         |
+| `review_mode`                                      | `auto`         | `auto`, `bootstrap`, or `incremental`                                                                                                         |
+| `pr_number`                                        | inferred       | Required for pull-request mode outside pull request events                                                                                    |
+| `state_key`                                        | derived        | Defaults to the target and runtime                                                                                                            |
+| `state_artifact_run_id`                            | empty          | Optional explicit run id to restore from                                                                                                      |
+| `artifact_retention_days`                          | `7`            | Clamped to 1 through 7                                                                                                                        |
+| `post_comment`                                     | `false`        | Creates or updates a sticky top-level PR comment                                                                                              |
+| `model_base_url`                                   | empty          | Required for `claude-code-cli`                                                                                                                |
+| `model_name`                                       | empty          | Required for `claude-code-cli`                                                                                                                |
+| `small_model_name`                                 | empty          | Optional small/background model                                                                                                               |
+| `api_key_mode`                                     | `auth-token`   | `auth-token`, `api-key`, or `both`                                                                                                            |
+| `claude_code_version`                              | empty          | Required explicit semver for `claude-code-cli`                                                                                                |
+| `tool_mode`                                        | `none`         | `none` disables runtime tools; `readonly` allows only Claude Code `Read`, `Glob`, and `Grep` for live runtime                                 |
+| `claude_max_turns`                                 | `6`            | Positive integer passed to Claude Code `--max-turns`                                                                                          |
+| `instructions` / `instructions_path`               | empty          | Mutually exclusive stable review instructions                                                                                                 |
+| `bootstrap_context` / `bootstrap_context_path`     | empty          | Mutually exclusive bootstrap-only context                                                                                                     |
+| `incremental_context` / `incremental_context_path` | empty          | Mutually exclusive incremental-only context                                                                                                   |
+| `max_context_chars`                                | `60000`        | Per instruction/context block                                                                                                                 |
+| `max_patch_chars`                                  | `120000`       | PR patch context bound                                                                                                                        |
+| `max_review_chars`                                 | `12000`        | Rendered review markdown bound for the posted current review and structured artifacts                                                         |
+| `max_findings`                                     | `50`           | Maximum normalized findings included in the sticky comment and structured result                                                              |
+| `test_runtime_fixture`                             | `valid`        | Structured fixture for `runtime_provider=test`: `valid`, `no_findings`, `null_location`, `many_findings`, `invalid_json`, or `schema_invalid` |
+| `max_uncached_input_tokens`                        | `0`            | Current-run `input_tokens` watchdog; `0` disables                                                                                             |
+| `max_cached_input_tokens`                          | `0`            | Current-run cache-read/cache-hit token watchdog; `0` disables                                                                                 |
+| `max_output_tokens`                                | `0`            | Current-run `output_tokens` watchdog; `0` disables                                                                                            |
+| `disable_prompt_caching`                           | `false`        | Sets `DISABLE_PROMPT_CACHING=1` for live runtime                                                                                              |
+| `debug_capture_raw_api_bodies`                     | `false`        | Restricted trusted manual diagnostic mode                                                                                                     |
+| `debug_acknowledgement`                            | empty          | Required acknowledgement phrase for diagnostic mode                                                                                           |
 
 `tool_mode=readonly` is only meaningful for `runtime_provider=claude-code-cli`. It restricts the
 Claude Code built-in tool surface to `Read`, `Glob`, and `Grep`; shell, network, edit/write,
@@ -139,35 +146,42 @@ preempt the provider call that emitted the over-budget usage record.
 
 ## Outputs
 
-| Output                                      | Notes                                                                                 |
-| ------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `state_key`                                 | Resolved state key                                                                    |
-| `review_mode`                               | Requested review mode                                                                 |
-| `phase`                                     | Actual phase: `bootstrap` or `incremental`                                            |
-| `review_phase`                              | Provider result: `bootstrap`, `incremental`, or `skipped-identical`                   |
-| `runtime_provider`                          | Runtime used                                                                          |
-| `session_id`                                | Runtime session id                                                                    |
-| `reviewed_head_sha`                         | Reviewed target head SHA                                                              |
-| `artifact_name`                             | Uploaded state artifact name                                                          |
-| `artifact_id`                               | Uploaded state artifact id when available                                             |
-| `artifact_url`                              | Uploaded state artifact URL when available                                            |
-| `artifact_retention_days`                   | Effective retention                                                                   |
-| `review_markdown_path`                      | Bounded review markdown path                                                          |
-| `comment_url`                               | Sticky comment URL when comment posting is enabled                                    |
-| `lineage_action`                            | Sticky comment lineage action                                                         |
-| `lineage_reason`                            | Sticky comment lineage reason                                                         |
-| `debug_artifact_name`                       | Restricted diagnostic artifact name when enabled                                      |
-| `debug_artifact_id`                         | Restricted diagnostic artifact id when enabled                                        |
-| `debug_artifact_url`                        | Restricted diagnostic artifact URL when enabled                                       |
-| `observed_turns`                            | Current-run observed agent turns (empty string when unavailable)                      |
-| `observed_turn_source`                      | Turn count source: `unique_assistant_message_ids`, `not_applicable`, or `unavailable` |
-| `lineage_observed_turns`                    | Lineage cumulative observed turns                                                     |
-| `lineage_totals_source`                     | Lineage data source                                                                   |
-| `lineage_totals_partial`                    | Whether lineage totals are partial (legacy manifest)                                  |
-| `lineage_usage_input_tokens`                | Lineage cumulative input tokens                                                       |
-| `lineage_usage_cache_read_input_tokens`     | Lineage cumulative cache-read tokens                                                  |
-| `lineage_usage_cache_creation_input_tokens` | Lineage cumulative cache-creation tokens                                              |
-| `lineage_usage_output_tokens`               | Lineage cumulative output tokens                                                      |
+| Output                                      | Notes                                                                                   |
+| ------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `state_key`                                 | Resolved state key                                                                      |
+| `review_mode`                               | Requested review mode                                                                   |
+| `phase`                                     | Actual phase: `bootstrap` or `incremental`                                              |
+| `review_phase`                              | Provider result: `bootstrap`, `incremental`, or `skipped-identical`                     |
+| `runtime_provider`                          | Runtime used                                                                            |
+| `session_id`                                | Runtime session id                                                                      |
+| `reviewed_head_sha`                         | Reviewed target head SHA                                                                |
+| `artifact_name`                             | Uploaded state artifact name                                                            |
+| `artifact_id`                               | Uploaded state artifact id when available                                               |
+| `artifact_url`                              | Uploaded state artifact URL when available                                              |
+| `artifact_retention_days`                   | Effective retention                                                                     |
+| `structured_result_path`                    | Validated structured review result JSON path                                            |
+| `rendered_review_markdown_path`             | Rendered markdown path generated from the structured result                             |
+| `structured_output_status`                  | Structured validation status: `valid`, `extracted`, `invalid_json`, or `schema_invalid` |
+| `findings_input_count`                      | Normalized finding count before cap                                                     |
+| `findings_post_cap_count`                   | Finding count after `max_findings` and before rendered markdown fitting                 |
+| `findings_rendered_count`                   | Finding count rendered in the sticky comment and structured artifacts                   |
+| `findings_truncated`                        | Whether findings were truncated by `max_findings` or `max_review_chars`                 |
+| `findings_truncation_reason`                | `max_findings`, `max_review_chars`, `both`, or empty when not truncated                 |
+| `comment_url`                               | Sticky comment URL when comment posting is enabled                                      |
+| `lineage_action`                            | Sticky comment lineage action                                                           |
+| `lineage_reason`                            | Sticky comment lineage reason                                                           |
+| `debug_artifact_name`                       | Restricted diagnostic artifact name when enabled                                        |
+| `debug_artifact_id`                         | Restricted diagnostic artifact id when enabled                                          |
+| `debug_artifact_url`                        | Restricted diagnostic artifact URL when enabled                                         |
+| `observed_turns`                            | Current-run observed agent turns (empty string when unavailable)                        |
+| `observed_turn_source`                      | Turn count source: `unique_assistant_message_ids`, `not_applicable`, or `unavailable`   |
+| `lineage_observed_turns`                    | Lineage cumulative observed turns                                                       |
+| `lineage_totals_source`                     | Lineage data source                                                                     |
+| `lineage_totals_partial`                    | Whether lineage totals are partial (legacy manifest)                                    |
+| `lineage_usage_input_tokens`                | Lineage cumulative input tokens                                                         |
+| `lineage_usage_cache_read_input_tokens`     | Lineage cumulative cache-read tokens                                                    |
+| `lineage_usage_cache_creation_input_tokens` | Lineage cumulative cache-creation tokens                                                |
+| `lineage_usage_output_tokens`               | Lineage cumulative output tokens                                                        |
 
 ## Observed Turns and Lineage Totals
 
@@ -191,6 +205,42 @@ are observed) with `observed_turn_source` set to `unique_assistant_message_ids`,
 total. The legacy `prompt_cache_hit_tokens` field name in stream records is read and normalized
 into `cacheReadInputTokens` but is no longer exposed separately.
 
+## Structured Review Contract
+
+Runtime output is no longer Markdown-first. Successful runtime output must be JSON:
+
+```json
+{
+  "schemaVersion": 1,
+  "summary": "Concise review summary.",
+  "findings": [],
+  "limitations": []
+}
+```
+
+Each finding includes `severity`, `confidence`, `category`, `title`, `body`, `path`, `startLine`,
+`endLine`, and optional `suggestedAction`. `path` must be `null` or a safe repo-relative path; absolute
+paths, drive-qualified paths, protocol-looking paths, current-dir-only paths, and `..` path segments
+are rejected. When both line values are present, `endLine` must be greater than or equal to
+`startLine`. `confidence` accepts only `medium` or `high`; low-confidence observations should be
+omitted by the model. The model must not provide workflow facts or finding fingerprints.
+
+The action-owned `StructuredReviewEnvelopeV1` injects trusted `phase`, `baseSha`, `headSha`,
+`previousReviewedHeadSha`, structured `reviewedRange`, `toolMode`, `runtimeProvider`, session, usage,
+turn, lineage, finding-count, and truncation metadata. Bootstrap `reviewedRange.fromSha` is `null`;
+incremental ranges use the prior reviewed head when available. Findings are normalized and
+fingerprinted by the action before comment rendering or artifact upload.
+
+The action caps findings before writing `structured-result.json`, `rendered-review.md`, or the sticky
+comment. It first applies `max_findings`, then further reduces findings if needed so the rendered
+current review fits `max_review_chars`. The structured result artifact and sticky comment therefore
+use the same final finding set; artifacts do not retain extra findings hidden from the posted review.
+
+If model JSON cannot be parsed or schema-validated after deterministic local cleanup such as trimming
+whitespace or extracting a fenced JSON object, the action fails closed. Invalid output does not update
+the sticky comment, upload successful state, advance the reviewed head, or write raw invalid model text
+to normal summaries, comments, manifests, rendered review markdown, or structured result artifacts.
+
 ## State Artifacts
 
 The action owns state restore and upload. It discovers the latest matching state artifact, restores the
@@ -202,9 +252,9 @@ State artifact names use:
 agentic-pr-review-state-${state_key}
 ```
 
-The state bundle includes a manifest, the bounded review markdown, and the sanitized runtime session
-directory needed for the next incremental run. Normal state artifacts reject raw/debug files, configured
-secret values, high-risk token prefixes, and unredacted auth headers.
+The state bundle includes a manifest, `structured-result.json`, `rendered-review.md`, and the sanitized
+runtime session directory needed for the next incremental run. Normal state artifacts reject raw/debug
+files, configured secret values, high-risk token prefixes, and unredacted auth headers.
 
 `review_mode=incremental` fails if no valid state can be restored. `review_mode=auto` restores when a
 matching state exists and otherwise starts a bootstrap phase. For pull request targets, incremental mode

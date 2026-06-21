@@ -1,10 +1,15 @@
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 import { GitHubArtifactStore, LocalArtifactStore, type ArtifactStore } from './artifacts.js';
 import { parseActionConfig, type InputReader } from './config.js';
 import { loadContextBlocks } from './context-blocks.js';
-import { upsertLineageComment } from './comments.js';
+import {
+  capStructuredReviewForMarkdownLimit,
+  renderStructuredReviewMarkdown,
+  upsertLineageComment,
+} from './comments.js';
 import { buildReviewPrompt } from './prompt.js';
 import {
   allowedToolsForMode,
@@ -20,6 +25,12 @@ import {
   stateArtifactName,
   writeStateBundle,
 } from './state.js';
+import {
+  buildReviewedRange,
+  normalizeStructuredReview,
+  StructuredReviewValidationError,
+  type StructuredResultMetadata,
+} from './structured.js';
 import { deriveStateKey, fetchTargetCompare, resolveTarget } from './target.js';
 import {
   type ActionConfig,
@@ -27,9 +38,10 @@ import {
   type Phase,
   type RestoredState,
   type RuntimeResult,
+  type StructuredReviewEnvelopeV1,
   type UploadedArtifact,
 } from './types.js';
-import { ensureDir, sanitizeStateKey, walkFiles, writeTextFile } from './utils.js';
+import { ensureDir, sanitizeStateKey, walkFiles, writeJsonFile, writeTextFile } from './utils.js';
 
 type ReviewPhaseOutput = Phase | 'skipped-identical';
 
@@ -146,8 +158,42 @@ export async function run(): Promise<void> {
     runtimeDir,
   });
 
-  const reviewMarkdownPath = path.join(tempRoot, 'review.md');
-  await writeTextFile(reviewMarkdownPath, runtimeResult.reviewMarkdown);
+  const reviewedRange = buildReviewedRange({
+    phase: resolution.phase,
+    target,
+    previousReviewedHeadSha: resolution.restoredState?.reviewedHeadSha,
+  });
+  let structuredReview: StructuredReviewEnvelopeV1;
+  let structuredMetadata: StructuredResultMetadata;
+  try {
+    const normalized = normalizeStructuredReview({
+      modelJsonText: runtimeResult.modelReviewJson,
+      target,
+      phase: resolution.phase,
+      previousReviewedHeadSha: resolution.restoredState?.reviewedHeadSha,
+      reviewedRange,
+      config,
+      sessionId: runtimeResult.sessionId,
+      usage: runtimeResult.usage,
+      observedTurns: runtimeResult.observedTurns,
+      observedTurnSource: runtimeResult.observedTurnSource,
+      lineageTotals: runtimeResult.lineageTotals,
+      maxFindings: config.maxFindings,
+    });
+    structuredReview = capStructuredReviewForMarkdownLimit(
+      normalized.envelope,
+      config.maxReviewChars,
+    );
+    structuredMetadata = metadataForStructuredReview(structuredReview, normalized.metadata.status);
+  } catch (error) {
+    handleStructuredValidationFailure(error);
+  }
+
+  const structuredResultPath = path.join(tempRoot, 'structured-result.json');
+  const renderedReviewMarkdownPath = path.join(tempRoot, 'rendered-review.md');
+  const renderedReviewMarkdown = renderStructuredReviewMarkdown(structuredReview!);
+  await writeJsonFile(structuredResultPath, structuredReview!);
+  await writeTextFile(renderedReviewMarkdownPath, renderedReviewMarkdown);
 
   const bundleDir = path.join(tempRoot, 'state-bundle');
   const bundleFiles = await writeStateBundle({
@@ -159,8 +205,24 @@ export async function run(): Promise<void> {
     promptSha256: prompt.sha256,
     blocks,
     runtimeResult,
+    structuredReview: structuredReview!,
+    structuredMetadata: structuredMetadata!,
+    renderedReviewMarkdown,
     runtimeDir,
     createdAt: resolution.restoredState?.createdAt,
+  });
+
+  const comment = await maybePostComment({
+    config,
+    target,
+    runtimeResult,
+    stateKey,
+    phase: resolution.phase,
+    artifactName,
+    lineageReason: resolution.lineageReason,
+    previousHeadSha: resolution.restoredState?.reviewedHeadSha,
+    structuredReview: structuredReview!,
+    octokit,
   });
 
   const uploadedState = await store.upload(
@@ -174,19 +236,6 @@ export async function run(): Promise<void> {
     debugArtifact = await uploadDebugArtifact(store, stateKey, runtimeResult.debugFiles);
   }
 
-  const comment = await maybePostComment({
-    config,
-    target,
-    runtimeResult,
-    stateKey,
-    phase: resolution.phase,
-    artifactName,
-    lineageReason: resolution.lineageReason,
-    previousHeadSha: resolution.restoredState?.reviewedHeadSha,
-    reviewMarkdown: runtimeResult.reviewMarkdown,
-    octokit,
-  });
-
   setOutputs({
     stateKey,
     reviewMode: config.reviewMode,
@@ -196,12 +245,14 @@ export async function run(): Promise<void> {
     sessionId: runtimeResult.sessionId,
     reviewedHeadSha: target.headSha,
     artifact: uploadedState,
-    reviewMarkdownPath,
+    structuredResultPath,
+    renderedReviewMarkdownPath,
     commentUrl: comment.commentUrl,
     lineageAction: comment.lineageAction,
     lineageReason: comment.lineageReason,
     debugArtifact,
     runtimeResult,
+    structuredMetadata: structuredMetadata!,
   });
 
   await writeSummary({
@@ -218,6 +269,9 @@ export async function run(): Promise<void> {
     artifactName,
     commentUrl: comment.commentUrl,
     bundleDir,
+    structuredMetadata: structuredMetadata!,
+    structuredResultPath,
+    renderedReviewMarkdownPath,
   });
 }
 
@@ -332,7 +386,12 @@ async function finishSkippedIdentical(options: {
   const runtimeResult: RuntimeResult = {
     sessionId: options.restoredState.sessionId,
     sessionName: options.restoredState.sessionName,
-    reviewMarkdown: `No changes since prior review for ${options.target.headSha}. Provider call skipped.`,
+    modelReviewJson: JSON.stringify({
+      schemaVersion: 1,
+      summary: `No changes since prior review for ${options.target.headSha}. Provider call skipped.`,
+      findings: [],
+      limitations: ['Compare range was identical to the previous reviewed head.'],
+    }),
     debugFiles: [],
     toolMode: options.config.toolMode,
     allowedTools: allowedToolsForMode(options.config.toolMode),
@@ -346,7 +405,37 @@ async function finishSkippedIdentical(options: {
     },
     lineageTotals,
   };
+  const reviewedRange = buildReviewedRange({
+    phase: 'incremental',
+    target: options.target,
+    previousReviewedHeadSha: options.restoredState.reviewedHeadSha,
+  });
+  const normalized = normalizeStructuredReview({
+    modelJsonText: runtimeResult.modelReviewJson,
+    target: options.target,
+    phase: 'incremental',
+    previousReviewedHeadSha: options.restoredState.reviewedHeadSha,
+    reviewedRange,
+    config: options.config,
+    sessionId: runtimeResult.sessionId,
+    usage: runtimeResult.usage,
+    observedTurns: runtimeResult.observedTurns,
+    observedTurnSource: runtimeResult.observedTurnSource,
+    lineageTotals: runtimeResult.lineageTotals,
+    maxFindings: options.config.maxFindings,
+  });
+  const structuredReview = capStructuredReviewForMarkdownLimit(
+    normalized.envelope,
+    options.config.maxReviewChars,
+  );
+  const structuredMetadata = metadataForStructuredReview(
+    structuredReview,
+    normalized.metadata.status,
+  );
+  const renderedReviewMarkdown = renderStructuredReviewMarkdown(structuredReview);
   const bundleDir = path.join(defaultTempDir(), 'agentic-pr-review', 'state-bundle');
+  const structuredResultPath = path.join(bundleDir, 'structured-result.json');
+  const renderedReviewMarkdownPath = path.join(bundleDir, 'rendered-review.md');
   const bundleFiles = await writeStateBundle({
     bundleDir,
     config: options.config,
@@ -356,6 +445,9 @@ async function finishSkippedIdentical(options: {
     promptSha256: 'skipped-identical',
     blocks: [],
     runtimeResult,
+    structuredReview,
+    structuredMetadata,
+    renderedReviewMarkdown,
     runtimeDir: options.runtimeDir,
     createdAt: options.restoredState.createdAt,
   });
@@ -374,11 +466,13 @@ async function finishSkippedIdentical(options: {
     sessionId: runtimeResult.sessionId,
     reviewedHeadSha: options.target.headSha,
     artifact: uploadedState,
-    reviewMarkdownPath: path.join(bundleDir, 'review.md'),
+    structuredResultPath,
+    renderedReviewMarkdownPath,
     commentUrl: 'skipped-identical',
     lineageAction: '',
     lineageReason: '',
     runtimeResult,
+    structuredMetadata,
   });
   await writeSummary({
     config: options.config,
@@ -398,6 +492,9 @@ async function finishSkippedIdentical(options: {
     artifactName: options.artifactName,
     commentUrl: 'skipped-identical',
     bundleDir,
+    structuredMetadata,
+    structuredResultPath,
+    renderedReviewMarkdownPath,
   });
 }
 
@@ -417,7 +514,7 @@ async function maybePostComment(options: {
   artifactName: string;
   lineageReason: LineageReason;
   previousHeadSha?: string;
-  reviewMarkdown: string;
+  structuredReview: StructuredReviewEnvelopeV1;
   octokit: any;
 }): Promise<{ commentUrl: string; lineageAction: string; lineageReason: string }> {
   if (!options.config.postComment) {
@@ -427,44 +524,34 @@ async function maybePostComment(options: {
     throw new Error('post_comment=true requires target_mode=pull-request');
   }
 
-  try {
-    const comment = await upsertLineageComment({
-      octokit: options.octokit,
-      owner: github.context.repo.owner,
-      repo: github.context.repo.repo,
-      prNumber: options.target.prNumber,
-      target: options.target,
-      reviewMarkdown: options.reviewMarkdown,
-      stateKey: options.stateKey,
-      phase: options.phase,
-      runtimeProvider: options.config.runtimeProvider,
-      sessionId: options.runtimeResult.sessionId,
-      previousHeadSha: options.previousHeadSha,
-      currentHeadSha: options.target.headSha,
-      artifactName: options.artifactName,
-      runId: github.context.runId,
-      runAttempt: github.context.runAttempt,
-      lineageReason: options.lineageReason,
-      usage: options.runtimeResult.usage,
-      observedTurns: options.runtimeResult.observedTurns,
-      maxTurns: options.config.claudeMaxTurns,
-      lineageTotals: options.runtimeResult.lineageTotals,
-      maxReviewChars: options.config.maxReviewChars,
-    });
-    return {
-      commentUrl: comment.commentUrl,
-      lineageAction: comment.lineageAction,
-      lineageReason: comment.lineageReason,
-    };
-  } catch (error) {
-    const message = messageOf(error);
-    core.warning(`sticky comment update failed after state artifact upload: ${message}`);
-    return {
-      commentUrl: `failed: ${message}`,
-      lineageAction: 'failed',
-      lineageReason: options.lineageReason,
-    };
-  }
+  const comment = await upsertLineageComment({
+    octokit: options.octokit,
+    owner: github.context.repo.owner,
+    repo: github.context.repo.repo,
+    prNumber: options.target.prNumber,
+    target: options.target,
+    structuredReview: options.structuredReview,
+    stateKey: options.stateKey,
+    phase: options.phase,
+    runtimeProvider: options.config.runtimeProvider,
+    sessionId: options.runtimeResult.sessionId,
+    previousHeadSha: options.previousHeadSha,
+    currentHeadSha: options.target.headSha,
+    artifactName: options.artifactName,
+    runId: github.context.runId,
+    runAttempt: github.context.runAttempt,
+    lineageReason: options.lineageReason,
+    usage: options.runtimeResult.usage,
+    observedTurns: options.runtimeResult.observedTurns,
+    maxTurns: options.config.claudeMaxTurns,
+    lineageTotals: options.runtimeResult.lineageTotals,
+    maxReviewChars: options.config.maxReviewChars,
+  });
+  return {
+    commentUrl: comment.commentUrl,
+    lineageAction: comment.lineageAction,
+    lineageReason: comment.lineageReason,
+  };
 }
 
 async function uploadDebugArtifact(
@@ -489,12 +576,14 @@ function setOutputs(options: {
   sessionId: string;
   reviewedHeadSha: string;
   artifact: UploadedArtifact;
-  reviewMarkdownPath: string;
+  structuredResultPath: string;
+  renderedReviewMarkdownPath: string;
   commentUrl: string;
   lineageAction: string;
   lineageReason: string;
   debugArtifact?: UploadedArtifact;
   runtimeResult?: RuntimeResult;
+  structuredMetadata: StructuredResultMetadata;
 }): void {
   core.setOutput('state_key', options.stateKey);
   core.setOutput('review_mode', options.reviewMode);
@@ -507,7 +596,17 @@ function setOutputs(options: {
   core.setOutput('artifact_id', options.artifact.id ?? '');
   core.setOutput('artifact_url', options.artifact.url ?? '');
   core.setOutput('artifact_retention_days', String(options.artifact.retentionDays));
-  core.setOutput('review_markdown_path', options.reviewMarkdownPath);
+  core.setOutput('structured_result_path', options.structuredResultPath);
+  core.setOutput('rendered_review_markdown_path', options.renderedReviewMarkdownPath);
+  core.setOutput('structured_output_status', options.structuredMetadata.status);
+  core.setOutput('findings_input_count', String(options.structuredMetadata.inputFindingCount));
+  core.setOutput('findings_post_cap_count', String(options.structuredMetadata.postFindingCapCount));
+  core.setOutput(
+    'findings_rendered_count',
+    String(options.structuredMetadata.renderedFindingCount),
+  );
+  core.setOutput('findings_truncated', String(options.structuredMetadata.findingsTruncated));
+  core.setOutput('findings_truncation_reason', options.structuredMetadata.truncationReason ?? '');
   core.setOutput('comment_url', options.commentUrl);
   core.setOutput('lineage_action', options.lineageAction);
   core.setOutput('lineage_reason', options.lineageReason);
@@ -544,6 +643,20 @@ function setOutputs(options: {
   }
 }
 
+function metadataForStructuredReview(
+  review: StructuredReviewEnvelopeV1,
+  status: StructuredResultMetadata['status'],
+): StructuredResultMetadata {
+  return {
+    inputFindingCount: review.result.inputFindingCount,
+    postFindingCapCount: review.result.postFindingCapCount,
+    renderedFindingCount: review.result.renderedFindingCount,
+    findingsTruncated: review.result.findingsTruncated,
+    truncationReason: review.result.truncationReason,
+    status,
+  };
+}
+
 async function writeSummary(input: {
   config: ActionConfig;
   target: Awaited<ReturnType<typeof resolveTarget>>;
@@ -558,6 +671,9 @@ async function writeSummary(input: {
   artifactName: string;
   commentUrl: string;
   bundleDir: string;
+  structuredMetadata: StructuredResultMetadata;
+  structuredResultPath: string;
+  renderedReviewMarkdownPath: string;
 }): Promise<void> {
   const restored = input.restored.restoredState
     ? `yes, head ${input.restored.restoredState.reviewedHeadSha ?? 'unknown'}`
@@ -604,6 +720,10 @@ async function writeSummary(input: {
     `- Observed turns: ${input.runtimeResult.observedTurns ?? 'n/a'} / max ${maxTurns}`,
     `- Usage: ${usage}`,
     `- Usage budget: ${budgetStatus}`,
+    `- Structured output status: ${input.structuredMetadata.status}`,
+    `- Findings: ${input.structuredMetadata.renderedFindingCount}/${input.structuredMetadata.postFindingCapCount}/${input.structuredMetadata.inputFindingCount}`,
+    `- Findings truncated: ${input.structuredMetadata.findingsTruncated}`,
+    `- Findings truncation reason: ${input.structuredMetadata.truncationReason ?? 'n/a'}`,
     `- Lineage turns: ${input.runtimeResult.lineageTotals.observedTurns ?? 'n/a'}`,
     `- Lineage usage: ${lineageUsage}`,
     `- Lineage source: ${lineageSourceDetail}`,
@@ -612,6 +732,8 @@ async function writeSummary(input: {
     `- State artifact: ${input.artifactName}`,
     `- Artifact retention days: ${input.config.artifactRetentionDays}`,
     `- Local bundle path: ${input.bundleDir}`,
+    `- Structured result path: ${input.structuredResultPath}`,
+    `- Rendered review markdown path: ${input.renderedReviewMarkdownPath}`,
   ];
   try {
     await core.summary.addRaw(lines.join('\n')).write();
@@ -627,10 +749,25 @@ function formatUsageBudgetStatus(status: RuntimeResult['usageBudgetStatus']): st
   return `${status.status} (records=${status.usageRecordsObserved})`;
 }
 
+function handleStructuredValidationFailure(error: unknown): never {
+  if (error instanceof StructuredReviewValidationError) {
+    core.setOutput('structured_output_status', error.status);
+    core.setOutput('findings_input_count', '0');
+    core.setOutput('findings_post_cap_count', '0');
+    core.setOutput('findings_rendered_count', '0');
+    core.setOutput('findings_truncated', 'false');
+    core.setOutput('findings_truncation_reason', '');
+    throw new Error(`structured review output validation failed: ${error.sanitizedDiagnostic}`);
+  }
+  throw error;
+}
+
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-run().catch((error: unknown) => {
-  core.setFailed(messageOf(error));
-});
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  run().catch((error: unknown) => {
+    core.setFailed(messageOf(error));
+  });
+}

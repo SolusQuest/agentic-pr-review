@@ -10,7 +10,9 @@ import {
   type RuntimeLineageTotals,
   type RuntimeResult,
   type RuntimeUsage,
+  type StructuredReviewEnvelopeV1,
 } from './types.js';
+import { type StructuredResultMetadata } from './structured.js';
 import {
   ensureDir,
   readJsonFile,
@@ -39,6 +41,14 @@ interface StateManifest {
   observedTurnSource?: string;
   lineageTotals?: RuntimeLineageTotals;
   usageBudgetStatus: RuntimeResult['usageBudgetStatus'];
+  structuredOutput: {
+    status: StructuredResultMetadata['status'];
+    inputFindingCount: number;
+    postFindingCapCount: number;
+    renderedFindingCount: number;
+    findingsTruncated: boolean;
+    truncationReason?: StructuredResultMetadata['truncationReason'];
+  };
   contextBlocks: Array<Pick<LoadedBlock, 'name' | 'source' | 'bytes' | 'sha256'>>;
   target: {
     mode: ReviewTarget['mode'];
@@ -93,6 +103,9 @@ export async function writeStateBundle(options: {
   promptSha256: string;
   blocks: LoadedBlock[];
   runtimeResult: RuntimeResult;
+  structuredReview: StructuredReviewEnvelopeV1;
+  structuredMetadata: StructuredResultMetadata;
+  renderedReviewMarkdown: string;
   runtimeDir: string;
   createdAt?: string;
 }): Promise<string[]> {
@@ -126,6 +139,14 @@ export async function writeStateBundle(options: {
     observedTurnSource: options.runtimeResult.observedTurnSource,
     lineageTotals: options.runtimeResult.lineageTotals,
     usageBudgetStatus: options.runtimeResult.usageBudgetStatus,
+    structuredOutput: {
+      status: options.structuredMetadata.status,
+      inputFindingCount: options.structuredMetadata.inputFindingCount,
+      postFindingCapCount: options.structuredMetadata.postFindingCapCount,
+      renderedFindingCount: options.structuredMetadata.renderedFindingCount,
+      findingsTruncated: options.structuredMetadata.findingsTruncated,
+      truncationReason: options.structuredMetadata.truncationReason,
+    },
     contextBlocks: options.blocks.map((block) => ({
       name: block.name,
       source: block.source,
@@ -142,9 +163,13 @@ export async function writeStateBundle(options: {
   };
 
   await writeJsonFile(path.join(options.bundleDir, 'manifest.json'), manifest);
+  await writeJsonFile(
+    path.join(options.bundleDir, 'structured-result.json'),
+    options.structuredReview,
+  );
   await writeTextFile(
-    path.join(options.bundleDir, 'review.md'),
-    options.runtimeResult.reviewMarkdown,
+    path.join(options.bundleDir, 'rendered-review.md'),
+    options.renderedReviewMarkdown,
   );
   await sanitizeStateBundle(options.bundleDir, options.config);
   return await walkFiles(options.bundleDir);
