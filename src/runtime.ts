@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   type ActionConfig,
+  type ModelReviewContentV1,
   type Phase,
   type RestoredState,
   type RuntimeLineageTotals,
@@ -46,15 +47,7 @@ export class TestRuntime implements ReviewRuntime {
       options.stateKey,
       `${sessionId}.jsonl`,
     );
-    const reviewMarkdown = [
-      '## Agentic PR Review',
-      '',
-      'No findings in synthetic test runtime.',
-      '',
-      `- Phase: ${options.phase}`,
-      `- Session: ${sessionId}`,
-      `- Prompt hash: ${options.promptHash}`,
-    ].join('\n');
+    const modelReviewJson = buildTestFixtureReviewJson(options.config.testRuntimeFixture);
 
     await writeTextFile(
       transcriptPath,
@@ -65,7 +58,7 @@ export class TestRuntime implements ReviewRuntime {
         state_key: options.stateKey,
         phase: options.phase,
         prompt_hash: options.promptHash,
-      })}\n${JSON.stringify({ type: 'result', session_id: sessionId, result: reviewMarkdown })}\n`,
+      })}\n${JSON.stringify({ type: 'result', session_id: sessionId, result: modelReviewJson })}\n`,
     );
 
     const lineageZeroUsage: RuntimeUsageTotals = {
@@ -77,7 +70,7 @@ export class TestRuntime implements ReviewRuntime {
     return {
       sessionId,
       sessionName,
-      reviewMarkdown,
+      modelReviewJson,
       debugFiles: [],
       toolMode: options.config.toolMode,
       allowedTools: [],
@@ -97,6 +90,83 @@ export class TestRuntime implements ReviewRuntime {
       },
     };
   }
+}
+
+function buildTestFixtureReviewJson(fixture: ActionConfig['testRuntimeFixture']): string {
+  if (fixture === 'invalid_json') {
+    return 'this is not json';
+  }
+  if (fixture === 'schema_invalid') {
+    return JSON.stringify({
+      schemaVersion: 1,
+      summary: 'Schema-invalid fixture.',
+      findings: [
+        {
+          severity: 'medium',
+          confidence: 'low',
+          category: 'correctness',
+          title: 'Low confidence should not validate',
+          body: 'The structured schema accepts only medium or high confidence.',
+          path: 'fixture.md',
+          startLine: 1,
+          endLine: 1,
+        },
+      ],
+      limitations: [],
+    });
+  }
+
+  const base: ModelReviewContentV1 & Record<string, unknown> = {
+    schemaVersion: 1,
+    summary: 'Synthetic structured review completed.',
+    findings: [
+      {
+        severity: 'medium',
+        confidence: 'high',
+        category: 'correctness',
+        title: 'Synthetic fixture finding',
+        body: 'This deterministic finding validates structured review rendering and artifacts.',
+        path: 'synthetic-review-fixture.md',
+        startLine: 3,
+        endLine: 4,
+        suggestedAction: 'Keep this fixture public-safe and deterministic.',
+      },
+    ],
+    limitations: ['Synthetic runtime does not execute a live model.'],
+    phase: 'model-owned-phase-ignored',
+    headSha: 'model-owned-head-ignored',
+  };
+
+  if (fixture === 'no_findings') {
+    base.findings = [];
+    base.summary = 'Synthetic structured review completed with no findings.';
+  } else if (fixture === 'null_location') {
+    base.findings = [
+      {
+        severity: 'low',
+        confidence: 'medium',
+        category: 'documentation',
+        title: 'Repository-level note',
+        body: 'This finding intentionally has no file or line location.',
+        path: null,
+        startLine: null,
+        endLine: null,
+      },
+    ];
+  } else if (fixture === 'many_findings') {
+    base.findings = Array.from({ length: 60 }, (_, index) => ({
+      severity: index % 3 === 0 ? 'high' : index % 3 === 1 ? 'medium' : 'low',
+      confidence: index % 2 === 0 ? 'high' : 'medium',
+      category: 'maintainability',
+      title: `Synthetic finding ${index + 1}`,
+      body: `Synthetic body ${index + 1}.`,
+      path: 'synthetic-review-fixture.md',
+      startLine: index + 1,
+      endLine: index + 1,
+    }));
+  }
+
+  return JSON.stringify(base);
 }
 
 export class ClaudeCodeRuntime implements ReviewRuntime {
@@ -186,7 +256,7 @@ export class ClaudeCodeRuntime implements ReviewRuntime {
     return {
       sessionId: await discoverSessionId(outputPath, options.runtimeDir),
       sessionName,
-      reviewMarkdown: await extractReviewMarkdown(outputPath, options.config.maxReviewChars),
+      modelReviewJson: await extractModelReviewJson(outputPath),
       debugFiles,
       toolMode: options.config.toolMode,
       allowedTools,
@@ -531,7 +601,7 @@ async function discoverSessionId(outputPath: string, runtimeDir: string): Promis
   return path.basename(newest.file, '.jsonl');
 }
 
-export async function extractReviewMarkdown(outputPath: string, maxChars: number): Promise<string> {
+export async function extractModelReviewJson(outputPath: string): Promise<string> {
   const output = await readFile(outputPath, 'utf8');
   let resultText: string | undefined;
   const assistantTexts: string[] = [];
@@ -550,7 +620,7 @@ export async function extractReviewMarkdown(outputPath: string, maxChars: number
   }
 
   const selected = (resultText ?? assistantTexts.join('\n\n')).trim();
-  return truncateText(selected || 'No review text was emitted by the runtime.', maxChars);
+  return selected || 'No review text was emitted by the runtime.';
 }
 
 export async function parseUsage(outputPath: string): Promise<RuntimeUsage | null> {

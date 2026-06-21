@@ -82,9 +82,17 @@ inputs:
     required: false
     default: '120000'
   max_review_chars:
-    description: Maximum characters retained from the runtime review output.
+    description: Maximum characters retained in the rendered review markdown.
     required: false
     default: '12000'
+  max_findings:
+    description: Maximum normalized findings rendered in the sticky comment and structured result artifact.
+    required: false
+    default: '50'
+  test_runtime_fixture:
+    description: Structured fixture emitted by runtime_provider=test.
+    required: false
+    default: valid
   max_uncached_input_tokens:
     description: 'Maximum current-run uncached input tokens before failing. 0 disables.'
     required: false
@@ -132,8 +140,22 @@ outputs:
     description: Uploaded state artifact URL when available.
   artifact_retention_days:
     description: Effective artifact retention.
-  review_markdown_path:
-    description: Path to bounded review markdown output.
+  structured_result_path:
+    description: Path to the validated structured review result JSON.
+  rendered_review_markdown_path:
+    description: Path to rendered review markdown generated from structured data.
+  structured_output_status:
+    description: Structured output validation status.
+  findings_input_count:
+    description: Number of normalized findings before applying the finding cap.
+  findings_post_cap_count:
+    description: Number of normalized findings after applying max_findings and before max_review_chars fitting.
+  findings_rendered_count:
+    description: Number of normalized findings rendered in comments and structured artifacts.
+  findings_truncated:
+    description: Whether findings were truncated by the finding cap.
+  findings_truncation_reason:
+    description: Finding truncation reason, when truncated.
   comment_url:
     description: Sticky comment URL when post_comment is enabled.
   lineage_action:

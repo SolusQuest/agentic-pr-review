@@ -16,6 +16,8 @@ function config(): ActionConfig {
     maxContextChars: 1000,
     maxPatchChars: 1000,
     maxReviewChars: 1000,
+    maxFindings: 50,
+    testRuntimeFixture: 'valid',
     usageBudgetLimits: {
       maxUncachedInputTokens: 0,
       maxCachedInputTokens: 0,

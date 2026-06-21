@@ -74,6 +74,8 @@ describe('TestRuntime', () => {
         maxContextChars: 1000,
         maxPatchChars: 1000,
         maxReviewChars: 1000,
+        maxFindings: 50,
+        testRuntimeFixture: 'valid',
         usageBudgetLimits: {
           maxUncachedInputTokens: 0,
           maxCachedInputTokens: 0,
@@ -96,6 +98,62 @@ describe('TestRuntime', () => {
       expect(result.toolMode).toBe('readonly');
       expect(result.allowedTools).toEqual([]);
       expect(result.usageBudgetStatus.status).toBe('not_applicable');
+      expect(result.modelReviewJson).toContain('"schemaVersion":1');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('emits selectable structured fixtures', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'agentic-pr-review-runtime-'));
+    try {
+      const baseConfig: ActionConfig = {
+        runtimeProvider: 'test',
+        targetMode: 'synthetic-fixture',
+        reviewMode: 'auto',
+        artifactRetentionDays: 7,
+        postComment: false,
+        apiKeyMode: 'auth-token',
+        toolMode: 'none',
+        claudeMaxTurns: 6,
+        maxContextChars: 1000,
+        maxPatchChars: 1000,
+        maxReviewChars: 1000,
+        maxFindings: 50,
+        testRuntimeFixture: 'valid',
+        usageBudgetLimits: {
+          maxUncachedInputTokens: 0,
+          maxCachedInputTokens: 0,
+          maxOutputTokens: 0,
+        },
+        disablePromptCaching: false,
+        debugCaptureRawApiBodies: false,
+        githubToken: 'token',
+      };
+      for (const fixture of [
+        'valid',
+        'no_findings',
+        'null_location',
+        'many_findings',
+        'invalid_json',
+        'schema_invalid',
+      ] as const) {
+        const result = await new TestRuntime().run({
+          config: { ...baseConfig, testRuntimeFixture: fixture },
+          phase: 'bootstrap',
+          stateKey: `synthetic-${fixture}`,
+          prompt: 'review',
+          promptHash: `hash-${fixture}`,
+          workspace: dir,
+          tempDir: dir,
+          runtimeDir: path.join(dir, 'runtime', fixture),
+        });
+        if (fixture === 'invalid_json') {
+          expect(result.modelReviewJson).toBe('this is not json');
+        } else {
+          expect(result.modelReviewJson).toContain('"schemaVersion":1');
+        }
+      }
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -261,6 +319,8 @@ describe('TestRuntime', () => {
         maxContextChars: 1000,
         maxPatchChars: 1000,
         maxReviewChars: 1000,
+        maxFindings: 50,
+        testRuntimeFixture: 'valid',
         usageBudgetLimits: {
           maxUncachedInputTokens: 0,
           maxCachedInputTokens: 0,

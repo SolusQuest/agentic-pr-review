@@ -4,6 +4,76 @@ export type ReviewMode = 'auto' | 'bootstrap' | 'incremental';
 export type Phase = 'bootstrap' | 'incremental';
 export type ApiKeyMode = 'auth-token' | 'api-key' | 'both';
 export type ToolMode = 'none' | 'readonly';
+export type TestRuntimeFixture =
+  | 'valid'
+  | 'no_findings'
+  | 'null_location'
+  | 'many_findings'
+  | 'invalid_json'
+  | 'schema_invalid';
+
+export interface ModelReviewFindingV1 {
+  severity: 'low' | 'medium' | 'high';
+  confidence: 'medium' | 'high';
+  category:
+    | 'correctness'
+    | 'security'
+    | 'requirements'
+    | 'test_coverage'
+    | 'build'
+    | 'performance'
+    | 'maintainability'
+    | 'documentation';
+  title: string;
+  body: string;
+  path: string | null;
+  startLine: number | null;
+  endLine: number | null;
+  suggestedAction?: string;
+}
+
+export interface ModelReviewContentV1 {
+  schemaVersion: 1;
+  summary: string;
+  findings: ModelReviewFindingV1[];
+  limitations: string[];
+}
+
+export interface StructuredFindingV1 extends ModelReviewFindingV1 {
+  fingerprint: string;
+}
+
+export interface ReviewedRange {
+  kind: 'bootstrap' | 'incremental';
+  fromSha: string | null;
+  toSha: string;
+}
+
+export interface StructuredReviewEnvelopeV1 {
+  schemaVersion: 1;
+  phase: Phase;
+  baseSha: string;
+  headSha: string;
+  previousReviewedHeadSha: string | null;
+  reviewedRange: ReviewedRange;
+  toolMode: ToolMode;
+  runtimeProvider: RuntimeProvider;
+  sessionId: string;
+  summary: string;
+  findings: StructuredFindingV1[];
+  limitations: string[];
+  usage: RuntimeUsage | null;
+  observedTurns: number | null;
+  observedTurnSource: string;
+  lineageTotals: RuntimeLineageTotals;
+  result: {
+    inputFindingCount: number;
+    postFindingCapCount: number;
+    renderedFindingCount: number;
+    findingsTruncated: boolean;
+    truncationReason?: 'max_findings' | 'max_review_chars' | 'both';
+  };
+}
 
 export interface UsageBudgetLimits {
   maxUncachedInputTokens: number;
@@ -47,6 +117,8 @@ export interface ActionConfig {
   maxContextChars: number;
   maxPatchChars: number;
   maxReviewChars: number;
+  maxFindings: number;
+  testRuntimeFixture: TestRuntimeFixture;
   usageBudgetLimits: UsageBudgetLimits;
   disablePromptCaching: boolean;
   debugCaptureRawApiBodies: boolean;
@@ -104,7 +176,7 @@ export interface RestoredState {
 export interface RuntimeResult {
   sessionId: string;
   sessionName: string;
-  reviewMarkdown: string;
+  modelReviewJson: string;
   debugFiles: string[];
   toolMode: ToolMode;
   allowedTools: string[];

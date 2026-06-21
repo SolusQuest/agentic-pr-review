@@ -4,6 +4,7 @@ import {
   type ReviewMode,
   type RuntimeProvider,
   type TargetMode,
+  type TestRuntimeFixture,
   type ToolMode,
 } from './types.js';
 import {
@@ -25,6 +26,14 @@ const TARGET_MODES = ['pull-request', 'synthetic-fixture'] as const satisfies re
 const REVIEW_MODES = ['auto', 'bootstrap', 'incremental'] as const satisfies readonly ReviewMode[];
 const API_KEY_MODES = ['auth-token', 'api-key', 'both'] as const satisfies readonly ApiKeyMode[];
 const TOOL_MODES = ['none', 'readonly'] as const satisfies readonly ToolMode[];
+const TEST_RUNTIME_FIXTURES = [
+  'valid',
+  'no_findings',
+  'null_location',
+  'many_findings',
+  'invalid_json',
+  'schema_invalid',
+] as const satisfies readonly TestRuntimeFixture[];
 const SYNTHETIC_RAW_DEBUG_ACKNOWLEDGEMENT = 'allow-raw-provider-debug';
 const PUBLIC_PR_RAW_DEBUG_ACKNOWLEDGEMENT = 'allow-raw-provider-debug-public-pr';
 
@@ -69,6 +78,11 @@ export function parseActionConfig(
     API_KEY_MODES,
   );
   const toolMode = oneOf(optionalInput(reader, 'tool_mode') ?? 'none', 'tool_mode', TOOL_MODES);
+  const testRuntimeFixture = oneOf(
+    optionalInput(reader, 'test_runtime_fixture') ?? 'valid',
+    'test_runtime_fixture',
+    TEST_RUNTIME_FIXTURES,
+  );
 
   const config: ActionConfig = {
     runtimeProvider,
@@ -118,6 +132,8 @@ export function parseActionConfig(
       'max_review_chars',
       12000,
     ),
+    maxFindings: parsePositiveInteger(optionalInput(reader, 'max_findings'), 'max_findings', 50),
+    testRuntimeFixture,
     usageBudgetLimits: {
       maxUncachedInputTokens: parseInteger(
         optionalInput(reader, 'max_uncached_input_tokens'),
