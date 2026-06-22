@@ -89,8 +89,24 @@ inputs:
     description: Maximum normalized findings rendered in the sticky comment and structured result artifact.
     required: false
     default: '50'
+  inline_comments:
+    description: Whether to post eligible structured findings as inline pull request review comments.
+    required: false
+    default: 'false'
+  max_inline_comments:
+    description: Maximum inline review comments to post, clamped to 0 through 10.
+    required: false
+    default: '5'
+  inline_min_severity:
+    description: 'Minimum severity for inline comments: low, medium, or high.'
+    required: false
+    default: medium
+  inline_min_confidence:
+    description: 'Minimum confidence for inline comments: medium or high.'
+    required: false
+    default: high
   test_runtime_fixture:
-    description: Structured fixture emitted by runtime_provider=test.
+    description: Structured fixture emitted by runtime_provider=test, including inline_commentable, inline_non_commentable, and inline_many_findings for inline smoke validation.
     required: false
     default: valid
   max_uncached_input_tokens:
@@ -156,6 +172,22 @@ outputs:
     description: Whether findings were truncated by the finding cap.
   findings_truncation_reason:
     description: Finding truncation reason, when truncated.
+  inline_comments_enabled:
+    description: Whether inline pull request review comments were enabled.
+  inline_comments_candidate_count:
+    description: Eligible inline comment candidates before applying max_inline_comments.
+  inline_comments_effective_cap:
+    description: Effective inline comment cap after input clamping.
+  inline_comments_cap_exceeded_count:
+    description: Eligible inline candidates omitted by max_inline_comments.
+  inline_comments_posted_count:
+    description: Inline comments posted by this run.
+  inline_comments_duplicate_count:
+    description: Inline candidates suppressed by existing duplicate markers.
+  inline_comments_skipped_count:
+    description: Inline candidates skipped before posting.
+  inline_comments_failed_count:
+    description: Inline comment posting failures recorded without hiding sticky findings.
   comment_url:
     description: Sticky comment URL when post_comment is enabled.
   lineage_action:

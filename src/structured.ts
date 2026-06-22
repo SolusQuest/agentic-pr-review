@@ -1,5 +1,6 @@
 import {
   type ActionConfig,
+  type InlineCommentsMetadata,
   type Phase,
   type ReviewedRange,
   type ReviewTarget,
@@ -20,6 +21,7 @@ export interface StructuredResultMetadata {
   truncationReason?: 'max_findings' | 'max_review_chars' | 'both';
   status: StructuredOutputStatus;
   validationError?: string;
+  inlineComments?: InlineCommentsMetadata;
 }
 
 export interface StructuredReviewNormalizationInput {

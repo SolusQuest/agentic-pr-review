@@ -12,7 +12,7 @@ import {
   UsageBudgetExceededError,
   UsageTracker,
 } from './runtime.js';
-import { type ActionConfig, type RestoredState } from './types.js';
+import { type ActionConfig, type RestoredState, type ReviewTarget } from './types.js';
 
 function observe(tracker: UsageTracker, value: unknown): void {
   tracker.observeLine(JSON.stringify(value));
@@ -24,6 +24,32 @@ function disabledTracker(): UsageTracker {
     maxCachedInputTokens: 0,
     maxOutputTokens: 0,
   });
+}
+
+function target(): ReviewTarget {
+  return {
+    mode: 'pull-request',
+    prNumber: 1,
+    title: 'Synthetic PR',
+    body: 'Synthetic body',
+    baseRef: 'main',
+    baseSha: 'base-sha',
+    headRef: 'branch',
+    headSha: 'head-sha',
+    headRepoFullName: 'example/repo',
+    draft: false,
+    changedFiles: [
+      {
+        filename: 'src/file.ts',
+        status: 'modified',
+        additions: 3,
+        deletions: 0,
+        changes: 3,
+        patch: '@@ -10,2 +10,3 @@\n context\n+added\n context',
+      },
+    ],
+    htmlUrl: 'https://github.com/example/repo/pull/1',
+  };
 }
 
 describe('Claude Code runtime arguments', () => {
@@ -75,6 +101,10 @@ describe('TestRuntime', () => {
         maxPatchChars: 1000,
         maxReviewChars: 1000,
         maxFindings: 50,
+        inlineComments: false,
+        maxInlineComments: 5,
+        inlineMinSeverity: 'medium',
+        inlineMinConfidence: 'high',
         testRuntimeFixture: 'valid',
         usageBudgetLimits: {
           maxUncachedInputTokens: 0,
@@ -94,6 +124,7 @@ describe('TestRuntime', () => {
         workspace: dir,
         tempDir: dir,
         runtimeDir: path.join(dir, 'runtime'),
+        target: target(),
       });
       expect(result.toolMode).toBe('readonly');
       expect(result.allowedTools).toEqual([]);
@@ -120,6 +151,10 @@ describe('TestRuntime', () => {
         maxPatchChars: 1000,
         maxReviewChars: 1000,
         maxFindings: 50,
+        inlineComments: false,
+        maxInlineComments: 5,
+        inlineMinSeverity: 'medium',
+        inlineMinConfidence: 'high',
         testRuntimeFixture: 'valid',
         usageBudgetLimits: {
           maxUncachedInputTokens: 0,
@@ -135,6 +170,9 @@ describe('TestRuntime', () => {
         'no_findings',
         'null_location',
         'many_findings',
+        'inline_commentable',
+        'inline_non_commentable',
+        'inline_many_findings',
         'invalid_json',
         'schema_invalid',
       ] as const) {
@@ -147,6 +185,7 @@ describe('TestRuntime', () => {
           workspace: dir,
           tempDir: dir,
           runtimeDir: path.join(dir, 'runtime', fixture),
+          target: target(),
         });
         if (fixture === 'invalid_json') {
           expect(result.modelReviewJson).toBe('this is not json');
@@ -154,6 +193,75 @@ describe('TestRuntime', () => {
           expect(result.modelReviewJson).toContain('"schemaVersion":1');
         }
       }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('emits inline smoke fixtures from target diff metadata', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'agentic-pr-review-runtime-'));
+    try {
+      const baseConfig: ActionConfig = {
+        runtimeProvider: 'test',
+        targetMode: 'pull-request',
+        reviewMode: 'auto',
+        artifactRetentionDays: 7,
+        postComment: true,
+        apiKeyMode: 'auth-token',
+        toolMode: 'none',
+        claudeMaxTurns: 6,
+        maxContextChars: 1000,
+        maxPatchChars: 1000,
+        maxReviewChars: 1000,
+        maxFindings: 50,
+        inlineComments: true,
+        maxInlineComments: 5,
+        inlineMinSeverity: 'medium',
+        inlineMinConfidence: 'high',
+        testRuntimeFixture: 'inline_commentable',
+        usageBudgetLimits: {
+          maxUncachedInputTokens: 0,
+          maxCachedInputTokens: 0,
+          maxOutputTokens: 0,
+        },
+        disablePromptCaching: false,
+        debugCaptureRawApiBodies: false,
+        githubToken: 'token',
+      };
+      const commentable = await new TestRuntime().run({
+        config: baseConfig,
+        phase: 'bootstrap',
+        stateKey: 'inline-commentable',
+        prompt: 'review',
+        promptHash: 'hash-inline-commentable',
+        workspace: dir,
+        tempDir: dir,
+        runtimeDir: path.join(dir, 'runtime', 'inline-commentable'),
+        target: target(),
+      });
+      const commentableJson = JSON.parse(commentable.modelReviewJson);
+      expect(commentableJson.findings[0]).toMatchObject({
+        path: 'src/file.ts',
+        startLine: 10,
+        endLine: 10,
+      });
+
+      const nonCommentable = await new TestRuntime().run({
+        config: { ...baseConfig, testRuntimeFixture: 'inline_non_commentable' },
+        phase: 'bootstrap',
+        stateKey: 'inline-non-commentable',
+        prompt: 'review',
+        promptHash: 'hash-inline-non-commentable',
+        workspace: dir,
+        tempDir: dir,
+        runtimeDir: path.join(dir, 'runtime', 'inline-non-commentable'),
+        target: target(),
+      });
+      const nonCommentableJson = JSON.parse(nonCommentable.modelReviewJson);
+      expect(nonCommentableJson.findings[0]).toMatchObject({
+        path: 'src/file.ts',
+        startLine: 999999,
+      });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -320,6 +428,10 @@ describe('TestRuntime', () => {
         maxPatchChars: 1000,
         maxReviewChars: 1000,
         maxFindings: 50,
+        inlineComments: false,
+        maxInlineComments: 5,
+        inlineMinSeverity: 'medium',
+        inlineMinConfidence: 'high',
         testRuntimeFixture: 'valid',
         usageBudgetLimits: {
           maxUncachedInputTokens: 0,
@@ -339,6 +451,7 @@ describe('TestRuntime', () => {
         workspace: dir,
         tempDir: dir,
         runtimeDir: path.join(dir, 'runtime'),
+        target: target(),
       });
       expect(result.observedTurns).toBe(0);
       expect(result.observedTurnSource).toBe('not_applicable');

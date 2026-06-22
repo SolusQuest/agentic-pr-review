@@ -4,11 +4,16 @@ export type ReviewMode = 'auto' | 'bootstrap' | 'incremental';
 export type Phase = 'bootstrap' | 'incremental';
 export type ApiKeyMode = 'auth-token' | 'api-key' | 'both';
 export type ToolMode = 'none' | 'readonly';
+export type InlineCommentSeverity = 'low' | 'medium' | 'high';
+export type InlineCommentConfidence = 'medium' | 'high';
 export type TestRuntimeFixture =
   | 'valid'
   | 'no_findings'
   | 'null_location'
   | 'many_findings'
+  | 'inline_commentable'
+  | 'inline_non_commentable'
+  | 'inline_many_findings'
   | 'invalid_json'
   | 'schema_invalid';
 
@@ -73,6 +78,7 @@ export interface StructuredReviewEnvelopeV1 {
     findingsTruncated: boolean;
     truncationReason?: 'max_findings' | 'max_review_chars' | 'both';
   };
+  inlineComments?: InlineCommentsMetadata;
 }
 
 export interface UsageBudgetLimits {
@@ -118,6 +124,10 @@ export interface ActionConfig {
   maxPatchChars: number;
   maxReviewChars: number;
   maxFindings: number;
+  inlineComments: boolean;
+  maxInlineComments: number;
+  inlineMinSeverity: InlineCommentSeverity;
+  inlineMinConfidence: InlineCommentConfidence;
   testRuntimeFixture: TestRuntimeFixture;
   usageBudgetLimits: UsageBudgetLimits;
   disablePromptCaching: boolean;
@@ -125,6 +135,27 @@ export interface ActionConfig {
   debugAcknowledgement?: string;
   githubToken: string;
   apiKey?: string;
+}
+
+export interface InlineCommentsPolicy {
+  enabled: boolean;
+  maxComments: number;
+  minSeverity: InlineCommentSeverity;
+  minConfidence: InlineCommentConfidence;
+}
+
+export interface InlineCommentsMetadata {
+  enabled: boolean;
+  policy: InlineCommentsPolicy;
+  candidateCount: number;
+  effectiveCap: number;
+  capExceededCount: number;
+  postedCount: number;
+  duplicateCount: number;
+  skippedCount: number;
+  failedCount: number;
+  skippedReasons: Record<string, number>;
+  failedReasons: Record<string, number>;
 }
 
 export interface LoadedBlock {

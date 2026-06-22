@@ -34,6 +34,8 @@ import {
 import { deriveStateKey, fetchTargetCompare, resolveTarget } from './target.js';
 import {
   type ActionConfig,
+  type InlineCommentsMetadata,
+  type InlineCommentsPolicy,
   type LineageReason,
   type Phase,
   type RestoredState,
@@ -41,7 +43,15 @@ import {
   type StructuredReviewEnvelopeV1,
   type UploadedArtifact,
 } from './types.js';
-import { ensureDir, sanitizeStateKey, walkFiles, writeJsonFile, writeTextFile } from './utils.js';
+import {
+  ensureDir,
+  sanitizeStateKey,
+  truncateText,
+  walkFiles,
+  writeJsonFile,
+  writeTextFile,
+} from './utils.js';
+import { defaultInlineCommentsMetadata, postInlineComments } from './inline-comments.js';
 
 type ReviewPhaseOutput = Phase | 'skipped-identical';
 
@@ -156,6 +166,7 @@ export async function run(): Promise<void> {
     workspace,
     tempDir: tempRoot,
     runtimeDir,
+    target,
   });
 
   const reviewedRange = buildReviewedRange({
@@ -189,10 +200,40 @@ export async function run(): Promise<void> {
     handleStructuredValidationFailure(error);
   }
 
+  const comment = await maybePostComment({
+    config,
+    target,
+    runtimeResult,
+    stateKey,
+    phase: resolution.phase,
+    artifactName,
+    lineageReason: resolution.lineageReason,
+    previousHeadSha: resolution.restoredState?.reviewedHeadSha,
+    structuredReview: structuredReview!,
+    octokit,
+  });
+
+  const inlineMetadata = await maybePostInlineComments({
+    config,
+    target,
+    stateKey,
+    structuredReview: structuredReview!,
+    octokit,
+    stickyCommentUrl: comment.commentUrl,
+  });
+  structuredReview = {
+    ...structuredReview!,
+    inlineComments: inlineMetadata,
+  };
+  structuredMetadata = {
+    ...structuredMetadata!,
+    inlineComments: inlineMetadata,
+  };
+
   const structuredResultPath = path.join(tempRoot, 'structured-result.json');
   const renderedReviewMarkdownPath = path.join(tempRoot, 'rendered-review.md');
-  const renderedReviewMarkdown = renderStructuredReviewMarkdown(structuredReview!);
-  await writeJsonFile(structuredResultPath, structuredReview!);
+  const renderedReviewMarkdown = renderStructuredReviewMarkdown(structuredReview);
+  await writeJsonFile(structuredResultPath, structuredReview);
   await writeTextFile(renderedReviewMarkdownPath, renderedReviewMarkdown);
 
   const bundleDir = path.join(tempRoot, 'state-bundle');
@@ -205,24 +246,11 @@ export async function run(): Promise<void> {
     promptSha256: prompt.sha256,
     blocks,
     runtimeResult,
-    structuredReview: structuredReview!,
-    structuredMetadata: structuredMetadata!,
+    structuredReview,
+    structuredMetadata,
     renderedReviewMarkdown,
     runtimeDir,
     createdAt: resolution.restoredState?.createdAt,
-  });
-
-  const comment = await maybePostComment({
-    config,
-    target,
-    runtimeResult,
-    stateKey,
-    phase: resolution.phase,
-    artifactName,
-    lineageReason: resolution.lineageReason,
-    previousHeadSha: resolution.restoredState?.reviewedHeadSha,
-    structuredReview: structuredReview!,
-    octokit,
   });
 
   const uploadedState = await store.upload(
@@ -424,7 +452,7 @@ async function finishSkippedIdentical(options: {
     lineageTotals: runtimeResult.lineageTotals,
     maxFindings: options.config.maxFindings,
   });
-  const structuredReview = capStructuredReviewForMarkdownLimit(
+  let structuredReview = capStructuredReviewForMarkdownLimit(
     normalized.envelope,
     options.config.maxReviewChars,
   );
@@ -432,6 +460,12 @@ async function finishSkippedIdentical(options: {
     structuredReview,
     normalized.metadata.status,
   );
+  const inlineMetadata = defaultInlineCommentsMetadata(inlinePolicy(options.config));
+  structuredReview = {
+    ...structuredReview,
+    inlineComments: inlineMetadata,
+  };
+  structuredMetadata.inlineComments = inlineMetadata;
   const renderedReviewMarkdown = renderStructuredReviewMarkdown(structuredReview);
   const bundleDir = path.join(defaultTempDir(), 'agentic-pr-review', 'state-bundle');
   const structuredResultPath = path.join(bundleDir, 'structured-result.json');
@@ -554,6 +588,65 @@ async function maybePostComment(options: {
   };
 }
 
+async function maybePostInlineComments(options: {
+  config: ActionConfig;
+  target: Awaited<ReturnType<typeof resolveTarget>>;
+  stateKey: string;
+  structuredReview: StructuredReviewEnvelopeV1;
+  octokit: any;
+  stickyCommentUrl: string;
+}): Promise<InlineCommentsMetadata> {
+  const policy = inlinePolicy(options.config);
+  if (options.target.mode !== 'pull-request' || !options.target.prNumber) {
+    const metadata = defaultInlineCommentsMetadata(policy);
+    if (policy.enabled) {
+      metadata.skippedCount = options.structuredReview.findings.length;
+      metadata.skippedReasons.non_pull_request = options.structuredReview.findings.length;
+    }
+    return metadata;
+  }
+  if (policy.enabled && !options.config.postComment) {
+    const metadata = defaultInlineCommentsMetadata(policy);
+    metadata.skippedCount = options.structuredReview.findings.length;
+    metadata.skippedReasons.sticky_comment_disabled = options.structuredReview.findings.length;
+    core.warning(
+      'Inline PR review comments require post_comment=true so the sticky review remains the source of truth.',
+    );
+    return metadata;
+  }
+  try {
+    return await postInlineComments({
+      octokit: options.octokit,
+      owner: github.context.repo.owner,
+      repo: github.context.repo.repo,
+      prNumber: options.target.prNumber,
+      stateKey: options.stateKey,
+      reviewedHeadSha: options.structuredReview.headSha,
+      stickyCommentUrl: options.stickyCommentUrl,
+      structuredReview: options.structuredReview,
+      policy,
+    });
+  } catch (error) {
+    const metadata = defaultInlineCommentsMetadata(policy);
+    metadata.failedCount = policy.enabled ? options.structuredReview.findings.length : 0;
+    if (metadata.failedCount > 0) {
+      metadata.failedReasons.api_failed = metadata.failedCount;
+    }
+    const diagnostic = truncateText(messageOf(error).replace(/\s+/g, ' '), 240);
+    core.warning(`Inline PR review comments skipped after sanitized failure: ${diagnostic}`);
+    return metadata;
+  }
+}
+
+function inlinePolicy(config: ActionConfig): InlineCommentsPolicy {
+  return {
+    enabled: config.inlineComments,
+    maxComments: config.maxInlineComments,
+    minSeverity: config.inlineMinSeverity,
+    minConfidence: config.inlineMinConfidence,
+  };
+}
+
 async function uploadDebugArtifact(
   store: ArtifactStore,
   stateKey: string,
@@ -607,6 +700,22 @@ function setOutputs(options: {
   );
   core.setOutput('findings_truncated', String(options.structuredMetadata.findingsTruncated));
   core.setOutput('findings_truncation_reason', options.structuredMetadata.truncationReason ?? '');
+  const inlineMetadata =
+    options.structuredMetadata.inlineComments ??
+    defaultInlineCommentsMetadata({
+      enabled: false,
+      maxComments: 5,
+      minSeverity: 'medium',
+      minConfidence: 'high',
+    });
+  core.setOutput('inline_comments_enabled', String(inlineMetadata.enabled));
+  core.setOutput('inline_comments_candidate_count', String(inlineMetadata.candidateCount));
+  core.setOutput('inline_comments_effective_cap', String(inlineMetadata.effectiveCap));
+  core.setOutput('inline_comments_cap_exceeded_count', String(inlineMetadata.capExceededCount));
+  core.setOutput('inline_comments_posted_count', String(inlineMetadata.postedCount));
+  core.setOutput('inline_comments_duplicate_count', String(inlineMetadata.duplicateCount));
+  core.setOutput('inline_comments_skipped_count', String(inlineMetadata.skippedCount));
+  core.setOutput('inline_comments_failed_count', String(inlineMetadata.failedCount));
   core.setOutput('comment_url', options.commentUrl);
   core.setOutput('lineage_action', options.lineageAction);
   core.setOutput('lineage_reason', options.lineageReason);
@@ -654,6 +763,7 @@ function metadataForStructuredReview(
     findingsTruncated: review.result.findingsTruncated,
     truncationReason: review.result.truncationReason,
     status,
+    inlineComments: review.inlineComments,
   };
 }
 
@@ -724,6 +834,7 @@ async function writeSummary(input: {
     `- Findings: ${input.structuredMetadata.renderedFindingCount}/${input.structuredMetadata.postFindingCapCount}/${input.structuredMetadata.inputFindingCount}`,
     `- Findings truncated: ${input.structuredMetadata.findingsTruncated}`,
     `- Findings truncation reason: ${input.structuredMetadata.truncationReason ?? 'n/a'}`,
+    `- Inline comments: ${formatInlineComments(input.structuredMetadata.inlineComments)}`,
     `- Lineage turns: ${input.runtimeResult.lineageTotals.observedTurns ?? 'n/a'}`,
     `- Lineage usage: ${lineageUsage}`,
     `- Lineage source: ${lineageSourceDetail}`,
@@ -740,6 +851,23 @@ async function writeSummary(input: {
   } catch (error) {
     core.info(`Unable to write job summary: ${messageOf(error)}`);
   }
+}
+
+function formatInlineComments(metadata: InlineCommentsMetadata | undefined): string {
+  if (!metadata) {
+    return 'disabled';
+  }
+  const skippedReasons = Object.keys(metadata.skippedReasons).join(', ') || 'none';
+  const failedReasons = Object.keys(metadata.failedReasons).join(', ') || 'none';
+  return [
+    `enabled=${metadata.enabled}`,
+    `candidates=${metadata.candidateCount}`,
+    `cap=${metadata.effectiveCap}`,
+    `posted=${metadata.postedCount}`,
+    `duplicates=${metadata.duplicateCount}`,
+    `skipped=${metadata.skippedCount} (${skippedReasons})`,
+    `failed=${metadata.failedCount} (${failedReasons})`,
+  ].join(', ');
 }
 
 function formatUsageBudgetStatus(status: RuntimeResult['usageBudgetStatus']): string {

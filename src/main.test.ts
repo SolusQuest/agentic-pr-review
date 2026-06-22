@@ -154,4 +154,25 @@ describe('run', () => {
     ).rejects.toThrow();
     expect(mocks.setOutput).not.toHaveBeenCalledWith('reviewed_head_sha', 'head-sha');
   });
+
+  it('skips inline comments when sticky comment posting is disabled', async () => {
+    Object.assign(mocks.inputs, {
+      post_comment: 'false',
+      inline_comments: 'true',
+      state_key: 'inline-without-sticky',
+    });
+    const { run } = await import('./main.js');
+
+    await run();
+
+    expect(mocks.createComment).not.toHaveBeenCalled();
+    expect(mocks.setOutput).toHaveBeenCalledWith('inline_comments_enabled', 'true');
+    expect(mocks.setOutput).toHaveBeenCalledWith('inline_comments_skipped_count', '1');
+    expect(mocks.warning).toHaveBeenCalledWith(
+      'Inline PR review comments require post_comment=true so the sticky review remains the source of truth.',
+    );
+    await expect(
+      stat(path.join(artifactRoot, stateArtifactName('inline-without-sticky'))),
+    ).resolves.toBeTruthy();
+  });
 });

@@ -7,6 +7,7 @@ import {
   type ModelReviewContentV1,
   type Phase,
   type RestoredState,
+  type ReviewTarget,
   type RuntimeLineageTotals,
   type RuntimeResult,
   type RuntimeUsage,
@@ -27,6 +28,7 @@ export interface RuntimeRunOptions {
   workspace: string;
   tempDir: string;
   runtimeDir: string;
+  target: ReviewTarget;
 }
 
 export interface ReviewRuntime {
@@ -47,7 +49,10 @@ export class TestRuntime implements ReviewRuntime {
       options.stateKey,
       `${sessionId}.jsonl`,
     );
-    const modelReviewJson = buildTestFixtureReviewJson(options.config.testRuntimeFixture);
+    const modelReviewJson = buildTestFixtureReviewJson(
+      options.config.testRuntimeFixture,
+      options.target,
+    );
 
     await writeTextFile(
       transcriptPath,
@@ -92,7 +97,10 @@ export class TestRuntime implements ReviewRuntime {
   }
 }
 
-function buildTestFixtureReviewJson(fixture: ActionConfig['testRuntimeFixture']): string {
+function buildTestFixtureReviewJson(
+  fixture: ActionConfig['testRuntimeFixture'],
+  target: ReviewTarget,
+): string {
   if (fixture === 'invalid_json') {
     return 'this is not json';
   }
@@ -164,9 +172,124 @@ function buildTestFixtureReviewJson(fixture: ActionConfig['testRuntimeFixture'])
       startLine: index + 1,
       endLine: index + 1,
     }));
+  } else if (fixture === 'inline_commentable') {
+    const location = findFirstCommentableRightSideLocation(target);
+    if (location) {
+      base.summary = 'Synthetic inline-commentable structured review completed.';
+      base.findings = [
+        {
+          severity: 'medium',
+          confidence: 'high',
+          category: 'correctness',
+          title: 'Inline-commentable synthetic finding',
+          body: 'This finding targets a current-side PR diff line for inline comment validation.',
+          path: location.path,
+          startLine: location.line,
+          endLine: location.line,
+          suggestedAction:
+            'Use this deterministic fixture to validate inline review comment posting.',
+        },
+      ];
+    } else {
+      base.summary = 'Synthetic inline-commentable fixture found no commentable diff line.';
+      base.findings = [
+        {
+          severity: 'medium',
+          confidence: 'high',
+          category: 'correctness',
+          title: 'No commentable diff line available',
+          body: 'The target pull request did not expose a current-side patch line for this fixture.',
+          path: 'synthetic-non-commentable.md',
+          startLine: 999999,
+          endLine: 999999,
+        },
+      ];
+    }
+  } else if (fixture === 'inline_non_commentable') {
+    base.summary = 'Synthetic non-commentable inline structured review completed.';
+    const firstPath = target.changedFiles[0]?.filename ?? 'synthetic-non-commentable.md';
+    base.findings = [
+      {
+        severity: 'medium',
+        confidence: 'high',
+        category: 'correctness',
+        title: 'Non-commentable synthetic finding',
+        body: 'This finding intentionally targets a line that should not be commentable.',
+        path: firstPath,
+        startLine: 999999,
+        endLine: 999999,
+        suggestedAction: 'Keep this finding visible in the sticky review only.',
+      },
+    ];
+  } else if (fixture === 'inline_many_findings') {
+    base.summary = 'Synthetic many-inline-findings structured review completed.';
+    const locations = findCommentableRightSideLocations(target);
+    base.findings = Array.from({ length: 12 }, (_, index) => {
+      const location = locations[index % Math.max(1, locations.length)] ?? {
+        path: 'synthetic-non-commentable.md',
+        line: 999999 + index,
+      };
+      return {
+        severity: index % 2 === 0 ? 'high' : 'medium',
+        confidence: 'high',
+        category: 'maintainability',
+        title: `Inline cap synthetic finding ${index + 1}`,
+        body: `Synthetic inline finding ${index + 1} validates cap and duplicate behavior.`,
+        path: location.path,
+        startLine: location.line,
+        endLine: location.line,
+        suggestedAction: 'Use this deterministic fixture for inline cap smoke validation.',
+      };
+    });
   }
 
   return JSON.stringify(base);
+}
+
+function findFirstCommentableRightSideLocation(
+  target: ReviewTarget,
+): { path: string; line: number } | undefined {
+  return findCommentableRightSideLocations(target)[0];
+}
+
+function findCommentableRightSideLocations(
+  target: ReviewTarget,
+): Array<{ path: string; line: number }> {
+  const locations: Array<{ path: string; line: number }> = [];
+  for (const file of target.changedFiles) {
+    if (!file.patch) {
+      continue;
+    }
+    for (const line of commentableRightSideLines(file.patch)) {
+      locations.push({ path: file.filename, line });
+    }
+  }
+  return locations;
+}
+
+function commentableRightSideLines(patch: string): number[] {
+  const result: number[] = [];
+  let newLine: number | undefined;
+  for (const line of patch.split('\n')) {
+    const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunk) {
+      newLine = Number.parseInt(hunk[1], 10);
+      continue;
+    }
+    if (newLine === undefined || line.startsWith('\\')) {
+      continue;
+    }
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      result.push(newLine);
+      newLine += 1;
+    } else if (line.startsWith(' ')) {
+      result.push(newLine);
+      newLine += 1;
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      continue;
+    }
+  }
+  return result;
 }
 
 export class ClaudeCodeRuntime implements ReviewRuntime {

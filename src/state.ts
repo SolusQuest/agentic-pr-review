@@ -48,6 +48,7 @@ interface StateManifest {
     renderedFindingCount: number;
     findingsTruncated: boolean;
     truncationReason?: StructuredResultMetadata['truncationReason'];
+    inlineComments?: StructuredResultMetadata['inlineComments'];
   };
   contextBlocks: Array<Pick<LoadedBlock, 'name' | 'source' | 'bytes' | 'sha256'>>;
   target: {
@@ -146,6 +147,7 @@ export async function writeStateBundle(options: {
       renderedFindingCount: options.structuredMetadata.renderedFindingCount,
       findingsTruncated: options.structuredMetadata.findingsTruncated,
       truncationReason: options.structuredMetadata.truncationReason,
+      inlineComments: options.structuredMetadata.inlineComments,
     },
     contextBlocks: options.blocks.map((block) => ({
       name: block.name,
