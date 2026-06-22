@@ -91,39 +91,52 @@ permissions:
   actions: read
 ```
 
+With `inline_comments: "true"`, use the same write permission:
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+```
+
 ## Inputs
 
-| Input                                              | Default        | Notes                                                                                                                                         |
-| -------------------------------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `runtime_provider`                                 | `test`         | `test` or `claude-code-cli`                                                                                                                   |
-| `target_mode`                                      | `pull-request` | `pull-request` or `synthetic-fixture`                                                                                                         |
-| `review_mode`                                      | `auto`         | `auto`, `bootstrap`, or `incremental`                                                                                                         |
-| `pr_number`                                        | inferred       | Required for pull-request mode outside pull request events                                                                                    |
-| `state_key`                                        | derived        | Defaults to the target and runtime                                                                                                            |
-| `state_artifact_run_id`                            | empty          | Optional explicit run id to restore from                                                                                                      |
-| `artifact_retention_days`                          | `7`            | Clamped to 1 through 7                                                                                                                        |
-| `post_comment`                                     | `false`        | Creates or updates a sticky top-level PR comment                                                                                              |
-| `model_base_url`                                   | empty          | Required for `claude-code-cli`                                                                                                                |
-| `model_name`                                       | empty          | Required for `claude-code-cli`                                                                                                                |
-| `small_model_name`                                 | empty          | Optional small/background model                                                                                                               |
-| `api_key_mode`                                     | `auth-token`   | `auth-token`, `api-key`, or `both`                                                                                                            |
-| `claude_code_version`                              | empty          | Required explicit semver for `claude-code-cli`                                                                                                |
-| `tool_mode`                                        | `none`         | `none` disables runtime tools; `readonly` allows only Claude Code `Read`, `Glob`, and `Grep` for live runtime                                 |
-| `claude_max_turns`                                 | `6`            | Positive integer passed to Claude Code `--max-turns`                                                                                          |
-| `instructions` / `instructions_path`               | empty          | Mutually exclusive stable review instructions                                                                                                 |
-| `bootstrap_context` / `bootstrap_context_path`     | empty          | Mutually exclusive bootstrap-only context                                                                                                     |
-| `incremental_context` / `incremental_context_path` | empty          | Mutually exclusive incremental-only context                                                                                                   |
-| `max_context_chars`                                | `60000`        | Per instruction/context block                                                                                                                 |
-| `max_patch_chars`                                  | `120000`       | PR patch context bound                                                                                                                        |
-| `max_review_chars`                                 | `12000`        | Rendered review markdown bound for the posted current review and structured artifacts                                                         |
-| `max_findings`                                     | `50`           | Maximum normalized findings included in the sticky comment and structured result                                                              |
-| `test_runtime_fixture`                             | `valid`        | Structured fixture for `runtime_provider=test`: `valid`, `no_findings`, `null_location`, `many_findings`, `invalid_json`, or `schema_invalid` |
-| `max_uncached_input_tokens`                        | `0`            | Current-run `input_tokens` watchdog; `0` disables                                                                                             |
-| `max_cached_input_tokens`                          | `0`            | Current-run cache-read/cache-hit token watchdog; `0` disables                                                                                 |
-| `max_output_tokens`                                | `0`            | Current-run `output_tokens` watchdog; `0` disables                                                                                            |
-| `disable_prompt_caching`                           | `false`        | Sets `DISABLE_PROMPT_CACHING=1` for live runtime                                                                                              |
-| `debug_capture_raw_api_bodies`                     | `false`        | Restricted trusted manual diagnostic mode                                                                                                     |
-| `debug_acknowledgement`                            | empty          | Required acknowledgement phrase for diagnostic mode                                                                                           |
+| Input                                              | Default        | Notes                                                                                                                                                                                                                 |
+| -------------------------------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runtime_provider`                                 | `test`         | `test` or `claude-code-cli`                                                                                                                                                                                           |
+| `target_mode`                                      | `pull-request` | `pull-request` or `synthetic-fixture`                                                                                                                                                                                 |
+| `review_mode`                                      | `auto`         | `auto`, `bootstrap`, or `incremental`                                                                                                                                                                                 |
+| `pr_number`                                        | inferred       | Required for pull-request mode outside pull request events                                                                                                                                                            |
+| `state_key`                                        | derived        | Defaults to the target and runtime                                                                                                                                                                                    |
+| `state_artifact_run_id`                            | empty          | Optional explicit run id to restore from                                                                                                                                                                              |
+| `artifact_retention_days`                          | `7`            | Clamped to 1 through 7                                                                                                                                                                                                |
+| `post_comment`                                     | `false`        | Creates or updates a sticky top-level PR comment                                                                                                                                                                      |
+| `model_base_url`                                   | empty          | Required for `claude-code-cli`                                                                                                                                                                                        |
+| `model_name`                                       | empty          | Required for `claude-code-cli`                                                                                                                                                                                        |
+| `small_model_name`                                 | empty          | Optional small/background model                                                                                                                                                                                       |
+| `api_key_mode`                                     | `auth-token`   | `auth-token`, `api-key`, or `both`                                                                                                                                                                                    |
+| `claude_code_version`                              | empty          | Required explicit semver for `claude-code-cli`                                                                                                                                                                        |
+| `tool_mode`                                        | `none`         | `none` disables runtime tools; `readonly` allows only Claude Code `Read`, `Glob`, and `Grep` for live runtime                                                                                                         |
+| `claude_max_turns`                                 | `6`            | Positive integer passed to Claude Code `--max-turns`                                                                                                                                                                  |
+| `instructions` / `instructions_path`               | empty          | Mutually exclusive stable review instructions                                                                                                                                                                         |
+| `bootstrap_context` / `bootstrap_context_path`     | empty          | Mutually exclusive bootstrap-only context                                                                                                                                                                             |
+| `incremental_context` / `incremental_context_path` | empty          | Mutually exclusive incremental-only context                                                                                                                                                                           |
+| `max_context_chars`                                | `60000`        | Per instruction/context block                                                                                                                                                                                         |
+| `max_patch_chars`                                  | `120000`       | PR patch context bound                                                                                                                                                                                                |
+| `max_review_chars`                                 | `12000`        | Rendered review markdown bound for the posted current review and structured artifacts                                                                                                                                 |
+| `max_findings`                                     | `50`           | Maximum normalized findings included in the sticky comment and structured result                                                                                                                                      |
+| `inline_comments`                                  | `false`        | Posts eligible structured findings as inline PR review comments. Sticky review remains the source of truth                                                                                                            |
+| `max_inline_comments`                              | `5`            | Maximum inline comments to post, clamped to 0 through 10                                                                                                                                                              |
+| `inline_min_severity`                              | `medium`       | Minimum severity for inline comments: `low`, `medium`, or `high`                                                                                                                                                      |
+| `inline_min_confidence`                            | `high`         | Minimum confidence for inline comments: `medium` or `high`                                                                                                                                                            |
+| `test_runtime_fixture`                             | `valid`        | Structured fixture for `runtime_provider=test`: `valid`, `no_findings`, `null_location`, `many_findings`, `inline_commentable`, `inline_non_commentable`, `inline_many_findings`, `invalid_json`, or `schema_invalid` |
+| `max_uncached_input_tokens`                        | `0`            | Current-run `input_tokens` watchdog; `0` disables                                                                                                                                                                     |
+| `max_cached_input_tokens`                          | `0`            | Current-run cache-read/cache-hit token watchdog; `0` disables                                                                                                                                                         |
+| `max_output_tokens`                                | `0`            | Current-run `output_tokens` watchdog; `0` disables                                                                                                                                                                    |
+| `disable_prompt_caching`                           | `false`        | Sets `DISABLE_PROMPT_CACHING=1` for live runtime                                                                                                                                                                      |
+| `debug_capture_raw_api_bodies`                     | `false`        | Restricted trusted manual diagnostic mode                                                                                                                                                                             |
+| `debug_acknowledgement`                            | empty          | Required acknowledgement phrase for diagnostic mode                                                                                                                                                                   |
 
 `tool_mode=readonly` is only meaningful for `runtime_provider=claude-code-cli`. It restricts the
 Claude Code built-in tool surface to `Read`, `Glob`, and `Grep`; shell, network, edit/write,
@@ -167,6 +180,14 @@ preempt the provider call that emitted the over-budget usage record.
 | `findings_rendered_count`                   | Finding count rendered in the sticky comment and structured artifacts                   |
 | `findings_truncated`                        | Whether findings were truncated by `max_findings` or `max_review_chars`                 |
 | `findings_truncation_reason`                | `max_findings`, `max_review_chars`, `both`, or empty when not truncated                 |
+| `inline_comments_enabled`                   | Whether inline PR review comments were enabled                                          |
+| `inline_comments_candidate_count`           | Eligible inline candidates before applying `max_inline_comments`                        |
+| `inline_comments_effective_cap`             | Effective inline comment cap after clamping                                             |
+| `inline_comments_cap_exceeded_count`        | Eligible inline candidates omitted by the cap                                           |
+| `inline_comments_posted_count`              | Inline comments posted by this run                                                      |
+| `inline_comments_duplicate_count`           | Inline candidates suppressed by existing duplicate markers                              |
+| `inline_comments_skipped_count`             | Inline candidates skipped before posting                                                |
+| `inline_comments_failed_count`              | Inline posting failures recorded without hiding sticky findings                         |
 | `comment_url`                               | Sticky comment URL when comment posting is enabled                                      |
 | `lineage_action`                            | Sticky comment lineage action                                                           |
 | `lineage_reason`                            | Sticky comment lineage reason                                                           |
@@ -235,6 +256,29 @@ The action caps findings before writing `structured-result.json`, `rendered-revi
 comment. It first applies `max_findings`, then further reduces findings if needed so the rendered
 current review fits `max_review_chars`. The structured result artifact and sticky comment therefore
 use the same final finding set; artifacts do not retain extra findings hidden from the posted review.
+
+Inline comments are disabled by default. When enabled, the action selects findings only from this final
+validated finding set, filters them by severity and confidence, verifies that each location maps to a
+current-side line in the current PR diff, suppresses existing marker duplicates, and posts at most the
+effective cap. Findings without a repo-relative path and current-head start line, outside the diff, in
+binary or missing-patch files, or on deleted-line-only locations stay in the sticky review only. If the
+PR head changes before posting, or diff/comment pagination reaches GitHub-supported limits, inline
+posting is skipped while the sticky review and state artifact flow continue.
+
+Inline comment bodies include only validated structured finding content plus a hidden generic marker:
+
+```text
+<!-- agentic-pr-review:inline:v1 key=<sha256> -->
+```
+
+The duplicate key is derived from the action-owned finding fingerprint, state key, path, and line/range.
+It does not include model names, runtime session ids, provider session ids, workflow run ids, or sticky
+comment lineage ids. Inline comment metadata is written under `inlineComments` in `structured-result.json`
+and under `structuredOutput.inlineComments` in the state manifest.
+
+For deterministic downstream smoke tests with `runtime_provider=test`, use `inline_commentable` to emit
+a finding on the first available current-side PR diff line, `inline_non_commentable` to keep a finding
+sticky-only, and `inline_many_findings` to exercise inline caps and duplicate suppression.
 
 If model JSON cannot be parsed or schema-validated after deterministic local cleanup such as trimming
 whitespace or extracting a fenced JSON object, the action fails closed. Invalid output does not update

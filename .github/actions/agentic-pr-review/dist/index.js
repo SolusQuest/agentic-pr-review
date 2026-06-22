@@ -45910,7 +45910,7 @@ var require_archiver_utils = __commonJS({
     var path9 = __require("path");
     var isStream = require_is_stream();
     var lazystream = require_lazystream();
-    var normalizePath2 = require_normalize_path();
+    var normalizePath3 = require_normalize_path();
     var defaults2 = require_defaults();
     var Stream2 = __require("stream").Stream;
     var PassThrough3 = require_ours().PassThrough;
@@ -45969,13 +45969,13 @@ var require_archiver_utils = __commonJS({
       return source;
     };
     utils.sanitizePath = function(filepath) {
-      return normalizePath2(filepath, false).replace(/^\w+:/, "").replace(/^(\.\.\/|\/)+/, "");
+      return normalizePath3(filepath, false).replace(/^\w+:/, "").replace(/^(\.\.\/|\/)+/, "");
     };
     utils.trailingSlashIt = function(str) {
       return str.slice(-1) !== "/" ? str + "/" : str;
     };
     utils.unixifyPath = function(filepath) {
-      return normalizePath2(filepath, false).replace(/^\w+:/, "");
+      return normalizePath3(filepath, false).replace(/^\w+:/, "");
     };
     utils.walkdir = function(dirpath, base, callback) {
       var results = [];
@@ -46872,7 +46872,7 @@ var require_constants6 = __commonJS({
 var require_zip_archive_entry = __commonJS({
   "node_modules/compress-commons/lib/archivers/zip/zip-archive-entry.js"(exports2, module) {
     var inherits = __require("util").inherits;
-    var normalizePath2 = require_normalize_path();
+    var normalizePath3 = require_normalize_path();
     var ArchiveEntry = require_archive_entry();
     var GeneralPurposeBit = require_general_purpose_bit();
     var UnixStat = require_unix_stat();
@@ -46996,7 +46996,7 @@ var require_zip_archive_entry = __commonJS({
       this.method = method;
     };
     ZipArchiveEntry.prototype.setName = function(name, prependSlash = false) {
-      name = normalizePath2(name, false).replace(/^\w+:/, "").replace(/^(\.\.\/|\/)+/, "");
+      name = normalizePath3(name, false).replace(/^\w+:/, "").replace(/^(\.\.\/|\/)+/, "");
       if (prependSlash) {
         name = `/${name}`;
       }
@@ -97860,11 +97860,20 @@ var TARGET_MODES = ["pull-request", "synthetic-fixture"];
 var REVIEW_MODES = ["auto", "bootstrap", "incremental"];
 var API_KEY_MODES = ["auth-token", "api-key", "both"];
 var TOOL_MODES = ["none", "readonly"];
+var INLINE_SEVERITIES = [
+  "low",
+  "medium",
+  "high"
+];
+var INLINE_CONFIDENCES = ["medium", "high"];
 var TEST_RUNTIME_FIXTURES = [
   "valid",
   "no_findings",
   "null_location",
   "many_findings",
+  "inline_commentable",
+  "inline_non_commentable",
+  "inline_many_findings",
   "invalid_json",
   "schema_invalid"
 ];
@@ -97955,6 +97964,26 @@ function parseActionConfig(reader, env, eventName) {
       12e3
     ),
     maxFindings: parsePositiveInteger(optionalInput(reader, "max_findings"), "max_findings", 50),
+    inlineComments: parseBoolean(
+      optionalInput(reader, "inline_comments"),
+      "inline_comments",
+      false
+    ),
+    maxInlineComments: clamp(
+      parseInteger(optionalInput(reader, "max_inline_comments"), "max_inline_comments", 5),
+      0,
+      10
+    ),
+    inlineMinSeverity: oneOf(
+      optionalInput(reader, "inline_min_severity") ?? "medium",
+      "inline_min_severity",
+      INLINE_SEVERITIES
+    ),
+    inlineMinConfidence: oneOf(
+      optionalInput(reader, "inline_min_confidence") ?? "high",
+      "inline_min_confidence",
+      INLINE_CONFIDENCES
+    ),
     testRuntimeFixture,
     usageBudgetLimits: {
       maxUncachedInputTokens: parseInteger(
@@ -98589,7 +98618,10 @@ var TestRuntime = class {
       options.stateKey,
       `${sessionId}.jsonl`
     );
-    const modelReviewJson = buildTestFixtureReviewJson(options.config.testRuntimeFixture);
+    const modelReviewJson = buildTestFixtureReviewJson(
+      options.config.testRuntimeFixture,
+      options.target
+    );
     await writeTextFile(
       transcriptPath,
       `${JSON.stringify({
@@ -98633,7 +98665,7 @@ ${JSON.stringify({ type: "result", session_id: sessionId, result: modelReviewJso
     };
   }
 };
-function buildTestFixtureReviewJson(fixture) {
+function buildTestFixtureReviewJson(fixture, target) {
   if (fixture === "invalid_json") {
     return "this is not json";
   }
@@ -98703,8 +98735,115 @@ function buildTestFixtureReviewJson(fixture) {
       startLine: index + 1,
       endLine: index + 1
     }));
+  } else if (fixture === "inline_commentable") {
+    const location = findFirstCommentableRightSideLocation(target);
+    if (location) {
+      base.summary = "Synthetic inline-commentable structured review completed.";
+      base.findings = [
+        {
+          severity: "medium",
+          confidence: "high",
+          category: "correctness",
+          title: "Inline-commentable synthetic finding",
+          body: "This finding targets a current-side PR diff line for inline comment validation.",
+          path: location.path,
+          startLine: location.line,
+          endLine: location.line,
+          suggestedAction: "Use this deterministic fixture to validate inline review comment posting."
+        }
+      ];
+    } else {
+      base.summary = "Synthetic inline-commentable fixture found no commentable diff line.";
+      base.findings = [
+        {
+          severity: "medium",
+          confidence: "high",
+          category: "correctness",
+          title: "No commentable diff line available",
+          body: "The target pull request did not expose a current-side patch line for this fixture.",
+          path: "synthetic-non-commentable.md",
+          startLine: 999999,
+          endLine: 999999
+        }
+      ];
+    }
+  } else if (fixture === "inline_non_commentable") {
+    base.summary = "Synthetic non-commentable inline structured review completed.";
+    const firstPath = target.changedFiles[0]?.filename ?? "synthetic-non-commentable.md";
+    base.findings = [
+      {
+        severity: "medium",
+        confidence: "high",
+        category: "correctness",
+        title: "Non-commentable synthetic finding",
+        body: "This finding intentionally targets a line that should not be commentable.",
+        path: firstPath,
+        startLine: 999999,
+        endLine: 999999,
+        suggestedAction: "Keep this finding visible in the sticky review only."
+      }
+    ];
+  } else if (fixture === "inline_many_findings") {
+    base.summary = "Synthetic many-inline-findings structured review completed.";
+    const locations = findCommentableRightSideLocations(target);
+    base.findings = Array.from({ length: 12 }, (_2, index) => {
+      const location = locations[index % Math.max(1, locations.length)] ?? {
+        path: "synthetic-non-commentable.md",
+        line: 999999 + index
+      };
+      return {
+        severity: index % 2 === 0 ? "high" : "medium",
+        confidence: "high",
+        category: "maintainability",
+        title: `Inline cap synthetic finding ${index + 1}`,
+        body: `Synthetic inline finding ${index + 1} validates cap and duplicate behavior.`,
+        path: location.path,
+        startLine: location.line,
+        endLine: location.line,
+        suggestedAction: "Use this deterministic fixture for inline cap smoke validation."
+      };
+    });
   }
   return JSON.stringify(base);
+}
+function findFirstCommentableRightSideLocation(target) {
+  return findCommentableRightSideLocations(target)[0];
+}
+function findCommentableRightSideLocations(target) {
+  const locations = [];
+  for (const file of target.changedFiles) {
+    if (!file.patch) {
+      continue;
+    }
+    for (const line of commentableRightSideLines(file.patch)) {
+      locations.push({ path: file.filename, line });
+    }
+  }
+  return locations;
+}
+function commentableRightSideLines(patch) {
+  const result = [];
+  let newLine;
+  for (const line of patch.split("\n")) {
+    const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunk) {
+      newLine = Number.parseInt(hunk[1], 10);
+      continue;
+    }
+    if (newLine === void 0 || line.startsWith("\\")) {
+      continue;
+    }
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      result.push(newLine);
+      newLine += 1;
+    } else if (line.startsWith(" ")) {
+      result.push(newLine);
+      newLine += 1;
+    } else if (line.startsWith("-") && !line.startsWith("---")) {
+      continue;
+    }
+  }
+  return result;
 }
 var ClaudeCodeRuntime = class {
   async run(options) {
@@ -99433,7 +99572,8 @@ async function writeStateBundle(options) {
       postFindingCapCount: options.structuredMetadata.postFindingCapCount,
       renderedFindingCount: options.structuredMetadata.renderedFindingCount,
       findingsTruncated: options.structuredMetadata.findingsTruncated,
-      truncationReason: options.structuredMetadata.truncationReason
+      truncationReason: options.structuredMetadata.truncationReason,
+      inlineComments: options.structuredMetadata.inlineComments
     },
     contextBlocks: options.blocks.map((block) => ({
       name: block.name,
@@ -99975,6 +100115,377 @@ function deriveStateKey(config, target) {
   return `synthetic-${config.runtimeProvider}`;
 }
 
+// src/inline-comments.ts
+var INLINE_COMMENT_MARKER_PREFIX = "<!-- agentic-pr-review:inline:v1";
+var INLINE_COMMENT_MARKER_SUFFIX = "-->";
+var INLINE_COMMENT_MARKER_PATTERN = /<!--\s*agentic-pr-review:inline:v1\s+key=([a-f0-9]{64})\s*-->/gi;
+var SUPPORTED_PULL_REQUEST_FILE_LIMIT = 3e3;
+var SUPPORTED_REVIEW_COMMENT_LIMIT = 3e3;
+var SEVERITY_RANK = {
+  low: 0,
+  medium: 1,
+  high: 2
+};
+var CONFIDENCE_RANK = {
+  medium: 0,
+  high: 1
+};
+function defaultInlineCommentsMetadata(policy) {
+  return {
+    enabled: policy.enabled,
+    policy,
+    candidateCount: 0,
+    effectiveCap: policy.maxComments,
+    capExceededCount: 0,
+    postedCount: 0,
+    duplicateCount: 0,
+    skippedCount: 0,
+    failedCount: 0,
+    skippedReasons: {},
+    failedReasons: {}
+  };
+}
+async function postInlineComments(input) {
+  const metadata2 = defaultInlineCommentsMetadata(input.policy);
+  if (!input.policy.enabled) {
+    skipAll(metadata2, input.structuredReview.findings.length, "disabled");
+    return metadata2;
+  }
+  const files = await listPullRequestFiles(input);
+  if (files.length >= SUPPORTED_PULL_REQUEST_FILE_LIMIT) {
+    skipAll(metadata2, input.structuredReview.findings.length, "diff_too_large");
+    return metadata2;
+  }
+  const lineIndex = buildCommentableLineIndex(files);
+  const selected = selectInlineCommentCandidates({
+    review: input.structuredReview,
+    policy: input.policy,
+    stateKey: input.stateKey,
+    lineIndex,
+    stickyCommentUrl: input.stickyCommentUrl
+  });
+  mergeReasons(metadata2.skippedReasons, selected.skippedReasons);
+  metadata2.skippedCount += selected.skippedCount;
+  metadata2.candidateCount = selected.candidates.length;
+  if (selected.candidates.length === 0) {
+    return metadata2;
+  }
+  let existingKeys = await listExistingInlineMarkerKeys(input);
+  if (existingKeys === "too_large") {
+    skipAll(metadata2, selected.candidates.length, "diff_too_large");
+    return metadata2;
+  }
+  let pending = suppressDuplicateCandidates(selected.candidates, existingKeys, metadata2);
+  metadata2.capExceededCount = Math.max(0, pending.length - input.policy.maxComments);
+  addSkip(metadata2, "cap_exceeded", metadata2.capExceededCount);
+  pending = pending.slice(0, input.policy.maxComments);
+  if (pending.length === 0) {
+    return metadata2;
+  }
+  const currentHeadSha = await fetchCurrentHeadSha(input);
+  if (currentHeadSha !== input.reviewedHeadSha) {
+    skipAll(metadata2, pending.length, "head_changed");
+    return metadata2;
+  }
+  try {
+    await input.octokit.rest.pulls.createReview({
+      owner: input.owner,
+      repo: input.repo,
+      pull_number: input.prNumber,
+      commit_id: input.reviewedHeadSha,
+      event: "COMMENT",
+      body: "Agentic PR Review inline comments. See the sticky top-level review comment for the full structured review.",
+      comments: pending.map((candidate) => ({
+        path: candidate.path,
+        line: candidate.line,
+        side: "RIGHT",
+        body: candidate.body
+      }))
+    });
+    metadata2.postedCount += pending.length;
+    return metadata2;
+  } catch (error2) {
+    const classification = classifyGitHubPostingError(error2);
+    if (!classification.allowIndividualFallback) {
+      failAll(metadata2, pending.length, classification.reason);
+      return metadata2;
+    }
+    addReason(metadata2.failedReasons, `batch_${classification.reason}`, 1);
+  }
+  existingKeys = await listExistingInlineMarkerKeys(input);
+  if (existingKeys === "too_large") {
+    skipAll(metadata2, pending.length, "diff_too_large");
+    return metadata2;
+  }
+  pending = suppressDuplicateCandidates(pending, existingKeys, metadata2);
+  if (pending.length === 0) {
+    return metadata2;
+  }
+  const fallbackHeadSha = await fetchCurrentHeadSha(input);
+  if (fallbackHeadSha !== input.reviewedHeadSha) {
+    skipAll(metadata2, pending.length, "head_changed");
+    return metadata2;
+  }
+  for (const candidate of pending) {
+    try {
+      await input.octokit.rest.pulls.createReviewComment({
+        owner: input.owner,
+        repo: input.repo,
+        pull_number: input.prNumber,
+        commit_id: input.reviewedHeadSha,
+        path: candidate.path,
+        line: candidate.line,
+        side: "RIGHT",
+        body: candidate.body
+      });
+      metadata2.postedCount += 1;
+    } catch (error2) {
+      const classification = classifyGitHubPostingError(error2);
+      metadata2.failedCount += 1;
+      addReason(metadata2.failedReasons, classification.reason, 1);
+    }
+  }
+  return metadata2;
+}
+function buildCommentableLineIndex(files) {
+  const index = /* @__PURE__ */ new Map();
+  for (const file of files) {
+    const path9 = normalizePath2(file.filename);
+    if (!file.patch) {
+      index.set(path9, { lines: /* @__PURE__ */ new Set(), hasPatch: false });
+      continue;
+    }
+    const lines = commentableRightSideLines2(file.patch);
+    index.set(path9, { lines, hasPatch: true });
+  }
+  return index;
+}
+function selectInlineCommentCandidates(input) {
+  const candidates = [];
+  const skippedReasons = {};
+  let skippedCount = 0;
+  for (const finding of input.review.findings) {
+    const skipReason = inlineFindingSkipReason(finding, input.policy, input.lineIndex);
+    if (skipReason) {
+      skippedCount += 1;
+      addReason(skippedReasons, skipReason, 1);
+      continue;
+    }
+    const path9 = normalizePath2(finding.path);
+    const line = finding.startLine;
+    const key = inlineCommentKey({
+      stateKey: input.stateKey,
+      fingerprint: finding.fingerprint,
+      path: path9,
+      startLine: line,
+      endLine: finding.endLine
+    });
+    candidates.push({
+      finding,
+      path: path9,
+      line,
+      endLine: finding.endLine,
+      key,
+      body: renderInlineCommentBody(finding, key, input.stickyCommentUrl)
+    });
+  }
+  return { candidates, skippedCount, skippedReasons };
+}
+function inlineCommentKey(input) {
+  return sha256(
+    JSON.stringify({
+      version: 1,
+      stateKey: input.stateKey,
+      fingerprint: input.fingerprint,
+      path: normalizePath2(input.path),
+      startLine: input.startLine,
+      endLine: input.endLine ?? null
+    })
+  );
+}
+function parseInlineCommentMarkerKeys(body2) {
+  const keys = /* @__PURE__ */ new Set();
+  for (const match of body2.matchAll(INLINE_COMMENT_MARKER_PATTERN)) {
+    keys.add(match[1]);
+  }
+  return keys;
+}
+function renderInlineCommentBody(finding, key, stickyCommentUrl) {
+  const lines = [
+    `${INLINE_COMMENT_MARKER_PREFIX} key=${key} ${INLINE_COMMENT_MARKER_SUFFIX}`,
+    `**${sanitizeMarkdownText2(finding.title)}**`,
+    "",
+    `Severity: ${finding.severity} | Confidence: ${finding.confidence} | Category: ${finding.category}`,
+    "",
+    truncateText(sanitizeMarkdownText2(finding.body), 1800)
+  ];
+  if (finding.endLine !== null && finding.endLine !== finding.startLine) {
+    lines.push("", `Original range: \`${finding.path}:${finding.startLine}-${finding.endLine}\``);
+  }
+  if (finding.suggestedAction) {
+    lines.push(
+      "",
+      "Suggested action:",
+      "",
+      truncateText(sanitizeMarkdownText2(finding.suggestedAction), 900)
+    );
+  }
+  lines.push(
+    "",
+    stickyCommentUrl ? `Full review: ${stickyCommentUrl}` : "Full review: sticky top-level Agentic PR Review comment."
+  );
+  return truncateText(lines.join("\n"), 4e3);
+}
+function inlineFindingSkipReason(finding, policy, lineIndex) {
+  if (SEVERITY_RANK[finding.severity] < SEVERITY_RANK[policy.minSeverity]) {
+    return "below_threshold";
+  }
+  if (CONFIDENCE_RANK[finding.confidence] < CONFIDENCE_RANK[policy.minConfidence]) {
+    return "below_threshold";
+  }
+  if (!finding.path || !finding.startLine) {
+    return "missing_location";
+  }
+  const entry = lineIndex.get(normalizePath2(finding.path));
+  if (!entry) {
+    return "path_not_in_diff";
+  }
+  if (!entry.hasPatch) {
+    return "binary_or_missing_patch";
+  }
+  if (!entry.lines.has(finding.startLine)) {
+    return "line_not_commentable";
+  }
+  return void 0;
+}
+function commentableRightSideLines2(patch) {
+  const result = /* @__PURE__ */ new Set();
+  let newLine;
+  for (const line of patch.split("\n")) {
+    const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunk) {
+      newLine = Number.parseInt(hunk[1], 10);
+      continue;
+    }
+    if (newLine === void 0 || line.startsWith("\\")) {
+      continue;
+    }
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      result.add(newLine);
+      newLine += 1;
+    } else if (line.startsWith(" ")) {
+      result.add(newLine);
+      newLine += 1;
+    } else if (line.startsWith("-") && !line.startsWith("---")) {
+      continue;
+    }
+  }
+  return result;
+}
+async function listPullRequestFiles(input) {
+  return await input.octokit.paginate(input.octokit.rest.pulls.listFiles, {
+    owner: input.owner,
+    repo: input.repo,
+    pull_number: input.prNumber,
+    per_page: 100
+  });
+}
+async function listExistingInlineMarkerKeys(input) {
+  const comments = await input.octokit.paginate(input.octokit.rest.pulls.listReviewComments, {
+    owner: input.owner,
+    repo: input.repo,
+    pull_number: input.prNumber,
+    per_page: 100
+  });
+  if (comments.length >= SUPPORTED_REVIEW_COMMENT_LIMIT) {
+    return "too_large";
+  }
+  const keys = /* @__PURE__ */ new Set();
+  for (const comment of comments) {
+    for (const key of parseInlineCommentMarkerKeys(comment.body ?? "")) {
+      keys.add(key);
+    }
+  }
+  return keys;
+}
+async function fetchCurrentHeadSha(input) {
+  const pull = await input.octokit.rest.pulls.get({
+    owner: input.owner,
+    repo: input.repo,
+    pull_number: input.prNumber
+  });
+  return String(pull.data.head.sha);
+}
+function suppressDuplicateCandidates(candidates, existingKeys, metadata2) {
+  const pending = [];
+  for (const candidate of candidates) {
+    if (existingKeys.has(candidate.key)) {
+      metadata2.duplicateCount += 1;
+    } else {
+      pending.push(candidate);
+    }
+  }
+  return pending;
+}
+function classifyGitHubPostingError(error2) {
+  const status = typeof error2?.status === "number" ? error2.status : void 0;
+  const message = error2 instanceof Error ? error2.message.toLowerCase() : String(error2).toLowerCase();
+  if (status === 401) {
+    return { reason: "authentication_failed", allowIndividualFallback: false };
+  }
+  if (status === 403 && /secondary|rate limit|abuse/.test(message)) {
+    return { reason: "secondary_rate_limit", allowIndividualFallback: false };
+  }
+  if (status === 429) {
+    return { reason: "secondary_rate_limit", allowIndividualFallback: false };
+  }
+  if (status === 403) {
+    return { reason: "permission_denied", allowIndividualFallback: false };
+  }
+  if (status === 404) {
+    return { reason: "repository_policy", allowIndividualFallback: false };
+  }
+  if (status === 422 && /policy|protected|forbidden/.test(message)) {
+    return { reason: "repository_policy", allowIndividualFallback: false };
+  }
+  if (status === 422) {
+    return { reason: "validation_failed", allowIndividualFallback: true };
+  }
+  return { reason: "ambiguous_failure", allowIndividualFallback: true };
+}
+function skipAll(metadata2, count, reason) {
+  metadata2.skippedCount += count;
+  addReason(metadata2.skippedReasons, reason, count);
+}
+function failAll(metadata2, count, reason) {
+  metadata2.failedCount += count;
+  addReason(metadata2.failedReasons, reason, count);
+}
+function addSkip(metadata2, reason, count) {
+  if (count <= 0) {
+    return;
+  }
+  metadata2.skippedCount += count;
+  addReason(metadata2.skippedReasons, reason, count);
+}
+function addReason(reasons, reason, count) {
+  if (count <= 0) {
+    return;
+  }
+  reasons[reason] = (reasons[reason] ?? 0) + count;
+}
+function mergeReasons(target, source) {
+  for (const [reason, count] of Object.entries(source)) {
+    addReason(target, reason, count);
+  }
+}
+function sanitizeMarkdownText2(value) {
+  return value.replace(/<!--/g, "&lt;!--").replace(/-->/g, "--&gt;");
+}
+function normalizePath2(value) {
+  return value.trim().replace(/\\/g, "/");
+}
+
 // src/main.ts
 var CoreInputReader = class {
   getInput(name) {
@@ -100068,7 +100579,8 @@ async function run() {
     restoredState: resolution.restoredState,
     workspace,
     tempDir: tempRoot,
-    runtimeDir
+    runtimeDir,
+    target
   });
   const reviewedRange = buildReviewedRange({
     phase: resolution.phase,
@@ -100100,6 +100612,34 @@ async function run() {
   } catch (error2) {
     handleStructuredValidationFailure(error2);
   }
+  const comment = await maybePostComment({
+    config,
+    target,
+    runtimeResult,
+    stateKey,
+    phase: resolution.phase,
+    artifactName,
+    lineageReason: resolution.lineageReason,
+    previousHeadSha: resolution.restoredState?.reviewedHeadSha,
+    structuredReview,
+    octokit
+  });
+  const inlineMetadata = await maybePostInlineComments({
+    config,
+    target,
+    stateKey,
+    structuredReview,
+    octokit,
+    stickyCommentUrl: comment.commentUrl
+  });
+  structuredReview = {
+    ...structuredReview,
+    inlineComments: inlineMetadata
+  };
+  structuredMetadata = {
+    ...structuredMetadata,
+    inlineComments: inlineMetadata
+  };
   const structuredResultPath = path8.join(tempRoot, "structured-result.json");
   const renderedReviewMarkdownPath = path8.join(tempRoot, "rendered-review.md");
   const renderedReviewMarkdown = renderStructuredReviewMarkdown(structuredReview);
@@ -100120,18 +100660,6 @@ async function run() {
     renderedReviewMarkdown,
     runtimeDir,
     createdAt: resolution.restoredState?.createdAt
-  });
-  const comment = await maybePostComment({
-    config,
-    target,
-    runtimeResult,
-    stateKey,
-    phase: resolution.phase,
-    artifactName,
-    lineageReason: resolution.lineageReason,
-    previousHeadSha: resolution.restoredState?.reviewedHeadSha,
-    structuredReview,
-    octokit
   });
   const uploadedState = await store.upload(
     artifactName,
@@ -100301,7 +100829,7 @@ async function finishSkippedIdentical(options) {
     lineageTotals: runtimeResult.lineageTotals,
     maxFindings: options.config.maxFindings
   });
-  const structuredReview = capStructuredReviewForMarkdownLimit(
+  let structuredReview = capStructuredReviewForMarkdownLimit(
     normalized.envelope,
     options.config.maxReviewChars
   );
@@ -100309,6 +100837,12 @@ async function finishSkippedIdentical(options) {
     structuredReview,
     normalized.metadata.status
   );
+  const inlineMetadata = defaultInlineCommentsMetadata(inlinePolicy(options.config));
+  structuredReview = {
+    ...structuredReview,
+    inlineComments: inlineMetadata
+  };
+  structuredMetadata.inlineComments = inlineMetadata;
   const renderedReviewMarkdown = renderStructuredReviewMarkdown(structuredReview);
   const bundleDir = path8.join(defaultTempDir(), "agentic-pr-review", "state-bundle");
   const structuredResultPath = path8.join(bundleDir, "structured-result.json");
@@ -100416,6 +100950,55 @@ async function maybePostComment(options) {
     lineageReason: comment.lineageReason
   };
 }
+async function maybePostInlineComments(options) {
+  const policy = inlinePolicy(options.config);
+  if (options.target.mode !== "pull-request" || !options.target.prNumber) {
+    const metadata2 = defaultInlineCommentsMetadata(policy);
+    if (policy.enabled) {
+      metadata2.skippedCount = options.structuredReview.findings.length;
+      metadata2.skippedReasons.non_pull_request = options.structuredReview.findings.length;
+    }
+    return metadata2;
+  }
+  if (policy.enabled && !options.config.postComment) {
+    const metadata2 = defaultInlineCommentsMetadata(policy);
+    metadata2.skippedCount = options.structuredReview.findings.length;
+    metadata2.skippedReasons.sticky_comment_disabled = options.structuredReview.findings.length;
+    warning(
+      "Inline PR review comments require post_comment=true so the sticky review remains the source of truth."
+    );
+    return metadata2;
+  }
+  try {
+    return await postInlineComments({
+      octokit: options.octokit,
+      owner: context2.repo.owner,
+      repo: context2.repo.repo,
+      prNumber: options.target.prNumber,
+      stateKey: options.stateKey,
+      reviewedHeadSha: options.structuredReview.headSha,
+      stickyCommentUrl: options.stickyCommentUrl,
+      structuredReview: options.structuredReview,
+      policy
+    });
+  } catch (error2) {
+    const metadata2 = defaultInlineCommentsMetadata(policy);
+    metadata2.failedCount = policy.enabled ? options.structuredReview.findings.length : 0;
+    if (metadata2.failedCount > 0) {
+      metadata2.failedReasons.inline_processing_failed = metadata2.failedCount;
+    }
+    warning(`Inline PR review comments skipped after sanitized failure: ${messageOf(error2)}`);
+    return metadata2;
+  }
+}
+function inlinePolicy(config) {
+  return {
+    enabled: config.inlineComments,
+    maxComments: config.maxInlineComments,
+    minSeverity: config.inlineMinSeverity,
+    minConfidence: config.inlineMinConfidence
+  };
+}
 async function uploadDebugArtifact(store, stateKey, debugFiles) {
   if (debugFiles.length === 0) {
     throw new Error("debug_capture_raw_api_bodies was enabled but no debug files were produced");
@@ -100447,6 +101030,20 @@ function setOutputs(options) {
   );
   setOutput("findings_truncated", String(options.structuredMetadata.findingsTruncated));
   setOutput("findings_truncation_reason", options.structuredMetadata.truncationReason ?? "");
+  const inlineMetadata = options.structuredMetadata.inlineComments ?? defaultInlineCommentsMetadata({
+    enabled: false,
+    maxComments: 5,
+    minSeverity: "medium",
+    minConfidence: "high"
+  });
+  setOutput("inline_comments_enabled", String(inlineMetadata.enabled));
+  setOutput("inline_comments_candidate_count", String(inlineMetadata.candidateCount));
+  setOutput("inline_comments_effective_cap", String(inlineMetadata.effectiveCap));
+  setOutput("inline_comments_cap_exceeded_count", String(inlineMetadata.capExceededCount));
+  setOutput("inline_comments_posted_count", String(inlineMetadata.postedCount));
+  setOutput("inline_comments_duplicate_count", String(inlineMetadata.duplicateCount));
+  setOutput("inline_comments_skipped_count", String(inlineMetadata.skippedCount));
+  setOutput("inline_comments_failed_count", String(inlineMetadata.failedCount));
   setOutput("comment_url", options.commentUrl);
   setOutput("lineage_action", options.lineageAction);
   setOutput("lineage_reason", options.lineageReason);
@@ -100489,7 +101086,8 @@ function metadataForStructuredReview(review, status) {
     renderedFindingCount: review.result.renderedFindingCount,
     findingsTruncated: review.result.findingsTruncated,
     truncationReason: review.result.truncationReason,
-    status
+    status,
+    inlineComments: review.inlineComments
   };
 }
 async function writeSummary(input) {
@@ -100533,6 +101131,7 @@ async function writeSummary(input) {
     `- Findings: ${input.structuredMetadata.renderedFindingCount}/${input.structuredMetadata.postFindingCapCount}/${input.structuredMetadata.inputFindingCount}`,
     `- Findings truncated: ${input.structuredMetadata.findingsTruncated}`,
     `- Findings truncation reason: ${input.structuredMetadata.truncationReason ?? "n/a"}`,
+    `- Inline comments: ${formatInlineComments(input.structuredMetadata.inlineComments)}`,
     `- Lineage turns: ${input.runtimeResult.lineageTotals.observedTurns ?? "n/a"}`,
     `- Lineage usage: ${lineageUsage}`,
     `- Lineage source: ${lineageSourceDetail}`,
@@ -100549,6 +101148,22 @@ async function writeSummary(input) {
   } catch (error2) {
     info(`Unable to write job summary: ${messageOf(error2)}`);
   }
+}
+function formatInlineComments(metadata2) {
+  if (!metadata2) {
+    return "disabled";
+  }
+  const skippedReasons = Object.keys(metadata2.skippedReasons).join(", ") || "none";
+  const failedReasons = Object.keys(metadata2.failedReasons).join(", ") || "none";
+  return [
+    `enabled=${metadata2.enabled}`,
+    `candidates=${metadata2.candidateCount}`,
+    `cap=${metadata2.effectiveCap}`,
+    `posted=${metadata2.postedCount}`,
+    `duplicates=${metadata2.duplicateCount}`,
+    `skipped=${metadata2.skippedCount} (${skippedReasons})`,
+    `failed=${metadata2.failedCount} (${failedReasons})`
+  ].join(", ");
 }
 function formatUsageBudgetStatus(status) {
   if (status.status === "exceeded" && status.exceeded) {

@@ -17,6 +17,10 @@ function config(): ActionConfig {
     maxPatchChars: 1000,
     maxReviewChars: 1000,
     maxFindings: 50,
+    inlineComments: false,
+    maxInlineComments: 5,
+    inlineMinSeverity: 'medium',
+    inlineMinConfidence: 'high',
     testRuntimeFixture: 'valid',
     usageBudgetLimits: {
       maxUncachedInputTokens: 0,

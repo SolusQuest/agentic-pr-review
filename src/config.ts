@@ -1,6 +1,8 @@
 import {
   type ActionConfig,
   type ApiKeyMode,
+  type InlineCommentConfidence,
+  type InlineCommentSeverity,
   type ReviewMode,
   type RuntimeProvider,
   type TargetMode,
@@ -26,11 +28,20 @@ const TARGET_MODES = ['pull-request', 'synthetic-fixture'] as const satisfies re
 const REVIEW_MODES = ['auto', 'bootstrap', 'incremental'] as const satisfies readonly ReviewMode[];
 const API_KEY_MODES = ['auth-token', 'api-key', 'both'] as const satisfies readonly ApiKeyMode[];
 const TOOL_MODES = ['none', 'readonly'] as const satisfies readonly ToolMode[];
+const INLINE_SEVERITIES = [
+  'low',
+  'medium',
+  'high',
+] as const satisfies readonly InlineCommentSeverity[];
+const INLINE_CONFIDENCES = ['medium', 'high'] as const satisfies readonly InlineCommentConfidence[];
 const TEST_RUNTIME_FIXTURES = [
   'valid',
   'no_findings',
   'null_location',
   'many_findings',
+  'inline_commentable',
+  'inline_non_commentable',
+  'inline_many_findings',
   'invalid_json',
   'schema_invalid',
 ] as const satisfies readonly TestRuntimeFixture[];
@@ -133,6 +144,26 @@ export function parseActionConfig(
       12000,
     ),
     maxFindings: parsePositiveInteger(optionalInput(reader, 'max_findings'), 'max_findings', 50),
+    inlineComments: parseBoolean(
+      optionalInput(reader, 'inline_comments'),
+      'inline_comments',
+      false,
+    ),
+    maxInlineComments: clamp(
+      parseInteger(optionalInput(reader, 'max_inline_comments'), 'max_inline_comments', 5),
+      0,
+      10,
+    ),
+    inlineMinSeverity: oneOf(
+      optionalInput(reader, 'inline_min_severity') ?? 'medium',
+      'inline_min_severity',
+      INLINE_SEVERITIES,
+    ),
+    inlineMinConfidence: oneOf(
+      optionalInput(reader, 'inline_min_confidence') ?? 'high',
+      'inline_min_confidence',
+      INLINE_CONFIDENCES,
+    ),
     testRuntimeFixture,
     usageBudgetLimits: {
       maxUncachedInputTokens: parseInteger(

@@ -22,6 +22,10 @@ describe('parseActionConfig', () => {
     expect(config.toolMode).toBe('none');
     expect(config.claudeMaxTurns).toBe(6);
     expect(config.maxFindings).toBe(50);
+    expect(config.inlineComments).toBe(false);
+    expect(config.maxInlineComments).toBe(5);
+    expect(config.inlineMinSeverity).toBe('medium');
+    expect(config.inlineMinConfidence).toBe('high');
     expect(config.testRuntimeFixture).toBe('valid');
     expect(config.usageBudgetLimits).toEqual({
       maxUncachedInputTokens: 0,
@@ -57,12 +61,20 @@ describe('parseActionConfig', () => {
       new Inputs({
         test_runtime_fixture: 'many_findings',
         max_findings: '12',
+        inline_comments: 'true',
+        max_inline_comments: '99',
+        inline_min_severity: 'low',
+        inline_min_confidence: 'medium',
       }),
       baseEnv,
       'pull_request',
     );
     expect(config.testRuntimeFixture).toBe('many_findings');
     expect(config.maxFindings).toBe(12);
+    expect(config.inlineComments).toBe(true);
+    expect(config.maxInlineComments).toBe(10);
+    expect(config.inlineMinSeverity).toBe('low');
+    expect(config.inlineMinConfidence).toBe('medium');
   });
 
   it('rejects invalid tool mode and claude turn values', () => {
@@ -81,6 +93,12 @@ describe('parseActionConfig', () => {
     expect(() =>
       parseActionConfig(new Inputs({ test_runtime_fixture: 'unknown' }), baseEnv, 'pull_request'),
     ).toThrow(/test_runtime_fixture must be one of/);
+    expect(() =>
+      parseActionConfig(new Inputs({ inline_min_severity: 'critical' }), baseEnv, 'pull_request'),
+    ).toThrow(/inline_min_severity must be one of/);
+    expect(() =>
+      parseActionConfig(new Inputs({ inline_min_confidence: 'low' }), baseEnv, 'pull_request'),
+    ).toThrow(/inline_min_confidence must be one of/);
   });
 
   it('parses explicit prompt caching disable switch', () => {
