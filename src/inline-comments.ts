@@ -435,6 +435,9 @@ function classifyGitHubPostingError(error: unknown): {
   if (status === 404) {
     return { reason: 'repository_policy', allowIndividualFallback: false };
   }
+  if (status === 422 && /spam|spammed|abuse|secondary|rate limit/.test(message)) {
+    return { reason: 'secondary_rate_limit', allowIndividualFallback: false };
+  }
   if (status === 422 && /policy|protected|forbidden/.test(message)) {
     return { reason: 'repository_policy', allowIndividualFallback: false };
   }

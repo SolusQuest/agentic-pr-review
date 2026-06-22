@@ -387,6 +387,12 @@ describe('inline comment posting', () => {
     ['permission_denied', Object.assign(new Error('Resource not accessible'), { status: 403 })],
     ['secondary_rate_limit', Object.assign(new Error('secondary rate limit'), { status: 403 })],
     ['secondary_rate_limit', Object.assign(new Error('Too Many Requests'), { status: 429 })],
+    [
+      'secondary_rate_limit',
+      Object.assign(new Error('Validation failed, or the endpoint has been spammed'), {
+        status: 422,
+      }),
+    ],
     ['repository_policy', Object.assign(new Error('not found'), { status: 404 })],
   ])('does not fan out fallback for %s batch failures', async (reason, error) => {
     const { octokit, createReviewComment } = mockOctokit({ createReviewError: error });

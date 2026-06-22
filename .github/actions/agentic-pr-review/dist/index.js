@@ -100445,6 +100445,9 @@ function classifyGitHubPostingError(error2) {
   if (status === 404) {
     return { reason: "repository_policy", allowIndividualFallback: false };
   }
+  if (status === 422 && /spam|spammed|abuse|secondary|rate limit/.test(message)) {
+    return { reason: "secondary_rate_limit", allowIndividualFallback: false };
+  }
   if (status === 422 && /policy|protected|forbidden/.test(message)) {
     return { reason: "repository_policy", allowIndividualFallback: false };
   }
@@ -100985,9 +100988,10 @@ async function maybePostInlineComments(options) {
     const metadata2 = defaultInlineCommentsMetadata(policy);
     metadata2.failedCount = policy.enabled ? options.structuredReview.findings.length : 0;
     if (metadata2.failedCount > 0) {
-      metadata2.failedReasons.inline_processing_failed = metadata2.failedCount;
+      metadata2.failedReasons.api_failed = metadata2.failedCount;
     }
-    warning(`Inline PR review comments skipped after sanitized failure: ${messageOf(error2)}`);
+    const diagnostic = truncateText(messageOf(error2).replace(/\s+/g, " "), 240);
+    warning(`Inline PR review comments skipped after sanitized failure: ${diagnostic}`);
     return metadata2;
   }
 }

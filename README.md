@@ -126,7 +126,7 @@ permissions:
 | `max_patch_chars`                                  | `120000`       | PR patch context bound                                                                                                                                                                                                |
 | `max_review_chars`                                 | `12000`        | Rendered review markdown bound for the posted current review and structured artifacts                                                                                                                                 |
 | `max_findings`                                     | `50`           | Maximum normalized findings included in the sticky comment and structured result                                                                                                                                      |
-| `inline_comments`                                  | `false`        | Posts eligible structured findings as inline PR review comments. Sticky review remains the source of truth                                                                                                            |
+| `inline_comments`                                  | `false`        | Posts eligible structured findings as inline PR review comments. Requires `post_comment=true` because the sticky review remains the source of truth                                                                   |
 | `max_inline_comments`                              | `5`            | Maximum inline comments to post, clamped to 0 through 10                                                                                                                                                              |
 | `inline_min_severity`                              | `medium`       | Minimum severity for inline comments: `low`, `medium`, or `high`                                                                                                                                                      |
 | `inline_min_confidence`                            | `high`         | Minimum confidence for inline comments: `medium` or `high`                                                                                                                                                            |
@@ -257,13 +257,15 @@ comment. It first applies `max_findings`, then further reduces findings if neede
 current review fits `max_review_chars`. The structured result artifact and sticky comment therefore
 use the same final finding set; artifacts do not retain extra findings hidden from the posted review.
 
-Inline comments are disabled by default. When enabled, the action selects findings only from this final
-validated finding set, filters them by severity and confidence, verifies that each location maps to a
-current-side line in the current PR diff, suppresses existing marker duplicates, and posts at most the
-effective cap. Findings without a repo-relative path and current-head start line, outside the diff, in
-binary or missing-patch files, or on deleted-line-only locations stay in the sticky review only. If the
-PR head changes before posting, or diff/comment pagination reaches GitHub-supported limits, inline
-posting is skipped while the sticky review and state artifact flow continue.
+Inline comments are disabled by default. `inline_comments=true` requires `post_comment=true`; otherwise
+inline posting is skipped and findings remain in the structured artifacts without inline review threads.
+When enabled with sticky comment posting, the action selects findings only from this final validated
+finding set, filters them by severity and confidence, verifies that each location maps to a current-side
+line in the current PR diff, suppresses existing marker duplicates, and posts at most the effective cap.
+Findings without a repo-relative path and current-head start line, outside the diff, in binary or
+missing-patch files, or on deleted-line-only locations stay in the sticky review only. If the PR head
+changes before posting, or diff/comment pagination reaches GitHub-supported limits, inline posting is
+skipped while the sticky review and state artifact flow continue.
 
 Inline comment bodies include only validated structured finding content plus a hidden generic marker:
 

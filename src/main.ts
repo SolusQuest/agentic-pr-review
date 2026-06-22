@@ -43,7 +43,14 @@ import {
   type StructuredReviewEnvelopeV1,
   type UploadedArtifact,
 } from './types.js';
-import { ensureDir, sanitizeStateKey, walkFiles, writeJsonFile, writeTextFile } from './utils.js';
+import {
+  ensureDir,
+  sanitizeStateKey,
+  truncateText,
+  walkFiles,
+  writeJsonFile,
+  writeTextFile,
+} from './utils.js';
 import { defaultInlineCommentsMetadata, postInlineComments } from './inline-comments.js';
 
 type ReviewPhaseOutput = Phase | 'skipped-identical';
@@ -623,9 +630,10 @@ async function maybePostInlineComments(options: {
     const metadata = defaultInlineCommentsMetadata(policy);
     metadata.failedCount = policy.enabled ? options.structuredReview.findings.length : 0;
     if (metadata.failedCount > 0) {
-      metadata.failedReasons.inline_processing_failed = metadata.failedCount;
+      metadata.failedReasons.api_failed = metadata.failedCount;
     }
-    core.warning(`Inline PR review comments skipped after sanitized failure: ${messageOf(error)}`);
+    const diagnostic = truncateText(messageOf(error).replace(/\s+/g, ' '), 240);
+    core.warning(`Inline PR review comments skipped after sanitized failure: ${diagnostic}`);
     return metadata;
   }
 }
