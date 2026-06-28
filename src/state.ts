@@ -3,8 +3,10 @@ import path from 'node:path';
 import { copyRuntimeStateToBundle } from './runtime.js';
 import {
   type ActionConfig,
+  type EffectiveDiffSource,
   type LoadedBlock,
   type Phase,
+  type PullRequestDiffSnapshotV1,
   type RestoredState,
   type ReviewTarget,
   type RuntimeLineageTotals,
@@ -16,6 +18,7 @@ import { type StructuredResultMetadata } from './structured.js';
 import {
   ensureDir,
   readJsonFile,
+  normalizeRepoRelativePath,
   relativePosix,
   walkFiles,
   writeJsonFile,
@@ -41,6 +44,12 @@ interface StateManifest {
   observedTurnSource?: string;
   lineageTotals?: RuntimeLineageTotals;
   usageBudgetStatus: RuntimeResult['usageBudgetStatus'];
+  review?: {
+    requestedMode: ActionConfig['reviewMode'];
+    executedPhase: Phase;
+    phaseReason: string;
+    effectiveDiffSource: EffectiveDiffSource;
+  };
   structuredOutput: {
     status: StructuredResultMetadata['status'];
     inputFindingCount: number;
@@ -57,6 +66,7 @@ interface StateManifest {
     baseSha: string;
     headSha: string;
     changedFiles: number;
+    pullRequestDiffSnapshot?: PullRequestDiffSnapshotV1;
   };
 }
 
@@ -72,6 +82,9 @@ export async function readRestoredState(root: string): Promise<RestoredState> {
   if (manifest.workflow !== 'agentic-pr-review') {
     throw new Error('restored state manifest has unexpected workflow');
   }
+  const pullRequestDiffSnapshot = manifest.target?.pullRequestDiffSnapshot
+    ? validatePullRequestDiffSnapshot(manifest.target.pullRequestDiffSnapshot)
+    : undefined;
   return {
     stateKey: manifest.stateKey,
     sessionId: manifest.sessionId,
@@ -91,6 +104,7 @@ export async function readRestoredState(root: string): Promise<RestoredState> {
     observedTurns: manifest.observedTurns,
     observedTurnSource: manifest.observedTurnSource,
     lineageTotals: manifest.lineageTotals,
+    pullRequestDiffSnapshot,
     manifestPath,
   };
 }
@@ -108,6 +122,8 @@ export async function writeStateBundle(options: {
   structuredMetadata: StructuredResultMetadata;
   renderedReviewMarkdown: string;
   runtimeDir: string;
+  phaseReason: string;
+  effectiveDiffSource: EffectiveDiffSource;
   createdAt?: string;
 }): Promise<string[]> {
   await rm(options.bundleDir, { recursive: true, force: true });
@@ -140,6 +156,12 @@ export async function writeStateBundle(options: {
     observedTurnSource: options.runtimeResult.observedTurnSource,
     lineageTotals: options.runtimeResult.lineageTotals,
     usageBudgetStatus: options.runtimeResult.usageBudgetStatus,
+    review: {
+      requestedMode: options.config.reviewMode,
+      executedPhase: options.phase,
+      phaseReason: options.phaseReason,
+      effectiveDiffSource: options.effectiveDiffSource,
+    },
     structuredOutput: {
       status: options.structuredMetadata.status,
       inputFindingCount: options.structuredMetadata.inputFindingCount,
@@ -161,6 +183,7 @@ export async function writeStateBundle(options: {
       baseSha: options.target.baseSha,
       headSha: options.target.headSha,
       changedFiles: options.target.changedFiles.length,
+      pullRequestDiffSnapshot: options.target.pullRequestDiffSnapshot,
     },
   };
 
@@ -175,6 +198,66 @@ export async function writeStateBundle(options: {
   );
   await sanitizeStateBundle(options.bundleDir, options.config);
   return await walkFiles(options.bundleDir);
+}
+
+function validatePullRequestDiffSnapshot(value: unknown): PullRequestDiffSnapshotV1 {
+  if (!value || typeof value !== 'object') {
+    throw new Error('restored state manifest pull request diff snapshot is incompatible');
+  }
+  const snapshot = value as PullRequestDiffSnapshotV1;
+  if (
+    snapshot.version !== 1 ||
+    snapshot.source !== 'github-pulls-list-files' ||
+    typeof snapshot.headSha !== 'string' ||
+    typeof snapshot.baseSha !== 'string' ||
+    !Array.isArray(snapshot.files)
+  ) {
+    throw new Error('restored state manifest pull request diff snapshot is incompatible');
+  }
+  return {
+    version: 1,
+    source: 'github-pulls-list-files',
+    headSha: snapshot.headSha,
+    baseSha: snapshot.baseSha,
+    files: snapshot.files.map((entry) => {
+      if (!entry || typeof entry !== 'object') {
+        throw new Error('restored state manifest pull request diff snapshot is incompatible');
+      }
+      const candidate = entry as PullRequestDiffSnapshotV1['files'][number];
+      if (
+        typeof candidate.filename !== 'string' ||
+        (candidate.previousFilename !== undefined &&
+          typeof candidate.previousFilename !== 'string') ||
+        typeof candidate.status !== 'string' ||
+        typeof candidate.additions !== 'number' ||
+        typeof candidate.deletions !== 'number' ||
+        typeof candidate.changes !== 'number' ||
+        typeof candidate.patchAvailable !== 'boolean' ||
+        (candidate.patchSha256 !== null && typeof candidate.patchSha256 !== 'string')
+      ) {
+        throw new Error('restored state manifest pull request diff snapshot is incompatible');
+      }
+      if (
+        candidate.patchAvailable
+          ? typeof candidate.patchSha256 !== 'string'
+          : candidate.patchSha256 !== null
+      ) {
+        throw new Error('restored state manifest pull request diff snapshot is incompatible');
+      }
+      return {
+        filename: normalizeRepoRelativePath(candidate.filename),
+        previousFilename: candidate.previousFilename
+          ? normalizeRepoRelativePath(candidate.previousFilename)
+          : undefined,
+        status: candidate.status,
+        additions: candidate.additions,
+        deletions: candidate.deletions,
+        changes: candidate.changes,
+        patchAvailable: candidate.patchAvailable,
+        patchSha256: candidate.patchSha256,
+      };
+    }),
+  };
 }
 
 export async function sanitizeStateBundle(

@@ -1,4 +1,4 @@
-import { cp, mkdir, rm } from 'node:fs/promises';
+import { cp, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import artifactClient from '@actions/artifact';
 import { type UploadedArtifact } from './types.js';
@@ -110,11 +110,13 @@ export class LocalArtifactStore implements ArtifactStore {
   async findStateArtifact(name: string): Promise<ArtifactRef | undefined> {
     const artifactRoot = path.join(this.root, name);
     try {
-      await mkdir(artifactRoot, { recursive: false });
-      await rm(artifactRoot, { recursive: true, force: true });
-      return undefined;
-    } catch {
-      return { id: 1, name, workflowRunId: 1 };
+      const info = await stat(artifactRoot);
+      return info.isDirectory() ? { id: 1, name, workflowRunId: 1 } : undefined;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return undefined;
+      }
+      throw error;
     }
   }
 

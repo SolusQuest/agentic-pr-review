@@ -82,6 +82,18 @@ export function sha256(text: string | Buffer): string {
   return createHash('sha256').update(text).digest('hex');
 }
 
+export function normalizeRepoRelativePath(value: string): string {
+  const normalized = value.trim().replace(/\\/g, '/');
+  if (!normalized || normalized.startsWith('/') || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(normalized)) {
+    throw new Error('path must be a safe repo-relative path');
+  }
+  const segments = normalized.split('/').filter((segment) => segment.length > 0 && segment !== '.');
+  if (segments.length === 0 || segments.includes('..')) {
+    throw new Error('path must be a safe repo-relative path');
+  }
+  return segments.join('/');
+}
+
 export function sanitizeStateKey(value: string): string {
   const sanitized = value
     .trim()

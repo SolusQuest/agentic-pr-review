@@ -9,7 +9,7 @@ import {
   type StructuredFindingV1,
   type StructuredReviewEnvelopeV1,
 } from './types.js';
-import { sha256 } from './utils.js';
+import { normalizeRepoRelativePath, sha256 } from './utils.js';
 
 export type StructuredOutputStatus = 'valid' | 'extracted' | 'invalid_json' | 'schema_invalid';
 
@@ -68,8 +68,9 @@ export function normalizeStructuredReview(input: StructuredReviewNormalizationIn
   const parsed = parseModelJson(input.modelJsonText);
   const model = validateModelReviewContent(parsed.value);
   const normalizedFindings = model.findings.map((finding) => normalizeFinding(finding));
-  const inputFindingCount = normalizedFindings.length;
-  const cappedFindings = normalizedFindings.slice(0, input.maxFindings);
+  const scopedFindings = filterFindingsToCurrentReviewScope(normalizedFindings, input.target);
+  const inputFindingCount = scopedFindings.length;
+  const cappedFindings = scopedFindings.slice(0, input.maxFindings);
   const postFindingCapCount = cappedFindings.length;
   const findingsTruncated = inputFindingCount > cappedFindings.length;
   const truncationReason = findingsTruncated ? 'max_findings' : undefined;
@@ -259,7 +260,7 @@ function normalizePath(value: unknown): string | null {
   if (value === null) {
     return null;
   }
-  return normalizePathText(String(value));
+  return normalizeRepoRelativePath(String(value));
 }
 
 function requireObject(value: unknown, label: string): Record<string, unknown> {
@@ -293,29 +294,28 @@ function validateRepoRelativePath(value: unknown, label: string, maxChars: numbe
   if (typeof value !== 'string' || value.trim().length === 0) {
     schemaError(`${label} must be a non-empty string or null`);
   }
-  const normalized = normalizePathText(value);
+  let normalized: string;
+  try {
+    normalized = normalizeRepoRelativePath(value);
+  } catch {
+    schemaError(`${label} must be a safe repo-relative path or null`);
+  }
   if (normalized.length > maxChars) {
     schemaError(`${label} is too long`);
   }
-  if (
-    isCurrentDirOnlyPath(normalized) ||
-    normalized.startsWith('/') ||
-    /^[A-Za-z][A-Za-z0-9+.-]*:/.test(normalized) ||
-    normalized.split('/').includes('..')
-  ) {
-    schemaError(`${label} must be a safe repo-relative path or null`);
+}
+
+function filterFindingsToCurrentReviewScope(
+  findings: StructuredFindingV1[],
+  target: ReviewTarget,
+): StructuredFindingV1[] {
+  if (target.mode !== 'pull-request') {
+    return findings;
   }
-}
-
-function normalizePathText(value: string): string {
-  return value.trim().replace(/\\/g, '/');
-}
-
-function isCurrentDirOnlyPath(value: string): boolean {
-  return value
-    .split('/')
-    .filter((segment) => segment.length > 0)
-    .every((segment) => segment === '.');
+  const currentPrFiles = new Set(
+    target.changedFiles.map((file) => normalizeRepoRelativePath(file.filename)),
+  );
+  return findings.filter((finding) => finding.path === null || currentPrFiles.has(finding.path));
 }
 
 function requireNullablePositiveInteger(value: unknown, label: string): void {
