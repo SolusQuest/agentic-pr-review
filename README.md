@@ -141,8 +141,9 @@ permissions:
 `tool_mode=readonly` is only meaningful for `runtime_provider=claude-code-cli`. It restricts the
 Claude Code built-in tool surface to `Read`, `Glob`, and `Grep`; shell, network, edit/write,
 subagent, skill, and MCP tool surfaces are not enabled by this mode. Readonly tools supplement the
-deterministic PR metadata, changed file list, bounded patch context, and incremental compare patch
-that the action already supplies. They do not replace that deterministic context.
+deterministic PR metadata, current PR file list, bounded patch context, and incremental PR diff
+snapshot delta that the action already supplies. They do not replace that deterministic context or
+expand review scope beyond current PR files.
 
 When live provider secrets are available, the checked-out workspace is a caller-controlled trust
 boundary. If a downstream workflow wants readonly tools to inspect reviewed code, check out the
@@ -250,7 +251,10 @@ The action-owned `StructuredReviewEnvelopeV1` injects trusted `phase`, `baseSha`
 `previousReviewedHeadSha`, structured `reviewedRange`, `toolMode`, `runtimeProvider`, session, usage,
 turn, lineage, finding-count, and truncation metadata. Bootstrap `reviewedRange.fromSha` is `null`;
 incremental ranges use the prior reviewed head when available. Findings are normalized and
-fingerprinted by the action before comment rendering or artifact upload.
+fingerprinted by the action before comment rendering or artifact upload. For pull request targets,
+non-null finding paths outside the current PR files returned by GitHub are dropped before rendering,
+artifacts, sticky comments, or inline comment selection; `path=null` remains allowed for PR-level
+observations.
 
 The action caps findings before writing `structured-result.json`, `rendered-review.md`, or the sticky
 comment. It first applies `max_findings`, then further reduces findings if needed so the rendered
@@ -302,13 +306,22 @@ The state bundle includes a manifest, `structured-result.json`, `rendered-review
 runtime session directory needed for the next incremental run. Normal state artifacts reject raw/debug
 files, configured secret values, high-risk token prefixes, and unredacted auth headers.
 
-`review_mode=incremental` fails if no valid state can be restored. `review_mode=auto` restores when a
-matching state exists and otherwise starts a bootstrap phase. For pull request targets, incremental mode
-compares the prior reviewed head to the current head:
+For pull request targets, the current effective GitHub PR diff from `pulls.listFiles` is the
+authoritative review scope. Bootstrap runs store a normalized PR diff snapshot in the state manifest.
+Incremental runs restore the previous compatible snapshot, build a current snapshot from the current PR
+files, and send only changed current PR diff entries plus incremental context. Unchanged current PR
+diff entries remain in scope metadata but do not consume bounded patch budget. Files that existed only
+in a raw commit compare range are not prompt patch context. Snapshot entries store patch hashes when
+GitHub provides patch text and the PR file SHA when available, so patch-unavailable files can still be
+detected as changed. If a patch-unavailable file lacks a stable file SHA, the action treats it
+conservatively as changed.
 
-- compare 404 or diverged history falls back to bootstrap in `auto` and fails in forced `incremental`
-- identical ranges upload refreshed state and set `review_phase=skipped-identical` without calling the provider
-- non-identical ahead ranges send only the compare-range patch plus incremental context
+If previous snapshot-compatible PR state is missing or incompatible, both `review_mode=auto` and forced
+`review_mode=incremental` start a bootstrap phase under the current state schema. The job summary and
+state manifest record the requested mode, executed phase, phase reason such as
+`snapshot_state_missing`, and effective diff source. If previous and current PR diff snapshot entries
+are equal, the action uploads refreshed state and sets `review_phase=skipped-identical` without calling
+the provider.
 
 Fork pull requests are not supported. The action reads PR metadata and patches through GitHub APIs, but
 session continuity and comment lineage are scoped to same-repository pull requests.

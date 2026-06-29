@@ -31,13 +31,21 @@ import {
   StructuredReviewValidationError,
   type StructuredResultMetadata,
 } from './structured.js';
-import { deriveStateKey, fetchTargetCompare, resolveTarget } from './target.js';
+import {
+  deriveStateKey,
+  diffPullRequestDiffSnapshots,
+  pullRequestDiffSnapshotsEquivalent,
+  resolveTarget,
+} from './target.js';
 import {
   type ActionConfig,
+  type EffectiveDiffSource,
   type InlineCommentsMetadata,
   type InlineCommentsPolicy,
   type LineageReason,
   type Phase,
+  type PullRequestDiffSnapshotDeltaV1,
+  type PullRequestDiffSnapshotV1,
   type RestoredState,
   type RuntimeResult,
   type StructuredReviewEnvelopeV1,
@@ -62,6 +70,8 @@ interface PhaseResolution {
   lineageReason: LineageReason;
   restoredArtifact?: { id: number; workflowRunId: number };
 }
+
+class SnapshotStateCompatibilityError extends Error {}
 
 class CoreInputReader implements InputReader {
   getInput(name: string): string {
@@ -89,31 +99,22 @@ export async function run(): Promise<void> {
   const stateKey = sanitizeStateKey(deriveStateKey(config, target));
   const artifactName = stateArtifactName(stateKey);
   const store = createArtifactStore(config.githubToken, octokit);
-  let resolution = await resolvePhase(config, store, artifactName, tempRoot, stateKey);
-  let compare =
-    resolution.phase === 'incremental' && target.mode === 'pull-request'
-      ? await fetchTargetCompare(
-          octokit,
-          github.context,
-          resolution.restoredState?.reviewedHeadSha ?? target.baseSha,
-          target.headSha,
-          config.maxPatchChars,
-        )
-      : undefined;
+  const resolution = await resolvePhase(config, store, artifactName, tempRoot, stateKey, target);
+  let incrementalDiff: PullRequestDiffSnapshotDeltaV1 | undefined;
+  const effectiveDiffSource = effectiveDiffSourceFor(target, resolution.phase);
 
   if (resolution.phase === 'incremental' && target.mode === 'pull-request') {
-    if (!compare) {
-      if (config.reviewMode === 'auto') {
-        resolution = {
-          phase: 'bootstrap',
-          lineageReason: 'compare_unavailable',
-        };
-      } else {
-        throw new Error(
-          'Unable to compare prior reviewed head to current head. Use review_mode=bootstrap or review_mode=auto to recover.',
-        );
-      }
-    } else if (compare.status === 'identical') {
+    const previousSnapshot = requireRestoredState(resolution.restoredState).pullRequestDiffSnapshot;
+    const currentSnapshot = requirePullRequestDiffSnapshot(target);
+    if (!previousSnapshot) {
+      throw new Error('internal error: incremental pull-request phase requires restored snapshot');
+    }
+    incrementalDiff = diffPullRequestDiffSnapshots(
+      previousSnapshot,
+      currentSnapshot,
+      target.changedFiles,
+    );
+    if (pullRequestDiffSnapshotsEquivalent(previousSnapshot, currentSnapshot)) {
       await restoreRuntimeState(resolution.restoreDir, config.runtimeProvider, runtimeDir);
       await finishSkippedIdentical({
         config,
@@ -123,20 +124,10 @@ export async function run(): Promise<void> {
         artifactName,
         runtimeDir,
         restoredState: requireRestoredState(resolution.restoredState),
+        phaseReason: resolution.lineageReason,
+        effectiveDiffSource,
       });
       return;
-    } else if (compare.status === 'diverged' || compare.status === 'behind') {
-      if (config.reviewMode === 'auto') {
-        resolution = {
-          phase: 'bootstrap',
-          lineageReason: 'compare_diverged',
-        };
-        compare = undefined;
-      } else {
-        throw new Error(
-          `Compare status is "${compare.status}". Use review_mode=bootstrap or review_mode=auto to recover.`,
-        );
-      }
     }
   }
 
@@ -152,7 +143,7 @@ export async function run(): Promise<void> {
     resolution.phase,
     blocks,
     config.maxPatchChars,
-    compare,
+    incrementalDiff,
     resolution.restoredState?.reviewedHeadSha,
   );
   const runtime = createRuntime(config.runtimeProvider);
@@ -250,6 +241,8 @@ export async function run(): Promise<void> {
     structuredMetadata,
     renderedReviewMarkdown,
     runtimeDir,
+    phaseReason: resolution.lineageReason,
+    effectiveDiffSource,
     createdAt: resolution.restoredState?.createdAt,
   });
 
@@ -293,7 +286,7 @@ export async function run(): Promise<void> {
     promptSha256: prompt.sha256,
     promptBytes: Buffer.byteLength(prompt.text, 'utf8'),
     restored: resolution,
-    compareUrl: compare?.htmlUrl,
+    effectiveDiffSource,
     artifactName,
     commentUrl: comment.commentUrl,
     bundleDir,
@@ -323,6 +316,7 @@ async function resolvePhase(
   artifactName: string,
   tempRoot: string,
   stateKey: string,
+  target: Awaited<ReturnType<typeof resolveTarget>>,
 ): Promise<PhaseResolution> {
   if (config.reviewMode === 'bootstrap') {
     return { phase: 'bootstrap', lineageReason: 'manual_bootstrap' };
@@ -330,6 +324,9 @@ async function resolvePhase(
 
   const artifact = await store.findStateArtifact(artifactName, config.stateArtifactRunId);
   if (!artifact) {
+    if (target.mode === 'pull-request') {
+      return { phase: 'bootstrap', lineageReason: 'snapshot_state_missing' };
+    }
     if (config.reviewMode === 'incremental') {
       throw new Error(`review_mode=incremental requires a state artifact named ${artifactName}`);
     }
@@ -342,8 +339,17 @@ async function resolvePhase(
   let restoredState: RestoredState | undefined;
   try {
     restoredState = await readRestoredState(restoreDir);
-    validateRestoredState(restoredState, stateKey, config.runtimeProvider);
+    validateRestoredState(restoredState, stateKey, config.runtimeProvider, target);
   } catch (error) {
+    if (
+      error instanceof SnapshotStateCompatibilityError ||
+      messageOf(error).includes('pull request diff snapshot')
+    ) {
+      core.warning(
+        `Restored state artifact is not snapshot-compatible; falling back to bootstrap: ${messageOf(error)}`,
+      );
+      return { phase: 'bootstrap', lineageReason: 'snapshot_state_incompatible' };
+    }
     if (config.reviewMode === 'auto') {
       const reason: LineageReason = messageOf(error).includes('runtime_provider')
         ? 'auto_bootstrap_runtime'
@@ -372,6 +378,7 @@ function validateRestoredState(
   restoredState: RestoredState,
   stateKey: string,
   runtimeProvider: string,
+  target: Awaited<ReturnType<typeof resolveTarget>>,
 ): void {
   if (restoredState.stateKey !== stateKey) {
     throw new Error('restored state artifact state_key does not match the requested state_key');
@@ -383,6 +390,11 @@ function validateRestoredState(
   }
   if (!restoredState.sessionId) {
     throw new Error('restored state artifact is missing session_id');
+  }
+  if (target.mode === 'pull-request' && !restoredState.pullRequestDiffSnapshot) {
+    throw new SnapshotStateCompatibilityError(
+      'restored state artifact is missing pull request diff snapshot metadata',
+    );
   }
 }
 
@@ -409,6 +421,8 @@ async function finishSkippedIdentical(options: {
   artifactName: string;
   runtimeDir: string;
   restoredState: RestoredState;
+  phaseReason: LineageReason;
+  effectiveDiffSource: EffectiveDiffSource;
 }): Promise<void> {
   const lineageTotals = preserveLineageTotalsForSkipped(options.restoredState);
   const runtimeResult: RuntimeResult = {
@@ -418,7 +432,7 @@ async function finishSkippedIdentical(options: {
       schemaVersion: 1,
       summary: `No changes since prior review for ${options.target.headSha}. Provider call skipped.`,
       findings: [],
-      limitations: ['Compare range was identical to the previous reviewed head.'],
+      limitations: ['Current PR diff snapshot entries matched the previous reviewed snapshot.'],
     }),
     debugFiles: [],
     toolMode: options.config.toolMode,
@@ -483,6 +497,8 @@ async function finishSkippedIdentical(options: {
     structuredMetadata,
     renderedReviewMarkdown,
     runtimeDir: options.runtimeDir,
+    phaseReason: options.phaseReason,
+    effectiveDiffSource: options.effectiveDiffSource,
     createdAt: options.restoredState.createdAt,
   });
   const uploadedState = await options.store.upload(
@@ -520,9 +536,9 @@ async function finishSkippedIdentical(options: {
     restored: {
       phase: 'incremental',
       restoredState: options.restoredState,
-      lineageReason: 'continuity_mismatch',
+      lineageReason: options.phaseReason,
     },
-    compareUrl: undefined,
+    effectiveDiffSource: options.effectiveDiffSource,
     artifactName: options.artifactName,
     commentUrl: 'skipped-identical',
     bundleDir,
@@ -537,6 +553,25 @@ function requireRestoredState(restoredState: RestoredState | undefined): Restore
     throw new Error('internal error: identical incremental requires restored state');
   }
   return restoredState;
+}
+
+function requirePullRequestDiffSnapshot(
+  target: Awaited<ReturnType<typeof resolveTarget>>,
+): PullRequestDiffSnapshotV1 {
+  if (!target.pullRequestDiffSnapshot) {
+    throw new Error('internal error: pull-request target requires current diff snapshot');
+  }
+  return target.pullRequestDiffSnapshot;
+}
+
+function effectiveDiffSourceFor(
+  target: Awaited<ReturnType<typeof resolveTarget>>,
+  phase: Phase,
+): EffectiveDiffSource {
+  if (target.mode !== 'pull-request') {
+    return 'target_changed_files';
+  }
+  return phase === 'incremental' ? 'incremental_pr_diff_snapshot_delta' : 'bootstrap_pr_files';
 }
 
 async function maybePostComment(options: {
@@ -777,7 +812,7 @@ async function writeSummary(input: {
   promptSha256: string;
   promptBytes: number;
   restored: PhaseResolution;
-  compareUrl?: string;
+  effectiveDiffSource: EffectiveDiffSource;
   artifactName: string;
   commentUrl: string;
   bundleDir: string;
@@ -817,6 +852,8 @@ async function writeSummary(input: {
     `- Requested mode: ${input.config.reviewMode}`,
     `- Resolved phase: ${input.phase}`,
     `- Review phase: ${input.reviewPhase}`,
+    `- Phase reason: ${input.restored.lineageReason}`,
+    `- Effective diff source: ${input.effectiveDiffSource}`,
     `- Runtime: ${input.config.runtimeProvider}`,
     `- Tool mode: ${input.runtimeResult.toolMode}`,
     `- Allowed tools: ${allowedTools}`,
@@ -838,7 +875,6 @@ async function writeSummary(input: {
     `- Lineage turns: ${input.runtimeResult.lineageTotals.observedTurns ?? 'n/a'}`,
     `- Lineage usage: ${lineageUsage}`,
     `- Lineage source: ${lineageSourceDetail}`,
-    `- Compare URL: ${input.compareUrl ?? 'n/a'}`,
     `- Sticky comment: ${input.commentUrl || 'not requested'}`,
     `- State artifact: ${input.artifactName}`,
     `- Artifact retention days: ${input.config.artifactRetentionDays}`,

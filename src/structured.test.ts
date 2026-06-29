@@ -23,6 +23,36 @@ const target: ReviewTarget = {
   changedFiles: [],
 };
 
+const pullRequestTarget: ReviewTarget = {
+  mode: 'pull-request',
+  prNumber: 1,
+  title: 'Synthetic PR',
+  body: '',
+  baseRef: 'main',
+  baseSha: 'trusted-base',
+  headRef: 'branch',
+  headSha: 'trusted-head',
+  draft: false,
+  changedFiles: [
+    {
+      filename: 'docs/current-change.md',
+      status: 'modified',
+      additions: 1,
+      deletions: 0,
+      changes: 1,
+      patch: '@@ -1 +1 @@\n+change',
+    },
+    {
+      filename: 'src/deleted-current-file.ts',
+      status: 'removed',
+      additions: 0,
+      deletions: 1,
+      changes: 1,
+      patch: '@@ -1 +0,0 @@\n-old',
+    },
+  ],
+};
+
 const config: Pick<ActionConfig, 'runtimeProvider' | 'toolMode'> = {
   runtimeProvider: 'test',
   toolMode: 'readonly',
@@ -57,6 +87,27 @@ function normalize(modelJsonText: string, maxFindings = 10) {
     reviewedRange: buildReviewedRange({
       phase: 'incremental',
       target,
+      previousReviewedHeadSha: 'trusted-prior',
+    }),
+    config,
+    sessionId: 'session-1',
+    usage,
+    observedTurns: 2,
+    observedTurnSource: 'unique_assistant_message_ids',
+    lineageTotals,
+    maxFindings,
+  });
+}
+
+function normalizeForTarget(reviewTarget: ReviewTarget, modelJsonText: string, maxFindings = 10) {
+  return normalizeStructuredReview({
+    modelJsonText,
+    target: reviewTarget,
+    phase: 'incremental',
+    previousReviewedHeadSha: 'trusted-prior',
+    reviewedRange: buildReviewedRange({
+      phase: 'incremental',
+      target: reviewTarget,
       previousReviewedHeadSha: 'trusted-prior',
     }),
     config,
@@ -306,5 +357,95 @@ describe('structured review normalization', () => {
     const second = normalize(validModel()).envelope.findings[0].fingerprint;
     expect(first).toBe(second);
     expect(first).toMatch(/^[a-f0-9]{16}$/);
+  });
+
+  it('drops file findings outside the current PR files before rendering and artifacts', () => {
+    const { envelope } = normalizeForTarget(
+      pullRequestTarget,
+      validModel({
+        findings: [
+          {
+            severity: 'medium',
+            confidence: 'high',
+            category: 'correctness',
+            title: 'Current file',
+            body: 'Allowed.',
+            path: 'docs/current-change.md',
+            startLine: 1,
+            endLine: 1,
+          },
+          {
+            severity: 'high',
+            confidence: 'high',
+            category: 'security',
+            title: 'Base-only file',
+            body: 'Should be dropped.',
+            path: 'src/base-only.ts',
+            startLine: 1,
+            endLine: 1,
+          },
+        ],
+      }),
+    );
+
+    expect(envelope.findings.map((finding) => finding.path)).toEqual(['docs/current-change.md']);
+    expect(envelope.result.inputFindingCount).toBe(1);
+  });
+
+  it('keeps findings for removed current PR files and pathless PR-level findings', () => {
+    const { envelope } = normalizeForTarget(
+      pullRequestTarget,
+      validModel({
+        findings: [
+          {
+            severity: 'medium',
+            confidence: 'high',
+            category: 'correctness',
+            title: 'Deleted current file',
+            body: 'Removed files are still in the current PR diff.',
+            path: 'src/deleted-current-file.ts',
+            startLine: 1,
+            endLine: 1,
+          },
+          {
+            severity: 'low',
+            confidence: 'medium',
+            category: 'documentation',
+            title: 'PR-level note',
+            body: 'Allowed without file path.',
+            path: null,
+            startLine: null,
+            endLine: null,
+          },
+        ],
+      }),
+    );
+
+    expect(envelope.findings.map((finding) => finding.path)).toEqual([
+      'src/deleted-current-file.ts',
+      null,
+    ]);
+  });
+
+  it('does not let unsafe paths bypass current PR file membership checks', () => {
+    expect(() =>
+      normalizeForTarget(
+        pullRequestTarget,
+        validModel({
+          findings: [
+            {
+              severity: 'medium',
+              confidence: 'high',
+              category: 'correctness',
+              title: 'Unsafe path',
+              body: 'Should fail validation.',
+              path: 'src/../docs/current-change.md',
+              startLine: 1,
+              endLine: 1,
+            },
+          ],
+        }),
+      ),
+    ).toThrow(/path/);
   });
 });

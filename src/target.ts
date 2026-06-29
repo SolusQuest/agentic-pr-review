@@ -1,15 +1,28 @@
 import {
   type ActionConfig,
   type ChangedFile,
-  type PullRequestCompare,
+  type PullRequestDiffSnapshotDeltaV1,
+  type PullRequestDiffSnapshotEntryV1,
+  type PullRequestDiffSnapshotV1,
   type ReviewTarget,
 } from './types.js';
-import { truncateText } from './utils.js';
+import { normalizeRepoRelativePath, sha256 } from './utils.js';
 
 export interface GitHubContextLike {
   repo: { owner: string; repo: string };
   payload: { pull_request?: { number?: number } };
   sha: string;
+}
+
+export interface PullRequestFileData {
+  sha?: string;
+  filename: string;
+  previous_filename?: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  changes: number;
+  patch?: string;
 }
 
 export async function resolveTarget(
@@ -58,31 +71,13 @@ export async function resolveTarget(
     repo,
     pull_number: prNumber,
     per_page: 100,
-  })) as Array<{
-    filename: string;
-    status: string;
-    additions: number;
-    deletions: number;
-    changes: number;
-    patch?: string;
-  }>;
+  })) as PullRequestFileData[];
 
-  let remainingPatchChars = config.maxPatchChars;
-  const changedFiles: ChangedFile[] = files.map((file) => {
-    const patch = file.patch
-      ? truncateText(file.patch, Math.max(0, remainingPatchChars))
-      : undefined;
-    if (patch) {
-      remainingPatchChars = Math.max(0, remainingPatchChars - patch.length);
-    }
-    return {
-      filename: file.filename,
-      status: file.status,
-      additions: file.additions,
-      deletions: file.deletions,
-      changes: file.changes,
-      patch,
-    };
+  const changedFiles = changedFilesFromPullRequestFiles(files);
+  const pullRequestDiffSnapshot = buildPullRequestDiffSnapshot({
+    baseSha: String(pull.data.base.sha),
+    headSha: String(pull.data.head.sha),
+    files,
   });
   const headRepoFullName = pull.data.head.repo?.full_name;
   if (!headRepoFullName) {
@@ -101,56 +96,140 @@ export async function resolveTarget(
     headRepoFullName,
     draft: Boolean(pull.data.draft),
     changedFiles,
+    pullRequestDiffSnapshot,
     htmlUrl: pull.data.html_url,
   };
 }
 
-export async function fetchTargetCompare(
-  octokit: any,
-  context: GitHubContextLike,
-  baseSha: string,
-  headSha: string,
-  maxPatchChars: number,
-): Promise<PullRequestCompare | undefined> {
-  const { owner, repo } = context.repo;
-  try {
-    const response = await octokit.rest.repos.compareCommitsWithBasehead({
-      owner,
-      repo,
-      basehead: `${baseSha}...${headSha}`,
-    });
-    let remainingPatchChars = maxPatchChars;
-    const changedFiles = (response.data.files ?? []).map((file: any) => {
-      const patch = file.patch
-        ? truncateText(String(file.patch), Math.max(0, remainingPatchChars))
-        : undefined;
-      if (patch) {
-        remainingPatchChars = Math.max(0, remainingPatchChars - patch.length);
-      }
-      return {
-        filename: String(file.filename),
-        status: String(file.status),
-        additions: Number(file.additions ?? 0),
-        deletions: Number(file.deletions ?? 0),
-        changes: Number(file.changes ?? 0),
-        patch,
-      };
-    });
+export function buildPullRequestDiffSnapshot(input: {
+  baseSha: string;
+  headSha: string;
+  files: PullRequestFileData[];
+}): PullRequestDiffSnapshotV1 {
+  return {
+    version: 1,
+    source: 'github-pulls-list-files',
+    baseSha: input.baseSha,
+    headSha: input.headSha,
+    files: input.files.map(snapshotEntryFromPullRequestFile),
+  };
+}
+
+export function changedFilesFromPullRequestFiles(files: PullRequestFileData[]): ChangedFile[] {
+  return files.map((file) => {
+    const patch = typeof file.patch === 'string' ? file.patch : undefined;
     return {
-      baseSha,
-      headSha,
-      htmlUrl: String(response.data.html_url),
-      status: String(response.data.status),
-      aheadBy: Number(response.data.ahead_by),
-      behindBy: Number(response.data.behind_by),
-      changedFiles,
+      filename: normalizeRepoRelativePath(String(file.filename)),
+      previousFilename: file.previous_filename
+        ? normalizeRepoRelativePath(String(file.previous_filename))
+        : undefined,
+      status: String(file.status),
+      additions: Number(file.additions ?? 0),
+      deletions: Number(file.deletions ?? 0),
+      changes: Number(file.changes ?? 0),
+      patch,
     };
-  } catch (error: any) {
-    if (error?.status === 404) {
-      return undefined;
+  });
+}
+
+export function diffPullRequestDiffSnapshots(
+  previous: PullRequestDiffSnapshotV1,
+  current: PullRequestDiffSnapshotV1,
+  currentFiles: ChangedFile[],
+): PullRequestDiffSnapshotDeltaV1 {
+  const previousByPath = new Map(previous.files.map((entry) => [entry.filename, entry]));
+  const currentByPath = new Map(current.files.map((entry) => [entry.filename, entry]));
+  const currentPatchByPath = new Map(currentFiles.map((file) => [file.filename, file.patch]));
+  const changedEntries: PullRequestDiffSnapshotDeltaV1['changedEntries'] = [];
+  let unchangedCount = 0;
+
+  for (const currentEntry of current.files) {
+    const previousEntry = previousByPath.get(currentEntry.filename);
+    if (!previousEntry) {
+      changedEntries.push({
+        kind: 'current_changed',
+        reason: 'new_file',
+        current: currentEntry,
+        patch: currentPatchByPath.get(currentEntry.filename),
+      });
+      continue;
     }
-    throw error;
+    if (snapshotEntryChanged(previousEntry, currentEntry)) {
+      changedEntries.push({
+        kind: 'current_changed',
+        reason: 'metadata_changed',
+        current: currentEntry,
+        previous: previousEntry,
+        patch: currentPatchByPath.get(currentEntry.filename),
+      });
+    } else {
+      unchangedCount += 1;
+    }
   }
+
+  const removedEntries = previous.files
+    .filter((entry) => !currentByPath.has(entry.filename))
+    .map((entry) => ({ kind: 'removed_from_pr_diff' as const, previous: entry }));
+
+  return {
+    version: 1,
+    source: 'github-pulls-list-files',
+    changedEntries,
+    removedEntries,
+    unchangedCount,
+  };
+}
+
+export function pullRequestDiffSnapshotsEquivalent(
+  previous: PullRequestDiffSnapshotV1,
+  current: PullRequestDiffSnapshotV1,
+): boolean {
+  return (
+    previous.files.length === current.files.length &&
+    diffPullRequestDiffSnapshots(previous, current, []).changedEntries.length === 0 &&
+    diffPullRequestDiffSnapshots(previous, current, []).removedEntries.length === 0
+  );
+}
+
+function snapshotEntryFromPullRequestFile(
+  file: PullRequestFileData,
+): PullRequestDiffSnapshotEntryV1 {
+  const patchAvailable = typeof file.patch === 'string';
+  const fileSha = typeof file.sha === 'string' && file.sha.trim() ? file.sha.trim() : undefined;
+  return {
+    filename: normalizeRepoRelativePath(String(file.filename)),
+    previousFilename: file.previous_filename
+      ? normalizeRepoRelativePath(String(file.previous_filename))
+      : undefined,
+    status: String(file.status),
+    additions: Number(file.additions ?? 0),
+    deletions: Number(file.deletions ?? 0),
+    changes: Number(file.changes ?? 0),
+    fileSha,
+    patchSha256: patchAvailable ? sha256(String(file.patch)) : null,
+    patchAvailable,
+  };
+}
+
+function snapshotEntryChanged(
+  previous: PullRequestDiffSnapshotEntryV1,
+  current: PullRequestDiffSnapshotEntryV1,
+): boolean {
+  if (previous.fileSha || current.fileSha) {
+    if (previous.fileSha !== current.fileSha) {
+      return true;
+    }
+  } else if (!previous.patchAvailable || !current.patchAvailable) {
+    return true;
+  }
+  return (
+    previous.status !== current.status ||
+    previous.additions !== current.additions ||
+    previous.deletions !== current.deletions ||
+    previous.changes !== current.changes ||
+    previous.patchAvailable !== current.patchAvailable ||
+    previous.patchSha256 !== current.patchSha256
+  );
 }
 
 export function deriveStateKey(config: ActionConfig, target: ReviewTarget): string {

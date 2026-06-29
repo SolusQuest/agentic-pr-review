@@ -3,9 +3,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { readRestoredState, stateArtifactName, writeStateBundle } from './state.js';
-import { type ActionConfig, type StructuredReviewEnvelopeV1 } from './types.js';
+import {
+  type ActionConfig,
+  type PullRequestDiffSnapshotV1,
+  type StructuredReviewEnvelopeV1,
+} from './types.js';
 import { type StructuredResultMetadata } from './structured.js';
-import { sanitizeStateKey } from './utils.js';
+import { sanitizeStateKey, sha256 } from './utils.js';
 
 function config(): ActionConfig {
   return {
@@ -82,6 +86,26 @@ const structuredMetadata: StructuredResultMetadata = {
   renderedFindingCount: 0,
   findingsTruncated: false,
 };
+
+function snapshot(patch: string): PullRequestDiffSnapshotV1 {
+  return {
+    version: 1,
+    source: 'github-pulls-list-files',
+    baseSha: 'base',
+    headSha: 'head',
+    files: [
+      {
+        filename: 'docs/current-change.md',
+        status: 'modified',
+        additions: 1,
+        deletions: 0,
+        changes: 1,
+        patchAvailable: true,
+        patchSha256: sha256(patch),
+      },
+    ],
+  };
+}
 
 describe('state helpers', () => {
   it('sanitizes state keys and names artifacts', () => {
@@ -164,6 +188,8 @@ describe('state helpers', () => {
         structuredMetadata,
         renderedReviewMarkdown: 'rendered review',
         runtimeDir,
+        phaseReason: 'manual_bootstrap',
+        effectiveDiffSource: 'target_changed_files',
       });
       const restored = await readRestoredState(bundleDir);
       expect(restored.sessionId).toBe('session-1');
@@ -186,6 +212,89 @@ describe('state helpers', () => {
       );
       expect(runtimeFile).toContain('***REDACTED***');
       expect(runtimeFile).not.toContain('secret-value');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('writes and restores PR diff snapshot metadata without patch bodies', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'agentic-pr-review-state-'));
+    try {
+      const runtimeDir = path.join(dir, 'runtime-source');
+      const bundleDir = path.join(dir, 'bundle');
+      const rawPatch = '@@ -1 +1 @@\n-secret-like review subject\n+public-safe change';
+      await mkdir(runtimeDir, { recursive: true });
+      await writeStateBundle({
+        bundleDir,
+        config: { ...config(), targetMode: 'pull-request' },
+        target: {
+          mode: 'pull-request',
+          prNumber: 1,
+          title: 'Synthetic',
+          body: '',
+          baseRef: 'main',
+          baseSha: 'base',
+          headRef: 'branch',
+          headSha: 'head',
+          draft: false,
+          changedFiles: [
+            {
+              filename: 'docs/current-change.md',
+              status: 'modified',
+              additions: 1,
+              deletions: 0,
+              changes: 1,
+              patch: rawPatch,
+            },
+          ],
+          pullRequestDiffSnapshot: snapshot(rawPatch),
+        },
+        stateKey: 'pr-1-test',
+        phase: 'bootstrap',
+        promptSha256: 'prompt-hash',
+        blocks: [],
+        runtimeResult: {
+          sessionId: 'session-1',
+          sessionName: 'session-name',
+          modelReviewJson: '{"schemaVersion":1,"summary":"review","findings":[],"limitations":[]}',
+          debugFiles: [],
+          toolMode: 'none',
+          allowedTools: [],
+          observedTurns: 0,
+          observedTurnSource: 'not_applicable',
+          usage: null,
+          usageBudgetStatus: {
+            status: 'disabled',
+            limits: config().usageBudgetLimits,
+            usageRecordsObserved: 0,
+          },
+          lineageTotals: {
+            observedTurns: 0,
+            usage: {
+              inputTokens: 0,
+              cacheReadInputTokens: 0,
+              cacheCreationInputTokens: 0,
+              outputTokens: 0,
+            },
+            source: 'current_run_only',
+            partial: false,
+          },
+        },
+        structuredReview: structuredReview(),
+        structuredMetadata,
+        renderedReviewMarkdown: 'rendered review',
+        runtimeDir,
+        phaseReason: 'manual_bootstrap',
+        effectiveDiffSource: 'bootstrap_pr_files',
+      });
+
+      const restored = await readRestoredState(bundleDir);
+      expect(restored.pullRequestDiffSnapshot).toEqual(snapshot(rawPatch));
+      const manifest = await readFile(path.join(bundleDir, 'manifest.json'), 'utf8');
+      expect(manifest).toContain('"effectiveDiffSource": "bootstrap_pr_files"');
+      expect(manifest).toContain(sha256(rawPatch));
+      expect(manifest).not.toContain(rawPatch);
+      expect(manifest).not.toContain('secret-like review subject');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -256,6 +365,8 @@ describe('state helpers', () => {
           structuredMetadata,
           renderedReviewMarkdown: 'rendered review',
           runtimeDir,
+          phaseReason: 'manual_bootstrap',
+          effectiveDiffSource: 'target_changed_files',
         }),
       ).resolves.toBeTruthy();
     } finally {

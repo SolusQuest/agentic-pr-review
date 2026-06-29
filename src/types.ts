@@ -2,6 +2,10 @@ export type RuntimeProvider = 'test' | 'claude-code-cli';
 export type TargetMode = 'pull-request' | 'synthetic-fixture';
 export type ReviewMode = 'auto' | 'bootstrap' | 'incremental';
 export type Phase = 'bootstrap' | 'incremental';
+export type EffectiveDiffSource =
+  | 'target_changed_files'
+  | 'bootstrap_pr_files'
+  | 'incremental_pr_diff_snapshot_delta';
 export type ApiKeyMode = 'auth-token' | 'api-key' | 'both';
 export type ToolMode = 'none' | 'readonly';
 export type InlineCommentSeverity = 'low' | 'medium' | 'high';
@@ -168,11 +172,53 @@ export interface LoadedBlock {
 
 export interface ChangedFile {
   filename: string;
+  previousFilename?: string;
   status: string;
   additions: number;
   deletions: number;
   changes: number;
   patch?: string;
+}
+
+export interface PullRequestDiffSnapshotV1 {
+  version: 1;
+  source: 'github-pulls-list-files';
+  headSha: string;
+  baseSha: string;
+  files: PullRequestDiffSnapshotEntryV1[];
+}
+
+export interface PullRequestDiffSnapshotEntryV1 {
+  filename: string;
+  previousFilename?: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  changes: number;
+  fileSha?: string;
+  patchSha256: string | null;
+  patchAvailable: boolean;
+}
+
+export interface PullRequestDiffSnapshotChangedEntryV1 {
+  kind: 'current_changed';
+  reason: 'new_file' | 'metadata_changed';
+  current: PullRequestDiffSnapshotEntryV1;
+  previous?: PullRequestDiffSnapshotEntryV1;
+  patch?: string;
+}
+
+export interface PullRequestDiffSnapshotRemovedEntryV1 {
+  kind: 'removed_from_pr_diff';
+  previous: PullRequestDiffSnapshotEntryV1;
+}
+
+export interface PullRequestDiffSnapshotDeltaV1 {
+  version: 1;
+  source: 'github-pulls-list-files';
+  changedEntries: PullRequestDiffSnapshotChangedEntryV1[];
+  removedEntries: PullRequestDiffSnapshotRemovedEntryV1[];
+  unchangedCount: number;
 }
 
 export interface ReviewTarget {
@@ -187,6 +233,7 @@ export interface ReviewTarget {
   headRepoFullName?: string;
   draft: boolean;
   changedFiles: ChangedFile[];
+  pullRequestDiffSnapshot?: PullRequestDiffSnapshotV1;
   htmlUrl?: string;
 }
 
@@ -201,6 +248,7 @@ export interface RestoredState {
   observedTurns?: number | null;
   observedTurnSource?: string;
   lineageTotals?: RuntimeLineageTotals;
+  pullRequestDiffSnapshot?: PullRequestDiffSnapshotV1;
   manifestPath: string;
 }
 
@@ -252,16 +300,6 @@ export interface UploadedArtifact {
   retentionDays: number;
 }
 
-export interface PullRequestCompare {
-  baseSha: string;
-  headSha: string;
-  htmlUrl: string;
-  status: string;
-  aheadBy: number;
-  behindBy: number;
-  changedFiles: ChangedFile[];
-}
-
 export type LineageReason =
   | 'manual_bootstrap'
   | 'auto_bootstrap_no_state'
@@ -269,6 +307,8 @@ export type LineageReason =
   | 'auto_bootstrap_runtime'
   | 'compare_unavailable'
   | 'compare_diverged'
-  | 'continuity_mismatch';
+  | 'continuity_mismatch'
+  | 'snapshot_state_missing'
+  | 'snapshot_state_incompatible';
 
 export type LineageAction = 'create' | 'update' | 'update_in_place';
