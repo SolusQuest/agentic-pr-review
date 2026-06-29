@@ -311,7 +311,10 @@ authoritative review scope. Bootstrap runs store a normalized PR diff snapshot i
 Incremental runs restore the previous compatible snapshot, build a current snapshot from the current PR
 files, and send only changed current PR diff entries plus incremental context. Unchanged current PR
 diff entries remain in scope metadata but do not consume bounded patch budget. Files that existed only
-in a raw commit compare range are not prompt patch context.
+in a raw commit compare range are not prompt patch context. Snapshot entries store patch hashes when
+GitHub provides patch text and the PR file SHA when available, so patch-unavailable files can still be
+detected as changed. If a patch-unavailable file lacks a stable file SHA, the action treats it
+conservatively as changed.
 
 If previous snapshot-compatible PR state is missing or incompatible, both `review_mode=auto` and forced
 `review_mode=incremental` start a bootstrap phase under the current state schema. The job summary and

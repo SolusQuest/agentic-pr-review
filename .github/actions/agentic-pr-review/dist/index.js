@@ -99673,7 +99673,7 @@ function validatePullRequestDiffSnapshot(value) {
         throw new Error("restored state manifest pull request diff snapshot is incompatible");
       }
       const candidate = entry;
-      if (typeof candidate.filename !== "string" || candidate.previousFilename !== void 0 && typeof candidate.previousFilename !== "string" || typeof candidate.status !== "string" || typeof candidate.additions !== "number" || typeof candidate.deletions !== "number" || typeof candidate.changes !== "number" || typeof candidate.patchAvailable !== "boolean" || candidate.patchSha256 !== null && typeof candidate.patchSha256 !== "string") {
+      if (typeof candidate.filename !== "string" || candidate.previousFilename !== void 0 && typeof candidate.previousFilename !== "string" || typeof candidate.status !== "string" || typeof candidate.additions !== "number" || typeof candidate.deletions !== "number" || typeof candidate.changes !== "number" || candidate.fileSha !== void 0 && typeof candidate.fileSha !== "string" || typeof candidate.patchAvailable !== "boolean" || candidate.patchSha256 !== null && typeof candidate.patchSha256 !== "string") {
         throw new Error("restored state manifest pull request diff snapshot is incompatible");
       }
       if (candidate.patchAvailable ? typeof candidate.patchSha256 !== "string" : candidate.patchSha256 !== null) {
@@ -99686,6 +99686,7 @@ function validatePullRequestDiffSnapshot(value) {
         additions: candidate.additions,
         deletions: candidate.deletions,
         changes: candidate.changes,
+        fileSha: candidate.fileSha,
         patchAvailable: candidate.patchAvailable,
         patchSha256: candidate.patchSha256
       };
@@ -100221,6 +100222,7 @@ function pullRequestDiffSnapshotsEquivalent(previous, current) {
 }
 function snapshotEntryFromPullRequestFile(file) {
   const patchAvailable = typeof file.patch === "string";
+  const fileSha = typeof file.sha === "string" && file.sha.trim() ? file.sha.trim() : void 0;
   return {
     filename: normalizeRepoRelativePath(String(file.filename)),
     previousFilename: file.previous_filename ? normalizeRepoRelativePath(String(file.previous_filename)) : void 0,
@@ -100228,11 +100230,19 @@ function snapshotEntryFromPullRequestFile(file) {
     additions: Number(file.additions ?? 0),
     deletions: Number(file.deletions ?? 0),
     changes: Number(file.changes ?? 0),
+    fileSha,
     patchSha256: patchAvailable ? sha256(String(file.patch)) : null,
     patchAvailable
   };
 }
 function snapshotEntryChanged(previous, current) {
+  if (previous.fileSha || current.fileSha) {
+    if (previous.fileSha !== current.fileSha) {
+      return true;
+    }
+  } else if (!previous.patchAvailable || !current.patchAvailable) {
+    return true;
+  }
   return previous.status !== current.status || previous.additions !== current.additions || previous.deletions !== current.deletions || previous.changes !== current.changes || previous.patchAvailable !== current.patchAvailable || previous.patchSha256 !== current.patchSha256;
 }
 function deriveStateKey(config, target) {

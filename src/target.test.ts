@@ -88,6 +88,7 @@ describe('resolveTarget', () => {
       },
       paginate: async () => [
         {
+          sha: 'file-sha-current',
           filename: 'docs/current-change.md',
           status: 'modified',
           additions: 1,
@@ -96,6 +97,7 @@ describe('resolveTarget', () => {
           patch: rawPatch,
         },
         {
+          sha: 'file-sha-binary',
           filename: 'assets/generated.bin',
           status: 'modified',
           additions: 0,
@@ -113,11 +115,13 @@ describe('resolveTarget', () => {
 
     expect(target.pullRequestDiffSnapshot?.files[0]).toMatchObject({
       filename: 'docs/current-change.md',
+      fileSha: 'file-sha-current',
       patchAvailable: true,
       patchSha256: sha256(rawPatch),
     });
     expect(target.pullRequestDiffSnapshot?.files[1]).toMatchObject({
       filename: 'assets/generated.bin',
+      fileSha: 'file-sha-binary',
       patchAvailable: false,
       patchSha256: null,
     });
@@ -187,5 +191,146 @@ describe('resolveTarget', () => {
         previous: previous.files[1],
       },
     ]);
+  });
+
+  it('uses file sha to detect patch-unavailable PR diff changes', () => {
+    const previous = buildPullRequestDiffSnapshot({
+      baseSha: 'base',
+      headSha: 'old-head',
+      files: [
+        {
+          sha: 'old-binary-sha',
+          filename: 'assets/generated.bin',
+          status: 'modified',
+          additions: 0,
+          deletions: 0,
+          changes: 0,
+        },
+      ],
+    });
+    const current = buildPullRequestDiffSnapshot({
+      baseSha: 'base',
+      headSha: 'new-head',
+      files: [
+        {
+          sha: 'new-binary-sha',
+          filename: 'assets/generated.bin',
+          status: 'modified',
+          additions: 0,
+          deletions: 0,
+          changes: 0,
+        },
+      ],
+    });
+
+    const delta = diffPullRequestDiffSnapshots(previous, current, [
+      {
+        filename: 'assets/generated.bin',
+        status: 'modified',
+        additions: 0,
+        deletions: 0,
+        changes: 0,
+      },
+    ]);
+
+    expect(delta.changedEntries).toHaveLength(1);
+    expect(delta.changedEntries[0]).toMatchObject({
+      kind: 'current_changed',
+      reason: 'metadata_changed',
+      current: {
+        filename: 'assets/generated.bin',
+        fileSha: 'new-binary-sha',
+        patchAvailable: false,
+        patchSha256: null,
+      },
+      previous: {
+        fileSha: 'old-binary-sha',
+      },
+    });
+  });
+
+  it('treats patch-unavailable entries with the same file sha as unchanged', () => {
+    const previous = buildPullRequestDiffSnapshot({
+      baseSha: 'base',
+      headSha: 'old-head',
+      files: [
+        {
+          sha: 'same-binary-sha',
+          filename: 'assets/generated.bin',
+          status: 'modified',
+          additions: 0,
+          deletions: 0,
+          changes: 0,
+        },
+      ],
+    });
+    const current = buildPullRequestDiffSnapshot({
+      baseSha: 'base',
+      headSha: 'new-head',
+      files: [
+        {
+          sha: 'same-binary-sha',
+          filename: 'assets/generated.bin',
+          status: 'modified',
+          additions: 0,
+          deletions: 0,
+          changes: 0,
+        },
+      ],
+    });
+
+    const delta = diffPullRequestDiffSnapshots(previous, current, [
+      {
+        filename: 'assets/generated.bin',
+        status: 'modified',
+        additions: 0,
+        deletions: 0,
+        changes: 0,
+      },
+    ]);
+
+    expect(delta.changedEntries).toEqual([]);
+    expect(delta.unchangedCount).toBe(1);
+  });
+
+  it('conservatively treats patch-unavailable entries without file sha as changed', () => {
+    const previous = buildPullRequestDiffSnapshot({
+      baseSha: 'base',
+      headSha: 'old-head',
+      files: [
+        {
+          filename: 'assets/generated.bin',
+          status: 'modified',
+          additions: 0,
+          deletions: 0,
+          changes: 0,
+        },
+      ],
+    });
+    const current = buildPullRequestDiffSnapshot({
+      baseSha: 'base',
+      headSha: 'new-head',
+      files: [
+        {
+          filename: 'assets/generated.bin',
+          status: 'modified',
+          additions: 0,
+          deletions: 0,
+          changes: 0,
+        },
+      ],
+    });
+
+    const delta = diffPullRequestDiffSnapshots(previous, current, [
+      {
+        filename: 'assets/generated.bin',
+        status: 'modified',
+        additions: 0,
+        deletions: 0,
+        changes: 0,
+      },
+    ]);
+
+    expect(delta.changedEntries).toHaveLength(1);
   });
 });

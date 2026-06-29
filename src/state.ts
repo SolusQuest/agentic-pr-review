@@ -232,6 +232,7 @@ function validatePullRequestDiffSnapshot(value: unknown): PullRequestDiffSnapsho
         typeof candidate.additions !== 'number' ||
         typeof candidate.deletions !== 'number' ||
         typeof candidate.changes !== 'number' ||
+        (candidate.fileSha !== undefined && typeof candidate.fileSha !== 'string') ||
         typeof candidate.patchAvailable !== 'boolean' ||
         (candidate.patchSha256 !== null && typeof candidate.patchSha256 !== 'string')
       ) {
@@ -253,6 +254,7 @@ function validatePullRequestDiffSnapshot(value: unknown): PullRequestDiffSnapsho
         additions: candidate.additions,
         deletions: candidate.deletions,
         changes: candidate.changes,
+        fileSha: candidate.fileSha,
         patchAvailable: candidate.patchAvailable,
         patchSha256: candidate.patchSha256,
       };

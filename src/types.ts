@@ -195,6 +195,7 @@ export interface PullRequestDiffSnapshotEntryV1 {
   additions: number;
   deletions: number;
   changes: number;
+  fileSha?: string;
   patchSha256: string | null;
   patchAvailable: boolean;
 }

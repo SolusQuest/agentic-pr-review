@@ -15,6 +15,7 @@ export interface GitHubContextLike {
 }
 
 export interface PullRequestFileData {
+  sha?: string;
   filename: string;
   previous_filename?: string;
   status: string;
@@ -194,6 +195,7 @@ function snapshotEntryFromPullRequestFile(
   file: PullRequestFileData,
 ): PullRequestDiffSnapshotEntryV1 {
   const patchAvailable = typeof file.patch === 'string';
+  const fileSha = typeof file.sha === 'string' && file.sha.trim() ? file.sha.trim() : undefined;
   return {
     filename: normalizeRepoRelativePath(String(file.filename)),
     previousFilename: file.previous_filename
@@ -203,6 +205,7 @@ function snapshotEntryFromPullRequestFile(
     additions: Number(file.additions ?? 0),
     deletions: Number(file.deletions ?? 0),
     changes: Number(file.changes ?? 0),
+    fileSha,
     patchSha256: patchAvailable ? sha256(String(file.patch)) : null,
     patchAvailable,
   };
@@ -212,6 +215,13 @@ function snapshotEntryChanged(
   previous: PullRequestDiffSnapshotEntryV1,
   current: PullRequestDiffSnapshotEntryV1,
 ): boolean {
+  if (previous.fileSha || current.fileSha) {
+    if (previous.fileSha !== current.fileSha) {
+      return true;
+    }
+  } else if (!previous.patchAvailable || !current.patchAvailable) {
+    return true;
+  }
   return (
     previous.status !== current.status ||
     previous.additions !== current.additions ||

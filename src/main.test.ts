@@ -347,6 +347,62 @@ describe('run', () => {
     }
   });
 
+  it('does not skip provider calls when patch-unavailable current PR files change sha', async () => {
+    Object.assign(mocks.inputs, {
+      review_mode: 'incremental',
+      post_comment: 'false',
+      state_key: 'snapshot-binary-changed',
+      test_runtime_fixture: 'no_findings',
+    });
+    mocks.octokit.paginate.mockImplementation(async (endpoint: unknown) => {
+      if (endpoint === mocks.listFiles) {
+        return [
+          {
+            sha: 'new-binary-sha',
+            filename: 'assets/generated.bin',
+            status: 'modified',
+            additions: 0,
+            deletions: 0,
+            changes: 0,
+          },
+        ];
+      }
+      return [];
+    });
+    await writeRestoredArtifact(
+      'snapshot-binary-changed',
+      currentSnapshot({
+        files: [
+          {
+            filename: 'assets/generated.bin',
+            status: 'modified',
+            additions: 0,
+            deletions: 0,
+            changes: 0,
+            fileSha: 'old-binary-sha',
+            patchAvailable: false,
+            patchSha256: null,
+          },
+        ],
+      }),
+    );
+    const runtime = await import('./runtime.js');
+    const runSpy = vi.spyOn(runtime.TestRuntime.prototype, 'run');
+    const { run } = await import('./main.js');
+
+    try {
+      await run();
+      expect(runSpy).toHaveBeenCalledTimes(1);
+      expect(mocks.setOutput).toHaveBeenCalledWith('phase', 'incremental');
+      expect(mocks.setOutput).toHaveBeenCalledWith('review_phase', 'incremental');
+      const prompt = runSpy.mock.calls[0][0].prompt;
+      expect(prompt).toContain('assets/generated.bin');
+      expect(prompt).toContain('## Bounded Current PR Patch Context\n- none');
+    } finally {
+      runSpy.mockRestore();
+    }
+  });
+
   it('uses only changed current PR diff entries for snapshot-changed incremental prompts', async () => {
     const unchangedPatch = 'UNCHANGED_PATCH_BODY'.repeat(100);
     const currentPatch = '@@ -1 +1 @@\n-old\n+new';
