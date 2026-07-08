@@ -1,30 +1,33 @@
-# Agent Operating Rules
+# Agent Entry
 
-This file defines operating rules for AI agents working in `SolusQuest/agentic-pr-review`.
+This repository is public. Agents working here must use only this repository, the current task prompt, and public context.
 
-## Scope
+## Startup Reading Order
 
-You are working only in `SolusQuest/agentic-pr-review`. Use only this repository, the current task prompt, and public context.
+1. `docs/50_ai/agent-context.md`
+2. `docs/50_ai/collaboration-layers.md`
+3. Task-specific procedures under `docs/50_ai/skills/`
+4. Relevant project, workflow, architecture, or roadmap docs under `docs/`
 
-## Context boundaries
+## Context Boundary
 
-- Do not assume access to private repositories, private issue trackers, private logs, private prompts, or private credentials.
-- If required information is missing, ask for a public-safe clarification.
-- Do not include non-public issue links, private repository details, prompts, transcripts, workflow logs, credentials, or secrets in files, commits, PR bodies, comments, CI logs, or artifacts.
+- Do not read or depend on private repositories, private issue trackers, private workflow logs, private prompts, transcripts, credentials, or secrets.
+- If required information is missing, ask for a public-safe clarification instead of inferring from private context.
+- Do not include private issue links, private repository details, private file paths, prompts, transcripts, workflow logs, credentials, secrets, or private-only rationale in files, commits, PR bodies, comments, CI logs, or artifacts.
+- PR bodies must be technically self-contained and understandable without private context.
 
-## CI rules
+## Safety Rules
 
-- `pull_request` / `push` CI must run without provider secrets.
-- Use synthetic fixtures or placeholder validation unless a task explicitly defines otherwise.
+- Do not merge PRs.
+- Do not mutate repository settings, labels, milestones, Projects, branch protection, or secrets unless a task explicitly authorizes that metadata operation.
+- `pull_request` and `push` CI must run without provider secrets.
 - Do not use `pull_request_target` without explicit security review.
+- Use synthetic fixtures or test-only modes unless a task explicitly defines live provider validation.
 
-## PR rules
+## Validation
 
-- PR body must be public-safe and technically self-contained.
-- PR body should summarize objective, behavior changes, and validation results.
-- Do not paste external task documents or task prompts verbatim into PR body.
+Run the relevant checks documented in `CLAUDE.md` and task-specific docs. For code changes, the default local validation is:
 
-## Issue rules
-
-- Issues in this repo should be describable using public information only.
-- Do not reference private PM issue numbers, private repo names, or private planning context.
+```bash
+npm run check
+```

@@ -1,0 +1,74 @@
+name: Task
+description: Planning, docs, research, spike, tooling, release, or maintenance work
+title: 'Task: '
+type: task
+body:
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: What needs to be accomplished?
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Why is this needed now?
+    validations:
+      required: false
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is in and out of scope?
+      value: |
+        ## In scope
+
+        -
+
+        ## Out of scope
+
+        -
+    validations:
+      required: false
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Expected Output
+      description: What concrete output should exist when this is done?
+      value: |
+        - [ ] Decision recorded, if applicable
+        - [ ] Relevant docs updated, if needed
+        - [ ] Follow-up issues drafted or created, if authorized
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: What must be true for this issue to be done?
+      value: |
+        - [ ]
+    validations:
+      required: true
+
+  - type: textarea
+    id: related
+    attributes:
+      label: Related Docs / Issues / PRs
+      description: Link public docs, issues, PRs, or code paths.
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Optional. For spikes, record the question being answered and decision criteria.
+    validations:
+      required: false
