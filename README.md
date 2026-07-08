@@ -11,6 +11,14 @@ This repository is experimental public tooling. The initial v0.x line is not a s
 
 The action uses the GitHub Actions `node24` runtime.
 
+## Project Docs
+
+- `docs/00_project/project-context.md` describes the project role and source-of-truth model.
+- `docs/20_architecture/architecture.md` describes the long-term TypeScript adapter plus C# runtime direction.
+- `docs/20_architecture/security-boundary.md` describes token, side-effect, and artifact boundaries.
+- `docs/50_ai/agent-context.md` is the public agent context entrypoint.
+- `docs/90_roadmap/roadmap-seed.md` contains seed material for future public issue refinement.
+
 ## Usage
 
 ```yaml

@@ -1,0 +1,67 @@
+name: Enhancement
+description: Improve an existing capability without adding a fundamentally new feature
+title: 'Enhancement: '
+type: feature
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What existing capability should be improved?
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: Current Behavior
+      description: How does it work now?
+    validations:
+      required: true
+
+  - type: textarea
+    id: desired
+    attributes:
+      label: Desired Behavior
+      description: How should it work after this change?
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      value: |
+        ## In scope
+
+        -
+
+        ## Out of scope
+
+        -
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      value: |
+        - [ ]
+    validations:
+      required: true
+
+  - type: textarea
+    id: docs
+    attributes:
+      label: Relevant Docs
+      description: Link public docs, code paths, issues, or PRs.
+    validations:
+      required: false
+
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Implementation Notes
+    validations:
+      required: false

@@ -1,25 +1,17 @@
-# CLAUDE.md
+# Claude Code Entry
 
-This file provides operating guidance for Claude Code working in `SolusQuest/agentic-pr-review`.
+Read `AGENTS.md` first. It defines the public context boundary, startup reading order, and safety rules for this repository.
 
-## Operating rules
-
-Read and follow `AGENTS.md` for general agent operating rules, context boundaries, CI rules, PR rules, and issue rules.
-
-## Code conventions
+## Code Conventions
 
 - TypeScript with strict mode.
-- ES modules (`"type": "module"` in package.json).
-- Use `vitest` for testing.
+- ES modules (`"type": "module"` in `package.json`).
+- Use `vitest` for tests.
 - Use `prettier` for formatting.
-
-## Text hygiene
-
-Do not wrap commit messages, PR bodies, issue bodies, or comments in decorative `@...@` markers.
 
 ## Validation
 
-After making changes, run:
+After code or documentation changes, run:
 
 ```bash
 npm run check
@@ -27,9 +19,14 @@ npm run check
 
 This runs format checking, type checking, and tests.
 
-## Safety
+For generated action bundle changes, also run:
 
-- Do not commit secrets, API keys, or credentials.
-- Do not use `secrets: inherit` in CI workflows.
-- Do not use `pull_request_target` without explicit security review.
-- If a task requires provider access, it must be explicitly defined with synthetic fixtures or test-only mode.
+```bash
+npm run dist:check
+```
+
+## Text Hygiene
+
+- Keep commit messages, PR bodies, issue bodies, and comments public-safe.
+- Do not wrap text in decorative marker strings.
+- Do not paste task prompts or non-public planning notes into PR bodies.

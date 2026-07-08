@@ -1,0 +1,74 @@
+name: Feature
+description: Add a new action, runtime, maintainer, or system capability
+title: 'Feature: '
+type: feature
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What new capability should exist after this is complete?
+    validations:
+      required: true
+
+  - type: textarea
+    id: value
+    attributes:
+      label: User / Maintainer Value
+      description: Why does this matter?
+    validations:
+      required: false
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is in and out of scope?
+      value: |
+        ## In scope
+
+        -
+
+        ## Out of scope
+
+        -
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: What must be true for this feature to be complete?
+      value: |
+        - [ ]
+    validations:
+      required: true
+
+  - type: textarea
+    id: docs
+    attributes:
+      label: Relevant Docs
+      description: Link public docs, code paths, issues, or PRs.
+    validations:
+      required: false
+
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Implementation Notes
+      description: Optional notes, constraints, likely code paths, or non-goals.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: agent
+    attributes:
+      label: Agent Readiness
+      description: Check these before adding label agent:ready.
+      options:
+        - label: Objective is clear
+        - label: Acceptance criteria are clear
+        - label: Relevant public docs or code paths are linked
+        - label: No unresolved design questions
+        - label: Validation method is defined
