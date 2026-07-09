@@ -132,6 +132,41 @@ describe('ReviewResultV1', () => {
     expect(validateReviewResultV1(result).ok).toBe(false);
   });
 
+  it('rejects an empty summary', () => {
+    expect(validateReviewResultV1({ ...validResult, summary: '' }).ok).toBe(false);
+  });
+
+  it('rejects a blank finding title', () => {
+    const result = {
+      ...validResult,
+      findings: [{ ...baseFinding, title: '   ' }],
+    };
+    expect(validateReviewResultV1(result).ok).toBe(false);
+  });
+
+  it('rejects an empty limitation entry', () => {
+    expect(validateReviewResultV1({ ...validResult, limitations: [''] }).ok).toBe(false);
+  });
+
+  it('rejects an empty diagnostic message', () => {
+    const result = {
+      ...validResult,
+      diagnostics: [{ code: 'E001', message: '', level: 'error' }],
+    };
+    expect(validateReviewResultV1(result).ok).toBe(false);
+  });
+
+  it.each(['/home/runner/trace.json', '../trace.json', 'file://trace.json', 'trace\\out.json'])(
+    'rejects an unsafe trace path %s',
+    (unsafePath) => {
+      const result = {
+        ...validResult,
+        trace: { path: unsafePath, sha256: 'a'.repeat(64) },
+      };
+      expect(validateReviewResultV1(result).ok).toBe(false);
+    },
+  );
+
   it('rejects an invalid inputSha256 format', () => {
     expect(validateReviewResultV1({ ...validResult, inputSha256: 'nothex' }).ok).toBe(false);
   });

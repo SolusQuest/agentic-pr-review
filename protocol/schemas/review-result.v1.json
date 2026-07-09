@@ -23,6 +23,7 @@
     "runtimeVersion": {
       "type": "string",
       "minLength": 1,
+      "pattern": "\\S",
       "description": "Opaque runtime version supplied by the runtime. Semver interpretation is out of scope."
     },
     "inputSha256": {
@@ -32,7 +33,8 @@
     },
     "summary": {
       "type": "string",
-      "maxLength": 4000
+      "maxLength": 4000,
+      "pattern": "\\S"
     },
     "findings": {
       "type": "array",
@@ -44,7 +46,8 @@
       "type": "array",
       "items": {
         "type": "string",
-        "maxLength": 1200
+        "maxLength": 1200,
+        "pattern": "\\S"
       }
     },
     "usage": {
@@ -62,7 +65,8 @@
       "type": "array",
       "items": {
         "type": "string",
-        "maxLength": 1000
+        "maxLength": 1000,
+        "pattern": "\\S"
       }
     },
     "diagnostics": {
@@ -80,6 +84,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 500,
+      "pattern": "\\S",
       "description": "Normalized POSIX relative path. Rejects absolute, drive-qualified, protocol-looking, current-dir-only, backslash-containing, and parent-dir (..) paths. Used for repo-relative finding paths and artifact-relative trace references; aligned with normalizeRepoRelativePath in src/utils.ts.",
       "allOf": [
         {
@@ -137,15 +142,18 @@
         },
         "title": {
           "type": "string",
-          "maxLength": 240
+          "maxLength": 240,
+          "pattern": "\\S"
         },
         "body": {
           "type": "string",
-          "maxLength": 4000
+          "maxLength": 4000,
+          "pattern": "\\S"
         },
         "evidence": {
           "type": "string",
-          "maxLength": 2000
+          "maxLength": 2000,
+          "pattern": "\\S"
         },
         "path": {
           "description": "Repo-relative path or null for pathless findings.",
@@ -168,7 +176,8 @@
         },
         "suggestedAction": {
           "type": "string",
-          "maxLength": 1600
+          "maxLength": 1600,
+          "pattern": "\\S"
         },
         "inlinePreference": {
           "enum": ["allowed", "preferred", "avoid"],
@@ -217,11 +226,13 @@
       "properties": {
         "code": {
           "type": "string",
-          "maxLength": 120
+          "maxLength": 120,
+          "pattern": "\\S"
         },
         "message": {
           "type": "string",
-          "maxLength": 1000
+          "maxLength": 1000,
+          "pattern": "\\S"
         },
         "level": {
           "enum": ["info", "warning", "error"]

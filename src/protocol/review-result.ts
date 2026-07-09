@@ -13,8 +13,8 @@
  *   result.findings           -> envelope.findings (host adds fingerprint via findingFingerprint in src/structured.ts)
  *   result.limitations        -> envelope.limitations
  *   result.usage              -> envelope.usage
- *   result.observedTurns      -> envelope.observedTurns
- *   result.observedTurnSource -> envelope.observedTurnSource
+ *   result.observedTurns      -> envelope.observedTurns when present; null when absent
+ *   result.observedTurnSource -> envelope.observedTurnSource when present; host supplies fallback when absent
  *   result.warnings           -> surfaced in host metadata (not stored in envelope)
  *   result.diagnostics        -> surfaced in host metadata (not stored in envelope)
  *   result.trace              -> host stores trace reference separately
