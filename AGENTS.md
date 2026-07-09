@@ -1,6 +1,6 @@
 # Agent Entry
 
-This repository is public. Agents working here must use only this repository, the current task prompt, and public context.
+This repository is public. Agents work from this repository, the current task prompt, and public context.
 
 ## Startup Reading Order
 
@@ -8,13 +8,6 @@ This repository is public. Agents working here must use only this repository, th
 2. `docs/50_ai/collaboration-layers.md`
 3. Task-specific procedures under `docs/50_ai/skills/`
 4. Relevant project, workflow, architecture, or roadmap docs under `docs/`
-
-## Context Boundary
-
-- Do not read or depend on private repositories, private issue trackers, private workflow logs, private prompts, transcripts, credentials, or secrets.
-- If required information is missing, ask for a public-safe clarification instead of inferring from private context.
-- Do not include private issue links, private repository details, private file paths, prompts, transcripts, workflow logs, credentials, secrets, or private-only rationale in files, commits, PR bodies, comments, CI logs, or artifacts.
-- PR bodies must be technically self-contained and understandable without private context.
 
 ## Safety Rules
 

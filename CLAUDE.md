@@ -1,6 +1,6 @@
 # Claude Code Entry
 
-Read `AGENTS.md` first. It defines the public context boundary, startup reading order, and safety rules for this repository.
+Read `AGENTS.md` first. It defines the startup reading order and safety rules for this repository.
 
 ## Code Conventions
 
@@ -27,6 +27,5 @@ npm run dist:check
 
 ## Text Hygiene
 
-- Keep commit messages, PR bodies, issue bodies, and comments public-safe.
+- Keep commit messages, PR bodies, issue bodies, and comments clear and focused.
 - Do not wrap text in decorative marker strings.
-- Do not paste task prompts or non-public planning notes into PR bodies.
