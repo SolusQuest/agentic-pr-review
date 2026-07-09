@@ -1,8 +1,8 @@
 # Roadmap
 
-This roadmap records the current public direction for `agentic-pr-review`. It replaces the earlier
+This roadmap records the current direction for `agentic-pr-review`. It replaces the earlier
 seed-only roadmap with a re-baselined view of what already exists, what the project is optimizing for,
-and which near-term milestones are ready to track in public issues.
+and which near-term milestones are ready to track in issues.
 
 ## Long-Term Goal
 
@@ -97,7 +97,7 @@ Restricted raw diagnostics remain explicit trusted debug behavior, not normal ru
 
 ### Phase 0: Public Planning And Validation Baseline
 
-Goal: make public docs and local checks reflect the current project state.
+Goal: make docs and local checks reflect the current project state.
 
 Done when:
 
@@ -246,7 +246,7 @@ Candidate later work:
 
 ## Near-Term Milestones
 
-Create public GitHub milestones for executable near-term work only:
+Create GitHub milestones for executable near-term work only:
 
 1. [`M0: Validation and roadmap baseline`](https://github.com/SolusQuest/agentic-pr-review/milestone/1)
 2. [`M1: Runtime protocol contract`](https://github.com/SolusQuest/agentic-pr-review/milestone/3)
@@ -254,5 +254,5 @@ Create public GitHub milestones for executable near-term work only:
 
 Keep later phases as roadmap-only candidates until protocol and CLI decisions land.
 
-The initial public issue plan is maintained in
+The initial issue plan is maintained in
 [`initial-issue-plan.md`](./initial-issue-plan.md).

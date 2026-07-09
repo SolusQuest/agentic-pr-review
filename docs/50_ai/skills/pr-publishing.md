@@ -28,5 +28,5 @@ If validation cannot run, state why in the PR body.
 
 - Open a PR; do not merge it.
 - Keep the PR body technically self-contained.
-- Link public issues when available.
+- Link issues when available.
 - Do not mutate labels, milestones, Projects, repository settings, branch protection, or secrets unless explicitly authorized.

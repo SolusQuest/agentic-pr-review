@@ -8,7 +8,7 @@ until their dependencies are clearer.
 
 ### [M0: Validation and roadmap baseline](https://github.com/SolusQuest/agentic-pr-review/milestone/1)
 
-Purpose: make the public roadmap and validation baseline match the current repository state.
+Purpose: make the roadmap and validation baseline match the current repository state.
 
 Exit criteria:
 
@@ -53,7 +53,7 @@ Exit criteria:
 
 Milestone: `M0: Validation and roadmap baseline`
 
-Objective: update the public roadmap so it reflects the current repository baseline and the next
+Objective: update the roadmap so it reflects the current repository baseline and the next
 executable runtime-protocol work.
 
 Context: the current action already has structured output validation, sticky comments, optional inline
@@ -66,7 +66,7 @@ In scope:
 - Update `docs/90_roadmap/roadmap-seed.md` into a current roadmap.
 - Document the long-term goal, non-goals, target architecture, phased roadmap, and near-term
   milestones.
-- Add a public issue plan for M0 through M2.
+- Add an issue plan for M0 through M2.
 - Keep later work as candidate roadmap material until protocol and CLI decisions land.
 
 Out of scope:

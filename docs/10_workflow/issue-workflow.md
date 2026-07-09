@@ -43,7 +43,7 @@ Apply `agent:ready` only when all are true:
 
 - objective is clear;
 - acceptance criteria are clear;
-- relevant public docs or code paths are linked;
+- relevant docs or code paths are linked;
 - no unresolved design questions remain;
 - validation method is defined;
 - scope is reasonable for one focused PR.
