@@ -5,7 +5,14 @@
   "description": "Sanitized runtime input contract written by the TypeScript host for a future review runtime. Canonical source of truth; TypeScript interfaces are convenience only. See issue #14 and docs/20_architecture/runtime-protocol.md.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["protocolVersion", "host", "subject", "previousState", "commentEvidence"],
+  "required": [
+    "protocolVersion",
+    "requestedRuntimeVersion",
+    "host",
+    "subject",
+    "previousState",
+    "commentEvidence"
+  ],
   "properties": {
     "protocolVersion": {
       "type": "integer",

@@ -95,6 +95,11 @@ describe('ReviewInputV1', () => {
     expect(validateReviewInputV1({ ...bootstrapInput, protocolVersion: 2 }).ok).toBe(false);
   });
 
+  it('rejects missing requestedRuntimeVersion', () => {
+    const { requestedRuntimeVersion: _omit, ...rest } = bootstrapInput;
+    expect(validateReviewInputV1(rest).ok).toBe(false);
+  });
+
   it('rejects credential-shaped fields via closed object shapes (secret-negative fixture)', () => {
     const leaky = {
       ...bootstrapInput,
@@ -103,23 +108,22 @@ describe('ReviewInputV1', () => {
     expect(validateReviewInputV1(leaky).ok).toBe(false);
   });
 
-  it('rejects unsafe parent-dir paths', () => {
+  it.each([
+    '/foo.ts',
+    'C:/foo.ts',
+    'C:\\foo.ts',
+    'file://foo.ts',
+    'https://example.com/foo.ts',
+    '.',
+    './foo.ts',
+    'src/../secret.ts',
+    'foo/..',
+  ])('rejects unsafe path %s', (unsafePath) => {
     const result = validateReviewInputV1({
       ...bootstrapInput,
       subject: {
         ...baseSubject,
-        changedFiles: [{ ...baseSubject.changedFiles[0], path: '../secret.ts' }],
-      },
-    });
-    expect(result.ok).toBe(false);
-  });
-
-  it('rejects backslash-containing paths', () => {
-    const result = validateReviewInputV1({
-      ...bootstrapInput,
-      subject: {
-        ...baseSubject,
-        changedFiles: [{ ...baseSubject.changedFiles[0], path: 'src\\main.ts' }],
+        changedFiles: [{ ...baseSubject.changedFiles[0], path: unsafePath }],
       },
     });
     expect(result.ok).toBe(false);
