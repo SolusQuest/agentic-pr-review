@@ -1,0 +1,325 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentic-pr-review/protocol/schemas/review-input.v1.json",
+  "title": "ReviewInputV1",
+  "description": "Sanitized runtime input contract written by the TypeScript host for a future review runtime. Canonical source of truth; TypeScript interfaces are convenience only. See issue #14 and docs/20_architecture/runtime-protocol.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocolVersion", "host", "subject", "previousState", "commentEvidence"],
+  "properties": {
+    "protocolVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Protocol-generation version, shared across ReviewInputV1/ReviewResultV1/ReviewTraceV1. Exact match required; mismatch fails closed."
+    },
+    "requestedRuntimeVersion": {
+      "type": ["string", "null"],
+      "description": "Opaque runtime version request from the host, or null when unspecified. Semver range parsing and binary resolution are out of scope for #14."
+    },
+    "host": {
+      "$ref": "#/definitions/host"
+    },
+    "subject": {
+      "$ref": "#/definitions/subject"
+    },
+    "previousState": {
+      "$ref": "#/definitions/previousState"
+    },
+    "commentEvidence": {
+      "$ref": "#/definitions/commentEvidence"
+    }
+  },
+  "definitions": {
+    "repoRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Normalized POSIX repo-relative path. Rejects absolute, drive-qualified, protocol-looking, current-dir-only, backslash-containing, and parent-dir (..) paths. Aligned with normalizeRepoRelativePath in src/utils.ts; serialized protocol JSON must already be normalized.",
+      "allOf": [
+        {
+          "pattern": "^[^/]"
+        },
+        {
+          "not": {
+            "pattern": "\\\\"
+          }
+        },
+        {
+          "not": {
+            "pattern": "^[A-Za-z][A-Za-z0-9+.-]*:"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(^|/)\\.\\.?(/|$)"
+          }
+        }
+      ]
+    },
+    "boundedPatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "truncated", "sha256", "maxChars"],
+      "description": "Bounded patch context. sha256 is a lowercase hex SHA-256 digest of patch.text (the bounded text the runtime receives), aiding deterministic replay.",
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Lowercase hex SHA-256 digest of patch.text."
+        },
+        "maxChars": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "changedFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "status", "additions", "deletions", "changes"],
+      "properties": {
+        "path": {
+          "$ref": "#/definitions/repoRelativePath"
+        },
+        "previousPath": {
+          "description": "Previous path for renamed files, or null.",
+          "oneOf": [
+            {
+              "$ref": "#/definitions/repoRelativePath"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "additions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "deletions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "changes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "patch": {
+          "$ref": "#/definitions/boundedPatch"
+        }
+      }
+    },
+    "contextDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "text"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      }
+    },
+    "pullRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["number", "title", "body", "baseRef", "headRef", "draft"],
+      "properties": {
+        "number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "baseRef": {
+          "type": "string"
+        },
+        "headRef": {
+          "type": "string"
+        },
+        "draft": {
+          "type": "boolean"
+        }
+      }
+    },
+    "inlineCommentsPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "maxComments": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "minSeverity": {
+          "enum": ["low", "medium", "high"]
+        },
+        "minConfidence": {
+          "enum": ["medium", "high"]
+        }
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "review"],
+      "description": "Trusted host-owned metadata. Runtime-provided facts cannot override these.",
+      "properties": {
+        "repository": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["owner", "name"],
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          }
+        },
+        "review": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["phase", "baseSha", "headSha", "runtimeProvider"],
+          "properties": {
+            "phase": {
+              "enum": ["bootstrap", "incremental"]
+            },
+            "baseSha": {
+              "type": "string"
+            },
+            "headSha": {
+              "type": "string"
+            },
+            "stateKey": {
+              "type": "string"
+            },
+            "runtimeProvider": {
+              "enum": ["test", "claude-code-cli"]
+            }
+          }
+        },
+        "options": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Host-owned execution constraints, not runtime-provided facts.",
+          "properties": {
+            "toolMode": {
+              "enum": ["none", "readonly"]
+            },
+            "maxFindings": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "maxPatchChars": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "maxContextChars": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "maxReviewChars": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "inlineComments": {
+              "$ref": "#/definitions/inlineCommentsPolicy"
+            }
+          }
+        }
+      }
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pullRequest", "changedFiles"],
+      "description": "Untrusted review subject data.",
+      "properties": {
+        "pullRequest": {
+          "$ref": "#/definitions/pullRequest"
+        },
+        "changedFiles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/changedFile"
+          }
+        },
+        "contextDocuments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/contextDocument"
+          }
+        },
+        "policyText": {
+          "type": "string"
+        }
+      }
+    },
+    "previousState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["present", "findingFingerprints"],
+      "description": "Minimal previous review state summary. Excludes manifest paths, raw comments, provider responses, and debug files.",
+      "properties": {
+        "present": {
+          "type": "boolean"
+        },
+        "reviewedHeadSha": {
+          "type": "string"
+        },
+        "phase": {
+          "enum": ["bootstrap", "incremental"]
+        },
+        "findingFingerprints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "lineage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reviewCount"],
+          "properties": {
+            "reviewCount": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "commentEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["existingFindingFingerprints"],
+      "description": "Minimal existing comment/duplicate-evidence summary for duplicate suppression.",
+      "properties": {
+        "existingFindingFingerprints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
