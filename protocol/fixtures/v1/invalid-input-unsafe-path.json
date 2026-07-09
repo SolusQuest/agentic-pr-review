@@ -1,0 +1,63 @@
+{
+  "protocolVersion": 1,
+  "requestedRuntimeVersion": null,
+  "host": {
+    "repository": {
+      "owner": "acme",
+      "name": "widgets"
+    },
+    "review": {
+      "phase": "bootstrap",
+      "baseSha": "0000000000000000000000000000000000000001",
+      "headSha": "0000000000000000000000000000000000000002",
+      "stateKey": "acme-widgets-pr-42",
+      "runtimeProvider": "test"
+    },
+    "options": {
+      "toolMode": "readonly",
+      "maxFindings": 20,
+      "maxPatchChars": 60000,
+      "maxContextChars": 50000,
+      "maxReviewChars": 40000,
+      "inlineComments": {
+        "enabled": true,
+        "maxComments": 10,
+        "minSeverity": "medium",
+        "minConfidence": "high"
+      }
+    }
+  },
+  "subject": {
+    "pullRequest": {
+      "number": 42,
+      "title": "Add user authentication module",
+      "body": "This PR adds a new authentication module with JWT support.",
+      "baseRef": "main",
+      "headRef": "feature/auth",
+      "draft": false
+    },
+    "changedFiles": [
+      {
+        "path": "../../../etc/passwd",
+        "status": "added",
+        "additions": 1,
+        "deletions": 0,
+        "changes": 1
+      }
+    ],
+    "contextDocuments": [
+      {
+        "name": "instructions",
+        "text": "Review for security, correctness, and test coverage."
+      }
+    ],
+    "policyText": "All new modules must include unit tests."
+  },
+  "previousState": {
+    "present": false,
+    "findingFingerprints": []
+  },
+  "commentEvidence": {
+    "existingFindingFingerprints": []
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "protocolVersion": 1,
+  "runtimeVersion": "test-runtime-1.0.0",
+  "inputSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "mode": "skipped",
+  "toolCalls": [],
+  "warnings": ["Review skipped: identical HEAD."],
+  "diagnostics": []
+}

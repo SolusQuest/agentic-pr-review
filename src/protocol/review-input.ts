@@ -144,5 +144,8 @@ export function validateReviewInputV1(value: unknown): ReviewInputValidationResu
 
 function formatError(err: ErrorObject): string {
   const location = err.instancePath || '/';
-  return `${location} ${err.message ?? 'invalid'}`;
+  const additional = (err.params as { additionalProperty?: string } | undefined)
+    ?.additionalProperty;
+  const suffix = additional ? `: ${additional}` : '';
+  return `${location} ${err.message ?? 'invalid'}${suffix}`;
 }

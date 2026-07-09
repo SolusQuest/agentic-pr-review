@@ -106,7 +106,37 @@ Trace privacy is enforced at the schema level by closed shapes (`additionalPrope
 
 Restricted raw diagnostics (raw provider request/response bodies) remain a separate opt-in path via `debugCaptureRawApiBodies` and are not part of `ReviewTraceV1`. See `docs/20_architecture/security-boundary.md`.
 
-## Contract Strategy
+## Protocol Fixtures
+
+Synthetic fixture files under `protocol/fixtures/v1/` prove the schemas work with realistic payloads and make schema drift visible in CI. Fixtures are reused by #18 (TS builder tests), #19 (runtime CLI), and #21 (CI fixture check).
+
+### Layout
+
+- `valid-<contract>-<scenario>.json` - valid payloads that must pass validation
+- `invalid-<contract>-<reason>.json` - invalid payloads that must fail with expected errors
+- `cases/<scenario>/` - paired fixtures (input + result + trace) for hash-chain verification
+- `manifest.json` - centralized manifest recording expected validation outcomes for every fixture
+
+### Manifest
+
+Each entry is either a single fixture (`type: "fixture"` with `file`, `contract`, `valid`, optional `expectedErrorIncludes`) or a paired case (`type: "case"` with `directory`, `contracts`, `valid`, `verifyHashChain`).
+
+For invalid fixtures, `expectedErrorIncludes` is an array of substrings matched against joined validator error messages. Each invalid fixture includes at least one field-specific or rule-specific token.
+
+### Validator entrypoints
+
+The fixture runner (`src/protocol/fixtures.test.ts`) calls the TS validators (`validateReviewInputV1`/`validateReviewResultV1`/`validateReviewTraceV1`), not raw Ajv. This ensures post-schema semantic validation (e.g., ReviewResultV1 line-range cross-field rules) is exercised.
+
+### Hash-chain verification
+
+Paired cases verify non-circular hash links over exact file bytes (no canonical JSON). `trace.resultSha256` is omitted in paired cases to avoid a circular exact-file-byte hash dependency between result and trace files.
+
+### Update rules
+
+- All fixtures must be synthetic and public-safe (no real PR data, tokens, provider responses, or private paths).
+- When adding a fixture, add a corresponding entry to `manifest.json`.
+- When modifying a schema, verify all fixtures still produce expected outcomes.
+- When adding a paired case, construct files in dependency order: input first, then trace (with `resultSha256` omitted), then result (with `trace.sha256` filled from trace file bytes).
 
 The protocol uses JSON Schema (draft-07) files as the single source of truth, avoiding two independently drifting definitions of business behavior across TypeScript and C#. TypeScript interfaces are developer ergonomics only; the schemas are authoritative.
 

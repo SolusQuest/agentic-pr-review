@@ -1,0 +1,21 @@
+{
+  "protocolVersion": 1,
+  "runtimeVersion": "test-runtime-1.0.0",
+  "inputSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "summary": "Repository-level observation noted.",
+  "findings": [
+    {
+      "severity": "low",
+      "confidence": "medium",
+      "category": "documentation",
+      "title": "Repository-level note",
+      "body": "Consider adding a CONTRIBUTING.md file.",
+      "path": null,
+      "startLine": null,
+      "endLine": null
+    }
+  ],
+  "limitations": [],
+  "warnings": [],
+  "diagnostics": []
+}

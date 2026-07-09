@@ -1,0 +1,47 @@
+{
+  "protocolVersion": 1,
+  "runtimeVersion": "claude-code-cli-1.0.0",
+  "inputSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "resultSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "mode": "live-provider",
+  "provider": {
+    "name": "anthropic",
+    "model": "claude-sonnet-4-20250514",
+    "requestCount": 3
+  },
+  "startedAt": "2026-07-09T10:00:00Z",
+  "completedAt": "2026-07-09T10:02:30Z",
+  "usage": {
+    "inputTokens": 12000,
+    "cacheReadInputTokens": 8000,
+    "cacheCreationInputTokens": 4000,
+    "outputTokens": 3500,
+    "recordsObserved": 3
+  },
+  "toolCalls": [
+    {
+      "name": "Read",
+      "status": "ok",
+      "durationMs": 120
+    },
+    {
+      "name": "Grep",
+      "status": "error",
+      "durationMs": 50,
+      "errorCode": "pattern_too_complex"
+    },
+    {
+      "name": "Glob",
+      "status": "skipped"
+    }
+  ],
+  "warnings": ["Cache hit ratio was lower than expected."],
+  "diagnostics": [
+    {
+      "code": "CACHE_MISS",
+      "message": "Prefix cache miss on turn 2.",
+      "level": "warning"
+    }
+  ],
+  "path": "/home/runner/work/trace.json"
+}
