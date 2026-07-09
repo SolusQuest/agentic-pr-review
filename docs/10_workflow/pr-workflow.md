@@ -12,7 +12,7 @@ Every PR should include:
 - issue or tracking reference when available;
 - breaking changes if any.
 
-Keep PR descriptions focused on the changes rather than pasting raw logs or transcripts.
+Keep PR descriptions self-contained. Do not paste raw task prompts, raw logs, transcripts, credentials, or secrets.
 
 ## Agent Behavior
 
