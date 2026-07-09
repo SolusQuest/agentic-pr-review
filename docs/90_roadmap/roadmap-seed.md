@@ -104,7 +104,7 @@ Done when:
 - `npm run check` passes on CI for `main`.
 - `npm run check` is documented as the default local validation command.
 - roadmap docs describe current capabilities without presenting completed work as future work.
-- near-term milestone and issue plans are public-safe and self-contained.
+- near-term milestone and issue plans are self-contained.
 
 ### Phase 1: Runtime Protocol Contract
 

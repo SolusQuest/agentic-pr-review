@@ -1,6 +1,6 @@
 # Initial Issue Plan
 
-This file records the initial public-safe issue breakdown for the near-term roadmap. It is intended
+This file records the initial issue breakdown for the near-term roadmap. It is intended
 to seed GitHub milestones and issues for M0 through M2 only. Later roadmap phases remain candidates
 until their dependencies are clearer.
 
@@ -15,8 +15,7 @@ Exit criteria:
 - `npm run check` is reliable as the documented default validation command.
 - roadmap docs describe the current TypeScript action baseline without presenting completed work as
   future work.
-- near-term runtime protocol work is split into public-safe, self-contained issues.
-- no private context is required to understand the roadmap or issue bodies.
+- near-term runtime protocol work is split into self-contained issues.
 
 ### [M1: Runtime protocol contract](https://github.com/SolusQuest/agentic-pr-review/milestone/3)
 
@@ -75,15 +74,13 @@ Out of scope:
 - runtime implementation changes;
 - action input/output behavior changes;
 - GitHub App, hosted service, GitLab, or Azure DevOps design;
-- private downstream integration planning.
 
 Acceptance criteria:
 
 - Roadmap docs describe current capabilities without presenting completed work as future work.
-- M0 through M2 are public-safe and self-contained.
+- M0 through M2 are self-contained.
 - Later phases are documented as candidates rather than active commitments.
 - `npm run check` or docs-appropriate validation is run.
-- PR body includes sanitization review.
 
 Related docs:
 
@@ -127,7 +124,7 @@ Acceptance criteria:
 - Contract excludes credentials and secrets by design.
 - Path fields are repo-relative and reject absolute, drive-qualified, protocol-looking, current-dir
   only, and `..` paths.
-- Existing TypeScript action state can be mapped to the contract without relying on private context.
+- Existing TypeScript action state can be mapped to the contract.
 - Tests or fixture validation cover valid bootstrap and incremental inputs.
 
 Related docs and code:
@@ -190,7 +187,7 @@ Objective: define the minimal sanitized trace contract needed for deterministic 
 replay.
 
 Context: trace data is important for replay and evaluation, but normal artifacts must not contain raw
-provider request or response bodies, secrets, auth headers, private prompts, or unbounded tool
+provider request or response bodies, secrets, auth headers, raw prompts, or unbounded tool
 results.
 
 In scope:
@@ -238,12 +235,12 @@ In scope:
   version, path safety, privacy/secret exclusion, and trace privacy.
 - Add expected validation outcomes for each fixture.
 - Document fixture naming and update rules.
-- Keep fixtures synthetic and public-safe.
+- Keep fixtures synthetic.
 
 Out of scope:
 
 - live provider validation;
-- real private PR diffs or workflow logs;
+- real PR diffs or workflow logs;
 - runtime CLI implementation.
 
 Acceptance criteria:
