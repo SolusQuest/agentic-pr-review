@@ -1,6 +1,6 @@
 # Issue Workflow
 
-Issues in this repository must be public-safe, self-contained, and actionable.
+Issues in this repository must be self-contained and actionable.
 
 ## Issue Forms And Types
 
@@ -49,15 +49,3 @@ Apply `agent:ready` only when all are true:
 - scope is reasonable for one focused PR.
 
 If an issue requires a public API decision, schema decision, security boundary decision, state model decision, or release policy decision, run design refinement first.
-
-## Public-Safe Requirements
-
-Issue bodies must not include:
-
-- private issue links or numbers;
-- private PR links;
-- private repository details or paths;
-- prompts, transcripts, private workflow logs, or private diffs;
-- secrets, credential values, private endpoints, or private environment values.
-
-If private context motivated the issue, summarize only the public-safe requirement and constraints.
