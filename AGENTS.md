@@ -9,6 +9,10 @@ This repository is public. Agents work from this repository, the current task pr
 3. Task-specific procedures under `docs/50_ai/skills/`
 4. Relevant project, workflow, architecture, or roadmap docs under `docs/`
 
+## Code Conventions
+
+See `docs/00_project/conventions.md` for TypeScript, module, test, and formatting conventions.
+
 ## Safety Rules
 
 - Do not merge PRs.
@@ -17,10 +21,21 @@ This repository is public. Agents work from this repository, the current task pr
 - Do not use `pull_request_target` without explicit security review.
 - Use synthetic fixtures or test-only modes unless a task explicitly defines live provider validation.
 
+## Text Hygiene
+
+- Keep commit messages, PR bodies, issue bodies, and comments clear and focused.
+- Do not wrap text in decorative marker strings.
+
 ## Validation
 
-Run the relevant checks documented in `CLAUDE.md` and task-specific docs. For code changes, the default local validation is:
+For code changes, the default local validation is:
 
 ```bash
 npm run check
+```
+
+For generated action bundle changes, also run:
+
+```bash
+npm run dist:check
 ```
