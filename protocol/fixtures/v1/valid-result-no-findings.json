@@ -1,0 +1,10 @@
+{
+  "protocolVersion": 1,
+  "runtimeVersion": "test-runtime-1.0.0",
+  "inputSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "summary": "No issues found in this review.",
+  "findings": [],
+  "limitations": ["Review was limited to static analysis of the diff."],
+  "warnings": [],
+  "diagnostics": []
+}

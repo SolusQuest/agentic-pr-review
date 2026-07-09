@@ -1,0 +1,34 @@
+{
+  "protocolVersion": 1,
+  "requestedRuntimeVersion": null,
+  "host": {
+    "repository": {
+      "owner": "acme",
+      "name": "widgets"
+    },
+    "review": {
+      "phase": "bootstrap",
+      "baseSha": "0000000000000000000000000000000000000001",
+      "headSha": "0000000000000000000000000000000000000002",
+      "runtimeProvider": "test"
+    }
+  },
+  "subject": {
+    "pullRequest": {
+      "number": 99,
+      "title": "Empty PR",
+      "body": "No changes yet.",
+      "baseRef": "main",
+      "headRef": "feature/empty",
+      "draft": true
+    },
+    "changedFiles": []
+  },
+  "previousState": {
+    "present": false,
+    "findingFingerprints": []
+  },
+  "commentEvidence": {
+    "existingFindingFingerprints": []
+  }
+}

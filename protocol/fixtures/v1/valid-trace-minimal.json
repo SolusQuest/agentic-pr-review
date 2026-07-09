@@ -1,0 +1,9 @@
+{
+  "protocolVersion": 1,
+  "runtimeVersion": "test-runtime-1.0.0",
+  "inputSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "mode": "deterministic-fixture",
+  "toolCalls": [],
+  "warnings": [],
+  "diagnostics": []
+}

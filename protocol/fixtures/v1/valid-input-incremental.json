@@ -1,0 +1,54 @@
+{
+  "protocolVersion": 1,
+  "requestedRuntimeVersion": "1.2.0",
+  "host": {
+    "repository": {
+      "owner": "acme",
+      "name": "widgets"
+    },
+    "review": {
+      "phase": "incremental",
+      "baseSha": "0000000000000000000000000000000000000001",
+      "headSha": "0000000000000000000000000000000000000003",
+      "stateKey": "acme-widgets-pr-42",
+      "runtimeProvider": "claude-code-cli"
+    }
+  },
+  "subject": {
+    "pullRequest": {
+      "number": 42,
+      "title": "Add user authentication module",
+      "body": "This PR adds a new authentication module with JWT support.",
+      "baseRef": "main",
+      "headRef": "feature/auth",
+      "draft": false
+    },
+    "changedFiles": [
+      {
+        "path": "src/auth/login.ts",
+        "status": "modified",
+        "additions": 5,
+        "deletions": 2,
+        "changes": 7,
+        "patch": {
+          "text": "@@ -10,3 +10,8 @@\n+  if (!user) throw new Error();",
+          "truncated": false,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "maxChars": 60000
+        }
+      }
+    ]
+  },
+  "previousState": {
+    "present": true,
+    "reviewedHeadSha": "0000000000000000000000000000000000000002",
+    "phase": "incremental",
+    "findingFingerprints": ["fp-abc123", "fp-def456"],
+    "lineage": {
+      "reviewCount": 3
+    }
+  },
+  "commentEvidence": {
+    "existingFindingFingerprints": ["fp-abc123"]
+  }
+}

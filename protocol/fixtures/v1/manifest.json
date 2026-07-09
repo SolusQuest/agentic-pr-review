@@ -1,0 +1,200 @@
+[
+  {
+    "type": "fixture",
+    "file": "valid-input-bootstrap.json",
+    "contract": "input",
+    "valid": true
+  },
+  {
+    "type": "fixture",
+    "file": "valid-input-incremental.json",
+    "contract": "input",
+    "valid": true
+  },
+  {
+    "type": "fixture",
+    "file": "valid-input-empty-changes.json",
+    "contract": "input",
+    "valid": true
+  },
+  {
+    "type": "fixture",
+    "file": "valid-result-full.json",
+    "contract": "result",
+    "valid": true
+  },
+  {
+    "type": "fixture",
+    "file": "valid-result-no-findings.json",
+    "contract": "result",
+    "valid": true
+  },
+  {
+    "type": "fixture",
+    "file": "valid-result-pathless.json",
+    "contract": "result",
+    "valid": true
+  },
+  {
+    "type": "fixture",
+    "file": "valid-trace-minimal.json",
+    "contract": "trace",
+    "valid": true
+  },
+  {
+    "type": "fixture",
+    "file": "valid-trace-full.json",
+    "contract": "trace",
+    "valid": true
+  },
+  {
+    "type": "fixture",
+    "file": "valid-trace-skipped.json",
+    "contract": "trace",
+    "valid": true
+  },
+  {
+    "type": "fixture",
+    "file": "invalid-input-protocol-version.json",
+    "contract": "input",
+    "valid": false,
+    "expectedErrorIncludes": ["protocolVersion"]
+  },
+  {
+    "type": "fixture",
+    "file": "invalid-input-unsafe-path.json",
+    "contract": "input",
+    "valid": false,
+    "expectedErrorIncludes": ["path"]
+  },
+  {
+    "type": "fixture",
+    "file": "invalid-input-credential-fields.json",
+    "contract": "input",
+    "valid": false,
+    "expectedErrorIncludes": ["apiKey"]
+  },
+  {
+    "type": "fixture",
+    "file": "invalid-result-confidence-low.json",
+    "contract": "result",
+    "valid": false,
+    "expectedErrorIncludes": ["confidence"]
+  },
+  {
+    "type": "fixture",
+    "file": "invalid-result-line-range-reversed.json",
+    "contract": "result",
+    "valid": false,
+    "expectedErrorIncludes": ["endLine"]
+  },
+  {
+    "type": "fixture",
+    "file": "invalid-result-line-without-path.json",
+    "contract": "result",
+    "valid": false,
+    "expectedErrorIncludes": ["path"]
+  },
+  {
+    "type": "fixture",
+    "file": "invalid-result-unsafe-path.json",
+    "contract": "result",
+    "valid": false,
+    "expectedErrorIncludes": ["path"]
+  },
+  {
+    "type": "fixture",
+    "file": "invalid-result-fingerprint-field.json",
+    "contract": "result",
+    "valid": false,
+    "expectedErrorIncludes": ["fingerprint"]
+  },
+  {
+    "type": "fixture",
+    "file": "invalid-result-host-owned-fields.json",
+    "contract": "result",
+    "valid": false,
+    "expectedErrorIncludes": ["phase"]
+  },
+  {
+    "type": "fixture",
+    "file": "invalid-result-credential-fields.json",
+    "contract": "result",
+    "valid": false,
+    "expectedErrorIncludes": ["apiKey"]
+  },
+  {
+    "type": "fixture",
+    "file": "invalid-result-hash-format.json",
+    "contract": "result",
+    "valid": false,
+    "expectedErrorIncludes": ["inputSha256"]
+  },
+  {
+    "type": "fixture",
+    "file": "invalid-result-string-bounds.json",
+    "contract": "result",
+    "valid": false,
+    "expectedErrorIncludes": ["warnings"]
+  },
+  {
+    "type": "fixture",
+    "file": "invalid-trace-raw-fields.json",
+    "contract": "trace",
+    "valid": false,
+    "expectedErrorIncludes": ["rawRequest"]
+  },
+  {
+    "type": "fixture",
+    "file": "invalid-trace-credential-fields.json",
+    "contract": "trace",
+    "valid": false,
+    "expectedErrorIncludes": ["apiKey"]
+  },
+  {
+    "type": "fixture",
+    "file": "invalid-trace-usage-lineage.json",
+    "contract": "trace",
+    "valid": false,
+    "expectedErrorIncludes": ["lineageTotals"]
+  },
+  {
+    "type": "fixture",
+    "file": "invalid-trace-path-field.json",
+    "contract": "trace",
+    "valid": false,
+    "expectedErrorIncludes": ["path"]
+  },
+  {
+    "type": "fixture",
+    "file": "invalid-trace-tool-content-fields.json",
+    "contract": "trace",
+    "valid": false,
+    "expectedErrorIncludes": ["inputSummary"]
+  },
+  {
+    "type": "fixture",
+    "file": "invalid-trace-hash-format.json",
+    "contract": "trace",
+    "valid": false,
+    "expectedErrorIncludes": ["inputSha256"]
+  },
+  {
+    "type": "fixture",
+    "file": "invalid-trace-string-bounds.json",
+    "contract": "trace",
+    "valid": false,
+    "expectedErrorIncludes": ["warnings"]
+  },
+  {
+    "type": "case",
+    "directory": "cases/bootstrap",
+    "contracts": {
+      "input": "input.json",
+      "result": "result.json",
+      "trace": "trace.json"
+    },
+    "valid": true,
+    "verifyHashChain": ["result.inputSha256", "trace.inputSha256", "result.trace.sha256"]
+  }
+]

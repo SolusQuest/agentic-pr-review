@@ -1,0 +1,30 @@
+{
+  "protocolVersion": 1,
+  "runtimeVersion": "test-runtime-1.0.0",
+  "inputSha256": "61d161b16828888da7d4eb810acee76ababbbc984563f92a3a47408a0449a8c0",
+  "mode": "deterministic-fixture",
+  "fixture": "default",
+  "provider": {
+    "name": "test",
+    "model": "test-model-1.0",
+    "requestCount": 1
+  },
+  "startedAt": "2026-07-09T10:00:00Z",
+  "completedAt": "2026-07-09T10:00:05Z",
+  "usage": {
+    "inputTokens": 5000,
+    "cacheReadInputTokens": 3000,
+    "cacheCreationInputTokens": 2000,
+    "outputTokens": 800,
+    "recordsObserved": 1
+  },
+  "toolCalls": [
+    {
+      "name": "Read",
+      "status": "ok",
+      "durationMs": 45
+    }
+  ],
+  "warnings": [],
+  "diagnostics": []
+}

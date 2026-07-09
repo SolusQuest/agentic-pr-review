@@ -154,5 +154,8 @@ function validateFindingLocations(result: ReviewResultV1): string[] {
 
 function formatError(err: ErrorObject): string {
   const location = err.instancePath || '/';
-  return `${location} ${err.message ?? 'invalid'}`;
+  const additional = (err.params as { additionalProperty?: string } | undefined)
+    ?.additionalProperty;
+  const suffix = additional ? `: ${additional}` : '';
+  return `${location} ${err.message ?? 'invalid'}${suffix}`;
 }
