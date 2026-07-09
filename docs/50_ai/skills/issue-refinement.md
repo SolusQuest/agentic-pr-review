@@ -46,7 +46,7 @@ An issue is agent-ready when:
 - validation method is defined;
 - scope fits one focused PR.
 
-If a human decision is still needed, keep the issue in a needs-design state and state what decision is blocking.
+If a human decision is still needed, state that design is still needed and name the blocking decision.
 
 ## Draft Shape
 
