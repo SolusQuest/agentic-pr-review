@@ -55,7 +55,7 @@ body:
     id: docs
     attributes:
       label: Relevant Docs
-      description: Link public docs, code paths, issues, or PRs.
+      description: Link docs, code paths, issues, or PRs.
     validations:
       required: false
 

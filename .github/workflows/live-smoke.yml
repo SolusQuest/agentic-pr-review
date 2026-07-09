@@ -112,7 +112,7 @@ jobs:
           max_cached_input_tokens: ${{ inputs.max_cached_input_tokens }}
           max_output_tokens: ${{ inputs.max_output_tokens }}
           disable_prompt_caching: 'false'
-          instructions: 'Review this synthetic fixture and return a concise public-safe smoke result.'
+          instructions: 'Review this synthetic fixture and return a concise smoke result.'
           debug_capture_raw_api_bodies: ${{ inputs.debug_capture_raw_api_bodies }}
           debug_acknowledgement: ${{ inputs.debug_acknowledgement }}
         env:
