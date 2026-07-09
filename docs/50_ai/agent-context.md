@@ -4,10 +4,9 @@ You are working in `SolusQuest/agentic-pr-review`, a public GitHub PR review act
 
 ## Read First
 
-1. `AGENTS.md`
-2. `docs/50_ai/collaboration-layers.md`
-3. Task-specific files under `docs/50_ai/skills/`
-4. Relevant project docs under `docs/`
+1. `docs/50_ai/collaboration-layers.md`
+2. Task-specific files under `docs/50_ai/skills/`
+3. Relevant project docs under `docs/`
 
 ## Repository Role
 
