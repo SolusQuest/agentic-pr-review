@@ -1,17 +1,15 @@
 # Issue Refinement
 
-Use this procedure when turning an idea, placeholder, or broad request into an agent-ready public issue.
+Use this procedure when turning an idea, placeholder, or broad request into an agent-ready issue.
 
 ## Inputs
 
-Use only public context:
+- the current issue or task prompt;
+- repository docs;
+- code paths;
+- PRs or release notes.
 
-- the current public issue or task prompt;
-- public repository docs;
-- public code paths;
-- public PRs or release notes.
-
-If important context is missing, ask for a public-safe clarification.
+If important context is missing, ask for a clarification.
 
 ## Preflight Decisions
 
@@ -41,7 +39,7 @@ An issue can be marked `agent:ready` when:
 
 - objective is clear;
 - acceptance criteria are clear;
-- relevant public docs or code paths are linked;
+- relevant docs or code paths are linked;
 - no unresolved design questions remain;
 - validation method is defined;
 - scope fits one focused PR.
@@ -50,12 +48,12 @@ If a human decision is still needed, keep `needs-design` or `agent:needs-human`.
 
 ## Draft Shape
 
-Use the repository issue forms where available. Keep body sections public-safe and execution-oriented:
+Use the repository issue forms where available. Keep body sections clear and execution-oriented:
 
 - objective or goal;
 - context;
 - scope;
 - expected output;
 - acceptance criteria;
-- related public docs, issues, or PRs;
+- related docs, issues, or PRs;
 - notes.
