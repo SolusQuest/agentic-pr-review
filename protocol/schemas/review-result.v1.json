@@ -1,0 +1,257 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentic-pr-review/protocol/schemas/review-result.v1.json",
+  "title": "ReviewResultV1",
+  "description": "Runtime result contract carrying proposed structured findings back to the TypeScript publisher. Runtime-proposed content only; host-owned workflow facts are excluded. Canonical source of truth; TS interfaces are convenience only. See issue #15 and docs/20_architecture/runtime-protocol.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocolVersion",
+    "runtimeVersion",
+    "summary",
+    "findings",
+    "limitations",
+    "warnings",
+    "diagnostics"
+  ],
+  "properties": {
+    "protocolVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Protocol-generation version, shared across ReviewInputV1/ReviewResultV1/ReviewTraceV1. Exact match required; mismatch fails closed."
+    },
+    "runtimeVersion": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S",
+      "description": "Opaque runtime version supplied by the runtime. Semver interpretation is out of scope."
+    },
+    "inputSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Optional non-authoritative lowercase hex SHA-256 echo of the consumed review input, for round-trip integrity."
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 4000,
+      "pattern": "\\S"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/finding"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 1200,
+        "pattern": "\\S"
+      }
+    },
+    "usage": {
+      "$ref": "#/definitions/usage"
+    },
+    "observedTurns": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Optional runtime-reported turn count."
+    },
+    "observedTurnSource": {
+      "enum": ["unique_assistant_message_ids", "not_applicable", "unavailable"]
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 1000,
+        "pattern": "\\S"
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/diagnostic"
+      }
+    },
+    "trace": {
+      "$ref": "#/definitions/trace"
+    }
+  },
+  "definitions": {
+    "safeRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "pattern": "\\S",
+      "description": "Normalized POSIX relative path. Rejects absolute, drive-qualified, protocol-looking, current-dir-only, backslash-containing, and parent-dir (..) paths. Used for repo-relative finding paths and artifact-relative trace references; aligned with normalizeRepoRelativePath in src/utils.ts.",
+      "allOf": [
+        {
+          "pattern": "^[^/]"
+        },
+        {
+          "not": {
+            "pattern": "\\\\"
+          }
+        },
+        {
+          "not": {
+            "pattern": "^[A-Za-z][A-Za-z0-9+.-]*:"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(^|/)\\.\\.?(/|$)"
+          }
+        }
+      ]
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "severity",
+        "confidence",
+        "category",
+        "title",
+        "body",
+        "path",
+        "startLine",
+        "endLine"
+      ],
+      "properties": {
+        "severity": {
+          "enum": ["low", "medium", "high"]
+        },
+        "confidence": {
+          "enum": ["medium", "high"],
+          "description": "medium|high only; low-confidence observations are omitted by design."
+        },
+        "category": {
+          "enum": [
+            "correctness",
+            "security",
+            "requirements",
+            "test_coverage",
+            "build",
+            "performance",
+            "maintainability",
+            "documentation"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 240,
+          "pattern": "\\S"
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "evidence": {
+          "type": "string",
+          "maxLength": 2000,
+          "pattern": "\\S"
+        },
+        "path": {
+          "description": "Repo-relative path or null for pathless findings.",
+          "oneOf": [
+            {
+              "$ref": "#/definitions/safeRelativePath"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "startLine": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "endLine": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "suggestedAction": {
+          "type": "string",
+          "maxLength": 1600,
+          "pattern": "\\S"
+        },
+        "inlinePreference": {
+          "enum": ["allowed", "preferred", "avoid"],
+          "description": "Runtime preference; publisher owns the final inline vs sticky decision."
+        }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inputTokens",
+        "cacheReadInputTokens",
+        "cacheCreationInputTokens",
+        "outputTokens",
+        "recordsObserved"
+      ],
+      "properties": {
+        "inputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cacheReadInputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cacheCreationInputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "outputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recordsObserved": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "level"],
+      "description": "Sanitized, bounded diagnostic. Must not contain raw provider bodies, prompts, or auth headers.",
+      "properties": {
+        "code": {
+          "type": "string",
+          "maxLength": 120,
+          "pattern": "\\S"
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 1000,
+          "pattern": "\\S"
+        },
+        "level": {
+          "enum": ["info", "warning", "error"]
+        }
+      }
+    },
+    "trace": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Lightweight trace reference. Full ReviewTraceV1 is #16.",
+      "properties": {
+        "path": {
+          "$ref": "#/definitions/safeRelativePath"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  }
+}
