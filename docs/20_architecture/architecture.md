@@ -8,6 +8,8 @@ The project should evolve toward a narrow, review-specific architecture:
 
 This direction is a product architecture target, not a requirement to rewrite the current implementation immediately.
 
+The schema-first protocol is defined as JSON Schema files under `protocol/schemas/`; see `docs/20_architecture/runtime-protocol.md` for contract details.
+
 ## TypeScript Responsibilities
 
 TypeScript remains the best layer for GitHub Action integration:
