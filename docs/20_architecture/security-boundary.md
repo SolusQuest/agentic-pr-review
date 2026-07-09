@@ -45,7 +45,8 @@ Canonical session ledger artifacts:
 - are not raw provider request or response captures;
 - are bounded, schema-versioned, sanitized logical session records required for runtime resume;
 - may contain enough canonical logical content or content-addressed references to reconstruct the cacheable provider request prefix;
-- must not contain auth headers, provider secrets, raw HTTP bodies, private runner paths, unbounded tool output, or debug captures.
+- must not contain auth headers, provider secrets, raw HTTP bodies, raw provider request/response bodies, raw prompts, private runner paths, unbounded tool output, or debug captures.
+- must represent canonical logical content needed for prefix reconstruction in bounded, sanitized, schema-owned form; the ledger is not an archive of raw prompt text or raw provider messages.
 
 Any content-addressed reference needed for prefix reconstruction must itself resolve to bounded, sanitized, durable content available across GitHub Actions runs.
 
