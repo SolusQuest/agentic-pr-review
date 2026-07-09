@@ -12,7 +12,7 @@ The protocol is defined as JSON Schema files under `protocol/schemas/`:
 
 - `review-input.v1.json` - input contract (ReviewInputV1), defined in #14
 - `review-result.v1.json` - result contract (ReviewResultV1), defined in #15
-- `review-trace.v1.json` - trace contract (ReviewTraceV1), pending #16
+- `review-trace.v1.json` - trace contract (ReviewTraceV1), defined in #16
 
 TypeScript hand-writes convenience interfaces that mirror the schemas and uses ajv for runtime validation. JSON Schema is the authoritative source of truth shared with the future C# runtime. See `src/protocol/` for the TypeScript types and validation wiring.
 
@@ -60,6 +60,51 @@ Key result conventions:
 - findings do not carry `fingerprint`; the host computes fingerprints for duplicate suppression
 - finding locations use `startLine`/`endLine` (both-null for pathless, both-present with `startLine <= endLine`, line values require a non-null `path`); cross-field rules are enforced by post-schema semantic validation
 - `inlinePreference` (`allowed | preferred | avoid`) is a runtime preference; the publisher owns the final inline vs sticky decision
+
+## Trace Contract (ReviewTraceV1)
+
+ReviewTraceV1 is defined (#16) and carries sanitized execution evidence for deterministic validation and future replay. The trace is runtime-produced and optional - a review can complete without one. The host stores, uploads, and verifies trace files but does not author their content.
+
+ReviewTraceV1 includes:
+
+- `protocolVersion` - integer protocol-generation version, shared across input/result/trace
+- `runtimeVersion` - opaque runtime version supplied by the runtime
+- `inputSha256` - required lowercase hex SHA-256 of the consumed input file bytes
+- `resultSha256` - optional lowercase hex SHA-256 of the produced result file bytes (absent on failure path)
+- `mode` - execution context (`deterministic-fixture | live-provider | skipped`); reflects run type, not success/failure
+- `fixture` - optional metadata for test fixture detail (expected only for `deterministic-fixture`)
+- `provider` - optional sanitized provider metadata (`name`, `model`, `requestCount`)
+- `startedAt` / `completedAt` - optional ISO-8601 timestamp strings (no format validation; fixtures may omit)
+- `usage` - optional current-run usage (same shape as `ReviewResultV1.usage`; excludes `lineageTotals` and `usageBudgetStatus`)
+- `toolCalls` - required array of sanitized tool-call summaries (each entry: `name`, `status`, optional `durationMs`/`errorCode`; no input/output content)
+- `warnings` - sanitized non-blocking notes
+- `diagnostics` - sanitized, bounded diagnostics (same shape as `ReviewResultV1` diagnostics)
+
+Key trace conventions:
+
+- `inputSha256` is required because a trace always corresponds to a consumed input; `resultSha256` is optional because failure paths may produce a trace without a valid result
+- `mode` does not express failure taxonomy; failure classification and exit-code mapping are deferred to #20
+- `toolCalls` is required (empty array allowed); entries carry no content (no `inputSummary`/`outputSummary`), enforcing the sanitized boundary structurally
+- `usage` excludes `lineageTotals` and `usageBudgetStatus` - those are host-owned accumulated state, not runtime-produced
+- the trace payload contains no path fields; `ReviewResultV1.trace.path` already points to the trace artifact file
+- timestamps must not be used for deterministic identity
+
+### Hash chain
+
+The three contracts form a bidirectional hash chain:
+
+- `ReviewResultV1.inputSha256` = SHA-256 of input file bytes (result echoes input)
+- `ReviewResultV1.trace.sha256` = SHA-256 of trace file bytes (result points to trace)
+- `ReviewTraceV1.inputSha256` = SHA-256 of input file bytes (trace echoes input)
+- `ReviewTraceV1.resultSha256` = SHA-256 of result file bytes (trace points back to result)
+
+`ReviewResultV1.trace.sha256` and `ReviewTraceV1.resultSha256` are distinct fields with distinct hash targets.
+
+### Privacy
+
+Trace privacy is enforced at the schema level by closed shapes (`additionalProperties: false`) that reject raw/credential-shaped fields such as `apiKey`, `authHeader`, `rawRequest`, `rawResponse`, and `prompt`. All allowed strings are bounded and non-blank. JSON Schema cannot guarantee arbitrary secret-value detection inside allowed strings; producer-side sanitization is the runtime's responsibility.
+
+Restricted raw diagnostics (raw provider request/response bodies) remain a separate opt-in path via `debugCaptureRawApiBodies` and are not part of `ReviewTraceV1`. See `docs/20_architecture/security-boundary.md`.
 
 ## Contract Strategy
 

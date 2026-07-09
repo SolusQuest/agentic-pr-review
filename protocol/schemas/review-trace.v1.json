@@ -1,0 +1,202 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentic-pr-review/protocol/schemas/review-trace.v1.json",
+  "title": "ReviewTraceV1",
+  "description": "Minimal sanitized trace contract carrying execution evidence for deterministic validation and future replay. Runtime-produced; the host stores, uploads, and verifies trace files but does not author their content. Canonical source of truth; TS interfaces are convenience only. See issue #16 and docs/20_architecture/runtime-protocol.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocolVersion",
+    "runtimeVersion",
+    "inputSha256",
+    "mode",
+    "toolCalls",
+    "warnings",
+    "diagnostics"
+  ],
+  "properties": {
+    "protocolVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Protocol-generation version, shared across ReviewInputV1/ReviewResultV1/ReviewTraceV1. Exact match required; mismatch fails closed."
+    },
+    "runtimeVersion": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S",
+      "description": "Opaque runtime version supplied by the runtime. Semver interpretation is out of scope."
+    },
+    "inputSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Required. Lowercase hex SHA-256 of the exact ReviewInputV1 file bytes consumed by the runtime."
+    },
+    "resultSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Optional. Lowercase hex SHA-256 of the exact ReviewResultV1 file bytes produced by the runtime. Absent when no valid result was produced (failure path)."
+    },
+    "mode": {
+      "enum": ["deterministic-fixture", "live-provider", "skipped"],
+      "description": "Execution context. Reflects what kind of run produced this trace, not success or failure. A failure during a live-provider run still uses mode 'live-provider'; absence of resultSha256 signals the failure path. Failure taxonomy and exit-code mapping are deferred to #20."
+    },
+    "fixture": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": "\\S",
+      "description": "Optional metadata expected only for deterministic-fixture mode. #16 does not enforce a cross-field constraint; this is a producer convention, not a schema rule."
+    },
+    "provider": {
+      "$ref": "#/definitions/provider"
+    },
+    "startedAt": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "\\S",
+      "description": "Optional ISO-8601 timestamp string. No format validation; fixtures may omit or use fixed synthetic values. Must not be used for deterministic identity."
+    },
+    "completedAt": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "\\S",
+      "description": "Optional ISO-8601 timestamp string. No format validation; fixtures may omit or use fixed synthetic values. Must not be used for deterministic identity."
+    },
+    "usage": {
+      "$ref": "#/definitions/usage"
+    },
+    "toolCalls": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/toolCall"
+      },
+      "description": "Required array of sanitized tool-call summaries. An empty array means no tool call summaries are present; it does not distinguish no calls from uninstrumented calls in V1."
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 1000,
+        "pattern": "\\S"
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/diagnostic"
+      }
+    }
+  },
+  "definitions": {
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional sanitized provider metadata.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "\\S"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "\\S",
+          "description": "Bounded sanitized metadata. Producers must not put endpoints, tokens, deployment URLs, or private runner paths in this field; #16 enforces only shape, length, and non-blank constraints."
+        },
+        "requestCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inputTokens",
+        "cacheReadInputTokens",
+        "cacheCreationInputTokens",
+        "outputTokens",
+        "recordsObserved"
+      ],
+      "description": "Current-run usage only. Excludes lineageTotals and usageBudgetStatus (host-owned accumulated state).",
+      "properties": {
+        "inputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cacheReadInputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cacheCreationInputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "outputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recordsObserved": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "toolCall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "status"],
+      "description": "Sanitized tool-call summary. Carries no content (no input/output summaries); only metadata.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "\\S"
+        },
+        "status": {
+          "enum": ["ok", "error", "skipped"]
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "errorCode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "\\S"
+        }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "level"],
+      "description": "Sanitized, bounded diagnostic. Must not contain raw provider bodies, prompts, or auth headers.",
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "\\S"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "pattern": "\\S"
+        },
+        "level": {
+          "enum": ["info", "warning", "error"]
+        }
+      }
+    }
+  }
+}
