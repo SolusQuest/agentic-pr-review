@@ -151,17 +151,13 @@ describe('Protocol fixture matrix - paired case hash-chain verification', () => 
 
         it(`${hashRef} matches sha256 of source file bytes`, () => {
           let sourceFile: string;
-          let sourceObj: unknown;
 
           if (hashRef.startsWith('result.inputSha256')) {
             sourceFile = inputPath;
-            sourceObj = input;
           } else if (hashRef.startsWith('trace.inputSha256')) {
             sourceFile = inputPath;
-            sourceObj = input;
           } else if (hashRef.startsWith('result.trace.sha256')) {
             sourceFile = tracePath;
-            sourceObj = trace;
           } else {
             throw new Error(`Unknown hash reference: ${hashRef}`);
           }
