@@ -2,6 +2,8 @@
 
 Use this procedure when preparing a PR in this repository.
 
+Follow `docs/10_workflow/pr-workflow.md` for PR body requirements, validation rules, and agent behavior constraints.
+
 ## Before Opening A PR
 
 1. Confirm the diff contains only intended changes.

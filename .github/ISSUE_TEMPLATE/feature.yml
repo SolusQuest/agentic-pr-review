@@ -65,7 +65,7 @@ body:
     id: agent
     attributes:
       label: Agent Readiness
-      description: Check these before adding label agent:ready.
+      description: Check these before treating the issue as agent-ready.
       options:
         - label: Objective is clear
         - label: Acceptance criteria are clear

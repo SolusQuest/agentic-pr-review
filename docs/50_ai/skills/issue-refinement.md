@@ -2,6 +2,8 @@
 
 Use this procedure when turning an idea, placeholder, or broad request into an agent-ready issue.
 
+Follow `docs/10_workflow/issue-workflow.md` for issue type selection and body conventions.
+
 ## Inputs
 
 - the current issue or task prompt;
@@ -35,7 +37,7 @@ For each decision, provide:
 
 ## Agent-Ready Criteria
 
-An issue can be marked `agent:ready` when:
+An issue is agent-ready when:
 
 - objective is clear;
 - acceptance criteria are clear;
@@ -44,11 +46,11 @@ An issue can be marked `agent:ready` when:
 - validation method is defined;
 - scope fits one focused PR.
 
-If a human decision is still needed, keep `needs-design` or `agent:needs-human`.
+If a human decision is still needed, state that design is still needed and name the blocking decision.
 
 ## Draft Shape
 
-Use the repository issue forms where available. Keep body sections clear and execution-oriented:
+Keep body sections clear and execution-oriented:
 
 - objective or goal;
 - context;
