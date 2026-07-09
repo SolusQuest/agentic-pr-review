@@ -11,7 +11,7 @@ The TypeScript host writes review input JSON. The runtime reads that input and w
 The protocol is defined as JSON Schema files under `protocol/schemas/`:
 
 - `review-input.v1.json` - input contract (ReviewInputV1), defined in #14
-- `review-result.v1.json` - result contract (ReviewResultV1), pending #15
+- `review-result.v1.json` - result contract (ReviewResultV1), defined in #15
 - `review-trace.v1.json` - trace contract (ReviewTraceV1), pending #16
 
 TypeScript hand-writes convenience interfaces that mirror the schemas and uses ajv for runtime validation. JSON Schema is the authoritative source of truth shared with the future C# runtime. See `src/protocol/` for the TypeScript types and validation wiring.
@@ -39,29 +39,27 @@ Input is sanitized for runtime consumption. GitHub write credentials do not belo
 
 ## Output Contract (ReviewResultV1)
 
-Review result (pending #15) should include:
+ReviewResultV1 is defined (#15) and carries runtime-proposed content only. The host assembles the full `StructuredReviewEnvelopeV1` by combining the result with host-owned metadata (phase, SHAs, reviewedRange, runtimeProvider, sessionId, usageBudgetStatus, lineageTotals). Host-owned workflow facts are excluded from the result by closed object shapes.
 
-- `protocolVersion`
-- `runtimeVersion`
-- summary
-- structured findings
-- usage data
-- warnings
-- diagnostics
-- trace reference or trace payload
+ReviewResultV1 includes:
 
-Findings should include enough stable information for duplicate suppression and safe publishing:
+- `protocolVersion` - integer protocol-generation version, shared across input/result/trace
+- `runtimeVersion` - opaque runtime version supplied by the runtime
+- `inputSha256` - optional non-authoritative echo of the input hash
+- `summary` - review summary
+- `findings` - structured findings (severity, confidence, category, title, body, evidence, path, startLine/endLine, suggestedAction, inlinePreference)
+- `limitations` - runtime-stated limitations
+- `usage` / `observedTurns` / `observedTurnSource` - runtime telemetry (no secrets)
+- `warnings` - sanitized non-blocking notes
+- `diagnostics` - sanitized, bounded error/contract info (no raw provider bodies, prompts, or auth headers)
+- `trace` - optional lightweight reference to the trace output (full `ReviewTraceV1` is #16)
 
-- severity;
-- confidence;
-- file path;
-- proposed line or range when available;
-- title;
-- body;
-- evidence;
-- fingerprint input or fingerprint;
-- inline suggestion preference;
-- fallback behavior when inline target is invalid.
+Key result conventions:
+
+- `confidence` is `medium | high` only; low-confidence observations are structurally unrepresentable (omitted by design)
+- findings do not carry `fingerprint`; the host computes fingerprints for duplicate suppression
+- finding locations use `startLine`/`endLine` (both-null for pathless, both-present with `startLine <= endLine`, line values require a non-null `path`); cross-field rules are enforced by post-schema semantic validation
+- `inlinePreference` (`allowed | preferred | avoid`) is a runtime preference; the publisher owns the final inline vs sticky decision
 
 ## Contract Strategy
 
