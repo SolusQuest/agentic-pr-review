@@ -12,6 +12,15 @@ The project goal is to provide policy-driven, structured-first PR review automat
 - support deterministic fixtures and replayable validation;
 - publish safe PR feedback through deterministic adapter code.
 
+## Runtime Product Constraints
+
+Beyond the review capabilities above, the project-owned runtime has three product-level constraints that shape its architecture:
+
+1. **Runtime replacement**: the self-developed runtime is the long-term live review path. `claude-code-cli` is the current live provider baseline and remains in a compatibility and maintenance role; new runtime capabilities target the project-owned runtime, not the Claude Code CLI integration.
+2. **Cross-session context recovery**: the project-owned runtime must resume review context across separate GitHub Actions runs without depending on Claude Code's session mechanism.
+3. **Stable provider request prefix**: the runtime must construct LLM API requests with a strict, stable cacheable prefix so that prefix-cache reuse is possible across resumed sessions.
+
+See `docs/20_architecture/architecture.md` for the runtime replacement direction, session continuity, and provider request prefix contract.
 The project is not trying to become a generic coding agent, a general agent framework, or a hosted review service in the initial scope.
 
 ## Current Position
@@ -23,6 +32,8 @@ The next architectural direction is to evolve the review runtime into a clearer 
 - TypeScript remains the GitHub Action host, adapter, and publisher.
 - A future C# runtime core owns review-domain reasoning, contract validation, provider orchestration, and trace generation.
 - The boundary between them should be explicit, schema-first, and testable.
+
+`claude-code-cli` remains the current live provider baseline. It may receive bug fixes, security fixes, provider-version compatibility fixes, and CI/live-smoke maintenance, but new runtime product capabilities should target the project-owned runtime path rather than the Claude Code CLI integration.
 
 ## Source Of Truth
 
