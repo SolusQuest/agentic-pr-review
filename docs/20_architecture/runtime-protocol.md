@@ -109,3 +109,16 @@ Restricted raw diagnostics (raw provider request/response bodies) remain a separ
 ## Contract Strategy
 
 The protocol uses JSON Schema (draft-07) files as the single source of truth, avoiding two independently drifting definitions of business behavior across TypeScript and C#. TypeScript interfaces are developer ergonomics only; the schemas are authoritative.
+
+## Future: Session Ledger Artifact
+
+The current protocol defines `ReviewInputV1`, `ReviewResultV1`, and `ReviewTraceV1`. A future project-owned runtime that resumes context across GitHub Actions runs will need an additional artifact type (for example, `ProviderSessionLedgerV1` or `RuntimeSessionV1`) to carry the canonical session ledger.
+
+This ledger artifact is distinct from `ReviewTraceV1`:
+
+- `ReviewTraceV1` is sanitized execution evidence for validation and replay; it carries no conversation content.
+- The ledger carries enough canonical logical content to reconstruct the cacheable provider request prefix, within the security boundary defined in `docs/20_architecture/security-boundary.md`.
+
+The protocol will also need to partition stable context (system instructions, policy, tool definitions, canonical prior turns) from volatile context (current PR delta, run metadata) to serve prefix-cache stability. See `docs/20_architecture/architecture.md` (Provider Request Prefix Contract) for the invariants.
+
+This is a direction statement only. The existing schemas are not changed; the ledger artifact and stable/volatile partitioning will be designed in a separate issue before project-owned live provider implementation.

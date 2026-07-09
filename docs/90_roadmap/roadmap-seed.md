@@ -27,6 +27,12 @@ The project optimizes for:
 - GitHub-first practicality;
 - a clear future runtime boundary.
 
+The project-owned runtime has three product-level constraints:
+
+1. **Runtime replacement** - the self-developed runtime is the long-term live review path; `claude-code-cli` is the current baseline kept in a compatibility and maintenance role.
+2. **Cross-session context recovery** - the runtime resumes review context across separate GitHub Actions runs without depending on Claude Code's session mechanism.
+3. **Stable provider request prefix** - the runtime constructs LLM API requests with a strict, stable cacheable prefix for prefix-cache reuse across resumed sessions.
+
 ## Non-Goals
 
 The project is not trying to become:
@@ -173,6 +179,10 @@ Done when:
 - provider secrets stay out of files, logs, normal artifacts, traces, and structured outputs.
 - TypeScript still preserves fail-closed enforcement for budgets and publishing where needed.
 
+- the canonical session ledger and provider request prefix contract are designed before project-owned live provider implementation (see candidate issue BC);
+- the runtime owns deterministic provider request construction with a stable cacheable prefix and prefix-hash diagnostics;
+- `claude-code-cli` remains a compatibility and maintenance path while the project-owned live provider path is established as the intended long-term default.
+
 ### Phase 5: Stateful Memory And Safe Publisher Contracts
 
 Goal: formalize long-lived state and publisher decisions as contracts.
@@ -188,6 +198,9 @@ Done when:
 - duplicate inline candidates are suppressed.
 - non-commentable lines remain sticky-only.
 - publisher code never trusts runtime-provided GitHub metadata without validation.
+
+- long-lived ledger compatibility and a migration/deprecation policy for the runtime replacement path are defined;
+- cache-hit-rate is measurable as a cost and efficiency signal (this metric may also live in the Phase 6 evaluation harness).
 
 ### Phase 6: Evaluation And Replay Harness
 
@@ -256,3 +269,24 @@ Keep later phases as roadmap-only candidates until protocol and CLI decisions la
 
 The initial issue plan is maintained in
 [`initial-issue-plan.md`](./initial-issue-plan.md).
+
+## Post-M2 Candidate Issues
+
+The following candidate issues are not part of the initial M0-M2 issue plan. They record work
+discovered after the initial issue seeding and should be created once the docs direction lands.
+
+### Candidate Issue BC: Design session ledger and provider request prefix contract
+
+Objective: define a canonical session ledger and provider request prefix contract so a project-owned
+runtime can resume across GitHub Actions runs and produce stable provider request prefixes for cache
+reuse.
+
+This is a pre-Phase-4 gate: it does not block #17-#21, but it blocks project-owned live provider
+implementation.
+
+### Candidate Issue A: Define runtime replacement and Claude Code compatibility policy
+
+Objective: document the migration, compatibility, and deprecation policy for moving from
+`claude-code-cli` to the project-owned runtime as the long-term default live path.
+
+Priority is lower than BC; create only if the docs do not fully settle compatibility policy.
