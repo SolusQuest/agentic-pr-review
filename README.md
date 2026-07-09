@@ -16,8 +16,8 @@ The action uses the GitHub Actions `node24` runtime.
 - `docs/00_project/project-context.md` describes the project role and source-of-truth model.
 - `docs/20_architecture/architecture.md` describes the long-term TypeScript adapter plus C# runtime direction.
 - `docs/20_architecture/security-boundary.md` describes token, side-effect, and artifact boundaries.
-- `docs/50_ai/agent-context.md` is the public agent context entrypoint.
-- `docs/90_roadmap/roadmap-seed.md` describes the public roadmap, near-term milestones, and issue
+- `docs/50_ai/agent-context.md` is the agent context entrypoint.
+- `docs/90_roadmap/roadmap-seed.md` describes the roadmap, near-term milestones, and issue
   plan.
 
 ## Usage
@@ -377,7 +377,7 @@ Do not use this mode with private repository context, private instructions, or f
 The diagnostic artifact is separate from the normal state artifact, its name includes `raw`, and its
 retention is exactly 1 day. This mode is for trusted manual diagnostic runs only.
 
-## Public-Safe Usage Constraints
+## Output Safety Constraints
 
 Do not print or upload full prompts, raw requests, raw responses, secrets, or credentials in normal logs,
 comments, summaries, or state artifacts. Keep project-specific review instructions in the caller

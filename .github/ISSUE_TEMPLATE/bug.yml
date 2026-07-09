@@ -31,7 +31,7 @@ body:
     id: repro
     attributes:
       label: Reproduction Steps
-      description: How can this be reproduced with public information?
+      description: How can this be reproduced?
       value: |
         1.
         2.
@@ -68,6 +68,6 @@ body:
     id: related
     attributes:
       label: Related Docs / Issues / PRs
-      description: Link public docs, issues, PRs, or code paths.
+      description: Link docs, issues, PRs, or code paths.
     validations:
       required: false

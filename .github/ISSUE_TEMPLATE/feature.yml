@@ -49,7 +49,7 @@ body:
     id: docs
     attributes:
       label: Relevant Docs
-      description: Link public docs, code paths, issues, or PRs.
+      description: Link docs, code paths, issues, or PRs.
     validations:
       required: false
 
@@ -69,6 +69,6 @@ body:
       options:
         - label: Objective is clear
         - label: Acceptance criteria are clear
-        - label: Relevant public docs or code paths are linked
+        - label: Relevant docs or code paths are linked
         - label: No unresolved design questions
         - label: Validation method is defined
