@@ -17,7 +17,8 @@ The action uses the GitHub Actions `node24` runtime.
 - `docs/20_architecture/architecture.md` describes the long-term TypeScript adapter plus C# runtime direction.
 - `docs/20_architecture/security-boundary.md` describes token, side-effect, and artifact boundaries.
 - `docs/50_ai/agent-context.md` is the public agent context entrypoint.
-- `docs/90_roadmap/roadmap-seed.md` contains seed material for future public issue refinement.
+- `docs/90_roadmap/roadmap-seed.md` describes the public roadmap, near-term milestones, and issue
+  plan.
 
 ## Usage
 
