@@ -17,7 +17,6 @@ These are useful while working but are not durable source of truth:
 - chat transcripts;
 - local scratch notes;
 - task prompts;
-- private planning context;
 - CI logs after they expire;
 - unpublished design discussion.
 

@@ -36,7 +36,3 @@ Use repository files as the durable source of truth:
 - `docs/90_roadmap/`: public roadmap, near-term milestones, and issue planning.
 
 GitHub issues track executable work. PR descriptions record implementation changes and validation. Chat discussions, local notes, and task prompts are not durable project truth until summarized into public repository docs, issues, or PRs.
-
-## Public Context Boundary
-
-All public repository content must be understandable without private context. If a task depends on private context, the private context must first be converted into public-safe requirements, constraints, or acceptance criteria.

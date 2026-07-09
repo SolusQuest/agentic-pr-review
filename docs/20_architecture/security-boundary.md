@@ -32,10 +32,6 @@ If a live provider is used, the workflow must define the trust boundary explicit
 
 ## Artifact Boundary
 
-Artifacts are useful for state, trace, and validation evidence, but they must not contain raw provider request or response bodies, secrets, auth headers, private prompts, or unbounded tool results.
+Artifacts are useful for state, trace, and validation evidence, but they must not contain raw provider request or response bodies, secrets, auth headers, raw prompts, or unbounded tool results.
 
 Restricted diagnostic capture must be opt-in, explicit, and documented.
-
-## Public Context Boundary
-
-All public repository content must be public-safe. Do not include private issue numbers, private PR links, private workflow logs, prompts, transcripts, private diffs, secret values, or private source locations.
