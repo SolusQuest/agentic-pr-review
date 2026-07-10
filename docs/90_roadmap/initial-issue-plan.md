@@ -19,7 +19,7 @@ Exit criteria:
 
 ### [M1: Runtime protocol contract](https://github.com/SolusQuest/agentic-pr-review/milestone/3)
 
-Purpose: define and test the schema-first file protocol between the TypeScript host and future
+Purpose: define and test the schema-first file protocol between the TypeScript host and selected C#
 runtime without replacing the current action path.
 
 Exit criteria:
@@ -33,10 +33,10 @@ Exit criteria:
   version, path safety, and privacy cases.
 - GitHub credentials and write-only platform metadata are excluded from runtime input.
 
-### [M2: Deterministic runtime CLI](https://github.com/SolusQuest/agentic-pr-review/milestone/2)
+### [M2: Deterministic C# runtime CLI](https://github.com/SolusQuest/agentic-pr-review/milestone/2)
 
-Purpose: prove a standalone deterministic runtime CLI can consume the protocol and emit sanitized
-results/traces in local and CI validation.
+Purpose: prove a standalone deterministic C# runtime CLI can consume the protocol, emit sanitized
+results/traces, and pass an early Native AOT feasibility check in local and CI validation.
 
 Exit criteria:
 
@@ -46,6 +46,8 @@ Exit criteria:
 - invalid input produces no partial successful result.
 - deterministic provider output is stable across repeated runs and CI.
 - trace output is sanitized by default.
+- an initial `linux-x64` Native AOT publish executes a deterministic fixture without production
+  release packaging.
 
 ## Issues
 
@@ -299,16 +301,14 @@ Related code:
 - `src/structured.ts`
 - `src/prompt.ts`
 
-### [Task: Add deterministic runtime CLI skeleton](https://github.com/SolusQuest/agentic-pr-review/issues/19)
+### [Feature: Add deterministic C# runtime CLI skeleton](https://github.com/SolusQuest/agentic-pr-review/issues/19)
 
-Milestone: `M2: Deterministic runtime CLI`
+Milestone: `M2: Deterministic C# runtime CLI`
 
 Objective: add a standalone runtime CLI skeleton that can read protocol input and emit deterministic
 protocol output without live provider secrets.
 
-Context: the long-term runtime direction is a C# review runtime, preferably distributed as Native AOT
-after the boundary is proven. The first CLI should prove the file protocol and deterministic
-behavior, not full provider orchestration.
+Context: the selected runtime direction is a C# review runtime distributed as Native AOT after behavior and compatibility are proven. The first CLI should prove the file protocol, deterministic behavior, and early AOT feasibility, not full provider orchestration or production packaging.
 
 In scope:
 
@@ -318,10 +318,11 @@ In scope:
 - Write deterministic `ReviewResultV1` and minimal `ReviewTraceV1`.
 - Keep output stable for repeated runs.
 - Document local execution commands.
+- Prove the selected dependencies and CLI entrypoint can publish and run as an initial `linux-x64` Native AOT feasibility artifact.
 
 Out of scope:
 
-- Native AOT release packaging;
+- production Native AOT release packaging, checksums, or platform matrix;
 - live provider integration;
 - GitHub API calls;
 - comment publishing;
@@ -333,6 +334,7 @@ Acceptance criteria:
 - CLI does not read `GITHUB_TOKEN` or provider secret environment variables.
 - Output is deterministic for the same input.
 - Invalid input does not write a successful result.
+- An initial `linux-x64` Native AOT publish can execute a deterministic fixture without requiring the .NET SDK on the consuming path.
 - Relevant local validation passes.
 
 Related docs:
@@ -343,7 +345,7 @@ Related docs:
 
 ### [Task: Add runtime protocol version and exit-code handling](https://github.com/SolusQuest/agentic-pr-review/issues/20)
 
-Milestone: `M2: Deterministic runtime CLI`
+Milestone: `M2: Deterministic C# runtime CLI`
 
 Objective: define and test runtime protocol/version checks and stable CLI exit codes.
 
@@ -380,7 +382,7 @@ Related docs:
 
 ### [Task: Add deterministic runtime CI fixture](https://github.com/SolusQuest/agentic-pr-review/issues/21)
 
-Milestone: `M2: Deterministic runtime CLI`
+Milestone: `M2: Deterministic C# runtime CLI`
 
 Objective: add CI coverage proving the deterministic runtime CLI can validate fixtures and produce
 stable results.

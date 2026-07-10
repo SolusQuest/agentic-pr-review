@@ -1,8 +1,8 @@
 # Distribution Direction
 
-The current project is a JavaScript GitHub Action.
+The current project is a JavaScript GitHub Action with a selected C# runtime direction.
 
-Future runtime work may introduce a separately built C# runtime binary. This document records the intended distribution constraints before implementation.
+Runtime work will introduce a separately built C# runtime binary. Native AOT is the intended production distribution form; this document records the constraints before implementation.
 
 ## Action Distribution
 
@@ -14,9 +14,9 @@ If `dist/` changes, run:
 npm run dist:check
 ```
 
-## Future Runtime Binary
+## C# Runtime Binary
 
-If a C# runtime CLI is introduced, Native AOT distribution is attractive because it can provide:
+Native AOT distribution is selected because it can provide:
 
 - no .NET SDK requirement for downstream runners;
 - fast startup;
@@ -24,7 +24,9 @@ If a C# runtime CLI is introduced, Native AOT distribution is attractive because
 - exact release assets;
 - clear checksum verification.
 
-Initial binary support may start with `linux-x64` if needed. Broader platform support can follow once the contract is stable.
+The deterministic C# CLI milestone must include an early `linux-x64` Native AOT feasibility check. That check proves the selected dependencies, JSON handling, and CLI entrypoint can publish and execute under AOT; it is not a production release commitment.
+
+Production binary support starts later with a pinned, checksummed `linux-x64` asset. Broader platform support can follow once the contract and provider behavior are stable.
 
 ## Version Mapping
 

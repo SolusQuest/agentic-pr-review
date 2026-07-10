@@ -14,7 +14,7 @@ The protocol is defined as JSON Schema files under `protocol/schemas/`:
 - `review-result.v1.json` - result contract (ReviewResultV1), defined in #15
 - `review-trace.v1.json` - trace contract (ReviewTraceV1), defined in #16
 
-TypeScript hand-writes convenience interfaces that mirror the schemas and uses ajv for runtime validation. JSON Schema is the authoritative source of truth shared with the future C# runtime. See `src/protocol/` for the TypeScript types and validation wiring.
+TypeScript hand-writes convenience interfaces that mirror the schemas and uses ajv for runtime validation. JSON Schema is the authoritative source of truth shared with the selected C# runtime. See `src/protocol/` for the TypeScript types and validation wiring.
 
 ## Input Contract (ReviewInputV1)
 
