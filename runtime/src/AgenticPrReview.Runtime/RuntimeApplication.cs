@@ -1,5 +1,4 @@
 using System.Reflection;
-using System.Numerics;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -214,52 +213,75 @@ public sealed class RuntimeApplication
     private static void ValidateInputVersion(JsonElement input)
     {
         if (input.ValueKind != JsonValueKind.Object || !input.TryGetProperty("protocolVersion", out var version) ||
-            version.ValueKind != JsonValueKind.Number || !TryParseJsonInteger(version.GetRawText(), out var integerVersion))
+            version.ValueKind != JsonValueKind.Number || !TryClassifyJsonInteger(version.GetRawText(), out var isOne))
         {
             throw new RuntimeFailure(10, "APR_INPUT_SCHEMA_INVALID", "Input does not satisfy ReviewInputV1.");
         }
 
-        if (integerVersion != BigInteger.One)
+        if (!isOne)
         {
             throw new RuntimeFailure(10, "APR_PROTOCOL_VERSION_UNSUPPORTED", "Input protocol version is unsupported.");
         }
     }
 
-    private static bool TryParseJsonInteger(string number, out BigInteger value)
+    private static bool TryClassifyJsonInteger(string number, out bool isOne)
     {
-        value = BigInteger.Zero;
+        isOne = false;
         var exponentIndex = number.IndexOfAny(['e', 'E']);
         var mantissa = exponentIndex < 0 ? number : number[..exponentIndex];
         var exponentText = exponentIndex < 0 ? "0" : number[(exponentIndex + 1)..];
-        if (!int.TryParse(exponentText, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var exponent))
+        var negativeExponent = exponentText.StartsWith('-');
+        var exponentDigits = exponentText.TrimStart('+', '-').TrimStart('0');
+        if (exponentDigits.Length == 0)
         {
-            return false;
+            exponentDigits = "0";
+            negativeExponent = false;
         }
 
         var decimalIndex = mantissa.IndexOf('.');
         var whole = decimalIndex < 0 ? mantissa : mantissa[..decimalIndex];
         var fraction = decimalIndex < 0 ? "" : mantissa[(decimalIndex + 1)..];
         if (whole.Length == 0 || (decimalIndex >= 0 && fraction.Length == 0) ||
-            !BigInteger.TryParse(whole + fraction, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var unscaled))
+            !whole.All(character => character is '-' or >= '0' and <= '9') || !fraction.All(char.IsDigit))
         {
             return false;
         }
 
-        var scale = fraction.Length - exponent;
-        if (scale <= 0)
+        var negative = whole.StartsWith('-');
+        var coefficient = (negative ? whole[1..] : whole) + fraction;
+        coefficient = coefficient.TrimStart('0');
+        if (coefficient.Length == 0)
         {
-            value = unscaled * BigInteger.Pow(10, -scale);
             return true;
         }
 
-        var divisor = BigInteger.Pow(10, scale);
-        if (unscaled % divisor != BigInteger.Zero)
+        var trailingZeros = coefficient.Length - coefficient.TrimEnd('0').Length;
+        var exponentComparedToFraction = CompareNatural(exponentDigits, fraction.Length);
+        var integral = !negativeExponent
+            ? exponentComparedToFraction >= 0 || trailingZeros >= fraction.Length - int.Parse(exponentDigits, CultureInfo.InvariantCulture)
+            : trailingZeros >= fraction.Length && CompareNatural(exponentDigits, trailingZeros - fraction.Length) <= 0;
+        if (!integral)
         {
             return false;
         }
 
-        value = unscaled / divisor;
+        if (!negative && exponentComparedToFraction == 0 && coefficient == "1")
+        {
+            isOne = true;
+        }
+        else if (!negative && exponentComparedToFraction < 0)
+        {
+            var scale = fraction.Length - int.Parse(exponentDigits, CultureInfo.InvariantCulture);
+            isOne = coefficient.Length == scale + 1 && coefficient[0] == '1' && coefficient[1..].All(character => character == '0');
+        }
+
         return true;
+    }
+
+    private static int CompareNatural(string digits, int value)
+    {
+        var text = value.ToString(CultureInfo.InvariantCulture);
+        return digits.Length != text.Length ? digits.Length.CompareTo(text.Length) : StringComparer.Ordinal.Compare(digits, text);
     }
 
     private Invocation ParseInvocation(string[] args)

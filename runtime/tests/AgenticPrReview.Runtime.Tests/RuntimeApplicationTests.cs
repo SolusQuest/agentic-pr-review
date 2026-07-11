@@ -184,6 +184,18 @@ public sealed class RuntimeApplicationTests
         }
     }
 
+    [Theory]
+    [InlineData("2e2147483648", "APR_PROTOCOL_VERSION_UNSUPPORTED:")]
+    [InlineData("0e-2147483648", "APR_PROTOCOL_VERSION_UNSUPPORTED:")]
+    [InlineData("1e-2147483648", "APR_INPUT_SCHEMA_INVALID:")]
+    public async Task ExtremeProtocolVersionExponentsRemainBounded(string rawVersion, string expectedCode)
+    {
+        using var files = new TemporaryFiles();
+        var json = await File.ReadAllTextAsync(files.InputPath);
+        await File.WriteAllTextAsync(files.InputPath, json.Replace("\"protocolVersion\": 1", $"\"protocolVersion\": {rawVersion}", StringComparison.Ordinal));
+        AssertFailure(await RunAsync(files.InputPath, files.OutputPath, files.TracePath), 10, expectedCode);
+    }
+
     [Fact]
     public async Task IncrementalFixtureExecutesSuccessfully()
     {
