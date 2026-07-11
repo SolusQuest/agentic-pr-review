@@ -269,7 +269,7 @@ public sealed class RuntimeApplication
         {
             isOne = true;
         }
-        else if (!negative && exponentComparedToFraction < 0)
+        else if (!negative && !negativeExponent && exponentComparedToFraction < 0)
         {
             var scale = fraction.Length - int.Parse(exponentDigits, CultureInfo.InvariantCulture);
             isOne = coefficient.Length == scale + 1 && coefficient[0] == '1' && coefficient[1..].All(character => character == '0');
