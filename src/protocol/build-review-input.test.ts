@@ -343,9 +343,11 @@ describe('buildReviewInputV1', () => {
       apiKey: 'sk-TESTFAKE',
     };
 
-    // Cast to the safe-pick parameter to demonstrate the runtime layer: the type
-    // layer already rejects sensitive fields; here we simulate a caller that
-    // erroneously forwards a full ActionConfig.
+    // The public `config` type exposes only safe fields, but TypeScript structural
+    // typing does not prevent a variable already typed as `ActionConfig` from
+    // being passed at the call site. This test simulates a caller that
+    // erroneously forwards the full `ActionConfig`; the recursive scan and
+    // schema validation below are the runtime and shape gates that catch it.
     const built = buildReviewInputV1({
       target: makeTarget(),
       config: leakyConfig as unknown as BuildReviewInputConfig,
