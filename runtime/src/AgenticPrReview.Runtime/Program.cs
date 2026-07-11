@@ -1,3 +1,3 @@
 using AgenticPrReview.Runtime;
 
-return await new RuntimeApplication().RunAsync(args, Console.Out, Console.Error);
+return await RuntimeEntrypoint.RunAsync(args, Console.Out, Console.Error);

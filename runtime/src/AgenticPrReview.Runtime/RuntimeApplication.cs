@@ -279,6 +279,14 @@ public sealed class RuntimeApplication
         {
             throw new RuntimeFailure(2, "APR_USAGE_INVALID", "Input, output, and trace paths must be valid.");
         }
+        catch (PathTooLongException)
+        {
+            throw new RuntimeFailure(2, "APR_USAGE_INVALID", "Input, output, and trace paths must be valid.");
+        }
+        catch (System.Security.SecurityException)
+        {
+            throw new RuntimeFailure(2, "APR_USAGE_INVALID", "Input, output, and trace paths must be valid.");
+        }
 
         if (invocation.HasConflictingPaths || fileSystem.Exists(invocation.OutputPath) || fileSystem.Exists(invocation.TracePath))
         {
@@ -312,6 +320,22 @@ public sealed class RuntimeApplication
 
     private static Task WriteDiagnosticAsync(TextWriter stderr, string code, string message) =>
         stderr.WriteLineAsync($"{code}: {message}");
+}
+
+public static class RuntimeEntrypoint
+{
+    public static async Task<int> RunAsync(string[] args, TextWriter stdout, TextWriter stderr, Func<RuntimeApplication>? createApplication = null)
+    {
+        try
+        {
+            return await (createApplication ?? (() => new RuntimeApplication()))().RunAsync(args, stdout, stderr);
+        }
+        catch
+        {
+            await stderr.WriteLineAsync("APR_RUNTIME_INTERNAL: Runtime initialization failed.");
+            return 20;
+        }
+    }
 }
 
 internal sealed record Invocation(string InputPath, string OutputPath, string TracePath, StringComparer PathComparer)

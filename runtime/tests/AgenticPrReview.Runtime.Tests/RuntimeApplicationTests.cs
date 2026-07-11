@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -37,6 +38,28 @@ public sealed class RuntimeApplicationTests
         Assert.False(resultDocument.RootElement.GetProperty("trace").TryGetProperty("path", out _));
     }
 
+    [Fact]
+    public async Task FrameworkDependentProcessProducesRepeatedExactGoldenBytes()
+    {
+        using var first = new TemporaryFiles();
+        using var second = new TemporaryFiles();
+
+        var firstProcess = await RunProcessAsync(first.InputPath, first.OutputPath, first.TracePath);
+        var secondProcess = await RunProcessAsync(second.InputPath, second.OutputPath, second.TracePath);
+
+        Assert.Equal(0, firstProcess.ExitCode);
+        Assert.Equal(0, secondProcess.ExitCode);
+        Assert.Empty(firstProcess.StandardOutput);
+        Assert.Empty(secondProcess.StandardOutput);
+        Assert.Empty(firstProcess.StandardError);
+        Assert.Empty(secondProcess.StandardError);
+        Assert.Equal(await File.ReadAllBytesAsync(first.TracePath), await File.ReadAllBytesAsync(second.TracePath));
+        Assert.Equal(await File.ReadAllBytesAsync(first.OutputPath), await File.ReadAllBytesAsync(second.OutputPath));
+        var goldenRoot = Path.Combine(AppContext.BaseDirectory, "fixtures", "deterministic", "bootstrap");
+        Assert.Equal(await File.ReadAllBytesAsync(Path.Combine(goldenRoot, "expected-trace.json")), await File.ReadAllBytesAsync(first.TracePath));
+        Assert.Equal(await File.ReadAllBytesAsync(Path.Combine(goldenRoot, "expected-result.json")), await File.ReadAllBytesAsync(first.OutputPath));
+    }
+
     public static IEnumerable<object[]> InvalidInvocations =>
     [
         [new[] { "bad" }],
@@ -57,6 +80,19 @@ public sealed class RuntimeApplicationTests
         Assert.Equal(2, exitCode);
         Assert.Empty(stdout.ToString());
         Assert.StartsWith("APR_USAGE_INVALID:", stderr.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InitializationFailureUsesTheRuntimeInternalContract()
+    {
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await RuntimeEntrypoint.RunAsync([], stdout, stderr, () => throw new InvalidOperationException("sentinel"));
+
+        Assert.Equal(20, exitCode);
+        Assert.Empty(stdout.ToString());
+        Assert.Equal("APR_RUNTIME_INTERNAL: Runtime initialization failed." + Environment.NewLine, stderr.ToString());
     }
 
     [Fact]
@@ -177,6 +213,33 @@ public sealed class RuntimeApplicationTests
         using var stderr = new StringWriter();
         var exitCode = await application.RunAsync(["review", "--input", input, "--output", output, "--trace", trace], stdout, stderr);
         return new RunResult(exitCode, stdout.ToString(), stderr.ToString());
+    }
+
+    private static async Task<RunResult> RunProcessAsync(string input, string output, string trace)
+    {
+        var start = new ProcessStartInfo
+        {
+            FileName = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        start.ArgumentList.Add("exec");
+        start.ArgumentList.Add("--runtimeconfig");
+        start.ArgumentList.Add(Path.Combine(AppContext.BaseDirectory, "AgenticPrReview.Runtime.Tests.runtimeconfig.json"));
+        start.ArgumentList.Add(typeof(RuntimeApplication).Assembly.Location);
+        start.ArgumentList.Add("review");
+        start.ArgumentList.Add("--input");
+        start.ArgumentList.Add(input);
+        start.ArgumentList.Add("--output");
+        start.ArgumentList.Add(output);
+        start.ArgumentList.Add("--trace");
+        start.ArgumentList.Add(trace);
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start runtime process.");
+        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        var standardError = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        return new RunResult(process.ExitCode, await standardOutput, await standardError);
     }
 
     private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();

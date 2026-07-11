@@ -12,23 +12,36 @@ public sealed class ProtocolFixtureTests
         var root = Path.Combine(AppContext.BaseDirectory, "protocol", "fixtures", "v1");
         using var manifest = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(root, "manifest.json")));
         var schemas = SchemaContracts.Load(typeof(RuntimeApplication).Assembly);
+        var registeredFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var entry in manifest.RootElement.EnumerateArray())
         {
             if (entry.GetProperty("type").GetString() == "fixture")
             {
                 AssertFixture(entry, root, schemas);
+                registeredFiles.Add(entry.GetProperty("file").GetString()!);
                 continue;
             }
 
             if (entry.GetProperty("type").GetString() == "case")
             {
                 AssertCase(entry, root, schemas);
+                var directory = entry.GetProperty("directory").GetString()!;
+                foreach (var contract in entry.GetProperty("contracts").EnumerateObject())
+                {
+                    registeredFiles.Add($"{directory}/{contract.Value.GetString()}");
+                }
                 continue;
             }
 
             throw new InvalidOperationException("Unknown manifest entry type.");
         }
+
+        var actualFiles = Directory.EnumerateFiles(root, "*.json", SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/'))
+            .Where(path => path != "manifest.json")
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Assert.Equal(actualFiles.Order(), registeredFiles.Order());
     }
 
     private static void AssertFixture(JsonElement entry, string root, SchemaContracts schemas)

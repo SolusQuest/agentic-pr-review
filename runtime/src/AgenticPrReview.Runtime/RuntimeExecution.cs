@@ -12,4 +12,6 @@ public sealed class DeterministicRuntimeExecutor : IRuntimeExecutor
     public Task<ExecutionOutcome> ExecuteAsync(ReviewInput input) => Task.FromResult(new ExecutionOutcome([], []));
 }
 
-public sealed class ProviderFailureException : Exception;
+public sealed class ProviderFailureException : Exception
+{
+}

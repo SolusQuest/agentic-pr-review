@@ -22,14 +22,17 @@ path. Do not replace this with a hand-written partial validator.
 On Linux, the required feasibility proof is:
 
 ```bash
+publish_dir="$(mktemp -d)"
+smoke_dir="$(mktemp -d)"
 dotnet publish runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj \
-  -c Release -r linux-x64 --self-contained true -p:PublishAot=true -o /tmp/apr-runtime-aot
-mkdir -p /tmp/apr-runtime-smoke
-cp protocol/fixtures/v1/cases/bootstrap/input.json /tmp/apr-runtime-smoke/input.json
-/tmp/apr-runtime-aot/AgenticPrReview.Runtime review \
-  --input /tmp/apr-runtime-smoke/input.json \
-  --output /tmp/apr-runtime-smoke/result.json \
-  --trace /tmp/apr-runtime-smoke/trace.json
+  -c Release -r linux-x64 --self-contained true -p:PublishAot=true -o "$publish_dir"
+cp protocol/fixtures/v1/cases/bootstrap/input.json "$smoke_dir/input.json"
+"$publish_dir/AgenticPrReview.Runtime" review \
+  --input "$smoke_dir/input.json" \
+  --output "$smoke_dir/result.json" \
+  --trace "$smoke_dir/trace.json"
+cmp "$smoke_dir/trace.json" runtime/tests/fixtures/deterministic/bootstrap/expected-trace.json
+cmp "$smoke_dir/result.json" runtime/tests/fixtures/deterministic/bootstrap/expected-result.json
 ```
 
 Issue #21 owns making this framework-dependent and Native AOT path recurring CI.
