@@ -140,6 +140,33 @@ Paired cases verify non-circular hash links over exact file bytes (no canonical 
 
 The protocol uses JSON Schema (draft-07) files as the single source of truth, avoiding two independently drifting definitions of business behavior across TypeScript and C#. TypeScript interfaces are developer ergonomics only; the schemas are authoritative.
 
+## TypeScript Builders and Mappers (M1 test-only, wired in M2)
+
+Two pure helpers bridge existing host structures and the protocol contracts. They are added in #18 as M1 test-only functions and are wired into the action execution path in M2 via #33; they are not called by `src/main.ts` in M1.
+
+### `buildReviewInputV1` (`src/protocol/build-review-input.ts`)
+
+Given the existing host structures (`ReviewTarget`, `LoadedBlock[]`, a `Pick<>` subset of `ActionConfig`, optional `RestoredState`, explicit previous-review and existing-comment fingerprint lists, and an authoritative repository identity), produces a schema-valid `ReviewInputV1`.
+
+Notable rules:
+
+- The `config` parameter is a `Pick<ActionConfig, ...>` that excludes credential- and debug-control-shaped fields (`githubToken`, `apiKey`, `debugAcknowledgement`, `debugCaptureRawApiBodies`). The builder receives resolved config values; it does not compute defaults.
+- `previousFindingFingerprints` and `existingCommentFingerprints` are independent inputs; the builder must not reuse one for the other. `previousState.findingFingerprints` and `commentEvidence.existingFindingFingerprints` come from these two separate parameters.
+- `previousState.lineage` is intentionally omitted: `RestoredState.lineageTotals` does not currently expose a stable review-count source.
+- Bounded patch: truncation is strict `>` (equality is not truncated); `patch.sha256` hashes the bounded `patch.text`; a missing patch is omitted entirely (never emitted as `{}`).
+- Path safety is fail-closed: unsafe paths in `ChangedFile.filename` propagate as-is and are rejected by `validateReviewInputV1`; the builder does not silently normalize.
+
+### `mapReviewResultV1ToRuntimeContent` (`src/protocol/map-review-result.ts`)
+
+Given a validated `ReviewResultV1`, produces a runtime-owned projection consumed by future host assembly (M2):
+
+- `content`: `summary`, `findings`, `limitations`, optional `usage`, optional `observedTurns`, optional `observedTurnSource`.
+- `sideChannel`: `warnings` (always an array), `diagnostics` (always an array), optional `inputSha256`, optional `trace`.
+
+The helper does not produce `StructuredReviewEnvelopeV1`, does not compute fingerprints, does not apply `maxFindings` capping or scope filtering, and does not accept or return host-owned facts (`phase`, `baseSha`, `headSha`, `reviewedRange`, `runtimeProvider`, `sessionId`, `usageBudgetStatus`, `lineageTotals`, `stateKey`, `repository`, `toolMode`). Envelope assembly, fingerprinting, capping, filtering, and publisher inline eligibility remain in the existing host pipeline and its M2 successor.
+
+The helper assumes the caller has already validated the input with `validateReviewResultV1`; it performs no mutation.
+
 ## Future: Replay Bundle
 
 `ReviewTraceV1` is evidence-only and cannot independently replay a review. It does not contain review input, patch/context, provider request material, tool input/output, session content, or deterministic provider response fixtures.
