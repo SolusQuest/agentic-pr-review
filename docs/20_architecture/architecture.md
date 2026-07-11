@@ -73,7 +73,7 @@ The project-owned runtime owns the LLM API call path directly. It does not wrap 
 
 The project-owned runtime must resume review context across separate GitHub Actions runs without depending on Claude Code's `--resume` mechanism or `session.jsonl` files.
 
-To achieve this, the runtime maintains a canonical session ledger: a durable, schema-versioned record that can be restored from a state artifact and used to reconstruct the next provider request. The ledger is distinct from `ReviewTraceV1`, which is sanitized execution evidence for validation and replay and carries no conversation content.
+To achieve this, the runtime maintains a canonical session ledger: a durable, schema-versioned record that can be restored from a state artifact and used to reconstruct the next provider request. The ledger is distinct from `ReviewTraceV1`, which is sanitized execution evidence that may be referenced by a future replay bundle, carries no conversation content, and cannot replay a review by itself.
 
 See `docs/20_architecture/runtime-protocol.md` for the direction on a future ledger artifact, and `docs/20_architecture/security-boundary.md` for the artifact boundary the ledger must satisfy.
 

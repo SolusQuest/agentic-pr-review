@@ -181,12 +181,12 @@ Done when:
 - the session ledger and provider request prefix design is completed as the first Phase 4 gate;
 - a schema-versioned ledger and canonical prefix materializer have contract fixtures;
 - restored sessions reproduce the expected `prefixSha256` for the same versioned inputs;
+- the ledger is restored from and persisted to an approved durable state artifact across separate workflow runs;
+- missing, incompatible, corrupt, or unsafe ledger state falls back to bootstrap behavior without unsafe reuse;
 - the runtime provider interface supports deterministic and live providers.
 - live provider execution is available only in explicit trusted modes.
 - cache-read, cache-write, uncached-input, output usage, timeouts, malformed output, and provider failures are normalized when the provider exposes them;
 - representative resumed-session evaluations compare normalized input cost with a documented stateless baseline;
-- read, grep, glob, patch-aware readers, and bounded tool-result summaries are represented in
-  protocol and fixtures after their stable-prefix placement is defined.
 - provider secrets stay out of files, logs, normal artifacts, traces, and structured outputs.
 - TypeScript still preserves fail-closed enforcement for budgets and publishing where needed.
 - `claude-code-cli` remains a compatibility and maintenance path while the project-owned live provider path is established as the intended long-term default.
@@ -220,7 +220,7 @@ Done when:
   behavior, provider failures, and malformed structured output.
 - at least one fixture exists for each required category.
 - eval exits non-zero on regression and produces deterministic CI-friendly output.
-- replay can consume a trace without GitHub Action state or GitHub credentials.
+- replay can consume a versioned replay bundle or manifest without GitHub credentials or live GitHub state; the bundle contains or content-addresses sanitized review input, runtime/provider identity, deterministic provider and tool fixture material, trace evidence, and actual or expected result data.
 - reports distinguish quality failures from infrastructure failures.
 - reports include true-positive, false-positive, duplicate, line mapping, incremental correctness,
   token usage, cache-read ratio, normalized input cost, latency, and reproducibility signals.
@@ -296,6 +296,12 @@ The following issues are not part of the initial M0-M2 issue plan.
 Issue [#29](https://github.com/SolusQuest/agentic-pr-review/issues/29) defines the first Phase 4 design gate: a canonical session ledger, stable provider request prefix, normalized cache usage, and cost non-regression model for resumed sessions.
 
 It does not block M2 or M3, but it blocks project-owned live provider implementation. Its design deliverable must create or identify the implementation issues needed to complete M4.
+
+### Post-M4 Candidate: Runtime context and tool orchestration
+
+Full repo-local read, grep, glob, patch-aware access, bounded tool-result handling, and tool-loop policy do not block M4. They form a separate future roadmap track after the provider/session foundation is stable.
+
+This candidate must define tool contracts, stable/dynamic prefix placement, budgets, fixtures, and security boundaries before receiving a milestone or implementation issues.
 
 ### Deferred Phase 7 Candidate: Runtime replacement and Claude Code compatibility policy
 

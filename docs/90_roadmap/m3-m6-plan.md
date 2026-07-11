@@ -33,6 +33,8 @@ Refinement status: not agent-ready. The objective and boundaries are stable; pro
 
 Objective: add a host-side adapter that can materialize protocol files, invoke the deterministic C# CLI, and return validated result and trace data without wiring it into normal action execution.
 
+Dependencies: #18, #19, #20, and #21.
+
 In scope:
 
 - isolated adapter/module boundary;
@@ -69,6 +71,8 @@ Related paths:
 Refinement status: not agent-ready. The publishing boundary is settled; input naming, compatibility behavior, and rollout shape require refinement.
 
 Objective: wire the invocation adapter into an explicit guarded action path and map validated runtime results into the current host-owned structured review and sticky publishing pipeline.
+
+Dependencies: #18, #19, #20, #21, and #33.
 
 In scope:
 
@@ -107,6 +111,8 @@ Related paths:
 Refinement status: not agent-ready. Required scenarios are known; fixture ownership and CI command shape depend on the first two M3 issues.
 
 Objective: prove the TypeScript host and deterministic C# runtime work together across success, compatibility, failure, and privacy paths without provider secrets.
+
+Dependencies: #21, #33, and #34.
 
 In scope:
 
@@ -148,10 +154,24 @@ Expected implementation follow-ups after #29:
 - canonical prefix materialization and `prefixSha256` restore/append fixtures;
 - provider capability and normalized cache usage model;
 - minimal AOT-compatible live provider adapter with bounded failures and telemetry;
-- ledger artifact restore/upload integration;
+- ledger artifact restore/upload integration across separate workflow runs, including safe bootstrap fallback for missing, incompatible, corrupt, or unsafe state;
 - representative resumed-session cache and normalized-cost validation.
 
 M4 is complete only when the contract is implemented and validated. Closing #29 alone does not complete the milestone; #29 must create or identify the implementation follow-ups before it closes.
+
+## Post-M4 Candidate: Runtime Context And Tool Orchestration
+
+Full repo-local tool orchestration is not an M4 exit condition. Keep it as a separate roadmap candidate until the live-provider/session foundation is stable.
+
+Candidate scope:
+
+- bounded read, grep, glob, and patch-aware tools;
+- tool request/result contracts and deterministic fixtures;
+- stable-prefix tool-definition placement and dynamic tool-result placement;
+- tool-call budgets, timeout/cancellation, path safety, and output bounds;
+- provider/tool loop orchestration without GitHub write capabilities.
+
+Do not create a milestone or implementation issues for this candidate until its contracts and dependency on M4 are refined.
 
 ## Phase 5: Stateful Memory And Safe Publisher Contracts
 
@@ -178,6 +198,8 @@ Quality and correctness signals:
 - incremental review and state-recovery correctness;
 - replay reproducibility and infrastructure failure classification;
 - latency and provider/runtime failure rates.
+
+Replay uses a versioned replay bundle or manifest, not `ReviewTraceV1` alone. The bundle contains or content-addresses sanitized review input, runtime/provider identity, deterministic provider and tool fixture material, optional approved ledger state for stateful cases, trace evidence, actual/expected result, and versioned content hashes without requiring GitHub credentials or live GitHub state.
 
 Cache and cost signals:
 
