@@ -1,1 +1,2 @@
 protocol/fixtures/v1/cases/** -text
+runtime/scripts/*.sh text eol=lf

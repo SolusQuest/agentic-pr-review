@@ -1,0 +1,33 @@
+name: Runtime CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install AOT build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang zlib1g-dev
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Runtime tests
+        run: bash runtime/scripts/verify-runtime.sh test
+
+      - name: Framework-dependent bootstrap smoke
+        run: bash runtime/scripts/verify-runtime.sh framework
+
+      - name: Native AOT bootstrap smoke
+        run: bash runtime/scripts/verify-runtime.sh aot

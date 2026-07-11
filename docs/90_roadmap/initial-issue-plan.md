@@ -4,6 +4,11 @@ This file records the initial issue breakdown for the near-term roadmap. It is i
 to seed GitHub milestones and issues for M0 through M2 only. Later roadmap phases remain candidates
 until their dependencies are clearer.
 
+Status: M0, M1, and M2 are complete. #21 closes M2 by making both the framework-dependent and
+`linux-x64` Native AOT deterministic runtime paths recurring CI. The next critical-path
+implementation phase is M3 (TypeScript runtime integration); M4's design gate in #29 remains
+active in parallel.
+
 ## Milestones To Create Now
 
 ### [M0: Validation and roadmap baseline](https://github.com/SolusQuest/agentic-pr-review/milestone/1)
@@ -55,7 +60,7 @@ M2 sequencing:
 - refine #20's stable exit taxonomy before #19 finalizes externally observable failure behavior;
 - #19 establishes the CLI, deterministic protocol path, minimal fail-closed plumbing, and initial AOT feasibility;
 - #20 owns the stable version, exit-code, and sanitized error contract;
-- #21 runs after #19 and #20 and continuously validates both framework-dependent and Native AOT paths in CI.
+- #21 runs after #19 and #20 and continuously validates both framework-dependent and Native AOT paths in CI (complete: .github/workflows/runtime-ci.yml).
 
 ## Issues
 

@@ -9,6 +9,7 @@
     "dist:check": "npm run build && git diff --exit-code -- .github/actions/agentic-pr-review/dist/index.js .github/actions/agentic-pr-review/dist/index.js.LEGAL.txt",
     "format:check": "prettier --check .",
     "format": "prettier --write .",
+    "runtime:verify": "bash runtime/scripts/verify-runtime.sh all",
     "synthetic": "node scripts/run-local-synthetic.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

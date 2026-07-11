@@ -67,8 +67,10 @@ The current implementation is a TypeScript GitHub Action with:
 - token and artifact safety gates;
 - local synthetic validation.
 
-The roadmap therefore starts from an existing TypeScript action baseline. The next architectural work
-is to make the runtime boundary explicit, schema-first, and testable.
+The TypeScript-to-runtime boundary is now established. The `ReviewInputV1` / `ReviewResultV1` /
+`ReviewTraceV1` protocol, a deterministic C# runtime CLI, and recurring framework-dependent and
+`linux-x64` Native AOT CI coverage all exist. The next architectural work is TypeScript-side
+runtime invocation (Phase 3) and a cache-efficient runtime provider foundation (Phase 4).
 
 ## Target Architecture
 

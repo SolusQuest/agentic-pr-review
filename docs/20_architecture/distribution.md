@@ -24,7 +24,7 @@ Native AOT distribution is selected because it can provide:
 - exact release assets;
 - clear checksum verification.
 
-The deterministic C# CLI milestone must include an early `linux-x64` Native AOT feasibility check. That check proves the selected dependencies, JSON handling, and CLI entrypoint can publish and execute under AOT; it is not a production release commitment.
+Both the framework-dependent and `linux-x64` Native AOT deterministic runtime paths are validated continuously by [`.github/workflows/runtime-ci.yml`](../../.github/workflows/runtime-ci.yml), which publishes the AOT binary and executes it against the bootstrap protocol fixture on every `pull_request` and on `push` to `main`. This proves the selected dependencies, JSON handling, and CLI entrypoint keep publishing and executing under AOT; it is not yet a production release commitment.
 
 Production binary support starts later with a pinned, checksummed `linux-x64` asset. Broader platform support can follow once the contract and provider behavior are stable.
 
