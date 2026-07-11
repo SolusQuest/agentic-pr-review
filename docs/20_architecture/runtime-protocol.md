@@ -4,7 +4,7 @@ The runtime boundary is protocol-first and file-based.
 
 ## Direction
 
-The TypeScript host writes review input JSON. The runtime reads that input and writes structured result JSON plus optional trace output. Both sides validate protocol version and fail closed on incompatible contracts.
+The TypeScript host writes review input JSON. The runtime reads that input and writes structured result JSON plus optional trace output. Both sides validate protocol version and fail closed on incompatible contracts. The M2 CLI process contract, including version comparison, exit classes, output commits, and sanitized diagnostics, is defined in [runtime-cli-process-contract.md](./runtime-cli-process-contract.md).
 
 ## Protocol Files
 
@@ -21,7 +21,7 @@ TypeScript hand-writes convenience interfaces that mirror the schemas and uses a
 ReviewInputV1 is defined (#14) and includes:
 
 - `protocolVersion` - integer protocol-generation version, shared across input/result/trace; exact match required
-- `requestedRuntimeVersion` - opaque runtime version request or null
+- `requestedRuntimeVersion` - opaque runtime version request or null; the M2 CLI uses exact ordinal string equality when it is non-null (see [runtime-cli-process-contract.md](./runtime-cli-process-contract.md))
 - `host` - trusted host-owned metadata (repository, review facts, runtime options)
 - `subject` - untrusted review data (pull request metadata, changed files with bounded patch context, context documents, policy text)
 - `previousState` - minimal previous review state summary
@@ -63,14 +63,14 @@ Key result conventions:
 
 ## Trace Contract (ReviewTraceV1)
 
-ReviewTraceV1 is defined (#16) and carries sanitized execution evidence for deterministic validation and as one input to a future replay bundle. The trace is runtime-produced and optional - a review can complete without one. The host stores, uploads, and verifies trace files but does not author their content.
+ReviewTraceV1 is defined (#16) and carries sanitized execution evidence for deterministic validation and as one input to a future replay bundle. The trace is runtime-produced and optional - a review can complete without one. The host stores, uploads, and verifies trace files but does not author their content. The M2 `review` CLI is stricter: it requires `--trace` and commits a valid trace before returning success; see [runtime-cli-process-contract.md](./runtime-cli-process-contract.md).
 
 ReviewTraceV1 includes:
 
 - `protocolVersion` - integer protocol-generation version, shared across input/result/trace
 - `runtimeVersion` - opaque runtime version supplied by the runtime
 - `inputSha256` - required lowercase hex SHA-256 of the consumed input file bytes
-- `resultSha256` - optional lowercase hex SHA-256 of the produced result file bytes (absent on failure path)
+- `resultSha256` - optional lowercase hex SHA-256 of the produced result file bytes; it is absent when no valid result exists and on the M2 CLI's non-circular success path
 - `mode` - execution context (`deterministic-fixture | live-provider | skipped`); reflects run type, not success/failure
 - `fixture` - optional metadata for test fixture detail (expected only for `deterministic-fixture`)
 - `provider` - optional sanitized provider metadata (`name`, `model`, `requestCount`)
@@ -82,23 +82,23 @@ ReviewTraceV1 includes:
 
 Key trace conventions:
 
-- `inputSha256` is required because a trace always corresponds to a consumed input; `resultSha256` is optional because failure paths may produce a trace without a valid result
-- `mode` does not express failure taxonomy; failure classification and exit-code mapping are deferred to #20
+- `inputSha256` is required because a trace always corresponds to a consumed input; `resultSha256` is optional because traces may lack a valid result and because the M2 CLI uses a non-circular success shape
+- `mode` does not express failure taxonomy; failure classification and exit-code mapping are defined by [runtime-cli-process-contract.md](./runtime-cli-process-contract.md)
 - `toolCalls` is required (empty array allowed); entries carry no content (no `inputSummary`/`outputSummary`), enforcing the sanitized boundary structurally
 - `usage` excludes `lineageTotals` and `usageBudgetStatus` - those are host-owned accumulated state, not runtime-produced
-- the trace payload contains no path fields; `ReviewResultV1.trace.path` already points to the trace artifact file
+- the trace payload contains no path fields; when present, `ReviewResultV1.trace.path` points to the trace artifact file
 - timestamps must not be used for deterministic identity
 
 ### Hash chain
 
-The three contracts form a bidirectional hash chain:
+The schemas expose optional hash links that can point in both directions:
 
 - `ReviewResultV1.inputSha256` = SHA-256 of input file bytes (result echoes input)
 - `ReviewResultV1.trace.sha256` = SHA-256 of trace file bytes (result points to trace)
 - `ReviewTraceV1.inputSha256` = SHA-256 of input file bytes (trace echoes input)
 - `ReviewTraceV1.resultSha256` = SHA-256 of result file bytes (trace points back to result)
 
-`ReviewResultV1.trace.sha256` and `ReviewTraceV1.resultSha256` are distinct fields with distinct hash targets.
+`ReviewResultV1.trace.sha256` and `ReviewTraceV1.resultSha256` are distinct fields with distinct hash targets. Exact-byte result and trace files cannot contain both links without a circular dependency. The M2 CLI therefore uses the non-circular shape in [runtime-cli-process-contract.md](./runtime-cli-process-contract.md): the trace omits `resultSha256`, while the result contains `trace.sha256`.
 
 ### Privacy
 
