@@ -6,6 +6,12 @@ This directory contains the M2 C# runtime implemented by issue #19. Its only com
 review --input <path> --output <path> --trace <path>
 ```
 
+The executable remains one project, with internal directories separated by responsibility:
+`Cli` is process entry, `Application` owns orchestration and error mapping, `Protocol` owns
+authoritative-schema validation and JSON models, `Execution` owns the deterministic executor
+seam, and `Storage` owns staging and no-replace commits. The test project mirrors the
+application and protocol areas without creating premature reusable libraries.
+
 Use the repository SDK baseline and run the runtime tests with:
 
 ```bash
