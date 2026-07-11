@@ -129,6 +129,20 @@ public sealed class RuntimeApplicationTests
     }
 
     [Fact]
+    public async Task SchemaValidUnboundedIntegersSurviveTheTypedInputBoundary()
+    {
+        using var files = new TemporaryFiles();
+        await files.UpdateInputAsync(node =>
+            node["subject"]!["changedFiles"]![0]!["additions"] = JsonValue.Create(2_147_483_648L));
+
+        var result = await RunAsync(files.InputPath, files.OutputPath, files.TracePath);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.True(File.Exists(files.OutputPath));
+        Assert.True(File.Exists(files.TracePath));
+    }
+
+    [Fact]
     public async Task ExistingDestinationIsNeverOverwritten()
     {
         using var files = new TemporaryFiles();
@@ -206,6 +220,22 @@ public sealed class RuntimeApplicationTests
         Assert.StartsWith("APR_RESULT_WRITE_FAILED:", stderr.ToString(), StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(1, "APR_TRACE_WRITE_FAILED:")]
+    [InlineData(2, "APR_RESULT_WRITE_FAILED:")]
+    public async Task StagingFailuresKeepTheirPrimaryDiagnostic(int failStageAt, string diagnostic)
+    {
+        using var files = new TemporaryFiles();
+        var application = new RuntimeApplication(new FailingFileSystem(new PhysicalRuntimeFileSystem(), failStageAt: failStageAt, failDelete: true));
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await application.RunAsync(["review", "--input", files.InputPath, "--output", files.OutputPath, "--trace", files.TracePath], stdout, stderr);
+
+        Assert.Equal(40, exitCode);
+        Assert.StartsWith(diagnostic, stderr.ToString(), StringComparison.Ordinal);
+    }
+
     private static async Task<RunResult> RunAsync(string input, string output, string trace)
     {
         var application = new RuntimeApplication();
@@ -260,13 +290,20 @@ public sealed class RuntimeApplicationTests
         IRuntimeFileSystem inner,
         bool failCommit = false,
         bool failSecondCommit = false,
-        bool createDestinationOnSecondCommit = false) : IRuntimeFileSystem
+        bool createDestinationOnSecondCommit = false,
+        int failStageAt = 0,
+        bool failDelete = false) : IRuntimeFileSystem
     {
         private int commits;
+        private int stages;
         public bool Exists(string path) => inner.Exists(path);
         public Task<byte[]> ReadAllBytesAsync(string path) => inner.ReadAllBytesAsync(path);
-        public Task<StagedFile> StageAsync(string finalPath, byte[] bytes) => inner.StageAsync(finalPath, bytes);
-        public Task DeleteIfExistsAsync(string path) => inner.DeleteIfExistsAsync(path);
+        public Task<StagedFile> StageAsync(string finalPath, byte[] bytes)
+        {
+            stages++;
+            return stages == failStageAt ? Task.FromException<StagedFile>(new IOException("Injected staging failure.")) : inner.StageAsync(finalPath, bytes);
+        }
+        public Task DeleteIfExistsAsync(string path) => failDelete ? Task.FromException(new IOException("Injected cleanup failure.")) : inner.DeleteIfExistsAsync(path);
         public Task CommitNoReplaceAsync(StagedFile stagedFile)
         {
             commits++;

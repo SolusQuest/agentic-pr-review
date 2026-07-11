@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace AgenticPrReview.Runtime;
 
 public sealed record ReviewInput(
@@ -13,28 +15,28 @@ public sealed record RuntimeRepository(string Owner, string Name);
 public sealed record RuntimeReview(string Phase, string BaseSha, string HeadSha, string? StateKey, string RuntimeProvider);
 public sealed record RuntimeOptions(
     string? ToolMode,
-    int? MaxFindings,
-    int? MaxPatchChars,
-    int? MaxContextChars,
-    int? MaxReviewChars,
+    JsonElement? MaxFindings,
+    JsonElement? MaxPatchChars,
+    JsonElement? MaxContextChars,
+    JsonElement? MaxReviewChars,
     RuntimeInlineCommentsPolicy? InlineComments);
-public sealed record RuntimeInlineCommentsPolicy(bool? Enabled, int? MaxComments, string? MinSeverity, string? MinConfidence);
+public sealed record RuntimeInlineCommentsPolicy(bool? Enabled, JsonElement? MaxComments, string? MinSeverity, string? MinConfidence);
 
 public sealed record RuntimeSubject(
     RuntimePullRequest PullRequest,
     RuntimeChangedFile[] ChangedFiles,
     RuntimeContextDocument[]? ContextDocuments,
     string? PolicyText);
-public sealed record RuntimePullRequest(int Number, string Title, string Body, string BaseRef, string HeadRef, bool Draft);
+public sealed record RuntimePullRequest(JsonElement Number, string Title, string Body, string BaseRef, string HeadRef, bool Draft);
 public sealed record RuntimeChangedFile(
     string Path,
     string? PreviousPath,
     string Status,
-    int Additions,
-    int Deletions,
-    int Changes,
+    JsonElement Additions,
+    JsonElement Deletions,
+    JsonElement Changes,
     RuntimePatch? Patch);
-public sealed record RuntimePatch(string Text, bool Truncated, string Sha256, int MaxChars);
+public sealed record RuntimePatch(string Text, bool Truncated, string Sha256, JsonElement MaxChars);
 public sealed record RuntimeContextDocument(string Name, string Text);
 
 public sealed record RuntimePreviousState(
@@ -43,5 +45,5 @@ public sealed record RuntimePreviousState(
     string? Phase,
     string[] FindingFingerprints,
     RuntimeLineage? Lineage);
-public sealed record RuntimeLineage(int ReviewCount);
+public sealed record RuntimeLineage(JsonElement ReviewCount);
 public sealed record RuntimeCommentEvidence(string[] ExistingFindingFingerprints);
