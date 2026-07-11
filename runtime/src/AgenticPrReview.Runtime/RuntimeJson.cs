@@ -58,4 +58,7 @@ internal static class RuntimeJson
     WriteIndented = false)]
 [JsonSerializable(typeof(ReviewResult))]
 [JsonSerializable(typeof(ReviewTrace))]
-internal partial class RuntimeJsonContext : JsonSerializerContext;
+[JsonSerializable(typeof(ReviewInput))]
+internal partial class RuntimeJsonContext : JsonSerializerContext
+{
+}

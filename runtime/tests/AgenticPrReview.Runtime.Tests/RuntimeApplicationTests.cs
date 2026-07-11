@@ -154,6 +154,22 @@ public sealed class RuntimeApplicationTests
         Assert.StartsWith("APR_RESULT_WRITE_FAILED:", stderr.ToString(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task DestinationCreatedAfterPreflightIsNotOverwritten()
+    {
+        using var files = new TemporaryFiles();
+        var application = new RuntimeApplication(new FailingFileSystem(new PhysicalRuntimeFileSystem(), createDestinationOnSecondCommit: true));
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await application.RunAsync(["review", "--input", files.InputPath, "--output", files.OutputPath, "--trace", files.TracePath], stdout, stderr);
+
+        Assert.Equal(40, exitCode);
+        Assert.Equal("sentinel", await File.ReadAllTextAsync(files.OutputPath));
+        Assert.True(File.Exists(files.TracePath));
+        Assert.StartsWith("APR_RESULT_WRITE_FAILED:", stderr.ToString(), StringComparison.Ordinal);
+    }
+
     private static async Task<RunResult> RunAsync(string input, string output, string trace)
     {
         var application = new RuntimeApplication();
@@ -169,15 +185,19 @@ public sealed class RuntimeApplicationTests
 
     private sealed class ThrowingExecutor(Exception exception) : IRuntimeExecutor
     {
-        public Task<ExecutionOutcome> ExecuteAsync(JsonElement input) => Task.FromException<ExecutionOutcome>(exception);
+        public Task<ExecutionOutcome> ExecuteAsync(ReviewInput input) => Task.FromException<ExecutionOutcome>(exception);
     }
 
     private sealed class ReturningExecutor(ExecutionOutcome outcome) : IRuntimeExecutor
     {
-        public Task<ExecutionOutcome> ExecuteAsync(JsonElement input) => Task.FromResult(outcome);
+        public Task<ExecutionOutcome> ExecuteAsync(ReviewInput input) => Task.FromResult(outcome);
     }
 
-    private sealed class FailingFileSystem(IRuntimeFileSystem inner, bool failCommit = false, bool failSecondCommit = false) : IRuntimeFileSystem
+    private sealed class FailingFileSystem(
+        IRuntimeFileSystem inner,
+        bool failCommit = false,
+        bool failSecondCommit = false,
+        bool createDestinationOnSecondCommit = false) : IRuntimeFileSystem
     {
         private int commits;
         public bool Exists(string path) => inner.Exists(path);
@@ -187,6 +207,11 @@ public sealed class RuntimeApplicationTests
         public Task CommitNoReplaceAsync(StagedFile stagedFile)
         {
             commits++;
+            if (createDestinationOnSecondCommit && commits == 2)
+            {
+                File.WriteAllText(stagedFile.FinalPath, "sentinel");
+            }
+
             if (failCommit || (failSecondCommit && commits == 2))
             {
                 throw new IOException("Injected commit failure.");

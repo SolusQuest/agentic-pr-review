@@ -74,10 +74,12 @@ public sealed class RuntimeApplication
                 throw new RuntimeFailure(10, "APR_INPUT_SCHEMA_INVALID", "Input does not satisfy ReviewInputV1.");
             }
 
+            var typedInput = JsonSerializer.Deserialize(input.RootElement, RuntimeJsonContext.Default.ReviewInput)
+                ?? throw new RuntimeFailure(10, "APR_INPUT_SCHEMA_INVALID", "Input does not satisfy ReviewInputV1.");
+
             var inputHash = Convert.ToHexString(SHA256.HashData(inputBytes)).ToLowerInvariant();
-            var requestedVersion = input.RootElement.GetProperty("requestedRuntimeVersion");
-            if (requestedVersion.ValueKind == JsonValueKind.String &&
-                !StringComparer.Ordinal.Equals(requestedVersion.GetString(), RuntimeVersion))
+            if (typedInput.RequestedRuntimeVersion is not null &&
+                !StringComparer.Ordinal.Equals(typedInput.RequestedRuntimeVersion, RuntimeVersion))
             {
                 var failure = new RuntimeFailure(10, "APR_RUNTIME_VERSION_MISMATCH", "Requested runtime version does not match this binary.", true);
                 return await FinishFailureAsync(invocation, inputHash, failure, stderr);
@@ -86,7 +88,7 @@ public sealed class RuntimeApplication
             ExecutionOutcome execution;
             try
             {
-                execution = await executor.ExecuteAsync(input.RootElement);
+                execution = await executor.ExecuteAsync(typedInput);
             }
             catch (ProviderFailureException)
             {
@@ -141,7 +143,7 @@ public sealed class RuntimeApplication
             }
             catch
             {
-                await fileSystem.DeleteIfExistsAsync(stagedTrace.TempPath);
+                await TryDeleteAsync(stagedTrace.TempPath);
                 throw new RuntimeFailure(40, "APR_RESULT_WRITE_FAILED", "Result could not be staged.");
             }
 
@@ -151,8 +153,8 @@ public sealed class RuntimeApplication
             }
             catch
             {
-                await fileSystem.DeleteIfExistsAsync(stagedTrace.TempPath);
-                await fileSystem.DeleteIfExistsAsync(stagedResult.TempPath);
+                await TryDeleteAsync(stagedTrace.TempPath);
+                await TryDeleteAsync(stagedResult.TempPath);
                 throw new RuntimeFailure(40, "APR_TRACE_WRITE_FAILED", "Trace could not be committed.");
             }
 
@@ -162,7 +164,7 @@ public sealed class RuntimeApplication
             }
             catch
             {
-                await fileSystem.DeleteIfExistsAsync(stagedResult.TempPath);
+                await TryDeleteAsync(stagedResult.TempPath);
                 throw new RuntimeFailure(40, "APR_RESULT_WRITE_FAILED", "Result could not be committed.");
             }
 
@@ -188,7 +190,7 @@ public sealed class RuntimeApplication
                 // The first pipeline error remains authoritative.
                 if (staged is not null)
                 {
-                    await fileSystem.DeleteIfExistsAsync(staged.TempPath);
+                    await TryDeleteAsync(staged.TempPath);
                 }
             }
         }
@@ -260,10 +262,24 @@ public sealed class RuntimeApplication
             throw new RuntimeFailure(2, "APR_USAGE_INVALID", "Expected review --input <path> --output <path> --trace <path>.");
         }
 
-        var invocation = new Invocation(
-            Path.GetFullPath(input),
-            Path.GetFullPath(output),
-            Path.GetFullPath(trace));
+        Invocation invocation;
+        try
+        {
+            invocation = new Invocation(
+                Path.GetFullPath(input),
+                Path.GetFullPath(output),
+                Path.GetFullPath(trace),
+                OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        }
+        catch (ArgumentException)
+        {
+            throw new RuntimeFailure(2, "APR_USAGE_INVALID", "Input, output, and trace paths must be valid.");
+        }
+        catch (NotSupportedException)
+        {
+            throw new RuntimeFailure(2, "APR_USAGE_INVALID", "Input, output, and trace paths must be valid.");
+        }
+
         if (invocation.HasConflictingPaths || fileSystem.Exists(invocation.OutputPath) || fileSystem.Exists(invocation.TracePath))
         {
             throw new RuntimeFailure(2, "APR_USAGE_INVALID", "Input, output, and trace paths must be distinct and new.");
@@ -276,6 +292,18 @@ public sealed class RuntimeApplication
         typeof(RuntimeApplication).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
         ?? throw new InvalidOperationException("Runtime version metadata is missing.");
 
+    private async Task TryDeleteAsync(string path)
+    {
+        try
+        {
+            await fileSystem.DeleteIfExistsAsync(path);
+        }
+        catch
+        {
+            // Cleanup never replaces the first pipeline failure.
+        }
+    }
+
     private static ReviewTrace CreateTrace(string inputHash, RuntimeDiagnostic[] diagnostics) =>
         new(1, RuntimeVersion, inputHash, "deterministic-fixture", [], [], diagnostics);
 
@@ -286,12 +314,12 @@ public sealed class RuntimeApplication
         stderr.WriteLineAsync($"{code}: {message}");
 }
 
-internal sealed record Invocation(string InputPath, string OutputPath, string TracePath)
+internal sealed record Invocation(string InputPath, string OutputPath, string TracePath, StringComparer PathComparer)
 {
     public bool HasConflictingPaths =>
-        StringComparer.OrdinalIgnoreCase.Equals(InputPath, OutputPath) ||
-        StringComparer.OrdinalIgnoreCase.Equals(InputPath, TracePath) ||
-        StringComparer.OrdinalIgnoreCase.Equals(OutputPath, TracePath);
+        PathComparer.Equals(InputPath, OutputPath) ||
+        PathComparer.Equals(InputPath, TracePath) ||
+        PathComparer.Equals(OutputPath, TracePath);
 }
 
 internal sealed class RuntimeFailure(int exitCode, string code, string message, bool attemptFailureTrace = false) : Exception(message)

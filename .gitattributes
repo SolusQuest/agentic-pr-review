@@ -1,1 +1,1 @@
-protocol/fixtures/v1/cases/** text eol=lf
+protocol/fixtures/v1/cases/** -text

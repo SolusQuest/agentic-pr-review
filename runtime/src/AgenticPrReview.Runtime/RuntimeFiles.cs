@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace AgenticPrReview.Runtime;
 
 public sealed record StagedFile(string TempPath, string FinalPath);
@@ -13,7 +15,7 @@ public interface IRuntimeFileSystem
 
 public sealed class PhysicalRuntimeFileSystem : IRuntimeFileSystem
 {
-    public bool Exists(string path) => File.Exists(path);
+    public bool Exists(string path) => File.Exists(path) || Directory.Exists(path);
 
     public Task<byte[]> ReadAllBytesAsync(string path) => File.ReadAllBytesAsync(path);
 
@@ -43,7 +45,25 @@ public sealed class PhysicalRuntimeFileSystem : IRuntimeFileSystem
 
     public Task CommitNoReplaceAsync(StagedFile stagedFile)
     {
-        File.Move(stagedFile.TempPath, stagedFile.FinalPath, overwrite: false);
+        if (OperatingSystem.IsWindows())
+        {
+            if (!NativeFileOperations.MoveFile(stagedFile.TempPath, stagedFile.FinalPath))
+            {
+                throw new IOException("The destination could not be committed without replacement.");
+            }
+        }
+        else if (OperatingSystem.IsLinux())
+        {
+            if (NativeFileOperations.RenameNoReplace(stagedFile.TempPath, stagedFile.FinalPath) != 0)
+            {
+                throw new IOException("The destination could not be committed without replacement.");
+            }
+        }
+        else
+        {
+            throw new PlatformNotSupportedException("This platform has no verified no-replace rename primitive.");
+        }
+
         return Task.CompletedTask;
     }
 
@@ -56,4 +76,20 @@ public sealed class PhysicalRuntimeFileSystem : IRuntimeFileSystem
 
         return Task.CompletedTask;
     }
+}
+
+internal static partial class NativeFileOperations
+{
+    private const int AtFileSystemDirectory = -100;
+    private const uint RenameNoReplaceFlag = 1;
+
+    [LibraryImport("kernel32", EntryPoint = "MoveFileW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool MoveFile(string existingFileName, string newFileName);
+
+    [LibraryImport("libc", EntryPoint = "renameat2", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int RenameAt2(int oldDirectory, string oldPath, int newDirectory, string newPath, uint flags);
+
+    internal static int RenameNoReplace(string source, string destination) =>
+        RenameAt2(AtFileSystemDirectory, source, AtFileSystemDirectory, destination, RenameNoReplaceFlag);
 }
