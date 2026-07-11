@@ -433,12 +433,14 @@ async function runProcess(
       settle({ code: null, signal: null, spawnError: err });
       return;
     }
-    if (!terminationReason) {
-      terminationReason = { kind: 'host-terminated' };
-      // No prior kill was scheduled; arm a bounded deadline so we do not hang if
-      // 'close' never arrives on this control-error path.
-      armCloseDeadline();
-    }
+    // Post-spawn control error: we deliberately do NOT change terminationReason. If a
+    // primary termination (timeout, cancelled, stream-hard-cap) is already recorded it
+    // must win. If none is recorded and 'close' still arrives with a real exit code,
+    // that natural exit should classify the outcome. As a safety net for the case where
+    // the OS never delivers 'close' after such a control error, arm the bounded close
+    // deadline so the adapter cannot hang; the final fallthrough classifies the
+    // no-terminationReason + no-exit case as host-terminated.
+    armCloseDeadline();
   });
   child.on('close', (code, signalCode) => settle({ code, signal: signalCode }));
 
