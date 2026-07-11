@@ -34,11 +34,11 @@
     "resultSha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$",
-      "description": "Optional. Lowercase hex SHA-256 of the exact ReviewResultV1 file bytes produced by the runtime. Absent when no valid result was produced (failure path)."
+      "description": "Optional. Lowercase hex SHA-256 of the exact ReviewResultV1 file bytes produced by the runtime. It may be absent when no valid result was produced and on a successful non-circular result/trace hash shape."
     },
     "mode": {
       "enum": ["deterministic-fixture", "live-provider", "skipped"],
-      "description": "Execution context. Reflects what kind of run produced this trace, not success or failure. A failure during a live-provider run still uses mode 'live-provider'; absence of resultSha256 signals the failure path. Failure taxonomy and exit-code mapping are deferred to #20."
+      "description": "Execution context. Reflects what kind of run produced this trace, not success or failure. A failure during a live-provider run still uses mode 'live-provider'. Absence of resultSha256 does not itself identify a failure because a successful non-circular result/trace hash shape may omit it. Failure taxonomy and exit-code mapping are defined by docs/20_architecture/runtime-cli-process-contract.md."
     },
     "fixture": {
       "type": "string",

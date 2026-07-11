@@ -10,9 +10,9 @@
  *
  * Hash chain:
  *   ReviewInputV1  --(inputSha256)-->  ReviewTraceV1
- *   ReviewResultV1 --(resultSha256)--> ReviewTraceV1
+ *   ReviewResultV1 --(optional resultSha256)--> ReviewTraceV1
  *   ReviewResultV1.trace.sha256 = SHA-256 of trace file bytes (result points to trace)
- *   ReviewTraceV1.resultSha256  = SHA-256 of result file bytes (trace points back to result)
+ *   ReviewTraceV1.resultSha256  = optional SHA-256 of result file bytes (trace points back to result)
  *
  * Privacy: trace payload contains no raw provider bodies, secrets, auth headers, raw prompts,
  * or unbounded tool output. Closed shapes reject credential-shaped fields. JSON Schema cannot
@@ -62,7 +62,7 @@ export interface ReviewTraceV1 {
   runtimeVersion: string;
   /** Required. Lowercase hex SHA-256 of the exact ReviewInputV1 file bytes consumed by the runtime. */
   inputSha256: string;
-  /** Optional. Lowercase hex SHA-256 of the exact ReviewResultV1 file bytes produced by the runtime. Absent on failure path. */
+  /** Optional. Lowercase hex SHA-256 of exact result bytes; absent on failure and non-circular success paths. */
   resultSha256?: string;
   /** Execution context. */
   mode: ReviewTraceModeV1;

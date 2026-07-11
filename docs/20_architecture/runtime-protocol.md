@@ -70,7 +70,7 @@ ReviewTraceV1 includes:
 - `protocolVersion` - integer protocol-generation version, shared across input/result/trace
 - `runtimeVersion` - opaque runtime version supplied by the runtime
 - `inputSha256` - required lowercase hex SHA-256 of the consumed input file bytes
-- `resultSha256` - optional lowercase hex SHA-256 of the produced result file bytes (absent on failure path)
+- `resultSha256` - optional lowercase hex SHA-256 of the produced result file bytes; it is absent when no valid result exists and on the M2 CLI's non-circular success path
 - `mode` - execution context (`deterministic-fixture | live-provider | skipped`); reflects run type, not success/failure
 - `fixture` - optional metadata for test fixture detail (expected only for `deterministic-fixture`)
 - `provider` - optional sanitized provider metadata (`name`, `model`, `requestCount`)
@@ -82,7 +82,7 @@ ReviewTraceV1 includes:
 
 Key trace conventions:
 
-- `inputSha256` is required because a trace always corresponds to a consumed input; `resultSha256` is optional because failure paths may produce a trace without a valid result
+- `inputSha256` is required because a trace always corresponds to a consumed input; `resultSha256` is optional because traces may lack a valid result and because the M2 CLI uses a non-circular success shape
 - `mode` does not express failure taxonomy; failure classification and exit-code mapping are defined by [runtime-cli-process-contract.md](./runtime-cli-process-contract.md)
 - `toolCalls` is required (empty array allowed); entries carry no content (no `inputSummary`/`outputSummary`), enforcing the sanitized boundary structurally
 - `usage` excludes `lineageTotals` and `usageBudgetStatus` - those are host-owned accumulated state, not runtime-produced
@@ -91,14 +91,14 @@ Key trace conventions:
 
 ### Hash chain
 
-The three contracts form a bidirectional hash chain:
+The schemas expose optional hash links that can point in both directions:
 
 - `ReviewResultV1.inputSha256` = SHA-256 of input file bytes (result echoes input)
 - `ReviewResultV1.trace.sha256` = SHA-256 of trace file bytes (result points to trace)
 - `ReviewTraceV1.inputSha256` = SHA-256 of input file bytes (trace echoes input)
 - `ReviewTraceV1.resultSha256` = SHA-256 of result file bytes (trace points back to result)
 
-`ReviewResultV1.trace.sha256` and `ReviewTraceV1.resultSha256` are distinct fields with distinct hash targets.
+`ReviewResultV1.trace.sha256` and `ReviewTraceV1.resultSha256` are distinct fields with distinct hash targets. Exact-byte result and trace files cannot contain both links without a circular dependency. The M2 CLI therefore uses the non-circular shape in [runtime-cli-process-contract.md](./runtime-cli-process-contract.md): the trace omits `resultSha256`, while the result contains `trace.sha256`.
 
 ### Privacy
 
