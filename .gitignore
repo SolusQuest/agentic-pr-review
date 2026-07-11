@@ -5,3 +5,4 @@ dist/
 !.github/actions/agentic-pr-review/dist/index.js.LEGAL.txt
 *.tsbuildinfo
 .agentic-pr-review-local/
+.local/
