@@ -38,7 +38,14 @@ public sealed class PhysicalRuntimeFileSystem : IRuntimeFileSystem
         }
         catch
         {
-            await DeleteIfExistsAsync(tempPath);
+            try
+            {
+                await DeleteIfExistsAsync(tempPath);
+            }
+            catch
+            {
+                // Cleanup must not replace the staging failure.
+            }
             throw;
         }
     }

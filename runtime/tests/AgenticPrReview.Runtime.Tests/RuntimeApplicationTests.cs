@@ -129,6 +129,40 @@ public sealed class RuntimeApplicationTests
     }
 
     [Fact]
+    public async Task InputReadAndJsonFailuresUseStableSanitizedDiagnostics()
+    {
+        using var missing = new TemporaryFiles();
+        File.Delete(missing.InputPath);
+        var unreadable = await RunAsync(missing.InputPath, missing.OutputPath, missing.TracePath);
+        AssertFailure(unreadable, 40, "APR_INPUT_READ_FAILED:");
+
+        using var invalid = new TemporaryFiles();
+        await File.WriteAllTextAsync(invalid.InputPath, "{not json");
+        var invalidJson = await RunAsync(invalid.InputPath, invalid.OutputPath, invalid.TracePath);
+        AssertFailure(invalidJson, 10, "APR_INPUT_JSON_INVALID:");
+    }
+
+    [Fact]
+    public async Task InternalExecutionFailurePreservesTheContractAndDoesNotLeakExceptionData()
+    {
+        using var files = new TemporaryFiles();
+        var application = new RuntimeApplication(executor: new ThrowingExecutor(new InvalidOperationException("secret-prompt C:\\private\\raw.json")));
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await application.RunAsync(["review", "--input", files.InputPath, "--output", files.OutputPath, "--trace", files.TracePath], stdout, stderr);
+
+        var diagnostic = stderr.ToString();
+        Assert.Equal(20, exitCode);
+        Assert.Empty(stdout.ToString());
+        Assert.StartsWith("APR_RUNTIME_INTERNAL:", diagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-prompt", diagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain("private", diagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain(Environment.NewLine + Environment.NewLine, diagnostic, StringComparison.Ordinal);
+        Assert.True(Encoding.UTF8.GetByteCount(diagnostic) <= 1000);
+    }
+
+    [Fact]
     public async Task SchemaValidUnboundedIntegersSurviveTheTypedInputBoundary()
     {
         using var files = new TemporaryFiles();
@@ -273,6 +307,15 @@ public sealed class RuntimeApplicationTests
     }
 
     private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+
+    private static void AssertFailure(RunResult result, int exitCode, string code)
+    {
+        Assert.Equal(exitCode, result.ExitCode);
+        Assert.Empty(result.StandardOutput);
+        Assert.StartsWith(code, result.StandardError, StringComparison.Ordinal);
+        Assert.True(Encoding.UTF8.GetByteCount(result.StandardError) <= 1000);
+        Assert.Single(result.StandardError.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
+    }
 
     private sealed record RunResult(int ExitCode, string StandardOutput, string StandardError);
 
