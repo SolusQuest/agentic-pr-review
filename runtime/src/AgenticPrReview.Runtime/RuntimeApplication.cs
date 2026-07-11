@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace AgenticPrReview.Runtime;
 
@@ -69,8 +70,8 @@ public sealed class RuntimeApplication
 
         using (input)
         {
-            ValidateInputVersion(input.RootElement);
-            if (!schemas.IsValid(SchemaKind.Input, input.RootElement))
+            var versionIsOne = ValidateInputVersion(input.RootElement);
+            if (!IsInputSchemaValid(input.RootElement, versionIsOne))
             {
                 throw new RuntimeFailure(10, "APR_INPUT_SCHEMA_INVALID", "Input does not satisfy ReviewInputV1.");
             }
@@ -210,7 +211,25 @@ public sealed class RuntimeApplication
         }
     }
 
-    private static void ValidateInputVersion(JsonElement input)
+    private bool IsInputSchemaValid(JsonElement input, bool versionIsOne)
+    {
+        if (schemas.IsValid(SchemaKind.Input, input))
+        {
+            return true;
+        }
+
+        if (!versionIsOne)
+        {
+            return false;
+        }
+
+        var normalized = JsonNode.Parse(input.GetRawText())!.AsObject();
+        normalized["protocolVersion"] = 1;
+        using var document = JsonDocument.Parse(normalized.ToJsonString());
+        return schemas.IsValid(SchemaKind.Input, document.RootElement);
+    }
+
+    private static bool ValidateInputVersion(JsonElement input)
     {
         if (input.ValueKind != JsonValueKind.Object || !input.TryGetProperty("protocolVersion", out var version) ||
             version.ValueKind != JsonValueKind.Number || !TryClassifyJsonInteger(version.GetRawText(), out var isOne))
@@ -222,6 +241,8 @@ public sealed class RuntimeApplication
         {
             throw new RuntimeFailure(10, "APR_PROTOCOL_VERSION_UNSUPPORTED", "Input protocol version is unsupported.");
         }
+
+        return true;
     }
 
     private static bool TryClassifyJsonInteger(string number, out bool isOne)
