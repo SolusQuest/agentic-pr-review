@@ -33,8 +33,13 @@ BOOTSTRAP_EXPECTED_TRACE="${REPO_ROOT}/runtime/tests/fixtures/deterministic/boot
 _tempdirs=()
 
 _cleanup() {
+  # Best-effort cleanup. Iterating an empty array under 'set -u' is safe with the
+  # [@]:+ expansion.
+  if [[ ${#_tempdirs[@]} -eq 0 ]]; then
+    return 0
+  fi
   local dir
-  for dir in "${_tempdirs[@]:-}"; do
+  for dir in "${_tempdirs[@]}"; do
     if [[ -n "${dir:-}" && -d "${dir}" ]]; then
       rm -rf -- "${dir}" || true
     fi
@@ -42,11 +47,17 @@ _cleanup() {
 }
 trap _cleanup EXIT
 
-_mktemp() {
-  local dir
-  dir="$(mktemp -d)"
-  _tempdirs+=("${dir}")
-  printf '%s\n' "${dir}"
+# _new_tempdir <out_var>
+#
+# Allocate a fresh temporary directory in the *caller's* shell and register it for
+# cleanup. Callers must not wrap this in $(...); command substitution runs in a
+# subshell and would silently drop the registration, defeating the trap.
+_new_tempdir() {
+  local __outvar="$1"
+  local __dir
+  __dir="$(mktemp -d)"
+  _tempdirs+=("${__dir}")
+  printf -v "${__outvar}" '%s' "${__dir}"
 }
 
 _require_file() {
@@ -86,7 +97,7 @@ run_framework() {
   _require_file "${BOOTSTRAP_EXPECTED_TRACE}"
 
   local workdir
-  workdir="$(_mktemp)"
+  _new_tempdir workdir
   local input="${workdir}/input.json"
   local result="${workdir}/result.json"
   local trace="${workdir}/trace.json"
@@ -117,8 +128,8 @@ run_aot() {
 
   local publish_dir
   local workdir
-  publish_dir="$(_mktemp)"
-  workdir="$(_mktemp)"
+  _new_tempdir publish_dir
+  _new_tempdir workdir
   if [[ "${publish_dir}" == "${workdir}" ]]; then
     printf 'error: publish and work directories must differ\n' >&2
     exit 1

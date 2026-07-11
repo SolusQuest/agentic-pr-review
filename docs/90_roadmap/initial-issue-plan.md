@@ -5,8 +5,9 @@ to seed GitHub milestones and issues for M0 through M2 only. Later roadmap phase
 until their dependencies are clearer.
 
 Status: M0, M1, and M2 are complete. #21 closes M2 by making both the framework-dependent and
-`linux-x64` Native AOT deterministic runtime paths recurring CI. The next active roadmap phase is
-M3 (TypeScript runtime integration).
+`linux-x64` Native AOT deterministic runtime paths recurring CI. The next critical-path
+implementation phase is M3 (TypeScript runtime integration); M4's design gate in #29 remains
+active in parallel.
 
 ## Milestones To Create Now
 
