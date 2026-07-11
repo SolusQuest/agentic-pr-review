@@ -154,12 +154,15 @@ it. Explicit provider-originated failures use exit 30; unrecognized exceptions u
 validation failure uses 10, runtime-generated invalid output uses 20, and otherwise valid content
 that cannot be committed uses 40.
 
-| Primary failure point                                                         | Final result | Final trace                   |
-| ----------------------------------------------------------------------------- | ------------ | ----------------------------- |
-| usage/path preflight, input read, JSON/protocol/schema validation             | absent       | absent                        |
-| runtime-version mismatch, provider/internal execution, result self-validation | absent       | optional valid failure trace  |
-| trace self-validation, trace staging, or trace commit                         | absent       | absent                        |
-| result commit after trace commit                                              | absent       | valid orphan trace may remain |
+| Primary failure point                                                                     | Current-invocation final result | Current-invocation final trace                   |
+| ----------------------------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------ |
+| usage/path preflight, input read, JSON/protocol/schema validation                         | none                            | none                                             |
+| runtime-version mismatch, provider/internal execution, result self-validation             | none                            | optional valid failure trace                     |
+| trace self-validation, trace staging, result staging before final commit, or trace commit | none                            | none                                             |
+| result commit after trace commit                                                          | none                            | valid current-invocation orphan trace may remain |
+
+`none` does not assert that the filesystem path is absent. A caller-owned or race-created
+destination may remain present and must remain untouched.
 
 A failure trace is permitted only after the input fully validates as ReviewInputV1 and its
 inputSha256 is known. It omits resultSha256, includes only template-generated sanitized
@@ -184,7 +187,7 @@ Issue #19 implements focused table-driven/unit or process tests covering:
 - missing/unreadable input; invalid JSON; missing/unsupported protocol versions; schema-invalid
   input; and runtime-version mismatch;
 - injected runtime-internal and provider failures;
-- result/trace self-validation and commit failures;
+- result/trace self-validation, staging, and commit failures;
 - primary-error preservation when failure-trace or cleanup work also fails;
 - the final-state matrix, including an orphan trace after result commit failure;
 - repeated exit/diagnostic-code stability;
