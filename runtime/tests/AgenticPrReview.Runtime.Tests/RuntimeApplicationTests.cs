@@ -239,6 +239,22 @@ public sealed class RuntimeApplicationTests
     }
 
     [Fact]
+    public async Task TraceCommitFailureLeavesNoSuccessfulFiles()
+    {
+        using var files = new TemporaryFiles();
+        var application = new RuntimeApplication(new FailingFileSystem(new PhysicalRuntimeFileSystem(), failCommit: true));
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await application.RunAsync(["review", "--input", files.InputPath, "--output", files.OutputPath, "--trace", files.TracePath], stdout, stderr);
+
+        Assert.Equal(40, exitCode);
+        Assert.False(File.Exists(files.TracePath));
+        Assert.False(File.Exists(files.OutputPath));
+        Assert.StartsWith("APR_TRACE_WRITE_FAILED:", stderr.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task DestinationCreatedAfterPreflightIsNotOverwritten()
     {
         using var files = new TemporaryFiles();
