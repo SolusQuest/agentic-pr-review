@@ -143,6 +143,26 @@ public sealed class RuntimeApplicationTests
     }
 
     [Fact]
+    public async Task MissingAndNonIntegerProtocolVersionsFailAsInputSchemaErrors()
+    {
+        using var missing = new TemporaryFiles();
+        await missing.UpdateInputAsync(node => node.Remove("protocolVersion"));
+        AssertFailure(await RunAsync(missing.InputPath, missing.OutputPath, missing.TracePath), 10, "APR_INPUT_SCHEMA_INVALID:");
+
+        using var nonInteger = new TemporaryFiles();
+        await nonInteger.UpdateInputAsync(node => node["protocolVersion"] = "one");
+        AssertFailure(await RunAsync(nonInteger.InputPath, nonInteger.OutputPath, nonInteger.TracePath), 10, "APR_INPUT_SCHEMA_INVALID:");
+    }
+
+    [Fact]
+    public async Task IncrementalFixtureExecutesSuccessfully()
+    {
+        using var files = new TemporaryFiles("valid-input-incremental.json");
+        await files.UpdateInputAsync(node => node["requestedRuntimeVersion"] = null);
+        Assert.Equal(0, (await RunAsync(files.InputPath, files.OutputPath, files.TracePath)).ExitCode);
+    }
+
+    [Fact]
     public async Task InternalExecutionFailurePreservesTheContractAndDoesNotLeakExceptionData()
     {
         using var files = new TemporaryFiles();
@@ -255,6 +275,36 @@ public sealed class RuntimeApplicationTests
     }
 
     [Fact]
+    public async Task TraceCommitRaceDoesNotOverwriteTheDestination()
+    {
+        using var files = new TemporaryFiles();
+        var application = new RuntimeApplication(new FailingFileSystem(new PhysicalRuntimeFileSystem(), createDestinationAtCommit: 1));
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        var exitCode = await application.RunAsync(["review", "--input", files.InputPath, "--output", files.OutputPath, "--trace", files.TracePath], stdout, stderr);
+
+        Assert.Equal(40, exitCode);
+        Assert.Equal("sentinel", await File.ReadAllTextAsync(files.TracePath));
+        Assert.False(File.Exists(files.OutputPath));
+    }
+
+    [Fact]
+    public async Task TraceSelfValidationFailureCreatesNoFiles()
+    {
+        using var files = new TemporaryFiles();
+        var oversized = new string('x', 1001);
+        var application = new RuntimeApplication(executor: new ReturningExecutor(new ExecutionOutcome([], [new RuntimeDiagnostic("APR_TEST", oversized, "error")])));
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        var exitCode = await application.RunAsync(["review", "--input", files.InputPath, "--output", files.OutputPath, "--trace", files.TracePath], stdout, stderr);
+
+        Assert.Equal(20, exitCode);
+        Assert.StartsWith("APR_OUTPUT_SELF_VALIDATION_FAILED:", stderr.ToString(), StringComparison.Ordinal);
+        Assert.False(File.Exists(files.TracePath));
+        Assert.False(File.Exists(files.OutputPath));
+    }
+
+    [Fact]
     public async Task DestinationCreatedAfterPreflightIsNotOverwritten()
     {
         using var files = new TemporaryFiles();
@@ -350,6 +400,7 @@ public sealed class RuntimeApplicationTests
         bool failCommit = false,
         bool failSecondCommit = false,
         bool createDestinationOnSecondCommit = false,
+        int createDestinationAtCommit = 0,
         int failStageAt = 0,
         bool failDelete = false) : IRuntimeFileSystem
     {
@@ -366,7 +417,7 @@ public sealed class RuntimeApplicationTests
         public Task CommitNoReplaceAsync(StagedFile stagedFile)
         {
             commits++;
-            if (createDestinationOnSecondCommit && commits == 2)
+            if ((createDestinationOnSecondCommit && commits == 2) || commits == createDestinationAtCommit)
             {
                 File.WriteAllText(stagedFile.FinalPath, "sentinel");
             }
@@ -383,11 +434,13 @@ public sealed class RuntimeApplicationTests
     private sealed class TemporaryFiles : IDisposable
     {
         private readonly string root = Path.Combine(Path.GetTempPath(), $"apr-runtime-tests-{Guid.NewGuid():N}");
-        public TemporaryFiles()
+        public TemporaryFiles(string inputFile = "input.json")
         {
             Directory.CreateDirectory(root);
             InputPath = Path.Combine(root, "input.json");
-            var source = Path.Combine(AppContext.BaseDirectory, "protocol", "fixtures", "v1", "cases", "bootstrap", "input.json");
+            var source = inputFile == "input.json"
+                ? Path.Combine(AppContext.BaseDirectory, "protocol", "fixtures", "v1", "cases", "bootstrap", inputFile)
+                : Path.Combine(AppContext.BaseDirectory, "protocol", "fixtures", "v1", inputFile);
             File.Copy(source, InputPath);
         }
 
