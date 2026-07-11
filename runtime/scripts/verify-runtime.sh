@@ -33,8 +33,8 @@ BOOTSTRAP_EXPECTED_TRACE="${REPO_ROOT}/runtime/tests/fixtures/deterministic/boot
 _tempdirs=()
 
 _cleanup() {
-  # Best-effort cleanup. Iterating an empty array under 'set -u' is safe with the
-  # [@]:+ expansion.
+  # Best-effort cleanup. Guard the empty array before iteration so 'set -u' does not
+  # trip on an unset [@] expansion.
   if [[ ${#_tempdirs[@]} -eq 0 ]]; then
     return 0
   fi
