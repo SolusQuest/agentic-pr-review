@@ -174,17 +174,22 @@ public sealed class RuntimeApplication
     {
         if (failure.AttemptFailureTrace)
         {
+            StagedFile? staged = null;
             try
             {
                 var trace = CreateTrace(inputHash, [new RuntimeDiagnostic(failure.Code, failure.Message, "error")]);
                 var bytes = RuntimeJson.SerializeTrace(trace);
                 ValidateOutput(SchemaKind.Trace, bytes, "failure trace");
-                var staged = await fileSystem.StageAsync(invocation.TracePath, bytes);
+                staged = await fileSystem.StageAsync(invocation.TracePath, bytes);
                 await fileSystem.CommitNoReplaceAsync(staged);
             }
             catch
             {
                 // The first pipeline error remains authoritative.
+                if (staged is not null)
+                {
+                    await fileSystem.DeleteIfExistsAsync(staged.TempPath);
+                }
             }
         }
 
