@@ -12,7 +12,7 @@ When a future external runtime binary exists, the action version and default run
 
 The current action is a JavaScript action with bundled `dist/` output.
 
-Future C# runtime distribution may use Native AOT binaries published as release assets. If introduced, release assets should include checksums and exact version selection.
+The selected C# runtime distribution will use Native AOT binaries published as release assets once the runtime reaches the distribution phase. Release assets must include checksums and exact version selection.
 
 ## Breaking Changes
 

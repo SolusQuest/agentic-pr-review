@@ -8,7 +8,7 @@ and which near-term milestones are ready to track in issues.
 
 `agentic-pr-review` should become a GitHub-first, stateful, policy-driven PR review runtime that
 produces structured, low-noise, replayable code review findings through a deterministic, safe
-publishing pipeline.
+publishing pipeline while preserving cost-efficient session continuation.
 
 In short:
 
@@ -24,6 +24,7 @@ The project optimizes for:
 - safe publishing;
 - replayability;
 - eval-driven improvement;
+- measurable quality and cache economics;
 - GitHub-first practicality;
 - a clear future runtime boundary.
 
@@ -31,7 +32,13 @@ The project-owned runtime has three product-level constraints:
 
 1. **Runtime replacement** - the self-developed runtime is the long-term live review path; `claude-code-cli` is the current baseline kept in a compatibility and maintenance role.
 2. **Cross-session context recovery** - the runtime resumes review context across separate GitHub Actions runs without depending on Claude Code's session mechanism.
-3. **Stable provider request prefix** - the runtime constructs LLM API requests with a strict, stable cacheable prefix for prefix-cache reuse across resumed sessions.
+3. **Cache-efficient session continuation** - for supported prefix-cache providers, the runtime reconstructs a strict, stable cacheable prefix across resumed sessions and demonstrates measurable cache effectiveness and normalized input cost. Stable construction is a contract; an individual provider-reported cache hit is an observed outcome.
+
+## Engineering Direction
+
+The project intentionally uses a TypeScript host and a project-owned C# runtime, with Native AOT as the runtime distribution target. This cross-language shape is an explicit engineering objective: it creates a clear process and protocol boundary and develops production-style experience with C# agent runtimes, deterministic serialization, provider orchestration, and verifiable binary distribution.
+
+The project accepts the additional build, versioning, and release complexity. C# and Native AOT remain architecture commitments rather than product success criteria; quality, safety, resumability, cache economics, and reliability still determine whether the runtime path graduates.
 
 ## Non-Goals
 
@@ -65,13 +72,13 @@ is to make the runtime boundary explicit, schema-first, and testable.
 
 ## Target Architecture
 
-Preferred long-term shape:
+Selected long-term shape:
 
 ```text
 GitHub Action first; future GitHub App only if productization needs justify it
   -> TypeScript host / adapter / publisher
   -> schema-first JSON protocol
-  -> C# review runtime, preferably distributed as Native AOT once the boundary is proven
+  -> C# review runtime, distributed as Native AOT once behavior and compatibility are proven
   -> provider and repo-local tool orchestration
   -> structured findings, sanitized traces, fixtures, and replay
 ```
@@ -86,7 +93,7 @@ TypeScript remains responsible for:
 - runtime binary resolution and invocation;
 - final side-effect safety checks.
 
-The future runtime core is responsible for:
+The project-owned C# runtime core is responsible for:
 
 - reading sanitized review input;
 - validating protocol version;
@@ -134,9 +141,9 @@ Done when:
   metadata are rejected or excluded.
 - incompatible protocol versions fail closed.
 
-### Phase 2: Deterministic Runtime CLI
+### Phase 2: Deterministic C# Runtime CLI
 
-Goal: introduce a standalone deterministic runtime CLI behind the file protocol.
+Goal: introduce a standalone deterministic C# runtime CLI behind the file protocol and prove early Native AOT feasibility.
 
 Done when:
 
@@ -146,6 +153,7 @@ Done when:
 - documented exit codes distinguish success, contract errors, runtime errors, and provider errors;
 - deterministic provider behavior is stable across repeated runs and supports CI;
 - trace output is sanitized by default and contains no raw provider bodies or secrets.
+- the selected dependencies and CLI entrypoint can publish and run as an initial `linux-x64` Native AOT feasibility artifact without requiring production release packaging.
 
 ### Phase 3: TypeScript Runtime Integration
 
@@ -164,23 +172,23 @@ Done when:
 - failure modes fail closed without publishing invalid findings or uploading unsafe artifacts.
 - generated action bundle changes, if any, are validated with `npm run dist:check`.
 
-### Phase 4: Runtime Provider Interface And Repo-Local Tools
+### Phase 4: Cache-Efficient Runtime Provider Foundation
 
-Goal: move provider and tool orchestration behind project-owned runtime interfaces.
+Goal: establish cache-efficient cross-session live-provider execution behind project-owned C# runtime interfaces.
 
 Done when:
 
+- the session ledger and provider request prefix design is completed as the first Phase 4 gate;
+- a schema-versioned ledger and canonical prefix materializer have contract fixtures;
+- restored sessions reproduce the expected `prefixSha256` for the same versioned inputs;
+- the ledger is restored from and persisted to an approved durable state artifact across separate workflow runs;
+- missing, incompatible, corrupt, or unsafe ledger state falls back to bootstrap behavior without unsafe reuse;
 - the runtime provider interface supports deterministic and live providers.
 - live provider execution is available only in explicit trusted modes.
-- usage records, timeouts, malformed output, and provider failures are normalized into contract
-  diagnostics.
-- read, grep, glob, patch-aware readers, and bounded tool-result summaries are represented in
-  protocol and fixtures.
+- cache-read, cache-write, uncached-input, output usage, timeouts, malformed output, and provider failures are normalized when the provider exposes them;
+- representative resumed-session evaluations compare normalized input cost with a documented stateless baseline;
 - provider secrets stay out of files, logs, normal artifacts, traces, and structured outputs.
 - TypeScript still preserves fail-closed enforcement for budgets and publishing where needed.
-
-- the canonical session ledger and provider request prefix contract are designed before project-owned live provider implementation (see candidate issue BC);
-- the runtime owns deterministic provider request construction with a stable cacheable prefix and prefix-hash diagnostics;
 - `claude-code-cli` remains a compatibility and maintenance path while the project-owned live provider path is established as the intended long-term default.
 
 ### Phase 5: Stateful Memory And Safe Publisher Contracts
@@ -199,12 +207,12 @@ Done when:
 - non-commentable lines remain sticky-only.
 - publisher code never trusts runtime-provided GitHub metadata without validation.
 
-- long-lived ledger compatibility and a migration/deprecation policy for the runtime replacement path are defined;
-- cache-hit-rate is measurable as a cost and efficiency signal (this metric may also live in the Phase 6 evaluation harness).
+- long-lived ledger compatibility, invalidation, and schema migration behavior are defined;
+- cache effectiveness and normalized input cost are measurable without making a single provider cache miss a publisher failure.
 
-### Phase 6: Evaluation And Replay Harness
+### Phase 6: Evaluation, Replay, And Shadow Validation
 
-Goal: make review quality measurable and regressible.
+Goal: make review quality, cache economics, and runtime graduation evidence measurable and regressible.
 
 Done when:
 
@@ -212,15 +220,17 @@ Done when:
   behavior, provider failures, and malformed structured output.
 - at least one fixture exists for each required category.
 - eval exits non-zero on regression and produces deterministic CI-friendly output.
-- replay can consume a trace without GitHub Action state or GitHub credentials.
+- replay can consume a versioned replay bundle or manifest without GitHub credentials or live GitHub state; the bundle contains or content-addresses sanitized review input, runtime/provider identity, deterministic provider and tool fixture material, trace evidence, and actual or expected result data.
 - reports distinguish quality failures from infrastructure failures.
 - reports include true-positive, false-positive, duplicate, line mapping, incremental correctness,
-  token usage, and reproducibility signals.
+  token usage, cache-read ratio, normalized input cost, latency, and reproducibility signals.
+- a no-publish shadow mode can compare the project-owned runtime with the maintained baseline on the same sanitized review inputs.
+- documented promotion thresholds distinguish isolated provider cache misses from sustained prefix instability or cost regression.
 
-### Phase 7: Runtime Distribution
+### Phase 7: Runtime Distribution And Live Graduation
 
 Goal: ship the runtime as a pinned, verifiable release artifact after the runtime has stable protocol
-and useful provider behavior.
+and useful provider behavior, then make an evidence-based live-provider transition decision.
 
 Done when:
 
@@ -230,6 +240,8 @@ Done when:
 - the action maps default runtime version to action version and never downloads implicit `latest`.
 - `runtime_path` bypasses download and checksum but still validates runtime and protocol version.
 - release docs describe action/runtime compatibility.
+- quality, safety, cache economics, and operational thresholds for preferring the project-owned live path are satisfied.
+- the `claude-code-cli` compatibility, fallback, migration, and possible deprecation policy is decided from observed runtime evidence rather than calendar dates.
 
 ### Phase 8: Optional Language Intelligence
 
@@ -263,30 +275,36 @@ Create GitHub milestones for executable near-term work only:
 
 1. [`M0: Validation and roadmap baseline`](https://github.com/SolusQuest/agentic-pr-review/milestone/1)
 2. [`M1: Runtime protocol contract`](https://github.com/SolusQuest/agentic-pr-review/milestone/3)
-3. [`M2: Deterministic runtime CLI`](https://github.com/SolusQuest/agentic-pr-review/milestone/2)
+3. [`M2: Deterministic C# runtime CLI`](https://github.com/SolusQuest/agentic-pr-review/milestone/2)
+4. [`M3: TypeScript runtime integration`](https://github.com/SolusQuest/agentic-pr-review/milestone/5)
+5. [`M4: Cache-efficient runtime provider foundation`](https://github.com/SolusQuest/agentic-pr-review/milestone/4)
 
-Keep later phases as roadmap-only candidates until protocol and CLI decisions land.
+Keep M5 and M6 as roadmap-only phases until M3 integration and the M4 ledger/prefix design make their issue boundaries stable.
 
 The initial issue plan is maintained in
 [`initial-issue-plan.md`](./initial-issue-plan.md).
 
-## Post-M2 Candidate Issues
+M3-M6 sequencing and refinement-ready issue outlines are maintained in
+[`m3-m6-plan.md`](./m3-m6-plan.md).
 
-The following candidate issues are not part of the initial M0-M2 issue plan. They record work
-discovered after the initial issue seeding and should be created once the docs direction lands.
+## Post-M2 Planning Status
 
-### Candidate Issue BC: Design session ledger and provider request prefix contract
+The following issues are not part of the initial M0-M2 issue plan.
 
-Objective: define a canonical session ledger and provider request prefix contract so a project-owned
-runtime can resume across GitHub Actions runs and produce stable provider request prefixes for cache
-reuse.
+### M4 Foundation: Cache-efficient session ledger and provider request prefix contract
 
-This is a pre-Phase-4 gate: it does not block #17-#21, but it blocks project-owned live provider
-implementation.
+Issue [#29](https://github.com/SolusQuest/agentic-pr-review/issues/29) defines the first Phase 4 design gate: a canonical session ledger, stable provider request prefix, normalized cache usage, and cost non-regression model for resumed sessions.
 
-### Candidate Issue A: Define runtime replacement and Claude Code compatibility policy
+It does not block M2 or M3, but it blocks project-owned live provider implementation. Its design deliverable must create or identify the implementation issues needed to complete M4.
 
-Objective: document the migration, compatibility, and deprecation policy for moving from
-`claude-code-cli` to the project-owned runtime as the long-term default live path.
+### Post-M4 Candidate: Runtime context and tool orchestration
 
-Priority is lower than BC; create only if the docs do not fully settle compatibility policy.
+Full repo-local read, grep, glob, patch-aware access, bounded tool-result handling, and tool-loop policy do not block M4. They form a separate future roadmap track after the provider/session foundation is stable.
+
+This candidate must define tool contracts, stable/dynamic prefix placement, budgets, fixtures, and security boundaries before receiving a milestone or implementation issues.
+
+### Deferred Phase 7 Candidate: Runtime replacement and Claude Code compatibility policy
+
+Issue [#30](https://github.com/SolusQuest/agentic-pr-review/issues/30) is deferred until the project-owned live provider has Phase 6 quality, cache economics, safety, and operational evidence.
+
+The issue should remain closed and unmilestoned while deferred. Reopen it for Phase 7 live graduation rather than assigning it to M4.

@@ -1,14 +1,26 @@
 # Architecture Direction
 
-The project should evolve toward a narrow, review-specific architecture:
+The project is intentionally evolving toward a narrow, review-specific architecture:
 
 1. TypeScript GitHub Action host and publisher.
 2. C# review runtime core.
 3. Schema-first JSON protocol between them.
 
-This direction is a product architecture target, not a requirement to rewrite the current implementation immediately.
+This is the selected project architecture, not a claim that C# is universally better for PR review and not a requirement to rewrite the current TypeScript implementation immediately.
 
 The schema-first protocol is defined as JSON Schema files under `protocol/schemas/`; see `docs/20_architecture/runtime-protocol.md` for contract details.
+
+## Architecture Decision And Rationale
+
+The project deliberately accepts a cross-language host/runtime boundary:
+
+- TypeScript remains close to GitHub Actions and the existing deterministic publisher.
+- C# provides the project-owned review runtime implementation and a distinct environment for building provider, state, and orchestration capabilities.
+- Native AOT is the runtime distribution target so downstream workflows can use pinned, self-contained binaries without installing the .NET SDK.
+
+A TypeScript-only runtime would reduce build and release complexity, while Go would also provide straightforward static distribution. Those remain technically credible alternatives, but they are not the selected direction. Reopening the language decision requires concrete evidence that the C# or Native AOT constraints prevent the product requirements from being met.
+
+The protocol remains language-neutral. Contract fixtures and observable behavior, rather than shared implementation types, keep the TypeScript host and C# runtime aligned.
 
 ## TypeScript Responsibilities
 
@@ -30,7 +42,7 @@ The TypeScript publisher owns side effects.
 
 ## Runtime Core Responsibilities
 
-A future C# runtime core should be platform-neutral and review-specific:
+The project-owned C# runtime core should be platform-neutral and review-specific:
 
 - read sanitized review input;
 - validate protocol version;
@@ -61,13 +73,13 @@ The project-owned runtime owns the LLM API call path directly. It does not wrap 
 
 The project-owned runtime must resume review context across separate GitHub Actions runs without depending on Claude Code's `--resume` mechanism or `session.jsonl` files.
 
-To achieve this, the runtime maintains a canonical session ledger: a durable, schema-versioned record that can be restored from a state artifact and used to reconstruct the next provider request. The ledger is distinct from `ReviewTraceV1`, which is sanitized execution evidence for validation and replay and carries no conversation content.
+To achieve this, the runtime maintains a canonical session ledger: a durable, schema-versioned record that can be restored from a state artifact and used to reconstruct the next provider request. The ledger is distinct from `ReviewTraceV1`, which is sanitized execution evidence that may be referenced by a future replay bundle, carries no conversation content, and cannot replay a review by itself.
 
 See `docs/20_architecture/runtime-protocol.md` for the direction on a future ledger artifact, and `docs/20_architecture/security-boundary.md` for the artifact boundary the ledger must satisfy.
 
 ## Provider Request Prefix Contract
 
-The runtime must construct LLM API requests with a strict, stable cacheable prefix so that prefix-cache reuse is possible across resumed sessions. Cache hit is the result of this contract, not the contract itself.
+The runtime must construct LLM API requests with a strict, stable cacheable prefix so that prefix-cache reuse is possible across resumed sessions. Cache-efficient resumability is a product constraint. Byte-stable runtime-owned request construction is the enforceable contract; provider-reported cache behavior and resulting input cost are measured outcomes.
 
 The contract defines four invariants:
 
@@ -78,7 +90,9 @@ The contract defines four invariants:
 
 Byte-for-byte stability is defined over the runtime-owned canonical provider request-prefix serialization (deterministic key order, UTF-8, newline normalization, default-value omission, array ordering) - not over raw HTTP bodies, provider SDK internal objects, or tokenized prefixes.
 
-A `prefixSha256` diagnostic carries version and domain separation (contract version, template version, provider, model) to avoid false cross-version or cross-model cache-hit judgments. Provider-specific cache behavior is isolated behind provider adapters; the core contract owns deterministic request construction, not provider cache guarantees.
+A `prefixSha256` diagnostic carries version and domain separation (contract version, template version, provider, model) to avoid false cross-version or cross-model cache-hit judgments. Provider-specific cache eligibility, minimum prefix requirements, cache usage telemetry, and pricing inputs are isolated behind provider adapters or evaluation configuration.
+
+Supported adapters should normalize cache-read, cache-write, uncached-input, and output usage when the provider exposes those values. Representative resumed-session evaluations must compare normalized input cost with a documented stateless baseline. An isolated provider cache miss does not invalidate a review because eviction, time-to-live, and provider routing are outside the runtime's control; sustained prefix instability or cost regression blocks runtime graduation.
 
 The ledger must not be raw API request storage. See `docs/20_architecture/security-boundary.md` for the artifact-class constraints the ledger must satisfy.
 

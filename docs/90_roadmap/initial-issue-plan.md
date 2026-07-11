@@ -19,7 +19,7 @@ Exit criteria:
 
 ### [M1: Runtime protocol contract](https://github.com/SolusQuest/agentic-pr-review/milestone/3)
 
-Purpose: define and test the schema-first file protocol between the TypeScript host and future
+Purpose: define and test the schema-first file protocol between the TypeScript host and selected C#
 runtime without replacing the current action path.
 
 Exit criteria:
@@ -33,10 +33,10 @@ Exit criteria:
   version, path safety, and privacy cases.
 - GitHub credentials and write-only platform metadata are excluded from runtime input.
 
-### [M2: Deterministic runtime CLI](https://github.com/SolusQuest/agentic-pr-review/milestone/2)
+### [M2: Deterministic C# runtime CLI](https://github.com/SolusQuest/agentic-pr-review/milestone/2)
 
-Purpose: prove a standalone deterministic runtime CLI can consume the protocol and emit sanitized
-results/traces in local and CI validation.
+Purpose: prove a standalone deterministic C# runtime CLI can consume the protocol, emit sanitized
+results/traces, and pass an early Native AOT feasibility check in local and CI validation.
 
 Exit criteria:
 
@@ -46,6 +46,16 @@ Exit criteria:
 - invalid input produces no partial successful result.
 - deterministic provider output is stable across repeated runs and CI.
 - trace output is sanitized by default.
+- an initial `linux-x64` Native AOT publish executes a deterministic fixture without production
+  release packaging.
+- CI continuously publishes and executes the AOT binary against at least one deterministic fixture.
+
+M2 sequencing:
+
+- refine #20's stable exit taxonomy before #19 finalizes externally observable failure behavior;
+- #19 establishes the CLI, deterministic protocol path, minimal fail-closed plumbing, and initial AOT feasibility;
+- #20 owns the stable version, exit-code, and sanitized error contract;
+- #21 runs after #19 and #20 and continuously validates both framework-dependent and Native AOT paths in CI.
 
 ## Issues
 
@@ -183,12 +193,12 @@ Related docs and code:
 
 Milestone: `M1: Runtime protocol contract`
 
-Objective: define the minimal sanitized trace contract needed for deterministic validation and future
-replay.
+Objective: define the minimal sanitized trace contract needed for deterministic validation and as
+evidence referenced by future replay bundles.
 
-Context: trace data is important for replay and evaluation, but normal artifacts must not contain raw
-provider request or response bodies, secrets, auth headers, raw prompts, or unbounded tool
-results.
+Context: trace data is important evidence for evaluation and future replay bundles, but a trace is not
+a standalone replay artifact. Normal artifacts must not contain raw provider request or response
+bodies, secrets, auth headers, raw prompts, or unbounded tool results.
 
 In scope:
 
@@ -299,16 +309,16 @@ Related code:
 - `src/structured.ts`
 - `src/prompt.ts`
 
-### [Task: Add deterministic runtime CLI skeleton](https://github.com/SolusQuest/agentic-pr-review/issues/19)
+### [Feature: Add deterministic C# runtime CLI skeleton](https://github.com/SolusQuest/agentic-pr-review/issues/19)
 
-Milestone: `M2: Deterministic runtime CLI`
+Milestone: `M2: Deterministic C# runtime CLI`
 
 Objective: add a standalone runtime CLI skeleton that can read protocol input and emit deterministic
 protocol output without live provider secrets.
 
-Context: the long-term runtime direction is a C# review runtime, preferably distributed as Native AOT
-after the boundary is proven. The first CLI should prove the file protocol and deterministic
-behavior, not full provider orchestration.
+Context: the selected runtime direction is a C# review runtime distributed as Native AOT after behavior and compatibility are proven. The first CLI should prove the file protocol, deterministic behavior, and early AOT feasibility, not full provider orchestration or production packaging.
+
+Coordination: #20 owns the stable exit-code taxonomy. #19 may establish minimal fail-closed process behavior, but it must not independently freeze externally observable exit classes before #20 is refined.
 
 In scope:
 
@@ -318,10 +328,11 @@ In scope:
 - Write deterministic `ReviewResultV1` and minimal `ReviewTraceV1`.
 - Keep output stable for repeated runs.
 - Document local execution commands.
+- Prove the selected dependencies and CLI entrypoint can publish and run as an initial `linux-x64` Native AOT feasibility artifact.
 
 Out of scope:
 
-- Native AOT release packaging;
+- production Native AOT release packaging, checksums, or platform matrix;
 - live provider integration;
 - GitHub API calls;
 - comment publishing;
@@ -333,6 +344,7 @@ Acceptance criteria:
 - CLI does not read `GITHUB_TOKEN` or provider secret environment variables.
 - Output is deterministic for the same input.
 - Invalid input does not write a successful result.
+- An initial `linux-x64` Native AOT publish can execute a deterministic fixture without requiring the .NET SDK on the consuming path.
 - Relevant local validation passes.
 
 Related docs:
@@ -343,7 +355,7 @@ Related docs:
 
 ### [Task: Add runtime protocol version and exit-code handling](https://github.com/SolusQuest/agentic-pr-review/issues/20)
 
-Milestone: `M2: Deterministic runtime CLI`
+Milestone: `M2: Deterministic C# runtime CLI`
 
 Objective: define and test runtime protocol/version checks and stable CLI exit codes.
 
@@ -378,32 +390,39 @@ Related docs:
 - `docs/20_architecture/runtime-protocol.md`
 - `docs/20_architecture/security-boundary.md`
 
-### [Task: Add deterministic runtime CI fixture](https://github.com/SolusQuest/agentic-pr-review/issues/21)
+### [Task: Add deterministic and Native AOT runtime CI coverage](https://github.com/SolusQuest/agentic-pr-review/issues/21)
 
-Milestone: `M2: Deterministic runtime CLI`
+Milestone: `M2: Deterministic C# runtime CLI`
 
-Objective: add CI coverage proving the deterministic runtime CLI can validate fixtures and produce
-stable results.
+Objective: add CI coverage proving the framework-dependent and Native AOT runtime CLI paths can
+validate fixtures and produce stable results.
 
-Context: the runtime CLI should be exercised before TypeScript action integration. CI should catch
-protocol drift and deterministic output changes.
+Context: the runtime CLI should be exercised before TypeScript action integration. #19 establishes
+initial AOT feasibility, while this issue continuously catches protocol drift, deterministic output
+changes, and dependencies or serialization choices that break Native AOT.
+
+Dependencies: #19 and #20.
 
 In scope:
 
 - Add a local script or test target that runs the deterministic runtime against protocol fixtures.
-- Add CI coverage for the runtime fixture check.
+- Add CI coverage for the framework-dependent runtime fixture check.
+- Publish the `linux-x64` Native AOT binary in CI and execute it against at least one deterministic
+  fixture.
 - Keep validation provider-secret-free.
 - Document how to run the fixture check locally.
 
 Out of scope:
 
 - live provider smoke tests;
-- runtime release packaging;
+- production runtime release packaging, checksums, or download behavior;
 - action-to-runtime integration.
 
 Acceptance criteria:
 
-- CI runs the deterministic runtime fixture check without provider secrets.
+- CI runs framework-dependent and Native AOT deterministic fixture checks without provider secrets.
+- The AOT check executes the published binary rather than only proving that `dotnet publish`
+  succeeds.
 - Fixture output is deterministic or compared through stable normalized assertions.
 - Failing fixture validation fails CI.
 - Local validation instructions are documented.

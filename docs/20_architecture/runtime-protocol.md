@@ -14,7 +14,7 @@ The protocol is defined as JSON Schema files under `protocol/schemas/`:
 - `review-result.v1.json` - result contract (ReviewResultV1), defined in #15
 - `review-trace.v1.json` - trace contract (ReviewTraceV1), defined in #16
 
-TypeScript hand-writes convenience interfaces that mirror the schemas and uses ajv for runtime validation. JSON Schema is the authoritative source of truth shared with the future C# runtime. See `src/protocol/` for the TypeScript types and validation wiring.
+TypeScript hand-writes convenience interfaces that mirror the schemas and uses ajv for runtime validation. JSON Schema is the authoritative source of truth shared with the selected C# runtime. See `src/protocol/` for the TypeScript types and validation wiring.
 
 ## Input Contract (ReviewInputV1)
 
@@ -63,7 +63,7 @@ Key result conventions:
 
 ## Trace Contract (ReviewTraceV1)
 
-ReviewTraceV1 is defined (#16) and carries sanitized execution evidence for deterministic validation and future replay. The trace is runtime-produced and optional - a review can complete without one. The host stores, uploads, and verifies trace files but does not author their content.
+ReviewTraceV1 is defined (#16) and carries sanitized execution evidence for deterministic validation and as one input to a future replay bundle. The trace is runtime-produced and optional - a review can complete without one. The host stores, uploads, and verifies trace files but does not author their content.
 
 ReviewTraceV1 includes:
 
@@ -140,13 +140,29 @@ Paired cases verify non-circular hash links over exact file bytes (no canonical 
 
 The protocol uses JSON Schema (draft-07) files as the single source of truth, avoiding two independently drifting definitions of business behavior across TypeScript and C#. TypeScript interfaces are developer ergonomics only; the schemas are authoritative.
 
+## Future: Replay Bundle
+
+`ReviewTraceV1` is evidence-only and cannot independently replay a review. It does not contain review input, patch/context, provider request material, tool input/output, session content, or deterministic provider response fixtures.
+
+A future versioned replay bundle or manifest (for example, `ReplayBundleV1`) will contain or content-address approved durable copies of:
+
+- sanitized `ReviewInputV1`;
+- runtime, provider adapter, model, policy, and configuration identity;
+- deterministic provider and bounded tool fixture material needed to reproduce the reviewed path;
+- an approved sanitized ledger snapshot when a stateful replay scenario requires one;
+- `ReviewTraceV1` as execution evidence;
+- actual and/or expected `ReviewResultV1`;
+- content hashes plus protocol, runtime, template, and fixture versions.
+
+Replay must not require GitHub credentials or live GitHub state. Replay material remains bounded and sanitized and must not contain provider secrets, auth headers, raw HTTP bodies, unrestricted provider transcripts, private runner paths, or unbounded tool output. Phase 6 will define the bundle schema or manifest contract and its fixture lifecycle.
+
 ## Future: Session Ledger Artifact
 
 The current protocol defines `ReviewInputV1`, `ReviewResultV1`, and `ReviewTraceV1`. A future project-owned runtime that resumes context across GitHub Actions runs will need an additional artifact type (for example, `ProviderSessionLedgerV1` or `RuntimeSessionV1`) to carry the canonical session ledger.
 
 This ledger artifact is distinct from `ReviewTraceV1`:
 
-- `ReviewTraceV1` is sanitized execution evidence for validation and replay; it carries no conversation content.
+- `ReviewTraceV1` is sanitized execution evidence that may be referenced by a replay bundle; it carries no conversation content and is not sufficient for replay by itself.
 - The ledger carries enough canonical logical content to reconstruct the cacheable provider request prefix, within the security boundary defined in `docs/20_architecture/security-boundary.md`.
 
 The protocol will also need to partition stable context (system instructions, policy, tool definitions, canonical prior turns) from volatile context (current PR delta, run metadata) to serve prefix-cache stability. See `docs/20_architecture/architecture.md` (Provider Request Prefix Contract) for the invariants.
