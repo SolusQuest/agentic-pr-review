@@ -98,6 +98,15 @@ interface ProcessOutcome {
   streamCap?: 'stdout' | 'stderr';
   streamObservedBytes?: number;
   spawnErrorCode?: string;
+  /**
+   * True iff the child process either (a) never spawned (pre-spawn failure) or
+   * (b) actually emitted its 'close' event before runProcess returned. False
+   * when the bounded post-kill close deadline fired without an observed close.
+   * runInvocation() uses this flag to decide whether cleaning up the invocation
+   * directory is safe: with an unobserved close the child may still be running
+   * and could race with recursive rm on its cwd.
+   */
+  closeObserved: boolean;
 }
 
 interface RunProcessResult {
@@ -292,7 +301,7 @@ async function runProcess(
   // or executable validation must prevent the child process from ever starting.
   if (signal?.aborted) {
     return {
-      outcome: { kind: 'cancelled' },
+      outcome: { kind: 'cancelled', closeObserved: true },
       capture: { stdoutBytes: new Uint8Array(), stderrBytes: new Uint8Array() },
     };
   }
@@ -310,6 +319,7 @@ async function runProcess(
       outcome: {
         kind: 'spawn-failed',
         spawnErrorCode: sanitizeCauseCode(cause),
+        closeObserved: true,
       },
       capture: { stdoutBytes: new Uint8Array(), stderrBytes: new Uint8Array() },
     };
@@ -319,6 +329,7 @@ async function runProcess(
     code: number | null;
     signal: NodeJS.Signals | null;
     spawnError?: unknown;
+    closeObserved: boolean;
   }
 
   const stdoutChunks: Buffer[] = [];
@@ -350,10 +361,9 @@ async function runProcess(
   // is preserved on any code path that arms this deadline.
   const armCloseDeadline = (): void => {
     if (closeDeadlineTimer !== undefined) return;
-    const graceMs = process.platform === 'win32' ? closeGraceMs : sigtermGraceMs + closeGraceMs;
     closeDeadlineTimer = setTimeout(() => {
-      settle({ code: null, signal: null });
-    }, graceMs);
+      settle({ code: null, signal: null, closeObserved: false });
+    }, closeGraceMs);
     closeDeadlineTimer.unref?.();
   };
 
@@ -430,7 +440,7 @@ async function runProcess(
     // already sent a kill and the OS never delivers close, the bounded deadline
     // armed by killChild() will still resolve the promise.
     if (!spawnedOk) {
-      settle({ code: null, signal: null, spawnError: err });
+      settle({ code: null, signal: null, spawnError: err, closeObserved: true });
       return;
     }
     // Post-spawn control error: we deliberately do NOT change terminationReason. If a
@@ -442,7 +452,9 @@ async function runProcess(
     // no-terminationReason + no-exit case as host-terminated.
     armCloseDeadline();
   });
-  child.on('close', (code, signalCode) => settle({ code, signal: signalCode }));
+  child.on('close', (code, signalCode) =>
+    settle({ code, signal: signalCode, closeObserved: true }),
+  );
 
   const timeoutTimer = setTimeout(() => {
     setTermination({ kind: 'timeout' });
@@ -473,11 +485,14 @@ async function runProcess(
     stderrBytes: Buffer.concat(stderrChunks, Math.min(stderrLen, STDERR_HARD_CAP)),
   };
 
+  const closeObserved = exit.closeObserved;
+
   if (exit.spawnError !== undefined && exit.code === null && exit.signal === null) {
     return {
       outcome: {
         kind: 'spawn-failed',
         spawnErrorCode: sanitizeCauseCode(exit.spawnError),
+        closeObserved: true,
       },
       capture,
     };
@@ -485,10 +500,10 @@ async function runProcess(
 
   if (terminationReason) {
     if (terminationReason.kind === 'timeout') {
-      return { outcome: { kind: 'timeout' }, capture };
+      return { outcome: { kind: 'timeout', closeObserved }, capture };
     }
     if (terminationReason.kind === 'cancelled') {
-      return { outcome: { kind: 'cancelled' }, capture };
+      return { outcome: { kind: 'cancelled', closeObserved }, capture };
     }
     if (terminationReason.kind === 'stream-hard-cap') {
       return {
@@ -496,18 +511,19 @@ async function runProcess(
           kind: 'stream-hard-cap',
           streamCap: terminationReason.stream,
           streamObservedBytes: terminationReason.observedBytes,
+          closeObserved,
         },
         capture,
       };
     }
     if (terminationReason.kind === 'host-terminated') {
-      return { outcome: { kind: 'host-terminated' }, capture };
+      return { outcome: { kind: 'host-terminated', closeObserved }, capture };
     }
   }
 
   if (exit.code === null) {
     return {
-      outcome: { kind: 'host-terminated' },
+      outcome: { kind: 'host-terminated', closeObserved },
       capture,
     };
   }
@@ -516,6 +532,7 @@ async function runProcess(
     outcome: {
       kind: 'natural-exit',
       exitCode: exit.code,
+      closeObserved,
     },
     capture,
   };
@@ -636,6 +653,10 @@ export async function runInvocation(
 
   let primaryError: RuntimeInvocationError | undefined;
   let success: RuntimeInvocationSuccess | undefined;
+  // Default true: pre-spawn failures (options-invalid, input-invalid, executable-invalid,
+  // early input write failures, etc.) never expose a live child to the invocation
+  // directory, so cleanup is always safe until we prove otherwise from runProcess.
+  let childCloseObserved = true;
 
   try {
     const inputPath = await writeInputFile(invocationDir, inputBytes, seams);
@@ -668,6 +689,7 @@ export async function runInvocation(
       sigtermGraceMs,
       closeGraceMs,
     );
+    childCloseObserved = outcome.closeObserved;
 
     const stderrSnippet = sanitizeStderrSnippet(capture.stderrBytes, invocationDir);
     const contractViolations = buildContractViolations(capture);
@@ -913,7 +935,15 @@ export async function runInvocation(
     }
   }
 
-  const cleanupError = await cleanupInvocationDir(invocationDir, seams, testSeams);
+  // Only clean up the invocation directory when we have positive evidence that the
+  // child process has actually released it. If the bounded post-kill close deadline
+  // fired without an observed 'close' event, the child may still be running and could
+  // race with recursive rm on its cwd; in that case we deliberately leak the directory
+  // and surface the primary error. Callers may inspect stale invocation directories
+  // under tempRoot when investigating such runs.
+  const cleanupError = childCloseObserved
+    ? await cleanupInvocationDir(invocationDir, seams, testSeams)
+    : undefined;
 
   if (primaryError) {
     throw primaryError;

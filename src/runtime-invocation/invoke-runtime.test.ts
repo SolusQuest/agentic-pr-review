@@ -630,16 +630,23 @@ describe('invokeRuntime - post-spawn lifecycle (mock ChildProcess)', () => {
         timeoutMs: 50,
         tempRoot,
       },
-      // Tight bounds: SIGTERM grace 20ms, then SIGKILL, then closeGraceMs=60ms for close;
-      // total wall-clock bound comfortably fits within the 8000ms test budget.
+      // Tight bounds: SIGTERM grace 20ms, then SIGKILL, then closeGraceMs=60ms for close.
       { spawnOverride, sigtermGraceMs: 20, closeGraceMs: 60 },
     );
 
-    // Never emit 'close'. The adapter's bounded fallback must still resolve the run.
+    // Never emit 'close'. The adapter's bounded fallback must resolve the run with the
+    // primary termination (timed-out), but MUST NOT run cleanup on the invocation
+    // directory because the child may still be alive and racing on its cwd. The dir
+    // is deliberately leaked; the outer afterEach hook removes it after the test.
     const err = await invoke.catch((e) => e);
     expect(err).toBeInstanceOf(RuntimeInvocationError);
     expect((err as RuntimeInvocationError).kind).toBe('timed-out');
-    expect(await readdir(tempRoot)).toEqual([]);
+    const remaining = await readdir(tempRoot);
+    expect(remaining.length).toBe(1);
+    // The leaked directory should still contain the input file we wrote pre-spawn.
+    const invocationDir = join(tempRoot, remaining[0]);
+    const leaked = await readdir(invocationDir);
+    expect(leaked).toContain('input.json');
   }, 8000);
 
   it('routes a pre-spawn error to spawn-failed', async () => {
