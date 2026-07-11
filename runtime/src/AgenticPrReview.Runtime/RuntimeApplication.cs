@@ -274,6 +274,11 @@ public sealed class RuntimeApplication
             var scale = fraction.Length - int.Parse(exponentDigits, CultureInfo.InvariantCulture);
             isOne = coefficient.Length == scale + 1 && coefficient[0] == '1' && coefficient[1..].All(character => character == '0');
         }
+        else if (!negative && negativeExponent)
+        {
+            var scale = fraction.Length + int.Parse(exponentDigits, CultureInfo.InvariantCulture);
+            isOne = trailingZeros == scale && coefficient.TrimEnd('0') == "1";
+        }
 
         return true;
     }

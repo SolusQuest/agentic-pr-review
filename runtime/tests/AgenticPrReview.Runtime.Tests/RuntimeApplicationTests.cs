@@ -196,6 +196,24 @@ public sealed class RuntimeApplicationTests
         AssertFailure(await RunAsync(files.InputPath, files.OutputPath, files.TracePath), 10, expectedCode);
     }
 
+    [Theory]
+    [InlineData("10e-1", 0, "")]
+    [InlineData("100e-2", 0, "")]
+    [InlineData("20e-1", 10, "APR_PROTOCOL_VERSION_UNSUPPORTED:")]
+    [InlineData("15e-1", 10, "APR_INPUT_SCHEMA_INVALID:")]
+    public async Task NegativeExponentProtocolVersionsUseNumericEquality(string rawVersion, int expectedExit, string expectedCode)
+    {
+        using var files = new TemporaryFiles();
+        var json = await File.ReadAllTextAsync(files.InputPath);
+        await File.WriteAllTextAsync(files.InputPath, json.Replace("\"protocolVersion\": 1", $"\"protocolVersion\": {rawVersion}", StringComparison.Ordinal));
+        var result = await RunAsync(files.InputPath, files.OutputPath, files.TracePath);
+        Assert.Equal(expectedExit, result.ExitCode);
+        if (expectedExit != 0)
+        {
+            Assert.StartsWith(expectedCode, result.StandardError, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public async Task IncrementalFixtureExecutesSuccessfully()
     {
