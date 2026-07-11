@@ -149,6 +149,11 @@ switch (s) {
     fail(40, 'APR_TRACE_WRITE_FAILED: forced trace write failure');
     break;
   }
+  case 'exit-40-input-read': {
+    // Positive-class case: APR_INPUT_READ_FAILED with its documented exit 40 file-io class.
+    fail(40, 'APR_INPUT_READ_FAILED: forced input read failure');
+    break;
+  }
   case 'exit-77': {
     fail(77, 'APR_UNKNOWN: forced unknown exit code');
     break;
@@ -392,6 +397,20 @@ switch (s) {
   case 'ignore-sigterm': {
     process.on('SIGTERM', () => {
       // swallow SIGTERM so the adapter has to escalate to SIGKILL on POSIX.
+    });
+    setInterval(() => {}, 60000);
+    break;
+  }
+  case 'flood-stderr-after-sigterm': {
+    // Idle initially; when SIGTERM arrives, immediately start flooding stderr and
+    // ignore SIGTERM so the adapter has to escalate to SIGKILL. Used to prove that
+    // the first terminal event (timeout) wins over a subsequent stream-hard-cap.
+    process.on('SIGTERM', () => {
+      const chunk = Buffer.alloc(4096, 0x43);
+      const interval = setInterval(() => {
+        process.stderr.write(chunk);
+      }, 5);
+      setTimeout(() => clearInterval(interval), 60000);
     });
     setInterval(() => {}, 60000);
     break;

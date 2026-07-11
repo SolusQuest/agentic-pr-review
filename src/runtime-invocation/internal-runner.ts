@@ -45,6 +45,10 @@ const STDOUT_HARD_CAP = 1024;
 const STDERR_CONTRACT_LIMIT = 1000;
 const STDERR_HARD_CAP = 4096;
 const DEFAULT_SIGTERM_GRACE_MS = 5000;
+// Bounded deadline for the child's 'close' event after we have already sent SIGKILL
+// (or the platform-equivalent final kill). If the OS never delivers close within this
+// window we fall back to the observed terminationReason rather than hang forever.
+const DEFAULT_POST_KILL_CLOSE_GRACE_MS = 3000;
 
 /**
  * Test seams for src/runtime-invocation. Not exported from the module's public entry;
@@ -60,6 +64,11 @@ export interface RuntimeInvocationTestSeams {
    * the SIGKILL escalation path is exercised deterministically without a wall-clock wait.
    */
   sigtermGraceMs?: number;
+  /**
+   * Override the bounded wait for 'close' after the final kill has been issued.
+   * Tests use a short value so the fallback path is exercised without waiting.
+   */
+  closeGraceMs?: number;
 }
 
 interface StreamCaptureResult {
@@ -74,7 +83,8 @@ type TerminationReason =
       kind: 'stream-hard-cap';
       stream: 'stdout' | 'stderr';
       observedBytes: number;
-    };
+    }
+  | { kind: 'host-terminated' };
 
 interface ProcessOutcome {
   kind:
@@ -274,6 +284,7 @@ async function runProcess(
   signal: AbortSignal | undefined,
   spawnFn: typeof spawn,
   sigtermGraceMs: number,
+  closeGraceMs: number,
 ): Promise<RunProcessResult> {
   const args = [...(command.prefixArgs ?? []), ...cliArgs];
   const env = buildChildEnv();
@@ -304,13 +315,47 @@ async function runProcess(
     };
   }
 
+  interface ExitPayload {
+    code: number | null;
+    signal: NodeJS.Signals | null;
+    spawnError?: unknown;
+  }
+
   const stdoutChunks: Buffer[] = [];
   const stderrChunks: Buffer[] = [];
   let stdoutLen = 0;
   let stderrLen = 0;
   let terminationReason: TerminationReason | undefined;
   let sigkillTimer: NodeJS.Timeout | undefined;
+  let closeDeadlineTimer: NodeJS.Timeout | undefined;
   let closed = false;
+  let settled = false;
+  let spawnedOk = false;
+  let resolveExit!: (payload: ExitPayload) => void;
+  const exitPromise = new Promise<ExitPayload>((resolve) => {
+    resolveExit = resolve;
+  });
+
+  const settle = (payload: ExitPayload): void => {
+    if (settled) return;
+    settled = true;
+    closed = true;
+    resolveExit(payload);
+  };
+
+  // Bounded fallback: after the last kill escalation is issued we cannot rely on the
+  // OS to deliver 'close'. If it never arrives within a bounded window we still resolve
+  // the exit promise so the adapter does not hang. Outcome classification below prefers
+  // the observed terminationReason (timeout / cancelled / stream-hard-cap / etc.), which
+  // is preserved on any code path that arms this deadline.
+  const armCloseDeadline = (): void => {
+    if (closeDeadlineTimer !== undefined) return;
+    const graceMs = process.platform === 'win32' ? closeGraceMs : sigtermGraceMs + closeGraceMs;
+    closeDeadlineTimer = setTimeout(() => {
+      settle({ code: null, signal: null });
+    }, graceMs);
+    closeDeadlineTimer.unref?.();
+  };
 
   const killChild = (): void => {
     if (closed) return;
@@ -320,6 +365,7 @@ async function runProcess(
       } catch {
         // ignore
       }
+      armCloseDeadline();
       return;
     }
     try {
@@ -338,6 +384,7 @@ async function runProcess(
       } catch {
         // ignore
       }
+      armCloseDeadline();
     }, sigtermGraceMs);
     sigkillTimer.unref?.();
   };
@@ -372,6 +419,29 @@ async function runProcess(
   child.stdout?.on('data', onStdout);
   child.stderr?.on('data', onStderr);
 
+  child.once('spawn', () => {
+    spawnedOk = true;
+  });
+  child.on('error', (err) => {
+    // Node ChildProcess emits 'error' for spawn failures and for post-spawn control
+    // errors (for example when a signal cannot be delivered). Only the pre-spawn
+    // variant is a real spawn-failed; post-spawn errors must not settle the promise
+    // before 'close' and must not overwrite an existing terminationReason. If we
+    // already sent a kill and the OS never delivers close, the bounded deadline
+    // armed by killChild() will still resolve the promise.
+    if (!spawnedOk) {
+      settle({ code: null, signal: null, spawnError: err });
+      return;
+    }
+    if (!terminationReason) {
+      terminationReason = { kind: 'host-terminated' };
+      // No prior kill was scheduled; arm a bounded deadline so we do not hang if
+      // 'close' never arrives on this control-error path.
+      armCloseDeadline();
+    }
+  });
+  child.on('close', (code, signalCode) => settle({ code, signal: signalCode }));
+
   const timeoutTimer = setTimeout(() => {
     setTermination({ kind: 'timeout' });
   }, timeoutMs);
@@ -389,28 +459,11 @@ async function runProcess(
     }
   }
 
-  const exit = await new Promise<{
-    code: number | null;
-    signal: NodeJS.Signals | null;
-    error?: unknown;
-  }>((resolve) => {
-    let settled = false;
-    const settle = (payload: {
-      code: number | null;
-      signal: NodeJS.Signals | null;
-      error?: unknown;
-    }): void => {
-      if (settled) return;
-      settled = true;
-      closed = true;
-      resolve(payload);
-    };
-    child.on('error', (err) => settle({ code: null, signal: null, error: err }));
-    child.on('close', (code, signalCode) => settle({ code, signal: signalCode }));
-  });
+  const exit = await exitPromise;
 
   clearTimeout(timeoutTimer);
   if (sigkillTimer) clearTimeout(sigkillTimer);
+  if (closeDeadlineTimer) clearTimeout(closeDeadlineTimer);
   if (signal) signal.removeEventListener('abort', abortListener);
 
   const capture: StreamCaptureResult = {
@@ -418,11 +471,11 @@ async function runProcess(
     stderrBytes: Buffer.concat(stderrChunks, Math.min(stderrLen, STDERR_HARD_CAP)),
   };
 
-  if (exit.error && exit.code === null && exit.signal === null) {
+  if (exit.spawnError !== undefined && exit.code === null && exit.signal === null) {
     return {
       outcome: {
         kind: 'spawn-failed',
-        spawnErrorCode: sanitizeCauseCode(exit.error),
+        spawnErrorCode: sanitizeCauseCode(exit.spawnError),
       },
       capture,
     };
@@ -444,6 +497,9 @@ async function runProcess(
         },
         capture,
       };
+    }
+    if (terminationReason.kind === 'host-terminated') {
+      return { outcome: { kind: 'host-terminated' }, capture };
     }
   }
 
@@ -523,6 +579,7 @@ export async function runInvocation(
   const seams: FsSeams = { ...defaultFsSeams, ...(testSeams?.fs ?? {}) };
   const spawnFn = testSeams?.spawnOverride ?? spawn;
   const sigtermGraceMs = testSeams?.sigtermGraceMs ?? DEFAULT_SIGTERM_GRACE_MS;
+  const closeGraceMs = testSeams?.closeGraceMs ?? DEFAULT_POST_KILL_CLOSE_GRACE_MS;
 
   if (signal?.aborted) {
     throw new RuntimeInvocationError({
@@ -607,6 +664,7 @@ export async function runInvocation(
       signal,
       spawnFn,
       sigtermGraceMs,
+      closeGraceMs,
     );
 
     const stderrSnippet = sanitizeStderrSnippet(capture.stderrBytes, invocationDir);
@@ -873,20 +931,3 @@ export async function runInvocation(
   }
   return success;
 }
-
-/**
- * Materialize protocol files, invoke the deterministic C# runtime CLI, and return
- * validated result and trace data. All failure paths raise {@link RuntimeInvocationError}
- * with a discriminated `kind`. See docs/20_architecture/runtime-cli-process-contract.md
- * and issue #33 for the complete adapter contract.
- *
- * The public entrypoint takes a single `options` object; test seams are not exposed here.
- */
-
-/**
- * Test-only entrypoint. Consumed by src/runtime-invocation/*.test.ts to exercise
- * host-I/O, cleanup, and process seams without touching the production API surface.
- * Do not import this from action wiring, #34, or any release build path.
- *
- * @internal
- */
