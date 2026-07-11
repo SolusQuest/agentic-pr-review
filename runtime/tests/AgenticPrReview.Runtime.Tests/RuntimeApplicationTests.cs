@@ -164,6 +164,26 @@ public sealed class RuntimeApplicationTests
         AssertFailure(await RunAsync(files.InputPath, files.OutputPath, files.TracePath), 10, "APR_PROTOCOL_VERSION_UNSUPPORTED:");
     }
 
+    [Theory]
+    [InlineData("1.0", 0, "")]
+    [InlineData("1e0", 0, "")]
+    [InlineData("2.0", 10, "APR_PROTOCOL_VERSION_UNSUPPORTED:")]
+    [InlineData("2e0", 10, "APR_PROTOCOL_VERSION_UNSUPPORTED:")]
+    [InlineData("1.5", 10, "APR_INPUT_SCHEMA_INVALID:")]
+    public async Task ProtocolVersionUsesJsonNumericIntegerSemantics(string rawVersion, int expectedExit, string expectedCode)
+    {
+        using var files = new TemporaryFiles();
+        var json = await File.ReadAllTextAsync(files.InputPath);
+        json = json.Replace("\"protocolVersion\": 1", $"\"protocolVersion\": {rawVersion}", StringComparison.Ordinal);
+        await File.WriteAllTextAsync(files.InputPath, json);
+        var result = await RunAsync(files.InputPath, files.OutputPath, files.TracePath);
+        Assert.Equal(expectedExit, result.ExitCode);
+        if (expectedExit != 0)
+        {
+            Assert.StartsWith(expectedCode, result.StandardError, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public async Task IncrementalFixtureExecutesSuccessfully()
     {

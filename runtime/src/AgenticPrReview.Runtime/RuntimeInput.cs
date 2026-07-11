@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace AgenticPrReview.Runtime;
 
 public sealed record ReviewInput(
-    int ProtocolVersion,
+    JsonElement ProtocolVersion,
     string? RequestedRuntimeVersion,
     RuntimeHost Host,
     RuntimeSubject Subject,

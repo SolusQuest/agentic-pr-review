@@ -214,8 +214,7 @@ public sealed class RuntimeApplication
     private static void ValidateInputVersion(JsonElement input)
     {
         if (input.ValueKind != JsonValueKind.Object || !input.TryGetProperty("protocolVersion", out var version) ||
-            version.ValueKind != JsonValueKind.Number ||
-            !BigInteger.TryParse(version.GetRawText(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var integerVersion))
+            version.ValueKind != JsonValueKind.Number || !TryParseJsonInteger(version.GetRawText(), out var integerVersion))
         {
             throw new RuntimeFailure(10, "APR_INPUT_SCHEMA_INVALID", "Input does not satisfy ReviewInputV1.");
         }
@@ -224,6 +223,43 @@ public sealed class RuntimeApplication
         {
             throw new RuntimeFailure(10, "APR_PROTOCOL_VERSION_UNSUPPORTED", "Input protocol version is unsupported.");
         }
+    }
+
+    private static bool TryParseJsonInteger(string number, out BigInteger value)
+    {
+        value = BigInteger.Zero;
+        var exponentIndex = number.IndexOfAny(['e', 'E']);
+        var mantissa = exponentIndex < 0 ? number : number[..exponentIndex];
+        var exponentText = exponentIndex < 0 ? "0" : number[(exponentIndex + 1)..];
+        if (!int.TryParse(exponentText, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var exponent))
+        {
+            return false;
+        }
+
+        var decimalIndex = mantissa.IndexOf('.');
+        var whole = decimalIndex < 0 ? mantissa : mantissa[..decimalIndex];
+        var fraction = decimalIndex < 0 ? "" : mantissa[(decimalIndex + 1)..];
+        if (whole.Length == 0 || (decimalIndex >= 0 && fraction.Length == 0) ||
+            !BigInteger.TryParse(whole + fraction, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var unscaled))
+        {
+            return false;
+        }
+
+        var scale = fraction.Length - exponent;
+        if (scale <= 0)
+        {
+            value = unscaled * BigInteger.Pow(10, -scale);
+            return true;
+        }
+
+        var divisor = BigInteger.Pow(10, scale);
+        if (unscaled % divisor != BigInteger.Zero)
+        {
+            return false;
+        }
+
+        value = unscaled / divisor;
+        return true;
     }
 
     private Invocation ParseInvocation(string[] args)
