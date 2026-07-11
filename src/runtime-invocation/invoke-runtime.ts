@@ -33,7 +33,6 @@ import {
   type FsSeams,
 } from './runtime-files.js';
 
-/** Public option object exposed to callers. */
 export type { InvokeRuntimeOptions, RuntimeCommand, RuntimeInvocationSuccess };
 export {
   RuntimeInvocationError,
@@ -45,27 +44,37 @@ export type { RuntimeInvocationErrorKind } from './runtime-errors.js';
 const STDOUT_HARD_CAP = 1024;
 const STDERR_CONTRACT_LIMIT = 1000;
 const STDERR_HARD_CAP = 4096;
-const SIGTERM_GRACE_MS = 5000;
+const DEFAULT_SIGTERM_GRACE_MS = 5000;
 
 /**
- * Optional internal seams. Not exported publicly; used only by tests to observe
- * cleanup behavior and inject filesystem failures deterministically.
+ * Test seams for src/runtime-invocation. Not exported from the module's public entry;
+ * consumed only by test files via {@link invokeRuntimeForTests}.
  */
-export interface InternalTestHooks {
+export interface RuntimeInvocationTestSeams {
   fs?: Partial<FsSeams>;
-  /** Called with the invocation directory before cleanup runs; used to snapshot files. */
-  onBeforeCleanup?: (invocationDir: string) => void | Promise<void>;
-  /** Overrides `os.tmpdir()`-derived resolution; primarily used in error-injection tests. */
   spawnOverride?: typeof spawn;
+  /** Called with the invocation directory before cleanup runs. */
+  onBeforeCleanup?: (invocationDir: string) => void | Promise<void>;
+  /**
+   * Override the POSIX SIGTERM-to-SIGKILL grace period. Tests use a short value so
+   * the SIGKILL escalation path is exercised deterministically without a wall-clock wait.
+   */
+  sigtermGraceMs?: number;
 }
 
 interface StreamCaptureResult {
   stdoutBytes: Uint8Array;
   stderrBytes: Uint8Array;
-  stdoutTruncated: boolean;
-  stderrTruncated: boolean;
-  hardCapExceeded?: { stream: 'stdout' | 'stderr'; observedBytes: number };
 }
+
+type TerminationReason =
+  | { kind: 'timeout' }
+  | { kind: 'cancelled' }
+  | {
+      kind: 'stream-hard-cap';
+      stream: 'stdout' | 'stderr';
+      observedBytes: number;
+    };
 
 interface ProcessOutcome {
   kind:
@@ -76,10 +85,9 @@ interface ProcessOutcome {
     | 'host-terminated'
     | 'spawn-failed';
   exitCode?: number;
-  signal?: NodeJS.Signals;
   streamCap?: 'stdout' | 'stderr';
   streamObservedBytes?: number;
-  cause?: unknown;
+  spawnErrorCode?: string;
 }
 
 interface RunProcessResult {
@@ -97,6 +105,27 @@ function isNonNullObject(value: unknown): value is Record<string, unknown> {
 
 function isStringArray(value: unknown): value is readonly string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
+}
+
+function isValidAbortSignal(value: unknown): value is AbortSignal {
+  if (!isNonNullObject(value)) return false;
+  const candidate = value as {
+    aborted?: unknown;
+    addEventListener?: unknown;
+    removeEventListener?: unknown;
+  };
+  return (
+    typeof candidate.aborted === 'boolean' &&
+    typeof candidate.addEventListener === 'function' &&
+    typeof candidate.removeEventListener === 'function'
+  );
+}
+
+function sanitizeCauseCode(cause: unknown): string | undefined {
+  if (cause === null || cause === undefined) return undefined;
+  if (typeof cause !== 'object') return undefined;
+  const code = (cause as { code?: unknown }).code;
+  return typeof code === 'string' && /^[A-Z0-9_]{1,32}$/.test(code) ? code : undefined;
 }
 
 function assertOptionsShape(options: InvokeRuntimeOptions): void {
@@ -152,13 +181,11 @@ function assertOptionsShape(options: InvokeRuntimeOptions): void {
       message: 'command.prefixArgs must be an array of strings when provided.',
     });
   }
-  if (signal !== undefined) {
-    if (!isNonNullObject(signal) || typeof (signal as AbortSignal).aborted !== 'boolean') {
-      throw new RuntimeInvocationError({
-        kind: 'options-invalid',
-        message: 'options.signal must be a valid AbortSignal.',
-      });
-    }
+  if (signal !== undefined && !isValidAbortSignal(signal)) {
+    throw new RuntimeInvocationError({
+      kind: 'options-invalid',
+      message: 'options.signal must be a valid AbortSignal.',
+    });
   }
 }
 
@@ -186,11 +213,11 @@ function buildChildEnv(): NodeJS.ProcessEnv {
 }
 
 function sanitizeStderrSnippet(bytes: Uint8Array, invocationDir: string): string | undefined {
+  if (bytes.length === 0) return undefined;
   const nlIndex = bytes.indexOf(0x0a);
-  const lineBytes =
-    nlIndex >= 0
-      ? bytes.subarray(0, Math.min(nlIndex, STDERR_CONTRACT_LIMIT))
-      : bytes.subarray(0, Math.min(bytes.length, STDERR_CONTRACT_LIMIT));
+  const cap = STDERR_CONTRACT_LIMIT;
+  const end = nlIndex >= 0 ? Math.min(nlIndex, cap) : Math.min(bytes.length, cap);
+  const lineBytes = bytes.subarray(0, end);
   if (lineBytes.length === 0) return undefined;
   let text: string;
   try {
@@ -198,7 +225,7 @@ function sanitizeStderrSnippet(bytes: Uint8Array, invocationDir: string): string
   } catch {
     return undefined;
   }
-  if (text.includes(invocationDir)) return undefined;
+  if (invocationDir.length > 0 && text.includes(invocationDir)) return undefined;
   const normalized = text
     .split('')
     .map((ch) => {
@@ -246,6 +273,7 @@ async function runProcess(
   timeoutMs: number,
   signal: AbortSignal | undefined,
   spawnFn: typeof spawn,
+  sigtermGraceMs: number,
 ): Promise<RunProcessResult> {
   const args = [...(command.prefixArgs ?? []), ...cliArgs];
   const env = buildChildEnv();
@@ -260,13 +288,11 @@ async function runProcess(
     });
   } catch (cause) {
     return {
-      outcome: { kind: 'spawn-failed', cause },
-      capture: {
-        stdoutBytes: new Uint8Array(),
-        stderrBytes: new Uint8Array(),
-        stdoutTruncated: false,
-        stderrTruncated: false,
+      outcome: {
+        kind: 'spawn-failed',
+        spawnErrorCode: sanitizeCauseCode(cause),
       },
+      capture: { stdoutBytes: new Uint8Array(), stderrBytes: new Uint8Array() },
     };
   }
 
@@ -274,87 +300,86 @@ async function runProcess(
   const stderrChunks: Buffer[] = [];
   let stdoutLen = 0;
   let stderrLen = 0;
-  let stdoutTruncated = false;
-  let stderrTruncated = false;
-  let hardCapExceeded: { stream: 'stdout' | 'stderr'; observedBytes: number } | undefined;
-  let terminationReason:
-    | {
-        kind: 'timeout' | 'cancelled' | 'stream-hard-cap' | 'spawn-failed';
-        stream?: 'stdout' | 'stderr';
-        observedBytes?: number;
-        cause?: unknown;
-      }
-    | undefined;
+  let terminationReason: TerminationReason | undefined;
+  let sigkillTimer: NodeJS.Timeout | undefined;
+  let closed = false;
 
   const killChild = (): void => {
-    if (child.killed) return;
+    if (closed) return;
+    if (process.platform === 'win32') {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // ignore
+      }
+      return;
+    }
     try {
       child.kill('SIGTERM');
     } catch {
       // ignore
     }
-    if (process.platform !== 'win32') {
-      setTimeout(() => {
-        if (!child.killed && child.exitCode === null && child.signalCode === null) {
-          try {
-            child.kill('SIGKILL');
-          } catch {
-            // ignore
-          }
-        }
-      }, SIGTERM_GRACE_MS).unref?.();
-    }
+    if (sigkillTimer) return;
+    sigkillTimer = setTimeout(() => {
+      // Do NOT rely on child.killed (which flips true as soon as a signal is sent);
+      // check whether the process has actually exited.
+      if (closed) return;
+      if (child.exitCode !== null || child.signalCode !== null) return;
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // ignore
+      }
+    }, sigtermGraceMs);
+    sigkillTimer.unref?.();
+  };
+
+  const setTermination = (reason: TerminationReason): void => {
+    if (terminationReason) return;
+    terminationReason = reason;
+    killChild();
   };
 
   const onStdout = (chunk: Buffer): void => {
     stdoutLen += chunk.length;
     if (stdoutLen <= STDOUT_HARD_CAP) {
       stdoutChunks.push(chunk);
-    } else {
-      const room = STDOUT_HARD_CAP - (stdoutLen - chunk.length);
-      if (room > 0) stdoutChunks.push(chunk.subarray(0, room));
-      stdoutTruncated = true;
-      if (!hardCapExceeded) {
-        hardCapExceeded = { stream: 'stdout', observedBytes: stdoutLen };
-        terminationReason = { kind: 'stream-hard-cap', stream: 'stdout', observedBytes: stdoutLen };
-        killChild();
-      }
+      return;
     }
+    const room = STDOUT_HARD_CAP - (stdoutLen - chunk.length);
+    if (room > 0) stdoutChunks.push(chunk.subarray(0, room));
+    setTermination({ kind: 'stream-hard-cap', stream: 'stdout', observedBytes: stdoutLen });
   };
   const onStderr = (chunk: Buffer): void => {
     stderrLen += chunk.length;
     if (stderrLen <= STDERR_HARD_CAP) {
       stderrChunks.push(chunk);
-    } else {
-      const room = STDERR_HARD_CAP - (stderrLen - chunk.length);
-      if (room > 0) stderrChunks.push(chunk.subarray(0, room));
-      stderrTruncated = true;
-      if (!hardCapExceeded) {
-        hardCapExceeded = { stream: 'stderr', observedBytes: stderrLen };
-        terminationReason = { kind: 'stream-hard-cap', stream: 'stderr', observedBytes: stderrLen };
-        killChild();
-      }
+      return;
     }
+    const room = STDERR_HARD_CAP - (stderrLen - chunk.length);
+    if (room > 0) stderrChunks.push(chunk.subarray(0, room));
+    setTermination({ kind: 'stream-hard-cap', stream: 'stderr', observedBytes: stderrLen });
   };
 
   child.stdout?.on('data', onStdout);
   child.stderr?.on('data', onStderr);
 
   const timeoutTimer = setTimeout(() => {
-    if (!terminationReason) {
-      terminationReason = { kind: 'timeout' };
-      killChild();
-    }
+    setTermination({ kind: 'timeout' });
   }, timeoutMs);
   timeoutTimer.unref?.();
 
   const abortListener = (): void => {
-    if (!terminationReason) {
-      terminationReason = { kind: 'cancelled' };
-      killChild();
-    }
+    setTermination({ kind: 'cancelled' });
   };
-  if (signal) signal.addEventListener('abort', abortListener, { once: true });
+  if (signal) {
+    if (signal.aborted) {
+      // Signal aborted between preflight and listener registration.
+      setTermination({ kind: 'cancelled' });
+    } else {
+      signal.addEventListener('abort', abortListener, { once: true });
+    }
+  }
 
   const exit = await new Promise<{
     code: number | null;
@@ -369,6 +394,7 @@ async function runProcess(
     }): void => {
       if (settled) return;
       settled = true;
+      closed = true;
       resolve(payload);
     };
     child.on('error', (err) => settle({ code: null, signal: null, error: err }));
@@ -376,19 +402,20 @@ async function runProcess(
   });
 
   clearTimeout(timeoutTimer);
+  if (sigkillTimer) clearTimeout(sigkillTimer);
   if (signal) signal.removeEventListener('abort', abortListener);
 
   const capture: StreamCaptureResult = {
     stdoutBytes: Buffer.concat(stdoutChunks, Math.min(stdoutLen, STDOUT_HARD_CAP)),
     stderrBytes: Buffer.concat(stderrChunks, Math.min(stderrLen, STDERR_HARD_CAP)),
-    stdoutTruncated,
-    stderrTruncated,
-    hardCapExceeded,
   };
 
   if (exit.error && exit.code === null && exit.signal === null) {
     return {
-      outcome: { kind: 'spawn-failed', cause: exit.error },
+      outcome: {
+        kind: 'spawn-failed',
+        spawnErrorCode: sanitizeCauseCode(exit.error),
+      },
       capture,
     };
   }
@@ -414,10 +441,7 @@ async function runProcess(
 
   if (exit.code === null) {
     return {
-      outcome: {
-        kind: 'host-terminated',
-        signal: exit.signal ?? undefined,
-      },
+      outcome: { kind: 'host-terminated' },
       capture,
     };
   }
@@ -464,11 +488,11 @@ async function readFailureTraceDiagnostics(
 async function cleanupInvocationDir(
   invocationDir: string,
   seams: FsSeams,
-  hooks: InternalTestHooks | undefined,
+  seamsForHooks: RuntimeInvocationTestSeams | undefined,
 ): Promise<Error | null> {
-  if (hooks?.onBeforeCleanup) {
+  if (seamsForHooks?.onBeforeCleanup) {
     try {
-      await hooks.onBeforeCleanup(invocationDir);
+      await seamsForHooks.onBeforeCleanup(invocationDir);
     } catch {
       // ignore hook errors
     }
@@ -481,24 +505,16 @@ async function cleanupInvocationDir(
   }
 }
 
-/**
- * Materialize protocol files, invoke the deterministic C# runtime CLI, and return
- * validated result and trace data. All failure paths raise {@link RuntimeInvocationError}
- * with a discriminated `kind`. See docs/20_architecture/runtime-cli-process-contract.md
- * and issue #33 for the complete adapter contract.
- *
- * This module is internal to the TypeScript action package and is not re-exported
- * from any public barrel. It is unstable until #34 integration.
- */
-export async function invokeRuntime(
+async function runInvocation(
   options: InvokeRuntimeOptions,
-  hooks?: InternalTestHooks,
+  testSeams: RuntimeInvocationTestSeams | undefined,
 ): Promise<RuntimeInvocationSuccess> {
   assertOptionsShape(options);
 
   const { command, input, timeoutMs, tempRoot, signal } = options;
-  const seams: FsSeams = { ...defaultFsSeams, ...(hooks?.fs ?? {}) };
-  const spawnFn = hooks?.spawnOverride ?? spawn;
+  const seams: FsSeams = { ...defaultFsSeams, ...(testSeams?.fs ?? {}) };
+  const spawnFn = testSeams?.spawnOverride ?? spawn;
+  const sigtermGraceMs = testSeams?.sigtermGraceMs ?? DEFAULT_SIGTERM_GRACE_MS;
 
   if (signal?.aborted) {
     throw new RuntimeInvocationError({
@@ -509,9 +525,13 @@ export async function invokeRuntime(
 
   const inputValidation = validateReviewInputV1(input);
   if (!inputValidation.ok) {
+    const count = inputValidation.errors?.length ?? 0;
     throw new RuntimeInvocationError({
       kind: 'input-invalid',
-      message: `ReviewInputV1 validation failed: ${(inputValidation.errors ?? []).slice(0, 3).join('; ')}`,
+      message:
+        count > 0
+          ? `ReviewInputV1 schema validation failed (${count} errors).`
+          : 'ReviewInputV1 schema validation failed.',
     });
   }
 
@@ -519,15 +539,29 @@ export async function invokeRuntime(
   if (inputBytes.length > BYTE_LIMITS.input) {
     throw new RuntimeInvocationError({
       kind: 'input-invalid',
-      message: `Serialized input exceeds host byte cap (${inputBytes.length} > ${BYTE_LIMITS.input}).`,
+      message: 'Serialized input exceeds host byte cap.',
     });
   }
   const inputSha256 = sha256Hex(inputBytes);
+
+  if (signal?.aborted) {
+    throw new RuntimeInvocationError({
+      kind: 'cancelled',
+      message: 'AbortSignal aborted during preflight.',
+    });
+  }
 
   if (!(await isExecutableFile(command.executablePath, seams))) {
     throw new RuntimeInvocationError({
       kind: 'executable-invalid',
       message: 'Runtime executable is missing, a symlink, non-regular, or not executable.',
+    });
+  }
+
+  if (signal?.aborted) {
+    throw new RuntimeInvocationError({
+      kind: 'cancelled',
+      message: 'AbortSignal aborted during preflight.',
     });
   }
 
@@ -558,6 +592,7 @@ export async function invokeRuntime(
       timeoutMs,
       signal,
       spawnFn,
+      sigtermGraceMs,
     );
 
     const stderrSnippet = sanitizeStderrSnippet(capture.stderrBytes, invocationDir);
@@ -567,14 +602,14 @@ export async function invokeRuntime(
       throw new RuntimeInvocationError({
         kind: 'spawn-failed',
         message: 'Failed to spawn runtime executable.',
-        cause: outcome.cause,
+        diagnosticCode: outcome.spawnErrorCode,
       });
     }
 
     if (outcome.kind === 'timeout') {
       throw new RuntimeInvocationError({
         kind: 'timed-out',
-        message: `Runtime did not exit within ${timeoutMs} ms.`,
+        message: 'Runtime did not exit within the configured timeout.',
         stderrSnippet,
       });
     }
@@ -590,7 +625,7 @@ export async function invokeRuntime(
     if (outcome.kind === 'stream-hard-cap') {
       throw new RuntimeInvocationError({
         kind: 'stream-limit-exceeded',
-        message: `Runtime ${outcome.streamCap} exceeded the host capture limit.`,
+        message: 'Runtime output exceeded the host stream capture limit.',
         stderrSnippet,
         contractViolations: [
           {
@@ -622,7 +657,7 @@ export async function invokeRuntime(
         const diagnosticCode = parseAprCode(stderrSnippet, knownClass);
         throw new RuntimeInvocationError({
           kind: 'runtime-exit',
-          message: `Runtime exited with code ${exitCode} (${knownClass}).`,
+          message: 'Runtime exited with a documented non-zero code.',
           exitCode,
           exitClass: knownClass,
           diagnosticCode,
@@ -633,7 +668,7 @@ export async function invokeRuntime(
       }
       throw new RuntimeInvocationError({
         kind: 'unknown-exit',
-        message: `Runtime exited with unknown code ${exitCode}.`,
+        message: 'Runtime exited with an undocumented non-zero code.',
         exitCode,
         stderrSnippet,
         contractViolations,
@@ -641,41 +676,42 @@ export async function invokeRuntime(
       });
     }
 
-    // Exit 0 - validate success outputs (D11).
-    const resultStat = await statSafeOutputFile('result', resultPath, seams, {
-      silentOnFailure: false,
-    });
-    if (!resultStat) throw new Error('unreachable');
-    const traceStat = await statSafeOutputFile('trace', tracePath, seams, {
-      silentOnFailure: false,
-    });
-    if (!traceStat) throw new Error('unreachable');
+    // Exit 0 - enforce D9 stream shape first, then D11 output validation.
+    if (capture.stdoutBytes.length !== 0 || capture.stderrBytes.length > STDERR_CONTRACT_LIMIT) {
+      throw new RuntimeInvocationError({
+        kind: 'process-contract-violation',
+        message: 'Runtime violated stream shape rules on exit 0.',
+        stderrSnippet,
+        contractViolations,
+      });
+    }
 
-    const resultBytes = (await readSafeOutputBytes('result', resultPath, seams, {
+    await statSafeOutputFile('result', resultPath, seams, { silentOnFailure: false });
+    await statSafeOutputFile('trace', tracePath, seams, { silentOnFailure: false });
+
+    const resultBytes = await readSafeOutputBytes('result', resultPath, seams, {
       silentOnFailure: false,
-    })) as Uint8Array;
-    const traceBytes = (await readSafeOutputBytes('trace', tracePath, seams, {
+    });
+    const traceBytes = await readSafeOutputBytes('trace', tracePath, seams, {
       silentOnFailure: false,
-    })) as Uint8Array;
+    });
 
     let resultText: string;
     let traceText: string;
     try {
       resultText = decodeStrictUtf8(resultBytes);
-    } catch (cause) {
+    } catch {
       throw new RuntimeInvocationError({
         kind: 'result-invalid',
         message: 'result.json is not valid UTF-8.',
-        cause,
       });
     }
     try {
       traceText = decodeStrictUtf8(traceBytes);
-    } catch (cause) {
+    } catch {
       throw new RuntimeInvocationError({
         kind: 'trace-invalid',
         message: 'trace.json is not valid UTF-8.',
-        cause,
       });
     }
 
@@ -683,41 +719,40 @@ export async function invokeRuntime(
     let traceParsed: unknown;
     try {
       resultParsed = JSON.parse(resultText);
-    } catch (cause) {
+    } catch {
       throw new RuntimeInvocationError({
         kind: 'result-invalid',
         message: 'result.json is not valid JSON.',
-        cause,
       });
     }
     try {
       traceParsed = JSON.parse(traceText);
-    } catch (cause) {
+    } catch {
       throw new RuntimeInvocationError({
         kind: 'trace-invalid',
         message: 'trace.json is not valid JSON.',
-        cause,
       });
     }
 
     const resultValidation = validateReviewResultV1(resultParsed);
     if (!resultValidation.ok) {
+      const count = resultValidation.errors?.length ?? 0;
       throw new RuntimeInvocationError({
         kind: 'result-invalid',
-        message: `ReviewResultV1 validation failed: ${(resultValidation.errors ?? []).slice(0, 3).join('; ')}`,
+        message: `ReviewResultV1 schema validation failed (${count} errors).`,
       });
     }
     const traceValidation = validateReviewTraceV1(traceParsed);
     if (!traceValidation.ok) {
+      const count = traceValidation.errors?.length ?? 0;
       throw new RuntimeInvocationError({
         kind: 'trace-invalid',
-        message: `ReviewTraceV1 validation failed: ${(traceValidation.errors ?? []).slice(0, 3).join('; ')}`,
+        message: `ReviewTraceV1 schema validation failed (${count} errors).`,
       });
     }
     const result = resultParsed as ReviewResultV1;
     const trace = traceParsed as ReviewTraceV1;
 
-    // M2 CLI-specific postconditions (D11 8-12).
     if (result.inputSha256 === undefined) {
       throw new RuntimeInvocationError({
         kind: 'process-contract-violation',
@@ -749,7 +784,6 @@ export async function invokeRuntime(
       });
     }
 
-    // Hash and version invariants (D11 13-17).
     if (result.inputSha256 !== inputSha256) {
       throw new RuntimeInvocationError({
         kind: 'hash-mismatch',
@@ -785,16 +819,6 @@ export async function invokeRuntime(
       });
     }
 
-    // Stream shape recheck (D11 18).
-    if (capture.stdoutBytes.length !== 0 || capture.stderrBytes.length > STDERR_CONTRACT_LIMIT) {
-      throw new RuntimeInvocationError({
-        kind: 'process-contract-violation',
-        message: 'Runtime violated stream shape rules on the success path.',
-        stderrSnippet,
-        contractViolations,
-      });
-    }
-
     success = {
       result,
       trace,
@@ -810,12 +834,12 @@ export async function invokeRuntime(
       primaryError = new RuntimeInvocationError({
         kind: 'host-io-failed',
         message: 'Unclassified host failure during runtime invocation.',
-        cause: err,
+        diagnosticCode: sanitizeCauseCode(err),
       });
     }
   }
 
-  const cleanupError = await cleanupInvocationDir(invocationDir, seams, hooks);
+  const cleanupError = await cleanupInvocationDir(invocationDir, seams, testSeams);
 
   if (primaryError) {
     throw primaryError;
@@ -824,15 +848,40 @@ export async function invokeRuntime(
     throw new RuntimeInvocationError({
       kind: 'cleanup-failed',
       message: 'Failed to clean up runtime invocation directory after a successful run.',
-      cause: cleanupError,
+      diagnosticCode: sanitizeCauseCode(cleanupError),
     });
   }
   if (!success) {
-    // Defensive: neither success nor primaryError should be impossible.
     throw new RuntimeInvocationError({
       kind: 'host-io-failed',
       message: 'invokeRuntime completed with neither a result nor an error.',
     });
   }
   return success;
+}
+
+/**
+ * Materialize protocol files, invoke the deterministic C# runtime CLI, and return
+ * validated result and trace data. All failure paths raise {@link RuntimeInvocationError}
+ * with a discriminated `kind`. See docs/20_architecture/runtime-cli-process-contract.md
+ * and issue #33 for the complete adapter contract.
+ *
+ * The public entrypoint takes a single `options` object; test seams are not exposed here.
+ */
+export function invokeRuntime(options: InvokeRuntimeOptions): Promise<RuntimeInvocationSuccess> {
+  return runInvocation(options, undefined);
+}
+
+/**
+ * Test-only entrypoint. Consumed by src/runtime-invocation/*.test.ts to exercise
+ * host-I/O, cleanup, and process seams without touching the production API surface.
+ * Do not import this from action wiring, #34, or any release build path.
+ *
+ * @internal
+ */
+export function invokeRuntimeForTests(
+  options: InvokeRuntimeOptions,
+  seams: RuntimeInvocationTestSeams,
+): Promise<RuntimeInvocationSuccess> {
+  return runInvocation(options, seams);
 }

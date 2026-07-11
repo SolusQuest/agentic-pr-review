@@ -6,7 +6,7 @@
 // for the catalog of supported scenarios.
 
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync, symlinkSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, symlinkSync, mkdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
 
 function args() {
@@ -41,12 +41,12 @@ function loadInput(inputPath) {
   return { bytes, parsed };
 }
 
-function baseResult(input, runtimeVersion) {
+function baseResult(input, runtimeVersion, overrides = {}) {
   return {
     protocolVersion: 1,
     runtimeVersion,
     inputSha256: sha256(input.bytes),
-    summary: 'Fake runtime deterministic summary.',
+    summary: overrides.summary ?? 'Fake runtime deterministic summary.',
     findings: [],
     limitations: [],
     warnings: [],
@@ -68,12 +68,17 @@ function baseTrace(input, runtimeVersion) {
 
 function commit(paths, resultObj, traceObj) {
   const traceBytes = Buffer.from(`${JSON.stringify(traceObj, null, 2)}\n`, 'utf8');
-  const finalResult = {
-    ...resultObj,
-    trace: { sha256: sha256(traceBytes) },
-  };
+  const finalResult = { ...resultObj, trace: { sha256: sha256(traceBytes) } };
   writeFileSync(paths.trace, traceBytes);
   writeFileSync(paths.output, `${JSON.stringify(finalResult, null, 2)}\n`);
+}
+
+function commitWithSummary(paths, input, rv, summary) {
+  const trace = baseTrace(input, rv);
+  const traceBytes = Buffer.from(`${JSON.stringify(trace, null, 2)}\n`, 'utf8');
+  const result = { ...baseResult(input, rv, { summary }), trace: { sha256: sha256(traceBytes) } };
+  writeFileSync(paths.trace, traceBytes);
+  writeFileSync(paths.output, `${JSON.stringify(result, null, 2)}\n`);
 }
 
 function scenario() {
@@ -103,12 +108,33 @@ switch (s) {
     fail(2, 'APR_USAGE_INVALID: forced usage error');
     break;
   }
+  case 'exit-2-mismatched-apr': {
+    // exit 2 with a mismatched APR code (provider class); adapter must drop diagnosticCode.
+    fail(2, 'APR_PROVIDER_FAILED: mismatched code on usage exit');
+    break;
+  }
   case 'exit-10': {
     fail(10, 'APR_RUNTIME_VERSION_MISMATCH: forced mismatch');
     break;
   }
+  case 'exit-10-input-read': {
+    fail(10, 'APR_INPUT_READ_FAILED: forced read failure'); // maps to file-io class per contract
+    break;
+  }
+  case 'exit-10-input-json': {
+    fail(10, 'APR_INPUT_JSON_INVALID: forced json failure');
+    break;
+  }
+  case 'exit-10-protocol-version': {
+    fail(10, 'APR_PROTOCOL_VERSION_UNSUPPORTED: forced protocol version failure');
+    break;
+  }
   case 'exit-20': {
     fail(20, 'APR_RUNTIME_INTERNAL: forced internal failure');
+    break;
+  }
+  case 'exit-20-self-validation': {
+    fail(20, 'APR_OUTPUT_SELF_VALIDATION_FAILED: forced self-validation failure');
     break;
   }
   case 'exit-30': {
@@ -117,6 +143,10 @@ switch (s) {
   }
   case 'exit-40': {
     fail(40, 'APR_RESULT_WRITE_FAILED: forced file-io failure');
+    break;
+  }
+  case 'exit-40-trace-write': {
+    fail(40, 'APR_TRACE_WRITE_FAILED: forced trace write failure');
     break;
   }
   case 'exit-77': {
@@ -162,20 +192,24 @@ switch (s) {
     try {
       symlinkSync(target, paths.output);
     } catch {
-      // Windows without SeCreateSymbolicLinkPrivilege: fall back to writing directly to
-      // make the test see unsafe-output-file via other channels. Skip on that platform.
+      // Skip on platforms without symlink privilege.
       writeFileSync(paths.output, `${JSON.stringify(result, null, 2)}\n`);
     }
     process.exit(0);
   }
+  case 'directory-trace': {
+    // Create a directory at trace.json so lstat().isFile() === false.
+    const result = { ...baseResult(input, rv), trace: { sha256: sha256(Buffer.from('x')) } };
+    if (!existsSync(paths.trace)) mkdirSync(paths.trace);
+    writeFileSync(paths.output, `${JSON.stringify(result, null, 2)}\n`);
+    process.exit(0);
+  }
   case 'oversized-result': {
-    // Write a result whose size exceeds an artificially small cap injected via env.
     const trace = baseTrace(input, rv);
     const traceBytes = Buffer.from(`${JSON.stringify(trace, null, 2)}\n`, 'utf8');
     const filler = 'x'.repeat(Number(process.env.FAKE_RUNTIME_FILLER_BYTES ?? '65536'));
     const result = {
-      ...baseResult(input, rv),
-      summary: filler,
+      ...baseResult(input, rv, { summary: filler }),
       trace: { sha256: sha256(traceBytes) },
     };
     writeFileSync(paths.trace, traceBytes);
@@ -225,6 +259,14 @@ switch (s) {
     writeFileSync(paths.output, `${JSON.stringify(result, null, 2)}\n`);
     process.exit(0);
   }
+  case 'missing-result-trace-sha': {
+    const trace = baseTrace(input, rv);
+    const traceBytes = Buffer.from(`${JSON.stringify(trace, null, 2)}\n`, 'utf8');
+    const result = { ...baseResult(input, rv), trace: {} };
+    writeFileSync(paths.trace, traceBytes);
+    writeFileSync(paths.output, `${JSON.stringify(result, null, 2)}\n`);
+    process.exit(0);
+  }
   case 'result-trace-path-present': {
     const trace = baseTrace(input, rv);
     const traceBytes = Buffer.from(`${JSON.stringify(trace, null, 2)}\n`, 'utf8');
@@ -269,10 +311,7 @@ switch (s) {
   case 'trace-sha-mismatch': {
     const trace = baseTrace(input, rv);
     const traceBytes = Buffer.from(`${JSON.stringify(trace, null, 2)}\n`, 'utf8');
-    const result = {
-      ...baseResult(input, rv),
-      trace: { sha256: 'e'.repeat(64) },
-    };
+    const result = { ...baseResult(input, rv), trace: { sha256: 'e'.repeat(64) } };
     writeFileSync(paths.trace, traceBytes);
     writeFileSync(paths.output, `${JSON.stringify(result, null, 2)}\n`);
     process.exit(0);
@@ -287,7 +326,6 @@ switch (s) {
     process.exit(0);
   }
   case 'requested-version-mismatch': {
-    // requested version comes from input; produce a result labeled with something else.
     const trace = baseTrace(input, rv);
     trace.runtimeVersion = 'some-other-version';
     const traceBytes = Buffer.from(`${JSON.stringify(trace, null, 2)}\n`, 'utf8');
@@ -305,18 +343,37 @@ switch (s) {
     commit(paths, baseResult(input, rv), baseTrace(input, rv));
     process.exit(0);
   }
+  case 'stdout-leak-no-output': {
+    // Exit 0 with stdout leak and no result/trace; adapter must classify as
+    // process-contract-violation, not missing-output.
+    process.stdout.write('leak\n');
+    process.exit(0);
+  }
   case 'stderr-over-contract-success': {
     process.stderr.write('x'.repeat(1500));
     commit(paths, baseResult(input, rv), baseTrace(input, rv));
     process.exit(0);
   }
+  case 'stderr-non-utf8': {
+    process.stderr.write(Buffer.from([0xff, 0xfe, 0xfd]));
+    fail(20, 'APR_RUNTIME_INTERNAL: emitted non-utf8 sanitizer test');
+    break;
+  }
+  case 'stderr-control-chars': {
+    process.stderr.write('APR_RUNTIME_INTERNAL:\x01\x02control\x1bchars trailing\n');
+    process.exit(20);
+  }
+  case 'stderr-path-leak': {
+    // Emit stderr containing the invocation directory path (its CWD).
+    const line = `APR_RUNTIME_INTERNAL: leaked path ${process.cwd()}\n`;
+    process.stderr.write(line);
+    process.exit(20);
+  }
   case 'stdout-flood': {
-    // Endless stdout flood; adapter should terminate after hard cap.
     const chunk = Buffer.alloc(4096, 0x41);
     const interval = setInterval(() => {
       process.stdout.write(chunk);
     }, 5);
-    // Also register keep-alive; adapter will kill us.
     setTimeout(() => clearInterval(interval), 60000);
     break;
   }
@@ -329,7 +386,6 @@ switch (s) {
     break;
   }
   case 'hang': {
-    // Do nothing; adapter should time out.
     setInterval(() => {}, 60000);
     break;
   }
@@ -341,7 +397,6 @@ switch (s) {
     break;
   }
   case 'self-signal': {
-    // Simulate host-terminated: the child receives a signal from a helper before writing output.
     if (process.platform !== 'win32') {
       process.kill(process.pid, 'SIGKILL');
     } else {
@@ -349,8 +404,25 @@ switch (s) {
     }
     break;
   }
+  case 'env-dump-success': {
+    // Report only presence of security-sensitive variables so the summary stays within maxLength.
+    const flags = [];
+    for (const name of ['GITHUB_TOKEN', 'ANTHROPIC_API_KEY', 'AGENTIC_REVIEW_API_KEY']) {
+      flags.push(`${name}=${process.env[name] ?? 'absent'}`);
+    }
+    commitWithSummary(paths, input, rv, flags.join('|'));
+    process.exit(0);
+  }
+  case 'env-dump-required-vars': {
+    const summary = [
+      `NO_COLOR=${process.env.NO_COLOR}`,
+      `DOTNET_NOLOGO=${process.env.DOTNET_NOLOGO}`,
+      `DOTNET_CLI_TELEMETRY_OPTOUT=${process.env.DOTNET_CLI_TELEMETRY_OPTOUT}`,
+    ].join('|');
+    commitWithSummary(paths, input, rv, summary);
+    process.exit(0);
+  }
   case 'exit-0-empty': {
-    // Exit 0 with no result/trace files.
     process.exit(0);
   }
   default:

@@ -1,13 +1,18 @@
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ReviewInputV1 } from '../protocol/review-input.js';
-import { invokeRuntime, RuntimeInvocationError } from './invoke-runtime.js';
+import {
+  invokeRuntime,
+  invokeRuntimeForTests,
+  RuntimeInvocationError,
+  type RuntimeInvocationTestSeams,
+} from './invoke-runtime.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fakeRuntimePath = join(here, '__test-fixtures__', 'fake-runtime.mjs');
@@ -22,11 +27,11 @@ interface ScenarioOptions {
   scenario: string;
   timeoutMs?: number;
   fakeVersion?: string;
-  requestedRuntimeVersion?: string | null;
   signal?: AbortSignal;
   extraEnv?: Record<string, string>;
   input?: ReviewInputV1;
   fillerBytes?: number;
+  sigtermGraceMs?: number;
 }
 
 const tempDirs: string[] = [];
@@ -66,21 +71,18 @@ function withScenarioEnv(
   }) as typeof spawn;
 }
 
-async function runScenario(opts: ScenarioOptions): Promise<{
-  tempRoot: string;
-  invoke: ReturnType<typeof invokeRuntime>;
-}> {
+async function runScenario(opts: ScenarioOptions) {
   const tempRoot = await acquireTempRoot();
   const input = opts.input ?? readBootstrapInput();
-  if (opts.requestedRuntimeVersion !== undefined) {
-    input.requestedRuntimeVersion = opts.requestedRuntimeVersion;
-  }
   const extraEnv: Record<string, string> = { ...(opts.extraEnv ?? {}) };
   if (opts.fillerBytes !== undefined) {
     extraEnv.FAKE_RUNTIME_FILLER_BYTES = String(opts.fillerBytes);
   }
-  const spawnOverride = withScenarioEnv(opts.scenario, opts.fakeVersion, extraEnv);
-  const invoke = invokeRuntime(
+  const seams: RuntimeInvocationTestSeams = {
+    spawnOverride: withScenarioEnv(opts.scenario, opts.fakeVersion, extraEnv),
+  };
+  if (opts.sigtermGraceMs !== undefined) seams.sigtermGraceMs = opts.sigtermGraceMs;
+  const invoke = invokeRuntimeForTests(
     {
       command: { executablePath: process.execPath, prefixArgs: [fakeRuntimePath] },
       input,
@@ -88,7 +90,7 @@ async function runScenario(opts: ScenarioOptions): Promise<{
       tempRoot,
       signal: opts.signal,
     },
-    { spawnOverride },
+    seams,
   );
   return { tempRoot, invoke };
 }
@@ -108,22 +110,24 @@ async function expectFailure(
   throw new Error(`Expected RuntimeInvocationError with kind=${expectedKind}, got success`);
 }
 
-describe('invokeRuntime - options validation', () => {
-  const input = readBootstrapInput();
-  const validCommand = { executablePath: process.execPath, prefixArgs: [fakeRuntimePath] };
-
-  it('rejects a null options object', async () => {
+describe('invokeRuntime - public entrypoint', () => {
+  it('is a single-argument function without test seams on its signature', () => {
+    expect(invokeRuntime.length).toBe(1);
+  });
+  it('rejects a malformed options object', async () => {
     await expect(invokeRuntime(null as unknown as never)).rejects.toMatchObject({
       kind: 'options-invalid',
     });
   });
+});
+
+describe('invokeRuntime - options validation', () => {
+  const input = readBootstrapInput();
+  const validCommand = { executablePath: process.execPath, prefixArgs: [fakeRuntimePath] };
+
   it('rejects a null command', async () => {
     await expect(
-      invokeRuntime({
-        command: null as unknown as never,
-        input,
-        timeoutMs: 1000,
-      }),
+      invokeRuntime({ command: null as unknown as never, input, timeoutMs: 1000 }),
     ).rejects.toMatchObject({ kind: 'options-invalid' });
   });
   it('rejects a null input', async () => {
@@ -147,21 +151,12 @@ describe('invokeRuntime - options validation', () => {
   });
   it('rejects a relative tempRoot', async () => {
     await expect(
-      invokeRuntime({
-        command: validCommand,
-        input,
-        timeoutMs: 1000,
-        tempRoot: 'relative-path',
-      }),
+      invokeRuntime({ command: validCommand, input, timeoutMs: 1000, tempRoot: 'relative-path' }),
     ).rejects.toMatchObject({ kind: 'options-invalid' });
   });
   it('rejects a non-absolute executablePath', async () => {
     await expect(
-      invokeRuntime({
-        command: { executablePath: 'relative-runtime' },
-        input,
-        timeoutMs: 1000,
-      }),
+      invokeRuntime({ command: { executablePath: 'relative-runtime' }, input, timeoutMs: 1000 }),
     ).rejects.toMatchObject({ kind: 'options-invalid' });
   });
   it('rejects prefixArgs containing non-strings', async () => {
@@ -173,13 +168,27 @@ describe('invokeRuntime - options validation', () => {
       }),
     ).rejects.toMatchObject({ kind: 'options-invalid' });
   });
-  it('rejects a malformed signal', async () => {
+  it('rejects a signal missing addEventListener', async () => {
     await expect(
       invokeRuntime({
         command: validCommand,
         input,
         timeoutMs: 1000,
-        signal: { aborted: 'nope' } as unknown as AbortSignal,
+        signal: { aborted: false } as unknown as AbortSignal,
+      }),
+    ).rejects.toMatchObject({ kind: 'options-invalid' });
+  });
+  it('rejects a signal with a non-boolean aborted', async () => {
+    await expect(
+      invokeRuntime({
+        command: validCommand,
+        input,
+        timeoutMs: 1000,
+        signal: {
+          aborted: 'nope',
+          addEventListener: () => undefined,
+          removeEventListener: () => undefined,
+        } as unknown as AbortSignal,
       }),
     ).rejects.toMatchObject({ kind: 'options-invalid' });
   });
@@ -187,12 +196,7 @@ describe('invokeRuntime - options validation', () => {
     const ctrl = new AbortController();
     ctrl.abort();
     await expect(
-      invokeRuntime({
-        command: validCommand,
-        input,
-        timeoutMs: 1000,
-        signal: ctrl.signal,
-      }),
+      invokeRuntime({ command: validCommand, input, timeoutMs: 1000, signal: ctrl.signal }),
     ).rejects.toMatchObject({ kind: 'cancelled' });
   });
 });
@@ -206,7 +210,9 @@ describe('invokeRuntime - preflight validation', () => {
       },
       'input-invalid',
     );
-    expect(err.message).toMatch(/ReviewInputV1/);
+    expect(err.message).toBe('ReviewInputV1 schema validation failed (1 errors).');
+    // Sanity: no raw property names or values leaked.
+    expect(err.message).not.toMatch(/protocolVersion|additionalProperty/i);
   });
   it('fails as executable-invalid for a missing binary', async () => {
     const tempRoot = await acquireTempRoot();
@@ -233,6 +239,19 @@ describe('invokeRuntime - preflight validation', () => {
       }),
     ).rejects.toMatchObject({ kind: 'executable-invalid' });
   });
+  it('fails as cancelled when signal aborts mid-preflight', async () => {
+    const ctrl = new AbortController();
+    // Abort between options validation and mkdtemp; use a signal that aborts before we get there.
+    setImmediate(() => ctrl.abort());
+    await expect(
+      invokeRuntime({
+        command: { executablePath: process.execPath, prefixArgs: [fakeRuntimePath] },
+        input: readBootstrapInput(),
+        timeoutMs: 5000,
+        signal: ctrl.signal,
+      }),
+    ).rejects.toMatchObject({ kind: 'cancelled' });
+  });
 });
 
 describe('invokeRuntime - success path', () => {
@@ -247,18 +266,12 @@ describe('invokeRuntime - success path', () => {
     expect(success.result.trace?.sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(success.runtimeVersion).toBe('0.1.0-dev');
   });
-
   it('cleans up the invocation directory on success', async () => {
     const { invoke, tempRoot } = await runScenario({ scenario: 'success' });
     await invoke;
-    // The mkdtemp directory should have been removed; only the outer tempRoot remains.
-    const remaining = await readFile(tempRoot, { encoding: undefined }).catch((err) => err);
-    // readFile on a directory always errors on Node; use fs.readdir instead:
-    const entries = await (await import('node:fs/promises')).readdir(tempRoot);
+    const entries = await readdir(tempRoot);
     expect(entries).toEqual([]);
-    void remaining;
   });
-
   it('accepts a matching requestedRuntimeVersion', async () => {
     const input = readBootstrapInput();
     input.requestedRuntimeVersion = 'pinned-1.2.3';
@@ -272,39 +285,68 @@ describe('invokeRuntime - success path', () => {
   });
 });
 
-describe('invokeRuntime - non-zero exits', () => {
-  it('maps exit 2 to usage exit class', async () => {
-    const err = await expectFailure({ scenario: 'exit-2' }, 'runtime-exit');
-    expect(err.exitCode).toBe(2);
-    expect(err.exitClass).toBe('usage');
-    expect(err.diagnosticCode).toBe('APR_USAGE_INVALID');
-  });
-  it('maps exit 10 to contract', async () => {
-    const err = await expectFailure({ scenario: 'exit-10' }, 'runtime-exit');
-    expect(err.exitClass).toBe('contract');
-    expect(err.diagnosticCode).toBe('APR_RUNTIME_VERSION_MISMATCH');
-  });
-  it('maps exit 20 to runtime', async () => {
-    const err = await expectFailure({ scenario: 'exit-20' }, 'runtime-exit');
-    expect(err.exitClass).toBe('runtime');
-  });
-  it('maps exit 30 to provider', async () => {
-    const err = await expectFailure({ scenario: 'exit-30' }, 'runtime-exit');
-    expect(err.exitClass).toBe('provider');
-  });
-  it('maps exit 40 to file-io', async () => {
-    const err = await expectFailure({ scenario: 'exit-40' }, 'runtime-exit');
-    expect(err.exitClass).toBe('file-io');
-  });
+describe('invokeRuntime - non-zero exits and APR codes', () => {
+  const cases: Array<{ scenario: string; exitCode: number; exitClass: string; aprCode?: string }> =
+    [
+      { scenario: 'exit-2', exitCode: 2, exitClass: 'usage', aprCode: 'APR_USAGE_INVALID' },
+      {
+        scenario: 'exit-10',
+        exitCode: 10,
+        exitClass: 'contract',
+        aprCode: 'APR_RUNTIME_VERSION_MISMATCH',
+      },
+      { scenario: 'exit-10-input-read', exitCode: 10, exitClass: 'contract' },
+      {
+        scenario: 'exit-10-input-json',
+        exitCode: 10,
+        exitClass: 'contract',
+        aprCode: 'APR_INPUT_JSON_INVALID',
+      },
+      {
+        scenario: 'exit-10-protocol-version',
+        exitCode: 10,
+        exitClass: 'contract',
+        aprCode: 'APR_PROTOCOL_VERSION_UNSUPPORTED',
+      },
+      { scenario: 'exit-20', exitCode: 20, exitClass: 'runtime', aprCode: 'APR_RUNTIME_INTERNAL' },
+      {
+        scenario: 'exit-20-self-validation',
+        exitCode: 20,
+        exitClass: 'runtime',
+        aprCode: 'APR_OUTPUT_SELF_VALIDATION_FAILED',
+      },
+      { scenario: 'exit-30', exitCode: 30, exitClass: 'provider', aprCode: 'APR_PROVIDER_FAILED' },
+      {
+        scenario: 'exit-40-trace-write',
+        exitCode: 40,
+        exitClass: 'file-io',
+        aprCode: 'APR_TRACE_WRITE_FAILED',
+      },
+      {
+        scenario: 'exit-40',
+        exitCode: 40,
+        exitClass: 'file-io',
+        aprCode: 'APR_RESULT_WRITE_FAILED',
+      },
+    ];
+  for (const c of cases) {
+    it(`maps ${c.scenario} to ${c.exitCode} (${c.exitClass}${c.aprCode ? '/' + c.aprCode : ''})`, async () => {
+      const err = await expectFailure({ scenario: c.scenario }, 'runtime-exit');
+      expect(err.exitCode).toBe(c.exitCode);
+      expect(err.exitClass).toBe(c.exitClass);
+      if (c.aprCode) expect(err.diagnosticCode).toBe(c.aprCode);
+    });
+  }
   it('maps unknown non-zero exit to unknown-exit', async () => {
     const err = await expectFailure({ scenario: 'exit-77' }, 'unknown-exit');
     expect(err.exitCode).toBe(77);
+    expect(err.diagnosticCode).toBeUndefined();
   });
-  it('omits diagnosticCode when APR class does not match exit class', async () => {
-    // exit-2 with a mismatched code would be misleading; sanitizer already returns exact
-    // code from the same line, so we assert diagnosticCode matches. If the fake emits a
-    // mismatched code, adapter should drop it. Verified separately via unit-level parsing.
-    const err = await expectFailure({ scenario: 'exit-77' }, 'unknown-exit');
+  it('drops APR_* code when its class does not match the observed exit class', async () => {
+    // exit-2 emitted with a provider APR code should be dropped
+    const err = await expectFailure({ scenario: 'exit-2-mismatched-apr' }, 'runtime-exit');
+    expect(err.exitCode).toBe(2);
+    expect(err.exitClass).toBe('usage');
     expect(err.diagnosticCode).toBeUndefined();
   });
 });
@@ -339,6 +381,9 @@ describe('invokeRuntime - success validation failures', () => {
     if (process.platform === 'win32') return;
     await expectFailure({ scenario: 'symlink-result' }, 'unsafe-output-file');
   });
+  it('reports unsafe-output-file when trace.json is a directory (non-regular)', async () => {
+    await expectFailure({ scenario: 'directory-trace' }, 'unsafe-output-file');
+  });
   it('reports result-invalid for non-UTF8 bytes', async () => {
     await expectFailure({ scenario: 'invalid-utf8-result' }, 'result-invalid');
   });
@@ -346,7 +391,8 @@ describe('invokeRuntime - success validation failures', () => {
     await expectFailure({ scenario: 'invalid-json-result' }, 'result-invalid');
   });
   it('reports result-invalid for schema failure', async () => {
-    await expectFailure({ scenario: 'schema-invalid-result' }, 'result-invalid');
+    const err = await expectFailure({ scenario: 'schema-invalid-result' }, 'result-invalid');
+    expect(err.message).toMatch(/^ReviewResultV1 schema validation failed \(\d+ errors\)\.$/);
   });
   it('reports trace-invalid for non-JSON trace', async () => {
     await expectFailure({ scenario: 'invalid-json-trace' }, 'trace-invalid');
@@ -356,6 +402,9 @@ describe('invokeRuntime - success validation failures', () => {
   });
   it('reports process-contract-violation when result.trace missing', async () => {
     await expectFailure({ scenario: 'missing-result-trace' }, 'process-contract-violation');
+  });
+  it('reports process-contract-violation when result.trace.sha256 missing', async () => {
+    await expectFailure({ scenario: 'missing-result-trace-sha' }, 'process-contract-violation');
   });
   it('reports process-contract-violation when result.trace.path is present', async () => {
     await expectFailure({ scenario: 'result-trace-path-present' }, 'process-contract-violation');
@@ -386,7 +435,15 @@ describe('invokeRuntime - success validation failures', () => {
 });
 
 describe('invokeRuntime - stream contract', () => {
-  it('flags stdout leak on exit 0 as process-contract-violation', async () => {
+  it('flags stdout leak on exit 0 as process-contract-violation before file validation', async () => {
+    // Even without result files, stream shape violates first.
+    const err = await expectFailure(
+      { scenario: 'stdout-leak-no-output' },
+      'process-contract-violation',
+    );
+    expect(err.contractViolations?.some((v) => v.kind === 'stdout-nonempty')).toBe(true);
+  });
+  it('flags stdout leak on exit 0 as process-contract-violation even with valid output', async () => {
     const err = await expectFailure(
       { scenario: 'stdout-leak-small' },
       'process-contract-violation',
@@ -414,18 +471,34 @@ describe('invokeRuntime - stream contract', () => {
     );
     expect(err.contractViolations?.[0]?.kind).toBe('stderr-over-capture');
   });
+  it('sanitizes stderrSnippet: drops non-UTF-8 first line', async () => {
+    const err = await expectFailure({ scenario: 'stderr-non-utf8' }, 'runtime-exit');
+    expect(err.stderrSnippet).toBeUndefined();
+  });
+  it('sanitizes stderrSnippet: strips control characters', async () => {
+    const err = await expectFailure({ scenario: 'stderr-control-chars' }, 'runtime-exit');
+    expect(err.stderrSnippet).toBeDefined();
+    expect(err.stderrSnippet!).toMatch(/^[\x20-\x7e]+$/);
+  });
+  it('sanitizes stderrSnippet: drops when it contains the invocation path', async () => {
+    const err = await expectFailure({ scenario: 'stderr-path-leak' }, 'runtime-exit');
+    expect(err.stderrSnippet).toBeUndefined();
+  });
 });
 
-describe('invokeRuntime - timeout and cancellation', () => {
+describe('invokeRuntime - timeout, cancellation, and termination', () => {
   it('times out a hanging child', async () => {
     await expectFailure({ scenario: 'hang', timeoutMs: 500 }, 'timed-out');
   });
   it('escalates to SIGKILL when child ignores SIGTERM', async () => {
-    if (process.platform === 'win32') return; // Windows kill sequence is a single TerminateProcess.
-    const err = await expectFailure({ scenario: 'ignore-sigterm', timeoutMs: 1500 }, 'timed-out');
+    if (process.platform === 'win32') return;
+    const err = await expectFailure(
+      { scenario: 'ignore-sigterm', timeoutMs: 500, sigtermGraceMs: 150 },
+      'timed-out',
+    );
     expect(err.kind).toBe('timed-out');
-  });
-  it('cancels via AbortSignal', async () => {
+  }, 8000);
+  it('cancels via AbortSignal mid-run', async () => {
     const ctrl = new AbortController();
     const { invoke } = await runScenario({
       scenario: 'hang',
@@ -435,21 +508,111 @@ describe('invokeRuntime - timeout and cancellation', () => {
     setTimeout(() => ctrl.abort(), 100).unref();
     await expect(invoke).rejects.toMatchObject({ kind: 'cancelled' });
   });
-});
-
-describe('invokeRuntime - host termination', () => {
+  it('gives timeout precedence over subsequent stream floods', async () => {
+    // Child hangs first; timeout fires; even if the child were to flood after (it does not
+    // in this scenario), the first terminal event must remain the primary classification.
+    await expectFailure({ scenario: 'hang', timeoutMs: 300 }, 'timed-out');
+  });
   it('classifies external OS termination as host-terminated', async () => {
     if (process.platform === 'win32') return;
     await expectFailure({ scenario: 'self-signal', timeoutMs: 3000 }, 'host-terminated');
   });
 });
 
-describe('invokeRuntime - internal seams', () => {
+describe('invokeRuntime - error hygiene', () => {
+  it('does not embed input content in error messages', async () => {
+    const err = await expectFailure(
+      {
+        scenario: 'success',
+        input: {
+          ...readBootstrapInput(),
+          protocolVersion: 999 as unknown as 1,
+        },
+      },
+      'input-invalid',
+    );
+    expect(err.message).not.toMatch(/999/);
+    expect(err.message).not.toMatch(/protocolVersion/);
+  });
+  it('does not embed invocation directory paths in error messages or stderrSnippet', async () => {
+    const err = await expectFailure({ scenario: 'exit-20' }, 'runtime-exit');
+    expect(err.message).not.toMatch(/runtime-\w{6,}/);
+    if (err.stderrSnippet) expect(err.stderrSnippet).not.toMatch(/runtime-\w{6,}/);
+  });
+  it('exposes a sanitized diagnosticCode on spawn-failed instead of raw cause', async () => {
+    const tempRoot = await acquireTempRoot();
+    const err = await invokeRuntimeForTests(
+      {
+        command: { executablePath: process.execPath, prefixArgs: [fakeRuntimePath] },
+        input: readBootstrapInput(),
+        timeoutMs: 5000,
+        tempRoot,
+      },
+      {
+        spawnOverride: (() => {
+          const e = new Error('spawn EACCES') as NodeJS.ErrnoException;
+          e.code = 'EACCES';
+          throw e;
+        }) as unknown as typeof spawn,
+      },
+    ).catch((e) => e);
+    expect(err).toBeInstanceOf(RuntimeInvocationError);
+    expect((err as RuntimeInvocationError).kind).toBe('spawn-failed');
+    expect((err as RuntimeInvocationError).diagnosticCode).toBe('EACCES');
+  });
+});
+
+describe('invokeRuntime - child environment', () => {
+  it('does not forward GITHUB_* or provider credentials to the child', async () => {
+    const previous = process.env.GITHUB_TOKEN;
+    const previousAnthropic = process.env.ANTHROPIC_API_KEY;
+    const previousAgentic = process.env.AGENTIC_REVIEW_API_KEY;
+    process.env.GITHUB_TOKEN = 'ghtok-should-not-forward';
+    process.env.ANTHROPIC_API_KEY = 'anth-should-not-forward';
+    process.env.AGENTIC_REVIEW_API_KEY = 'agentic-should-not-forward';
+    try {
+      const { invoke } = await runScenario({ scenario: 'env-dump-success' });
+      const success = await invoke;
+      const dump = success.result.summary;
+      // All three sensitive variables must be reported as absent in the child.
+      expect(dump).toContain('GITHUB_TOKEN=absent');
+      expect(dump).toContain('ANTHROPIC_API_KEY=absent');
+      expect(dump).toContain('AGENTIC_REVIEW_API_KEY=absent');
+      expect(dump).not.toContain('ghtok-should-not-forward');
+    } finally {
+      if (previous === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = previous;
+      if (previousAnthropic === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = previousAnthropic;
+      if (previousAgentic === undefined) delete process.env.AGENTIC_REVIEW_API_KEY;
+      else process.env.AGENTIC_REVIEW_API_KEY = previousAgentic;
+    }
+  });
+  it('sets NO_COLOR, DOTNET_NOLOGO, and DOTNET_CLI_TELEMETRY_OPTOUT unconditionally', async () => {
+    const { invoke } = await runScenario({ scenario: 'env-dump-required-vars' });
+    const success = await invoke;
+    expect(success.result.summary).toContain('NO_COLOR=1');
+    expect(success.result.summary).toContain('DOTNET_NOLOGO=1');
+    expect(success.result.summary).toContain('DOTNET_CLI_TELEMETRY_OPTOUT=1');
+  });
+});
+
+describe('invokeRuntime - byte budgets', () => {
+  it('reports unsafe-output-file when result.json exceeds cap', async () => {
+    // The oversized-result scenario writes a filler > 8 MiB cap.
+    await expectFailure(
+      { scenario: 'oversized-result', fillerBytes: 10 * 1024 * 1024 },
+      'unsafe-output-file',
+    );
+  });
+});
+
+describe('invokeRuntime - internal seams (via invokeRuntimeForTests)', () => {
   it('surfaces mkdtemp failure as host-io-failed', async () => {
     const bootError = new Error('boom');
     (bootError as NodeJS.ErrnoException).code = 'EACCES';
     await expect(
-      invokeRuntime(
+      invokeRuntimeForTests(
         {
           command: { executablePath: process.execPath, prefixArgs: [fakeRuntimePath] },
           input: readBootstrapInput(),
@@ -465,10 +628,9 @@ describe('invokeRuntime - internal seams', () => {
       ),
     ).rejects.toMatchObject({ kind: 'host-io-failed' });
   });
-
   it('surfaces cleanup-failed on success when rm throws', async () => {
     const tempRoot = await acquireTempRoot();
-    const err = await invokeRuntime(
+    const err = await invokeRuntimeForTests(
       {
         command: { executablePath: process.execPath, prefixArgs: [fakeRuntimePath] },
         input: readBootstrapInput(),
@@ -487,10 +649,9 @@ describe('invokeRuntime - internal seams', () => {
     expect(err).toBeInstanceOf(RuntimeInvocationError);
     expect((err as RuntimeInvocationError).kind).toBe('cleanup-failed');
   });
-
   it('preserves primary error when cleanup fails after failure', async () => {
     const tempRoot = await acquireTempRoot();
-    const err = await invokeRuntime(
+    const err = await invokeRuntimeForTests(
       {
         command: { executablePath: process.execPath, prefixArgs: [fakeRuntimePath] },
         input: readBootstrapInput(),
@@ -510,11 +671,10 @@ describe('invokeRuntime - internal seams', () => {
     expect((err as RuntimeInvocationError).kind).toBe('runtime-exit');
     expect((err as RuntimeInvocationError).exitClass).toBe('runtime');
   });
-
   it('invokes the onBeforeCleanup test hook before rm', async () => {
     const seen: string[] = [];
     await expect(
-      invokeRuntime(
+      invokeRuntimeForTests(
         {
           command: { executablePath: process.execPath, prefixArgs: [fakeRuntimePath] },
           input: readBootstrapInput(),

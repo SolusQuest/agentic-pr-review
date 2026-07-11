@@ -117,6 +117,18 @@ export async function statSafeOutputFile(
   fileKind: SafeFileCheckKind,
   fullPath: string,
   seams: FsSeams,
+  options: { silentOnFailure: false },
+): Promise<{ size: number }>;
+export async function statSafeOutputFile(
+  fileKind: SafeFileCheckKind,
+  fullPath: string,
+  seams: FsSeams,
+  options: { silentOnFailure: true },
+): Promise<{ size: number } | null>;
+export async function statSafeOutputFile(
+  fileKind: SafeFileCheckKind,
+  fullPath: string,
+  seams: FsSeams,
   options: SafeFileCheckOptions,
 ): Promise<{ size: number } | null> {
   let stat;
@@ -161,6 +173,18 @@ export async function statSafeOutputFile(
  * failures during the read map to host-io-failed on the success path or null on the
  * failure-trace path.
  */
+export async function readSafeOutputBytes(
+  fileKind: SafeFileCheckKind,
+  fullPath: string,
+  seams: FsSeams,
+  options: { silentOnFailure: false },
+): Promise<Uint8Array>;
+export async function readSafeOutputBytes(
+  fileKind: SafeFileCheckKind,
+  fullPath: string,
+  seams: FsSeams,
+  options: { silentOnFailure: true },
+): Promise<Uint8Array | null>;
 export async function readSafeOutputBytes(
   fileKind: SafeFileCheckKind,
   fullPath: string,
