@@ -1,18 +1,17 @@
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, symlink } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ReviewInputV1 } from '../protocol/review-input.js';
+import { invokeRuntime, RuntimeInvocationError } from './invoke-runtime.js';
 import {
-  invokeRuntime,
   invokeRuntimeForTests,
-  RuntimeInvocationError,
   type RuntimeInvocationTestSeams,
-} from './invoke-runtime.js';
+} from './invoke-runtime.test-support.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fakeRuntimePath = join(here, '__test-fixtures__', 'fake-runtime.mjs');
@@ -671,6 +670,42 @@ describe('invokeRuntime - internal seams (via invokeRuntimeForTests)', () => {
     expect((err as RuntimeInvocationError).kind).toBe('runtime-exit');
     expect((err as RuntimeInvocationError).exitClass).toBe('runtime');
   });
+  it('does not spawn when the signal aborts during input write', async () => {
+    let spawnCalled = false;
+    const spawnOverride = ((..._args: unknown[]) => {
+      spawnCalled = true;
+      throw new Error('should not spawn');
+    }) as unknown as typeof spawn;
+    const ctrl = new AbortController();
+    let writeStarted = false;
+    const err = await invokeRuntimeForTests(
+      {
+        command: { executablePath: process.execPath, prefixArgs: [fakeRuntimePath] },
+        input: readBootstrapInput(),
+        timeoutMs: 5000,
+        tempRoot: await acquireTempRoot(),
+        signal: ctrl.signal,
+      },
+      {
+        spawnOverride,
+        fs: {
+          writeFile: (async (target: unknown, data: unknown) => {
+            writeStarted = true;
+            ctrl.abort();
+            // Slight delay so the abort races the resolve.
+            await new Promise((r) => setTimeout(r, 10));
+            const { writeFile } = await import('node:fs/promises');
+            return writeFile(target as unknown as string, data as unknown as Uint8Array);
+          }) as unknown as (typeof import('node:fs/promises'))['writeFile'],
+        },
+      },
+    ).catch((e) => e);
+    expect(writeStarted).toBe(true);
+    expect(spawnCalled).toBe(false);
+    expect(err).toBeInstanceOf(RuntimeInvocationError);
+    expect((err as RuntimeInvocationError).kind).toBe('cancelled');
+  });
+
   it('invokes the onBeforeCleanup test hook before rm', async () => {
     const seen: string[] = [];
     await expect(

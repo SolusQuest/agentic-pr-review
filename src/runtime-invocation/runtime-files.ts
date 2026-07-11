@@ -5,6 +5,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { RuntimeInvocationError } from './runtime-errors.js';
 
+function extractSanitizedCode(cause: unknown): string | undefined {
+  if (cause === null || typeof cause !== 'object') return undefined;
+  const code = (cause as { code?: unknown }).code;
+  return typeof code === 'string' && /^[A-Z0-9_]{1,32}$/.test(code) ? code : undefined;
+}
+
 /**
  * Byte budgets for the three protocol files (see #33 D10). These are host-side safety
  * bounds; they are not part of the public protocol and may change based on evidence.
@@ -70,7 +76,7 @@ export async function createInvocationDir(
     throw new RuntimeInvocationError({
       kind: 'host-io-failed',
       message: 'Failed to create runtime invocation directory.',
-      cause,
+      diagnosticCode: extractSanitizedCode(cause),
     });
   }
 }
@@ -92,7 +98,7 @@ export async function writeInputFile(
     throw new RuntimeInvocationError({
       kind: 'host-io-failed',
       message: 'Failed to materialize input.json.',
-      cause,
+      diagnosticCode: extractSanitizedCode(cause),
     });
   }
 }
@@ -147,7 +153,7 @@ export async function statSafeOutputFile(
     throw new RuntimeInvocationError({
       kind: 'host-io-failed',
       message: `Failed to inspect ${fileKind}.json.`,
-      cause,
+      diagnosticCode: extractSanitizedCode(cause),
     });
   }
   if (stat.isSymbolicLink() || !stat.isFile()) {
@@ -199,7 +205,7 @@ export async function readSafeOutputBytes(
     throw new RuntimeInvocationError({
       kind: 'host-io-failed',
       message: `Failed to read ${fileKind}.json.`,
-      cause,
+      diagnosticCode: extractSanitizedCode(cause),
     });
   }
 }

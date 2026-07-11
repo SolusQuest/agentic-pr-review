@@ -45,13 +45,12 @@ export interface RuntimeInvocationErrorInit {
   stderrSnippet?: string;
   contractViolations?: readonly RuntimeContractViolation[];
   failureTraceDiagnostics?: readonly ReviewTraceDiagnosticV1[];
-  cause?: unknown;
 }
 
 /**
  * All failures raised by {@link invokeRuntime}. Callers switch on {@link kind} to
- * classify the failure. Underlying causes may be attached internally but are not
- * re-emitted verbatim to callers of the action layer (#34).
+ * classify the failure. No native Error.cause is attached and no raw underlying
+ * value is exposed on the public error surface.
  */
 export class RuntimeInvocationError extends Error {
   readonly kind: RuntimeInvocationErrorKind;
@@ -63,7 +62,7 @@ export class RuntimeInvocationError extends Error {
   readonly failureTraceDiagnostics?: readonly ReviewTraceDiagnosticV1[];
 
   constructor(init: RuntimeInvocationErrorInit) {
-    super(init.message, init.cause !== undefined ? { cause: init.cause } : undefined);
+    super(init.message);
     this.name = 'RuntimeInvocationError';
     this.kind = init.kind;
     if (init.exitCode !== undefined) this.exitCode = init.exitCode;
