@@ -154,6 +154,16 @@ public sealed class RuntimeApplicationTests
         AssertFailure(await RunAsync(nonInteger.InputPath, nonInteger.OutputPath, nonInteger.TracePath), 10, "APR_INPUT_SCHEMA_INVALID:");
     }
 
+    [Theory]
+    [InlineData(2_147_483_648L)]
+    [InlineData(-1L)]
+    public async Task AnyIntegerProtocolVersionOtherThanOneIsUnsupported(long protocolVersion)
+    {
+        using var files = new TemporaryFiles();
+        await files.UpdateInputAsync(node => node["protocolVersion"] = JsonValue.Create(protocolVersion));
+        AssertFailure(await RunAsync(files.InputPath, files.OutputPath, files.TracePath), 10, "APR_PROTOCOL_VERSION_UNSUPPORTED:");
+    }
+
     [Fact]
     public async Task IncrementalFixtureExecutesSuccessfully()
     {

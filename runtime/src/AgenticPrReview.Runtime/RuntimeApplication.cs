@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Numerics;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -212,12 +214,13 @@ public sealed class RuntimeApplication
     private static void ValidateInputVersion(JsonElement input)
     {
         if (input.ValueKind != JsonValueKind.Object || !input.TryGetProperty("protocolVersion", out var version) ||
-            version.ValueKind != JsonValueKind.Number || !version.TryGetInt32(out var integerVersion))
+            version.ValueKind != JsonValueKind.Number ||
+            !BigInteger.TryParse(version.GetRawText(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var integerVersion))
         {
             throw new RuntimeFailure(10, "APR_INPUT_SCHEMA_INVALID", "Input does not satisfy ReviewInputV1.");
         }
 
-        if (integerVersion != 1)
+        if (integerVersion != BigInteger.One)
         {
             throw new RuntimeFailure(10, "APR_PROTOCOL_VERSION_UNSUPPORTED", "Input protocol version is unsupported.");
         }
