@@ -105,21 +105,50 @@ export async function run(): Promise<void> {
   const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
   const tempRoot = path.join(defaultTempDir(), 'agentic-pr-review');
   const runtimeDir = path.join(tempRoot, 'runtime', config.runtimeProvider);
-  await ensureDir(tempRoot);
+  try {
+    await ensureDir(tempRoot);
+  } catch (error) {
+    if ((config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
+      setDeterministicErrorOutputs(new Error('state-invalid: temporary directory unavailable'));
+      throw new Error('state-invalid: temporary directory unavailable');
+    }
+    throw error;
+  }
 
   const octokit = github.getOctokit(config.githubToken);
-  const target = await resolveTarget(config, octokit, github.context);
-  validateSameRepositoryTarget(target);
+  let target: Awaited<ReturnType<typeof resolveTarget>>;
+  try {
+    target = await resolveTarget(config, octokit, github.context);
+    validateSameRepositoryTarget(target);
+  } catch (error) {
+    if ((config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
+      setDeterministicErrorOutputs(new Error('input-invalid: target resolution failed'));
+      throw new Error('input-invalid: target resolution failed');
+    }
+    throw error;
+  }
 
-  const baseStateKey = deriveStateKey(config, target);
-  const stateKey =
-    (config.runtimeBackend ?? 'legacy') === 'deterministic-csharp'
-      ? deterministicStateKey(baseStateKey)
-      : sanitizeStateKey(baseStateKey);
-  const artifactName =
-    (config.runtimeBackend ?? 'legacy') === 'deterministic-csharp'
-      ? deterministicStateArtifactName(stateKey)
-      : stateArtifactName(stateKey);
+  let stateKey: string;
+  let artifactName: string;
+  try {
+    const baseStateKey = deriveStateKey(config, target);
+    stateKey =
+      (config.runtimeBackend ?? 'legacy') === 'deterministic-csharp'
+        ? deterministicStateKey(baseStateKey)
+        : sanitizeStateKey(baseStateKey);
+    artifactName =
+      (config.runtimeBackend ?? 'legacy') === 'deterministic-csharp'
+        ? deterministicStateArtifactName(stateKey)
+        : stateArtifactName(stateKey);
+  } catch (error) {
+    if ((config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
+      setDeterministicErrorOutputs(
+        new Error('state-invalid: state identity could not be resolved'),
+      );
+      throw new Error('state-invalid: state identity could not be resolved');
+    }
+    throw error;
+  }
   const store = createArtifactStore(config.githubToken, octokit);
   let resolution: PhaseResolution;
   try {
@@ -560,7 +589,7 @@ async function resolvePhase(
   try {
     artifact = await store.findStateArtifact(artifactName, config.stateArtifactRunId);
   } catch (error) {
-    if (config.runtimeBackend === 'deterministic-csharp' && config.reviewMode === 'incremental') {
+    if (config.runtimeBackend === 'deterministic-csharp') {
       throw new Error('state-invalid: state artifact lookup failed');
     }
     throw error;
@@ -581,7 +610,7 @@ async function resolvePhase(
   try {
     await store.download(artifact, restoreDir);
   } catch (error) {
-    if (config.runtimeBackend === 'deterministic-csharp' && config.reviewMode === 'incremental') {
+    if (config.runtimeBackend === 'deterministic-csharp') {
       throw new Error('state-invalid: restored state artifact could not be downloaded');
     }
     throw error;
@@ -740,8 +769,9 @@ async function finishSkippedIdentical(options: {
   let structuredReview: StructuredReviewEnvelopeV1;
   let structuredMetadata: StructuredResultMetadata;
   if ((options.config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
+    let assembled: ReturnType<typeof assembleStructuredReviewFromRuntimeContent>;
     try {
-      const assembled = assembleStructuredReviewFromRuntimeContent({
+      assembled = assembleStructuredReviewFromRuntimeContent({
         content: skippedContent,
         target: options.target,
         phase: 'incremental',
@@ -755,6 +785,13 @@ async function finishSkippedIdentical(options: {
         lineageTotals: runtimeResult.lineageTotals,
         maxFindings: options.config.maxFindings,
       });
+    } catch {
+      setDeterministicErrorOutputs(
+        new Error('mapping-invalid: skipped review could not be assembled'),
+      );
+      throw new Error('mapping-invalid: skipped review could not be assembled');
+    }
+    try {
       structuredReview = capStructuredReviewForMarkdownLimit(
         assembled.envelope,
         options.config.maxReviewChars,
@@ -762,9 +799,9 @@ async function finishSkippedIdentical(options: {
       structuredMetadata = metadataForStructuredReview(structuredReview, assembled.metadata.status);
     } catch {
       setDeterministicErrorOutputs(
-        new Error('rendering-invalid: skipped review could not be assembled'),
+        new Error('rendering-invalid: skipped review could not be rendered'),
       );
-      throw new Error('rendering-invalid: skipped review could not be assembled');
+      throw new Error('rendering-invalid: skipped review could not be rendered');
     }
   } else {
     const normalized = normalizeStructuredReview({

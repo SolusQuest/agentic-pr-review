@@ -309,6 +309,10 @@ describe('run', () => {
 
     expect(mocks.setOutput).toHaveBeenCalledWith('runtime_backend', 'deterministic-csharp');
     expect(mocks.setOutput).toHaveBeenCalledWith('runtime_error_kind', '');
+    expect(mocks.setOutput).toHaveBeenCalledWith(
+      'usage_budget_status',
+      'not_applicable (records=0)',
+    );
     await expect(
       stat(
         path.join(
@@ -357,6 +361,8 @@ describe('run', () => {
     expect(mocks.createComment).not.toHaveBeenCalled();
     expect(mocks.setOutput).toHaveBeenCalledWith('inline_comments_enabled', 'true');
     expect(mocks.setOutput).toHaveBeenCalledWith('inline_comments_skipped_count', '1');
+    expect(mocks.setOutput).not.toHaveBeenCalledWith('runtime_backend', expect.anything());
+    expect(mocks.setOutput).not.toHaveBeenCalledWith('usage_budget_status', expect.anything());
     expect(mocks.warning).toHaveBeenCalledWith(
       'Inline PR review comments require post_comment=true so the sticky review remains the source of truth.',
     );
