@@ -141,9 +141,10 @@ The successful hash shape is intentionally one-way:
 - ReviewResultV1.trace.path is omitted.
 
 trace.path is artifact-relative in the schema, while this CLI produces a file at a host-supplied
-invocation path and does not own artifact layout. Issue #33 retains that path separately in its
-adapter return and verifies its bytes against ReviewResultV1.trace.sha256. It must not modify the
-runtime-produced result file or represent an enriched copy as the exact runtime output. A future
+invocation path and does not own artifact layout. Issue #33 retains the runtime-supplied path only
+during validation and returns the exact validated bytes and parsed data; it does not enrich or
+reserialize runtime output and does not expose the invocation path on its return value. The
+adapter verifies the trace bytes it read against ReviewResultV1.trace.sha256. A future
 artifact-relative reference belongs to a separately defined host-owned representation unless the
 protocol changes. Omitting ReviewTraceV1.resultSha256 avoids an exact-byte circular dependency.
 
