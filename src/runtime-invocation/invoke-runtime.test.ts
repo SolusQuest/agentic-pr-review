@@ -688,13 +688,20 @@ describe('invokeRuntime - post-spawn lifecycle (mock ChildProcess)', () => {
       return mock as unknown as ReturnType<typeof spawn>;
     }) as unknown as typeof spawn;
 
-    // Production-shaped ordering: closeGraceMs (30) < sigtermGraceMs (200) so a naive
-    // close deadline armed by the post-spawn error path would fire before the
-    // scheduled SIGTERM->SIGKILL escalation. The adapter must defer arming until the
-    // sigkillTimer has fired. We use a wide post-SIGKILL closeGraceMs (400 ms) here so
-    // that once SIGKILL fires the test has room to emit 'close' before the fallback
-    // fires; the property under test is the pre-SIGKILL deferral, not the post-SIGKILL
-    // deadline (which is covered separately).
+    // Real short closeGraceMs < sigtermGraceMs so a naive implementation (post-spawn
+    // error immediately calls armCloseDeadline) would resolve the exit promise long
+    // before the sigkillTimer fires, thereby cancelling the pending SIGKILL. The
+    // property under test is that the adapter defers arming while sigkillTimer is
+    // pending and lets the SIGKILL escalation actually run.
+    //
+    // Never emit 'close'; instead assert that after the run bounded-returns:
+    //   - the correct implementation attempted SIGKILL (killCalls contains 'SIGKILL')
+    //   - the outcome is timed-out
+    //   - the invocation directory is preserved (closeObserved=false)
+    //
+    // A broken implementation would arm a 30 ms deadline at t~80 ms, settle at
+    // t~110 ms, clearTimeout the pending sigkillTimer at t~200 ms, and never send
+    // SIGKILL. The killCalls assertion catches that regression directly.
     const invoke = invokeRuntimeForTests(
       {
         command: { executablePath: process.execPath, prefixArgs: [] },
@@ -702,32 +709,36 @@ describe('invokeRuntime - post-spawn lifecycle (mock ChildProcess)', () => {
         timeoutMs: 40,
         tempRoot,
       },
-      { spawnOverride, sigtermGraceMs: 200, closeGraceMs: 400 },
+      { spawnOverride, sigtermGraceMs: 200, closeGraceMs: 30 },
     );
 
     // Wait past the timeout so setTermination('timeout') runs and killChild() sends
-    // SIGTERM (recorded but non-fatal for the mock), scheduling the SIGKILL timer.
+    // SIGTERM, scheduling the SIGKILL timer at t~240 ms.
     await delay(80);
     expect(mock.killCalls).toContain('SIGTERM');
     expect(mock.killCalls).not.toContain('SIGKILL');
-    // Emit a synthetic post-spawn control error. If the adapter incorrectly armed
-    // a short close deadline here (i.e. did not honor the pending sigkillTimer) the
-    // promise would resolve before SIGKILL runs.
+
+    // Emit a synthetic post-spawn control error. A broken implementation would call
+    // armCloseDeadline() here (30 ms) and pre-empt the pending SIGKILL escalation.
     const controlErr = new Error('synthetic kill delivery failure');
     (controlErr as NodeJS.ErrnoException).code = 'ESRCH';
     mock.emit('error', controlErr);
 
-    // Wait long enough for the SIGKILL escalation to fire (sigtermGraceMs=200 -> ~240 ms
-    // after start) but well before the 400 ms post-SIGKILL close deadline.
-    await delay(220);
-    expect(mock.killCalls).toContain('SIGKILL');
-
-    // Finally emit close so the run resolves with closeObserved=true and cleanup runs.
-    mock.emit('close', null, 'SIGKILL');
+    // Do NOT emit 'close'. Let the correct implementation follow the full sequence:
+    //   ~240 ms: sigkillTimer fires -> SIGKILL attempted -> armCloseDeadline(30 ms)
+    //   ~270 ms: bounded fallback settles with closeObserved=false
     const err = await invoke.catch((e) => e);
     expect(err).toBeInstanceOf(RuntimeInvocationError);
     expect((err as RuntimeInvocationError).kind).toBe('timed-out');
-    expect(await readdir(tempRoot)).toEqual([]);
+    // The escalation must have attempted SIGKILL despite the intervening control
+    // error and the short closeGraceMs.
+    expect(mock.killCalls).toContain('SIGKILL');
+    // closeObserved=false -> cleanup skipped -> invocation directory preserved.
+    const remaining = await readdir(tempRoot);
+    expect(remaining.length).toBe(1);
+    const invocationDir = join(tempRoot, remaining[0]);
+    const leaked = await readdir(invocationDir);
+    expect(leaked).toContain('input.json');
   }, 8000);
 
   it('bounded-returns when child appears exited but close never arrives', async () => {
