@@ -6,7 +6,6 @@ import type {
   ActionConfig,
   ChangedFile,
   LoadedBlock,
-  Phase,
   RestoredState,
   ReviewTarget,
 } from '../types.js';

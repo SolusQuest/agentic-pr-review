@@ -13,7 +13,6 @@ import {
 import { buildReviewPrompt } from './prompt.js';
 import {
   allowedToolsForMode,
-  computeLineageTotals,
   createRuntime,
   defaultTempDir,
   preserveLineageTotalsForSkipped,
