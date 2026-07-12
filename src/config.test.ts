@@ -16,6 +16,7 @@ describe('parseActionConfig', () => {
   it('parses defaults for test runtime', () => {
     const config = parseActionConfig(new Inputs({}), baseEnv, 'pull_request');
     expect(config.runtimeProvider).toBe('test');
+    expect(config.runtimeBackend).toBe('legacy');
     expect(config.targetMode).toBe('pull-request');
     expect(config.reviewMode).toBe('auto');
     expect(config.apiKeyMode).toBe('auth-token');
@@ -108,6 +109,37 @@ describe('parseActionConfig', () => {
       'pull_request',
     );
     expect(config.disablePromptCaching).toBe(true);
+  });
+
+  it('accepts the guarded deterministic C# matrix', () => {
+    const config = parseActionConfig(
+      new Inputs({ runtime_backend: 'deterministic-csharp', target_mode: 'synthetic-fixture' }),
+      baseEnv,
+      'workflow_dispatch',
+    );
+    expect(config.runtimeBackend).toBe('deterministic-csharp');
+    expect(config.runtimeProvider).toBe('test');
+  });
+
+  it('rejects deterministic provider settings and synthetic comments', () => {
+    expect(() =>
+      parseActionConfig(
+        new Inputs({ runtime_backend: 'deterministic-csharp', model_name: 'ignored' }),
+        baseEnv,
+        'workflow_dispatch',
+      ),
+    ).toThrow(/configuration is invalid/);
+    expect(() =>
+      parseActionConfig(
+        new Inputs({
+          runtime_backend: 'deterministic-csharp',
+          target_mode: 'synthetic-fixture',
+          post_comment: 'true',
+        }),
+        baseEnv,
+        'workflow_dispatch',
+      ),
+    ).toThrow(/requires post_comment=false/);
   });
 
   it('rejects mutually exclusive instruction inputs', () => {

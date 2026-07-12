@@ -187,6 +187,16 @@ Replay must not require GitHub credentials or live GitHub state. Replay material
 
 The current protocol defines `ReviewInputV1`, `ReviewResultV1`, and `ReviewTraceV1`. A future project-owned runtime that resumes context across GitHub Actions runs will need an additional artifact type (for example, `ProviderSessionLedgerV1` or `RuntimeSessionV1`) to carry the canonical session ledger.
 
+## Deterministic C# Host Integration
+
+The default-off `runtime_backend=deterministic-csharp` path constructs and validates `ReviewInputV1`,
+invokes the trusted command through `invokeRuntime()`, validates the deterministic trace semantics,
+and maps `ReviewResultV1` with `mapReviewResultV1ToRuntimeContent()`. The host then assembles the
+typed content into the existing `StructuredReviewEnvelopeV1`; it does not round-trip typed content
+through the legacy `modelReviewJson` parser. Runtime warnings and diagnostics remain side-channel
+metadata, while phase, SHA, state, lineage, usage-budget, fingerprints, and publishing facts remain
+host-owned.
+
 This ledger artifact is distinct from `ReviewTraceV1`:
 
 - `ReviewTraceV1` is sanitized execution evidence that may be referenced by a replay bundle; it carries no conversation content and is not sufficient for replay by itself.

@@ -4,6 +4,7 @@ import {
   type Phase,
   type ReviewTarget,
   type RuntimeLineageTotals,
+  type RuntimeBackend,
   type RuntimeUsage,
   type StructuredFindingV1,
   type StructuredReviewEnvelopeV1,
@@ -34,6 +35,7 @@ interface LineageMeta {
   lineage_id: string;
   state_key: string;
   runtime_provider: string;
+  runtime_backend?: RuntimeBackend;
   session_id: string;
   from_head_sha: string | null;
   to_head_sha: string;
@@ -55,6 +57,7 @@ export interface LineageCommentInput {
   stateKey: string;
   phase: Phase;
   runtimeProvider: string;
+  runtimeBackend?: RuntimeBackend;
   sessionId: string;
   previousHeadSha?: string;
   currentHeadSha: string;
@@ -166,12 +169,17 @@ export function buildLineageCommentBody(
   const chainStart = existingMeta?.lineage_id.split(':').at(-1) ?? shortSha(input.currentHeadSha);
   const lineageId =
     existingMeta?.lineage_id ??
-    `${input.stateKey}:${input.runtimeProvider}:${input.runId}:${chainStart}`;
+    (input.runtimeBackend === 'deterministic-csharp'
+      ? `deterministic-csharp:${input.stateKey}:${input.runtimeProvider}:${input.runId}:${chainStart}`
+      : `${input.stateKey}:${input.runtimeProvider}:${input.runId}:${chainStart}`);
   const meta: LineageMeta = {
     version: 1,
     lineage_id: lineageId,
     state_key: input.stateKey,
     runtime_provider: input.runtimeProvider,
+    ...(input.runtimeBackend === 'deterministic-csharp'
+      ? { runtime_backend: input.runtimeBackend }
+      : {}),
     session_id: input.sessionId,
     from_head_sha: input.previousHeadSha ?? null,
     to_head_sha: input.currentHeadSha,
@@ -201,7 +209,7 @@ export function buildLineageCommentBody(
     '| --- | --- |',
     `| Mode | ${input.phase} |`,
     `| Range | \`${previous}\` -> \`${shortSha(input.currentHeadSha)}\` |`,
-    `| Runtime | ${input.runtimeProvider} |`,
+    `| Runtime | ${input.runtimeProvider} (${input.runtimeBackend ?? 'legacy'}) |`,
     `| Session | \`${input.sessionId}\` |`,
     `| State artifact | \`${input.artifactName}\` |`,
     `| Run | ${runValue} |`,
@@ -348,7 +356,8 @@ function findLineageComment(
       Boolean(
         candidate.meta &&
         candidate.meta.state_key === input.stateKey &&
-        candidate.meta.runtime_provider === input.runtimeProvider,
+        candidate.meta.runtime_provider === input.runtimeProvider &&
+        (candidate.meta.runtime_backend ?? 'legacy') === (input.runtimeBackend ?? 'legacy'),
       ),
     )
     .sort((left, right) => {

@@ -2,6 +2,10 @@ name: Agentic PR Review
 description: Session-aware agentic pull request review with state artifact restore.
 
 inputs:
+  runtime_backend:
+    description: 'Host runtime backend: legacy or deterministic-csharp (experimental, default-off).'
+    required: false
+    default: legacy
   runtime_provider:
     description: 'Runtime to use for review generation: test or claude-code-cli.'
     required: false
@@ -134,6 +138,16 @@ inputs:
     required: false
 
 outputs:
+  runtime_backend:
+    description: Deterministic runtime backend used by the guarded path.
+  runtime_version:
+    description: Runtime-reported version for the deterministic backend.
+  runtime_trace_sha256:
+    description: Validated deterministic trace SHA-256.
+  runtime_error_kind:
+    description: Bounded deterministic runtime or host error kind.
+  runtime_error_class:
+    description: Bounded deterministic runtime exit class when available.
   state_key:
     description: Resolved state key.
   review_mode:

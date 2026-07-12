@@ -1,4 +1,5 @@
 export type RuntimeProvider = 'test' | 'claude-code-cli';
+export type RuntimeBackend = 'legacy' | 'deterministic-csharp';
 export type TargetMode = 'pull-request' | 'synthetic-fixture';
 export type ReviewMode = 'auto' | 'bootstrap' | 'incremental';
 export type Phase = 'bootstrap' | 'incremental';
@@ -103,6 +104,8 @@ export interface UsageBudgetStatus {
 }
 
 export interface ActionConfig {
+  /** Missing in hand-built legacy test fixtures; parsed action config always supplies legacy. */
+  runtimeBackend?: RuntimeBackend;
   runtimeProvider: RuntimeProvider;
   targetMode: TargetMode;
   reviewMode: ReviewMode;
@@ -238,6 +241,8 @@ export interface ReviewTarget {
 }
 
 export interface RestoredState {
+  /** Missing manifests and legacy fixtures normalize to legacy. */
+  runtimeBackend?: RuntimeBackend;
   stateKey: string;
   sessionId: string;
   sessionName: string;
@@ -255,7 +260,8 @@ export interface RestoredState {
 export interface RuntimeResult {
   sessionId: string;
   sessionName: string;
-  modelReviewJson: string;
+  /** Legacy bridge payload; deterministic C# leaves it absent and uses typed content. */
+  modelReviewJson?: string;
   debugFiles: string[];
   toolMode: ToolMode;
   allowedTools: string[];
@@ -264,6 +270,10 @@ export interface RuntimeResult {
   usage: RuntimeUsage | null;
   usageBudgetStatus: UsageBudgetStatus;
   lineageTotals: RuntimeLineageTotals;
+  reviewInputSha256?: string;
+  reviewInputBytes?: number;
+  runtimeVersion?: string;
+  traceSha256?: string;
 }
 
 export interface RuntimeUsage {

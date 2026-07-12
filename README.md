@@ -80,6 +80,27 @@ For a live runtime, pass provider configuration as inputs and the API key as an 
     AGENTIC_REVIEW_API_KEY: ${{ secrets.AGENTIC_REVIEW_CLAUDE_CODE_API_KEY }}
 ```
 
+The experimental deterministic C# host bridge is explicitly opt-in. It uses the validated
+`invokeRuntime()` adapter and keeps publishing host-owned:
+
+```yaml
+- uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@<sha>
+  with:
+    runtime_backend: deterministic-csharp
+    runtime_provider: test
+    target_mode: synthetic-fixture
+    review_mode: bootstrap
+  env:
+    GITHUB_TOKEN: ${{ github.token }}
+    AGENTIC_REVIEW_RUNTIME_EXECUTABLE: ${{ runner.temp }}/agentic-review-runtime
+    AGENTIC_REVIEW_RUNTIME_PREFIX_ARGS_JSON: '["${{ runner.temp }}/agentic-review-runtime.dll"]'
+```
+
+The executable and any absolute prefix path must be prepared outside `GITHUB_WORKSPACE`.
+The host rejects checkout-contained, relative, symlink, missing, and non-regular executable
+paths before spawn. The deterministic path supports `runtime_provider=test`, `tool_mode=none`,
+no inline comments, and no provider secrets; synthetic targets must keep `post_comment=false`.
+
 ## Permissions
 
 Without PR comments:
@@ -113,6 +134,7 @@ permissions:
 
 | Input                                              | Default        | Notes                                                                                                                                                                                                                 |
 | -------------------------------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runtime_backend`                                  | `legacy`       | `legacy` or experimental `deterministic-csharp`; legacy remains the default                                                                                                                                           |
 | `runtime_provider`                                 | `test`         | `test` or `claude-code-cli`                                                                                                                                                                                           |
 | `target_mode`                                      | `pull-request` | `pull-request` or `synthetic-fixture`                                                                                                                                                                                 |
 | `review_mode`                                      | `auto`         | `auto`, `bootstrap`, or `incremental`                                                                                                                                                                                 |
@@ -171,6 +193,11 @@ preempt the provider call that emitted the over-budget usage record.
 
 | Output                                      | Notes                                                                                   |
 | ------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `runtime_backend`                           | Deterministic backend when the guarded path is selected                                 |
+| `runtime_version`                           | Runtime-reported version for deterministic execution                                    |
+| `runtime_trace_sha256`                      | Validated deterministic trace hash                                                      |
+| `runtime_error_kind`                        | Bounded deterministic runtime or host error kind                                        |
+| `runtime_error_class`                       | Bounded deterministic runtime exit class                                                |
 | `state_key`                                 | Resolved state key                                                                      |
 | `review_mode`                               | Requested review mode                                                                   |
 | `phase`                                     | Actual phase: `bootstrap` or `incremental`                                              |

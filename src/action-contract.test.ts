@@ -11,6 +11,7 @@ describe('action contract', () => {
 
   it('declares core public inputs and outputs', () => {
     for (const name of [
+      'runtime_backend',
       'runtime_provider',
       'target_mode',
       'review_mode',
@@ -55,6 +56,10 @@ describe('action contract', () => {
       'lineage_usage_cache_read_input_tokens',
       'lineage_usage_cache_creation_input_tokens',
       'lineage_usage_output_tokens',
+      'runtime_version',
+      'runtime_trace_sha256',
+      'runtime_error_kind',
+      'runtime_error_class',
     ]) {
       expect(action).toContain(name);
     }

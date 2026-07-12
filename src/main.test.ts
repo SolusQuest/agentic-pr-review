@@ -2,7 +2,11 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { stateArtifactName } from './state.js';
+import {
+  deterministicStateArtifactName,
+  deterministicStateKey,
+  stateArtifactName,
+} from './state.js';
 import { type PullRequestDiffSnapshotV1 } from './types.js';
 import { sha256 } from './utils.js';
 
@@ -173,8 +177,14 @@ describe('run', () => {
   async function writeRestoredArtifact(
     stateKey: string,
     snapshot?: PullRequestDiffSnapshotV1,
+    runtimeBackend: 'legacy' | 'deterministic-csharp' = 'legacy',
   ): Promise<void> {
-    const artifactDir = path.join(artifactRoot, stateArtifactName(stateKey));
+    const artifactDir = path.join(
+      artifactRoot,
+      runtimeBackend === 'deterministic-csharp'
+        ? deterministicStateArtifactName(stateKey)
+        : stateArtifactName(stateKey),
+    );
     await mkdir(path.join(artifactDir, 'runtime', 'test'), { recursive: true });
     await writeFile(
       path.join(artifactDir, 'manifest.json'),
@@ -184,6 +194,9 @@ describe('run', () => {
           workflow: 'agentic-pr-review',
           stateKey,
           phase: 'bootstrap',
+          ...(runtimeBackend === 'deterministic-csharp'
+            ? { runtimeBackend: 'deterministic-csharp' }
+            : {}),
           runtimeProvider: 'test',
           toolMode: 'none',
           allowedTools: [],
@@ -250,6 +263,60 @@ describe('run', () => {
       stat(path.join(artifactRoot, stateArtifactName('comment-fail'))),
     ).rejects.toThrow();
     expect(mocks.setOutput).not.toHaveBeenCalledWith('reviewed_head_sha', 'head-sha');
+  });
+
+  it('short-circuits deterministic identical reviews without command configuration', async () => {
+    Object.assign(mocks.inputs, {
+      runtime_backend: 'deterministic-csharp',
+      post_comment: 'false',
+      review_mode: 'incremental',
+      state_key: 'deterministic-identical',
+    });
+    const logicalStateKey = deterministicStateKey('deterministic-identical');
+    await writeRestoredArtifact(
+      logicalStateKey,
+      currentSnapshot({ headSha: 'head-sha' }),
+      'deterministic-csharp',
+    );
+
+    const { run } = await import('./main.js');
+    await expect(run()).resolves.toBeUndefined();
+
+    const outputNames = mocks.setOutput.mock.calls.map(([name]) => name);
+    expect(outputNames).toContain('runtime_backend');
+    expect(outputNames).toContain('runtime_version');
+    expect(mocks.setOutput).toHaveBeenCalledWith('runtime_version', '');
+    expect(mocks.setOutput).toHaveBeenCalledWith('runtime_trace_sha256', '');
+    expect(mocks.setOutput).toHaveBeenCalledWith('runtime_error_kind', '');
+    expect(mocks.createComment).not.toHaveBeenCalled();
+  });
+
+  it('runs the guarded deterministic backend through the fake runtime', async () => {
+    Object.assign(mocks.inputs, {
+      runtime_backend: 'deterministic-csharp',
+      post_comment: 'false',
+      review_mode: 'bootstrap',
+      state_key: 'deterministic-smoke',
+    });
+    process.env.AGENTIC_REVIEW_RUNTIME_EXECUTABLE = process.execPath;
+    process.env.AGENTIC_REVIEW_RUNTIME_PREFIX_ARGS_JSON = JSON.stringify([
+      path.join(process.cwd(), 'src/runtime-invocation/__test-fixtures__/fake-runtime.mjs'),
+    ]);
+    process.env.FAKE_RUNTIME_SCENARIO = 'success';
+
+    const { run } = await import('./main.js');
+    await expect(run()).resolves.toBeUndefined();
+
+    expect(mocks.setOutput).toHaveBeenCalledWith('runtime_backend', 'deterministic-csharp');
+    expect(mocks.setOutput).toHaveBeenCalledWith('runtime_error_kind', '');
+    await expect(
+      stat(
+        path.join(
+          artifactRoot,
+          deterministicStateArtifactName(deterministicStateKey('deterministic-smoke')),
+        ),
+      ),
+    ).resolves.toBeTruthy();
   });
 
   it('skips inline comments when sticky comment posting is disabled', async () => {

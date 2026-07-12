@@ -10,6 +10,7 @@ import {
   type RestoredState,
   type ReviewTarget,
   type RuntimeLineageTotals,
+  type RuntimeBackend,
   type RuntimeResult,
   type RuntimeUsage,
   type StructuredReviewEnvelopeV1,
@@ -24,6 +25,7 @@ import {
   writeJsonFile,
   writeTextFile,
 } from './utils.js';
+import { sha256 } from './utils.js';
 
 interface StateManifest {
   version: 1;
@@ -31,12 +33,15 @@ interface StateManifest {
   stateKey: string;
   phase: Phase;
   runtimeProvider: ActionConfig['runtimeProvider'];
+  runtimeBackend?: RuntimeBackend;
   toolMode: ActionConfig['toolMode'];
   allowedTools: string[];
   sessionId: string;
   sessionName: string;
   reviewedHeadSha?: string;
-  promptSha256: string;
+  promptSha256?: string;
+  reviewInputSha256?: string;
+  reviewInputBytes?: number;
   createdAt: string;
   updatedAt: string;
   usage: RuntimeUsage | null;
@@ -82,10 +87,15 @@ export async function readRestoredState(root: string): Promise<RestoredState> {
   if (manifest.workflow !== 'agentic-pr-review') {
     throw new Error('restored state manifest has unexpected workflow');
   }
+  const runtimeBackend = manifest.runtimeBackend ?? 'legacy';
+  if (runtimeBackend !== 'legacy' && runtimeBackend !== 'deterministic-csharp') {
+    throw new Error('restored state manifest has unknown runtime_backend');
+  }
   const pullRequestDiffSnapshot = manifest.target?.pullRequestDiffSnapshot
     ? validatePullRequestDiffSnapshot(manifest.target.pullRequestDiffSnapshot)
     : undefined;
   return {
+    runtimeBackend,
     stateKey: manifest.stateKey,
     sessionId: manifest.sessionId,
     sessionName: manifest.sessionName ?? `agentic-pr-review-${manifest.stateKey}`,
@@ -115,7 +125,9 @@ export async function writeStateBundle(options: {
   target: ReviewTarget;
   stateKey: string;
   phase: Phase;
-  promptSha256: string;
+  promptSha256?: string;
+  reviewInputSha256?: string;
+  reviewInputBytes?: number;
   blocks: LoadedBlock[];
   runtimeResult: RuntimeResult;
   structuredReview: StructuredReviewEnvelopeV1;
@@ -128,13 +140,18 @@ export async function writeStateBundle(options: {
 }): Promise<string[]> {
   await rm(options.bundleDir, { recursive: true, force: true });
   await ensureDir(options.bundleDir);
-  await copyRuntimeStateToBundle(
-    options.runtimeDir,
-    options.config.runtimeProvider,
-    options.bundleDir,
-  );
-
-  await sanitizeRuntimeFiles(path.join(options.bundleDir, 'runtime'), knownSecrets(options.config));
+  const runtimeBackend = options.config.runtimeBackend ?? 'legacy';
+  if (runtimeBackend === 'legacy') {
+    await copyRuntimeStateToBundle(
+      options.runtimeDir,
+      options.config.runtimeProvider,
+      options.bundleDir,
+    );
+    await sanitizeRuntimeFiles(
+      path.join(options.bundleDir, 'runtime'),
+      knownSecrets(options.config),
+    );
+  }
 
   const now = new Date().toISOString();
   const manifest: StateManifest = {
@@ -143,12 +160,22 @@ export async function writeStateBundle(options: {
     stateKey: options.stateKey,
     phase: options.phase,
     runtimeProvider: options.config.runtimeProvider,
+    ...(runtimeBackend === 'deterministic-csharp' ? { runtimeBackend } : {}),
     toolMode: options.runtimeResult.toolMode,
     allowedTools: options.runtimeResult.allowedTools,
     sessionId: options.runtimeResult.sessionId,
     sessionName: options.runtimeResult.sessionName,
     reviewedHeadSha: options.target.headSha,
-    promptSha256: options.promptSha256,
+    ...(runtimeBackend === 'legacy'
+      ? { promptSha256: options.promptSha256 ?? '' }
+      : {
+          ...(options.reviewInputSha256 !== undefined
+            ? { reviewInputSha256: options.reviewInputSha256 }
+            : {}),
+          ...(options.reviewInputBytes !== undefined
+            ? { reviewInputBytes: options.reviewInputBytes }
+            : {}),
+        }),
     createdAt: options.createdAt ?? now,
     updatedAt: now,
     usage: options.runtimeResult.usage,
@@ -415,6 +442,14 @@ function safeParseJson(value: string): unknown | undefined {
 
 export function stateArtifactName(stateKey: string): string {
   return `agentic-pr-review-state-${stateKey}`;
+}
+
+export function deterministicStateKey(baseStateKey: string): string {
+  return `cs-${sha256(baseStateKey).slice(0, 20)}`;
+}
+
+export function deterministicStateArtifactName(logicalStateKey: string): string {
+  return `agentic-pr-review-deterministic-csharp-state-${logicalStateKey}`;
 }
 
 export function debugArtifactName(stateKey: string): string {

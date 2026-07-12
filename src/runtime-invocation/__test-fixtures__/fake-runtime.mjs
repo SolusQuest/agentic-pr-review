@@ -60,6 +60,7 @@ function baseTrace(input, runtimeVersion) {
     runtimeVersion,
     inputSha256: sha256(input.bytes),
     mode: 'deterministic-fixture',
+    fixture: 'valid',
     toolCalls: [],
     warnings: [],
     diagnostics: [{ code: 'FAKE_OK', message: 'fake runtime executed', level: 'info' }],

@@ -30,6 +30,23 @@ Provider credentials must not appear in:
 
 If a live provider is used, the workflow must define the trust boundary explicitly and avoid exposing secrets to untrusted code.
 
+## Deterministic C# Host Bridge
+
+The `runtime_backend=deterministic-csharp` path is default-off and receives only sanitized
+`ReviewInputV1`. The C# runtime proposes typed review content; the TypeScript host owns phase,
+repository facts, fingerprints, state identity, lineage, comments, artifacts, and action outputs.
+
+The runtime command is workflow-owned configuration. `AGENTIC_REVIEW_RUNTIME_EXECUTABLE` and
+complete absolute prefix arguments are realpath-checked and must resolve outside `GITHUB_WORKSPACE`;
+relative arguments and opaque option forms such as `--option=/path` are not interpreted as paths.
+Malformed command configuration fails closed before spawn. The deterministic path does not receive
+GitHub or provider credentials, does not use `PATH` search or downloads, and does not publish inline
+comments. Its local state bundle is sanitized before the sticky comment or artifact upload barrier.
+
+An identical incremental PR snapshot is a host short-circuit: it does not parse command settings,
+construct runtime input, invoke the runtime, or validate a trace. It still constructs and sanitizes
+the host-owned structured result and state bundle before upload.
+
 ## Artifact Boundary
 
 Artifacts are useful for state, trace, and validation evidence, but they must not contain raw provider request or response bodies, secrets, auth headers, raw prompts, or unbounded tool results.

@@ -2,7 +2,13 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { readRestoredState, stateArtifactName, writeStateBundle } from './state.js';
+import {
+  deterministicStateArtifactName,
+  deterministicStateKey,
+  readRestoredState,
+  stateArtifactName,
+  writeStateBundle,
+} from './state.js';
 import {
   type ActionConfig,
   type PullRequestDiffSnapshotV1,
@@ -112,6 +118,15 @@ describe('state helpers', () => {
     const key = sanitizeStateKey(' pr #42 / test ');
     expect(key).toBe('pr-42-test');
     expect(stateArtifactName(key)).toBe('agentic-pr-review-state-pr-42-test');
+  });
+
+  it('keeps deterministic state identity outside the legacy artifact namespace', () => {
+    const logical = deterministicStateKey('explicit-state-key');
+    expect(logical).toMatch(/^cs-[a-f0-9]{20}$/);
+    expect(deterministicStateArtifactName(logical)).toBe(
+      `agentic-pr-review-deterministic-csharp-state-${logical}`,
+    );
+    expect(deterministicStateArtifactName(logical)).not.toBe(stateArtifactName(logical));
   });
 
   it('writes restorable sanitized state without context bodies', async () => {
