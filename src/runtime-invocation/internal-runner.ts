@@ -386,13 +386,17 @@ async function runProcess(
     if (sigkillTimer) return;
     sigkillTimer = setTimeout(() => {
       // Do NOT rely on child.killed (which flips true as soon as a signal is sent);
-      // check whether the process has actually exited.
+      // check whether the process has actually exited before attempting SIGKILL.
+      // Whether or not we actually send SIGKILL, we must always arm the bounded close
+      // deadline so a stalled 'close' (for example when descendants keep stdio open
+      // after the direct child exited) cannot leave the exit promise unresolved.
       if (closed) return;
-      if (child.exitCode !== null || child.signalCode !== null) return;
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        // ignore
+      if (child.exitCode === null && child.signalCode === null) {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // ignore; bounded fallback still applies
+        }
       }
       armCloseDeadline();
     }, sigtermGraceMs);
@@ -446,10 +450,19 @@ async function runProcess(
     // Post-spawn control error: we deliberately do NOT change terminationReason. If a
     // primary termination (timeout, cancelled, stream-hard-cap) is already recorded it
     // must win. If none is recorded and 'close' still arrives with a real exit code,
-    // that natural exit should classify the outcome. As a safety net for the case where
-    // the OS never delivers 'close' after such a control error, arm the bounded close
-    // deadline so the adapter cannot hang; the final fallthrough classifies the
-    // no-terminationReason + no-exit case as host-terminated.
+    // that natural exit should classify the outcome.
+    //
+    // Safety net for the case where the OS never delivers 'close': arm the bounded
+    // close deadline. However, if a POSIX SIGTERM->SIGKILL escalation is already
+    // scheduled (sigkillTimer pending), the close deadline must not fire before
+    // SIGKILL has been attempted; otherwise a short closeGraceMs (< sigtermGraceMs)
+    // could resolve the exit promise, cause cleanup of pending kill timers, and
+    // leave an orphan process that was otherwise going to be SIGKILL'd. In that
+    // case we defer arming and let the sigkillTimer callback arm the deadline
+    // after it fires (or does not fire) the SIGKILL.
+    if (sigkillTimer !== undefined && process.platform !== 'win32') {
+      return;
+    }
     armCloseDeadline();
   });
   child.on('close', (code, signalCode) =>

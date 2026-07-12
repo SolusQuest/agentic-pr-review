@@ -678,6 +678,93 @@ describe('invokeRuntime - post-spawn lifecycle (mock ChildProcess)', () => {
     expect((err as RuntimeInvocationError).diagnosticCode).toBe('ENOENT');
     expect(await readdir(tempRoot)).toEqual([]);
   }, 8000);
+
+  it('does not let a short closeGraceMs pre-empt a pending POSIX SIGKILL escalation', async () => {
+    if (process.platform === 'win32') return;
+    const tempRoot = await acquireTempRoot();
+    const mock = makeMockChild();
+    const spawnOverride = (() => {
+      setImmediate(() => mock.emit('spawn'));
+      return mock as unknown as ReturnType<typeof spawn>;
+    }) as unknown as typeof spawn;
+
+    // Production-shaped ordering: closeGraceMs (30) < sigtermGraceMs (200) so a naive
+    // close deadline armed by the post-spawn error path would fire before the
+    // scheduled SIGTERM->SIGKILL escalation. The adapter must defer arming until the
+    // sigkillTimer has fired.
+    const invoke = invokeRuntimeForTests(
+      {
+        command: { executablePath: process.execPath, prefixArgs: [] },
+        input: readBootstrapInput(),
+        timeoutMs: 40,
+        tempRoot,
+      },
+      { spawnOverride, sigtermGraceMs: 200, closeGraceMs: 30 },
+    );
+
+    // Wait past the timeout so setTermination('timeout') runs and killChild() sends
+    // SIGTERM (recorded but non-fatal for the mock), scheduling the SIGKILL timer.
+    await delay(80);
+    expect(mock.killCalls).toContain('SIGTERM');
+    // Emit a synthetic post-spawn control error. If the adapter incorrectly armed
+    // the short close deadline here, the promise would resolve before SIGKILL runs.
+    const controlErr = new Error('synthetic kill delivery failure');
+    (controlErr as NodeJS.ErrnoException).code = 'ESRCH';
+    mock.emit('error', controlErr);
+
+    // Wait long enough for the SIGKILL escalation to fire (sigtermGraceMs=200) but
+    // less than the total bounded budget.
+    await delay(260);
+    expect(mock.killCalls).toContain('SIGKILL');
+
+    // Finally emit close to let the run resolve.
+    mock.emit('close', null, 'SIGKILL');
+    const err = await invoke.catch((e) => e);
+    expect(err).toBeInstanceOf(RuntimeInvocationError);
+    expect((err as RuntimeInvocationError).kind).toBe('timed-out');
+    // Cleanup ran because close was observed.
+    expect(await readdir(tempRoot)).toEqual([]);
+  }, 8000);
+
+  it('bounded-returns when child appears exited but close never arrives', async () => {
+    if (process.platform === 'win32') return;
+    const tempRoot = await acquireTempRoot();
+    const mock = makeMockChild();
+    const spawnOverride = (() => {
+      setImmediate(() => mock.emit('spawn'));
+      return mock as unknown as ReturnType<typeof spawn>;
+    }) as unknown as typeof spawn;
+
+    const invoke = invokeRuntimeForTests(
+      {
+        command: { executablePath: process.execPath, prefixArgs: [] },
+        input: readBootstrapInput(),
+        timeoutMs: 40,
+        tempRoot,
+      },
+      { spawnOverride, sigtermGraceMs: 100, closeGraceMs: 80 },
+    );
+
+    // After the timeout fires and SIGTERM is delivered, simulate a direct child that
+    // has already exited (exitCode set) but whose 'close' never arrives because a
+    // descendant is still holding stdio open. The sigkillTimer must NOT skip arming
+    // the close deadline just because exitCode is non-null.
+    await delay(60);
+    expect(mock.killCalls).toContain('SIGTERM');
+    mock.exitCode = 0;
+    // Never emit 'close'. The adapter must bounded-return within
+    // sigtermGraceMs + closeGraceMs (100 + 80 = 180 ms) after SIGTERM.
+    const err = await invoke.catch((e) => e);
+    expect(err).toBeInstanceOf(RuntimeInvocationError);
+    expect((err as RuntimeInvocationError).kind).toBe('timed-out');
+    // Because close was never observed, cleanup was intentionally skipped and the
+    // invocation directory is preserved.
+    const remaining = await readdir(tempRoot);
+    expect(remaining.length).toBe(1);
+    const invocationDir = join(tempRoot, remaining[0]);
+    const leaked = await readdir(invocationDir);
+    expect(leaked).toContain('input.json');
+  }, 8000);
 });
 describe('invokeRuntime - error hygiene', () => {
   it('does not embed input content in error messages', async () => {
