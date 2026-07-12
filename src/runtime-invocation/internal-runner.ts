@@ -1,7 +1,6 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { validateReviewInputV1 } from '../protocol/review-input.js';
-import { validateReviewResultV1, type ReviewResultV1 } from '../protocol/review-result.js';
 import {
   validateReviewTraceV1,
   type ReviewTraceDiagnosticV1,
@@ -33,6 +32,7 @@ import {
   type FsSeams,
 } from './runtime-files.js';
 import { runProcess, type StreamCaptureResult } from './process-runner.js';
+import { validateSuccessAndBuildResult } from './success-validator.js';
 
 export type { InvokeRuntimeOptions, RuntimeCommand, RuntimeInvocationSuccess };
 export {
@@ -457,147 +457,13 @@ export async function runInvocation(
       });
     }
 
-    await statSafeOutputFile('result', resultPath, seams, { silentOnFailure: false });
-    await statSafeOutputFile('trace', tracePath, seams, { silentOnFailure: false });
-
-    const resultBytes = await readSafeOutputBytes('result', resultPath, seams, {
-      silentOnFailure: false,
-    });
-    const traceBytes = await readSafeOutputBytes('trace', tracePath, seams, {
-      silentOnFailure: false,
-    });
-
-    let resultText: string;
-    let traceText: string;
-    try {
-      resultText = decodeStrictUtf8(resultBytes);
-    } catch {
-      throw new RuntimeInvocationError({
-        kind: 'result-invalid',
-        message: 'result.json is not valid UTF-8.',
-      });
-    }
-    try {
-      traceText = decodeStrictUtf8(traceBytes);
-    } catch {
-      throw new RuntimeInvocationError({
-        kind: 'trace-invalid',
-        message: 'trace.json is not valid UTF-8.',
-      });
-    }
-
-    let resultParsed: unknown;
-    let traceParsed: unknown;
-    try {
-      resultParsed = JSON.parse(resultText);
-    } catch {
-      throw new RuntimeInvocationError({
-        kind: 'result-invalid',
-        message: 'result.json is not valid JSON.',
-      });
-    }
-    try {
-      traceParsed = JSON.parse(traceText);
-    } catch {
-      throw new RuntimeInvocationError({
-        kind: 'trace-invalid',
-        message: 'trace.json is not valid JSON.',
-      });
-    }
-
-    const resultValidation = validateReviewResultV1(resultParsed);
-    if (!resultValidation.ok) {
-      const count = resultValidation.errors?.length ?? 0;
-      throw new RuntimeInvocationError({
-        kind: 'result-invalid',
-        message: `ReviewResultV1 schema validation failed (${count} errors).`,
-      });
-    }
-    const traceValidation = validateReviewTraceV1(traceParsed);
-    if (!traceValidation.ok) {
-      const count = traceValidation.errors?.length ?? 0;
-      throw new RuntimeInvocationError({
-        kind: 'trace-invalid',
-        message: `ReviewTraceV1 schema validation failed (${count} errors).`,
-      });
-    }
-    const result = resultParsed as ReviewResultV1;
-    const trace = traceParsed as ReviewTraceV1;
-
-    if (result.inputSha256 === undefined) {
-      throw new RuntimeInvocationError({
-        kind: 'process-contract-violation',
-        message: 'result.inputSha256 must be present on the M2 CLI success path.',
-      });
-    }
-    if (result.trace === undefined) {
-      throw new RuntimeInvocationError({
-        kind: 'process-contract-violation',
-        message: 'result.trace must be present on the M2 CLI success path.',
-      });
-    }
-    if (result.trace.sha256 === undefined) {
-      throw new RuntimeInvocationError({
-        kind: 'process-contract-violation',
-        message: 'result.trace.sha256 must be present on the M2 CLI success path.',
-      });
-    }
-    if (result.trace.path !== undefined) {
-      throw new RuntimeInvocationError({
-        kind: 'process-contract-violation',
-        message: 'result.trace.path must be absent on the M2 CLI success path.',
-      });
-    }
-    if (trace.resultSha256 !== undefined) {
-      throw new RuntimeInvocationError({
-        kind: 'process-contract-violation',
-        message: 'trace.resultSha256 must be absent on the M2 CLI success path.',
-      });
-    }
-
-    if (result.inputSha256 !== inputSha256) {
-      throw new RuntimeInvocationError({
-        kind: 'hash-mismatch',
-        message: 'result.inputSha256 does not match adapter-computed inputSha256.',
-      });
-    }
-    if (trace.inputSha256 !== inputSha256) {
-      throw new RuntimeInvocationError({
-        kind: 'hash-mismatch',
-        message: 'trace.inputSha256 does not match adapter-computed inputSha256.',
-      });
-    }
-    const traceBytesSha = sha256Hex(traceBytes);
-    if (result.trace.sha256 !== traceBytesSha) {
-      throw new RuntimeInvocationError({
-        kind: 'hash-mismatch',
-        message: 'result.trace.sha256 does not match sha256(traceBytes).',
-      });
-    }
-    if (result.runtimeVersion !== trace.runtimeVersion) {
-      throw new RuntimeInvocationError({
-        kind: 'version-mismatch',
-        message: 'result.runtimeVersion and trace.runtimeVersion differ.',
-      });
-    }
-    if (
-      input.requestedRuntimeVersion !== null &&
-      input.requestedRuntimeVersion !== result.runtimeVersion
-    ) {
-      throw new RuntimeInvocationError({
-        kind: 'version-mismatch',
-        message: 'result.runtimeVersion does not match requestedRuntimeVersion.',
-      });
-    }
-
-    success = {
-      result,
-      trace,
+    success = await validateSuccessAndBuildResult({
+      resultPath,
+      tracePath,
+      input,
       inputSha256,
-      resultBytes,
-      traceBytes,
-      runtimeVersion: result.runtimeVersion,
-    };
+      seams,
+    });
   } catch (err) {
     if (err instanceof RuntimeInvocationError) {
       primaryError = err;
