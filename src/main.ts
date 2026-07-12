@@ -168,7 +168,16 @@ export async function run(): Promise<void> {
     );
   }
 
-  const blocks = await loadContextBlocks(config, workspace, resolution.phase);
+  let blocks: Awaited<ReturnType<typeof loadContextBlocks>>;
+  try {
+    blocks = await loadContextBlocks(config, workspace, resolution.phase);
+  } catch (error) {
+    if ((config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
+      setDeterministicErrorOutputs(new Error('input-invalid: context loading failed'));
+      throw new Error('input-invalid: context loading failed');
+    }
+    throw error;
+  }
   const reviewedRange = buildReviewedRange({
     phase: resolution.phase,
     target,
@@ -210,10 +219,10 @@ export async function run(): Promise<void> {
         throw new Error('trace-invalid: deterministic result must include trace.sha256');
       }
       validateDeterministicTrace(invocation.trace, invocation.inputSha256);
-      for (const warning of invocation.result.warnings) {
+      for (const warning of boundedRuntimeMessages(invocation.result.warnings)) {
         core.warning(sanitizeRuntimeDiagnostic(warning));
       }
-      for (const warning of invocation.trace.warnings) {
+      for (const warning of boundedRuntimeMessages(invocation.trace.warnings)) {
         core.warning(sanitizeRuntimeDiagnostic(warning));
       }
       const errorDiagnostic = invocation.result.diagnostics.find(
@@ -222,15 +231,12 @@ export async function run(): Promise<void> {
       if (errorDiagnostic) {
         throw new Error(`diagnostic-error: ${truncateText(errorDiagnostic.code, 120)}`);
       }
-      for (const diagnostic of [
+      const diagnosticSummary = summarizeRuntimeDiagnostics([
         ...invocation.result.diagnostics,
         ...invocation.trace.diagnostics,
-      ]) {
-        if (diagnostic.level !== 'error') {
-          core.info(
-            `deterministic runtime diagnostic: ${sanitizeRuntimeDiagnostic(diagnostic.code)}`,
-          );
-        }
+      ]);
+      if (diagnosticSummary) {
+        core.info(`deterministic runtime diagnostics: ${diagnosticSummary}`);
       }
       runtimeResult = buildDeterministicRuntimeResult(
         invocation,
@@ -239,21 +245,27 @@ export async function run(): Promise<void> {
         stateKey,
         inputBytes,
       );
-      const projection = mapReviewResultV1ToRuntimeContent(invocation.result);
-      const assembled = assembleStructuredReviewFromRuntimeContent({
-        content: projection.content,
-        target,
-        phase: resolution.phase,
-        previousReviewedHeadSha: resolution.restoredState?.reviewedHeadSha,
-        reviewedRange,
-        config,
-        sessionId: runtimeResult.sessionId,
-        usage: runtimeResult.usage,
-        observedTurns: runtimeResult.observedTurns,
-        observedTurnSource: runtimeResult.observedTurnSource,
-        lineageTotals: runtimeResult.lineageTotals,
-        maxFindings: config.maxFindings,
-      });
+      runtimeResult.diagnosticSummary = diagnosticSummary;
+      let assembled: ReturnType<typeof assembleStructuredReviewFromRuntimeContent>;
+      try {
+        const projection = mapReviewResultV1ToRuntimeContent(invocation.result);
+        assembled = assembleStructuredReviewFromRuntimeContent({
+          content: projection.content,
+          target,
+          phase: resolution.phase,
+          previousReviewedHeadSha: resolution.restoredState?.reviewedHeadSha,
+          reviewedRange,
+          config,
+          sessionId: runtimeResult.sessionId,
+          usage: runtimeResult.usage,
+          observedTurns: runtimeResult.observedTurns,
+          observedTurnSource: runtimeResult.observedTurnSource,
+          lineageTotals: runtimeResult.lineageTotals,
+          maxFindings: config.maxFindings,
+        });
+      } catch {
+        throw new Error('mapping-invalid: typed runtime content could not be assembled');
+      }
       structuredReview = capStructuredReviewForMarkdownLimit(
         assembled.envelope,
         config.maxReviewChars,
@@ -309,6 +321,9 @@ export async function run(): Promise<void> {
   } catch (error) {
     if ((config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
       setDeterministicErrorOutputs(error);
+      if (error instanceof RuntimeInvocationError) {
+        throw new Error(`deterministic runtime failed: ${error.kind}`);
+      }
     }
     handleStructuredValidationFailure(error);
   }
@@ -753,7 +768,16 @@ async function finishSkippedIdentical(options: {
     inlineComments: inlineMetadata,
   };
   structuredMetadata.inlineComments = inlineMetadata;
-  const renderedReviewMarkdown = renderStructuredReviewMarkdown(structuredReview);
+  let renderedReviewMarkdown: string;
+  try {
+    renderedReviewMarkdown = renderStructuredReviewMarkdown(structuredReview);
+  } catch (error) {
+    if ((options.config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
+      setDeterministicErrorOutputs(new Error(`rendering-invalid: ${messageOf(error)}`));
+      throw new Error('rendering-invalid: skipped review could not be rendered');
+    }
+    throw error;
+  }
   const bundleDir = path.join(defaultTempDir(), 'agentic-pr-review', 'state-bundle');
   const structuredResultPath = path.join(bundleDir, 'structured-result.json');
   const renderedReviewMarkdownPath = path.join(bundleDir, 'rendered-review.md');
@@ -1158,6 +1182,16 @@ async function writeSummary(input: {
           `- Prompt sha256: ${input.promptSha256 ?? 'n/a'}`,
           `- Prompt bytes: ${input.promptBytes ?? 'n/a'}`,
         ];
+  const deterministicMetadata =
+    runtimeBackend === 'deterministic-csharp'
+      ? [
+          `- Runtime version: ${input.runtimeResult.runtimeVersion ?? 'n/a'}`,
+          `- Runtime trace sha256: ${input.runtimeResult.traceSha256 ?? 'n/a'}`,
+          ...(input.runtimeResult.diagnosticSummary
+            ? [`- Runtime diagnostics: ${input.runtimeResult.diagnosticSummary}`]
+            : []),
+        ]
+      : [];
   const lines = [
     '### Agentic PR Review',
     '',
@@ -1166,7 +1200,11 @@ async function writeSummary(input: {
     `- Review phase: ${input.reviewPhase}`,
     `- Phase reason: ${input.restored.lineageReason}`,
     `- Effective diff source: ${input.effectiveDiffSource}`,
-    `- Runtime: ${input.config.runtimeProvider} (${runtimeBackend})`,
+    `- Runtime: ${
+      runtimeBackend === 'deterministic-csharp'
+        ? `${input.config.runtimeProvider} (${runtimeBackend})`
+        : input.config.runtimeProvider
+    }`,
     `- Tool mode: ${input.runtimeResult.toolMode}`,
     `- Allowed tools: ${allowedTools}`,
     `- State key: ${input.stateKey}`,
@@ -1175,8 +1213,7 @@ async function writeSummary(input: {
     `- Previous reviewed head: ${input.restored.restoredState?.reviewedHeadSha ?? 'n/a'}`,
     `- Current head: ${input.target.headSha}`,
     ...inputMetadata,
-    `- Runtime version: ${input.runtimeResult.runtimeVersion ?? 'n/a'}`,
-    `- Runtime trace sha256: ${input.runtimeResult.traceSha256 ?? 'n/a'}`,
+    ...deterministicMetadata,
     `- Observed turns: ${input.runtimeResult.observedTurns ?? 'n/a'} / max ${maxTurns}`,
     `- Usage: ${usage}`,
     `- Usage budget: ${budgetStatus}`,
@@ -1274,9 +1311,36 @@ function sanitizeRuntimeDiagnostic(value: string): string {
   return truncateText(
     sanitized
       .replace(/Authorization:\s*Bearer\s+\S+/gi, 'Authorization: Bearer ***')
-      .replace(/x-api-key:\s*\S+/gi, 'x-api-key: ***'),
+      .replace(/x-api-key:\s*\S+/gi, 'x-api-key: ***')
+      .replace(/\b[A-Za-z]:[\\/][^\s"'`]+/g, '<path>')
+      .replace(/(^|\s)\/(?:[^\s"'`]+\/)+[^\s"'`]+/g, '$1<path>'),
     240,
   );
+}
+
+function boundedRuntimeMessages(messages: readonly string[]): string[] {
+  const limit = 10;
+  if (messages.length <= limit) {
+    return [...messages];
+  }
+  return [...messages.slice(0, limit), `${messages.length - limit} additional messages omitted`];
+}
+
+function summarizeRuntimeDiagnostics(
+  diagnostics: ReadonlyArray<{ code: string; level: 'info' | 'warning' | 'error' }>,
+): string {
+  const counts = new Map<string, number>();
+  for (const diagnostic of diagnostics) {
+    if (diagnostic.level === 'error') {
+      continue;
+    }
+    const code = sanitizeRuntimeDiagnostic(diagnostic.code);
+    counts.set(code, (counts.get(code) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .slice(0, 20)
+    .map(([code, count]) => `${code}=${count}`)
+    .join(', ');
 }
 
 function messageOf(error: unknown): string {

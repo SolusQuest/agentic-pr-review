@@ -274,6 +274,7 @@ export interface RuntimeResult {
   reviewInputBytes?: number;
   runtimeVersion?: string;
   traceSha256?: string;
+  diagnosticSummary?: string;
 }
 
 export interface RuntimeUsage {

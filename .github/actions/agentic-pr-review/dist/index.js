@@ -104581,8 +104581,8 @@ function parseActionConfig(reader, env, eventName) {
   assertMutuallyExclusive(config, "instructions", "instructionsPath");
   assertMutuallyExclusive(config, "bootstrapContext", "bootstrapContextPath");
   assertMutuallyExclusive(config, "incrementalContext", "incrementalContextPath");
-  validateLiveRuntimeConfig(config);
   validateDeterministicRuntimeConfig(config);
+  validateLiveRuntimeConfig(config);
   validateDebugCapture(config, eventName);
   return config;
 }
@@ -104627,7 +104627,7 @@ function validateDeterministicRuntimeConfig(config) {
   }
 }
 function validateLiveRuntimeConfig(config) {
-  if (config.runtimeProvider !== "claude-code-cli") {
+  if (config.runtimeBackend === "deterministic-csharp" || config.runtimeProvider !== "claude-code-cli") {
     return;
   }
   required(config.modelBaseUrl, "model_base_url");
@@ -104808,6 +104808,7 @@ function buildLineageCommentBody(input, action5, existingMeta, existingBody) {
     updated_at: now
   };
   const repository = input.target.htmlUrl ? repositoryFromUrl(input.target.htmlUrl) : void 0;
+  const runtimeLabel = input.runtimeBackend === "deterministic-csharp" ? `${input.runtimeProvider} (${input.runtimeBackend})` : input.runtimeProvider;
   const runValue = repository ? `[${input.runId}.${input.runAttempt}](https://github.com/${repository}/actions/runs/${input.runId})` : `${input.runId}.${input.runAttempt}`;
   const previous = input.previousHeadSha ? shortSha(input.previousHeadSha) : "n/a";
   const header = [
@@ -104822,7 +104823,7 @@ ${LINEAGE_META_SUFFIX}`,
     "| --- | --- |",
     `| Mode | ${input.phase} |`,
     `| Range | \`${previous}\` -> \`${shortSha(input.currentHeadSha)}\` |`,
-    `| Runtime | ${input.runtimeProvider} (${input.runtimeBackend ?? "legacy"}) |`,
+    `| Runtime | ${runtimeLabel} |`,
     `| Session | \`${input.sessionId}\` |`,
     `| State artifact | \`${input.artifactName}\` |`,
     `| Run | ${runValue} |`,
@@ -109373,7 +109374,16 @@ async function run() {
       runtimeDir
     );
   }
-  const blocks2 = await loadContextBlocks(config, workspace, resolution.phase);
+  let blocks2;
+  try {
+    blocks2 = await loadContextBlocks(config, workspace, resolution.phase);
+  } catch (error2) {
+    if ((config.runtimeBackend ?? "legacy") === "deterministic-csharp") {
+      setDeterministicErrorOutputs(new Error("input-invalid: context loading failed"));
+      throw new Error("input-invalid: context loading failed");
+    }
+    throw error2;
+  }
   const reviewedRange = buildReviewedRange({
     phase: resolution.phase,
     target,
@@ -109416,10 +109426,10 @@ async function run() {
         throw new Error("trace-invalid: deterministic result must include trace.sha256");
       }
       validateDeterministicTrace(invocation.trace, invocation.inputSha256);
-      for (const warning2 of invocation.result.warnings) {
+      for (const warning2 of boundedRuntimeMessages(invocation.result.warnings)) {
         warning(sanitizeRuntimeDiagnostic(warning2));
       }
-      for (const warning2 of invocation.trace.warnings) {
+      for (const warning2 of boundedRuntimeMessages(invocation.trace.warnings)) {
         warning(sanitizeRuntimeDiagnostic(warning2));
       }
       const errorDiagnostic = invocation.result.diagnostics.find(
@@ -109428,15 +109438,12 @@ async function run() {
       if (errorDiagnostic) {
         throw new Error(`diagnostic-error: ${truncateText(errorDiagnostic.code, 120)}`);
       }
-      for (const diagnostic of [
+      const diagnosticSummary = summarizeRuntimeDiagnostics([
         ...invocation.result.diagnostics,
         ...invocation.trace.diagnostics
-      ]) {
-        if (diagnostic.level !== "error") {
-          info(
-            `deterministic runtime diagnostic: ${sanitizeRuntimeDiagnostic(diagnostic.code)}`
-          );
-        }
+      ]);
+      if (diagnosticSummary) {
+        info(`deterministic runtime diagnostics: ${diagnosticSummary}`);
       }
       runtimeResult = buildDeterministicRuntimeResult(
         invocation,
@@ -109445,21 +109452,27 @@ async function run() {
         stateKey,
         inputBytes
       );
-      const projection = mapReviewResultV1ToRuntimeContent(invocation.result);
-      const assembled = assembleStructuredReviewFromRuntimeContent({
-        content: projection.content,
-        target,
-        phase: resolution.phase,
-        previousReviewedHeadSha: resolution.restoredState?.reviewedHeadSha,
-        reviewedRange,
-        config,
-        sessionId: runtimeResult.sessionId,
-        usage: runtimeResult.usage,
-        observedTurns: runtimeResult.observedTurns,
-        observedTurnSource: runtimeResult.observedTurnSource,
-        lineageTotals: runtimeResult.lineageTotals,
-        maxFindings: config.maxFindings
-      });
+      runtimeResult.diagnosticSummary = diagnosticSummary;
+      let assembled;
+      try {
+        const projection = mapReviewResultV1ToRuntimeContent(invocation.result);
+        assembled = assembleStructuredReviewFromRuntimeContent({
+          content: projection.content,
+          target,
+          phase: resolution.phase,
+          previousReviewedHeadSha: resolution.restoredState?.reviewedHeadSha,
+          reviewedRange,
+          config,
+          sessionId: runtimeResult.sessionId,
+          usage: runtimeResult.usage,
+          observedTurns: runtimeResult.observedTurns,
+          observedTurnSource: runtimeResult.observedTurnSource,
+          lineageTotals: runtimeResult.lineageTotals,
+          maxFindings: config.maxFindings
+        });
+      } catch {
+        throw new Error("mapping-invalid: typed runtime content could not be assembled");
+      }
       structuredReview = capStructuredReviewForMarkdownLimit(
         assembled.envelope,
         config.maxReviewChars
@@ -109515,6 +109528,9 @@ async function run() {
   } catch (error2) {
     if ((config.runtimeBackend ?? "legacy") === "deterministic-csharp") {
       setDeterministicErrorOutputs(error2);
+      if (error2 instanceof RuntimeInvocationError) {
+        throw new Error(`deterministic runtime failed: ${error2.kind}`);
+      }
     }
     handleStructuredValidationFailure(error2);
   }
@@ -109895,7 +109911,16 @@ async function finishSkippedIdentical(options) {
     inlineComments: inlineMetadata
   };
   structuredMetadata.inlineComments = inlineMetadata;
-  const renderedReviewMarkdown = renderStructuredReviewMarkdown(structuredReview);
+  let renderedReviewMarkdown;
+  try {
+    renderedReviewMarkdown = renderStructuredReviewMarkdown(structuredReview);
+  } catch (error2) {
+    if ((options.config.runtimeBackend ?? "legacy") === "deterministic-csharp") {
+      setDeterministicErrorOutputs(new Error(`rendering-invalid: ${messageOf(error2)}`));
+      throw new Error("rendering-invalid: skipped review could not be rendered");
+    }
+    throw error2;
+  }
   const bundleDir = path12.join(defaultTempDir(), "agentic-pr-review", "state-bundle");
   const structuredResultPath = path12.join(bundleDir, "structured-result.json");
   const renderedReviewMarkdownPath = path12.join(bundleDir, "rendered-review.md");
@@ -110204,6 +110229,11 @@ async function writeSummary(input) {
     `- Prompt sha256: ${input.promptSha256 ?? "n/a"}`,
     `- Prompt bytes: ${input.promptBytes ?? "n/a"}`
   ];
+  const deterministicMetadata = runtimeBackend === "deterministic-csharp" ? [
+    `- Runtime version: ${input.runtimeResult.runtimeVersion ?? "n/a"}`,
+    `- Runtime trace sha256: ${input.runtimeResult.traceSha256 ?? "n/a"}`,
+    ...input.runtimeResult.diagnosticSummary ? [`- Runtime diagnostics: ${input.runtimeResult.diagnosticSummary}`] : []
+  ] : [];
   const lines = [
     "### Agentic PR Review",
     "",
@@ -110212,7 +110242,7 @@ async function writeSummary(input) {
     `- Review phase: ${input.reviewPhase}`,
     `- Phase reason: ${input.restored.lineageReason}`,
     `- Effective diff source: ${input.effectiveDiffSource}`,
-    `- Runtime: ${input.config.runtimeProvider} (${runtimeBackend})`,
+    `- Runtime: ${runtimeBackend === "deterministic-csharp" ? `${input.config.runtimeProvider} (${runtimeBackend})` : input.config.runtimeProvider}`,
     `- Tool mode: ${input.runtimeResult.toolMode}`,
     `- Allowed tools: ${allowedTools}`,
     `- State key: ${input.stateKey}`,
@@ -110221,8 +110251,7 @@ async function writeSummary(input) {
     `- Previous reviewed head: ${input.restored.restoredState?.reviewedHeadSha ?? "n/a"}`,
     `- Current head: ${input.target.headSha}`,
     ...inputMetadata,
-    `- Runtime version: ${input.runtimeResult.runtimeVersion ?? "n/a"}`,
-    `- Runtime trace sha256: ${input.runtimeResult.traceSha256 ?? "n/a"}`,
+    ...deterministicMetadata,
     `- Observed turns: ${input.runtimeResult.observedTurns ?? "n/a"} / max ${maxTurns}`,
     `- Usage: ${usage}`,
     `- Usage budget: ${budgetStatus}`,
@@ -110313,9 +110342,27 @@ function sanitizeRuntimeDiagnostic(value) {
     sanitized = sanitized.replaceAll(secret, "***");
   }
   return truncateText(
-    sanitized.replace(/Authorization:\s*Bearer\s+\S+/gi, "Authorization: Bearer ***").replace(/x-api-key:\s*\S+/gi, "x-api-key: ***"),
+    sanitized.replace(/Authorization:\s*Bearer\s+\S+/gi, "Authorization: Bearer ***").replace(/x-api-key:\s*\S+/gi, "x-api-key: ***").replace(/\b[A-Za-z]:[\\/][^\s"'`]+/g, "<path>").replace(/(^|\s)\/(?:[^\s"'`]+\/)+[^\s"'`]+/g, "$1<path>"),
     240
   );
+}
+function boundedRuntimeMessages(messages) {
+  const limit = 10;
+  if (messages.length <= limit) {
+    return [...messages];
+  }
+  return [...messages.slice(0, limit), `${messages.length - limit} additional messages omitted`];
+}
+function summarizeRuntimeDiagnostics(diagnostics) {
+  const counts = /* @__PURE__ */ new Map();
+  for (const diagnostic of diagnostics) {
+    if (diagnostic.level === "error") {
+      continue;
+    }
+    const code = sanitizeRuntimeDiagnostic(diagnostic.code);
+    counts.set(code, (counts.get(code) ?? 0) + 1);
+  }
+  return [...counts.entries()].slice(0, 20).map(([code, count]) => `${code}=${count}`).join(", ");
 }
 function messageOf(error2) {
   return error2 instanceof Error ? error2.message : String(error2);

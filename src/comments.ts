@@ -195,6 +195,10 @@ export function buildLineageCommentBody(
   };
 
   const repository = input.target.htmlUrl ? repositoryFromUrl(input.target.htmlUrl) : undefined;
+  const runtimeLabel =
+    input.runtimeBackend === 'deterministic-csharp'
+      ? `${input.runtimeProvider} (${input.runtimeBackend})`
+      : input.runtimeProvider;
   const runValue = repository
     ? `[${input.runId}.${input.runAttempt}](https://github.com/${repository}/actions/runs/${input.runId})`
     : `${input.runId}.${input.runAttempt}`;
@@ -209,7 +213,7 @@ export function buildLineageCommentBody(
     '| --- | --- |',
     `| Mode | ${input.phase} |`,
     `| Range | \`${previous}\` -> \`${shortSha(input.currentHeadSha)}\` |`,
-    `| Runtime | ${input.runtimeProvider} (${input.runtimeBackend ?? 'legacy'}) |`,
+    `| Runtime | ${runtimeLabel} |`,
     `| Session | \`${input.sessionId}\` |`,
     `| State artifact | \`${input.artifactName}\` |`,
     `| Run | ${runValue} |`,

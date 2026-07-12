@@ -211,8 +211,8 @@ export function parseActionConfig(
   assertMutuallyExclusive(config, 'instructions', 'instructionsPath');
   assertMutuallyExclusive(config, 'bootstrapContext', 'bootstrapContextPath');
   assertMutuallyExclusive(config, 'incrementalContext', 'incrementalContextPath');
-  validateLiveRuntimeConfig(config);
   validateDeterministicRuntimeConfig(config);
+  validateLiveRuntimeConfig(config);
   validateDebugCapture(config, eventName);
   return config;
 }
@@ -263,7 +263,10 @@ function validateDeterministicRuntimeConfig(config: ActionConfig): void {
 }
 
 function validateLiveRuntimeConfig(config: ActionConfig): void {
-  if (config.runtimeProvider !== 'claude-code-cli') {
+  if (
+    config.runtimeBackend === 'deterministic-csharp' ||
+    config.runtimeProvider !== 'claude-code-cli'
+  ) {
     return;
   }
   required(config.modelBaseUrl, 'model_base_url');
