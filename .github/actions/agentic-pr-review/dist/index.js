@@ -106144,6 +106144,11 @@ function defaultTempDir() {
 // src/state.ts
 import { readFile as readFile3, rm as rm4, stat as stat5, writeFile as writeFile4 } from "node:fs/promises";
 import path7 from "node:path";
+var RestoredSnapshotInvalidError = class extends Error {
+  constructor() {
+    super("restored state manifest pull request diff snapshot is incompatible");
+  }
+};
 var SECRET_FILE_PATTERN = /(^|[\\/])(\.env|credentials?|secrets?|tokens?|settings\.local)(\.|[\\/]|$)/i;
 var SECRET_CONTENT_PATTERN = /(ghp_|github_pat_|sk-[a-zA-Z0-9]|authorization:\s*bearer)/i;
 var AUTH_HEADER_KEYS = /* @__PURE__ */ new Set(["authorization", "x-api-key", "x-api-token"]);
@@ -106264,11 +106269,11 @@ async function writeStateBundle(options) {
 }
 function validatePullRequestDiffSnapshot(value) {
   if (!value || typeof value !== "object") {
-    throw new Error("restored state manifest pull request diff snapshot is incompatible");
+    throw new RestoredSnapshotInvalidError();
   }
   const snapshot2 = value;
   if (snapshot2.version !== 1 || snapshot2.source !== "github-pulls-list-files" || typeof snapshot2.headSha !== "string" || typeof snapshot2.baseSha !== "string" || !Array.isArray(snapshot2.files)) {
-    throw new Error("restored state manifest pull request diff snapshot is incompatible");
+    throw new RestoredSnapshotInvalidError();
   }
   return {
     version: 1,
@@ -106277,14 +106282,14 @@ function validatePullRequestDiffSnapshot(value) {
     baseSha: snapshot2.baseSha,
     files: snapshot2.files.map((entry) => {
       if (!entry || typeof entry !== "object") {
-        throw new Error("restored state manifest pull request diff snapshot is incompatible");
+        throw new RestoredSnapshotInvalidError();
       }
       const candidate = entry;
       if (typeof candidate.filename !== "string" || candidate.previousFilename !== void 0 && typeof candidate.previousFilename !== "string" || typeof candidate.status !== "string" || typeof candidate.additions !== "number" || typeof candidate.deletions !== "number" || typeof candidate.changes !== "number" || candidate.fileSha !== void 0 && typeof candidate.fileSha !== "string" || typeof candidate.patchAvailable !== "boolean" || candidate.patchSha256 !== null && typeof candidate.patchSha256 !== "string") {
-        throw new Error("restored state manifest pull request diff snapshot is incompatible");
+        throw new RestoredSnapshotInvalidError();
       }
       if (candidate.patchAvailable ? typeof candidate.patchSha256 !== "string" : candidate.patchSha256 !== null) {
-        throw new Error("restored state manifest pull request diff snapshot is incompatible");
+        throw new RestoredSnapshotInvalidError();
       }
       return {
         filename: normalizeRepoRelativePath(candidate.filename),
@@ -109304,6 +109309,10 @@ function normalizePath2(value) {
 // src/main.ts
 var SnapshotStateCompatibilityError = class extends Error {
 };
+var StateArtifactInvalidError = class extends Error {
+};
+var StateRuntimeCompatibilityError = class extends Error {
+};
 var CoreInputReader = class {
   getInput(name) {
     return getInput(name);
@@ -109436,15 +109445,12 @@ async function run() {
         (diagnostic) => diagnostic.level === "error"
       );
       if (errorDiagnostic) {
-        throw new Error(`diagnostic-error: ${truncateText(errorDiagnostic.code, 120)}`);
+        throw new Error(`diagnostic-error: ${sanitizeRuntimeDiagnostic(errorDiagnostic.code)}`);
       }
       const diagnosticSummary = summarizeRuntimeDiagnostics([
         ...invocation.result.diagnostics,
         ...invocation.trace.diagnostics
       ]);
-      if (diagnosticSummary) {
-        info(`deterministic runtime diagnostics: ${diagnosticSummary}`);
-      }
       runtimeResult = buildDeterministicRuntimeResult(
         invocation,
         resolution,
@@ -109735,7 +109741,15 @@ async function resolvePhase(config, store, artifactName, tempRoot, stateKey, tar
   if (config.reviewMode === "bootstrap") {
     return { phase: "bootstrap", lineageReason: "manual_bootstrap" };
   }
-  const artifact = await store.findStateArtifact(artifactName, config.stateArtifactRunId);
+  let artifact;
+  try {
+    artifact = await store.findStateArtifact(artifactName, config.stateArtifactRunId);
+  } catch (error2) {
+    if (config.runtimeBackend === "deterministic-csharp" && config.reviewMode === "incremental") {
+      throw new Error("state-invalid: state artifact lookup failed");
+    }
+    throw error2;
+  }
   if (!artifact) {
     if (target.mode === "pull-request") {
       return { phase: "bootstrap", lineageReason: "snapshot_state_missing" };
@@ -109748,7 +109762,14 @@ async function resolvePhase(config, store, artifactName, tempRoot, stateKey, tar
     return { phase: "bootstrap", lineageReason: "auto_bootstrap_no_state" };
   }
   const restoreDir = path12.join(tempRoot, "restored-state");
-  await store.download(artifact, restoreDir);
+  try {
+    await store.download(artifact, restoreDir);
+  } catch (error2) {
+    if (config.runtimeBackend === "deterministic-csharp" && config.reviewMode === "incremental") {
+      throw new Error("state-invalid: restored state artifact could not be downloaded");
+    }
+    throw error2;
+  }
   let restoredState;
   try {
     restoredState = await readRestoredState(restoreDir);
@@ -109760,21 +109781,24 @@ async function resolvePhase(config, store, artifactName, tempRoot, stateKey, tar
       target
     );
   } catch (error2) {
-    if (error2 instanceof SnapshotStateCompatibilityError || messageOf(error2).includes("pull request diff snapshot")) {
+    if (error2 instanceof SnapshotStateCompatibilityError || error2 instanceof RestoredSnapshotInvalidError) {
       warning(
         `Restored state artifact is not snapshot-compatible; falling back to bootstrap: ${messageOf(error2)}`
       );
       return { phase: "bootstrap", lineageReason: "snapshot_state_incompatible" };
     }
     if (config.reviewMode === "auto") {
-      const reason = messageOf(error2).includes("runtime_provider") || messageOf(error2).includes("runtime_backend does not match") ? "auto_bootstrap_runtime" : "auto_bootstrap_invalid";
+      const reason = error2 instanceof StateRuntimeCompatibilityError ? "auto_bootstrap_runtime" : "auto_bootstrap_invalid";
       warning(
         `Restored state artifact is not usable; falling back to bootstrap: ${messageOf(error2)}`
       );
       return { phase: "bootstrap", lineageReason: reason };
     }
-    if (config.runtimeBackend === "deterministic-csharp" && config.reviewMode === "incremental" && messageOf(error2).includes("runtime_backend")) {
-      throw new Error(`state-invalid: ${truncateText(messageOf(error2), 240)}`);
+    if (config.runtimeBackend === "deterministic-csharp" && config.reviewMode === "incremental") {
+      if (error2 instanceof StateArtifactInvalidError || error2 instanceof StateRuntimeCompatibilityError) {
+        throw new Error("state-invalid: restored state is incompatible");
+      }
+      throw new Error("state-invalid: restored state could not be read");
     }
     throw error2;
   }
@@ -109791,20 +109815,22 @@ async function resolvePhase(config, store, artifactName, tempRoot, stateKey, tar
 }
 function validateRestoredState(restoredState, stateKey, runtimeProvider, runtimeBackend, target) {
   if (restoredState.stateKey !== stateKey) {
-    throw new Error("restored state artifact state_key does not match the requested state_key");
+    throw new StateArtifactInvalidError(
+      "restored state artifact state_key does not match the requested state_key"
+    );
   }
   if (restoredState.runtimeProvider !== runtimeProvider) {
-    throw new Error(
+    throw new StateRuntimeCompatibilityError(
       "restored state artifact runtime_provider does not match the requested runtime_provider"
     );
   }
   if ((restoredState.runtimeBackend ?? "legacy") !== runtimeBackend) {
-    throw new Error(
+    throw new StateRuntimeCompatibilityError(
       "restored state artifact runtime_backend does not match the requested runtime_backend"
     );
   }
   if (!restoredState.sessionId) {
-    throw new Error("restored state artifact is missing session_id");
+    throw new StateArtifactInvalidError("restored state artifact is missing session_id");
   }
   if (target.mode === "pull-request" && !restoredState.pullRequestDiffSnapshot) {
     throw new SnapshotStateCompatibilityError(
@@ -109865,25 +109891,32 @@ async function finishSkippedIdentical(options) {
   let structuredReview;
   let structuredMetadata;
   if ((options.config.runtimeBackend ?? "legacy") === "deterministic-csharp") {
-    const assembled = assembleStructuredReviewFromRuntimeContent({
-      content: skippedContent,
-      target: options.target,
-      phase: "incremental",
-      previousReviewedHeadSha: options.restoredState.reviewedHeadSha,
-      reviewedRange,
-      config: options.config,
-      sessionId: runtimeResult.sessionId,
-      usage: runtimeResult.usage,
-      observedTurns: runtimeResult.observedTurns,
-      observedTurnSource: runtimeResult.observedTurnSource,
-      lineageTotals: runtimeResult.lineageTotals,
-      maxFindings: options.config.maxFindings
-    });
-    structuredReview = capStructuredReviewForMarkdownLimit(
-      assembled.envelope,
-      options.config.maxReviewChars
-    );
-    structuredMetadata = metadataForStructuredReview(structuredReview, assembled.metadata.status);
+    try {
+      const assembled = assembleStructuredReviewFromRuntimeContent({
+        content: skippedContent,
+        target: options.target,
+        phase: "incremental",
+        previousReviewedHeadSha: options.restoredState.reviewedHeadSha,
+        reviewedRange,
+        config: options.config,
+        sessionId: runtimeResult.sessionId,
+        usage: runtimeResult.usage,
+        observedTurns: runtimeResult.observedTurns,
+        observedTurnSource: runtimeResult.observedTurnSource,
+        lineageTotals: runtimeResult.lineageTotals,
+        maxFindings: options.config.maxFindings
+      });
+      structuredReview = capStructuredReviewForMarkdownLimit(
+        assembled.envelope,
+        options.config.maxReviewChars
+      );
+      structuredMetadata = metadataForStructuredReview(structuredReview, assembled.metadata.status);
+    } catch {
+      setDeterministicErrorOutputs(
+        new Error("rendering-invalid: skipped review could not be assembled")
+      );
+      throw new Error("rendering-invalid: skipped review could not be assembled");
+    }
   } else {
     const normalized = normalizeStructuredReview({
       modelJsonText: runtimeResult.modelReviewJson ?? "",
@@ -109949,6 +109982,9 @@ async function finishSkippedIdentical(options) {
       throw new Error("state-invalid: state bundle construction failed");
     }
     throw error2;
+  }
+  if ((options.config.runtimeBackend ?? "legacy") === "deterministic-csharp") {
+    setDeterministicSuccessOutputs(runtimeResult);
   }
   const uploadedState = await options.store.upload(
     options.artifactName,
@@ -110191,6 +110227,9 @@ function setDeterministicSuccessOutputs(runtimeResult) {
   setOutput("runtime_trace_sha256", runtimeResult?.traceSha256 ?? "");
   setOutput("runtime_error_kind", "");
   setOutput("runtime_error_class", "");
+  if (runtimeResult) {
+    setOutput("usage_budget_status", formatUsageBudgetStatus(runtimeResult.usageBudgetStatus));
+  }
 }
 function metadataForStructuredReview(review, status) {
   return {
@@ -110330,6 +110369,7 @@ function setDeterministicErrorOutputs(error2) {
   setOutput("runtime_trace_sha256", "");
   setOutput("runtime_error_kind", kind);
   setOutput("runtime_error_class", adapterError?.exitClass ?? "");
+  setOutput("usage_budget_status", "not_applicable (records=0)");
 }
 function sanitizeRuntimeDiagnostic(value) {
   let sanitized = value.replace(/\s+/g, " ").trim();
@@ -110342,7 +110382,7 @@ function sanitizeRuntimeDiagnostic(value) {
     sanitized = sanitized.replaceAll(secret, "***");
   }
   return truncateText(
-    sanitized.replace(/Authorization:\s*Bearer\s+\S+/gi, "Authorization: Bearer ***").replace(/x-api-key:\s*\S+/gi, "x-api-key: ***").replace(/\b[A-Za-z]:[\\/][^\s"'`]+/g, "<path>").replace(/(^|\s)\/(?:[^\s"'`]+\/)+[^\s"'`]+/g, "$1<path>"),
+    sanitized.replace(/Authorization:\s*Bearer\s+\S+/gi, "Authorization: Bearer ***").replace(/x-api-key:\s*\S+/gi, "x-api-key: ***").replace(/\b[A-Za-z]:[\\/][^\s"'`]+/g, "<path>").replace(/(^|[^A-Za-z0-9])\/(?:[^\s"'`()]+\/)*[^\s"'`()]+/g, "$1<path>"),
     240
   );
 }

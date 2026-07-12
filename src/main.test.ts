@@ -319,6 +319,30 @@ describe('run', () => {
     ).resolves.toBeTruthy();
   });
 
+  it('reports bounded command errors before deterministic side effects', async () => {
+    Object.assign(mocks.inputs, {
+      runtime_backend: 'deterministic-csharp',
+      post_comment: 'false',
+      review_mode: 'bootstrap',
+      state_key: 'deterministic-command-failure',
+    });
+    delete process.env.AGENTIC_REVIEW_RUNTIME_EXECUTABLE;
+    delete process.env.AGENTIC_REVIEW_RUNTIME_PREFIX_ARGS_JSON;
+
+    const { run } = await import('./main.js');
+    await expect(run()).rejects.toThrow(/AGENTIC_REVIEW_RUNTIME_EXECUTABLE/);
+
+    expect(mocks.setOutput).toHaveBeenCalledWith('runtime_error_kind', 'command-unavailable');
+    await expect(
+      stat(
+        path.join(
+          artifactRoot,
+          deterministicStateArtifactName(deterministicStateKey('deterministic-command-failure')),
+        ),
+      ),
+    ).rejects.toThrow();
+  });
+
   it('skips inline comments when sticky comment posting is disabled', async () => {
     Object.assign(mocks.inputs, {
       post_comment: 'false',

@@ -60,6 +60,7 @@ describe('action contract', () => {
       'runtime_trace_sha256',
       'runtime_error_kind',
       'runtime_error_class',
+      'usage_budget_status',
     ]) {
       expect(action).toContain(name);
     }

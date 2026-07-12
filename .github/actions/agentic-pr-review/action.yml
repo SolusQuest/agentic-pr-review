@@ -148,6 +148,8 @@ outputs:
     description: Bounded deterministic runtime or host error kind.
   runtime_error_class:
     description: Bounded deterministic runtime exit class when available.
+  usage_budget_status:
+    description: Deterministic usage-budget status.
   state_key:
     description: Resolved state key.
   review_mode:

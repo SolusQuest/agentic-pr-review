@@ -124,6 +124,18 @@ describe('parseActionConfig', () => {
   it('rejects deterministic provider settings and synthetic comments', () => {
     expect(() =>
       parseActionConfig(
+        new Inputs({
+          runtime_backend: 'deterministic-csharp',
+          runtime_provider: 'claude-code-cli',
+        }),
+        baseEnv,
+        'workflow_dispatch',
+      ),
+    ).toThrow(
+      /config-invalid: runtime_backend=deterministic-csharp requires runtime_provider=test/,
+    );
+    expect(() =>
+      parseActionConfig(
         new Inputs({ runtime_backend: 'deterministic-csharp', model_name: 'ignored' }),
         baseEnv,
         'workflow_dispatch',

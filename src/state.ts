@@ -75,6 +75,12 @@ interface StateManifest {
   };
 }
 
+export class RestoredSnapshotInvalidError extends Error {
+  constructor() {
+    super('restored state manifest pull request diff snapshot is incompatible');
+  }
+}
+
 const SECRET_FILE_PATTERN =
   /(^|[\\/])(\.env|credentials?|secrets?|tokens?|settings\.local)(\.|[\\/]|$)/i;
 const SECRET_CONTENT_PATTERN = /(ghp_|github_pat_|sk-[a-zA-Z0-9]|authorization:\s*bearer)/i;
@@ -229,7 +235,7 @@ export async function writeStateBundle(options: {
 
 function validatePullRequestDiffSnapshot(value: unknown): PullRequestDiffSnapshotV1 {
   if (!value || typeof value !== 'object') {
-    throw new Error('restored state manifest pull request diff snapshot is incompatible');
+    throw new RestoredSnapshotInvalidError();
   }
   const snapshot = value as PullRequestDiffSnapshotV1;
   if (
@@ -239,7 +245,7 @@ function validatePullRequestDiffSnapshot(value: unknown): PullRequestDiffSnapsho
     typeof snapshot.baseSha !== 'string' ||
     !Array.isArray(snapshot.files)
   ) {
-    throw new Error('restored state manifest pull request diff snapshot is incompatible');
+    throw new RestoredSnapshotInvalidError();
   }
   return {
     version: 1,
@@ -248,7 +254,7 @@ function validatePullRequestDiffSnapshot(value: unknown): PullRequestDiffSnapsho
     baseSha: snapshot.baseSha,
     files: snapshot.files.map((entry) => {
       if (!entry || typeof entry !== 'object') {
-        throw new Error('restored state manifest pull request diff snapshot is incompatible');
+        throw new RestoredSnapshotInvalidError();
       }
       const candidate = entry as PullRequestDiffSnapshotV1['files'][number];
       if (
@@ -263,14 +269,14 @@ function validatePullRequestDiffSnapshot(value: unknown): PullRequestDiffSnapsho
         typeof candidate.patchAvailable !== 'boolean' ||
         (candidate.patchSha256 !== null && typeof candidate.patchSha256 !== 'string')
       ) {
-        throw new Error('restored state manifest pull request diff snapshot is incompatible');
+        throw new RestoredSnapshotInvalidError();
       }
       if (
         candidate.patchAvailable
           ? typeof candidate.patchSha256 !== 'string'
           : candidate.patchSha256 !== null
       ) {
-        throw new Error('restored state manifest pull request diff snapshot is incompatible');
+        throw new RestoredSnapshotInvalidError();
       }
       return {
         filename: normalizeRepoRelativePath(candidate.filename),
