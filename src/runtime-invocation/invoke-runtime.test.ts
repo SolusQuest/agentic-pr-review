@@ -691,7 +691,10 @@ describe('invokeRuntime - post-spawn lifecycle (mock ChildProcess)', () => {
     // Production-shaped ordering: closeGraceMs (30) < sigtermGraceMs (200) so a naive
     // close deadline armed by the post-spawn error path would fire before the
     // scheduled SIGTERM->SIGKILL escalation. The adapter must defer arming until the
-    // sigkillTimer has fired.
+    // sigkillTimer has fired. We use a wide post-SIGKILL closeGraceMs (400 ms) here so
+    // that once SIGKILL fires the test has room to emit 'close' before the fallback
+    // fires; the property under test is the pre-SIGKILL deferral, not the post-SIGKILL
+    // deadline (which is covered separately).
     const invoke = invokeRuntimeForTests(
       {
         command: { executablePath: process.execPath, prefixArgs: [] },
@@ -699,30 +702,31 @@ describe('invokeRuntime - post-spawn lifecycle (mock ChildProcess)', () => {
         timeoutMs: 40,
         tempRoot,
       },
-      { spawnOverride, sigtermGraceMs: 200, closeGraceMs: 30 },
+      { spawnOverride, sigtermGraceMs: 200, closeGraceMs: 400 },
     );
 
     // Wait past the timeout so setTermination('timeout') runs and killChild() sends
     // SIGTERM (recorded but non-fatal for the mock), scheduling the SIGKILL timer.
     await delay(80);
     expect(mock.killCalls).toContain('SIGTERM');
+    expect(mock.killCalls).not.toContain('SIGKILL');
     // Emit a synthetic post-spawn control error. If the adapter incorrectly armed
-    // the short close deadline here, the promise would resolve before SIGKILL runs.
+    // a short close deadline here (i.e. did not honor the pending sigkillTimer) the
+    // promise would resolve before SIGKILL runs.
     const controlErr = new Error('synthetic kill delivery failure');
     (controlErr as NodeJS.ErrnoException).code = 'ESRCH';
     mock.emit('error', controlErr);
 
-    // Wait long enough for the SIGKILL escalation to fire (sigtermGraceMs=200) but
-    // less than the total bounded budget.
-    await delay(260);
+    // Wait long enough for the SIGKILL escalation to fire (sigtermGraceMs=200 -> ~240 ms
+    // after start) but well before the 400 ms post-SIGKILL close deadline.
+    await delay(220);
     expect(mock.killCalls).toContain('SIGKILL');
 
-    // Finally emit close to let the run resolve.
+    // Finally emit close so the run resolves with closeObserved=true and cleanup runs.
     mock.emit('close', null, 'SIGKILL');
     const err = await invoke.catch((e) => e);
     expect(err).toBeInstanceOf(RuntimeInvocationError);
     expect((err as RuntimeInvocationError).kind).toBe('timed-out');
-    // Cleanup ran because close was observed.
     expect(await readdir(tempRoot)).toEqual([]);
   }, 8000);
 
