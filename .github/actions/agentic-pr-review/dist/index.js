@@ -109326,7 +109326,15 @@ async function run() {
   const stateKey = (config.runtimeBackend ?? "legacy") === "deterministic-csharp" ? deterministicStateKey(baseStateKey) : sanitizeStateKey(baseStateKey);
   const artifactName = (config.runtimeBackend ?? "legacy") === "deterministic-csharp" ? deterministicStateArtifactName(stateKey) : stateArtifactName(stateKey);
   const store = createArtifactStore(config.githubToken, octokit);
-  const resolution = await resolvePhase(config, store, artifactName, tempRoot, stateKey, target);
+  let resolution;
+  try {
+    resolution = await resolvePhase(config, store, artifactName, tempRoot, stateKey, target);
+  } catch (error2) {
+    if ((config.runtimeBackend ?? "legacy") === "deterministic-csharp") {
+      setDeterministicErrorOutputs(error2);
+    }
+    throw error2;
+  }
   let incrementalDiff;
   const effectiveDiffSource = effectiveDiffSourceFor(target, resolution.phase);
   if (resolution.phase === "incremental" && target.mode === "pull-request") {
@@ -109547,29 +109555,47 @@ async function run() {
   };
   const structuredResultPath = path12.join(tempRoot, "structured-result.json");
   const renderedReviewMarkdownPath = path12.join(tempRoot, "rendered-review.md");
-  const renderedReviewMarkdown = renderStructuredReviewMarkdown(structuredReview);
-  await writeJsonFile(structuredResultPath, structuredReview);
-  await writeTextFile(renderedReviewMarkdownPath, renderedReviewMarkdown);
+  let renderedReviewMarkdown;
+  try {
+    renderedReviewMarkdown = renderStructuredReviewMarkdown(structuredReview);
+    await writeJsonFile(structuredResultPath, structuredReview);
+    await writeTextFile(renderedReviewMarkdownPath, renderedReviewMarkdown);
+  } catch (error2) {
+    if (deterministicBackend) {
+      setDeterministicErrorOutputs(new Error(`rendering-invalid: ${messageOf(error2)}`));
+      throw new Error("rendering-invalid: rendered review could not be written");
+    }
+    throw error2;
+  }
   const bundleDir = path12.join(tempRoot, "state-bundle");
-  const bundleFiles = await writeStateBundle({
-    bundleDir,
-    config,
-    target,
-    stateKey,
-    phase: resolution.phase,
-    promptSha256,
-    reviewInputSha256: runtimeResult.reviewInputSha256,
-    reviewInputBytes: runtimeResult.reviewInputBytes,
-    blocks: blocks2,
-    runtimeResult,
-    structuredReview,
-    structuredMetadata,
-    renderedReviewMarkdown,
-    runtimeDir,
-    phaseReason: resolution.lineageReason,
-    effectiveDiffSource,
-    createdAt: resolution.restoredState?.createdAt
-  });
+  let bundleFiles;
+  try {
+    bundleFiles = await writeStateBundle({
+      bundleDir,
+      config,
+      target,
+      stateKey,
+      phase: resolution.phase,
+      promptSha256,
+      reviewInputSha256: runtimeResult.reviewInputSha256,
+      reviewInputBytes: runtimeResult.reviewInputBytes,
+      blocks: blocks2,
+      runtimeResult,
+      structuredReview,
+      structuredMetadata,
+      renderedReviewMarkdown,
+      runtimeDir,
+      phaseReason: resolution.lineageReason,
+      effectiveDiffSource,
+      createdAt: resolution.restoredState?.createdAt
+    });
+  } catch (error2) {
+    if (deterministicBackend) {
+      setDeterministicErrorOutputs(new Error("state-invalid: state bundle construction failed"));
+      throw new Error("state-invalid: state bundle construction failed");
+    }
+    throw error2;
+  }
   if (deterministicBackend) {
     comment = await maybePostComment({
       config,
@@ -109699,7 +109725,9 @@ async function resolvePhase(config, store, artifactName, tempRoot, stateKey, tar
       return { phase: "bootstrap", lineageReason: "snapshot_state_missing" };
     }
     if (config.reviewMode === "incremental") {
-      throw new Error(`review_mode=incremental requires a state artifact named ${artifactName}`);
+      throw new Error(
+        `${config.runtimeBackend === "deterministic-csharp" ? "state-invalid: " : ""}review_mode=incremental requires a state artifact named ${artifactName}`
+      );
     }
     return { phase: "bootstrap", lineageReason: "auto_bootstrap_no_state" };
   }
@@ -109728,6 +109756,9 @@ async function resolvePhase(config, store, artifactName, tempRoot, stateKey, tar
         `Restored state artifact is not usable; falling back to bootstrap: ${messageOf(error2)}`
       );
       return { phase: "bootstrap", lineageReason: reason };
+    }
+    if (config.runtimeBackend === "deterministic-csharp" && config.reviewMode === "incremental" && messageOf(error2).includes("runtime_backend")) {
+      throw new Error(`state-invalid: ${truncateText(messageOf(error2), 240)}`);
     }
     throw error2;
   }
@@ -109868,23 +109899,32 @@ async function finishSkippedIdentical(options) {
   const bundleDir = path12.join(defaultTempDir(), "agentic-pr-review", "state-bundle");
   const structuredResultPath = path12.join(bundleDir, "structured-result.json");
   const renderedReviewMarkdownPath = path12.join(bundleDir, "rendered-review.md");
-  const bundleFiles = await writeStateBundle({
-    bundleDir,
-    config: options.config,
-    target: options.target,
-    stateKey: options.stateKey,
-    phase: "incremental",
-    promptSha256: (options.config.runtimeBackend ?? "legacy") === "legacy" ? "skipped-identical" : void 0,
-    blocks: [],
-    runtimeResult,
-    structuredReview,
-    structuredMetadata,
-    renderedReviewMarkdown,
-    runtimeDir: options.runtimeDir,
-    phaseReason: options.phaseReason,
-    effectiveDiffSource: options.effectiveDiffSource,
-    createdAt: options.restoredState.createdAt
-  });
+  let bundleFiles;
+  try {
+    bundleFiles = await writeStateBundle({
+      bundleDir,
+      config: options.config,
+      target: options.target,
+      stateKey: options.stateKey,
+      phase: "incremental",
+      promptSha256: (options.config.runtimeBackend ?? "legacy") === "legacy" ? "skipped-identical" : void 0,
+      blocks: [],
+      runtimeResult,
+      structuredReview,
+      structuredMetadata,
+      renderedReviewMarkdown,
+      runtimeDir: options.runtimeDir,
+      phaseReason: options.phaseReason,
+      effectiveDiffSource: options.effectiveDiffSource,
+      createdAt: options.restoredState.createdAt
+    });
+  } catch (error2) {
+    if ((options.config.runtimeBackend ?? "legacy") === "deterministic-csharp") {
+      setDeterministicErrorOutputs(new Error("state-invalid: state bundle construction failed"));
+      throw new Error("state-invalid: state bundle construction failed");
+    }
+    throw error2;
+  }
   const uploadedState = await options.store.upload(
     options.artifactName,
     bundleDir,

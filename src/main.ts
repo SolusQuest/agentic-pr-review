@@ -118,7 +118,15 @@ export async function run(): Promise<void> {
       ? deterministicStateArtifactName(stateKey)
       : stateArtifactName(stateKey);
   const store = createArtifactStore(config.githubToken, octokit);
-  const resolution = await resolvePhase(config, store, artifactName, tempRoot, stateKey, target);
+  let resolution: PhaseResolution;
+  try {
+    resolution = await resolvePhase(config, store, artifactName, tempRoot, stateKey, target);
+  } catch (error) {
+    if ((config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
+      setDeterministicErrorOutputs(error);
+    }
+    throw error;
+  }
   let incrementalDiff: PullRequestDiffSnapshotDeltaV1 | undefined;
   const effectiveDiffSource = effectiveDiffSourceFor(target, resolution.phase);
 
@@ -343,30 +351,48 @@ export async function run(): Promise<void> {
 
   const structuredResultPath = path.join(tempRoot, 'structured-result.json');
   const renderedReviewMarkdownPath = path.join(tempRoot, 'rendered-review.md');
-  const renderedReviewMarkdown = renderStructuredReviewMarkdown(structuredReview);
-  await writeJsonFile(structuredResultPath, structuredReview);
-  await writeTextFile(renderedReviewMarkdownPath, renderedReviewMarkdown);
+  let renderedReviewMarkdown: string;
+  try {
+    renderedReviewMarkdown = renderStructuredReviewMarkdown(structuredReview);
+    await writeJsonFile(structuredResultPath, structuredReview);
+    await writeTextFile(renderedReviewMarkdownPath, renderedReviewMarkdown);
+  } catch (error) {
+    if (deterministicBackend) {
+      setDeterministicErrorOutputs(new Error(`rendering-invalid: ${messageOf(error)}`));
+      throw new Error('rendering-invalid: rendered review could not be written');
+    }
+    throw error;
+  }
 
   const bundleDir = path.join(tempRoot, 'state-bundle');
-  const bundleFiles = await writeStateBundle({
-    bundleDir,
-    config,
-    target,
-    stateKey,
-    phase: resolution.phase,
-    promptSha256,
-    reviewInputSha256: runtimeResult.reviewInputSha256,
-    reviewInputBytes: runtimeResult.reviewInputBytes,
-    blocks,
-    runtimeResult,
-    structuredReview,
-    structuredMetadata,
-    renderedReviewMarkdown,
-    runtimeDir,
-    phaseReason: resolution.lineageReason,
-    effectiveDiffSource,
-    createdAt: resolution.restoredState?.createdAt,
-  });
+  let bundleFiles: string[];
+  try {
+    bundleFiles = await writeStateBundle({
+      bundleDir,
+      config,
+      target,
+      stateKey,
+      phase: resolution.phase,
+      promptSha256,
+      reviewInputSha256: runtimeResult.reviewInputSha256,
+      reviewInputBytes: runtimeResult.reviewInputBytes,
+      blocks,
+      runtimeResult,
+      structuredReview,
+      structuredMetadata,
+      renderedReviewMarkdown,
+      runtimeDir,
+      phaseReason: resolution.lineageReason,
+      effectiveDiffSource,
+      createdAt: resolution.restoredState?.createdAt,
+    });
+  } catch (error) {
+    if (deterministicBackend) {
+      setDeterministicErrorOutputs(new Error('state-invalid: state bundle construction failed'));
+      throw new Error('state-invalid: state bundle construction failed');
+    }
+    throw error;
+  }
 
   if (deterministicBackend) {
     comment = await maybePostComment({
@@ -521,7 +547,9 @@ async function resolvePhase(
       return { phase: 'bootstrap', lineageReason: 'snapshot_state_missing' };
     }
     if (config.reviewMode === 'incremental') {
-      throw new Error(`review_mode=incremental requires a state artifact named ${artifactName}`);
+      throw new Error(
+        `${config.runtimeBackend === 'deterministic-csharp' ? 'state-invalid: ' : ''}review_mode=incremental requires a state artifact named ${artifactName}`,
+      );
     }
     return { phase: 'bootstrap', lineageReason: 'auto_bootstrap_no_state' };
   }
@@ -559,6 +587,13 @@ async function resolvePhase(
         `Restored state artifact is not usable; falling back to bootstrap: ${messageOf(error)}`,
       );
       return { phase: 'bootstrap', lineageReason: reason };
+    }
+    if (
+      config.runtimeBackend === 'deterministic-csharp' &&
+      config.reviewMode === 'incremental' &&
+      messageOf(error).includes('runtime_backend')
+    ) {
+      throw new Error(`state-invalid: ${truncateText(messageOf(error), 240)}`);
     }
     throw error;
   }
@@ -722,24 +757,33 @@ async function finishSkippedIdentical(options: {
   const bundleDir = path.join(defaultTempDir(), 'agentic-pr-review', 'state-bundle');
   const structuredResultPath = path.join(bundleDir, 'structured-result.json');
   const renderedReviewMarkdownPath = path.join(bundleDir, 'rendered-review.md');
-  const bundleFiles = await writeStateBundle({
-    bundleDir,
-    config: options.config,
-    target: options.target,
-    stateKey: options.stateKey,
-    phase: 'incremental',
-    promptSha256:
-      (options.config.runtimeBackend ?? 'legacy') === 'legacy' ? 'skipped-identical' : undefined,
-    blocks: [],
-    runtimeResult,
-    structuredReview,
-    structuredMetadata,
-    renderedReviewMarkdown,
-    runtimeDir: options.runtimeDir,
-    phaseReason: options.phaseReason,
-    effectiveDiffSource: options.effectiveDiffSource,
-    createdAt: options.restoredState.createdAt,
-  });
+  let bundleFiles: string[];
+  try {
+    bundleFiles = await writeStateBundle({
+      bundleDir,
+      config: options.config,
+      target: options.target,
+      stateKey: options.stateKey,
+      phase: 'incremental',
+      promptSha256:
+        (options.config.runtimeBackend ?? 'legacy') === 'legacy' ? 'skipped-identical' : undefined,
+      blocks: [],
+      runtimeResult,
+      structuredReview,
+      structuredMetadata,
+      renderedReviewMarkdown,
+      runtimeDir: options.runtimeDir,
+      phaseReason: options.phaseReason,
+      effectiveDiffSource: options.effectiveDiffSource,
+      createdAt: options.restoredState.createdAt,
+    });
+  } catch (error) {
+    if ((options.config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
+      setDeterministicErrorOutputs(new Error('state-invalid: state bundle construction failed'));
+      throw new Error('state-invalid: state bundle construction failed');
+    }
+    throw error;
+  }
   const uploadedState = await options.store.upload(
     options.artifactName,
     bundleDir,
