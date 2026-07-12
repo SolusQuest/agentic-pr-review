@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { RuntimeCommand } from './runtime-command.js';
+import { sanitizeErrorCode } from './sanitizers.js';
 
 /** POSIX SIGTERM-to-SIGKILL grace period used when the caller does not override. */
 const DEFAULT_SIGTERM_GRACE_MS = 5000;
@@ -74,18 +75,6 @@ type TerminationReason =
   | { kind: 'host-terminated' };
 
 /**
- * Bounded regex extraction of an error `code` property. Applies the same
- * `^[A-Z0-9_]{1,32}$` allowlist used throughout the adapter so no raw Error
- * or path is exposed via {@link ProcessOutcome.spawnErrorCode}.
- */
-function sanitizeSpawnErrorCode(cause: unknown): string | undefined {
-  if (cause === null || cause === undefined) return undefined;
-  if (typeof cause !== 'object') return undefined;
-  const code = (cause as { code?: unknown }).code;
-  return typeof code === 'string' && /^[A-Z0-9_]{1,32}$/.test(code) ? code : undefined;
-}
-
-/**
  * Build the minimal child environment. Forwards only a documented allowlist of
  * host variables and forces documentation-required opt-outs. Never forwards
  * `GITHUB_*`, `ANTHROPIC_*`, or `AGENTIC_REVIEW_*` credentials.
@@ -156,7 +145,7 @@ export async function runProcess(options: RunProcessOptions): Promise<RunProcess
     return {
       outcome: {
         kind: 'spawn-failed',
-        spawnErrorCode: sanitizeSpawnErrorCode(cause),
+        spawnErrorCode: sanitizeErrorCode(cause),
         closeObserved: true,
       },
       capture: { stdoutBytes: new Uint8Array(), stderrBytes: new Uint8Array() },
@@ -342,7 +331,7 @@ export async function runProcess(options: RunProcessOptions): Promise<RunProcess
     return {
       outcome: {
         kind: 'spawn-failed',
-        spawnErrorCode: sanitizeSpawnErrorCode(exit.spawnError),
+        spawnErrorCode: sanitizeErrorCode(exit.spawnError),
         closeObserved: true,
       },
       capture,

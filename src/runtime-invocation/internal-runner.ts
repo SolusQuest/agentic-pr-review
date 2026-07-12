@@ -32,6 +32,7 @@ import {
   type FsSeams,
 } from './runtime-files.js';
 import { runProcess, type StreamCaptureResult } from './process-runner.js';
+import { sanitizeErrorCode } from './sanitizers.js';
 import { validateSuccessAndBuildResult } from './success-validator.js';
 
 export type { InvokeRuntimeOptions, RuntimeCommand, RuntimeInvocationSuccess };
@@ -89,13 +90,6 @@ function isValidAbortSignal(value: unknown): value is AbortSignal {
     typeof candidate.addEventListener === 'function' &&
     typeof candidate.removeEventListener === 'function'
   );
-}
-
-function sanitizeCauseCode(cause: unknown): string | undefined {
-  if (cause === null || cause === undefined) return undefined;
-  if (typeof cause !== 'object') return undefined;
-  const code = (cause as { code?: unknown }).code;
-  return typeof code === 'string' && /^[A-Z0-9_]{1,32}$/.test(code) ? code : undefined;
 }
 
 function assertOptionsShape(options: InvokeRuntimeOptions): void {
@@ -471,7 +465,7 @@ export async function runInvocation(
       primaryError = new RuntimeInvocationError({
         kind: 'host-io-failed',
         message: 'Unclassified host failure during runtime invocation.',
-        diagnosticCode: sanitizeCauseCode(err),
+        diagnosticCode: sanitizeErrorCode(err),
       });
     }
   }
@@ -493,7 +487,7 @@ export async function runInvocation(
     throw new RuntimeInvocationError({
       kind: 'cleanup-failed',
       message: 'Failed to clean up runtime invocation directory after a successful run.',
-      diagnosticCode: sanitizeCauseCode(cleanupError),
+      diagnosticCode: sanitizeErrorCode(cleanupError),
     });
   }
   if (!success) {
