@@ -14,16 +14,17 @@ export interface ArtifactRef {
 export interface ArtifactLookupContext {
   targetMode: 'pull-request' | 'synthetic-fixture';
   prNumber?: number;
+  runtimeBackend?: 'legacy' | 'deterministic-csharp';
 }
 
 interface WorkflowRunMetadata {
   id: number;
-  workflowId: number;
-  workflowPath: string;
-  event: string;
+  workflowId?: number;
+  workflowPath?: string;
+  event?: string;
   conclusion?: string;
-  headSha: string;
-  headRepository: string;
+  headSha?: string;
+  headRepository?: string;
   pullRequestNumbers: number[];
 }
 
@@ -49,7 +50,8 @@ export class GitHubArtifactStore implements ArtifactStore {
   ) {}
 
   async findStateArtifact(name: string, explicitRunId?: number): Promise<ArtifactRef | undefined> {
-    const currentRun = await this.getWorkflowRun(this.currentRunId);
+    const strictProvenance = this.lookupContext?.runtimeBackend !== 'legacy';
+    const currentRun = await this.getWorkflowRun(this.currentRunId, strictProvenance);
     const artifacts = explicitRunId
       ? await this.listWorkflowRunArtifacts(name, explicitRunId)
       : await this.listRepoArtifacts(name);
@@ -60,11 +62,12 @@ export class GitHubArtifactStore implements ArtifactStore {
       if (!runId) continue;
       let run: WorkflowRunMetadata;
       try {
-        run = runId === currentRun.id ? currentRun : await this.getWorkflowRun(runId);
+        run =
+          runId === currentRun.id ? currentRun : await this.getWorkflowRun(runId, strictProvenance);
       } catch {
         continue;
       }
-      if (this.isTrustedRun(run, currentRun)) {
+      if (this.isTrustedRun(run, currentRun, explicitRunId, strictProvenance)) {
         trusted.push({ artifact, run });
       }
     }
@@ -138,7 +141,10 @@ export class GitHubArtifactStore implements ArtifactStore {
     return response.data.artifacts ?? [];
   }
 
-  private async getWorkflowRun(runId: number): Promise<WorkflowRunMetadata> {
+  private async getWorkflowRun(
+    runId: number,
+    strictProvenance: boolean,
+  ): Promise<WorkflowRunMetadata> {
     const response = await this.octokit.request('GET /repos/{owner}/{repo}/actions/runs/{run_id}', {
       owner: this.owner,
       repo: this.repo,
@@ -155,16 +161,17 @@ export class GitHubArtifactStore implements ArtifactStore {
     if (
       !Number.isSafeInteger(id) ||
       id <= 0 ||
-      !Number.isSafeInteger(workflowId) ||
-      workflowId <= 0 ||
-      typeof workflowPath !== 'string' ||
-      !workflowPath ||
-      typeof event !== 'string' ||
-      !event ||
-      typeof headSha !== 'string' ||
-      !headSha ||
-      typeof headRepository !== 'string' ||
-      !headRepository
+      (strictProvenance &&
+        (!Number.isSafeInteger(workflowId) ||
+          workflowId <= 0 ||
+          typeof workflowPath !== 'string' ||
+          !workflowPath ||
+          typeof event !== 'string' ||
+          !event ||
+          typeof headSha !== 'string' ||
+          !headSha ||
+          typeof headRepository !== 'string' ||
+          !headRepository))
     ) {
       throw new Error('artifact provenance metadata is incomplete');
     }
@@ -184,15 +191,46 @@ export class GitHubArtifactStore implements ArtifactStore {
     };
   }
 
-  private isTrustedRun(candidate: WorkflowRunMetadata, current: WorkflowRunMetadata): boolean {
+  private isTrustedRun(
+    candidate: WorkflowRunMetadata,
+    current: WorkflowRunMetadata,
+    explicitRunId: number | undefined,
+    strictProvenance: boolean,
+  ): boolean {
     if (candidate.conclusion !== 'success') return false;
-    if (candidate.workflowId !== current.workflowId) return false;
-    if (candidate.workflowPath !== current.workflowPath) return false;
-    if (candidate.event !== current.event) return false;
-    if (candidate.headRepository !== current.headRepository) return false;
-    if (this.lookupContext?.targetMode === 'pull-request' && this.lookupContext.prNumber) {
-      if (candidate.event !== 'pull_request') return false;
-      if (!candidate.pullRequestNumbers.includes(this.lookupContext.prNumber)) return false;
+    if (strictProvenance) {
+      if (candidate.workflowId !== current.workflowId) return false;
+      if (candidate.workflowPath !== current.workflowPath) return false;
+      if (candidate.event !== current.event) return false;
+      if (candidate.headRepository !== current.headRepository) return false;
+      if (this.lookupContext?.targetMode === 'pull-request' && this.lookupContext.prNumber) {
+        if (candidate.event !== 'pull_request') return false;
+        if (!candidate.pullRequestNumbers.includes(this.lookupContext.prNumber)) return false;
+      }
+      return true;
+    }
+    if (current.workflowId && candidate.workflowId && candidate.workflowId !== current.workflowId) {
+      return false;
+    }
+    if (
+      current.workflowPath &&
+      candidate.workflowPath &&
+      candidate.workflowPath !== current.workflowPath
+    ) {
+      return false;
+    }
+    if (!current.workflowId && !current.workflowPath) return false;
+    if (current.event && candidate.event !== current.event) return false;
+    if (current.headRepository && candidate.headRepository !== current.headRepository) {
+      return false;
+    }
+    if (
+      this.lookupContext?.targetMode === 'pull-request' &&
+      this.lookupContext.prNumber &&
+      !candidate.pullRequestNumbers.includes(this.lookupContext.prNumber) &&
+      !explicitRunId
+    ) {
+      return false;
     }
     return true;
   }

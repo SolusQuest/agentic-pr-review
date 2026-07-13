@@ -202,7 +202,9 @@ function assertAllowedKeys(value: Record<string, unknown>, allowed: Set<string>)
 }
 
 function boundedString(value: unknown, maxLength = 1024): value is string {
-  return typeof value === 'string' && value.length <= maxLength && !/[\u0000\r\n]/.test(value);
+  return (
+    typeof value === 'string' && value.length <= maxLength && !/[\u0000-\u001f\u007f]/.test(value)
+  );
 }
 
 function nonNegativeInteger(value: unknown): value is number {
@@ -365,7 +367,13 @@ function validateManifestShape(value: unknown): asserts value is StateManifest {
     !boundedString(value.sessionId, 200) ||
     !boundedString(value.sessionName, 200) ||
     (value.reviewedHeadSha !== undefined && !boundedString(value.reviewedHeadSha, 200)) ||
-    (value.promptSha256 !== undefined && !/^[a-f0-9]{64}$/.test(String(value.promptSha256))) ||
+    (value.promptSha256 !== undefined &&
+      !(
+        /^[a-f0-9]{64}$/.test(String(value.promptSha256)) ||
+        (value.promptSha256 === 'skipped-identical' &&
+          value.phase === 'incremental' &&
+          (value.runtimeBackend === undefined || value.runtimeBackend === 'legacy'))
+      )) ||
     (value.reviewInputSha256 !== undefined &&
       !/^[a-f0-9]{64}$/.test(String(value.reviewInputSha256))) ||
     (value.reviewInputBytes !== undefined && !nonNegativeInteger(value.reviewInputBytes)) ||

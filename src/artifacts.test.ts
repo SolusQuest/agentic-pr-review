@@ -147,4 +147,39 @@ describe('GitHubArtifactStore provenance filtering', () => {
       /provenance metadata is incomplete/,
     );
   });
+
+  it('preserves legacy explicit-run restore semantics with partial metadata', async () => {
+    const runs = new Map<number, unknown>([
+      [99, run({ head_sha: undefined })],
+      [42, run({ id: 42, head_sha: undefined, pull_requests: [{ number: 35 }] })],
+    ]);
+    const octokit = {
+      request: async (route: string, params: { run_id?: number }) =>
+        route.includes('/actions/runs/{run_id}/artifacts')
+          ? {
+              data: {
+                artifacts: [
+                  {
+                    id: 7,
+                    name: 'state',
+                    expired: false,
+                    created_at: '2026-07-14',
+                    workflow_run: { id: 42 },
+                  },
+                ],
+              },
+            }
+          : { data: runs.get(params.run_id ?? -1) },
+    };
+    const store = new GitHubArtifactStore(octokit, 'token', 'SolusQuest', 'agentic-pr-review', 99, {
+      targetMode: 'pull-request',
+      prNumber: 34,
+      runtimeBackend: 'legacy',
+    });
+
+    await expect(store.findStateArtifact('state', 42)).resolves.toMatchObject({
+      id: 7,
+      workflowRunId: 42,
+    });
+  });
 });

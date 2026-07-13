@@ -350,8 +350,12 @@ describe('run', () => {
     await expect(run()).rejects.toThrow(/deterministic sticky comment could not be published/);
 
     expect(mocks.createComment).toHaveBeenCalledTimes(1);
-    expect(mocks.setOutput).toHaveBeenCalledWith('runtime_error_kind', '');
-    expect(mocks.summary.addRaw.mock.calls.at(-1)?.[0]).toContain('Sticky comment written: false');
+    expect(mocks.setOutput).toHaveBeenCalledWith('runtime_error_kind', 'rendering-invalid');
+    const summary = mocks.summary.addRaw.mock.calls.at(-1)?.[0] as string;
+    expect(summary).toContain('Sticky comment written: false');
+    expect(summary).toContain('State artifact upload: not attempted');
+    expect(summary).toContain('Failure classification: rendering-invalid');
+    expect(summary).not.toContain('State artifact upload: failed');
     await expect(
       stat(
         path.join(
@@ -607,6 +611,8 @@ describe('run', () => {
       expect(mocks.setOutput).toHaveBeenCalledWith('phase', 'incremental');
       expect(mocks.setOutput).toHaveBeenCalledWith('review_phase', 'skipped-identical');
       expect(mocks.octokit.rest.repos.compareCommitsWithBasehead).not.toHaveBeenCalled();
+      await run();
+      expect(runSpy).not.toHaveBeenCalled();
     } finally {
       runSpy.mockRestore();
     }

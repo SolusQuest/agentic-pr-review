@@ -150,7 +150,7 @@ export async function run(): Promise<void> {
     }
     throw error;
   }
-  const store = createArtifactStore(config.githubToken, octokit, target);
+  const store = createArtifactStore(config.githubToken, octokit, target, config.runtimeBackend);
   let resolution: PhaseResolution;
   try {
     resolution = await resolvePhase(config, store, artifactName, tempRoot, stateKey, target);
@@ -480,12 +480,11 @@ export async function run(): Promise<void> {
         octokit,
       });
     } catch {
-      await writeDeterministicUploadFailureSummary({
+      setDeterministicHostErrorKind('rendering-invalid');
+      await writeDeterministicStickyFailureSummary({
         phase: resolution.phase,
         reviewPhase: resolution.phase,
         runtimeResult,
-        stickyWritten: false,
-        artifactUploaded: false,
       });
       throw new Error('rendering-invalid: deterministic sticky comment could not be published');
     }
@@ -617,6 +616,7 @@ function createArtifactStore(
   token: string,
   octokit: any,
   target: Awaited<ReturnType<typeof resolveTarget>>,
+  runtimeBackend: ActionConfig['runtimeBackend'],
 ): ArtifactStore {
   const localRoot = process.env.AGENTIC_REVIEW_LOCAL_ARTIFACT_DIR;
   if (localRoot) {
@@ -631,6 +631,7 @@ function createArtifactStore(
     {
       targetMode: target.mode,
       prNumber: target.prNumber,
+      runtimeBackend,
     },
   );
 }
@@ -1316,6 +1317,11 @@ function setDeterministicSuccessOutputs(runtimeResult: RuntimeResult | undefined
   }
 }
 
+function setDeterministicHostErrorKind(kind: string): void {
+  core.setOutput('runtime_error_kind', kind);
+  core.setOutput('runtime_error_class', '');
+}
+
 function metadataForStructuredReview(
   review: StructuredReviewEnvelopeV1,
   status: StructuredResultMetadata['status'],
@@ -1478,6 +1484,34 @@ async function writeDeterministicUploadFailureSummary(input: {
       .write();
   } catch {
     core.info('Unable to write deterministic failure summary.');
+  }
+}
+
+async function writeDeterministicStickyFailureSummary(input: {
+  phase: Phase;
+  reviewPhase: ReviewPhaseOutput;
+  runtimeResult: RuntimeResult;
+}): Promise<void> {
+  try {
+    await core.summary
+      .addRaw(
+        [
+          '### Agentic PR Review',
+          '',
+          '- Runtime backend: deterministic-csharp',
+          `- Runtime version: ${formatRuntimeVersion(input.runtimeResult.runtimeVersion)}`,
+          `- Runtime trace sha256: ${input.runtimeResult.traceSha256 ?? 'n/a'}`,
+          `- Resolved phase: ${input.phase}`,
+          `- Review phase: ${input.reviewPhase}`,
+          '- Runtime execution: succeeded',
+          '- Sticky comment written: false',
+          '- State artifact upload: not attempted',
+          '- Failure classification: rendering-invalid',
+        ].join('\n'),
+      )
+      .write();
+  } catch {
+    core.info('Unable to write deterministic sticky failure summary.');
   }
 }
 

@@ -104315,7 +104315,8 @@ var GitHubArtifactStore = class {
   currentRunId;
   lookupContext;
   async findStateArtifact(name, explicitRunId) {
-    const currentRun = await this.getWorkflowRun(this.currentRunId);
+    const strictProvenance = this.lookupContext?.runtimeBackend !== "legacy";
+    const currentRun = await this.getWorkflowRun(this.currentRunId, strictProvenance);
     const artifacts = explicitRunId ? await this.listWorkflowRunArtifacts(name, explicitRunId) : await this.listRepoArtifacts(name);
     const trusted = [];
     for (const artifact of artifacts) {
@@ -104324,11 +104325,11 @@ var GitHubArtifactStore = class {
       if (!runId) continue;
       let run2;
       try {
-        run2 = runId === currentRun.id ? currentRun : await this.getWorkflowRun(runId);
+        run2 = runId === currentRun.id ? currentRun : await this.getWorkflowRun(runId, strictProvenance);
       } catch {
         continue;
       }
-      if (this.isTrustedRun(run2, currentRun)) {
+      if (this.isTrustedRun(run2, currentRun, explicitRunId, strictProvenance)) {
         trusted.push({ artifact, run: run2 });
       }
     }
@@ -104390,7 +104391,7 @@ var GitHubArtifactStore = class {
     );
     return response.data.artifacts ?? [];
   }
-  async getWorkflowRun(runId) {
+  async getWorkflowRun(runId, strictProvenance) {
     const response = await this.octokit.request("GET /repos/{owner}/{repo}/actions/runs/{run_id}", {
       owner: this.owner,
       repo: this.repo,
@@ -104404,7 +104405,7 @@ var GitHubArtifactStore = class {
     const conclusion = typeof run2?.conclusion === "string" ? run2.conclusion : void 0;
     const headSha = run2?.head_sha;
     const headRepository = run2?.head_repository?.full_name;
-    if (!Number.isSafeInteger(id) || id <= 0 || !Number.isSafeInteger(workflowId) || workflowId <= 0 || typeof workflowPath !== "string" || !workflowPath || typeof event !== "string" || !event || typeof headSha !== "string" || !headSha || typeof headRepository !== "string" || !headRepository) {
+    if (!Number.isSafeInteger(id) || id <= 0 || strictProvenance && (!Number.isSafeInteger(workflowId) || workflowId <= 0 || typeof workflowPath !== "string" || !workflowPath || typeof event !== "string" || !event || typeof headSha !== "string" || !headSha || typeof headRepository !== "string" || !headRepository)) {
       throw new Error("artifact provenance metadata is incomplete");
     }
     return {
@@ -104418,15 +104419,32 @@ var GitHubArtifactStore = class {
       pullRequestNumbers: Array.isArray(run2.pull_requests) ? run2.pull_requests.map((pull) => Number(pull.number)).filter((number) => Number.isInteger(number) && number > 0) : []
     };
   }
-  isTrustedRun(candidate, current) {
+  isTrustedRun(candidate, current, explicitRunId, strictProvenance) {
     if (candidate.conclusion !== "success") return false;
-    if (candidate.workflowId !== current.workflowId) return false;
-    if (candidate.workflowPath !== current.workflowPath) return false;
-    if (candidate.event !== current.event) return false;
-    if (candidate.headRepository !== current.headRepository) return false;
-    if (this.lookupContext?.targetMode === "pull-request" && this.lookupContext.prNumber) {
-      if (candidate.event !== "pull_request") return false;
-      if (!candidate.pullRequestNumbers.includes(this.lookupContext.prNumber)) return false;
+    if (strictProvenance) {
+      if (candidate.workflowId !== current.workflowId) return false;
+      if (candidate.workflowPath !== current.workflowPath) return false;
+      if (candidate.event !== current.event) return false;
+      if (candidate.headRepository !== current.headRepository) return false;
+      if (this.lookupContext?.targetMode === "pull-request" && this.lookupContext.prNumber) {
+        if (candidate.event !== "pull_request") return false;
+        if (!candidate.pullRequestNumbers.includes(this.lookupContext.prNumber)) return false;
+      }
+      return true;
+    }
+    if (current.workflowId && candidate.workflowId && candidate.workflowId !== current.workflowId) {
+      return false;
+    }
+    if (current.workflowPath && candidate.workflowPath && candidate.workflowPath !== current.workflowPath) {
+      return false;
+    }
+    if (!current.workflowId && !current.workflowPath) return false;
+    if (current.event && candidate.event !== current.event) return false;
+    if (current.headRepository && candidate.headRepository !== current.headRepository) {
+      return false;
+    }
+    if (this.lookupContext?.targetMode === "pull-request" && this.lookupContext.prNumber && !candidate.pullRequestNumbers.includes(this.lookupContext.prNumber) && !explicitRunId) {
+      return false;
     }
     return true;
   }
@@ -104642,7 +104660,7 @@ function parseActionConfig(reader, env, eventName) {
   assertMutuallyExclusive(config, "instructions", "instructionsPath");
   assertMutuallyExclusive(config, "bootstrapContext", "bootstrapContextPath");
   assertMutuallyExclusive(config, "incrementalContext", "incrementalContextPath");
-  if (config.targetMode === "pull-request" && config.reviewMode === "incremental" && eventName !== "pull_request") {
+  if (config.runtimeBackend === "deterministic-csharp" && config.targetMode === "pull-request" && config.reviewMode === "incremental" && eventName !== "pull_request") {
     throw new Error(
       "config-invalid: pull-request incremental restore is only allowed on pull_request events"
     );
@@ -106329,7 +106347,7 @@ function assertAllowedKeys(value, allowed) {
   if (Object.keys(value).some((key) => !allowed.has(key))) invalidManifest();
 }
 function boundedString(value, maxLength = 1024) {
-  return typeof value === "string" && value.length <= maxLength && !/[\u0000\r\n]/.test(value);
+  return typeof value === "string" && value.length <= maxLength && !/[\u0000-\u001f\u007f]/.test(value);
 }
 function nonNegativeInteger(value) {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
@@ -106409,7 +106427,7 @@ function validateManifestShape(value) {
   if (!isRecord(value) || [...Object.keys(value)].some((key) => !MANIFEST_KEYS.has(key))) {
     invalidManifest();
   }
-  if (value.version !== 1 || value.workflow !== "agentic-pr-review" || !boundedString(value.stateKey, 200) || value.phase !== "bootstrap" && value.phase !== "incremental" || value.runtimeProvider !== "test" && value.runtimeProvider !== "claude-code-cli" || value.runtimeBackend !== void 0 && value.runtimeBackend !== "legacy" && value.runtimeBackend !== "deterministic-csharp" || value.toolMode !== "none" && value.toolMode !== "readonly" || !Array.isArray(value.allowedTools) || value.allowedTools.length > 20 || value.allowedTools.some((item) => !boundedString(item, 80)) || !boundedString(value.sessionId, 200) || !boundedString(value.sessionName, 200) || value.reviewedHeadSha !== void 0 && !boundedString(value.reviewedHeadSha, 200) || value.promptSha256 !== void 0 && !/^[a-f0-9]{64}$/.test(String(value.promptSha256)) || value.reviewInputSha256 !== void 0 && !/^[a-f0-9]{64}$/.test(String(value.reviewInputSha256)) || value.reviewInputBytes !== void 0 && !nonNegativeInteger(value.reviewInputBytes) || !boundedString(value.createdAt, 80) || !boundedString(value.updatedAt, 80) || !(value.usage === null || isRecord(value.usage)) || value.observedTurns !== void 0 && !(value.observedTurns === null || nonNegativeInteger(value.observedTurns)) || value.observedTurnSource !== void 0 && !boundedString(value.observedTurnSource, 80) || value.lineageTotals !== void 0 && !isRecord(value.lineageTotals) || !isRecord(value.target) || !isRecord(value.structuredOutput) || !Array.isArray(value.contextBlocks) || value.contextBlocks.length > 3) {
+  if (value.version !== 1 || value.workflow !== "agentic-pr-review" || !boundedString(value.stateKey, 200) || value.phase !== "bootstrap" && value.phase !== "incremental" || value.runtimeProvider !== "test" && value.runtimeProvider !== "claude-code-cli" || value.runtimeBackend !== void 0 && value.runtimeBackend !== "legacy" && value.runtimeBackend !== "deterministic-csharp" || value.toolMode !== "none" && value.toolMode !== "readonly" || !Array.isArray(value.allowedTools) || value.allowedTools.length > 20 || value.allowedTools.some((item) => !boundedString(item, 80)) || !boundedString(value.sessionId, 200) || !boundedString(value.sessionName, 200) || value.reviewedHeadSha !== void 0 && !boundedString(value.reviewedHeadSha, 200) || value.promptSha256 !== void 0 && !(/^[a-f0-9]{64}$/.test(String(value.promptSha256)) || value.promptSha256 === "skipped-identical" && value.phase === "incremental" && (value.runtimeBackend === void 0 || value.runtimeBackend === "legacy")) || value.reviewInputSha256 !== void 0 && !/^[a-f0-9]{64}$/.test(String(value.reviewInputSha256)) || value.reviewInputBytes !== void 0 && !nonNegativeInteger(value.reviewInputBytes) || !boundedString(value.createdAt, 80) || !boundedString(value.updatedAt, 80) || !(value.usage === null || isRecord(value.usage)) || value.observedTurns !== void 0 && !(value.observedTurns === null || nonNegativeInteger(value.observedTurns)) || value.observedTurnSource !== void 0 && !boundedString(value.observedTurnSource, 80) || value.lineageTotals !== void 0 && !isRecord(value.lineageTotals) || !isRecord(value.target) || !isRecord(value.structuredOutput) || !Array.isArray(value.contextBlocks) || value.contextBlocks.length > 3) {
     invalidManifest();
   }
   if (value.usage !== null) validateUsage(value.usage);
@@ -109666,7 +109684,7 @@ async function run() {
     }
     throw error2;
   }
-  const store = createArtifactStore(config.githubToken, octokit, target);
+  const store = createArtifactStore(config.githubToken, octokit, target, config.runtimeBackend);
   let resolution;
   try {
     resolution = await resolvePhase(config, store, artifactName, tempRoot, stateKey, target);
@@ -109990,12 +110008,11 @@ async function run() {
         octokit
       });
     } catch {
-      await writeDeterministicUploadFailureSummary({
+      setDeterministicHostErrorKind("rendering-invalid");
+      await writeDeterministicStickyFailureSummary({
         phase: resolution.phase,
         reviewPhase: resolution.phase,
-        runtimeResult,
-        stickyWritten: false,
-        artifactUploaded: false
+        runtimeResult
       });
       throw new Error("rendering-invalid: deterministic sticky comment could not be published");
     }
@@ -110109,7 +110126,7 @@ function validateDeterministicTrace(trace, inputSha256) {
     throw new Error("diagnostic-error: deterministic trace contains an error diagnostic");
   }
 }
-function createArtifactStore(token, octokit, target) {
+function createArtifactStore(token, octokit, target, runtimeBackend) {
   const localRoot = process.env.AGENTIC_REVIEW_LOCAL_ARTIFACT_DIR;
   if (localRoot) {
     return new LocalArtifactStore(localRoot);
@@ -110122,7 +110139,8 @@ function createArtifactStore(token, octokit, target) {
     context2.runId,
     {
       targetMode: target.mode,
-      prNumber: target.prNumber
+      prNumber: target.prNumber,
+      runtimeBackend
     }
   );
 }
@@ -110692,6 +110710,10 @@ function setDeterministicSuccessOutputs(runtimeResult) {
     setOutput("usage_budget_status", formatUsageBudgetStatus(runtimeResult.usageBudgetStatus));
   }
 }
+function setDeterministicHostErrorKind(kind) {
+  setOutput("runtime_error_kind", kind);
+  setOutput("runtime_error_class", "");
+}
 function metadataForStructuredReview(review, status) {
   return {
     inputFindingCount: review.result.inputFindingCount,
@@ -110798,6 +110820,27 @@ async function writeDeterministicUploadFailureSummary(input) {
     ).write();
   } catch {
     info("Unable to write deterministic failure summary.");
+  }
+}
+async function writeDeterministicStickyFailureSummary(input) {
+  try {
+    await summary.addRaw(
+      [
+        "### Agentic PR Review",
+        "",
+        "- Runtime backend: deterministic-csharp",
+        `- Runtime version: ${formatRuntimeVersion(input.runtimeResult.runtimeVersion)}`,
+        `- Runtime trace sha256: ${input.runtimeResult.traceSha256 ?? "n/a"}`,
+        `- Resolved phase: ${input.phase}`,
+        `- Review phase: ${input.reviewPhase}`,
+        "- Runtime execution: succeeded",
+        "- Sticky comment written: false",
+        "- State artifact upload: not attempted",
+        "- Failure classification: rendering-invalid"
+      ].join("\n")
+    ).write();
+  } catch {
+    info("Unable to write deterministic sticky failure summary.");
   }
 }
 function formatInlineComments(metadata2) {

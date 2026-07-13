@@ -176,11 +176,25 @@ describe('parseActionConfig', () => {
   it('limits pull-request incremental restore to pull_request events', () => {
     expect(() =>
       parseActionConfig(
-        new Inputs({ target_mode: 'pull-request', review_mode: 'incremental' }),
+        new Inputs({
+          runtime_backend: 'deterministic-csharp',
+          target_mode: 'pull-request',
+          review_mode: 'incremental',
+        }),
         baseEnv,
         'workflow_dispatch',
       ),
     ).toThrow(/only allowed on pull_request events/);
+  });
+
+  it('keeps legacy pull-request incremental restore compatible with workflow_dispatch', () => {
+    expect(() =>
+      parseActionConfig(
+        new Inputs({ target_mode: 'pull-request', review_mode: 'incremental' }),
+        baseEnv,
+        'workflow_dispatch',
+      ),
+    ).not.toThrow();
   });
 
   it('requires live runtime configuration', () => {

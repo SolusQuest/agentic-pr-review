@@ -212,6 +212,7 @@ export function parseActionConfig(
   assertMutuallyExclusive(config, 'bootstrapContext', 'bootstrapContextPath');
   assertMutuallyExclusive(config, 'incrementalContext', 'incrementalContextPath');
   if (
+    config.runtimeBackend === 'deterministic-csharp' &&
     config.targetMode === 'pull-request' &&
     config.reviewMode === 'incremental' &&
     eventName !== 'pull_request'
