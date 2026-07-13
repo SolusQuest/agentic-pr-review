@@ -51,6 +51,11 @@ repository. Unknown manifest versions and unknown top-level fields fail closed. 
 deterministic incremental restore is allowed only on `pull_request` events, and explicit selection
 cannot bypass the artifact's association with the requested PR. Legacy restore retains its existing
 compatibility semantics rather than retroactively applying these deterministic-only restrictions.
+These version-1 rules describe the existing deterministic backend. The M4
+project-owned live path uses the separate `StateManifestV2` and restricted
+`ProviderSessionLedgerV1` contract defined in
+`docs/20_architecture/session-ledger-and-prefix-contract.md`; a v1 artifact is
+classified as unsupported legacy state for that path and is safely bootstrapped.
 The state-producing workflow must not execute untrusted pull-request code: it must check out a
 trusted/default or immutable ref, or use a separate trusted workflow before writing state artifacts.
 
