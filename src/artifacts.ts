@@ -50,7 +50,10 @@ export class GitHubArtifactStore implements ArtifactStore {
   ) {}
 
   async findStateArtifact(name: string, explicitRunId?: number): Promise<ArtifactRef | undefined> {
-    const strictProvenance = this.lookupContext?.runtimeBackend !== 'legacy';
+    if (this.lookupContext?.runtimeBackend === 'legacy') {
+      return this.findLegacyStateArtifact(name, explicitRunId);
+    }
+    const strictProvenance = true;
     const currentRun = await this.getWorkflowRun(this.currentRunId, strictProvenance);
     const artifacts = explicitRunId
       ? await this.listWorkflowRunArtifacts(name, explicitRunId)
@@ -82,6 +85,24 @@ export class GitHubArtifactStore implements ArtifactStore {
       name: String(match.artifact.name),
       workflowRunId: match.run.id,
       runHeadSha: match.run.headSha,
+    };
+  }
+
+  private async findLegacyStateArtifact(
+    name: string,
+    explicitRunId?: number,
+  ): Promise<ArtifactRef | undefined> {
+    const artifacts = explicitRunId
+      ? await this.listWorkflowRunArtifacts(name, explicitRunId)
+      : await this.listRepoArtifacts(name);
+    const match = artifacts
+      .filter((artifact) => artifact.name === name && !artifact.expired && artifact.id)
+      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+    if (!match?.id) return undefined;
+    return {
+      id: Number(match.id),
+      name: String(match.name),
+      workflowRunId: Number(match.workflow_run?.id ?? explicitRunId ?? 0),
     };
   }
 

@@ -563,6 +563,29 @@ describe('run', () => {
     expect(mocks.octokit.rest.repos.compareCommitsWithBasehead).not.toHaveBeenCalled();
   });
 
+  it('restores legacy manifests without deterministic provenance fields', async () => {
+    Object.assign(mocks.inputs, {
+      review_mode: 'incremental',
+      post_comment: 'false',
+      state_key: 'legacy-old-manifest',
+    });
+    await writeRestoredArtifact('legacy-old-manifest', currentSnapshot());
+    const manifestPath = path.join(
+      artifactRoot,
+      stateArtifactName('legacy-old-manifest'),
+      'manifest.json',
+    );
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as any;
+    delete manifest.target.headRepository;
+    await writeFile(manifestPath, JSON.stringify(manifest), 'utf8');
+
+    const { run } = await import('./main.js');
+    await run();
+
+    expect(mocks.setOutput).toHaveBeenCalledWith('phase', 'incremental');
+    expect(mocks.setOutput).toHaveBeenCalledWith('review_phase', 'skipped-identical');
+  });
+
   it('forced incremental bootstraps without snapshot-compatible state and records fallback metadata', async () => {
     Object.assign(mocks.inputs, {
       review_mode: 'incremental',

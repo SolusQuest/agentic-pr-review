@@ -104315,7 +104315,10 @@ var GitHubArtifactStore = class {
   currentRunId;
   lookupContext;
   async findStateArtifact(name, explicitRunId) {
-    const strictProvenance = this.lookupContext?.runtimeBackend !== "legacy";
+    if (this.lookupContext?.runtimeBackend === "legacy") {
+      return this.findLegacyStateArtifact(name, explicitRunId);
+    }
+    const strictProvenance = true;
     const currentRun = await this.getWorkflowRun(this.currentRunId, strictProvenance);
     const artifacts = explicitRunId ? await this.listWorkflowRunArtifacts(name, explicitRunId) : await this.listRepoArtifacts(name);
     const trusted = [];
@@ -104344,6 +104347,16 @@ var GitHubArtifactStore = class {
       name: String(match.artifact.name),
       workflowRunId: match.run.id,
       runHeadSha: match.run.headSha
+    };
+  }
+  async findLegacyStateArtifact(name, explicitRunId) {
+    const artifacts = explicitRunId ? await this.listWorkflowRunArtifacts(name, explicitRunId) : await this.listRepoArtifacts(name);
+    const match = artifacts.filter((artifact) => artifact.name === name && !artifact.expired && artifact.id).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+    if (!match?.id) return void 0;
+    return {
+      id: Number(match.id),
+      name: String(match.name),
+      workflowRunId: Number(match.workflow_run?.id ?? explicitRunId ?? 0)
     };
   }
   async download(ref, destination) {
@@ -110248,12 +110261,13 @@ function validateRestoredState(restoredState, stateKey, runtimeProvider, runtime
   if (!restoredState.sessionId) {
     throw new StateArtifactInvalidError("restored state artifact is missing session_id");
   }
-  if (expectedArtifactHeadSha !== void 0 && restoredState.reviewedHeadSha !== expectedArtifactHeadSha) {
+  const deterministicBackend = runtimeBackend === "deterministic-csharp";
+  if (deterministicBackend && expectedArtifactHeadSha !== void 0 && restoredState.reviewedHeadSha !== expectedArtifactHeadSha) {
     throw new StateArtifactInvalidError(
       "restored state artifact reviewed_head_sha does not match its workflow run head_sha"
     );
   }
-  if (target.mode === "pull-request") {
+  if (deterministicBackend && target.mode === "pull-request") {
     if (restoredState.prNumber !== target.prNumber) {
       throw new StateArtifactInvalidError(
         "restored state artifact pull request number does not match the requested target"
@@ -110912,8 +110926,8 @@ function sanitizeRuntimeDiagnostic(value, secrets = []) {
     sanitized = sanitized.replaceAll(secret, "***");
   }
   return truncateText(
-    sanitized.replace(/Authorization:\s*[^,;|]+/gi, "Authorization: ***").replace(/x-api-(?:key|token):\s*[^\s,;]+/gi, "x-api-key: ***").replace(/(^|[\s"'(=,:])(?:(?:[A-Za-z]:[\\/])|(?:\\\\)|\/)[^\s"'`() ,;]*/g, "$1<path>").replace(
-      /(^|[\s"'(=,:])(?:ghp_|github_pat_|gho_|ghu_|ghs_|ghr_|sk-)[A-Za-z0-9_-]+/gi,
+    sanitized.replace(/Authorization\s*[:=]\s*[^,;|]+/gi, "Authorization: ***").replace(/x-api-(?:key|token)\s*[:=]\s*[^\s,;|]+/gi, "x-api-key: ***").replace(/(^|[^A-Za-z0-9_])(?:(?:[A-Za-z]:[\\/])|(?:\\\\)|\/)[^\s"'`() ,;]*/g, "$1<path>").replace(
+      /(^|[^A-Za-z0-9_])(?:ghp_|github_pat_|gho_|ghu_|ghs_|ghr_|sk-)[A-Za-z0-9_-]+/gi,
       "$1***"
     ),
     240

@@ -27,4 +27,15 @@ describe('sanitizeRuntimeDiagnostic', () => {
     );
     expect(sanitized).toContain('<path>');
   });
+
+  it.each([
+    ['bracketed path', 'path=[/home/runner/work/private/file]', 'private/file'],
+    ['braced token', 'token={ghp_example_token}', 'ghp_example_token'],
+    ['equals authorization', 'Authorization=Bearer secret-value', 'Bearer secret-value'],
+    ['equals API token', 'x-api-token=secret-token', 'secret-token'],
+  ])('redacts %s', (_label, value, leakedValue) => {
+    const sanitized = sanitizeRuntimeDiagnostic(value);
+
+    expect(sanitized).not.toContain(leakedValue);
+  });
 });

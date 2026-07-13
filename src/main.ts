@@ -768,7 +768,9 @@ function validateRestoredState(
   if (!restoredState.sessionId) {
     throw new StateArtifactInvalidError('restored state artifact is missing session_id');
   }
+  const deterministicBackend = runtimeBackend === 'deterministic-csharp';
   if (
+    deterministicBackend &&
     expectedArtifactHeadSha !== undefined &&
     restoredState.reviewedHeadSha !== expectedArtifactHeadSha
   ) {
@@ -776,7 +778,7 @@ function validateRestoredState(
       'restored state artifact reviewed_head_sha does not match its workflow run head_sha',
     );
   }
-  if (target.mode === 'pull-request') {
+  if (deterministicBackend && target.mode === 'pull-request') {
     if (restoredState.prNumber !== target.prNumber) {
       throw new StateArtifactInvalidError(
         'restored state artifact pull request number does not match the requested target',
@@ -1591,11 +1593,11 @@ export function sanitizeRuntimeDiagnostic(value: string, secrets: readonly strin
   }
   return truncateText(
     sanitized
-      .replace(/Authorization:\s*[^,;|]+/gi, 'Authorization: ***')
-      .replace(/x-api-(?:key|token):\s*[^\s,;]+/gi, 'x-api-key: ***')
-      .replace(/(^|[\s"'(=,:])(?:(?:[A-Za-z]:[\\/])|(?:\\\\)|\/)[^\s"'`() ,;]*/g, '$1<path>')
+      .replace(/Authorization\s*[:=]\s*[^,;|]+/gi, 'Authorization: ***')
+      .replace(/x-api-(?:key|token)\s*[:=]\s*[^\s,;|]+/gi, 'x-api-key: ***')
+      .replace(/(^|[^A-Za-z0-9_])(?:(?:[A-Za-z]:[\\/])|(?:\\\\)|\/)[^\s"'`() ,;]*/g, '$1<path>')
       .replace(
-        /(^|[\s"'(=,:])(?:ghp_|github_pat_|gho_|ghu_|ghs_|ghr_|sk-)[A-Za-z0-9_-]+/gi,
+        /(^|[^A-Za-z0-9_])(?:ghp_|github_pat_|gho_|ghu_|ghs_|ghr_|sk-)[A-Za-z0-9_-]+/gi,
         '$1***',
       ),
     240,
