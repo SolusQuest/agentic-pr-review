@@ -3,5 +3,18 @@
   "semi": true,
   "singleQuote": true,
   "trailingComma": "all",
-  "printWidth": 100
+  "printWidth": 100,
+  "overrides": [
+    {
+      "files": [
+        "docs/20_architecture/architecture.md",
+        "docs/20_architecture/runtime-protocol.md",
+        "docs/20_architecture/security-boundary.md",
+        "docs/20_architecture/session-ledger-and-prefix-contract.md"
+      ],
+      "options": {
+        "proseWrap": "never"
+      }
+    }
+  ]
 }
