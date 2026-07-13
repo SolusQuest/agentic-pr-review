@@ -1,4 +1,4 @@
-using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -141,8 +141,10 @@ if (scenario is "unsafe-result-directory" or "unsafe-trace-directory" or "unsafe
     else if (scenario.Contains("non-regular", StringComparison.Ordinal))
     {
         var socketPath = scenario.StartsWith("unsafe-result", StringComparison.Ordinal) ? outputPath : tracePath;
-        using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-        socket.Bind(new UnixDomainSocketEndPoint(socketPath));
+        if (NativeMethods.mkfifo(socketPath, 0x1B6) != 0)
+        {
+            throw new InvalidOperationException($"mkfifo failed with errno {Marshal.GetLastWin32Error()}.");
+        }
     }
     else
     {
@@ -287,4 +289,10 @@ static string BuildPrivacyFailureTrace(string inputPath)
             },
         },
     });
+}
+
+static class NativeMethods
+{
+    [DllImport("libc", EntryPoint = "mkfifo", SetLastError = true)]
+    public static extern int mkfifo(string pathname, uint mode);
 }
