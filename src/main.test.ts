@@ -7,6 +7,7 @@ import {
   deterministicStateKey,
   stateArtifactName,
 } from './state.js';
+import { LocalArtifactStore } from './artifacts.js';
 import { type PullRequestDiffSnapshotV1 } from './types.js';
 import { sha256 } from './utils.js';
 
@@ -376,12 +377,16 @@ describe('run', () => {
       path.join(process.cwd(), 'src/runtime-invocation/__test-fixtures__/fake-runtime.mjs'),
     ]);
     process.env.FAKE_RUNTIME_SCENARIO = 'success';
-    const blockedArtifactRoot = path.join(root, 'artifact-root-file');
-    await writeFile(blockedArtifactRoot, 'not a directory', 'utf8');
-    process.env.AGENTIC_REVIEW_LOCAL_ARTIFACT_DIR = blockedArtifactRoot;
+    const uploadSpy = vi
+      .spyOn(LocalArtifactStore.prototype, 'upload')
+      .mockRejectedValueOnce(new Error('blocked state upload'));
 
     const { run } = await import('./main.js');
-    await expect(run()).rejects.toThrow('state-invalid: state artifact upload failed');
+    try {
+      await expect(run()).rejects.toThrow('state-invalid: state artifact upload failed');
+    } finally {
+      uploadSpy.mockRestore();
+    }
 
     expect(mocks.createComment).toHaveBeenCalledTimes(1);
     expect(mocks.setOutput).toHaveBeenCalledWith('runtime_error_kind', '');

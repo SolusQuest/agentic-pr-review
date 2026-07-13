@@ -104322,7 +104322,12 @@ var GitHubArtifactStore = class {
       if (artifact.name !== name || artifact.expired || !artifact.id) continue;
       const runId = Number(artifact.workflow_run?.id ?? explicitRunId ?? 0);
       if (!runId) continue;
-      const run2 = runId === currentRun.id ? currentRun : await this.getWorkflowRun(runId);
+      let run2;
+      try {
+        run2 = runId === currentRun.id ? currentRun : await this.getWorkflowRun(runId);
+      } catch {
+        continue;
+      }
       if (this.isTrustedRun(run2, currentRun)) {
         trusted.push({ artifact, run: run2 });
       }

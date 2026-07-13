@@ -58,7 +58,12 @@ export class GitHubArtifactStore implements ArtifactStore {
       if (artifact.name !== name || artifact.expired || !artifact.id) continue;
       const runId = Number(artifact.workflow_run?.id ?? explicitRunId ?? 0);
       if (!runId) continue;
-      const run = runId === currentRun.id ? currentRun : await this.getWorkflowRun(runId);
+      let run: WorkflowRunMetadata;
+      try {
+        run = runId === currentRun.id ? currentRun : await this.getWorkflowRun(runId);
+      } catch {
+        continue;
+      }
       if (this.isTrustedRun(run, currentRun)) {
         trusted.push({ artifact, run });
       }
