@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 var scenario = Option(args, "--scenario") ?? "success";
 var inputPath = Option(args, "--input");
@@ -83,7 +84,7 @@ if (scenario is "partial-trace" or "truncated-trace")
 
 if (scenario is "schema-invalid-result" or "semantic-invalid-result")
 {
-    await File.WriteAllTextAsync(outputPath, scenario == "schema-invalid-result" ? "{}" : "{\"findings\":[{\"startLine\":0}]}" );
+    await File.WriteAllTextAsync(outputPath, scenario == "schema-invalid-result" ? "{}" : BuildSemanticInvalidResult());
     await File.WriteAllTextAsync(tracePath, BuildValidFiles(inputPath).Trace);
     return 0;
 }
@@ -92,16 +93,46 @@ if (scenario is "schema-invalid-trace" or "semantic-invalid-trace")
 {
     var valid = BuildValidFiles(inputPath);
     await File.WriteAllTextAsync(outputPath, valid.Result);
-    await File.WriteAllTextAsync(tracePath, scenario == "schema-invalid-trace" ? "{}" : "{\"protocolVersion\":1,\"runtimeVersion\":\"0.1.0-dev\",\"inputSha256\":\"bad\"}" );
+    await File.WriteAllTextAsync(tracePath, scenario == "schema-invalid-trace" ? "{}" : valid.Trace.Replace("\"mode\":\"deterministic-fixture\"", "\"mode\":\"live-provider\""));
     return 0;
 }
 
-if (scenario is "unsafe-result-directory" or "unsafe-trace-directory")
+if (scenario.StartsWith("missing-result-", StringComparison.Ordinal) || scenario is "result-trace-path" or "trace-result-sha")
 {
-    var path = scenario == "unsafe-result-directory" ? outputPath : tracePath;
-    Directory.CreateDirectory(path);
+    var contractFiles = BuildValidFiles(inputPath);
+    var result = JsonNode.Parse(contractFiles.Result)!.AsObject();
+    var trace = JsonNode.Parse(contractFiles.Trace)!.AsObject();
+    switch (scenario)
+    {
+        case "missing-result-inputsha": result.Remove("inputSha256"); break;
+        case "missing-result-trace": result.Remove("trace"); break;
+        case "missing-result-trace-sha": result["trace"]!.AsObject().Remove("sha256"); break;
+        case "result-trace-path": result["trace"]!["path"] = "trace.json"; break;
+        case "trace-result-sha": trace["resultSha256"] = new string('0', 64); break;
+    }
+    await File.WriteAllTextAsync(outputPath, result.ToJsonString());
+    await File.WriteAllTextAsync(tracePath, trace.ToJsonString());
+    return 0;
+}
+
+if (scenario is "unsafe-result-directory" or "unsafe-trace-directory" or "unsafe-result-symlink" or "unsafe-trace-symlink" or "unsafe-result-oversized" or "unsafe-trace-oversized")
+{
     var valid = BuildValidFiles(inputPath);
-    if (scenario == "unsafe-result-directory")
+    if (scenario.Contains("directory", StringComparison.Ordinal))
+    {
+        Directory.CreateDirectory(scenario.StartsWith("unsafe-result", StringComparison.Ordinal) ? outputPath : tracePath);
+    }
+    else if (scenario.Contains("symlink", StringComparison.Ordinal))
+    {
+        File.CreateSymbolicLink(scenario.StartsWith("unsafe-result", StringComparison.Ordinal) ? outputPath : tracePath, inputPath);
+    }
+    else
+    {
+        var oversizedPath = scenario.StartsWith("unsafe-result", StringComparison.Ordinal) ? outputPath : tracePath;
+        var size = scenario.StartsWith("unsafe-result", StringComparison.Ordinal) ? 8 * 1024 * 1024 + 1 : 4 * 1024 * 1024 + 1;
+        await File.WriteAllBytesAsync(oversizedPath, new byte[size]);
+    }
+    if (scenario.StartsWith("unsafe-result", StringComparison.Ordinal))
     {
         await File.WriteAllTextAsync(tracePath, valid.Trace);
     }
@@ -114,7 +145,15 @@ if (scenario is "unsafe-result-directory" or "unsafe-trace-directory")
 
 if (scenario == "privacy-diagnostic")
 {
-    Console.Error.WriteLine("APR_RUNTIME_INTERNAL: Authorization: ghp_integration_fixture_token C:\\private\\raw.json");
+    await File.WriteAllTextAsync(tracePath, BuildPrivacyFailureTrace(inputPath));
+    Console.Error.WriteLine("APR_RUNTIME_INTERNAL: Authorization=Bearer privacy_authorization_secret token=ghp_privacy_fixture_token path=[C:\\private\\raw.json]");
+    return 20;
+}
+
+if (scenario == "privacy-host-sinks")
+{
+    await File.WriteAllTextAsync(tracePath, BuildPrivacyFailureTrace(inputPath));
+    Console.Error.WriteLine("APR_RUNTIME_INTERNAL: Authorization=Bearer privacy_authorization_secret token=ghp_privacy_fixture_token path=[C:\\private\\raw.json]");
     return 20;
 }
 
@@ -174,4 +213,55 @@ static (string Result, string Trace) BuildValidFiles(string inputPath, string sc
         trace = new { sha256 = scenario == "trace-hash-mismatch" ? new string('0', 64) : traceHash },
     };
     return (JsonSerializer.Serialize(resultObject), trace);
+}
+
+static string BuildSemanticInvalidResult()
+{
+    return JsonSerializer.Serialize(new
+    {
+        protocolVersion = 1,
+        runtimeVersion = "0.1.0-dev",
+        summary = "Semantic-invalid integration fixture.",
+        findings = new[]
+        {
+            new
+            {
+                severity = "medium",
+                confidence = "high",
+                category = "correctness",
+                title = "Invalid range",
+                body = "The end line precedes the start line.",
+                path = "src/fixture.cs",
+                startLine = 2,
+                endLine = 1,
+            },
+        },
+        limitations = Array.Empty<string>(),
+        warnings = Array.Empty<string>(),
+        diagnostics = Array.Empty<object>(),
+    });
+}
+
+static string BuildPrivacyFailureTrace(string inputPath)
+{
+    var inputHash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(inputPath))).ToLowerInvariant();
+    return JsonSerializer.Serialize(new
+    {
+        protocolVersion = 1,
+        runtimeVersion = "0.1.0-dev",
+        inputSha256 = inputHash,
+        mode = "deterministic-fixture",
+        fixture = "privacy",
+        toolCalls = Array.Empty<object>(),
+        warnings = Array.Empty<string>(),
+        diagnostics = new[]
+        {
+            new
+            {
+                code = "APR_RUNTIME_INTERNAL",
+                message = "Authorization: *** token: *** path: <path>",
+                level = "error",
+            },
+        },
+    });
 }

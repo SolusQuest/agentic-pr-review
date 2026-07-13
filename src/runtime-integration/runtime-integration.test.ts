@@ -1,10 +1,13 @@
-import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
+import { lstat, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { LocalArtifactStore } from '../artifacts.js';
 import type { RuntimeInvocationError } from '../runtime-invocation/runtime-errors.js';
 import { invokeRuntime } from '../runtime-invocation/invoke-runtime.js';
 import { readBootstrapInput } from '../runtime-invocation/invoke-runtime.test-helpers.js';
+import { BYTE_LIMITS } from '../runtime-invocation/runtime-files.js';
+import { invokeRuntimeForTests } from '../runtime-invocation/invoke-runtime.test-support.js';
 
 const enabled = Boolean(process.env.APR_RUNTIME_INTEGRATION_ROOT);
 const aotOnly = process.env.APR_RUNTIME_INTEGRATION_MODE === 'aot';
@@ -18,10 +21,13 @@ const mocks = vi.hoisted(() => {
   const listComments = vi.fn();
   const createComment = vi.fn();
   const updateComment = vi.fn();
+  const createReview = vi.fn();
+  const createReviewComment = vi.fn();
+  const error = vi.fn();
   const octokit = {
     paginate: vi.fn(),
     rest: {
-      pulls: { get, listFiles },
+      pulls: { get, listFiles, createReview, createReviewComment },
       issues: { listComments, createComment, updateComment },
       repos: { compareCommitsWithBasehead: vi.fn() },
     },
@@ -35,10 +41,13 @@ const mocks = vi.hoisted(() => {
     listComments,
     createComment,
     updateComment,
+    createReview,
+    createReviewComment,
     getInput: vi.fn((name: string) => inputs[name] ?? ''),
     setOutput: vi.fn(),
     setSecret: vi.fn(),
     warning: vi.fn(),
+    error,
     info: vi.fn(),
     getOctokit: vi.fn(() => octokit),
   };
@@ -49,6 +58,7 @@ vi.mock('@actions/core', () => ({
   setOutput: mocks.setOutput,
   setSecret: mocks.setSecret,
   warning: mocks.warning,
+  error: mocks.error,
   info: mocks.info,
   summary: mocks.summary,
 }));
@@ -162,32 +172,34 @@ integration('runtime integration', () => {
     expect(result).not.toContain('integration-github-token');
   });
 
-  it('keeps repeated real runtime invocations byte-for-byte deterministic', async () => {
-    const command = {
-      executablePath:
-        process.env.APR_RUNTIME_FIXTURE_DOTNET ?? process.env.APR_RUNTIME_DOTNET ?? '',
-      prefixArgs: [process.env.APR_RUNTIME_FIXTURE_DLL ?? '', '--scenario', 'success'],
-    };
-    const input = readBootstrapInput();
-    const first = await invokeRuntime({
-      command,
-      input,
-      timeoutMs: 15_000,
-      tempRoot: await mkdtemp(path.join(root, 'determinism-first-')),
-    });
-    const second = await invokeRuntime({
-      command,
-      input,
-      timeoutMs: 15_000,
-      tempRoot: await mkdtemp(path.join(root, 'determinism-second-')),
-    });
+  it.skipIf(aotOnly)(
+    'keeps repeated production runtime invocations byte-for-byte deterministic',
+    async () => {
+      const command = {
+        executablePath: process.env.APR_RUNTIME_DOTNET ?? '',
+        prefixArgs: JSON.parse(process.env.APR_RUNTIME_PREFIX_ARGS_JSON ?? '[]') as string[],
+      };
+      const input = readBootstrapInput();
+      const first = await invokeRuntime({
+        command,
+        input,
+        timeoutMs: 15_000,
+        tempRoot: await mkdtemp(path.join(root, 'determinism-first-')),
+      });
+      const second = await invokeRuntime({
+        command,
+        input,
+        timeoutMs: 15_000,
+        tempRoot: await mkdtemp(path.join(root, 'determinism-second-')),
+      });
 
-    expect(first.inputSha256).toBe(second.inputSha256);
-    expect(first.runtimeVersion).toBe(second.runtimeVersion);
-    expect(first.resultBytes).toEqual(second.resultBytes);
-    expect(first.traceBytes).toEqual(second.traceBytes);
-    expect(first.result.trace?.sha256).toBe(second.result.trace?.sha256);
-  });
+      expect(first.inputSha256).toBe(second.inputSha256);
+      expect(first.runtimeVersion).toBe(second.runtimeVersion);
+      expect(first.resultBytes).toEqual(second.resultBytes);
+      expect(first.traceBytes).toEqual(second.traceBytes);
+      expect(first.result.trace?.sha256).toBe(second.result.trace?.sha256);
+    },
+  );
 
   it('cleans a failed invocation before the next isolated success', async () => {
     const failedRoot = await mkdtemp(path.join(root, 'cleanup-failure-'));
@@ -224,6 +236,7 @@ integration('runtime integration', () => {
   it.skipIf(aotOnly)(
     'proves the failure barrier with an eligible pull request publisher',
     async () => {
+      const uploadSpy = vi.spyOn(LocalArtifactStore.prototype, 'upload');
       Object.assign(mocks.inputs, {
         post_comment: 'true',
         state_key: 'runtime-integration-failure',
@@ -235,55 +248,166 @@ integration('runtime integration', () => {
         'malformed-result',
       ]);
 
-      const { run } = await import('../main.js');
-      await expect(run()).rejects.toThrow(/deterministic runtime failed: result-invalid/);
+      try {
+        const { run } = await import('../main.js');
+        await expect(run()).rejects.toThrow(/deterministic runtime failed: result-invalid/);
 
-      expect(mocks.createComment).not.toHaveBeenCalled();
-      expect(mocks.updateComment).not.toHaveBeenCalled();
-      expect(mocks.setOutput).toHaveBeenCalledWith('runtime_error_kind', 'result-invalid');
-      await expect(stat(artifactRoot)).rejects.toThrow();
-      expect(mocks.summary.write).not.toHaveBeenCalled();
+        expect(mocks.createComment).not.toHaveBeenCalled();
+        expect(mocks.updateComment).not.toHaveBeenCalled();
+        expect(mocks.createReview).not.toHaveBeenCalled();
+        expect(mocks.createReviewComment).not.toHaveBeenCalled();
+        expect(uploadSpy).not.toHaveBeenCalled();
+        expect(mocks.setOutput).toHaveBeenCalledWith('runtime_error_kind', 'result-invalid');
+        await expect(stat(artifactRoot)).rejects.toThrow();
+        expect(mocks.summary.write).not.toHaveBeenCalled();
+      } finally {
+        uploadSpy.mockRestore();
+      }
     },
   );
 
-  it.skipIf(aotOnly).each([
-    ['invalid-json', 'runtime-exit'],
-    ['schema-invalid-input', 'runtime-exit'],
-    ['protocol-version', 'runtime-exit'],
-    ['exit-2', 'runtime-exit'],
-    ['exit-10', 'runtime-exit'],
-    ['exit-20', 'runtime-exit'],
-    ['exit-30', 'runtime-exit'],
-    ['exit-40', 'runtime-exit'],
-    ['unknown-exit', 'unknown-exit'],
-    ['missing-result', 'missing-output'],
-    ['missing-trace', 'missing-output'],
-    ['partial-result', 'result-invalid'],
-    ['partial-trace', 'trace-invalid'],
-    ['schema-invalid-result', 'result-invalid'],
-    ['schema-invalid-trace', 'trace-invalid'],
-    ['input-hash-mismatch', 'hash-mismatch'],
-    ['trace-hash-mismatch', 'hash-mismatch'],
-    ['version-mismatch', 'version-mismatch'],
-    ['unsafe-result-directory', 'unsafe-output-file'],
-    ['unsafe-trace-directory', 'unsafe-output-file'],
-    ['timeout', 'timed-out'],
-  ])('maps fixture scenario %s to %s', async (scenario, expectedKind) => {
-    const tempRoot = await mkdtemp(path.join(root, `adapter-${scenario}-`));
-    const command = {
-      executablePath:
-        process.env.APR_RUNTIME_FIXTURE_DOTNET ?? process.env.APR_RUNTIME_DOTNET ?? '',
-      prefixArgs: [process.env.APR_RUNTIME_FIXTURE_DLL ?? '', '--scenario', scenario],
-    };
-    await expect(
-      invokeRuntime({
-        command,
-        input: readBootstrapInput(),
-        timeoutMs: scenario === 'timeout' ? 1_000 : 15_000,
-        tempRoot,
-      }),
-    ).rejects.toMatchObject({ kind: expectedKind });
+  it.skipIf(aotOnly)('keeps runtime privacy sentinels out of host failure sinks', async () => {
+    Object.assign(mocks.inputs, {
+      post_comment: 'true',
+      state_key: 'runtime-integration-privacy',
+    });
+    process.env.AGENTIC_REVIEW_RUNTIME_EXECUTABLE = process.env.APR_RUNTIME_FIXTURE_DOTNET ?? '';
+    process.env.AGENTIC_REVIEW_RUNTIME_PREFIX_ARGS_JSON = JSON.stringify([
+      process.env.APR_RUNTIME_FIXTURE_DLL,
+      '--scenario',
+      'privacy-host-sinks',
+    ]);
+
+    const { run } = await import('../main.js');
+    await expect(run()).rejects.toThrow(/deterministic runtime failed: runtime-exit/);
+
+    const sinkText = JSON.stringify([
+      mocks.warning.mock.calls,
+      mocks.error.mock.calls,
+      mocks.summary.addRaw.mock.calls,
+      mocks.setOutput.mock.calls,
+      mocks.createComment.mock.calls,
+      mocks.updateComment.mock.calls,
+      mocks.createReview.mock.calls,
+      mocks.createReviewComment.mock.calls,
+    ]);
+    expect(sinkText).not.toContain('privacy_authorization_secret');
+    expect(sinkText).not.toContain('ghp_privacy_fixture_token');
+    expect(sinkText).not.toContain('C:\\private\\raw.json');
+    expect(mocks.createComment).not.toHaveBeenCalled();
+    expect(mocks.updateComment).not.toHaveBeenCalled();
+    expect(mocks.createReview).not.toHaveBeenCalled();
+    expect(mocks.createReviewComment).not.toHaveBeenCalled();
+    await expect(stat(artifactRoot)).rejects.toThrow();
   });
+
+  it.skipIf(aotOnly).each([
+    ['invalid-json', 'runtime-exit', 'contract', 'APR_INPUT_JSON_INVALID', 'absent', 'absent'],
+    [
+      'schema-invalid-input',
+      'runtime-exit',
+      'contract',
+      'APR_INPUT_SCHEMA_INVALID',
+      'absent',
+      'absent',
+    ],
+    [
+      'protocol-version',
+      'runtime-exit',
+      'contract',
+      'APR_PROTOCOL_VERSION_UNSUPPORTED',
+      'absent',
+      'absent',
+    ],
+    ['exit-2', 'runtime-exit', 'usage', 'APR_USAGE_INVALID', 'absent', 'absent'],
+    ['exit-10', 'runtime-exit', 'contract', 'APR_INPUT_SCHEMA_INVALID', 'absent', 'absent'],
+    ['exit-20', 'runtime-exit', 'runtime', 'APR_RUNTIME_INTERNAL', 'absent', 'absent'],
+    ['exit-30', 'runtime-exit', 'provider', 'APR_PROVIDER_FAILED', 'absent', 'absent'],
+    ['exit-40', 'runtime-exit', 'file-io', 'APR_RESULT_WRITE_FAILED', 'absent', 'absent'],
+    ['unknown-exit', 'unknown-exit', '', '', 'absent', 'absent'],
+    ['missing-result', 'missing-output', '', '', 'absent', 'present'],
+    ['missing-trace', 'missing-output', '', '', 'present', 'absent'],
+    ['partial-result', 'result-invalid', '', '', 'present', 'present'],
+    ['partial-trace', 'trace-invalid', '', '', 'present', 'present'],
+    ['truncated-result', 'result-invalid', '', '', 'present', 'present'],
+    ['truncated-trace', 'trace-invalid', '', '', 'present', 'present'],
+    ['schema-invalid-result', 'result-invalid', '', '', 'present', 'present'],
+    ['schema-invalid-trace', 'trace-invalid', '', '', 'present', 'present'],
+    ['semantic-invalid-result', 'result-invalid', '', '', 'present', 'present'],
+    ['semantic-invalid-trace', 'trace-invalid', '', '', 'present', 'present'],
+    ['missing-result-inputsha', 'process-contract-violation', '', '', 'present', 'present'],
+    ['missing-result-trace', 'process-contract-violation', '', '', 'present', 'present'],
+    ['missing-result-trace-sha', 'process-contract-violation', '', '', 'present', 'present'],
+    ['result-trace-path', 'process-contract-violation', '', '', 'present', 'present'],
+    ['trace-result-sha', 'process-contract-violation', '', '', 'present', 'present'],
+    ['input-hash-mismatch', 'hash-mismatch', '', '', 'present', 'present'],
+    ['trace-hash-mismatch', 'hash-mismatch', '', '', 'present', 'present'],
+    ['version-mismatch', 'version-mismatch', '', '', 'present', 'present'],
+    ...(process.platform === 'linux'
+      ? [
+          ['unsafe-result-directory', 'unsafe-output-file', '', '', 'rejected', 'present'],
+          ['unsafe-trace-directory', 'unsafe-output-file', '', '', 'present', 'rejected'],
+          ['unsafe-result-symlink', 'unsafe-output-file', '', '', 'rejected', 'present'],
+          ['unsafe-trace-symlink', 'unsafe-output-file', '', '', 'present', 'rejected'],
+          ['unsafe-result-oversized', 'unsafe-output-file', '', '', 'rejected', 'present'],
+          ['unsafe-trace-oversized', 'unsafe-output-file', '', '', 'present', 'rejected'],
+        ]
+      : []),
+    ['timeout', 'timed-out', '', '', 'absent', 'absent'],
+  ])(
+    'maps fixture scenario %s to %s with tuple %s/%s/%s/%s',
+    async (
+      scenario,
+      expectedKind,
+      expectedExitClass,
+      expectedDiagnosticCode,
+      resultState,
+      traceState,
+    ) => {
+      const tempRoot = await mkdtemp(path.join(root, `adapter-${scenario}-`));
+      const command = {
+        executablePath:
+          process.env.APR_RUNTIME_FIXTURE_DOTNET ?? process.env.APR_RUNTIME_DOTNET ?? '',
+        prefixArgs: [process.env.APR_RUNTIME_FIXTURE_DLL ?? '', '--scenario', scenario],
+      };
+      let observed: { result: string; trace: string } | undefined;
+      const classifyFile = async (filePath: string, cap: number): Promise<string> => {
+        try {
+          const info = await lstat(filePath);
+          return info.isSymbolicLink() || !info.isFile() || info.size > cap
+            ? 'rejected'
+            : 'present';
+        } catch {
+          return 'absent';
+        }
+      };
+      const invocation = invokeRuntimeForTests(
+        {
+          command,
+          input: readBootstrapInput(),
+          timeoutMs: scenario === 'timeout' ? 1_000 : 15_000,
+          tempRoot,
+        },
+        {
+          onBeforeCleanup: async (invocationDir) => {
+            observed = {
+              result: await classifyFile(
+                path.join(invocationDir, 'result.json'),
+                BYTE_LIMITS.result,
+              ),
+              trace: await classifyFile(path.join(invocationDir, 'trace.json'), BYTE_LIMITS.trace),
+            };
+          },
+        },
+      );
+      await expect(invocation).rejects.toMatchObject({
+        kind: expectedKind,
+        exitClass: expectedExitClass || undefined,
+        diagnosticCode: expectedDiagnosticCode || undefined,
+      });
+      expect(observed).toEqual({ result: resultState, trace: traceState });
+    },
+  );
 
   it.skipIf(aotOnly)(
     'proves the child environment allowlist and diagnostic sanitization',
@@ -343,7 +467,17 @@ integration('runtime integration', () => {
         error = value as RuntimeInvocationError;
       }
       expect(error.kind).toBe('runtime-exit');
-      expect(error.stderrSnippet).not.toContain('ghp_integration_fixture_token');
+      expect(error.exitClass).toBe('runtime');
+      expect(error.diagnosticCode).toBe('APR_RUNTIME_INTERNAL');
+      expect(error.failureTraceDiagnostics).toEqual([
+        {
+          code: 'APR_RUNTIME_INTERNAL',
+          message: 'Authorization: *** token: *** path: <path>',
+          level: 'error',
+        },
+      ]);
+      expect(error.stderrSnippet).not.toContain('privacy_authorization_secret');
+      expect(error.stderrSnippet).not.toContain('ghp_privacy_fixture_token');
       expect(error.stderrSnippet).not.toContain('C:\\private\\raw.json');
     },
   );

@@ -105,7 +105,11 @@ jobs:
           test "${#TRACE_SHA}" -eq 64
           test -z "$ERROR_KIND"
           test "$BUDGET_STATUS" = 'not_applicable (records=0)'
-          manifest="$(find "$ARTIFACT_ROOT" -name manifest.json -type f -print -quit)"
-          test -n "$manifest"
-          jq -e '.reviewInputSha256 | test("^[0-9a-f]{64}$")' "$manifest"
+          expected_state_key="cs-$(printf '%s' runtime-integration-built-action | sha256sum | cut -c1-20)"
+          expected_artifact="agentic-pr-review-deterministic-csharp-state-$expected_state_key"
+          manifest="$ARTIFACT_ROOT/$expected_artifact/manifest.json"
+          test -f "$manifest"
+          jq -e --arg state_key "$expected_state_key" \
+            '.runtimeBackend == "deterministic-csharp" and .stateKey == $state_key and .target.mode == "synthetic-fixture" and .review.requestedMode == "bootstrap" and (.reviewInputSha256 | test("^[0-9a-f]{64}$"))' \
+            "$manifest"
           test -z "$(find "$ARTIFACT_ROOT" -name trace.json -type f -print -quit)"
