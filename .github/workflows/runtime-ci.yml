@@ -31,3 +31,85 @@ jobs:
 
       - name: Native AOT bootstrap smoke
         run: bash runtime/scripts/verify-runtime.sh aot
+
+  integration:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Install AOT build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang zlib1g-dev
+
+      - run: npm ci
+
+      - name: Run host/runtime integration matrix
+        run: npm run runtime:integration
+
+      - name: Prepare trusted runtime for built-action smoke
+        shell: bash
+        run: |
+          runtime_dir="$RUNNER_TEMP/agentic-pr-review-built-runtime"
+          artifact_dir="$RUNNER_TEMP/agentic-pr-review-built-artifacts"
+          mkdir -p "$runtime_dir" "$artifact_dir"
+          dotnet publish runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj \
+            -c Release \
+            --nologo \
+            --no-self-contained \
+            -p:PublishAot=false \
+            -o "$runtime_dir"
+          dotnet_path="$(realpath "$(command -v dotnet)")"
+          runtime_dll="$(realpath "$runtime_dir/AgenticPrReview.Runtime.dll")"
+          echo "AGENTIC_REVIEW_RUNTIME_EXECUTABLE=$dotnet_path" >> "$GITHUB_ENV"
+          echo "AGENTIC_REVIEW_RUNTIME_PREFIX_ARGS_JSON=[\"$runtime_dll\"]" >> "$GITHUB_ENV"
+          echo "AGENTIC_REVIEW_LOCAL_ARTIFACT_DIR=$artifact_dir" >> "$GITHUB_ENV"
+
+      - name: Run checked-in built action with real framework runtime
+        id: built-action
+        uses: ./.github/actions/agentic-pr-review
+        with:
+          runtime_backend: deterministic-csharp
+          runtime_provider: test
+          target_mode: synthetic-fixture
+          review_mode: bootstrap
+          state_key: runtime-integration-built-action
+          post_comment: 'false'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Assert built-action public contract and local artifact
+        shell: bash
+        env:
+          ARTIFACT_ROOT: ${{ env.AGENTIC_REVIEW_LOCAL_ARTIFACT_DIR }}
+          RUNTIME_BACKEND: ${{ steps.built-action.outputs.runtime_backend }}
+          RUNTIME_VERSION: ${{ steps.built-action.outputs.runtime_version }}
+          TRACE_SHA: ${{ steps.built-action.outputs.runtime_trace_sha256 }}
+          ERROR_KIND: ${{ steps.built-action.outputs.runtime_error_kind }}
+          BUDGET_STATUS: ${{ steps.built-action.outputs.usage_budget_status }}
+        run: |
+          test "$RUNTIME_BACKEND" = deterministic-csharp
+          test -n "$RUNTIME_VERSION"
+          test "${#TRACE_SHA}" -eq 64
+          test -z "$ERROR_KIND"
+          test "$BUDGET_STATUS" = 'not_applicable (records=0)'
+          expected_state_key="cs-$(printf '%s' runtime-integration-built-action | sha256sum | cut -c1-20)"
+          expected_artifact="agentic-pr-review-deterministic-csharp-state-$expected_state_key"
+          manifest="$ARTIFACT_ROOT/$expected_artifact/manifest.json"
+          test -f "$manifest"
+          jq -e --arg state_key "$expected_state_key" \
+            '.runtimeBackend == "deterministic-csharp" and .stateKey == $state_key and .target.mode == "synthetic-fixture" and .review.requestedMode == "bootstrap" and (.reviewInputSha256 | test("^[0-9a-f]{64}$"))' \
+            "$manifest"
+          test -z "$(find "$ARTIFACT_ROOT" -name trace.json -type f -print -quit)"

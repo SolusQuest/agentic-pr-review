@@ -1,1 +1,1 @@
-{"protocolVersion":1,"runtimeVersion":"0.1.0-dev","inputSha256":"61d161b16828888da7d4eb810acee76ababbbc984563f92a3a47408a0449a8c0","mode":"deterministic-fixture","toolCalls":[],"warnings":[],"diagnostics":[]}
+{"protocolVersion":1,"runtimeVersion":"0.1.0-dev","inputSha256":"61d161b16828888da7d4eb810acee76ababbbc984563f92a3a47408a0449a8c0","mode":"deterministic-fixture","fixture":"bootstrap","toolCalls":[],"warnings":[],"diagnostics":[]}

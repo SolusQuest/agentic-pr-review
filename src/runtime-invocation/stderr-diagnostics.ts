@@ -35,7 +35,15 @@ export function sanitizeStderrSnippet(
     .join('')
     .replace(/ +/g, ' ')
     .trim();
-  return normalized.length > 0 ? normalized : undefined;
+  const sanitized = normalized
+    .replace(/Authorization\s*[:=]\s*[^,;|]+/gi, 'Authorization: ***')
+    .replace(/x-api-(?:key|token)\s*[:=]\s*[^\s,;|]+/gi, 'x-api-key: ***')
+    .replace(/(^|[^A-Za-z0-9_])(?:(?:[A-Za-z]:[\\/])|(?:\\\\)|\/)[^\s"'`() ,;]*/g, '$1<path>')
+    .replace(
+      /(^|[^A-Za-z0-9_])(?:ghp_|github_pat_|gho_|ghu_|ghs_|ghr_|sk-)[A-Za-z0-9_-]+/gi,
+      '$1***',
+    );
+  return sanitized.length > 0 ? sanitized : undefined;
 }
 
 export function parseAprCode(

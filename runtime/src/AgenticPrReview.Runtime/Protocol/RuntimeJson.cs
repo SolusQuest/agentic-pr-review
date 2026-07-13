@@ -19,6 +19,7 @@ public sealed record ReviewTrace(
     [property: JsonPropertyName("runtimeVersion")] string RuntimeVersion,
     [property: JsonPropertyName("inputSha256")] string InputSha256,
     [property: JsonPropertyName("mode")] string Mode,
+    [property: JsonPropertyName("fixture")] string? Fixture,
     [property: JsonPropertyName("toolCalls")] RuntimeToolCall[] ToolCalls,
     [property: JsonPropertyName("warnings")] string[] Warnings,
     [property: JsonPropertyName("diagnostics")] RuntimeDiagnostic[] Diagnostics);

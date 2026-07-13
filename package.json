@@ -10,6 +10,7 @@
     "format:check": "prettier --check .",
     "format": "prettier --write .",
     "runtime:verify": "bash runtime/scripts/verify-runtime.sh all",
+    "runtime:integration": "node scripts/run-runtime-integration.mjs",
     "synthetic": "node scripts/run-local-synthetic.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
