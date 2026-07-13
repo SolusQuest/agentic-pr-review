@@ -32,42 +32,17 @@ If a live provider is used, the workflow must define the trust boundary explicit
 
 ## Deterministic C# Host Bridge
 
-The `runtime_backend=deterministic-csharp` path is default-off and receives only sanitized
-`ReviewInputV1`. The C# runtime proposes typed review content; the TypeScript host owns phase,
-repository facts, fingerprints, state identity, lineage, comments, artifacts, and action outputs.
+The `runtime_backend=deterministic-csharp` path is default-off and receives only sanitized `ReviewInputV1`. The C# runtime proposes typed review content; the TypeScript host owns phase, repository facts, fingerprints, state identity, lineage, comments, artifacts, and action outputs.
 
-The runtime command is workflow-owned configuration. `AGENTIC_REVIEW_RUNTIME_EXECUTABLE` and
-complete absolute prefix arguments are realpath-checked and must resolve outside `GITHUB_WORKSPACE`;
-relative arguments and opaque option forms such as `--option=/path` are not interpreted as paths.
-Malformed command configuration fails closed before spawn. The deterministic path does not receive
-GitHub or provider credentials, does not use `PATH` search or downloads, and does not publish inline
-comments. Its local state bundle is sanitized before the sticky comment or artifact upload barrier.
+The runtime command is workflow-owned configuration. `AGENTIC_REVIEW_RUNTIME_EXECUTABLE` and complete absolute prefix arguments are realpath-checked and must resolve outside `GITHUB_WORKSPACE`; relative arguments and opaque option forms such as `--option=/path` are not interpreted as paths. Malformed command configuration fails closed before spawn. The deterministic path does not receive GitHub or provider credentials, does not use `PATH` search or downloads, and does not publish inline comments. Its local state bundle is sanitized before the sticky comment or artifact upload barrier.
 
-The deterministic-csharp state restore path is provenance-bound. It accepts only successful runs
-from the same workflow and event, with the same head repository and requested pull request; the
-restored manifest must be version 1, match the artifact run head SHA, target PR, and head
-repository. Unknown manifest versions and unknown top-level fields fail closed. Explicit
-`state_artifact_run_id` selection does not bypass these manifest checks. For pull-request targets,
-deterministic incremental restore is allowed only on `pull_request` events, and explicit selection
-cannot bypass the artifact's association with the requested PR. Legacy restore retains its existing
-compatibility semantics rather than retroactively applying these deterministic-only restrictions.
-The state-producing workflow must not execute untrusted pull-request code: it must check out a
-trusted/default or immutable ref, or use a separate trusted workflow before writing state artifacts.
+The deterministic-csharp state restore path is provenance-bound. It accepts only successful runs from the same workflow and event, with the same head repository and requested pull request; the restored manifest must be version 1, match the artifact run head SHA, target PR, and head repository. Unknown manifest versions and unknown top-level fields fail closed. Explicit `state_artifact_run_id` selection does not bypass these manifest checks. For pull-request targets, deterministic incremental restore is allowed only on `pull_request` events, and explicit selection cannot bypass the artifact's association with the requested PR. Legacy restore retains its existing compatibility semantics rather than retroactively applying these deterministic-only restrictions. These version-1 rules describe the existing deterministic backend. The M4 project-owned live path uses the separate `StateManifestV2` and restricted `ProviderSessionLedgerV1` contract defined in `docs/20_architecture/session-ledger-and-prefix-contract.md`; a v1 artifact is classified as unsupported legacy state for that path and is safely bootstrapped. The state-producing workflow must not execute untrusted pull-request code: it must check out a trusted/default or immutable ref, or use a separate trusted workflow before writing state artifacts.
 
-The host rechecks the pull request head immediately before publishing state. Downstream workflows
-should also configure per-PR concurrency with cancellation to prevent stale writers from replacing
-a newer review; the host-side check is a final stale-head barrier, not a replacement for workflow
-concurrency.
+The host rechecks the pull request head immediately before publishing state. Downstream workflows should also configure per-PR concurrency with cancellation to prevent stale writers from replacing a newer review; the host-side check is a final stale-head barrier, not a replacement for workflow concurrency.
 
-Deterministic summaries omit runner-local bundle and result paths. Runtime versions are bounded
-single-line metadata, and host warnings, diagnostics, authorization headers, token-shaped values,
-and filesystem paths are sanitized before publication. If state upload fails after deterministic
-runtime success, the action keeps the success outputs and writes a bounded partial-side-effect
-summary identifying the failed state upload.
+Deterministic summaries omit runner-local bundle and result paths. Runtime versions are bounded single-line metadata, and host warnings, diagnostics, authorization headers, token-shaped values, and filesystem paths are sanitized before publication. If state upload fails after deterministic runtime success, the action keeps the success outputs and writes a bounded partial-side-effect summary identifying the failed state upload.
 
-An identical incremental PR snapshot is a host short-circuit: it does not parse command settings,
-construct runtime input, invoke the runtime, or validate a trace. It still constructs and sanitizes
-the host-owned structured result and state bundle before upload.
+An identical incremental PR snapshot is a host short-circuit: it does not parse command settings, construct runtime input, invoke the runtime, or validate a trace. It still constructs and sanitizes the host-owned structured result and state bundle before upload.
 
 ## Artifact Boundary
 

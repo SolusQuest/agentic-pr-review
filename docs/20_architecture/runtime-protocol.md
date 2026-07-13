@@ -183,19 +183,13 @@ A future versioned replay bundle or manifest (for example, `ReplayBundleV1`) wil
 
 Replay must not require GitHub credentials or live GitHub state. Replay material remains bounded and sanitized and must not contain provider secrets, auth headers, raw HTTP bodies, unrestricted provider transcripts, private runner paths, or unbounded tool output. Phase 6 will define the bundle schema or manifest contract and its fixture lifecycle.
 
-## Future: Session Ledger Artifact
+## M4: Session Ledger Artifact
 
-The current protocol defines `ReviewInputV1`, `ReviewResultV1`, and `ReviewTraceV1`. A future project-owned runtime that resumes context across GitHub Actions runs will need an additional artifact type (for example, `ProviderSessionLedgerV1` or `RuntimeSessionV1`) to carry the canonical session ledger.
+The current protocol defines `ReviewInputV1`, `ReviewResultV1`, and `ReviewTraceV1`. M4 defines the additional restricted durable artifact `ProviderSessionLedgerV1`, its `StateManifestV2` binding, and the separate `ProviderRunMetadataV1` sidecar. See [`session-ledger-and-prefix-contract.md`](session-ledger-and-prefix-contract.md) for the cross-issue contract.
 
 ## Deterministic C# Host Integration
 
-The default-off `runtime_backend=deterministic-csharp` path constructs and validates `ReviewInputV1`,
-invokes the trusted command through `invokeRuntime()`, validates the deterministic trace semantics,
-and maps `ReviewResultV1` with `mapReviewResultV1ToRuntimeContent()`. The host then assembles the
-typed content into the existing `StructuredReviewEnvelopeV1`; it does not round-trip typed content
-through the legacy `modelReviewJson` parser. Runtime warnings and diagnostics remain side-channel
-metadata, while phase, SHA, state, lineage, usage-budget, fingerprints, and publishing facts remain
-host-owned.
+The default-off `runtime_backend=deterministic-csharp` path constructs and validates `ReviewInputV1`, invokes the trusted command through `invokeRuntime()`, validates the deterministic trace semantics, and maps `ReviewResultV1` with `mapReviewResultV1ToRuntimeContent()`. The host then assembles the typed content into the existing `StructuredReviewEnvelopeV1`; it does not round-trip typed content through the legacy `modelReviewJson` parser. Runtime warnings and diagnostics remain side-channel metadata, while phase, SHA, state, lineage, usage-budget, fingerprints, and publishing facts remain host-owned.
 
 This ledger artifact is distinct from `ReviewTraceV1`:
 
@@ -204,4 +198,4 @@ This ledger artifact is distinct from `ReviewTraceV1`:
 
 The protocol will also need to partition stable context (system instructions, policy, tool definitions, canonical prior turns) from volatile context (current PR delta, run metadata) to serve prefix-cache stability. See `docs/20_architecture/architecture.md` (Provider Request Prefix Contract) for the invariants.
 
-This is a direction statement only. The existing schemas are not changed; the ledger artifact and stable/volatile partitioning will be designed in a separate issue before project-owned live provider implementation.
+The existing `Review*V1` schemas remain unchanged. The ledger artifact, provider-run metadata sidecar, and stable/volatile partitioning are designed by issue #29; implementation follow-ups own the concrete process flags and file names.
