@@ -396,7 +396,13 @@ integration('runtime integration', () => {
       resultState,
       traceState,
     ) => {
-      const tempRoot = await mkdtemp(path.join(root, `adapter-${scenario}-`));
+      const shortSocketPath = scenario.includes('non-regular');
+      const tempRoot = await mkdtemp(
+        path.join(
+          shortSocketPath ? os.tmpdir() : root,
+          shortSocketPath ? 'apr-nr-' : `adapter-${scenario}-`,
+        ),
+      );
       const command = {
         executablePath:
           process.env.APR_RUNTIME_FIXTURE_DOTNET ?? process.env.APR_RUNTIME_DOTNET ?? '',
@@ -432,12 +438,16 @@ integration('runtime integration', () => {
           },
         },
       );
-      await expect(invocation).rejects.toMatchObject({
-        kind: expectedKind,
-        exitClass: expectedExitClass || undefined,
-        diagnosticCode: expectedDiagnosticCode || undefined,
-      });
-      expect(observed).toEqual({ result: resultState, trace: traceState });
+      try {
+        await expect(invocation).rejects.toMatchObject({
+          kind: expectedKind,
+          exitClass: expectedExitClass || undefined,
+          diagnosticCode: expectedDiagnosticCode || undefined,
+        });
+        expect(observed).toEqual({ result: resultState, trace: traceState });
+      } finally {
+        if (shortSocketPath) await rm(tempRoot, { recursive: true, force: true });
+      }
     },
   );
 
