@@ -162,6 +162,65 @@ integration('runtime integration', () => {
     expect(result).not.toContain('integration-github-token');
   });
 
+  it('keeps repeated real runtime invocations byte-for-byte deterministic', async () => {
+    const command = {
+      executablePath:
+        process.env.APR_RUNTIME_FIXTURE_DOTNET ?? process.env.APR_RUNTIME_DOTNET ?? '',
+      prefixArgs: [process.env.APR_RUNTIME_FIXTURE_DLL ?? '', '--scenario', 'success'],
+    };
+    const input = readBootstrapInput();
+    const first = await invokeRuntime({
+      command,
+      input,
+      timeoutMs: 15_000,
+      tempRoot: await mkdtemp(path.join(root, 'determinism-first-')),
+    });
+    const second = await invokeRuntime({
+      command,
+      input,
+      timeoutMs: 15_000,
+      tempRoot: await mkdtemp(path.join(root, 'determinism-second-')),
+    });
+
+    expect(first.inputSha256).toBe(second.inputSha256);
+    expect(first.runtimeVersion).toBe(second.runtimeVersion);
+    expect(first.resultBytes).toEqual(second.resultBytes);
+    expect(first.traceBytes).toEqual(second.traceBytes);
+    expect(first.result.trace?.sha256).toBe(second.result.trace?.sha256);
+  });
+
+  it('cleans a failed invocation before the next isolated success', async () => {
+    const failedRoot = await mkdtemp(path.join(root, 'cleanup-failure-'));
+    await expect(
+      invokeRuntime({
+        command: {
+          executablePath:
+            process.env.APR_RUNTIME_FIXTURE_DOTNET ?? process.env.APR_RUNTIME_DOTNET ?? '',
+          prefixArgs: [process.env.APR_RUNTIME_FIXTURE_DLL ?? '', '--scenario', 'malformed-result'],
+        },
+        input: readBootstrapInput(),
+        timeoutMs: 15_000,
+        tempRoot: failedRoot,
+      }),
+    ).rejects.toMatchObject({ kind: 'result-invalid' });
+    await expect(readdir(failedRoot)).resolves.toEqual([]);
+
+    const successRoot = await mkdtemp(path.join(root, 'cleanup-success-'));
+    await expect(
+      invokeRuntime({
+        command: {
+          executablePath:
+            process.env.APR_RUNTIME_FIXTURE_DOTNET ?? process.env.APR_RUNTIME_DOTNET ?? '',
+          prefixArgs: [process.env.APR_RUNTIME_FIXTURE_DLL ?? '', '--scenario', 'success'],
+        },
+        input: readBootstrapInput(),
+        timeoutMs: 15_000,
+        tempRoot: successRoot,
+      }),
+    ).resolves.toBeDefined();
+    await expect(readdir(successRoot)).resolves.toEqual([]);
+  });
+
   it.skipIf(aotOnly)(
     'proves the failure barrier with an eligible pull request publisher',
     async () => {
