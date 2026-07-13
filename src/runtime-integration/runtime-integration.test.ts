@@ -1,4 +1,4 @@
-import { lstat, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
+import { lstat, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -267,6 +267,8 @@ integration('runtime integration', () => {
   );
 
   it.skipIf(aotOnly)('keeps runtime privacy sentinels out of host failure sinks', async () => {
+    const privacyFilesPath = path.join(root, 'privacy-host-files.json');
+    await writeFile(privacyFilesPath, '');
     Object.assign(mocks.inputs, {
       post_comment: 'true',
       state_key: 'runtime-integration-privacy',
@@ -276,12 +278,22 @@ integration('runtime integration', () => {
       process.env.APR_RUNTIME_FIXTURE_DLL,
       '--scenario',
       'privacy-host-sinks',
+      '--probe',
+      privacyFilesPath,
     ]);
 
     const { run } = await import('../main.js');
-    await expect(run()).rejects.toThrow(/deterministic runtime failed: runtime-exit/);
+    let publicError = '';
+    try {
+      await run();
+      throw new Error('privacy host fixture unexpectedly succeeded');
+    } catch (error) {
+      publicError = error instanceof Error ? error.message : String(error);
+    }
+    expect(publicError).toMatch(/deterministic runtime failed: result-invalid/);
 
     const sinkText = JSON.stringify([
+      publicError,
       mocks.warning.mock.calls,
       mocks.error.mock.calls,
       mocks.summary.addRaw.mock.calls,
@@ -298,6 +310,25 @@ integration('runtime integration', () => {
     expect(mocks.updateComment).not.toHaveBeenCalled();
     expect(mocks.createReview).not.toHaveBeenCalled();
     expect(mocks.createReviewComment).not.toHaveBeenCalled();
+    expect(JSON.parse(await readFile(privacyFilesPath, 'utf8'))).toEqual({
+      result: 'present',
+      trace: 'present',
+    });
+    await expect(stat(artifactRoot)).rejects.toThrow();
+  });
+
+  it.skipIf(aotOnly)('keeps deterministic trace policy at the source host boundary', async () => {
+    Object.assign(mocks.inputs, { state_key: 'runtime-integration-trace-policy' });
+    process.env.AGENTIC_REVIEW_RUNTIME_EXECUTABLE = process.env.APR_RUNTIME_FIXTURE_DOTNET ?? '';
+    process.env.AGENTIC_REVIEW_RUNTIME_PREFIX_ARGS_JSON = JSON.stringify([
+      process.env.APR_RUNTIME_FIXTURE_DLL,
+      '--scenario',
+      'semantic-invalid-trace',
+    ]);
+
+    const { run } = await import('../main.js');
+    await expect(run()).rejects.toThrow(/trace-invalid/);
+    expect(mocks.setOutput).toHaveBeenCalledWith('runtime_error_kind', 'trace-invalid');
     await expect(stat(artifactRoot)).rejects.toThrow();
   });
 
@@ -334,7 +365,6 @@ integration('runtime integration', () => {
     ['schema-invalid-result', 'result-invalid', '', '', 'present', 'present'],
     ['schema-invalid-trace', 'trace-invalid', '', '', 'present', 'present'],
     ['semantic-invalid-result', 'result-invalid', '', '', 'present', 'present'],
-    ['semantic-invalid-trace', 'trace-invalid', '', '', 'present', 'present'],
     ['missing-result-inputsha', 'process-contract-violation', '', '', 'present', 'present'],
     ['missing-result-trace', 'process-contract-violation', '', '', 'present', 'present'],
     ['missing-result-trace-sha', 'process-contract-violation', '', '', 'present', 'present'],
@@ -349,6 +379,8 @@ integration('runtime integration', () => {
           ['unsafe-trace-directory', 'unsafe-output-file', '', '', 'present', 'rejected'],
           ['unsafe-result-symlink', 'unsafe-output-file', '', '', 'rejected', 'present'],
           ['unsafe-trace-symlink', 'unsafe-output-file', '', '', 'present', 'rejected'],
+          ['unsafe-result-non-regular', 'unsafe-output-file', '', '', 'rejected', 'present'],
+          ['unsafe-trace-non-regular', 'unsafe-output-file', '', '', 'present', 'rejected'],
           ['unsafe-result-oversized', 'unsafe-output-file', '', '', 'rejected', 'present'],
           ['unsafe-trace-oversized', 'unsafe-output-file', '', '', 'present', 'rejected'],
         ]
@@ -445,22 +477,41 @@ integration('runtime integration', () => {
       });
 
       let error: RuntimeInvocationError;
+      let privacyFiles: { result: string; trace: string } | undefined;
       try {
         process.env.GITHUB_TOKEN = 'ghp_integration_fixture_token';
-        await invokeRuntime({
-          command: {
-            executablePath:
-              process.env.APR_RUNTIME_FIXTURE_DOTNET ?? process.env.APR_RUNTIME_DOTNET ?? '',
-            prefixArgs: [
-              process.env.APR_RUNTIME_FIXTURE_DLL ?? '',
-              '--scenario',
-              'privacy-diagnostic',
-            ],
+        await invokeRuntimeForTests(
+          {
+            command: {
+              executablePath:
+                process.env.APR_RUNTIME_FIXTURE_DOTNET ?? process.env.APR_RUNTIME_DOTNET ?? '',
+              prefixArgs: [
+                process.env.APR_RUNTIME_FIXTURE_DLL ?? '',
+                '--scenario',
+                'privacy-diagnostic',
+              ],
+            },
+            input: readBootstrapInput(),
+            timeoutMs: 15_000,
+            tempRoot: await mkdtemp(path.join(root, 'privacy-')),
           },
-          input: readBootstrapInput(),
-          timeoutMs: 15_000,
-          tempRoot: await mkdtemp(path.join(root, 'privacy-')),
-        });
+          {
+            onBeforeCleanup: async (invocationDir) => {
+              const hasFile = async (filePath: string) => {
+                try {
+                  await lstat(filePath);
+                  return 'present';
+                } catch {
+                  return 'absent';
+                }
+              };
+              privacyFiles = {
+                result: await hasFile(path.join(invocationDir, 'result.json')),
+                trace: await hasFile(path.join(invocationDir, 'trace.json')),
+              };
+            },
+          },
+        );
         throw new Error('privacy fixture unexpectedly succeeded');
       } catch (value) {
         if (!value || typeof value !== 'object' || !('kind' in value)) throw value;
@@ -479,6 +530,7 @@ integration('runtime integration', () => {
       expect(error.stderrSnippet).not.toContain('privacy_authorization_secret');
       expect(error.stderrSnippet).not.toContain('ghp_privacy_fixture_token');
       expect(error.stderrSnippet).not.toContain('C:\\private\\raw.json');
+      expect(privacyFiles).toEqual({ result: 'absent', trace: 'present' });
     },
   );
 });

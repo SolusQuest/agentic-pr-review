@@ -108697,12 +108697,6 @@ async function validateSuccessAndBuildResult(args) {
   }
   const result = resultParsed;
   const trace = traceParsed;
-  if (trace.mode !== "deterministic-fixture" || !trace.fixture || trace.provider !== void 0 || trace.usage !== void 0 || trace.toolCalls.length !== 0) {
-    throw new RuntimeInvocationError({
-      kind: "trace-invalid",
-      message: "deterministic trace failed semantic validation."
-    });
-  }
   if (result.inputSha256 === void 0) {
     throw new RuntimeInvocationError({
       kind: "process-contract-violation",

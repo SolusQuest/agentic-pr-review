@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -93,7 +94,18 @@ if (scenario is "schema-invalid-trace" or "semantic-invalid-trace")
 {
     var valid = BuildValidFiles(inputPath);
     await File.WriteAllTextAsync(outputPath, valid.Result);
-    await File.WriteAllTextAsync(tracePath, scenario == "schema-invalid-trace" ? "{}" : valid.Trace.Replace("\"mode\":\"deterministic-fixture\"", "\"mode\":\"live-provider\""));
+    if (scenario == "schema-invalid-trace")
+    {
+        await File.WriteAllTextAsync(tracePath, "{}");
+    }
+    else
+    {
+        var semanticTrace = valid.Trace.Replace("\"mode\":\"deterministic-fixture\"", "\"mode\":\"live-provider\"");
+        var semanticResult = JsonNode.Parse(valid.Result)!.AsObject();
+        semanticResult["trace"]!["sha256"] = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(semanticTrace))).ToLowerInvariant();
+        await File.WriteAllTextAsync(outputPath, semanticResult.ToJsonString());
+        await File.WriteAllTextAsync(tracePath, semanticTrace);
+    }
     return 0;
 }
 
@@ -115,7 +127,7 @@ if (scenario.StartsWith("missing-result-", StringComparison.Ordinal) || scenario
     return 0;
 }
 
-if (scenario is "unsafe-result-directory" or "unsafe-trace-directory" or "unsafe-result-symlink" or "unsafe-trace-symlink" or "unsafe-result-oversized" or "unsafe-trace-oversized")
+if (scenario is "unsafe-result-directory" or "unsafe-trace-directory" or "unsafe-result-symlink" or "unsafe-trace-symlink" or "unsafe-result-non-regular" or "unsafe-trace-non-regular" or "unsafe-result-oversized" or "unsafe-trace-oversized")
 {
     var valid = BuildValidFiles(inputPath);
     if (scenario.Contains("directory", StringComparison.Ordinal))
@@ -125,6 +137,12 @@ if (scenario is "unsafe-result-directory" or "unsafe-trace-directory" or "unsafe
     else if (scenario.Contains("symlink", StringComparison.Ordinal))
     {
         File.CreateSymbolicLink(scenario.StartsWith("unsafe-result", StringComparison.Ordinal) ? outputPath : tracePath, inputPath);
+    }
+    else if (scenario.Contains("non-regular", StringComparison.Ordinal))
+    {
+        var socketPath = scenario.StartsWith("unsafe-result", StringComparison.Ordinal) ? outputPath : tracePath;
+        using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+        socket.Bind(new UnixDomainSocketEndPoint(socketPath));
     }
     else
     {
@@ -152,9 +170,14 @@ if (scenario == "privacy-diagnostic")
 
 if (scenario == "privacy-host-sinks")
 {
+    await File.WriteAllTextAsync(outputPath, "{\"protocolVersion\":1,\"summary\":\"privacy_authorization_secret ghp_privacy_fixture_token C:\\\\private\\\\raw.json\"}");
     await File.WriteAllTextAsync(tracePath, BuildPrivacyFailureTrace(inputPath));
-    Console.Error.WriteLine("APR_RUNTIME_INTERNAL: Authorization=Bearer privacy_authorization_secret token=ghp_privacy_fixture_token path=[C:\\private\\raw.json]");
-    return 20;
+    var privacyProbePath = Option(args, "--probe");
+    if (privacyProbePath is not null)
+    {
+        await File.WriteAllTextAsync(privacyProbePath, "{\"result\":\"present\",\"trace\":\"present\"}");
+    }
+    return 0;
 }
 
 var files = BuildValidFiles(inputPath, scenario);
