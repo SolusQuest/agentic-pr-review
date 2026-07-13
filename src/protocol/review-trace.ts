@@ -5,8 +5,9 @@
  * This TypeScript interface is developer ergonomics only; the JSON Schema is authoritative.
  *
  * The trace carries sanitized execution evidence for deterministic validation and future
- * replay. It is runtime-produced; the host stores, uploads, and verifies trace files but
- * does not author their content. The trace is optional - a review can complete without one.
+ * replay. It is runtime-produced; the deterministic adapter materializes it temporarily,
+ * validates it in memory, and does not persist or upload it in the #34 deterministic path.
+ * The trace is optional - a review can complete without one.
  *
  * Hash chain:
  *   ReviewInputV1  --(inputSha256)-->  ReviewTraceV1

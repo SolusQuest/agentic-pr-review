@@ -100,4 +100,51 @@ describe('GitHubArtifactStore provenance filtering', () => {
 
     await expect(store.findStateArtifact('state')).resolves.toBeUndefined();
   });
+
+  it('does not let an explicit run id bypass target pull-request association', async () => {
+    const runs = new Map<number, unknown>([
+      [99, run()],
+      [42, run({ id: 42, pull_requests: [{ number: 35 }] })],
+    ]);
+    const octokit = {
+      request: async (route: string, params: { run_id?: number }) =>
+        route.includes('/actions/runs/{run_id}')
+          ? { data: runs.get(params.run_id ?? -1) }
+          : {
+              data: {
+                artifacts: [
+                  {
+                    id: 5,
+                    name: 'state',
+                    expired: false,
+                    created_at: '2026-07-14',
+                    workflow_run: { id: 42 },
+                  },
+                ],
+              },
+            },
+    };
+    const store = new GitHubArtifactStore(octokit, 'token', 'SolusQuest', 'agentic-pr-review', 99, {
+      targetMode: 'pull-request',
+      prNumber: 34,
+    });
+
+    await expect(store.findStateArtifact('state', 42)).resolves.toBeUndefined();
+  });
+
+  it('fails closed when a workflow run omits provenance metadata', async () => {
+    const octokit = {
+      request: async (route: string) =>
+        route.includes('/actions/runs/{run_id}')
+          ? { data: run({ head_sha: undefined }) }
+          : { data: { artifacts: [] } },
+    };
+    const store = new GitHubArtifactStore(octokit, 'token', 'SolusQuest', 'agentic-pr-review', 99, {
+      targetMode: 'synthetic-fixture',
+    });
+
+    await expect(store.findStateArtifact('state')).rejects.toThrow(
+      /provenance metadata is incomplete/,
+    );
+  });
 });

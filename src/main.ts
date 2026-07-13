@@ -25,6 +25,7 @@ import {
   deterministicStateKey,
   readRestoredState,
   RestoredSnapshotInvalidError,
+  StateManifestInvalidError,
   stateArtifactName,
   writeStateBundle,
 } from './state.js';
@@ -163,6 +164,7 @@ export async function run(): Promise<void> {
   const effectiveDiffSource = effectiveDiffSourceFor(target, resolution.phase);
 
   if (resolution.phase === 'incremental' && target.mode === 'pull-request') {
+    let snapshotsEquivalent = false;
     try {
       const previousSnapshot = requireRestoredState(
         resolution.restoredState,
@@ -176,30 +178,31 @@ export async function run(): Promise<void> {
         currentSnapshot,
         target.changedFiles,
       );
-      if (pullRequestDiffSnapshotsEquivalent(previousSnapshot, currentSnapshot)) {
-        if ((config.runtimeBackend ?? 'legacy') === 'legacy') {
-          await restoreRuntimeState(resolution.restoreDir, config.runtimeProvider, runtimeDir);
-        }
-        await finishSkippedIdentical({
-          config,
-          store,
-          target,
-          stateKey,
-          artifactName,
-          runtimeDir,
-          restoredState: requireRestoredState(resolution.restoredState),
-          phaseReason: resolution.lineageReason,
-          effectiveDiffSource,
-          octokit,
-        });
-        return;
-      }
+      snapshotsEquivalent = pullRequestDiffSnapshotsEquivalent(previousSnapshot, currentSnapshot);
     } catch (error) {
       if ((config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
         setDeterministicErrorOutputs(new Error(`state-invalid: incremental snapshot failed`));
         throw new Error('state-invalid: incremental pull-request snapshot is unusable');
       }
       throw error;
+    }
+    if (snapshotsEquivalent) {
+      if ((config.runtimeBackend ?? 'legacy') === 'legacy') {
+        await restoreRuntimeState(resolution.restoreDir, config.runtimeProvider, runtimeDir);
+      }
+      await finishSkippedIdentical({
+        config,
+        store,
+        target,
+        stateKey,
+        artifactName,
+        runtimeDir,
+        restoredState: requireRestoredState(resolution.restoredState),
+        phaseReason: resolution.lineageReason,
+        effectiveDiffSource,
+        octokit,
+      });
+      return;
     }
   }
 
@@ -263,16 +266,18 @@ export async function run(): Promise<void> {
       }
       validateDeterministicTrace(invocation.trace, invocation.inputSha256);
       for (const warning of boundedRuntimeMessages(invocation.result.warnings)) {
-        core.warning(sanitizeRuntimeDiagnostic(warning));
+        core.warning(sanitizeRuntimeDiagnosticForHost(warning));
       }
       for (const warning of boundedRuntimeMessages(invocation.trace.warnings)) {
-        core.warning(sanitizeRuntimeDiagnostic(warning));
+        core.warning(sanitizeRuntimeDiagnosticForHost(warning));
       }
       const errorDiagnostic = invocation.result.diagnostics.find(
         (diagnostic) => diagnostic.level === 'error',
       );
       if (errorDiagnostic) {
-        throw new Error(`diagnostic-error: ${sanitizeRuntimeDiagnostic(errorDiagnostic.code)}`);
+        throw new Error(
+          `diagnostic-error: ${sanitizeRuntimeDiagnosticForHost(errorDiagnostic.code)}`,
+        );
       }
       const diagnosticSummary = summarizeRuntimeDiagnostics([
         ...invocation.result.diagnostics,
@@ -449,37 +454,16 @@ export async function run(): Promise<void> {
     throw error;
   }
 
-  try {
-    await assertTargetHeadUnchanged(target, octokit);
-  } catch (error) {
-    if (deterministicBackend) {
-      setDeterministicErrorOutputs(new Error('stale-target: target head could not be confirmed'));
-      throw new Error('stale-target: target head could not be confirmed');
+  if (deterministicBackend) {
+    try {
+      await assertTargetHeadUnchanged(target, octokit);
+    } catch {
+      setDeterministicErrorOutputs(new Error('state-invalid: target head could not be confirmed'));
+      throw new Error('state-invalid: target head could not be confirmed');
     }
-    throw error;
   }
   if (deterministicBackend) {
     setDeterministicSuccessOutputs(runtimeResult);
-  }
-  let uploadedState: UploadedArtifact;
-  try {
-    uploadedState = await store.upload(
-      artifactName,
-      bundleDir,
-      bundleFiles,
-      config.artifactRetentionDays,
-    );
-  } catch (error) {
-    if (deterministicBackend) {
-      await writeDeterministicUploadFailureSummary({
-        phase: resolution.phase,
-        reviewPhase: resolution.phase,
-        runtimeResult,
-        stickyWritten: false,
-      });
-      throw new Error('state-invalid: state artifact upload failed');
-    }
-    throw error;
   }
   if (deterministicBackend) {
     try {
@@ -495,10 +479,37 @@ export async function run(): Promise<void> {
         structuredReview: structuredReview!,
         octokit,
       });
-    } catch (error) {
-      setDeterministicErrorOutputs(new Error(`rendering-invalid: sticky comment failed`));
+    } catch {
+      await writeDeterministicUploadFailureSummary({
+        phase: resolution.phase,
+        reviewPhase: resolution.phase,
+        runtimeResult,
+        stickyWritten: false,
+        artifactUploaded: false,
+      });
       throw new Error('rendering-invalid: deterministic sticky comment could not be published');
     }
+  }
+  let uploadedState: UploadedArtifact;
+  try {
+    uploadedState = await store.upload(
+      artifactName,
+      bundleDir,
+      bundleFiles,
+      config.artifactRetentionDays,
+    );
+  } catch (error) {
+    if (deterministicBackend) {
+      await writeDeterministicUploadFailureSummary({
+        phase: resolution.phase,
+        reviewPhase: resolution.phase,
+        runtimeResult,
+        stickyWritten: Boolean(comment.commentUrl),
+        artifactUploaded: false,
+      });
+      throw new Error('state-invalid: state artifact upload failed');
+    }
+    throw error;
   }
   let debugArtifact: UploadedArtifact | undefined;
   if (config.debugCaptureRawApiBodies) {
@@ -679,6 +690,16 @@ async function resolvePhase(
       artifact.runHeadSha,
     );
   } catch (error) {
+    if (error instanceof StateManifestInvalidError) {
+      if (config.reviewMode === 'auto') {
+        core.warning('Restored state manifest is invalid; falling back to bootstrap.');
+        return { phase: 'bootstrap', lineageReason: 'auto_bootstrap_invalid' };
+      }
+      if (config.runtimeBackend === 'deterministic-csharp' && config.reviewMode === 'incremental') {
+        throw new Error('state-invalid: restored state manifest is invalid');
+      }
+      throw error;
+    }
     if (
       error instanceof SnapshotStateCompatibilityError ||
       error instanceof RestoredSnapshotInvalidError
@@ -746,7 +767,10 @@ function validateRestoredState(
   if (!restoredState.sessionId) {
     throw new StateArtifactInvalidError('restored state artifact is missing session_id');
   }
-  if (expectedArtifactHeadSha && restoredState.reviewedHeadSha !== expectedArtifactHeadSha) {
+  if (
+    expectedArtifactHeadSha !== undefined &&
+    restoredState.reviewedHeadSha !== expectedArtifactHeadSha
+  ) {
     throw new StateArtifactInvalidError(
       'restored state artifact reviewed_head_sha does not match its workflow run head_sha',
     );
@@ -963,14 +987,13 @@ async function finishSkippedIdentical(options: {
     }
     throw error;
   }
-  try {
-    await assertTargetHeadUnchanged(options.target, options.octokit);
-  } catch (error) {
-    if (deterministicBackend) {
-      setDeterministicErrorOutputs(new Error('stale-target: target head could not be confirmed'));
-      throw new Error('stale-target: target head could not be confirmed');
+  if (deterministicBackend) {
+    try {
+      await assertTargetHeadUnchanged(options.target, options.octokit);
+    } catch {
+      setDeterministicErrorOutputs(new Error('state-invalid: target head could not be confirmed'));
+      throw new Error('state-invalid: target head could not be confirmed');
     }
-    throw error;
   }
   if (deterministicBackend) setDeterministicSuccessOutputs(runtimeResult);
   let uploadedState: UploadedArtifact;
@@ -988,6 +1011,7 @@ async function finishSkippedIdentical(options: {
         reviewPhase: 'skipped-identical',
         runtimeResult,
         stickyWritten: false,
+        artifactUploaded: false,
       });
       throw new Error('state-invalid: state artifact upload failed');
     }
@@ -1432,6 +1456,7 @@ async function writeDeterministicUploadFailureSummary(input: {
   reviewPhase: ReviewPhaseOutput;
   runtimeResult: RuntimeResult;
   stickyWritten: boolean;
+  artifactUploaded: boolean;
 }): Promise<void> {
   try {
     await core.summary
@@ -1446,7 +1471,7 @@ async function writeDeterministicUploadFailureSummary(input: {
           `- Review phase: ${input.reviewPhase}`,
           `- Runtime execution: succeeded`,
           `- Sticky comment written: ${input.stickyWritten}`,
-          '- State artifact upload: failed',
+          `- State artifact upload: ${input.artifactUploaded ? 'succeeded' : 'failed'}`,
           '- Failure classification: state-invalid',
         ].join('\n'),
       )
@@ -1514,7 +1539,6 @@ function setDeterministicErrorOutputs(error: unknown): void {
     'mapping-invalid',
     'state-invalid',
     'rendering-invalid',
-    'stale-target',
   ];
   const prefix = message.split(':', 1)[0];
   const kind = adapterError?.kind ?? (hostKinds.includes(prefix) ? prefix : 'rendering-invalid');
@@ -1526,23 +1550,33 @@ function setDeterministicErrorOutputs(error: unknown): void {
   core.setOutput('usage_budget_status', 'not_applicable (records=0)');
 }
 
-function sanitizeRuntimeDiagnostic(value: string): string {
+export function sanitizeRuntimeDiagnostic(value: string, secrets: readonly string[] = []): string {
   let sanitized = value.replace(/\s+/g, ' ').trim();
-  for (const secret of [
-    process.env.GITHUB_TOKEN,
-    process.env.AGENTIC_REVIEW_API_KEY,
-    process.env.ANTHROPIC_API_KEY,
-    process.env.ANTHROPIC_AUTH_TOKEN,
-  ].filter((item): item is string => Boolean(item && item.length > 4))) {
+  for (const secret of secrets.filter((item) => item.length > 4)) {
     sanitized = sanitized.replaceAll(secret, '***');
   }
   return truncateText(
     sanitized
-      .replace(/Authorization:\s*\S+\s+\S+/gi, 'Authorization: *** ***')
-      .replace(/x-api-(?:key|token):\s*\S+/gi, 'x-api-key: ***')
-      .replace(/\b(?:[A-Za-z]:[\\/]|\\\\|\/\/|\/)(?:[^\s"'`()]+[\\/])*[^\s"'`()]+/g, '<path>')
-      .replace(/\b(?:ghp_|github_pat_|sk-[A-Za-z0-9])[A-Za-z0-9_-]*/gi, '***'),
+      .replace(/Authorization:\s*[^,;|]+/gi, 'Authorization: ***')
+      .replace(/x-api-(?:key|token):\s*[^\s,;]+/gi, 'x-api-key: ***')
+      .replace(/(^|[\s"'(=,:])(?:(?:[A-Za-z]:[\\/])|(?:\\\\)|\/)[^\s"'`() ,;]*/g, '$1<path>')
+      .replace(
+        /(^|[\s"'(=,:])(?:ghp_|github_pat_|gho_|ghu_|ghs_|ghr_|sk-)[A-Za-z0-9_-]+/gi,
+        '$1***',
+      ),
     240,
+  );
+}
+
+function sanitizeRuntimeDiagnosticForHost(value: string): string {
+  return sanitizeRuntimeDiagnostic(
+    value,
+    [
+      process.env.GITHUB_TOKEN,
+      process.env.AGENTIC_REVIEW_API_KEY,
+      process.env.ANTHROPIC_API_KEY,
+      process.env.ANTHROPIC_AUTH_TOKEN,
+    ].filter((item): item is string => Boolean(item)),
   );
 }
 
@@ -1562,7 +1596,7 @@ function summarizeRuntimeDiagnostics(
     if (diagnostic.level === 'error') {
       continue;
     }
-    const code = sanitizeRuntimeDiagnostic(diagnostic.code);
+    const code = sanitizeRuntimeDiagnosticForHost(diagnostic.code);
     counts.set(code, (counts.get(code) ?? 0) + 1);
   }
   return [...counts.entries()]

@@ -211,6 +211,15 @@ export function parseActionConfig(
   assertMutuallyExclusive(config, 'instructions', 'instructionsPath');
   assertMutuallyExclusive(config, 'bootstrapContext', 'bootstrapContextPath');
   assertMutuallyExclusive(config, 'incrementalContext', 'incrementalContextPath');
+  if (
+    config.targetMode === 'pull-request' &&
+    config.reviewMode === 'incremental' &&
+    eventName !== 'pull_request'
+  ) {
+    throw new Error(
+      'config-invalid: pull-request incremental restore is only allowed on pull_request events',
+    );
+  }
   validateDeterministicRuntimeConfig(config);
   validateLiveRuntimeConfig(config);
   validateDebugCapture(config, eventName);

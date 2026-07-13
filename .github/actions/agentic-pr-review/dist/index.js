@@ -104323,7 +104323,7 @@ var GitHubArtifactStore = class {
       const runId = Number(artifact.workflow_run?.id ?? explicitRunId ?? 0);
       if (!runId) continue;
       const run2 = runId === currentRun.id ? currentRun : await this.getWorkflowRun(runId);
-      if (this.isTrustedRun(run2, currentRun, explicitRunId !== void 0)) {
+      if (this.isTrustedRun(run2, currentRun)) {
         trusted.push({ artifact, run: run2 });
       }
     }
@@ -104392,32 +104392,36 @@ var GitHubArtifactStore = class {
       run_id: runId
     });
     const run2 = response.data;
+    const workflowId = Number(run2?.workflow_id);
+    const id = Number(run2?.id);
+    const workflowPath = run2?.path;
+    const event = run2?.event;
+    const conclusion = run2?.conclusion;
+    const headSha = run2?.head_sha;
+    const headRepository = run2?.head_repository?.full_name;
+    if (!Number.isSafeInteger(id) || id <= 0 || !Number.isSafeInteger(workflowId) || workflowId <= 0 || typeof workflowPath !== "string" || !workflowPath || typeof event !== "string" || !event || typeof conclusion !== "string" || typeof headSha !== "string" || !headSha || typeof headRepository !== "string" || !headRepository) {
+      throw new Error("artifact provenance metadata is incomplete");
+    }
     return {
-      id: Number(run2.id),
-      workflowId: Number(run2.workflow_id) || void 0,
-      workflowPath: typeof run2.path === "string" ? run2.path : void 0,
-      event: typeof run2.event === "string" ? run2.event : void 0,
-      conclusion: typeof run2.conclusion === "string" ? run2.conclusion : void 0,
-      headSha: typeof run2.head_sha === "string" ? run2.head_sha : void 0,
-      headRepository: typeof run2.head_repository?.full_name === "string" ? run2.head_repository.full_name : void 0,
+      id,
+      workflowId,
+      workflowPath,
+      event,
+      conclusion,
+      headSha,
+      headRepository,
       pullRequestNumbers: Array.isArray(run2.pull_requests) ? run2.pull_requests.map((pull) => Number(pull.number)).filter((number) => Number.isInteger(number) && number > 0) : []
     };
   }
-  isTrustedRun(candidate, current, explicitRunId) {
+  isTrustedRun(candidate, current) {
     if (candidate.conclusion !== "success") return false;
-    if (current.workflowId && candidate.workflowId && current.workflowId !== candidate.workflowId) {
-      return false;
-    }
-    if (current.workflowPath && candidate.workflowPath && current.workflowPath !== candidate.workflowPath) {
-      return false;
-    }
-    if (!current.workflowId && !current.workflowPath) return false;
-    if (current.event && candidate.event !== current.event) return false;
-    if (current.headRepository && candidate.headRepository !== current.headRepository) return false;
+    if (candidate.workflowId !== current.workflowId) return false;
+    if (candidate.workflowPath !== current.workflowPath) return false;
+    if (candidate.event !== current.event) return false;
+    if (candidate.headRepository !== current.headRepository) return false;
     if (this.lookupContext?.targetMode === "pull-request" && this.lookupContext.prNumber) {
-      if (!candidate.pullRequestNumbers.includes(this.lookupContext.prNumber) && !explicitRunId) {
-        return false;
-      }
+      if (candidate.event !== "pull_request") return false;
+      if (!candidate.pullRequestNumbers.includes(this.lookupContext.prNumber)) return false;
     }
     return true;
   }
@@ -104633,6 +104637,11 @@ function parseActionConfig(reader, env, eventName) {
   assertMutuallyExclusive(config, "instructions", "instructionsPath");
   assertMutuallyExclusive(config, "bootstrapContext", "bootstrapContextPath");
   assertMutuallyExclusive(config, "incrementalContext", "incrementalContextPath");
+  if (config.targetMode === "pull-request" && config.reviewMode === "incremental" && eventName !== "pull_request") {
+    throw new Error(
+      "config-invalid: pull-request incremental restore is only allowed on pull_request events"
+    );
+  }
   validateDeterministicRuntimeConfig(config);
   validateLiveRuntimeConfig(config);
   validateDebugCapture(config, eventName);
@@ -106201,6 +106210,11 @@ var RestoredSnapshotInvalidError = class extends Error {
     super("restored state manifest pull request diff snapshot is incompatible");
   }
 };
+var StateManifestInvalidError = class extends Error {
+  constructor() {
+    super("restored state manifest shape is invalid");
+  }
+};
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -106231,12 +106245,193 @@ var MANIFEST_KEYS = /* @__PURE__ */ new Set([
   "contextBlocks",
   "target"
 ]);
+var TARGET_KEYS = /* @__PURE__ */ new Set([
+  "mode",
+  "prNumber",
+  "headRepository",
+  "baseSha",
+  "headSha",
+  "changedFiles",
+  "pullRequestDiffSnapshot"
+]);
+var REVIEW_KEYS = /* @__PURE__ */ new Set([
+  "requestedMode",
+  "executedPhase",
+  "phaseReason",
+  "effectiveDiffSource"
+]);
+var STRUCTURED_OUTPUT_KEYS = /* @__PURE__ */ new Set([
+  "status",
+  "inputFindingCount",
+  "postFindingCapCount",
+  "renderedFindingCount",
+  "findingsTruncated",
+  "truncationReason",
+  "inlineComments"
+]);
+var CONTEXT_BLOCK_KEYS = /* @__PURE__ */ new Set(["name", "source", "bytes", "sha256"]);
+var USAGE_KEYS = /* @__PURE__ */ new Set([
+  "inputTokens",
+  "cacheReadInputTokens",
+  "cacheCreationInputTokens",
+  "outputTokens",
+  "recordsObserved"
+]);
+var LINEAGE_USAGE_KEYS = /* @__PURE__ */ new Set([
+  "inputTokens",
+  "cacheReadInputTokens",
+  "cacheCreationInputTokens",
+  "outputTokens"
+]);
+var LINEAGE_TOTALS_KEYS = /* @__PURE__ */ new Set(["observedTurns", "usage", "source", "partial"]);
+var USAGE_BUDGET_KEYS = /* @__PURE__ */ new Set(["status", "limits", "usageRecordsObserved", "exceeded"]);
+var USAGE_LIMIT_KEYS = /* @__PURE__ */ new Set([
+  "maxUncachedInputTokens",
+  "maxCachedInputTokens",
+  "maxOutputTokens"
+]);
+var USAGE_EXCEEDED_KEYS = /* @__PURE__ */ new Set(["category", "limit", "observed"]);
+var INLINE_COMMENTS_KEYS = /* @__PURE__ */ new Set([
+  "enabled",
+  "policy",
+  "candidateCount",
+  "effectiveCap",
+  "capExceededCount",
+  "postedCount",
+  "duplicateCount",
+  "skippedCount",
+  "failedCount",
+  "skippedReasons",
+  "failedReasons"
+]);
+var INLINE_POLICY_KEYS = /* @__PURE__ */ new Set(["enabled", "maxComments", "minSeverity", "minConfidence"]);
+var SNAPSHOT_KEYS = /* @__PURE__ */ new Set(["version", "source", "headSha", "baseSha", "files"]);
+var SNAPSHOT_FILE_KEYS = /* @__PURE__ */ new Set([
+  "filename",
+  "previousFilename",
+  "status",
+  "additions",
+  "deletions",
+  "changes",
+  "fileSha",
+  "patchSha256",
+  "patchAvailable"
+]);
+function invalidManifest() {
+  throw new StateManifestInvalidError();
+}
+function assertAllowedKeys(value, allowed) {
+  if (Object.keys(value).some((key) => !allowed.has(key))) invalidManifest();
+}
+function boundedString(value, maxLength = 1024) {
+  return typeof value === "string" && value.length <= maxLength && !/[\u0000\r\n]/.test(value);
+}
+function nonNegativeInteger(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+function optionalPositiveInteger(value) {
+  return value === void 0 || typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+function validateUsage(value) {
+  if (!isRecord(value)) invalidManifest();
+  assertAllowedKeys(value, USAGE_KEYS);
+  if (!nonNegativeInteger(value.inputTokens) || !nonNegativeInteger(value.cacheReadInputTokens) || !nonNegativeInteger(value.cacheCreationInputTokens) || !nonNegativeInteger(value.outputTokens) || !nonNegativeInteger(value.recordsObserved)) {
+    invalidManifest();
+  }
+}
+function validateLineageTotals(value) {
+  if (!isRecord(value)) invalidManifest();
+  assertAllowedKeys(value, LINEAGE_TOTALS_KEYS);
+  if (!(value.observedTurns === null || nonNegativeInteger(value.observedTurns)) || !isRecord(value.usage) || value.source !== "current_run_only" && value.source !== "restored_manifest_plus_current_run" && value.source !== "restored_manifest_preserved_for_skipped" && value.source !== "legacy_manifest_fallback" && value.source !== "unavailable" || typeof value.partial !== "boolean") {
+    invalidManifest();
+  }
+  assertAllowedKeys(value.usage, LINEAGE_USAGE_KEYS);
+  if (!nonNegativeInteger(value.usage.inputTokens) || !nonNegativeInteger(value.usage.cacheReadInputTokens) || !nonNegativeInteger(value.usage.cacheCreationInputTokens) || !nonNegativeInteger(value.usage.outputTokens)) {
+    invalidManifest();
+  }
+}
+function validateUsageBudgetStatus(value) {
+  if (!isRecord(value) || !isRecord(value.limits)) invalidManifest();
+  assertAllowedKeys(value, USAGE_BUDGET_KEYS);
+  assertAllowedKeys(value.limits, USAGE_LIMIT_KEYS);
+  if (value.status !== "disabled" && value.status !== "within_limit" && value.status !== "exceeded" && value.status !== "not_applicable" || !nonNegativeInteger(value.limits.maxUncachedInputTokens) || !nonNegativeInteger(value.limits.maxCachedInputTokens) || !nonNegativeInteger(value.limits.maxOutputTokens) || !nonNegativeInteger(value.usageRecordsObserved)) {
+    invalidManifest();
+  }
+  if (value.exceeded !== void 0) {
+    if (!isRecord(value.exceeded)) invalidManifest();
+    assertAllowedKeys(value.exceeded, USAGE_EXCEEDED_KEYS);
+    if (value.exceeded.category !== "uncached_input" && value.exceeded.category !== "cached_input" && value.exceeded.category !== "output" || !nonNegativeInteger(value.exceeded.limit) || !nonNegativeInteger(value.exceeded.observed)) {
+      invalidManifest();
+    }
+  }
+}
+function validateCountRecord(value) {
+  if (!isRecord(value)) invalidManifest();
+  for (const count of Object.values(value)) {
+    if (!nonNegativeInteger(count)) invalidManifest();
+  }
+}
+function validateInlineComments(value) {
+  if (!isRecord(value) || !isRecord(value.policy)) invalidManifest();
+  assertAllowedKeys(value, INLINE_COMMENTS_KEYS);
+  assertAllowedKeys(value.policy, INLINE_POLICY_KEYS);
+  if (typeof value.enabled !== "boolean" || typeof value.policy.enabled !== "boolean" || !nonNegativeInteger(value.policy.maxComments) || value.policy.minSeverity !== "low" && value.policy.minSeverity !== "medium" && value.policy.minSeverity !== "high" || value.policy.minConfidence !== "medium" && value.policy.minConfidence !== "high") {
+    invalidManifest();
+  }
+  for (const key of [
+    "candidateCount",
+    "effectiveCap",
+    "capExceededCount",
+    "postedCount",
+    "duplicateCount",
+    "skippedCount",
+    "failedCount"
+  ]) {
+    if (!nonNegativeInteger(value[key])) invalidManifest();
+  }
+  validateCountRecord(value.skippedReasons);
+  validateCountRecord(value.failedReasons);
+}
+function validateStructuredOutput(value) {
+  if (!isRecord(value)) invalidManifest();
+  assertAllowedKeys(value, STRUCTURED_OUTPUT_KEYS);
+  if (value.status !== "valid" && value.status !== "extracted" && value.status !== "invalid_json" && value.status !== "schema_invalid" || !nonNegativeInteger(value.inputFindingCount) || !nonNegativeInteger(value.postFindingCapCount) || !nonNegativeInteger(value.renderedFindingCount) || typeof value.findingsTruncated !== "boolean" || value.truncationReason !== void 0 && value.truncationReason !== "max_findings" && value.truncationReason !== "max_review_chars" && value.truncationReason !== "both") {
+    invalidManifest();
+  }
+  if (value.inlineComments !== void 0) validateInlineComments(value.inlineComments);
+}
 function validateManifestShape(value) {
   if (!isRecord(value) || [...Object.keys(value)].some((key) => !MANIFEST_KEYS.has(key))) {
-    throw new RestoredSnapshotInvalidError();
+    invalidManifest();
   }
-  if (value.version !== 1 || value.workflow !== "agentic-pr-review" || typeof value.stateKey !== "string" || value.phase !== "bootstrap" && value.phase !== "incremental" || typeof value.runtimeProvider !== "string" || typeof value.toolMode !== "string" || !Array.isArray(value.allowedTools) || value.allowedTools.some((item) => typeof item !== "string") || typeof value.sessionId !== "string" || typeof value.sessionName !== "string" || !isRecord(value.target) || typeof value.target.mode !== "string" || typeof value.target.baseSha !== "string" || typeof value.target.headSha !== "string" || typeof value.target.changedFiles !== "number") {
-    throw new RestoredSnapshotInvalidError();
+  if (value.version !== 1 || value.workflow !== "agentic-pr-review" || !boundedString(value.stateKey, 200) || value.phase !== "bootstrap" && value.phase !== "incremental" || value.runtimeProvider !== "test" && value.runtimeProvider !== "claude-code-cli" || value.runtimeBackend !== void 0 && value.runtimeBackend !== "legacy" && value.runtimeBackend !== "deterministic-csharp" || value.toolMode !== "none" && value.toolMode !== "readonly" || !Array.isArray(value.allowedTools) || value.allowedTools.length > 20 || value.allowedTools.some((item) => !boundedString(item, 80)) || !boundedString(value.sessionId, 200) || !boundedString(value.sessionName, 200) || value.reviewedHeadSha !== void 0 && !boundedString(value.reviewedHeadSha, 200) || value.promptSha256 !== void 0 && !/^[a-f0-9]{64}$/.test(String(value.promptSha256)) || value.reviewInputSha256 !== void 0 && !/^[a-f0-9]{64}$/.test(String(value.reviewInputSha256)) || value.reviewInputBytes !== void 0 && !nonNegativeInteger(value.reviewInputBytes) || !boundedString(value.createdAt, 80) || !boundedString(value.updatedAt, 80) || !(value.usage === null || isRecord(value.usage)) || value.observedTurns !== void 0 && !(value.observedTurns === null || nonNegativeInteger(value.observedTurns)) || value.observedTurnSource !== void 0 && !boundedString(value.observedTurnSource, 80) || value.lineageTotals !== void 0 && !isRecord(value.lineageTotals) || !isRecord(value.target) || !isRecord(value.structuredOutput) || !Array.isArray(value.contextBlocks) || value.contextBlocks.length > 3) {
+    invalidManifest();
+  }
+  if (value.usage !== null) validateUsage(value.usage);
+  if (value.lineageTotals !== void 0) validateLineageTotals(value.lineageTotals);
+  validateUsageBudgetStatus(value.usageBudgetStatus);
+  validateStructuredOutput(value.structuredOutput);
+  if (value.review !== void 0) {
+    if (!isRecord(value.review)) invalidManifest();
+    assertAllowedKeys(value.review, REVIEW_KEYS);
+    if (value.review.requestedMode !== "auto" && value.review.requestedMode !== "bootstrap" && value.review.requestedMode !== "incremental" || value.review.executedPhase !== "bootstrap" && value.review.executedPhase !== "incremental" || !boundedString(value.review.phaseReason, 120) || value.review.effectiveDiffSource !== "target_changed_files" && value.review.effectiveDiffSource !== "bootstrap_pr_files" && value.review.effectiveDiffSource !== "incremental_pr_diff_snapshot_delta") {
+      invalidManifest();
+    }
+  }
+  for (const block of value.contextBlocks) {
+    if (!isRecord(block)) invalidManifest();
+    assertAllowedKeys(block, CONTEXT_BLOCK_KEYS);
+    if (!boundedString(block.name, 80) || block.source !== "input" && block.source !== "path" || !nonNegativeInteger(block.bytes) || !/^[a-f0-9]{64}$/.test(String(block.sha256))) {
+      invalidManifest();
+    }
+  }
+  const target = value.target;
+  assertAllowedKeys(target, TARGET_KEYS);
+  if (target.mode !== "pull-request" && target.mode !== "synthetic-fixture" || !optionalPositiveInteger(target.prNumber) || target.headRepository !== void 0 && !boundedString(target.headRepository, 200) || !boundedString(target.baseSha, 200) || !boundedString(target.headSha, 200) || !nonNegativeInteger(target.changedFiles) || target.pullRequestDiffSnapshot !== void 0 && !isRecord(target.pullRequestDiffSnapshot)) {
+    invalidManifest();
+  }
+  if (target.pullRequestDiffSnapshot !== void 0) {
+    validatePullRequestDiffSnapshot(target.pullRequestDiffSnapshot);
   }
 }
 var SECRET_FILE_PATTERN = /(^|[\\/])(\.env|credentials?|secrets?|tokens?|settings\.local)(\.|[\\/]|$)/i;
@@ -106363,7 +106558,10 @@ function validatePullRequestDiffSnapshot(value) {
     throw new RestoredSnapshotInvalidError();
   }
   const snapshot2 = value;
-  if (snapshot2.version !== 1 || snapshot2.source !== "github-pulls-list-files" || typeof snapshot2.headSha !== "string" || typeof snapshot2.baseSha !== "string" || !Array.isArray(snapshot2.files)) {
+  if (isRecord(value) && Object.keys(value).some((key) => !SNAPSHOT_KEYS.has(key))) {
+    throw new RestoredSnapshotInvalidError();
+  }
+  if (snapshot2.version !== 1 || snapshot2.source !== "github-pulls-list-files" || !boundedString(snapshot2.headSha, 200) || !boundedString(snapshot2.baseSha, 200) || !Array.isArray(snapshot2.files) || snapshot2.files.length > 1e4) {
     throw new RestoredSnapshotInvalidError();
   }
   return {
@@ -106376,7 +106574,10 @@ function validatePullRequestDiffSnapshot(value) {
         throw new RestoredSnapshotInvalidError();
       }
       const candidate = entry;
-      if (typeof candidate.filename !== "string" || candidate.previousFilename !== void 0 && typeof candidate.previousFilename !== "string" || typeof candidate.status !== "string" || typeof candidate.additions !== "number" || typeof candidate.deletions !== "number" || typeof candidate.changes !== "number" || candidate.fileSha !== void 0 && typeof candidate.fileSha !== "string" || typeof candidate.patchAvailable !== "boolean" || candidate.patchSha256 !== null && typeof candidate.patchSha256 !== "string") {
+      if (isRecord(entry) && Object.keys(entry).some((key) => !SNAPSHOT_FILE_KEYS.has(key))) {
+        throw new RestoredSnapshotInvalidError();
+      }
+      if (!boundedString(candidate.filename, 500) || candidate.previousFilename !== void 0 && !boundedString(candidate.previousFilename, 500) || !boundedString(candidate.status, 80) || !nonNegativeInteger(candidate.additions) || !nonNegativeInteger(candidate.deletions) || !nonNegativeInteger(candidate.changes) || candidate.fileSha !== void 0 && !boundedString(candidate.fileSha, 200) || typeof candidate.patchAvailable !== "boolean" || candidate.patchSha256 !== null && !/^[a-f0-9]{64}$/.test(candidate.patchSha256)) {
         throw new RestoredSnapshotInvalidError();
       }
       if (candidate.patchAvailable ? typeof candidate.patchSha256 !== "string" : candidate.patchSha256 !== null) {
@@ -109473,6 +109674,7 @@ async function run() {
   let incrementalDiff;
   const effectiveDiffSource = effectiveDiffSourceFor(target, resolution.phase);
   if (resolution.phase === "incremental" && target.mode === "pull-request") {
+    let snapshotsEquivalent = false;
     try {
       const previousSnapshot = requireRestoredState(
         resolution.restoredState
@@ -109486,30 +109688,31 @@ async function run() {
         currentSnapshot,
         target.changedFiles
       );
-      if (pullRequestDiffSnapshotsEquivalent(previousSnapshot, currentSnapshot)) {
-        if ((config.runtimeBackend ?? "legacy") === "legacy") {
-          await restoreRuntimeState(resolution.restoreDir, config.runtimeProvider, runtimeDir);
-        }
-        await finishSkippedIdentical({
-          config,
-          store,
-          target,
-          stateKey,
-          artifactName,
-          runtimeDir,
-          restoredState: requireRestoredState(resolution.restoredState),
-          phaseReason: resolution.lineageReason,
-          effectiveDiffSource,
-          octokit
-        });
-        return;
-      }
+      snapshotsEquivalent = pullRequestDiffSnapshotsEquivalent(previousSnapshot, currentSnapshot);
     } catch (error2) {
       if ((config.runtimeBackend ?? "legacy") === "deterministic-csharp") {
         setDeterministicErrorOutputs(new Error(`state-invalid: incremental snapshot failed`));
         throw new Error("state-invalid: incremental pull-request snapshot is unusable");
       }
       throw error2;
+    }
+    if (snapshotsEquivalent) {
+      if ((config.runtimeBackend ?? "legacy") === "legacy") {
+        await restoreRuntimeState(resolution.restoreDir, config.runtimeProvider, runtimeDir);
+      }
+      await finishSkippedIdentical({
+        config,
+        store,
+        target,
+        stateKey,
+        artifactName,
+        runtimeDir,
+        restoredState: requireRestoredState(resolution.restoredState),
+        phaseReason: resolution.lineageReason,
+        effectiveDiffSource,
+        octokit
+      });
+      return;
     }
   }
   if ((config.runtimeBackend ?? "legacy") === "legacy") {
@@ -109572,16 +109775,18 @@ async function run() {
       }
       validateDeterministicTrace(invocation.trace, invocation.inputSha256);
       for (const warning2 of boundedRuntimeMessages(invocation.result.warnings)) {
-        warning(sanitizeRuntimeDiagnostic(warning2));
+        warning(sanitizeRuntimeDiagnosticForHost(warning2));
       }
       for (const warning2 of boundedRuntimeMessages(invocation.trace.warnings)) {
-        warning(sanitizeRuntimeDiagnostic(warning2));
+        warning(sanitizeRuntimeDiagnosticForHost(warning2));
       }
       const errorDiagnostic = invocation.result.diagnostics.find(
         (diagnostic) => diagnostic.level === "error"
       );
       if (errorDiagnostic) {
-        throw new Error(`diagnostic-error: ${sanitizeRuntimeDiagnostic(errorDiagnostic.code)}`);
+        throw new Error(
+          `diagnostic-error: ${sanitizeRuntimeDiagnosticForHost(errorDiagnostic.code)}`
+        );
       }
       const diagnosticSummary = summarizeRuntimeDiagnostics([
         ...invocation.result.diagnostics,
@@ -109754,37 +109959,16 @@ async function run() {
     }
     throw error2;
   }
-  try {
-    await assertTargetHeadUnchanged(target, octokit);
-  } catch (error2) {
-    if (deterministicBackend) {
-      setDeterministicErrorOutputs(new Error("stale-target: target head could not be confirmed"));
-      throw new Error("stale-target: target head could not be confirmed");
+  if (deterministicBackend) {
+    try {
+      await assertTargetHeadUnchanged(target, octokit);
+    } catch {
+      setDeterministicErrorOutputs(new Error("state-invalid: target head could not be confirmed"));
+      throw new Error("state-invalid: target head could not be confirmed");
     }
-    throw error2;
   }
   if (deterministicBackend) {
     setDeterministicSuccessOutputs(runtimeResult);
-  }
-  let uploadedState;
-  try {
-    uploadedState = await store.upload(
-      artifactName,
-      bundleDir,
-      bundleFiles,
-      config.artifactRetentionDays
-    );
-  } catch (error2) {
-    if (deterministicBackend) {
-      await writeDeterministicUploadFailureSummary({
-        phase: resolution.phase,
-        reviewPhase: resolution.phase,
-        runtimeResult,
-        stickyWritten: false
-      });
-      throw new Error("state-invalid: state artifact upload failed");
-    }
-    throw error2;
   }
   if (deterministicBackend) {
     try {
@@ -109800,10 +109984,37 @@ async function run() {
         structuredReview,
         octokit
       });
-    } catch (error2) {
-      setDeterministicErrorOutputs(new Error(`rendering-invalid: sticky comment failed`));
+    } catch {
+      await writeDeterministicUploadFailureSummary({
+        phase: resolution.phase,
+        reviewPhase: resolution.phase,
+        runtimeResult,
+        stickyWritten: false,
+        artifactUploaded: false
+      });
       throw new Error("rendering-invalid: deterministic sticky comment could not be published");
     }
+  }
+  let uploadedState;
+  try {
+    uploadedState = await store.upload(
+      artifactName,
+      bundleDir,
+      bundleFiles,
+      config.artifactRetentionDays
+    );
+  } catch (error2) {
+    if (deterministicBackend) {
+      await writeDeterministicUploadFailureSummary({
+        phase: resolution.phase,
+        reviewPhase: resolution.phase,
+        runtimeResult,
+        stickyWritten: Boolean(comment.commentUrl),
+        artifactUploaded: false
+      });
+      throw new Error("state-invalid: state artifact upload failed");
+    }
+    throw error2;
   }
   let debugArtifact;
   if (config.debugCaptureRawApiBodies) {
@@ -109955,6 +110166,16 @@ async function resolvePhase(config, store, artifactName, tempRoot, stateKey, tar
       artifact.runHeadSha
     );
   } catch (error2) {
+    if (error2 instanceof StateManifestInvalidError) {
+      if (config.reviewMode === "auto") {
+        warning("Restored state manifest is invalid; falling back to bootstrap.");
+        return { phase: "bootstrap", lineageReason: "auto_bootstrap_invalid" };
+      }
+      if (config.runtimeBackend === "deterministic-csharp" && config.reviewMode === "incremental") {
+        throw new Error("state-invalid: restored state manifest is invalid");
+      }
+      throw error2;
+    }
     if (error2 instanceof SnapshotStateCompatibilityError || error2 instanceof RestoredSnapshotInvalidError) {
       warning(
         "Restored state artifact is not snapshot-compatible; falling back to bootstrap."
@@ -110004,7 +110225,7 @@ function validateRestoredState(restoredState, stateKey, runtimeProvider, runtime
   if (!restoredState.sessionId) {
     throw new StateArtifactInvalidError("restored state artifact is missing session_id");
   }
-  if (expectedArtifactHeadSha && restoredState.reviewedHeadSha !== expectedArtifactHeadSha) {
+  if (expectedArtifactHeadSha !== void 0 && restoredState.reviewedHeadSha !== expectedArtifactHeadSha) {
     throw new StateArtifactInvalidError(
       "restored state artifact reviewed_head_sha does not match its workflow run head_sha"
     );
@@ -110197,14 +110418,13 @@ async function finishSkippedIdentical(options) {
     }
     throw error2;
   }
-  try {
-    await assertTargetHeadUnchanged(options.target, options.octokit);
-  } catch (error2) {
-    if (deterministicBackend) {
-      setDeterministicErrorOutputs(new Error("stale-target: target head could not be confirmed"));
-      throw new Error("stale-target: target head could not be confirmed");
+  if (deterministicBackend) {
+    try {
+      await assertTargetHeadUnchanged(options.target, options.octokit);
+    } catch {
+      setDeterministicErrorOutputs(new Error("state-invalid: target head could not be confirmed"));
+      throw new Error("state-invalid: target head could not be confirmed");
     }
-    throw error2;
   }
   if (deterministicBackend) setDeterministicSuccessOutputs(runtimeResult);
   let uploadedState;
@@ -110221,7 +110441,8 @@ async function finishSkippedIdentical(options) {
         phase: "incremental",
         reviewPhase: "skipped-identical",
         runtimeResult,
-        stickyWritten: false
+        stickyWritten: false,
+        artifactUploaded: false
       });
       throw new Error("state-invalid: state artifact upload failed");
     }
@@ -110566,7 +110787,7 @@ async function writeDeterministicUploadFailureSummary(input) {
         `- Review phase: ${input.reviewPhase}`,
         `- Runtime execution: succeeded`,
         `- Sticky comment written: ${input.stickyWritten}`,
-        "- State artifact upload: failed",
+        `- State artifact upload: ${input.artifactUploaded ? "succeeded" : "failed"}`,
         "- Failure classification: state-invalid"
       ].join("\n")
     ).write();
@@ -110626,8 +110847,7 @@ function setDeterministicErrorOutputs(error2) {
     "diagnostic-error",
     "mapping-invalid",
     "state-invalid",
-    "rendering-invalid",
-    "stale-target"
+    "rendering-invalid"
   ];
   const prefix2 = message.split(":", 1)[0];
   const kind = adapterError?.kind ?? (hostKinds.includes(prefix2) ? prefix2 : "rendering-invalid");
@@ -110638,19 +110858,28 @@ function setDeterministicErrorOutputs(error2) {
   setOutput("runtime_error_class", adapterError?.exitClass ?? "");
   setOutput("usage_budget_status", "not_applicable (records=0)");
 }
-function sanitizeRuntimeDiagnostic(value) {
+function sanitizeRuntimeDiagnostic(value, secrets = []) {
   let sanitized = value.replace(/\s+/g, " ").trim();
-  for (const secret of [
-    process.env.GITHUB_TOKEN,
-    process.env.AGENTIC_REVIEW_API_KEY,
-    process.env.ANTHROPIC_API_KEY,
-    process.env.ANTHROPIC_AUTH_TOKEN
-  ].filter((item) => Boolean(item && item.length > 4))) {
+  for (const secret of secrets.filter((item) => item.length > 4)) {
     sanitized = sanitized.replaceAll(secret, "***");
   }
   return truncateText(
-    sanitized.replace(/Authorization:\s*\S+\s+\S+/gi, "Authorization: *** ***").replace(/x-api-(?:key|token):\s*\S+/gi, "x-api-key: ***").replace(/\b(?:[A-Za-z]:[\\/]|\\\\|\/\/|\/)(?:[^\s"'`()]+[\\/])*[^\s"'`()]+/g, "<path>").replace(/\b(?:ghp_|github_pat_|sk-[A-Za-z0-9])[A-Za-z0-9_-]*/gi, "***"),
+    sanitized.replace(/Authorization:\s*[^,;|]+/gi, "Authorization: ***").replace(/x-api-(?:key|token):\s*[^\s,;]+/gi, "x-api-key: ***").replace(/(^|[\s"'(=,:])(?:(?:[A-Za-z]:[\\/])|(?:\\\\)|\/)[^\s"'`() ,;]*/g, "$1<path>").replace(
+      /(^|[\s"'(=,:])(?:ghp_|github_pat_|gho_|ghu_|ghs_|ghr_|sk-)[A-Za-z0-9_-]+/gi,
+      "$1***"
+    ),
     240
+  );
+}
+function sanitizeRuntimeDiagnosticForHost(value) {
+  return sanitizeRuntimeDiagnostic(
+    value,
+    [
+      process.env.GITHUB_TOKEN,
+      process.env.AGENTIC_REVIEW_API_KEY,
+      process.env.ANTHROPIC_API_KEY,
+      process.env.ANTHROPIC_AUTH_TOKEN
+    ].filter((item) => Boolean(item))
   );
 }
 function boundedRuntimeMessages(messages) {
@@ -110666,7 +110895,7 @@ function summarizeRuntimeDiagnostics(diagnostics) {
     if (diagnostic.level === "error") {
       continue;
     }
-    const code = sanitizeRuntimeDiagnostic(diagnostic.code);
+    const code = sanitizeRuntimeDiagnosticForHost(diagnostic.code);
     counts.set(code, (counts.get(code) ?? 0) + 1);
   }
   return [...counts.entries()].slice(0, 20).map(([code, count]) => `${code}=${count}`).join(", ");
@@ -110680,5 +110909,6 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   });
 }
 export {
-  run
+  run,
+  sanitizeRuntimeDiagnostic
 };

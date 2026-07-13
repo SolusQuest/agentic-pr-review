@@ -138,7 +138,7 @@ describe('state helpers', () => {
         'utf8',
       );
       await expect(readRestoredState(dir)).rejects.toThrow(
-        'restored state manifest pull request diff snapshot is incompatible',
+        'restored state manifest shape is invalid',
       );
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -172,14 +172,14 @@ describe('state helpers', () => {
         },
         stateKey: 'synthetic-test',
         phase: 'bootstrap',
-        promptSha256: 'prompt-hash',
+        promptSha256: sha256('prompt-hash'),
         blocks: [
           {
             name: 'instructions',
             source: 'input',
             text: 'do not persist this body',
             bytes: 24,
-            sha256: 'block-hash',
+            sha256: sha256('block-hash'),
           },
         ],
         runtimeResult: {
@@ -282,7 +282,7 @@ describe('state helpers', () => {
         },
         stateKey: 'pr-1-test',
         phase: 'bootstrap',
-        promptSha256: 'prompt-hash',
+        promptSha256: sha256('prompt-hash'),
         blocks: [],
         runtimeResult: {
           sessionId: 'session-1',
@@ -362,7 +362,7 @@ describe('state helpers', () => {
           },
           stateKey: 'synthetic-test',
           phase: 'bootstrap',
-          promptSha256: 'prompt-hash',
+          promptSha256: sha256('prompt-hash'),
           blocks: [],
           runtimeResult: {
             sessionId: 'session-1',

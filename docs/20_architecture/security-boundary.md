@@ -47,7 +47,11 @@ State artifact restore is provenance-bound. The GitHub artifact store accepts on
 runs from the same workflow and event, with the same head repository and requested pull request;
 the restored manifest must be version 1, match the artifact run head SHA, target PR, and head
 repository. Unknown manifest versions and unknown top-level fields fail closed. Explicit
-`state_artifact_run_id` selection does not bypass these manifest checks.
+`state_artifact_run_id` selection does not bypass these manifest checks. For pull-request targets,
+incremental restore is allowed only on `pull_request` events; explicit selection also cannot bypass
+the artifact's association with the requested PR. The state-producing workflow must not execute
+untrusted pull-request code: it must check out a trusted/default or immutable ref, or use a separate
+trusted workflow before writing state artifacts.
 
 The host rechecks the pull request head immediately before publishing state. Downstream workflows
 should also configure per-PR concurrency with cancellation to prevent stale writers from replacing

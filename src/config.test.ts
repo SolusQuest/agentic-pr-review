@@ -173,6 +173,16 @@ describe('parseActionConfig', () => {
     ).toThrow(/state_artifact_run_id must be a positive integer/);
   });
 
+  it('limits pull-request incremental restore to pull_request events', () => {
+    expect(() =>
+      parseActionConfig(
+        new Inputs({ target_mode: 'pull-request', review_mode: 'incremental' }),
+        baseEnv,
+        'workflow_dispatch',
+      ),
+    ).toThrow(/only allowed on pull_request events/);
+  });
+
   it('requires live runtime configuration', () => {
     expect(() =>
       parseActionConfig(

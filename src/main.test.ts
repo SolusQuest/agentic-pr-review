@@ -68,7 +68,7 @@ vi.mock('@actions/core', () => ({
 
 vi.mock('@actions/github', () => ({
   context: {
-    eventName: 'workflow_dispatch',
+    eventName: 'pull_request',
     repo: { owner: 'example', repo: 'repo' },
     payload: {},
     sha: 'head-sha',
@@ -203,7 +203,7 @@ describe('run', () => {
           sessionId: 'session-1',
           sessionName: 'session-name',
           reviewedHeadSha: 'old-head-sha',
-          promptSha256: 'prompt-hash',
+          promptSha256: sha256('prompt-hash'),
           createdAt: '2026-01-01T00:00:00.000Z',
           updatedAt: '2026-01-01T00:00:00.000Z',
           usage: null,
@@ -332,6 +332,63 @@ describe('run', () => {
     expect(mocks.summary.addRaw.mock.calls.at(-1)?.[0]).not.toContain(tempRoot);
   });
 
+  it('does not upload an artifact when deterministic sticky publishing fails', async () => {
+    Object.assign(mocks.inputs, {
+      runtime_backend: 'deterministic-csharp',
+      post_comment: 'true',
+      review_mode: 'bootstrap',
+      state_key: 'deterministic-comment-failure',
+    });
+    process.env.AGENTIC_REVIEW_RUNTIME_EXECUTABLE = process.execPath;
+    process.env.AGENTIC_REVIEW_RUNTIME_PREFIX_ARGS_JSON = JSON.stringify([
+      path.join(process.cwd(), 'src/runtime-invocation/__test-fixtures__/fake-runtime.mjs'),
+    ]);
+    process.env.FAKE_RUNTIME_SCENARIO = 'success';
+
+    const { run } = await import('./main.js');
+    await expect(run()).rejects.toThrow(/deterministic sticky comment could not be published/);
+
+    expect(mocks.createComment).toHaveBeenCalledTimes(1);
+    expect(mocks.setOutput).toHaveBeenCalledWith('runtime_error_kind', '');
+    expect(mocks.summary.addRaw.mock.calls.at(-1)?.[0]).toContain('Sticky comment written: false');
+    await expect(
+      stat(
+        path.join(
+          artifactRoot,
+          deterministicStateArtifactName(deterministicStateKey('deterministic-comment-failure')),
+        ),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('keeps a successful deterministic sticky comment when state upload fails', async () => {
+    Object.assign(mocks.inputs, {
+      runtime_backend: 'deterministic-csharp',
+      post_comment: 'true',
+      review_mode: 'bootstrap',
+      state_key: 'deterministic-comment-upload-failure',
+    });
+    mocks.createComment.mockResolvedValue({
+      data: { html_url: 'https://github.com/example/repo/pull/1#issuecomment-1' },
+    });
+    process.env.AGENTIC_REVIEW_RUNTIME_EXECUTABLE = process.execPath;
+    process.env.AGENTIC_REVIEW_RUNTIME_PREFIX_ARGS_JSON = JSON.stringify([
+      path.join(process.cwd(), 'src/runtime-invocation/__test-fixtures__/fake-runtime.mjs'),
+    ]);
+    process.env.FAKE_RUNTIME_SCENARIO = 'success';
+    const blockedArtifactRoot = path.join(root, 'artifact-root-file');
+    await writeFile(blockedArtifactRoot, 'not a directory', 'utf8');
+    process.env.AGENTIC_REVIEW_LOCAL_ARTIFACT_DIR = blockedArtifactRoot;
+
+    const { run } = await import('./main.js');
+    await expect(run()).rejects.toThrow('state-invalid: state artifact upload failed');
+
+    expect(mocks.createComment).toHaveBeenCalledTimes(1);
+    expect(mocks.setOutput).toHaveBeenCalledWith('runtime_error_kind', '');
+    expect(mocks.summary.addRaw.mock.calls.at(-1)?.[0]).toContain('Sticky comment written: true');
+    expect(mocks.summary.addRaw.mock.calls.at(-1)?.[0]).toContain('State artifact upload: failed');
+  });
+
   it('keeps runtime success outputs and writes a bounded summary when state upload fails', async () => {
     Object.assign(mocks.inputs, {
       runtime_backend: 'deterministic-csharp',
@@ -353,6 +410,72 @@ describe('run', () => {
     expect(mocks.setOutput).toHaveBeenCalledWith('runtime_error_kind', '');
     expect(mocks.summary.addRaw.mock.calls.at(-1)?.[0]).toContain('State artifact upload: failed');
     expect(mocks.summary.addRaw.mock.calls.at(-1)?.[0]).not.toContain(tempRoot);
+  });
+
+  it('preserves skipped-identical upload failures instead of rewriting them as snapshot failures', async () => {
+    Object.assign(mocks.inputs, {
+      runtime_backend: 'deterministic-csharp',
+      post_comment: 'false',
+      review_mode: 'incremental',
+      state_key: 'deterministic-skipped-upload-failure',
+    });
+    const logicalStateKey = deterministicStateKey('deterministic-skipped-upload-failure');
+    await writeRestoredArtifact(
+      logicalStateKey,
+      currentSnapshot({ headSha: 'head-sha' }),
+      'deterministic-csharp',
+    );
+    process.env.AGENTIC_REVIEW_RUNTIME_EXECUTABLE = process.execPath;
+    process.env.AGENTIC_REVIEW_RUNTIME_PREFIX_ARGS_JSON = JSON.stringify([
+      path.join(process.cwd(), 'src/runtime-invocation/__test-fixtures__/fake-runtime.mjs'),
+    ]);
+    process.env.FAKE_RUNTIME_SCENARIO = 'success';
+    const blockedArtifactRoot = path.join(root, 'artifact-root-file');
+    await writeFile(blockedArtifactRoot, 'not a directory', 'utf8');
+    process.env.AGENTIC_REVIEW_LOCAL_ARTIFACT_DIR = blockedArtifactRoot;
+
+    const { run } = await import('./main.js');
+    await expect(run()).rejects.toThrow('state-invalid: state artifact upload failed');
+
+    expect(mocks.setOutput).toHaveBeenCalledWith('runtime_error_kind', '');
+    const summary = mocks.summary.addRaw.mock.calls.at(-1)?.[0] as string;
+    expect(summary).toContain('State artifact upload: failed');
+    expect(summary).not.toContain('incremental snapshot unusable');
+  });
+
+  it('preserves skipped-identical stale-head failures instead of rewriting them as snapshot failures', async () => {
+    Object.assign(mocks.inputs, {
+      runtime_backend: 'deterministic-csharp',
+      post_comment: 'false',
+      review_mode: 'incremental',
+      state_key: 'deterministic-skipped-stale-head',
+    });
+    const logicalStateKey = deterministicStateKey('deterministic-skipped-stale-head');
+    await writeRestoredArtifact(
+      logicalStateKey,
+      currentSnapshot({ headSha: 'head-sha' }),
+      'deterministic-csharp',
+    );
+    mocks.octokit.rest.pulls.get
+      .mockResolvedValueOnce({
+        data: {
+          title: 'Synthetic PR',
+          body: 'Synthetic body',
+          base: { ref: 'main', sha: 'base-sha' },
+          head: { ref: 'branch', sha: 'head-sha', repo: { full_name: 'example/repo' } },
+          draft: false,
+          html_url: 'https://github.com/example/repo/pull/1',
+        },
+      })
+      .mockResolvedValueOnce({ data: { head: { sha: 'new-head-sha' } } });
+
+    const { run } = await import('./main.js');
+    await expect(run()).rejects.toThrow('state-invalid: target head could not be confirmed');
+
+    expect(mocks.setOutput).toHaveBeenCalledWith('runtime_error_kind', 'state-invalid');
+    expect(mocks.summary.addRaw).not.toHaveBeenCalledWith(
+      expect.stringContaining('incremental snapshot unusable'),
+    );
   });
 
   it('reports bounded command errors before deterministic side effects', async () => {

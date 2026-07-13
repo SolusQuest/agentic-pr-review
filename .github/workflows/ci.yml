@@ -74,8 +74,11 @@ jobs:
           RUNTIME_VERSION: ${{ steps.deterministic.outputs.runtime_version }}
           TRACE_SHA: ${{ steps.deterministic.outputs.runtime_trace_sha256 }}
           ERROR_KIND: ${{ steps.deterministic.outputs.runtime_error_kind }}
+          ARTIFACT_NAME: ${{ steps.deterministic.outputs.artifact_name }}
         run: |
           test "$RUNTIME_BACKEND" = deterministic-csharp
           test -n "$RUNTIME_VERSION"
           test "${#TRACE_SHA}" -eq 64
           test -z "$ERROR_KIND"
+          expected="agentic-pr-review-deterministic-csharp-state-cs-$(printf %s 'ci-deterministic-smoke' | sha256sum | cut -c1-20)"
+          test "$ARTIFACT_NAME" = "$expected"

@@ -18,12 +18,12 @@ export interface ArtifactLookupContext {
 
 interface WorkflowRunMetadata {
   id: number;
-  workflowId?: number;
-  workflowPath?: string;
-  event?: string;
-  conclusion?: string;
-  headSha?: string;
-  headRepository?: string;
+  workflowId: number;
+  workflowPath: string;
+  event: string;
+  conclusion: string;
+  headSha: string;
+  headRepository: string;
   pullRequestNumbers: number[];
 }
 
@@ -59,7 +59,7 @@ export class GitHubArtifactStore implements ArtifactStore {
       const runId = Number(artifact.workflow_run?.id ?? explicitRunId ?? 0);
       if (!runId) continue;
       const run = runId === currentRun.id ? currentRun : await this.getWorkflowRun(runId);
-      if (this.isTrustedRun(run, currentRun, explicitRunId !== undefined)) {
+      if (this.isTrustedRun(run, currentRun)) {
         trusted.push({ artifact, run });
       }
     }
@@ -140,17 +140,38 @@ export class GitHubArtifactStore implements ArtifactStore {
       run_id: runId,
     });
     const run = response.data;
+    const workflowId = Number(run?.workflow_id);
+    const id = Number(run?.id);
+    const workflowPath = run?.path;
+    const event = run?.event;
+    const conclusion = run?.conclusion;
+    const headSha = run?.head_sha;
+    const headRepository = run?.head_repository?.full_name;
+    if (
+      !Number.isSafeInteger(id) ||
+      id <= 0 ||
+      !Number.isSafeInteger(workflowId) ||
+      workflowId <= 0 ||
+      typeof workflowPath !== 'string' ||
+      !workflowPath ||
+      typeof event !== 'string' ||
+      !event ||
+      typeof conclusion !== 'string' ||
+      typeof headSha !== 'string' ||
+      !headSha ||
+      typeof headRepository !== 'string' ||
+      !headRepository
+    ) {
+      throw new Error('artifact provenance metadata is incomplete');
+    }
     return {
-      id: Number(run.id),
-      workflowId: Number(run.workflow_id) || undefined,
-      workflowPath: typeof run.path === 'string' ? run.path : undefined,
-      event: typeof run.event === 'string' ? run.event : undefined,
-      conclusion: typeof run.conclusion === 'string' ? run.conclusion : undefined,
-      headSha: typeof run.head_sha === 'string' ? run.head_sha : undefined,
-      headRepository:
-        typeof run.head_repository?.full_name === 'string'
-          ? run.head_repository.full_name
-          : undefined,
+      id,
+      workflowId,
+      workflowPath,
+      event,
+      conclusion,
+      headSha,
+      headRepository,
       pullRequestNumbers: Array.isArray(run.pull_requests)
         ? run.pull_requests
             .map((pull: any) => Number(pull.number))
@@ -159,29 +180,15 @@ export class GitHubArtifactStore implements ArtifactStore {
     };
   }
 
-  private isTrustedRun(
-    candidate: WorkflowRunMetadata,
-    current: WorkflowRunMetadata,
-    explicitRunId: boolean,
-  ): boolean {
+  private isTrustedRun(candidate: WorkflowRunMetadata, current: WorkflowRunMetadata): boolean {
     if (candidate.conclusion !== 'success') return false;
-    if (current.workflowId && candidate.workflowId && current.workflowId !== candidate.workflowId) {
-      return false;
-    }
-    if (
-      current.workflowPath &&
-      candidate.workflowPath &&
-      current.workflowPath !== candidate.workflowPath
-    ) {
-      return false;
-    }
-    if (!current.workflowId && !current.workflowPath) return false;
-    if (current.event && candidate.event !== current.event) return false;
-    if (current.headRepository && candidate.headRepository !== current.headRepository) return false;
+    if (candidate.workflowId !== current.workflowId) return false;
+    if (candidate.workflowPath !== current.workflowPath) return false;
+    if (candidate.event !== current.event) return false;
+    if (candidate.headRepository !== current.headRepository) return false;
     if (this.lookupContext?.targetMode === 'pull-request' && this.lookupContext.prNumber) {
-      if (!candidate.pullRequestNumbers.includes(this.lookupContext.prNumber) && !explicitRunId) {
-        return false;
-      }
+      if (candidate.event !== 'pull_request') return false;
+      if (!candidate.pullRequestNumbers.includes(this.lookupContext.prNumber)) return false;
     }
     return true;
   }

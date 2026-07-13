@@ -82,6 +82,12 @@ export class RestoredSnapshotInvalidError extends Error {
   }
 }
 
+export class StateManifestInvalidError extends Error {
+  constructor() {
+    super('restored state manifest shape is invalid');
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -114,28 +120,317 @@ const MANIFEST_KEYS = new Set([
   'target',
 ]);
 
+const TARGET_KEYS = new Set([
+  'mode',
+  'prNumber',
+  'headRepository',
+  'baseSha',
+  'headSha',
+  'changedFiles',
+  'pullRequestDiffSnapshot',
+]);
+const REVIEW_KEYS = new Set([
+  'requestedMode',
+  'executedPhase',
+  'phaseReason',
+  'effectiveDiffSource',
+]);
+const STRUCTURED_OUTPUT_KEYS = new Set([
+  'status',
+  'inputFindingCount',
+  'postFindingCapCount',
+  'renderedFindingCount',
+  'findingsTruncated',
+  'truncationReason',
+  'inlineComments',
+]);
+const CONTEXT_BLOCK_KEYS = new Set(['name', 'source', 'bytes', 'sha256']);
+const USAGE_KEYS = new Set([
+  'inputTokens',
+  'cacheReadInputTokens',
+  'cacheCreationInputTokens',
+  'outputTokens',
+  'recordsObserved',
+]);
+const LINEAGE_USAGE_KEYS = new Set([
+  'inputTokens',
+  'cacheReadInputTokens',
+  'cacheCreationInputTokens',
+  'outputTokens',
+]);
+const LINEAGE_TOTALS_KEYS = new Set(['observedTurns', 'usage', 'source', 'partial']);
+const USAGE_BUDGET_KEYS = new Set(['status', 'limits', 'usageRecordsObserved', 'exceeded']);
+const USAGE_LIMIT_KEYS = new Set([
+  'maxUncachedInputTokens',
+  'maxCachedInputTokens',
+  'maxOutputTokens',
+]);
+const USAGE_EXCEEDED_KEYS = new Set(['category', 'limit', 'observed']);
+const INLINE_COMMENTS_KEYS = new Set([
+  'enabled',
+  'policy',
+  'candidateCount',
+  'effectiveCap',
+  'capExceededCount',
+  'postedCount',
+  'duplicateCount',
+  'skippedCount',
+  'failedCount',
+  'skippedReasons',
+  'failedReasons',
+]);
+const INLINE_POLICY_KEYS = new Set(['enabled', 'maxComments', 'minSeverity', 'minConfidence']);
+const SNAPSHOT_KEYS = new Set(['version', 'source', 'headSha', 'baseSha', 'files']);
+const SNAPSHOT_FILE_KEYS = new Set([
+  'filename',
+  'previousFilename',
+  'status',
+  'additions',
+  'deletions',
+  'changes',
+  'fileSha',
+  'patchSha256',
+  'patchAvailable',
+]);
+
+function invalidManifest(): never {
+  throw new StateManifestInvalidError();
+}
+
+function assertAllowedKeys(value: Record<string, unknown>, allowed: Set<string>): void {
+  if (Object.keys(value).some((key) => !allowed.has(key))) invalidManifest();
+}
+
+function boundedString(value: unknown, maxLength = 1024): value is string {
+  return typeof value === 'string' && value.length <= maxLength && !/[\u0000\r\n]/.test(value);
+}
+
+function nonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function optionalPositiveInteger(value: unknown): boolean {
+  return (
+    value === undefined || (typeof value === 'number' && Number.isSafeInteger(value) && value > 0)
+  );
+}
+
+function validateUsage(value: unknown): void {
+  if (!isRecord(value)) invalidManifest();
+  assertAllowedKeys(value, USAGE_KEYS);
+  if (
+    !nonNegativeInteger(value.inputTokens) ||
+    !nonNegativeInteger(value.cacheReadInputTokens) ||
+    !nonNegativeInteger(value.cacheCreationInputTokens) ||
+    !nonNegativeInteger(value.outputTokens) ||
+    !nonNegativeInteger(value.recordsObserved)
+  ) {
+    invalidManifest();
+  }
+}
+
+function validateLineageTotals(value: unknown): void {
+  if (!isRecord(value)) invalidManifest();
+  assertAllowedKeys(value, LINEAGE_TOTALS_KEYS);
+  if (
+    !(value.observedTurns === null || nonNegativeInteger(value.observedTurns)) ||
+    !isRecord(value.usage) ||
+    (value.source !== 'current_run_only' &&
+      value.source !== 'restored_manifest_plus_current_run' &&
+      value.source !== 'restored_manifest_preserved_for_skipped' &&
+      value.source !== 'legacy_manifest_fallback' &&
+      value.source !== 'unavailable') ||
+    typeof value.partial !== 'boolean'
+  ) {
+    invalidManifest();
+  }
+  assertAllowedKeys(value.usage, LINEAGE_USAGE_KEYS);
+  if (
+    !nonNegativeInteger(value.usage.inputTokens) ||
+    !nonNegativeInteger(value.usage.cacheReadInputTokens) ||
+    !nonNegativeInteger(value.usage.cacheCreationInputTokens) ||
+    !nonNegativeInteger(value.usage.outputTokens)
+  ) {
+    invalidManifest();
+  }
+}
+
+function validateUsageBudgetStatus(value: unknown): void {
+  if (!isRecord(value) || !isRecord(value.limits)) invalidManifest();
+  assertAllowedKeys(value, USAGE_BUDGET_KEYS);
+  assertAllowedKeys(value.limits, USAGE_LIMIT_KEYS);
+  if (
+    (value.status !== 'disabled' &&
+      value.status !== 'within_limit' &&
+      value.status !== 'exceeded' &&
+      value.status !== 'not_applicable') ||
+    !nonNegativeInteger(value.limits.maxUncachedInputTokens) ||
+    !nonNegativeInteger(value.limits.maxCachedInputTokens) ||
+    !nonNegativeInteger(value.limits.maxOutputTokens) ||
+    !nonNegativeInteger(value.usageRecordsObserved)
+  ) {
+    invalidManifest();
+  }
+  if (value.exceeded !== undefined) {
+    if (!isRecord(value.exceeded)) invalidManifest();
+    assertAllowedKeys(value.exceeded, USAGE_EXCEEDED_KEYS);
+    if (
+      (value.exceeded.category !== 'uncached_input' &&
+        value.exceeded.category !== 'cached_input' &&
+        value.exceeded.category !== 'output') ||
+      !nonNegativeInteger(value.exceeded.limit) ||
+      !nonNegativeInteger(value.exceeded.observed)
+    ) {
+      invalidManifest();
+    }
+  }
+}
+
+function validateCountRecord(value: unknown): void {
+  if (!isRecord(value)) invalidManifest();
+  for (const count of Object.values(value)) {
+    if (!nonNegativeInteger(count)) invalidManifest();
+  }
+}
+
+function validateInlineComments(value: unknown): void {
+  if (!isRecord(value) || !isRecord(value.policy)) invalidManifest();
+  assertAllowedKeys(value, INLINE_COMMENTS_KEYS);
+  assertAllowedKeys(value.policy, INLINE_POLICY_KEYS);
+  if (
+    typeof value.enabled !== 'boolean' ||
+    typeof value.policy.enabled !== 'boolean' ||
+    !nonNegativeInteger(value.policy.maxComments) ||
+    (value.policy.minSeverity !== 'low' &&
+      value.policy.minSeverity !== 'medium' &&
+      value.policy.minSeverity !== 'high') ||
+    (value.policy.minConfidence !== 'medium' && value.policy.minConfidence !== 'high')
+  ) {
+    invalidManifest();
+  }
+  for (const key of [
+    'candidateCount',
+    'effectiveCap',
+    'capExceededCount',
+    'postedCount',
+    'duplicateCount',
+    'skippedCount',
+    'failedCount',
+  ]) {
+    if (!nonNegativeInteger(value[key])) invalidManifest();
+  }
+  validateCountRecord(value.skippedReasons);
+  validateCountRecord(value.failedReasons);
+}
+
+function validateStructuredOutput(value: unknown): void {
+  if (!isRecord(value)) invalidManifest();
+  assertAllowedKeys(value, STRUCTURED_OUTPUT_KEYS);
+  if (
+    (value.status !== 'valid' &&
+      value.status !== 'extracted' &&
+      value.status !== 'invalid_json' &&
+      value.status !== 'schema_invalid') ||
+    !nonNegativeInteger(value.inputFindingCount) ||
+    !nonNegativeInteger(value.postFindingCapCount) ||
+    !nonNegativeInteger(value.renderedFindingCount) ||
+    typeof value.findingsTruncated !== 'boolean' ||
+    (value.truncationReason !== undefined &&
+      value.truncationReason !== 'max_findings' &&
+      value.truncationReason !== 'max_review_chars' &&
+      value.truncationReason !== 'both')
+  ) {
+    invalidManifest();
+  }
+  if (value.inlineComments !== undefined) validateInlineComments(value.inlineComments);
+}
+
 function validateManifestShape(value: unknown): asserts value is StateManifest {
   if (!isRecord(value) || [...Object.keys(value)].some((key) => !MANIFEST_KEYS.has(key))) {
-    throw new RestoredSnapshotInvalidError();
+    invalidManifest();
   }
   if (
     value.version !== 1 ||
     value.workflow !== 'agentic-pr-review' ||
-    typeof value.stateKey !== 'string' ||
+    !boundedString(value.stateKey, 200) ||
     (value.phase !== 'bootstrap' && value.phase !== 'incremental') ||
-    typeof value.runtimeProvider !== 'string' ||
-    typeof value.toolMode !== 'string' ||
+    (value.runtimeProvider !== 'test' && value.runtimeProvider !== 'claude-code-cli') ||
+    (value.runtimeBackend !== undefined &&
+      value.runtimeBackend !== 'legacy' &&
+      value.runtimeBackend !== 'deterministic-csharp') ||
+    (value.toolMode !== 'none' && value.toolMode !== 'readonly') ||
     !Array.isArray(value.allowedTools) ||
-    value.allowedTools.some((item) => typeof item !== 'string') ||
-    typeof value.sessionId !== 'string' ||
-    typeof value.sessionName !== 'string' ||
+    value.allowedTools.length > 20 ||
+    value.allowedTools.some((item) => !boundedString(item, 80)) ||
+    !boundedString(value.sessionId, 200) ||
+    !boundedString(value.sessionName, 200) ||
+    (value.reviewedHeadSha !== undefined && !boundedString(value.reviewedHeadSha, 200)) ||
+    (value.promptSha256 !== undefined && !/^[a-f0-9]{64}$/.test(String(value.promptSha256))) ||
+    (value.reviewInputSha256 !== undefined &&
+      !/^[a-f0-9]{64}$/.test(String(value.reviewInputSha256))) ||
+    (value.reviewInputBytes !== undefined && !nonNegativeInteger(value.reviewInputBytes)) ||
+    !boundedString(value.createdAt, 80) ||
+    !boundedString(value.updatedAt, 80) ||
+    !(value.usage === null || isRecord(value.usage)) ||
+    (value.observedTurns !== undefined &&
+      !(value.observedTurns === null || nonNegativeInteger(value.observedTurns))) ||
+    (value.observedTurnSource !== undefined && !boundedString(value.observedTurnSource, 80)) ||
+    (value.lineageTotals !== undefined && !isRecord(value.lineageTotals)) ||
     !isRecord(value.target) ||
-    typeof value.target.mode !== 'string' ||
-    typeof value.target.baseSha !== 'string' ||
-    typeof value.target.headSha !== 'string' ||
-    typeof value.target.changedFiles !== 'number'
+    !isRecord(value.structuredOutput) ||
+    !Array.isArray(value.contextBlocks) ||
+    value.contextBlocks.length > 3
   ) {
-    throw new RestoredSnapshotInvalidError();
+    invalidManifest();
+  }
+  if (value.usage !== null) validateUsage(value.usage);
+  if (value.lineageTotals !== undefined) validateLineageTotals(value.lineageTotals);
+  validateUsageBudgetStatus(value.usageBudgetStatus);
+  validateStructuredOutput(value.structuredOutput);
+  if (value.review !== undefined) {
+    if (!isRecord(value.review)) invalidManifest();
+    assertAllowedKeys(value.review, REVIEW_KEYS);
+    if (
+      (value.review.requestedMode !== 'auto' &&
+        value.review.requestedMode !== 'bootstrap' &&
+        value.review.requestedMode !== 'incremental') ||
+      (value.review.executedPhase !== 'bootstrap' &&
+        value.review.executedPhase !== 'incremental') ||
+      !boundedString(value.review.phaseReason, 120) ||
+      (value.review.effectiveDiffSource !== 'target_changed_files' &&
+        value.review.effectiveDiffSource !== 'bootstrap_pr_files' &&
+        value.review.effectiveDiffSource !== 'incremental_pr_diff_snapshot_delta')
+    ) {
+      invalidManifest();
+    }
+  }
+  for (const block of value.contextBlocks) {
+    if (!isRecord(block)) invalidManifest();
+    assertAllowedKeys(block, CONTEXT_BLOCK_KEYS);
+    if (
+      !boundedString(block.name, 80) ||
+      (block.source !== 'input' && block.source !== 'path') ||
+      !nonNegativeInteger(block.bytes) ||
+      !/^[a-f0-9]{64}$/.test(String(block.sha256))
+    ) {
+      invalidManifest();
+    }
+  }
+  const target = value.target;
+  assertAllowedKeys(target, TARGET_KEYS);
+  if (
+    (target.mode !== 'pull-request' && target.mode !== 'synthetic-fixture') ||
+    !optionalPositiveInteger(target.prNumber) ||
+    (target.headRepository !== undefined && !boundedString(target.headRepository, 200)) ||
+    !boundedString(target.baseSha, 200) ||
+    !boundedString(target.headSha, 200) ||
+    !nonNegativeInteger(target.changedFiles) ||
+    (target.pullRequestDiffSnapshot !== undefined && !isRecord(target.pullRequestDiffSnapshot))
+  ) {
+    invalidManifest();
+  }
+  if (target.pullRequestDiffSnapshot !== undefined) {
+    validatePullRequestDiffSnapshot(target.pullRequestDiffSnapshot);
   }
 }
 
@@ -297,12 +592,16 @@ function validatePullRequestDiffSnapshot(value: unknown): PullRequestDiffSnapsho
     throw new RestoredSnapshotInvalidError();
   }
   const snapshot = value as PullRequestDiffSnapshotV1;
+  if (isRecord(value) && Object.keys(value).some((key) => !SNAPSHOT_KEYS.has(key))) {
+    throw new RestoredSnapshotInvalidError();
+  }
   if (
     snapshot.version !== 1 ||
     snapshot.source !== 'github-pulls-list-files' ||
-    typeof snapshot.headSha !== 'string' ||
-    typeof snapshot.baseSha !== 'string' ||
-    !Array.isArray(snapshot.files)
+    !boundedString(snapshot.headSha, 200) ||
+    !boundedString(snapshot.baseSha, 200) ||
+    !Array.isArray(snapshot.files) ||
+    snapshot.files.length > 10_000
   ) {
     throw new RestoredSnapshotInvalidError();
   }
@@ -316,17 +615,20 @@ function validatePullRequestDiffSnapshot(value: unknown): PullRequestDiffSnapsho
         throw new RestoredSnapshotInvalidError();
       }
       const candidate = entry as PullRequestDiffSnapshotV1['files'][number];
+      if (isRecord(entry) && Object.keys(entry).some((key) => !SNAPSHOT_FILE_KEYS.has(key))) {
+        throw new RestoredSnapshotInvalidError();
+      }
       if (
-        typeof candidate.filename !== 'string' ||
+        !boundedString(candidate.filename, 500) ||
         (candidate.previousFilename !== undefined &&
-          typeof candidate.previousFilename !== 'string') ||
-        typeof candidate.status !== 'string' ||
-        typeof candidate.additions !== 'number' ||
-        typeof candidate.deletions !== 'number' ||
-        typeof candidate.changes !== 'number' ||
-        (candidate.fileSha !== undefined && typeof candidate.fileSha !== 'string') ||
+          !boundedString(candidate.previousFilename, 500)) ||
+        !boundedString(candidate.status, 80) ||
+        !nonNegativeInteger(candidate.additions) ||
+        !nonNegativeInteger(candidate.deletions) ||
+        !nonNegativeInteger(candidate.changes) ||
+        (candidate.fileSha !== undefined && !boundedString(candidate.fileSha, 200)) ||
         typeof candidate.patchAvailable !== 'boolean' ||
-        (candidate.patchSha256 !== null && typeof candidate.patchSha256 !== 'string')
+        (candidate.patchSha256 !== null && !/^[a-f0-9]{64}$/.test(candidate.patchSha256))
       ) {
         throw new RestoredSnapshotInvalidError();
       }
