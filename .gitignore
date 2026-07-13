@@ -6,5 +6,6 @@ dist/
 *.tsbuildinfo
 .agentic-pr-review-local/
 .local/
+.codex/
 runtime/**/bin/
 runtime/**/obj/

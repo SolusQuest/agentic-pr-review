@@ -181,7 +181,7 @@ public sealed class RuntimeApplication
             StagedFile? staged = null;
             try
             {
-                var trace = CreateTrace(inputHash, [new RuntimeDiagnostic(failure.Code, failure.Message, "error")]);
+                var trace = CreateTrace(inputHash, [new RuntimeDiagnostic(failure.Code, failure.Message, "error")], "failure");
                 var bytes = RuntimeJson.SerializeTrace(trace);
                 ValidateOutput(SchemaKind.Trace, bytes, "failure trace");
                 staged = await fileSystem.StageAsync(invocation.TracePath, bytes);
@@ -399,8 +399,8 @@ public sealed class RuntimeApplication
         }
     }
 
-    private static ReviewTrace CreateTrace(string inputHash, RuntimeDiagnostic[] diagnostics) =>
-        new(1, RuntimeVersion, inputHash, "deterministic-fixture", [], [], diagnostics);
+    private static ReviewTrace CreateTrace(string inputHash, RuntimeDiagnostic[] diagnostics, string fixture = "bootstrap") =>
+        new(1, RuntimeVersion, inputHash, "deterministic-fixture", fixture, [], [], diagnostics);
 
     private static ReviewResult CreateResult(string inputHash, string traceHash, ExecutionOutcome outcome) =>
         new(1, RuntimeVersion, inputHash, Summary, outcome.Findings, [Limitation], [], [], new ReviewTraceReference(null, traceHash));

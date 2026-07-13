@@ -2,3 +2,4 @@ node_modules/
 dist/
 .github/actions/agentic-pr-review/dist/
 runtime/tests/fixtures/deterministic/**
+.codex/
