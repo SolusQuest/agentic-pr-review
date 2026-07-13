@@ -5,8 +5,9 @@
  * This TypeScript interface is developer ergonomics only; the JSON Schema is authoritative.
  *
  * The trace carries sanitized execution evidence for deterministic validation and future
- * replay. It is runtime-produced; the host stores, uploads, and verifies trace files but
- * does not author their content. The trace is optional - a review can complete without one.
+ * replay. It is runtime-produced; the deterministic adapter materializes it temporarily,
+ * validates it in memory, and does not persist or upload it in the #34 deterministic path.
+ * The trace is optional - a review can complete without one.
  *
  * Hash chain:
  *   ReviewInputV1  --(inputSha256)-->  ReviewTraceV1
@@ -20,10 +21,8 @@
  * is the runtime's responsibility (#18+).
  */
 
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { Ajv, type ErrorObject } from 'ajv';
+import schema from '../../protocol/schemas/review-trace.v1.json' with { type: 'json' };
 
 export type ReviewTraceModeV1 = 'deterministic-fixture' | 'live-provider' | 'skipped';
 
@@ -88,10 +87,6 @@ export interface ReviewTraceValidationResult {
   ok: boolean;
   errors?: string[];
 }
-
-const here = dirname(fileURLToPath(import.meta.url));
-const schemaPath = join(here, '..', '..', 'protocol', 'schemas', 'review-trace.v1.json');
-const schema = JSON.parse(readFileSync(schemaPath, 'utf8')) as object;
 
 const ajv = new Ajv({ strict: true, allErrors: true });
 const validateSchema = ajv.compile<ReviewTraceV1>(schema);

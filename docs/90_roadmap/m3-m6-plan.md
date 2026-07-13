@@ -68,7 +68,7 @@ Related paths:
 
 ### [Feature: Add guarded C# runtime execution path to the action](https://github.com/SolusQuest/agentic-pr-review/issues/34)
 
-Refinement status: not agent-ready. The publishing boundary is settled; input naming, compatibility behavior, and rollout shape require refinement.
+Refinement status: agent-ready; refined in issue #34 before implementation.
 
 Objective: wire the invocation adapter into an explicit guarded action path and map validated runtime results into the current host-owned structured review and sticky publishing pipeline.
 
@@ -76,11 +76,12 @@ Dependencies: #18, #19, #20, #21, and #33.
 
 In scope:
 
-- explicit test-only or opt-in runtime path;
+- explicit default-off `runtime_backend=deterministic-csharp` path;
 - mapping validated `ReviewResultV1` into current structured review handling;
 - host-owned phase, SHA, usage-budget, lineage, fingerprint, and publishing metadata;
 - sticky-only behavior for the first integrated runtime path;
-- fail-closed handling before any comment or artifact side effect.
+- fail-closed handling before any comment or artifact side effect;
+- backend-aware state identity, trusted command resolution, deterministic trace policy, and bounded outputs.
 
 Out of scope:
 
@@ -89,12 +90,9 @@ Out of scope:
 - live provider or session ledger support;
 - changing the model/runtime ownership of GitHub side effects.
 
-Open decisions for refinement:
-
-- whether the first guard is a test-only mode or a public experimental input;
-- how runtime compatibility/version errors appear in step summary and action outputs;
-- which existing structured-review helper becomes the single mapping boundary;
-- whether safe trace upload is included in the same PR or deferred to the integration-fixture task.
+Refined decisions are recorded in issue #34. The first path is public experimental but default-off,
+uses `runtime_provider=test`, is sticky-only, and excludes trace artifact upload; #35 owns real
+cross-language process fixtures and CI orchestration.
 
 Related paths:
 

@@ -9,6 +9,7 @@ import {
   type StructuredFindingV1,
   type StructuredReviewEnvelopeV1,
 } from './types.js';
+import type { RuntimeReviewContentV1 } from './protocol/map-review-result.js';
 import { normalizeRepoRelativePath, sha256 } from './utils.js';
 
 export type StructuredOutputStatus = 'valid' | 'extracted' | 'invalid_json' | 'schema_invalid';
@@ -26,6 +27,21 @@ export interface StructuredResultMetadata {
 
 export interface StructuredReviewNormalizationInput {
   modelJsonText: string;
+  target: ReviewTarget;
+  phase: Phase;
+  previousReviewedHeadSha?: string;
+  reviewedRange: ReviewedRange;
+  config: Pick<ActionConfig, 'runtimeProvider' | 'toolMode'>;
+  sessionId: string;
+  usage: RuntimeUsage | null;
+  observedTurns: number | null;
+  observedTurnSource: string;
+  lineageTotals: RuntimeLineageTotals;
+  maxFindings: number;
+}
+
+export interface StructuredReviewAssemblyInput {
+  content: RuntimeReviewContentV1;
   target: ReviewTarget;
   phase: Phase;
   previousReviewedHeadSha?: string;
@@ -108,6 +124,58 @@ export function normalizeStructuredReview(input: StructuredReviewNormalizationIn
       findingsTruncated,
       truncationReason,
       status: parsed.status,
+    },
+  };
+}
+
+/** Assemble runtime-owned typed content with host-owned review metadata. */
+export function assembleStructuredReviewFromRuntimeContent(input: StructuredReviewAssemblyInput): {
+  envelope: StructuredReviewEnvelopeV1;
+  metadata: StructuredResultMetadata;
+} {
+  const normalizedFindings = input.content.findings.map((finding) =>
+    normalizeFinding(finding as unknown as Record<string, unknown>),
+  );
+  const scopedFindings = filterFindingsToCurrentReviewScope(normalizedFindings, input.target);
+  const inputFindingCount = scopedFindings.length;
+  const cappedFindings = scopedFindings.slice(0, input.maxFindings);
+  const postFindingCapCount = cappedFindings.length;
+  const findingsTruncated = inputFindingCount > cappedFindings.length;
+  const truncationReason = findingsTruncated ? 'max_findings' : undefined;
+  const envelope: StructuredReviewEnvelopeV1 = {
+    schemaVersion: 1,
+    phase: input.phase,
+    baseSha: input.target.baseSha,
+    headSha: input.target.headSha,
+    previousReviewedHeadSha: input.previousReviewedHeadSha ?? null,
+    reviewedRange: input.reviewedRange,
+    toolMode: input.config.toolMode,
+    runtimeProvider: input.config.runtimeProvider,
+    sessionId: input.sessionId,
+    summary: input.content.summary,
+    findings: cappedFindings,
+    limitations: input.content.limitations,
+    usage: input.usage,
+    observedTurns: input.observedTurns,
+    observedTurnSource: input.observedTurnSource,
+    lineageTotals: input.lineageTotals,
+    result: {
+      inputFindingCount,
+      postFindingCapCount,
+      renderedFindingCount: cappedFindings.length,
+      findingsTruncated,
+      truncationReason,
+    },
+  };
+  return {
+    envelope,
+    metadata: {
+      inputFindingCount,
+      postFindingCapCount,
+      renderedFindingCount: cappedFindings.length,
+      findingsTruncated,
+      truncationReason,
+      status: 'valid',
     },
   };
 }

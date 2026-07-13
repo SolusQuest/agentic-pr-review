@@ -4,6 +4,7 @@ import {
   type InlineCommentConfidence,
   type InlineCommentSeverity,
   type ReviewMode,
+  type RuntimeBackend,
   type RuntimeProvider,
   type TargetMode,
   type TestRuntimeFixture,
@@ -24,6 +25,10 @@ export interface InputReader {
 }
 
 const RUNTIME_PROVIDERS = ['test', 'claude-code-cli'] as const satisfies readonly RuntimeProvider[];
+const RUNTIME_BACKENDS = [
+  'legacy',
+  'deterministic-csharp',
+] as const satisfies readonly RuntimeBackend[];
 const TARGET_MODES = ['pull-request', 'synthetic-fixture'] as const satisfies readonly TargetMode[];
 const REVIEW_MODES = ['auto', 'bootstrap', 'incremental'] as const satisfies readonly ReviewMode[];
 const API_KEY_MODES = ['auth-token', 'api-key', 'both'] as const satisfies readonly ApiKeyMode[];
@@ -73,6 +78,11 @@ export function parseActionConfig(
     'runtime_provider',
     RUNTIME_PROVIDERS,
   );
+  const runtimeBackend = oneOf(
+    optionalInput(reader, 'runtime_backend') ?? 'legacy',
+    'runtime_backend',
+    RUNTIME_BACKENDS,
+  );
   const targetMode = oneOf(
     optionalInput(reader, 'target_mode') ?? 'pull-request',
     'target_mode',
@@ -96,6 +106,7 @@ export function parseActionConfig(
   );
 
   const config: ActionConfig = {
+    runtimeBackend,
     runtimeProvider,
     targetMode,
     reviewMode,
@@ -200,13 +211,72 @@ export function parseActionConfig(
   assertMutuallyExclusive(config, 'instructions', 'instructionsPath');
   assertMutuallyExclusive(config, 'bootstrapContext', 'bootstrapContextPath');
   assertMutuallyExclusive(config, 'incrementalContext', 'incrementalContextPath');
+  if (
+    config.runtimeBackend === 'deterministic-csharp' &&
+    config.targetMode === 'pull-request' &&
+    config.reviewMode === 'incremental' &&
+    eventName !== 'pull_request'
+  ) {
+    throw new Error(
+      'config-invalid: pull-request incremental restore is only allowed on pull_request events',
+    );
+  }
+  validateDeterministicRuntimeConfig(config);
   validateLiveRuntimeConfig(config);
   validateDebugCapture(config, eventName);
   return config;
 }
 
+function validateDeterministicRuntimeConfig(config: ActionConfig): void {
+  if (config.runtimeBackend !== 'deterministic-csharp') {
+    return;
+  }
+  if (config.runtimeProvider !== 'test') {
+    throw new Error(
+      'config-invalid: runtime_backend=deterministic-csharp requires runtime_provider=test',
+    );
+  }
+  if (config.targetMode === 'synthetic-fixture' && config.postComment) {
+    throw new Error(
+      'config-invalid: runtime_backend=deterministic-csharp with target_mode=synthetic-fixture requires post_comment=false',
+    );
+  }
+  const invalid: string[] = [];
+  if (config.toolMode !== 'none') invalid.push('tool_mode');
+  if (config.inlineComments) invalid.push('inline_comments');
+  if (config.maxInlineComments !== 5) invalid.push('max_inline_comments');
+  if (config.inlineMinSeverity !== 'medium') invalid.push('inline_min_severity');
+  if (config.inlineMinConfidence !== 'high') invalid.push('inline_min_confidence');
+  if (config.testRuntimeFixture !== 'valid') invalid.push('test_runtime_fixture');
+  if (config.debugCaptureRawApiBodies) invalid.push('debug_capture_raw_api_bodies');
+  if (config.disablePromptCaching) invalid.push('disable_prompt_caching');
+  if (config.apiKeyMode !== 'auth-token') invalid.push('api_key_mode');
+  if (config.claudeMaxTurns !== 6) invalid.push('claude_max_turns');
+  if (
+    config.usageBudgetLimits.maxUncachedInputTokens !== 0 ||
+    config.usageBudgetLimits.maxCachedInputTokens !== 0 ||
+    config.usageBudgetLimits.maxOutputTokens !== 0
+  ) {
+    invalid.push('usage_budget');
+  }
+  if (config.modelBaseUrl) invalid.push('model_base_url');
+  if (config.modelName) invalid.push('model_name');
+  if (config.smallModelName) invalid.push('small_model_name');
+  if (config.claudeCodeVersion) invalid.push('claude_code_version');
+  if (config.apiKey) invalid.push('AGENTIC_REVIEW_API_KEY');
+  if (config.debugAcknowledgement) invalid.push('debug_acknowledgement');
+  if (invalid.length > 0) {
+    throw new Error(
+      `config-invalid: runtime_backend=deterministic-csharp configuration is invalid: ${invalid.join(', ')}`,
+    );
+  }
+}
+
 function validateLiveRuntimeConfig(config: ActionConfig): void {
-  if (config.runtimeProvider !== 'claude-code-cli') {
+  if (
+    config.runtimeBackend === 'deterministic-csharp' ||
+    config.runtimeProvider !== 'claude-code-cli'
+  ) {
     return;
   }
   required(config.modelBaseUrl, 'model_base_url');

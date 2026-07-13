@@ -63,12 +63,12 @@ Key result conventions:
 
 ## Trace Contract (ReviewTraceV1)
 
-ReviewTraceV1 is defined (#16) and carries sanitized execution evidence for deterministic validation and as one input to a future replay bundle. The trace is runtime-produced and optional - a review can complete without one. The host stores, uploads, and verifies trace files but does not author their content. The M2 `review` CLI is stricter: it requires `--trace` and commits a valid trace before returning success; see [runtime-cli-process-contract.md](./runtime-cli-process-contract.md).
+ReviewTraceV1 is defined (#16) and carries sanitized execution evidence for deterministic validation and as one input to a future replay bundle. The trace is runtime-produced and optional - a review can complete without one. The adapter materializes the trace temporarily, validates it in memory, and does not persist or upload it in the #34 deterministic host path. The M2 `review` CLI is stricter: it requires `--trace` and commits a valid trace before returning success; see [runtime-cli-process-contract.md](./runtime-cli-process-contract.md).
 
 ReviewTraceV1 includes:
 
 - `protocolVersion` - integer protocol-generation version, shared across input/result/trace
-- `runtimeVersion` - opaque runtime version supplied by the runtime
+- `runtimeVersion` - bounded opaque single-line runtime version supplied by the runtime (maximum 120 characters)
 - `inputSha256` - required lowercase hex SHA-256 of the consumed input file bytes
 - `resultSha256` - optional lowercase hex SHA-256 of the produced result file bytes; it is absent when no valid result exists and on the M2 CLI's non-circular success path
 - `mode` - execution context (`deterministic-fixture | live-provider | skipped`); reflects run type, not success/failure
@@ -186,6 +186,16 @@ Replay must not require GitHub credentials or live GitHub state. Replay material
 ## Future: Session Ledger Artifact
 
 The current protocol defines `ReviewInputV1`, `ReviewResultV1`, and `ReviewTraceV1`. A future project-owned runtime that resumes context across GitHub Actions runs will need an additional artifact type (for example, `ProviderSessionLedgerV1` or `RuntimeSessionV1`) to carry the canonical session ledger.
+
+## Deterministic C# Host Integration
+
+The default-off `runtime_backend=deterministic-csharp` path constructs and validates `ReviewInputV1`,
+invokes the trusted command through `invokeRuntime()`, validates the deterministic trace semantics,
+and maps `ReviewResultV1` with `mapReviewResultV1ToRuntimeContent()`. The host then assembles the
+typed content into the existing `StructuredReviewEnvelopeV1`; it does not round-trip typed content
+through the legacy `modelReviewJson` parser. Runtime warnings and diagnostics remain side-channel
+metadata, while phase, SHA, state, lineage, usage-budget, fingerprints, and publishing facts remain
+host-owned.
 
 This ledger artifact is distinct from `ReviewTraceV1`:
 

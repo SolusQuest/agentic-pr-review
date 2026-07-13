@@ -39,3 +39,46 @@ jobs:
           state_key: ci-synthetic-smoke
         env:
           GITHUB_TOKEN: ${{ github.token }}
+
+  deterministic-action-smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v6
+      - name: Prepare fake deterministic runtime
+        shell: bash
+        run: |
+          runtime_dir="$RUNNER_TEMP/agentic-pr-review-fake-runtime"
+          mkdir -p "$runtime_dir"
+          cp src/runtime-invocation/__test-fixtures__/fake-runtime.mjs "$runtime_dir/fake-runtime.mjs"
+          echo "AGENTIC_REVIEW_RUNTIME_EXECUTABLE=$(realpath "$(command -v node)")" >> "$GITHUB_ENV"
+          echo "AGENTIC_REVIEW_RUNTIME_PREFIX_ARGS_JSON=[\"$runtime_dir/fake-runtime.mjs\"]" >> "$GITHUB_ENV"
+      - name: Run deterministic action smoke
+        id: deterministic
+        uses: ./.github/actions/agentic-pr-review
+        with:
+          runtime_backend: deterministic-csharp
+          runtime_provider: test
+          target_mode: synthetic-fixture
+          review_mode: bootstrap
+          state_key: ci-deterministic-smoke
+          post_comment: 'false'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Assert deterministic outputs
+        shell: bash
+        env:
+          RUNTIME_BACKEND: ${{ steps.deterministic.outputs.runtime_backend }}
+          RUNTIME_VERSION: ${{ steps.deterministic.outputs.runtime_version }}
+          TRACE_SHA: ${{ steps.deterministic.outputs.runtime_trace_sha256 }}
+          ERROR_KIND: ${{ steps.deterministic.outputs.runtime_error_kind }}
+          ARTIFACT_NAME: ${{ steps.deterministic.outputs.artifact_name }}
+        run: |
+          test "$RUNTIME_BACKEND" = deterministic-csharp
+          test -n "$RUNTIME_VERSION"
+          test "${#TRACE_SHA}" -eq 64
+          test -z "$ERROR_KIND"
+          expected="agentic-pr-review-deterministic-csharp-state-cs-$(printf %s 'ci-deterministic-smoke' | sha256sum | cut -c1-20)"
+          test "$ARTIFACT_NAME" = "$expected"

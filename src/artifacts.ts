@@ -8,6 +8,24 @@ export interface ArtifactRef {
   id: number;
   name: string;
   workflowRunId: number;
+  runHeadSha?: string;
+}
+
+export interface ArtifactLookupContext {
+  targetMode: 'pull-request' | 'synthetic-fixture';
+  prNumber?: number;
+  runtimeBackend?: 'legacy' | 'deterministic-csharp';
+}
+
+interface WorkflowRunMetadata {
+  id: number;
+  workflowId?: number;
+  workflowPath?: string;
+  event?: string;
+  conclusion?: string;
+  headSha?: string;
+  headRepository?: string;
+  pullRequestNumbers: number[];
 }
 
 export interface ArtifactStore {
@@ -28,22 +46,63 @@ export class GitHubArtifactStore implements ArtifactStore {
     private readonly owner: string,
     private readonly repo: string,
     private readonly currentRunId: number,
+    private readonly lookupContext?: ArtifactLookupContext,
   ) {}
 
   async findStateArtifact(name: string, explicitRunId?: number): Promise<ArtifactRef | undefined> {
+    if (this.lookupContext?.runtimeBackend === 'legacy') {
+      return this.findLegacyStateArtifact(name, explicitRunId);
+    }
+    const strictProvenance = true;
+    const currentRun = await this.getWorkflowRun(this.currentRunId, strictProvenance);
+    const artifacts = explicitRunId
+      ? await this.listWorkflowRunArtifacts(name, explicitRunId)
+      : await this.listRepoArtifacts(name);
+    const trusted = [] as Array<{ artifact: any; run: WorkflowRunMetadata }>;
+    for (const artifact of artifacts) {
+      if (artifact.name !== name || artifact.expired || !artifact.id) continue;
+      const runId = Number(artifact.workflow_run?.id ?? explicitRunId ?? 0);
+      if (!runId) continue;
+      let run: WorkflowRunMetadata;
+      try {
+        run =
+          runId === currentRun.id ? currentRun : await this.getWorkflowRun(runId, strictProvenance);
+      } catch {
+        continue;
+      }
+      if (this.isTrustedRun(run, currentRun, explicitRunId, strictProvenance)) {
+        trusted.push({ artifact, run });
+      }
+    }
+    const match = trusted.sort((a, b) =>
+      String(b.artifact.created_at).localeCompare(String(a.artifact.created_at)),
+    )[0];
+    if (!match?.artifact?.id) {
+      return undefined;
+    }
+    return {
+      id: Number(match.artifact.id),
+      name: String(match.artifact.name),
+      workflowRunId: match.run.id,
+      runHeadSha: match.run.headSha,
+    };
+  }
+
+  private async findLegacyStateArtifact(
+    name: string,
+    explicitRunId?: number,
+  ): Promise<ArtifactRef | undefined> {
     const artifacts = explicitRunId
       ? await this.listWorkflowRunArtifacts(name, explicitRunId)
       : await this.listRepoArtifacts(name);
     const match = artifacts
-      .filter((artifact: any) => artifact.name === name && !artifact.expired)
-      .sort((a: any, b: any) => String(b.created_at).localeCompare(String(a.created_at)))[0];
-    if (!match?.id) {
-      return undefined;
-    }
+      .filter((artifact) => artifact.name === name && !artifact.expired && artifact.id)
+      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+    if (!match?.id) return undefined;
     return {
       id: Number(match.id),
       name: String(match.name),
-      workflowRunId: Number(match.workflow_run?.id ?? explicitRunId ?? this.currentRunId),
+      workflowRunId: Number(match.workflow_run?.id ?? explicitRunId ?? 0),
     };
   }
 
@@ -101,6 +160,100 @@ export class GitHubArtifactStore implements ArtifactStore {
       },
     );
     return response.data.artifacts ?? [];
+  }
+
+  private async getWorkflowRun(
+    runId: number,
+    strictProvenance: boolean,
+  ): Promise<WorkflowRunMetadata> {
+    const response = await this.octokit.request('GET /repos/{owner}/{repo}/actions/runs/{run_id}', {
+      owner: this.owner,
+      repo: this.repo,
+      run_id: runId,
+    });
+    const run = response.data;
+    const workflowId = Number(run?.workflow_id);
+    const id = Number(run?.id);
+    const workflowPath = run?.path;
+    const event = run?.event;
+    const conclusion = typeof run?.conclusion === 'string' ? run.conclusion : undefined;
+    const headSha = run?.head_sha;
+    const headRepository = run?.head_repository?.full_name;
+    if (
+      !Number.isSafeInteger(id) ||
+      id <= 0 ||
+      (strictProvenance &&
+        (!Number.isSafeInteger(workflowId) ||
+          workflowId <= 0 ||
+          typeof workflowPath !== 'string' ||
+          !workflowPath ||
+          typeof event !== 'string' ||
+          !event ||
+          typeof headSha !== 'string' ||
+          !headSha ||
+          typeof headRepository !== 'string' ||
+          !headRepository))
+    ) {
+      throw new Error('artifact provenance metadata is incomplete');
+    }
+    return {
+      id,
+      workflowId,
+      workflowPath,
+      event,
+      conclusion,
+      headSha,
+      headRepository,
+      pullRequestNumbers: Array.isArray(run.pull_requests)
+        ? run.pull_requests
+            .map((pull: any) => Number(pull.number))
+            .filter((number: number) => Number.isInteger(number) && number > 0)
+        : [],
+    };
+  }
+
+  private isTrustedRun(
+    candidate: WorkflowRunMetadata,
+    current: WorkflowRunMetadata,
+    explicitRunId: number | undefined,
+    strictProvenance: boolean,
+  ): boolean {
+    if (candidate.conclusion !== 'success') return false;
+    if (strictProvenance) {
+      if (candidate.workflowId !== current.workflowId) return false;
+      if (candidate.workflowPath !== current.workflowPath) return false;
+      if (candidate.event !== current.event) return false;
+      if (candidate.headRepository !== current.headRepository) return false;
+      if (this.lookupContext?.targetMode === 'pull-request' && this.lookupContext.prNumber) {
+        if (candidate.event !== 'pull_request') return false;
+        if (!candidate.pullRequestNumbers.includes(this.lookupContext.prNumber)) return false;
+      }
+      return true;
+    }
+    if (current.workflowId && candidate.workflowId && candidate.workflowId !== current.workflowId) {
+      return false;
+    }
+    if (
+      current.workflowPath &&
+      candidate.workflowPath &&
+      candidate.workflowPath !== current.workflowPath
+    ) {
+      return false;
+    }
+    if (!current.workflowId && !current.workflowPath) return false;
+    if (current.event && candidate.event !== current.event) return false;
+    if (current.headRepository && candidate.headRepository !== current.headRepository) {
+      return false;
+    }
+    if (
+      this.lookupContext?.targetMode === 'pull-request' &&
+      this.lookupContext.prNumber &&
+      !candidate.pullRequestNumbers.includes(this.lookupContext.prNumber) &&
+      !explicitRunId
+    ) {
+      return false;
+    }
+    return true;
   }
 }
 

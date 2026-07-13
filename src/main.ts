@@ -13,6 +13,7 @@ import {
 import { buildReviewPrompt } from './prompt.js';
 import {
   allowedToolsForMode,
+  computeLineageTotals,
   createRuntime,
   defaultTempDir,
   preserveLineageTotalsForSkipped,
@@ -20,16 +21,27 @@ import {
 } from './runtime.js';
 import {
   debugArtifactName,
+  deterministicStateArtifactName,
+  deterministicStateKey,
   readRestoredState,
+  RestoredSnapshotInvalidError,
+  StateManifestInvalidError,
   stateArtifactName,
   writeStateBundle,
 } from './state.js';
 import {
+  assembleStructuredReviewFromRuntimeContent,
   buildReviewedRange,
   normalizeStructuredReview,
   StructuredReviewValidationError,
   type StructuredResultMetadata,
 } from './structured.js';
+import { buildReviewInputV1 } from './protocol/build-review-input.js';
+import { mapReviewResultV1ToRuntimeContent } from './protocol/map-review-result.js';
+import { validateReviewInputV1 } from './protocol/review-input.js';
+import { invokeRuntime } from './runtime-invocation/invoke-runtime.js';
+import { resolveTrustedRuntimeCommand } from './runtime-invocation/command-resolver.js';
+import { RuntimeInvocationError } from './runtime-invocation/runtime-errors.js';
 import {
   deriveStateKey,
   diffPullRequestDiffSnapshots,
@@ -50,6 +62,8 @@ import {
   type StructuredReviewEnvelopeV1,
   type UploadedArtifact,
 } from './types.js';
+import type { RuntimeInvocationSuccess } from './runtime-invocation/runtime-command.js';
+import type { ReviewTraceV1 } from './protocol/review-trace.js';
 import {
   ensureDir,
   sanitizeStateKey,
@@ -57,6 +71,7 @@ import {
   walkFiles,
   writeJsonFile,
   writeTextFile,
+  sha256,
 } from './utils.js';
 import { defaultInlineCommentsMetadata, postInlineComments } from './inline-comments.js';
 
@@ -71,6 +86,8 @@ interface PhaseResolution {
 }
 
 class SnapshotStateCompatibilityError extends Error {}
+class StateArtifactInvalidError extends Error {}
+class StateRuntimeCompatibilityError extends Error {}
 
 class CoreInputReader implements InputReader {
   getInput(name: string): string {
@@ -89,32 +106,90 @@ export async function run(): Promise<void> {
   const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
   const tempRoot = path.join(defaultTempDir(), 'agentic-pr-review');
   const runtimeDir = path.join(tempRoot, 'runtime', config.runtimeProvider);
-  await ensureDir(tempRoot);
+  try {
+    await ensureDir(tempRoot);
+  } catch (error) {
+    if ((config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
+      setDeterministicErrorOutputs(new Error('state-invalid: temporary directory unavailable'));
+      throw new Error('state-invalid: temporary directory unavailable');
+    }
+    throw error;
+  }
 
   const octokit = github.getOctokit(config.githubToken);
-  const target = await resolveTarget(config, octokit, github.context);
-  validateSameRepositoryTarget(target);
+  let target: Awaited<ReturnType<typeof resolveTarget>>;
+  try {
+    target = await resolveTarget(config, octokit, github.context);
+    validateSameRepositoryTarget(target);
+  } catch (error) {
+    if ((config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
+      setDeterministicErrorOutputs(new Error('input-invalid: target resolution failed'));
+      throw new Error('input-invalid: target resolution failed');
+    }
+    throw error;
+  }
 
-  const stateKey = sanitizeStateKey(deriveStateKey(config, target));
-  const artifactName = stateArtifactName(stateKey);
-  const store = createArtifactStore(config.githubToken, octokit);
-  const resolution = await resolvePhase(config, store, artifactName, tempRoot, stateKey, target);
+  let stateKey: string;
+  let artifactName: string;
+  try {
+    const baseStateKey = deriveStateKey(config, target);
+    stateKey =
+      (config.runtimeBackend ?? 'legacy') === 'deterministic-csharp'
+        ? deterministicStateKey(baseStateKey)
+        : sanitizeStateKey(baseStateKey);
+    artifactName =
+      (config.runtimeBackend ?? 'legacy') === 'deterministic-csharp'
+        ? deterministicStateArtifactName(stateKey)
+        : stateArtifactName(stateKey);
+  } catch (error) {
+    if ((config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
+      setDeterministicErrorOutputs(
+        new Error('state-invalid: state identity could not be resolved'),
+      );
+      throw new Error('state-invalid: state identity could not be resolved');
+    }
+    throw error;
+  }
+  const store = createArtifactStore(config.githubToken, octokit, target, config.runtimeBackend);
+  let resolution: PhaseResolution;
+  try {
+    resolution = await resolvePhase(config, store, artifactName, tempRoot, stateKey, target);
+  } catch (error) {
+    if ((config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
+      setDeterministicErrorOutputs(error);
+    }
+    throw error;
+  }
   let incrementalDiff: PullRequestDiffSnapshotDeltaV1 | undefined;
   const effectiveDiffSource = effectiveDiffSourceFor(target, resolution.phase);
 
   if (resolution.phase === 'incremental' && target.mode === 'pull-request') {
-    const previousSnapshot = requireRestoredState(resolution.restoredState).pullRequestDiffSnapshot;
-    const currentSnapshot = requirePullRequestDiffSnapshot(target);
-    if (!previousSnapshot) {
-      throw new Error('internal error: incremental pull-request phase requires restored snapshot');
+    let snapshotsEquivalent = false;
+    try {
+      const previousSnapshot = requireRestoredState(
+        resolution.restoredState,
+      ).pullRequestDiffSnapshot;
+      const currentSnapshot = requirePullRequestDiffSnapshot(target);
+      if (!previousSnapshot) {
+        throw new Error('missing restored pull-request diff snapshot');
+      }
+      incrementalDiff = diffPullRequestDiffSnapshots(
+        previousSnapshot,
+        currentSnapshot,
+        target.changedFiles,
+      );
+      snapshotsEquivalent = pullRequestDiffSnapshotsEquivalent(previousSnapshot, currentSnapshot);
+    } catch (error) {
+      if ((config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
+        setDeterministicErrorOutputs(new Error(`state-invalid: incremental snapshot failed`));
+        throw new Error('state-invalid: incremental pull-request snapshot is unusable');
+      }
+      throw error;
     }
-    incrementalDiff = diffPullRequestDiffSnapshots(
-      previousSnapshot,
-      currentSnapshot,
-      target.changedFiles,
-    );
-    if (pullRequestDiffSnapshotsEquivalent(previousSnapshot, currentSnapshot)) {
-      await restoreRuntimeState(resolution.restoreDir, config.runtimeProvider, runtimeDir);
+    if (snapshotsEquivalent) {
+      if ((config.runtimeBackend ?? 'legacy') === 'legacy') {
+        await restoreRuntimeState(resolution.restoreDir, config.runtimeProvider, runtimeDir);
+      }
       await finishSkippedIdentical({
         config,
         store,
@@ -125,40 +200,30 @@ export async function run(): Promise<void> {
         restoredState: requireRestoredState(resolution.restoredState),
         phaseReason: resolution.lineageReason,
         effectiveDiffSource,
+        octokit,
       });
       return;
     }
   }
 
-  await restoreRuntimeState(
-    resolution.restoredState ? resolution.restoreDir : undefined,
-    config.runtimeProvider,
-    runtimeDir,
-  );
+  if ((config.runtimeBackend ?? 'legacy') === 'legacy') {
+    await restoreRuntimeState(
+      resolution.restoredState ? resolution.restoreDir : undefined,
+      config.runtimeProvider,
+      runtimeDir,
+    );
+  }
 
-  const blocks = await loadContextBlocks(config, workspace, resolution.phase);
-  const prompt = buildReviewPrompt(
-    target,
-    resolution.phase,
-    blocks,
-    config.maxPatchChars,
-    incrementalDiff,
-    resolution.restoredState?.reviewedHeadSha,
-  );
-  const runtime = createRuntime(config.runtimeProvider);
-  const runtimeResult = await runtime.run({
-    config,
-    phase: resolution.phase,
-    stateKey,
-    prompt: prompt.text,
-    promptHash: prompt.sha256,
-    restoredState: resolution.restoredState,
-    workspace,
-    tempDir: tempRoot,
-    runtimeDir,
-    target,
-  });
-
+  let blocks: Awaited<ReturnType<typeof loadContextBlocks>>;
+  try {
+    blocks = await loadContextBlocks(config, workspace, resolution.phase);
+  } catch (error) {
+    if ((config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
+      setDeterministicErrorOutputs(new Error('input-invalid: context loading failed'));
+      throw new Error('input-invalid: context loading failed');
+    }
+    throw error;
+  }
   const reviewedRange = buildReviewedRange({
     phase: resolution.phase,
     target,
@@ -166,51 +231,175 @@ export async function run(): Promise<void> {
   });
   let structuredReview: StructuredReviewEnvelopeV1;
   let structuredMetadata: StructuredResultMetadata;
+  let runtimeResult: RuntimeResult;
+  let promptSha256: string | undefined;
+  let promptBytes: number | undefined;
   try {
-    const normalized = normalizeStructuredReview({
-      modelJsonText: runtimeResult.modelReviewJson,
-      target,
-      phase: resolution.phase,
-      previousReviewedHeadSha: resolution.restoredState?.reviewedHeadSha,
-      reviewedRange,
-      config,
-      sessionId: runtimeResult.sessionId,
-      usage: runtimeResult.usage,
-      observedTurns: runtimeResult.observedTurns,
-      observedTurnSource: runtimeResult.observedTurnSource,
-      lineageTotals: runtimeResult.lineageTotals,
-      maxFindings: config.maxFindings,
-    });
-    structuredReview = capStructuredReviewForMarkdownLimit(
-      normalized.envelope,
-      config.maxReviewChars,
-    );
-    structuredMetadata = metadataForStructuredReview(structuredReview, normalized.metadata.status);
+    if ((config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
+      const input = buildReviewInputV1({
+        target,
+        config: { ...config, stateKey },
+        phase: resolution.phase,
+        blocks,
+        restoredState: resolution.restoredState ?? null,
+        previousFindingFingerprints: [],
+        existingCommentFingerprints: [],
+        repository: { owner: github.context.repo.owner, name: github.context.repo.repo },
+        requestedRuntimeVersion: null,
+      });
+      const inputValidation = validateReviewInputV1(input);
+      if (!inputValidation.ok) {
+        throw new Error(
+          `input-invalid: ${truncateText((inputValidation.errors ?? []).join('; '), 240)}`,
+        );
+      }
+      const inputBytes = Buffer.byteLength(`${JSON.stringify(input, null, 2)}\n`, 'utf8');
+      const resolvedCommand = await resolveTrustedRuntimeCommand(process.env);
+      const invocation = await invokeRuntime({
+        command: resolvedCommand.command,
+        input,
+        timeoutMs: 30000,
+        tempRoot: tempRoot,
+      });
+      if (!invocation.result.trace?.sha256) {
+        throw new Error('trace-invalid: deterministic result must include trace.sha256');
+      }
+      validateDeterministicTrace(invocation.trace, invocation.inputSha256);
+      for (const warning of boundedRuntimeMessages(invocation.result.warnings)) {
+        core.warning(sanitizeRuntimeDiagnosticForHost(warning));
+      }
+      for (const warning of boundedRuntimeMessages(invocation.trace.warnings)) {
+        core.warning(sanitizeRuntimeDiagnosticForHost(warning));
+      }
+      const errorDiagnostic = invocation.result.diagnostics.find(
+        (diagnostic) => diagnostic.level === 'error',
+      );
+      if (errorDiagnostic) {
+        throw new Error(
+          `diagnostic-error: ${sanitizeRuntimeDiagnosticForHost(errorDiagnostic.code)}`,
+        );
+      }
+      const diagnosticSummary = summarizeRuntimeDiagnostics([
+        ...invocation.result.diagnostics,
+        ...invocation.trace.diagnostics,
+      ]);
+      runtimeResult = buildDeterministicRuntimeResult(
+        invocation,
+        resolution,
+        config,
+        stateKey,
+        inputBytes,
+      );
+      runtimeResult.diagnosticSummary = diagnosticSummary;
+      let assembled: ReturnType<typeof assembleStructuredReviewFromRuntimeContent>;
+      try {
+        const projection = mapReviewResultV1ToRuntimeContent(invocation.result);
+        assembled = assembleStructuredReviewFromRuntimeContent({
+          content: projection.content,
+          target,
+          phase: resolution.phase,
+          previousReviewedHeadSha: resolution.restoredState?.reviewedHeadSha,
+          reviewedRange,
+          config,
+          sessionId: runtimeResult.sessionId,
+          usage: runtimeResult.usage,
+          observedTurns: runtimeResult.observedTurns,
+          observedTurnSource: runtimeResult.observedTurnSource,
+          lineageTotals: runtimeResult.lineageTotals,
+          maxFindings: config.maxFindings,
+        });
+      } catch {
+        throw new Error('mapping-invalid: typed runtime content could not be assembled');
+      }
+      structuredReview = capStructuredReviewForMarkdownLimit(
+        assembled.envelope,
+        config.maxReviewChars,
+      );
+      structuredMetadata = metadataForStructuredReview(structuredReview, assembled.metadata.status);
+    } else {
+      const prompt = buildReviewPrompt(
+        target,
+        resolution.phase,
+        blocks,
+        config.maxPatchChars,
+        incrementalDiff,
+        resolution.restoredState?.reviewedHeadSha,
+      );
+      promptSha256 = prompt.sha256;
+      promptBytes = Buffer.byteLength(prompt.text, 'utf8');
+      const runtime = createRuntime(config.runtimeProvider);
+      runtimeResult = await runtime.run({
+        config,
+        phase: resolution.phase,
+        stateKey,
+        prompt: prompt.text,
+        promptHash: prompt.sha256,
+        restoredState: resolution.restoredState,
+        workspace,
+        tempDir: tempRoot,
+        runtimeDir,
+        target,
+      });
+      const normalized = normalizeStructuredReview({
+        modelJsonText: runtimeResult.modelReviewJson ?? '',
+        target,
+        phase: resolution.phase,
+        previousReviewedHeadSha: resolution.restoredState?.reviewedHeadSha,
+        reviewedRange,
+        config,
+        sessionId: runtimeResult.sessionId,
+        usage: runtimeResult.usage,
+        observedTurns: runtimeResult.observedTurns,
+        observedTurnSource: runtimeResult.observedTurnSource,
+        lineageTotals: runtimeResult.lineageTotals,
+        maxFindings: config.maxFindings,
+      });
+      structuredReview = capStructuredReviewForMarkdownLimit(
+        normalized.envelope,
+        config.maxReviewChars,
+      );
+      structuredMetadata = metadataForStructuredReview(
+        structuredReview,
+        normalized.metadata.status,
+      );
+    }
   } catch (error) {
+    if ((config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
+      setDeterministicErrorOutputs(error);
+      if (error instanceof RuntimeInvocationError) {
+        throw new Error(`deterministic runtime failed: ${error.kind}`);
+      }
+    }
     handleStructuredValidationFailure(error);
   }
 
-  const comment = await maybePostComment({
-    config,
-    target,
-    runtimeResult,
-    stateKey,
-    phase: resolution.phase,
-    artifactName,
-    lineageReason: resolution.lineageReason,
-    previousHeadSha: resolution.restoredState?.reviewedHeadSha,
-    structuredReview: structuredReview!,
-    octokit,
-  });
-
-  const inlineMetadata = await maybePostInlineComments({
-    config,
-    target,
-    stateKey,
-    structuredReview: structuredReview!,
-    octokit,
-    stickyCommentUrl: comment.commentUrl,
-  });
+  const deterministicBackend = (config.runtimeBackend ?? 'legacy') === 'deterministic-csharp';
+  let comment = { commentUrl: '', lineageAction: '', lineageReason: '' };
+  let inlineMetadata: InlineCommentsMetadata;
+  if (deterministicBackend) {
+    inlineMetadata = defaultInlineCommentsMetadata(inlinePolicy(config));
+  } else {
+    comment = await maybePostComment({
+      config,
+      target,
+      runtimeResult,
+      stateKey,
+      phase: resolution.phase,
+      artifactName,
+      lineageReason: resolution.lineageReason,
+      previousHeadSha: resolution.restoredState?.reviewedHeadSha,
+      structuredReview: structuredReview!,
+      octokit,
+    });
+    inlineMetadata = await maybePostInlineComments({
+      config,
+      target,
+      stateKey,
+      structuredReview: structuredReview!,
+      octokit,
+      stickyCommentUrl: comment.commentUrl,
+    });
+  }
   structuredReview = {
     ...structuredReview!,
     inlineComments: inlineMetadata,
@@ -222,35 +411,105 @@ export async function run(): Promise<void> {
 
   const structuredResultPath = path.join(tempRoot, 'structured-result.json');
   const renderedReviewMarkdownPath = path.join(tempRoot, 'rendered-review.md');
-  const renderedReviewMarkdown = renderStructuredReviewMarkdown(structuredReview);
-  await writeJsonFile(structuredResultPath, structuredReview);
-  await writeTextFile(renderedReviewMarkdownPath, renderedReviewMarkdown);
+  let renderedReviewMarkdown: string;
+  try {
+    renderedReviewMarkdown = renderStructuredReviewMarkdown(structuredReview);
+    await writeJsonFile(structuredResultPath, structuredReview);
+    await writeTextFile(renderedReviewMarkdownPath, renderedReviewMarkdown);
+  } catch (error) {
+    if (deterministicBackend) {
+      setDeterministicErrorOutputs(new Error(`rendering-invalid: ${messageOf(error)}`));
+      throw new Error('rendering-invalid: rendered review could not be written');
+    }
+    throw error;
+  }
 
   const bundleDir = path.join(tempRoot, 'state-bundle');
-  const bundleFiles = await writeStateBundle({
-    bundleDir,
-    config,
-    target,
-    stateKey,
-    phase: resolution.phase,
-    promptSha256: prompt.sha256,
-    blocks,
-    runtimeResult,
-    structuredReview,
-    structuredMetadata,
-    renderedReviewMarkdown,
-    runtimeDir,
-    phaseReason: resolution.lineageReason,
-    effectiveDiffSource,
-    createdAt: resolution.restoredState?.createdAt,
-  });
+  let bundleFiles: string[];
+  try {
+    bundleFiles = await writeStateBundle({
+      bundleDir,
+      config,
+      target,
+      stateKey,
+      phase: resolution.phase,
+      promptSha256,
+      reviewInputSha256: runtimeResult.reviewInputSha256,
+      reviewInputBytes: runtimeResult.reviewInputBytes,
+      blocks,
+      runtimeResult,
+      structuredReview,
+      structuredMetadata,
+      renderedReviewMarkdown,
+      runtimeDir,
+      phaseReason: resolution.lineageReason,
+      effectiveDiffSource,
+      createdAt: resolution.restoredState?.createdAt,
+    });
+  } catch (error) {
+    if (deterministicBackend) {
+      setDeterministicErrorOutputs(new Error('state-invalid: state bundle construction failed'));
+      throw new Error('state-invalid: state bundle construction failed');
+    }
+    throw error;
+  }
 
-  const uploadedState = await store.upload(
-    artifactName,
-    bundleDir,
-    bundleFiles,
-    config.artifactRetentionDays,
-  );
+  if (deterministicBackend) {
+    try {
+      await assertTargetHeadUnchanged(target, octokit);
+    } catch {
+      setDeterministicErrorOutputs(new Error('state-invalid: target head could not be confirmed'));
+      throw new Error('state-invalid: target head could not be confirmed');
+    }
+  }
+  if (deterministicBackend) {
+    setDeterministicSuccessOutputs(runtimeResult);
+  }
+  if (deterministicBackend) {
+    try {
+      comment = await maybePostComment({
+        config,
+        target,
+        runtimeResult,
+        stateKey,
+        phase: resolution.phase,
+        artifactName,
+        lineageReason: resolution.lineageReason,
+        previousHeadSha: resolution.restoredState?.reviewedHeadSha,
+        structuredReview: structuredReview!,
+        octokit,
+      });
+    } catch {
+      setDeterministicHostErrorKind('rendering-invalid');
+      await writeDeterministicStickyFailureSummary({
+        phase: resolution.phase,
+        reviewPhase: resolution.phase,
+        runtimeResult,
+      });
+      throw new Error('rendering-invalid: deterministic sticky comment could not be published');
+    }
+  }
+  let uploadedState: UploadedArtifact;
+  try {
+    uploadedState = await store.upload(
+      artifactName,
+      bundleDir,
+      bundleFiles,
+      config.artifactRetentionDays,
+    );
+  } catch (error) {
+    if (deterministicBackend) {
+      await writeDeterministicUploadFailureSummary({
+        phase: resolution.phase,
+        reviewPhase: resolution.phase,
+        runtimeResult,
+        stickyWritten: Boolean(comment.commentUrl),
+        artifactUploaded: false,
+      });
+      throw new Error('state-invalid: state artifact upload failed');
+    }
+    throw error;
+  }
   let debugArtifact: UploadedArtifact | undefined;
   if (config.debugCaptureRawApiBodies) {
     debugArtifact = await uploadDebugArtifact(store, stateKey, runtimeResult.debugFiles);
@@ -262,6 +521,7 @@ export async function run(): Promise<void> {
     phase: resolution.phase,
     reviewPhase: resolution.phase,
     runtimeProvider: config.runtimeProvider,
+    runtimeBackend: config.runtimeBackend ?? 'legacy',
     sessionId: runtimeResult.sessionId,
     reviewedHeadSha: target.headSha,
     artifact: uploadedState,
@@ -282,8 +542,8 @@ export async function run(): Promise<void> {
     phase: resolution.phase,
     reviewPhase: resolution.phase,
     runtimeResult,
-    promptSha256: prompt.sha256,
-    promptBytes: Buffer.byteLength(prompt.text, 'utf8'),
+    promptSha256,
+    promptBytes,
     restored: resolution,
     effectiveDiffSource,
     artifactName,
@@ -295,7 +555,69 @@ export async function run(): Promise<void> {
   });
 }
 
-function createArtifactStore(token: string, octokit: any): ArtifactStore {
+function buildDeterministicRuntimeResult(
+  invocation: RuntimeInvocationSuccess,
+  resolution: PhaseResolution,
+  config: ActionConfig,
+  stateKey: string,
+  inputBytes: number,
+): RuntimeResult {
+  const sessionId =
+    resolution.phase === 'incremental' && resolution.restoredState
+      ? resolution.restoredState.sessionId
+      : `csharp-${sha256(stateKey).slice(0, 20)}`;
+  return {
+    sessionId,
+    sessionName: `agentic-pr-review-${stateKey}`,
+    debugFiles: [],
+    toolMode: 'none',
+    allowedTools: [],
+    observedTurns: null,
+    observedTurnSource: 'not_applicable',
+    usage: null,
+    usageBudgetStatus: {
+      status: 'not_applicable',
+      limits: config.usageBudgetLimits,
+      usageRecordsObserved: 0,
+    },
+    lineageTotals: computeLineageTotals(resolution.restoredState, null, null),
+    reviewInputSha256: invocation.inputSha256,
+    reviewInputBytes: inputBytes,
+    runtimeVersion: invocation.runtimeVersion,
+    traceSha256: invocation.result.trace?.sha256,
+  };
+}
+
+function validateDeterministicTrace(trace: ReviewTraceV1, inputSha256: string): void {
+  if (trace.mode !== 'deterministic-fixture') {
+    throw new Error('trace-invalid: trace.mode must be deterministic-fixture');
+  }
+  if (!trace.fixture || trace.fixture.length > 200) {
+    throw new Error('trace-invalid: trace.fixture must be a bounded non-empty string');
+  }
+  if (trace.provider !== undefined || trace.usage !== undefined) {
+    throw new Error('trace-invalid: deterministic trace cannot include provider or usage');
+  }
+  if (trace.inputSha256 !== inputSha256) {
+    throw new Error('trace-invalid: trace inputSha256 does not match adapter inputSha256');
+  }
+  if (!isSafeRuntimeVersion(trace.runtimeVersion)) {
+    throw new Error('trace-invalid: runtimeVersion is not bounded single-line metadata');
+  }
+  if (trace.toolCalls.length !== 0) {
+    throw new Error('trace-invalid: deterministic trace cannot include tool calls');
+  }
+  if (trace.diagnostics.some((diagnostic) => diagnostic.level === 'error')) {
+    throw new Error('diagnostic-error: deterministic trace contains an error diagnostic');
+  }
+}
+
+function createArtifactStore(
+  token: string,
+  octokit: any,
+  target: Awaited<ReturnType<typeof resolveTarget>>,
+  runtimeBackend: ActionConfig['runtimeBackend'],
+): ArtifactStore {
   const localRoot = process.env.AGENTIC_REVIEW_LOCAL_ARTIFACT_DIR;
   if (localRoot) {
     return new LocalArtifactStore(localRoot);
@@ -306,6 +628,11 @@ function createArtifactStore(token: string, octokit: any): ArtifactStore {
     github.context.repo.owner,
     github.context.repo.repo,
     github.context.runId,
+    {
+      targetMode: target.mode,
+      prNumber: target.prNumber,
+      runtimeBackend,
+    },
   );
 }
 
@@ -321,42 +648,84 @@ async function resolvePhase(
     return { phase: 'bootstrap', lineageReason: 'manual_bootstrap' };
   }
 
-  const artifact = await store.findStateArtifact(artifactName, config.stateArtifactRunId);
+  let artifact: Awaited<ReturnType<ArtifactStore['findStateArtifact']>>;
+  try {
+    artifact = await store.findStateArtifact(artifactName, config.stateArtifactRunId);
+  } catch (error) {
+    if (config.runtimeBackend === 'deterministic-csharp') {
+      throw new Error('state-invalid: state artifact lookup failed');
+    }
+    throw error;
+  }
   if (!artifact) {
     if (target.mode === 'pull-request') {
       return { phase: 'bootstrap', lineageReason: 'snapshot_state_missing' };
     }
     if (config.reviewMode === 'incremental') {
-      throw new Error(`review_mode=incremental requires a state artifact named ${artifactName}`);
+      throw new Error(
+        `${config.runtimeBackend === 'deterministic-csharp' ? 'state-invalid: ' : ''}review_mode=incremental requires a state artifact named ${artifactName}`,
+      );
     }
     return { phase: 'bootstrap', lineageReason: 'auto_bootstrap_no_state' };
   }
 
   const restoreDir = path.join(tempRoot, 'restored-state');
-  await store.download(artifact, restoreDir);
+  try {
+    await store.download(artifact, restoreDir);
+  } catch (error) {
+    if (config.runtimeBackend === 'deterministic-csharp') {
+      throw new Error('state-invalid: restored state artifact could not be downloaded');
+    }
+    throw error;
+  }
 
   let restoredState: RestoredState | undefined;
   try {
     restoredState = await readRestoredState(restoreDir);
-    validateRestoredState(restoredState, stateKey, config.runtimeProvider, target);
+    validateRestoredState(
+      restoredState,
+      stateKey,
+      config.runtimeProvider,
+      config.runtimeBackend ?? 'legacy',
+      target,
+      artifact.runHeadSha,
+    );
   } catch (error) {
+    if (error instanceof StateManifestInvalidError) {
+      if (config.reviewMode === 'auto') {
+        core.warning('Restored state manifest is invalid; falling back to bootstrap.');
+        return { phase: 'bootstrap', lineageReason: 'auto_bootstrap_invalid' };
+      }
+      if (config.runtimeBackend === 'deterministic-csharp' && config.reviewMode === 'incremental') {
+        throw new Error('state-invalid: restored state manifest is invalid');
+      }
+      throw error;
+    }
     if (
       error instanceof SnapshotStateCompatibilityError ||
-      messageOf(error).includes('pull request diff snapshot')
+      error instanceof RestoredSnapshotInvalidError
     ) {
       core.warning(
-        `Restored state artifact is not snapshot-compatible; falling back to bootstrap: ${messageOf(error)}`,
+        'Restored state artifact is not snapshot-compatible; falling back to bootstrap.',
       );
       return { phase: 'bootstrap', lineageReason: 'snapshot_state_incompatible' };
     }
     if (config.reviewMode === 'auto') {
-      const reason: LineageReason = messageOf(error).includes('runtime_provider')
-        ? 'auto_bootstrap_runtime'
-        : 'auto_bootstrap_invalid';
-      core.warning(
-        `Restored state artifact is not usable; falling back to bootstrap: ${messageOf(error)}`,
-      );
+      const reason: LineageReason =
+        error instanceof StateRuntimeCompatibilityError
+          ? 'auto_bootstrap_runtime'
+          : 'auto_bootstrap_invalid';
+      core.warning('Restored state artifact is not usable; falling back to bootstrap.');
       return { phase: 'bootstrap', lineageReason: reason };
+    }
+    if (config.runtimeBackend === 'deterministic-csharp' && config.reviewMode === 'incremental') {
+      if (
+        error instanceof StateArtifactInvalidError ||
+        error instanceof StateRuntimeCompatibilityError
+      ) {
+        throw new Error('state-invalid: restored state is incompatible');
+      }
+      throw new Error('state-invalid: restored state could not be read');
     }
     throw error;
   }
@@ -377,18 +746,49 @@ function validateRestoredState(
   restoredState: RestoredState,
   stateKey: string,
   runtimeProvider: string,
+  runtimeBackend: NonNullable<ActionConfig['runtimeBackend']>,
   target: Awaited<ReturnType<typeof resolveTarget>>,
+  expectedArtifactHeadSha?: string,
 ): void {
   if (restoredState.stateKey !== stateKey) {
-    throw new Error('restored state artifact state_key does not match the requested state_key');
+    throw new StateArtifactInvalidError(
+      'restored state artifact state_key does not match the requested state_key',
+    );
   }
   if (restoredState.runtimeProvider !== runtimeProvider) {
-    throw new Error(
+    throw new StateRuntimeCompatibilityError(
       'restored state artifact runtime_provider does not match the requested runtime_provider',
     );
   }
+  if ((restoredState.runtimeBackend ?? 'legacy') !== runtimeBackend) {
+    throw new StateRuntimeCompatibilityError(
+      'restored state artifact runtime_backend does not match the requested runtime_backend',
+    );
+  }
   if (!restoredState.sessionId) {
-    throw new Error('restored state artifact is missing session_id');
+    throw new StateArtifactInvalidError('restored state artifact is missing session_id');
+  }
+  const deterministicBackend = runtimeBackend === 'deterministic-csharp';
+  if (
+    deterministicBackend &&
+    expectedArtifactHeadSha !== undefined &&
+    restoredState.reviewedHeadSha !== expectedArtifactHeadSha
+  ) {
+    throw new StateArtifactInvalidError(
+      'restored state artifact reviewed_head_sha does not match its workflow run head_sha',
+    );
+  }
+  if (deterministicBackend && target.mode === 'pull-request') {
+    if (restoredState.prNumber !== target.prNumber) {
+      throw new StateArtifactInvalidError(
+        'restored state artifact pull request number does not match the requested target',
+      );
+    }
+    if (restoredState.headRepository !== target.headRepoFullName) {
+      throw new StateArtifactInvalidError(
+        'restored state artifact head repository does not match the requested target',
+      );
+    }
   }
   if (target.mode === 'pull-request' && !restoredState.pullRequestDiffSnapshot) {
     throw new SnapshotStateCompatibilityError(
@@ -412,6 +812,26 @@ function validateSameRepositoryTarget(target: Awaited<ReturnType<typeof resolveT
   }
 }
 
+async function assertTargetHeadUnchanged(
+  target: Awaited<ReturnType<typeof resolveTarget>>,
+  octokit: any,
+): Promise<void> {
+  if (target.mode !== 'pull-request' || !target.prNumber) return;
+  try {
+    const response = await octokit.rest.pulls.get({
+      owner: github.context.repo.owner,
+      repo: github.context.repo.repo,
+      pull_number: target.prNumber,
+    });
+    if (response.data.head?.sha !== target.headSha) {
+      throw new Error('stale-target: pull request head changed during review');
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('stale-target:')) throw error;
+    throw new Error('stale-target: pull request head could not be confirmed');
+  }
+}
+
 async function finishSkippedIdentical(options: {
   config: ActionConfig;
   store: ArtifactStore;
@@ -422,17 +842,27 @@ async function finishSkippedIdentical(options: {
   restoredState: RestoredState;
   phaseReason: LineageReason;
   effectiveDiffSource: EffectiveDiffSource;
+  octokit: any;
 }): Promise<void> {
   const lineageTotals = preserveLineageTotalsForSkipped(options.restoredState);
+  const deterministicBackend =
+    (options.config.runtimeBackend ?? 'legacy') === 'deterministic-csharp';
   const runtimeResult: RuntimeResult = {
     sessionId: options.restoredState.sessionId,
-    sessionName: options.restoredState.sessionName,
-    modelReviewJson: JSON.stringify({
-      schemaVersion: 1,
-      summary: `No changes since prior review for ${options.target.headSha}. Provider call skipped.`,
-      findings: [],
-      limitations: ['Current PR diff snapshot entries matched the previous reviewed snapshot.'],
-    }),
+    sessionName: deterministicBackend
+      ? `agentic-pr-review-${options.stateKey}`
+      : options.restoredState.sessionName,
+    modelReviewJson:
+      (options.config.runtimeBackend ?? 'legacy') === 'legacy'
+        ? JSON.stringify({
+            schemaVersion: 1,
+            summary: `No changes since prior review for ${options.target.headSha}. Provider call skipped.`,
+            findings: [],
+            limitations: [
+              'Current PR diff snapshot entries matched the previous reviewed snapshot.',
+            ],
+          })
+        : undefined,
     debugFiles: [],
     toolMode: options.config.toolMode,
     allowedTools: allowedToolsForMode(options.config.toolMode),
@@ -451,67 +881,152 @@ async function finishSkippedIdentical(options: {
     target: options.target,
     previousReviewedHeadSha: options.restoredState.reviewedHeadSha,
   });
-  const normalized = normalizeStructuredReview({
-    modelJsonText: runtimeResult.modelReviewJson,
-    target: options.target,
-    phase: 'incremental',
-    previousReviewedHeadSha: options.restoredState.reviewedHeadSha,
-    reviewedRange,
-    config: options.config,
-    sessionId: runtimeResult.sessionId,
-    usage: runtimeResult.usage,
-    observedTurns: runtimeResult.observedTurns,
-    observedTurnSource: runtimeResult.observedTurnSource,
-    lineageTotals: runtimeResult.lineageTotals,
-    maxFindings: options.config.maxFindings,
-  });
-  let structuredReview = capStructuredReviewForMarkdownLimit(
-    normalized.envelope,
-    options.config.maxReviewChars,
-  );
-  const structuredMetadata = metadataForStructuredReview(
-    structuredReview,
-    normalized.metadata.status,
-  );
+  const skippedContent = {
+    summary: `No changes since prior review for ${options.target.headSha}. Provider call skipped.`,
+    findings: [],
+    limitations: ['Current PR diff snapshot entries matched the previous reviewed snapshot.'],
+  };
+  let structuredReview: StructuredReviewEnvelopeV1;
+  let structuredMetadata: StructuredResultMetadata;
+  if ((options.config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
+    let assembled: ReturnType<typeof assembleStructuredReviewFromRuntimeContent>;
+    try {
+      assembled = assembleStructuredReviewFromRuntimeContent({
+        content: skippedContent,
+        target: options.target,
+        phase: 'incremental',
+        previousReviewedHeadSha: options.restoredState.reviewedHeadSha,
+        reviewedRange,
+        config: options.config,
+        sessionId: runtimeResult.sessionId,
+        usage: runtimeResult.usage,
+        observedTurns: runtimeResult.observedTurns,
+        observedTurnSource: runtimeResult.observedTurnSource,
+        lineageTotals: runtimeResult.lineageTotals,
+        maxFindings: options.config.maxFindings,
+      });
+    } catch {
+      setDeterministicErrorOutputs(
+        new Error('mapping-invalid: skipped review could not be assembled'),
+      );
+      throw new Error('mapping-invalid: skipped review could not be assembled');
+    }
+    try {
+      structuredReview = capStructuredReviewForMarkdownLimit(
+        assembled.envelope,
+        options.config.maxReviewChars,
+      );
+      structuredMetadata = metadataForStructuredReview(structuredReview, assembled.metadata.status);
+    } catch {
+      setDeterministicErrorOutputs(
+        new Error('rendering-invalid: skipped review could not be rendered'),
+      );
+      throw new Error('rendering-invalid: skipped review could not be rendered');
+    }
+  } else {
+    const normalized = normalizeStructuredReview({
+      modelJsonText: runtimeResult.modelReviewJson ?? '',
+      target: options.target,
+      phase: 'incremental',
+      previousReviewedHeadSha: options.restoredState.reviewedHeadSha,
+      reviewedRange,
+      config: options.config,
+      sessionId: runtimeResult.sessionId,
+      usage: runtimeResult.usage,
+      observedTurns: runtimeResult.observedTurns,
+      observedTurnSource: runtimeResult.observedTurnSource,
+      lineageTotals: runtimeResult.lineageTotals,
+      maxFindings: options.config.maxFindings,
+    });
+    structuredReview = capStructuredReviewForMarkdownLimit(
+      normalized.envelope,
+      options.config.maxReviewChars,
+    );
+    structuredMetadata = metadataForStructuredReview(structuredReview, normalized.metadata.status);
+  }
   const inlineMetadata = defaultInlineCommentsMetadata(inlinePolicy(options.config));
   structuredReview = {
     ...structuredReview,
     inlineComments: inlineMetadata,
   };
   structuredMetadata.inlineComments = inlineMetadata;
-  const renderedReviewMarkdown = renderStructuredReviewMarkdown(structuredReview);
+  let renderedReviewMarkdown: string;
+  try {
+    renderedReviewMarkdown = renderStructuredReviewMarkdown(structuredReview);
+  } catch (error) {
+    if ((options.config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
+      setDeterministicErrorOutputs(new Error(`rendering-invalid: ${messageOf(error)}`));
+      throw new Error('rendering-invalid: skipped review could not be rendered');
+    }
+    throw error;
+  }
   const bundleDir = path.join(defaultTempDir(), 'agentic-pr-review', 'state-bundle');
   const structuredResultPath = path.join(bundleDir, 'structured-result.json');
   const renderedReviewMarkdownPath = path.join(bundleDir, 'rendered-review.md');
-  const bundleFiles = await writeStateBundle({
-    bundleDir,
-    config: options.config,
-    target: options.target,
-    stateKey: options.stateKey,
-    phase: 'incremental',
-    promptSha256: 'skipped-identical',
-    blocks: [],
-    runtimeResult,
-    structuredReview,
-    structuredMetadata,
-    renderedReviewMarkdown,
-    runtimeDir: options.runtimeDir,
-    phaseReason: options.phaseReason,
-    effectiveDiffSource: options.effectiveDiffSource,
-    createdAt: options.restoredState.createdAt,
-  });
-  const uploadedState = await options.store.upload(
-    options.artifactName,
-    bundleDir,
-    bundleFiles,
-    options.config.artifactRetentionDays,
-  );
+  let bundleFiles: string[];
+  try {
+    bundleFiles = await writeStateBundle({
+      bundleDir,
+      config: options.config,
+      target: options.target,
+      stateKey: options.stateKey,
+      phase: 'incremental',
+      promptSha256:
+        (options.config.runtimeBackend ?? 'legacy') === 'legacy' ? 'skipped-identical' : undefined,
+      blocks: [],
+      runtimeResult,
+      structuredReview,
+      structuredMetadata,
+      renderedReviewMarkdown,
+      runtimeDir: options.runtimeDir,
+      phaseReason: options.phaseReason,
+      effectiveDiffSource: options.effectiveDiffSource,
+      createdAt: options.restoredState.createdAt,
+    });
+  } catch (error) {
+    if ((options.config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
+      setDeterministicErrorOutputs(new Error('state-invalid: state bundle construction failed'));
+      throw new Error('state-invalid: state bundle construction failed');
+    }
+    throw error;
+  }
+  if (deterministicBackend) {
+    try {
+      await assertTargetHeadUnchanged(options.target, options.octokit);
+    } catch {
+      setDeterministicErrorOutputs(new Error('state-invalid: target head could not be confirmed'));
+      throw new Error('state-invalid: target head could not be confirmed');
+    }
+  }
+  if (deterministicBackend) setDeterministicSuccessOutputs(runtimeResult);
+  let uploadedState: UploadedArtifact;
+  try {
+    uploadedState = await options.store.upload(
+      options.artifactName,
+      bundleDir,
+      bundleFiles,
+      options.config.artifactRetentionDays,
+    );
+  } catch (error) {
+    if (deterministicBackend) {
+      await writeDeterministicUploadFailureSummary({
+        phase: 'incremental',
+        reviewPhase: 'skipped-identical',
+        runtimeResult,
+        stickyWritten: false,
+        artifactUploaded: false,
+      });
+      throw new Error('state-invalid: state artifact upload failed');
+    }
+    throw error;
+  }
   setOutputs({
     stateKey: options.stateKey,
     reviewMode: options.config.reviewMode,
     phase: 'incremental',
     reviewPhase: 'skipped-identical',
     runtimeProvider: options.config.runtimeProvider,
+    runtimeBackend: options.config.runtimeBackend ?? 'legacy',
     sessionId: runtimeResult.sessionId,
     reviewedHeadSha: options.target.headSha,
     artifact: uploadedState,
@@ -530,8 +1045,9 @@ async function finishSkippedIdentical(options: {
     phase: 'incremental',
     reviewPhase: 'skipped-identical',
     runtimeResult,
-    promptSha256: 'skipped-identical',
-    promptBytes: 0,
+    promptSha256:
+      (options.config.runtimeBackend ?? 'legacy') === 'legacy' ? 'skipped-identical' : undefined,
+    promptBytes: (options.config.runtimeBackend ?? 'legacy') === 'legacy' ? 0 : undefined,
     restored: {
       phase: 'incremental',
       restoredState: options.restoredState,
@@ -579,6 +1095,7 @@ async function maybePostComment(options: {
   runtimeResult: RuntimeResult;
   stateKey: string;
   phase: Phase;
+  runtimeBackend?: ActionConfig['runtimeBackend'];
   artifactName: string;
   lineageReason: LineageReason;
   previousHeadSha?: string;
@@ -602,6 +1119,7 @@ async function maybePostComment(options: {
     stateKey: options.stateKey,
     phase: options.phase,
     runtimeProvider: options.config.runtimeProvider,
+    runtimeBackend: options.config.runtimeBackend ?? 'legacy',
     sessionId: options.runtimeResult.sessionId,
     previousHeadSha: options.previousHeadSha,
     currentHeadSha: options.target.headSha,
@@ -700,6 +1218,7 @@ function setOutputs(options: {
   phase: Phase;
   reviewPhase: ReviewPhaseOutput;
   runtimeProvider: string;
+  runtimeBackend: string;
   sessionId: string;
   reviewedHeadSha: string;
   artifact: UploadedArtifact;
@@ -717,6 +1236,9 @@ function setOutputs(options: {
   core.setOutput('phase', options.phase);
   core.setOutput('review_phase', options.reviewPhase);
   core.setOutput('runtime_provider', options.runtimeProvider);
+  if (options.runtimeBackend === 'deterministic-csharp') {
+    setDeterministicSuccessOutputs(options.runtimeResult);
+  }
   core.setOutput('session_id', options.sessionId);
   core.setOutput('reviewed_head_sha', options.reviewedHeadSha);
   core.setOutput('artifact_name', options.artifact.name);
@@ -786,6 +1308,22 @@ function setOutputs(options: {
   }
 }
 
+function setDeterministicSuccessOutputs(runtimeResult: RuntimeResult | undefined): void {
+  core.setOutput('runtime_backend', 'deterministic-csharp');
+  core.setOutput('runtime_version', runtimeResult?.runtimeVersion ?? '');
+  core.setOutput('runtime_trace_sha256', runtimeResult?.traceSha256 ?? '');
+  core.setOutput('runtime_error_kind', '');
+  core.setOutput('runtime_error_class', '');
+  if (runtimeResult) {
+    core.setOutput('usage_budget_status', formatUsageBudgetStatus(runtimeResult.usageBudgetStatus));
+  }
+}
+
+function setDeterministicHostErrorKind(kind: string): void {
+  core.setOutput('runtime_error_kind', kind);
+  core.setOutput('runtime_error_class', '');
+}
+
 function metadataForStructuredReview(
   review: StructuredReviewEnvelopeV1,
   status: StructuredResultMetadata['status'],
@@ -808,8 +1346,8 @@ async function writeSummary(input: {
   phase: Phase;
   reviewPhase: ReviewPhaseOutput;
   runtimeResult: RuntimeResult;
-  promptSha256: string;
-  promptBytes: number;
+  promptSha256?: string;
+  promptBytes?: number;
   restored: PhaseResolution;
   effectiveDiffSource: EffectiveDiffSource;
   artifactName: string;
@@ -845,6 +1383,37 @@ async function writeSummary(input: {
       : 'none';
   const budgetStatus = formatUsageBudgetStatus(input.runtimeResult.usageBudgetStatus);
   const maxTurns = input.config.claudeMaxTurns;
+  const runtimeBackend = input.config.runtimeBackend ?? 'legacy';
+  const inputMetadata =
+    runtimeBackend === 'deterministic-csharp'
+      ? input.reviewPhase === 'skipped-identical'
+        ? ['- Review input: not applicable (skipped-identical)']
+        : [
+            `- Review input SHA-256: ${input.runtimeResult.reviewInputSha256 ?? 'n/a'}`,
+            `- Review input bytes: ${input.runtimeResult.reviewInputBytes ?? 'n/a'}`,
+          ]
+      : [
+          `- Prompt sha256: ${input.promptSha256 ?? 'n/a'}`,
+          `- Prompt bytes: ${input.promptBytes ?? 'n/a'}`,
+        ];
+  const deterministicMetadata =
+    runtimeBackend === 'deterministic-csharp'
+      ? [
+          `- Runtime version: ${formatRuntimeVersion(input.runtimeResult.runtimeVersion)}`,
+          `- Runtime trace sha256: ${input.runtimeResult.traceSha256 ?? 'n/a'}`,
+          ...(input.runtimeResult.diagnosticSummary
+            ? [`- Runtime diagnostics: ${input.runtimeResult.diagnosticSummary}`]
+            : []),
+        ]
+      : [];
+  const pathMetadata =
+    runtimeBackend === 'legacy'
+      ? [
+          `- Local bundle path: ${input.bundleDir}`,
+          `- Structured result path: ${input.structuredResultPath}`,
+          `- Rendered review markdown path: ${input.renderedReviewMarkdownPath}`,
+        ]
+      : [];
   const lines = [
     '### Agentic PR Review',
     '',
@@ -853,7 +1422,11 @@ async function writeSummary(input: {
     `- Review phase: ${input.reviewPhase}`,
     `- Phase reason: ${input.restored.lineageReason}`,
     `- Effective diff source: ${input.effectiveDiffSource}`,
-    `- Runtime: ${input.config.runtimeProvider}`,
+    `- Runtime: ${
+      runtimeBackend === 'deterministic-csharp'
+        ? `${input.config.runtimeProvider} (${runtimeBackend})`
+        : input.config.runtimeProvider
+    }`,
     `- Tool mode: ${input.runtimeResult.toolMode}`,
     `- Allowed tools: ${allowedTools}`,
     `- State key: ${input.stateKey}`,
@@ -861,8 +1434,8 @@ async function writeSummary(input: {
     `- Restored previous state: ${restored}`,
     `- Previous reviewed head: ${input.restored.restoredState?.reviewedHeadSha ?? 'n/a'}`,
     `- Current head: ${input.target.headSha}`,
-    `- Prompt sha256: ${input.promptSha256}`,
-    `- Prompt bytes: ${input.promptBytes}`,
+    ...inputMetadata,
+    ...deterministicMetadata,
     `- Observed turns: ${input.runtimeResult.observedTurns ?? 'n/a'} / max ${maxTurns}`,
     `- Usage: ${usage}`,
     `- Usage budget: ${budgetStatus}`,
@@ -877,14 +1450,70 @@ async function writeSummary(input: {
     `- Sticky comment: ${input.commentUrl || 'not requested'}`,
     `- State artifact: ${input.artifactName}`,
     `- Artifact retention days: ${input.config.artifactRetentionDays}`,
-    `- Local bundle path: ${input.bundleDir}`,
-    `- Structured result path: ${input.structuredResultPath}`,
-    `- Rendered review markdown path: ${input.renderedReviewMarkdownPath}`,
+    ...pathMetadata,
   ];
   try {
     await core.summary.addRaw(lines.join('\n')).write();
-  } catch (error) {
-    core.info(`Unable to write job summary: ${messageOf(error)}`);
+  } catch {
+    core.info('Unable to write job summary.');
+  }
+}
+
+async function writeDeterministicUploadFailureSummary(input: {
+  phase: Phase;
+  reviewPhase: ReviewPhaseOutput;
+  runtimeResult: RuntimeResult;
+  stickyWritten: boolean;
+  artifactUploaded: boolean;
+}): Promise<void> {
+  try {
+    await core.summary
+      .addRaw(
+        [
+          '### Agentic PR Review',
+          '',
+          '- Runtime backend: deterministic-csharp',
+          `- Runtime version: ${formatRuntimeVersion(input.runtimeResult.runtimeVersion)}`,
+          `- Runtime trace sha256: ${input.runtimeResult.traceSha256 ?? 'n/a'}`,
+          `- Resolved phase: ${input.phase}`,
+          `- Review phase: ${input.reviewPhase}`,
+          `- Runtime execution: succeeded`,
+          `- Sticky comment written: ${input.stickyWritten}`,
+          `- State artifact upload: ${input.artifactUploaded ? 'succeeded' : 'failed'}`,
+          '- Failure classification: state-invalid',
+        ].join('\n'),
+      )
+      .write();
+  } catch {
+    core.info('Unable to write deterministic failure summary.');
+  }
+}
+
+async function writeDeterministicStickyFailureSummary(input: {
+  phase: Phase;
+  reviewPhase: ReviewPhaseOutput;
+  runtimeResult: RuntimeResult;
+}): Promise<void> {
+  try {
+    await core.summary
+      .addRaw(
+        [
+          '### Agentic PR Review',
+          '',
+          '- Runtime backend: deterministic-csharp',
+          `- Runtime version: ${formatRuntimeVersion(input.runtimeResult.runtimeVersion)}`,
+          `- Runtime trace sha256: ${input.runtimeResult.traceSha256 ?? 'n/a'}`,
+          `- Resolved phase: ${input.phase}`,
+          `- Review phase: ${input.reviewPhase}`,
+          '- Runtime execution: succeeded',
+          '- Sticky comment written: false',
+          '- State artifact upload: not attempted',
+          '- Failure classification: rendering-invalid',
+        ].join('\n'),
+      )
+      .write();
+  } catch {
+    core.info('Unable to write deterministic sticky failure summary.');
   }
 }
 
@@ -912,6 +1541,15 @@ function formatUsageBudgetStatus(status: RuntimeResult['usageBudgetStatus']): st
   return `${status.status} (records=${status.usageRecordsObserved})`;
 }
 
+function formatRuntimeVersion(value: string | undefined): string {
+  if (!value) return 'n/a';
+  return value.replace(/[`\r\n\u0000-\u001f\u007f]/g, '?').slice(0, 120);
+}
+
+function isSafeRuntimeVersion(value: string): boolean {
+  return value.length > 0 && value.length <= 120 && !/[\u0000-\u001f\u007f\r\n]/.test(value);
+}
+
 function handleStructuredValidationFailure(error: unknown): never {
   if (error instanceof StructuredReviewValidationError) {
     core.setOutput('structured_output_status', error.status);
@@ -923,6 +1561,84 @@ function handleStructuredValidationFailure(error: unknown): never {
     throw new Error(`structured review output validation failed: ${error.sanitizedDiagnostic}`);
   }
   throw error;
+}
+
+function setDeterministicErrorOutputs(error: unknown): void {
+  const adapterError = error instanceof RuntimeInvocationError ? error : undefined;
+  const message = messageOf(error);
+  const hostKinds = [
+    'config-invalid',
+    'command-unavailable',
+    'input-invalid',
+    'trace-invalid',
+    'diagnostic-error',
+    'mapping-invalid',
+    'state-invalid',
+    'rendering-invalid',
+  ];
+  const prefix = message.split(':', 1)[0];
+  const kind = adapterError?.kind ?? (hostKinds.includes(prefix) ? prefix : 'rendering-invalid');
+  core.setOutput('runtime_backend', 'deterministic-csharp');
+  core.setOutput('runtime_version', '');
+  core.setOutput('runtime_trace_sha256', '');
+  core.setOutput('runtime_error_kind', kind);
+  core.setOutput('runtime_error_class', adapterError?.exitClass ?? '');
+  core.setOutput('usage_budget_status', 'not_applicable (records=0)');
+}
+
+export function sanitizeRuntimeDiagnostic(value: string, secrets: readonly string[] = []): string {
+  let sanitized = value.replace(/\s+/g, ' ').trim();
+  for (const secret of secrets.filter((item) => item.length > 4)) {
+    sanitized = sanitized.replaceAll(secret, '***');
+  }
+  return truncateText(
+    sanitized
+      .replace(/Authorization\s*[:=]\s*[^,;|]+/gi, 'Authorization: ***')
+      .replace(/x-api-(?:key|token)\s*[:=]\s*[^\s,;|]+/gi, 'x-api-key: ***')
+      .replace(/(^|[^A-Za-z0-9_])(?:(?:[A-Za-z]:[\\/])|(?:\\\\)|\/)[^\s"'`() ,;]*/g, '$1<path>')
+      .replace(
+        /(^|[^A-Za-z0-9_])(?:ghp_|github_pat_|gho_|ghu_|ghs_|ghr_|sk-)[A-Za-z0-9_-]+/gi,
+        '$1***',
+      ),
+    240,
+  );
+}
+
+function sanitizeRuntimeDiagnosticForHost(value: string): string {
+  return sanitizeRuntimeDiagnostic(
+    value,
+    [
+      process.env.GITHUB_TOKEN,
+      process.env.AGENTIC_REVIEW_API_KEY,
+      process.env.ANTHROPIC_API_KEY,
+      process.env.ANTHROPIC_AUTH_TOKEN,
+    ].filter((item): item is string => Boolean(item)),
+  );
+}
+
+function boundedRuntimeMessages(messages: readonly string[]): string[] {
+  const limit = 10;
+  if (messages.length <= limit) {
+    return [...messages];
+  }
+  return [...messages.slice(0, limit), `${messages.length - limit} additional messages omitted`];
+}
+
+function summarizeRuntimeDiagnostics(
+  diagnostics: ReadonlyArray<{ code: string; level: 'info' | 'warning' | 'error' }>,
+): string {
+  const counts = new Map<string, number>();
+  for (const diagnostic of diagnostics) {
+    if (diagnostic.level === 'error') {
+      continue;
+    }
+    const code = sanitizeRuntimeDiagnosticForHost(diagnostic.code);
+    counts.set(code, (counts.get(code) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .slice(0, 20)
+    .map(([code, count]) => `${code}=${count}`)
+    .join(', ');
 }
 
 function messageOf(error: unknown): string {

@@ -16,6 +16,7 @@ describe('parseActionConfig', () => {
   it('parses defaults for test runtime', () => {
     const config = parseActionConfig(new Inputs({}), baseEnv, 'pull_request');
     expect(config.runtimeProvider).toBe('test');
+    expect(config.runtimeBackend).toBe('legacy');
     expect(config.targetMode).toBe('pull-request');
     expect(config.reviewMode).toBe('auto');
     expect(config.apiKeyMode).toBe('auth-token');
@@ -110,6 +111,49 @@ describe('parseActionConfig', () => {
     expect(config.disablePromptCaching).toBe(true);
   });
 
+  it('accepts the guarded deterministic C# matrix', () => {
+    const config = parseActionConfig(
+      new Inputs({ runtime_backend: 'deterministic-csharp', target_mode: 'synthetic-fixture' }),
+      baseEnv,
+      'workflow_dispatch',
+    );
+    expect(config.runtimeBackend).toBe('deterministic-csharp');
+    expect(config.runtimeProvider).toBe('test');
+  });
+
+  it('rejects deterministic provider settings and synthetic comments', () => {
+    expect(() =>
+      parseActionConfig(
+        new Inputs({
+          runtime_backend: 'deterministic-csharp',
+          runtime_provider: 'claude-code-cli',
+        }),
+        baseEnv,
+        'workflow_dispatch',
+      ),
+    ).toThrow(
+      /config-invalid: runtime_backend=deterministic-csharp requires runtime_provider=test/,
+    );
+    expect(() =>
+      parseActionConfig(
+        new Inputs({ runtime_backend: 'deterministic-csharp', model_name: 'ignored' }),
+        baseEnv,
+        'workflow_dispatch',
+      ),
+    ).toThrow(/configuration is invalid/);
+    expect(() =>
+      parseActionConfig(
+        new Inputs({
+          runtime_backend: 'deterministic-csharp',
+          target_mode: 'synthetic-fixture',
+          post_comment: 'true',
+        }),
+        baseEnv,
+        'workflow_dispatch',
+      ),
+    ).toThrow(/requires post_comment=false/);
+  });
+
   it('rejects mutually exclusive instruction inputs', () => {
     expect(() =>
       parseActionConfig(
@@ -127,6 +171,30 @@ describe('parseActionConfig', () => {
     expect(() =>
       parseActionConfig(new Inputs({ state_artifact_run_id: '0' }), baseEnv, 'pull_request'),
     ).toThrow(/state_artifact_run_id must be a positive integer/);
+  });
+
+  it('limits pull-request incremental restore to pull_request events', () => {
+    expect(() =>
+      parseActionConfig(
+        new Inputs({
+          runtime_backend: 'deterministic-csharp',
+          target_mode: 'pull-request',
+          review_mode: 'incremental',
+        }),
+        baseEnv,
+        'workflow_dispatch',
+      ),
+    ).toThrow(/only allowed on pull_request events/);
+  });
+
+  it('keeps legacy pull-request incremental restore compatible with workflow_dispatch', () => {
+    expect(() =>
+      parseActionConfig(
+        new Inputs({ target_mode: 'pull-request', review_mode: 'incremental' }),
+        baseEnv,
+        'workflow_dispatch',
+      ),
+    ).not.toThrow();
   });
 
   it('requires live runtime configuration', () => {

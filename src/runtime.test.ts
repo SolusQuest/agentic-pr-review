@@ -239,7 +239,7 @@ describe('TestRuntime', () => {
         runtimeDir: path.join(dir, 'runtime', 'inline-commentable'),
         target: target(),
       });
-      const commentableJson = JSON.parse(commentable.modelReviewJson);
+      const commentableJson = JSON.parse(commentable.modelReviewJson!);
       expect(commentableJson.findings[0]).toMatchObject({
         path: 'src/file.ts',
         startLine: 10,
@@ -257,7 +257,7 @@ describe('TestRuntime', () => {
         runtimeDir: path.join(dir, 'runtime', 'inline-non-commentable'),
         target: target(),
       });
-      const nonCommentableJson = JSON.parse(nonCommentable.modelReviewJson);
+      const nonCommentableJson = JSON.parse(nonCommentable.modelReviewJson!);
       expect(nonCommentableJson.findings[0]).toMatchObject({
         path: 'src/file.ts',
         startLine: 999999,

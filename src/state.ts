@@ -10,6 +10,7 @@ import {
   type RestoredState,
   type ReviewTarget,
   type RuntimeLineageTotals,
+  type RuntimeBackend,
   type RuntimeResult,
   type RuntimeUsage,
   type StructuredReviewEnvelopeV1,
@@ -24,6 +25,7 @@ import {
   writeJsonFile,
   writeTextFile,
 } from './utils.js';
+import { sha256 } from './utils.js';
 
 interface StateManifest {
   version: 1;
@@ -31,12 +33,15 @@ interface StateManifest {
   stateKey: string;
   phase: Phase;
   runtimeProvider: ActionConfig['runtimeProvider'];
+  runtimeBackend?: RuntimeBackend;
   toolMode: ActionConfig['toolMode'];
   allowedTools: string[];
   sessionId: string;
   sessionName: string;
   reviewedHeadSha?: string;
-  promptSha256: string;
+  promptSha256?: string;
+  reviewInputSha256?: string;
+  reviewInputBytes?: number;
   createdAt: string;
   updatedAt: string;
   usage: RuntimeUsage | null;
@@ -63,11 +68,378 @@ interface StateManifest {
   target: {
     mode: ReviewTarget['mode'];
     prNumber?: number;
+    headRepository?: string;
     baseSha: string;
     headSha: string;
     changedFiles: number;
     pullRequestDiffSnapshot?: PullRequestDiffSnapshotV1;
   };
+}
+
+export class RestoredSnapshotInvalidError extends Error {
+  constructor() {
+    super('restored state manifest pull request diff snapshot is incompatible');
+  }
+}
+
+export class StateManifestInvalidError extends Error {
+  constructor() {
+    super('restored state manifest shape is invalid');
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+const MANIFEST_KEYS = new Set([
+  'version',
+  'workflow',
+  'stateKey',
+  'phase',
+  'runtimeProvider',
+  'runtimeBackend',
+  'toolMode',
+  'allowedTools',
+  'sessionId',
+  'sessionName',
+  'reviewedHeadSha',
+  'promptSha256',
+  'reviewInputSha256',
+  'reviewInputBytes',
+  'createdAt',
+  'updatedAt',
+  'usage',
+  'observedTurns',
+  'observedTurnSource',
+  'lineageTotals',
+  'usageBudgetStatus',
+  'review',
+  'structuredOutput',
+  'contextBlocks',
+  'target',
+]);
+
+const TARGET_KEYS = new Set([
+  'mode',
+  'prNumber',
+  'headRepository',
+  'baseSha',
+  'headSha',
+  'changedFiles',
+  'pullRequestDiffSnapshot',
+]);
+const REVIEW_KEYS = new Set([
+  'requestedMode',
+  'executedPhase',
+  'phaseReason',
+  'effectiveDiffSource',
+]);
+const STRUCTURED_OUTPUT_KEYS = new Set([
+  'status',
+  'inputFindingCount',
+  'postFindingCapCount',
+  'renderedFindingCount',
+  'findingsTruncated',
+  'truncationReason',
+  'inlineComments',
+]);
+const CONTEXT_BLOCK_KEYS = new Set(['name', 'source', 'bytes', 'sha256']);
+const USAGE_KEYS = new Set([
+  'inputTokens',
+  'cacheReadInputTokens',
+  'cacheCreationInputTokens',
+  'outputTokens',
+  'recordsObserved',
+]);
+const LINEAGE_USAGE_KEYS = new Set([
+  'inputTokens',
+  'cacheReadInputTokens',
+  'cacheCreationInputTokens',
+  'outputTokens',
+]);
+const LINEAGE_TOTALS_KEYS = new Set(['observedTurns', 'usage', 'source', 'partial']);
+const USAGE_BUDGET_KEYS = new Set(['status', 'limits', 'usageRecordsObserved', 'exceeded']);
+const USAGE_LIMIT_KEYS = new Set([
+  'maxUncachedInputTokens',
+  'maxCachedInputTokens',
+  'maxOutputTokens',
+]);
+const USAGE_EXCEEDED_KEYS = new Set(['category', 'limit', 'observed']);
+const INLINE_COMMENTS_KEYS = new Set([
+  'enabled',
+  'policy',
+  'candidateCount',
+  'effectiveCap',
+  'capExceededCount',
+  'postedCount',
+  'duplicateCount',
+  'skippedCount',
+  'failedCount',
+  'skippedReasons',
+  'failedReasons',
+]);
+const INLINE_POLICY_KEYS = new Set(['enabled', 'maxComments', 'minSeverity', 'minConfidence']);
+const SNAPSHOT_KEYS = new Set(['version', 'source', 'headSha', 'baseSha', 'files']);
+const SNAPSHOT_FILE_KEYS = new Set([
+  'filename',
+  'previousFilename',
+  'status',
+  'additions',
+  'deletions',
+  'changes',
+  'fileSha',
+  'patchSha256',
+  'patchAvailable',
+]);
+
+function invalidManifest(): never {
+  throw new StateManifestInvalidError();
+}
+
+function assertAllowedKeys(value: Record<string, unknown>, allowed: Set<string>): void {
+  if (Object.keys(value).some((key) => !allowed.has(key))) invalidManifest();
+}
+
+function boundedString(value: unknown, maxLength = 1024): value is string {
+  return (
+    typeof value === 'string' && value.length <= maxLength && !/[\u0000-\u001f\u007f]/.test(value)
+  );
+}
+
+function nonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function optionalPositiveInteger(value: unknown): boolean {
+  return (
+    value === undefined || (typeof value === 'number' && Number.isSafeInteger(value) && value > 0)
+  );
+}
+
+function validateUsage(value: unknown): void {
+  if (!isRecord(value)) invalidManifest();
+  assertAllowedKeys(value, USAGE_KEYS);
+  if (
+    !nonNegativeInteger(value.inputTokens) ||
+    !nonNegativeInteger(value.cacheReadInputTokens) ||
+    !nonNegativeInteger(value.cacheCreationInputTokens) ||
+    !nonNegativeInteger(value.outputTokens) ||
+    !nonNegativeInteger(value.recordsObserved)
+  ) {
+    invalidManifest();
+  }
+}
+
+function validateLineageTotals(value: unknown): void {
+  if (!isRecord(value)) invalidManifest();
+  assertAllowedKeys(value, LINEAGE_TOTALS_KEYS);
+  if (
+    !(value.observedTurns === null || nonNegativeInteger(value.observedTurns)) ||
+    !isRecord(value.usage) ||
+    (value.source !== 'current_run_only' &&
+      value.source !== 'restored_manifest_plus_current_run' &&
+      value.source !== 'restored_manifest_preserved_for_skipped' &&
+      value.source !== 'legacy_manifest_fallback' &&
+      value.source !== 'unavailable') ||
+    typeof value.partial !== 'boolean'
+  ) {
+    invalidManifest();
+  }
+  assertAllowedKeys(value.usage, LINEAGE_USAGE_KEYS);
+  if (
+    !nonNegativeInteger(value.usage.inputTokens) ||
+    !nonNegativeInteger(value.usage.cacheReadInputTokens) ||
+    !nonNegativeInteger(value.usage.cacheCreationInputTokens) ||
+    !nonNegativeInteger(value.usage.outputTokens)
+  ) {
+    invalidManifest();
+  }
+}
+
+function validateUsageBudgetStatus(value: unknown): void {
+  if (!isRecord(value) || !isRecord(value.limits)) invalidManifest();
+  assertAllowedKeys(value, USAGE_BUDGET_KEYS);
+  assertAllowedKeys(value.limits, USAGE_LIMIT_KEYS);
+  if (
+    (value.status !== 'disabled' &&
+      value.status !== 'within_limit' &&
+      value.status !== 'exceeded' &&
+      value.status !== 'not_applicable') ||
+    !nonNegativeInteger(value.limits.maxUncachedInputTokens) ||
+    !nonNegativeInteger(value.limits.maxCachedInputTokens) ||
+    !nonNegativeInteger(value.limits.maxOutputTokens) ||
+    !nonNegativeInteger(value.usageRecordsObserved)
+  ) {
+    invalidManifest();
+  }
+  if (value.exceeded !== undefined) {
+    if (!isRecord(value.exceeded)) invalidManifest();
+    assertAllowedKeys(value.exceeded, USAGE_EXCEEDED_KEYS);
+    if (
+      (value.exceeded.category !== 'uncached_input' &&
+        value.exceeded.category !== 'cached_input' &&
+        value.exceeded.category !== 'output') ||
+      !nonNegativeInteger(value.exceeded.limit) ||
+      !nonNegativeInteger(value.exceeded.observed)
+    ) {
+      invalidManifest();
+    }
+  }
+}
+
+function validateCountRecord(value: unknown): void {
+  if (!isRecord(value)) invalidManifest();
+  for (const count of Object.values(value)) {
+    if (!nonNegativeInteger(count)) invalidManifest();
+  }
+}
+
+function validateInlineComments(value: unknown): void {
+  if (!isRecord(value) || !isRecord(value.policy)) invalidManifest();
+  assertAllowedKeys(value, INLINE_COMMENTS_KEYS);
+  assertAllowedKeys(value.policy, INLINE_POLICY_KEYS);
+  if (
+    typeof value.enabled !== 'boolean' ||
+    typeof value.policy.enabled !== 'boolean' ||
+    !nonNegativeInteger(value.policy.maxComments) ||
+    (value.policy.minSeverity !== 'low' &&
+      value.policy.minSeverity !== 'medium' &&
+      value.policy.minSeverity !== 'high') ||
+    (value.policy.minConfidence !== 'medium' && value.policy.minConfidence !== 'high')
+  ) {
+    invalidManifest();
+  }
+  for (const key of [
+    'candidateCount',
+    'effectiveCap',
+    'capExceededCount',
+    'postedCount',
+    'duplicateCount',
+    'skippedCount',
+    'failedCount',
+  ]) {
+    if (!nonNegativeInteger(value[key])) invalidManifest();
+  }
+  validateCountRecord(value.skippedReasons);
+  validateCountRecord(value.failedReasons);
+}
+
+function validateStructuredOutput(value: unknown): void {
+  if (!isRecord(value)) invalidManifest();
+  assertAllowedKeys(value, STRUCTURED_OUTPUT_KEYS);
+  if (
+    (value.status !== 'valid' &&
+      value.status !== 'extracted' &&
+      value.status !== 'invalid_json' &&
+      value.status !== 'schema_invalid') ||
+    !nonNegativeInteger(value.inputFindingCount) ||
+    !nonNegativeInteger(value.postFindingCapCount) ||
+    !nonNegativeInteger(value.renderedFindingCount) ||
+    typeof value.findingsTruncated !== 'boolean' ||
+    (value.truncationReason !== undefined &&
+      value.truncationReason !== 'max_findings' &&
+      value.truncationReason !== 'max_review_chars' &&
+      value.truncationReason !== 'both')
+  ) {
+    invalidManifest();
+  }
+  if (value.inlineComments !== undefined) validateInlineComments(value.inlineComments);
+}
+
+function validateManifestShape(value: unknown): asserts value is StateManifest {
+  if (!isRecord(value) || [...Object.keys(value)].some((key) => !MANIFEST_KEYS.has(key))) {
+    invalidManifest();
+  }
+  if (
+    value.version !== 1 ||
+    value.workflow !== 'agentic-pr-review' ||
+    !boundedString(value.stateKey, 200) ||
+    (value.phase !== 'bootstrap' && value.phase !== 'incremental') ||
+    (value.runtimeProvider !== 'test' && value.runtimeProvider !== 'claude-code-cli') ||
+    (value.runtimeBackend !== undefined &&
+      value.runtimeBackend !== 'legacy' &&
+      value.runtimeBackend !== 'deterministic-csharp') ||
+    (value.toolMode !== 'none' && value.toolMode !== 'readonly') ||
+    !Array.isArray(value.allowedTools) ||
+    value.allowedTools.length > 20 ||
+    value.allowedTools.some((item) => !boundedString(item, 80)) ||
+    !boundedString(value.sessionId, 200) ||
+    !boundedString(value.sessionName, 200) ||
+    (value.reviewedHeadSha !== undefined && !boundedString(value.reviewedHeadSha, 200)) ||
+    (value.promptSha256 !== undefined &&
+      !(
+        /^[a-f0-9]{64}$/.test(String(value.promptSha256)) ||
+        (value.promptSha256 === 'skipped-identical' &&
+          value.phase === 'incremental' &&
+          (value.runtimeBackend === undefined || value.runtimeBackend === 'legacy'))
+      )) ||
+    (value.reviewInputSha256 !== undefined &&
+      !/^[a-f0-9]{64}$/.test(String(value.reviewInputSha256))) ||
+    (value.reviewInputBytes !== undefined && !nonNegativeInteger(value.reviewInputBytes)) ||
+    !boundedString(value.createdAt, 80) ||
+    !boundedString(value.updatedAt, 80) ||
+    !(value.usage === null || isRecord(value.usage)) ||
+    (value.observedTurns !== undefined &&
+      !(value.observedTurns === null || nonNegativeInteger(value.observedTurns))) ||
+    (value.observedTurnSource !== undefined && !boundedString(value.observedTurnSource, 80)) ||
+    (value.lineageTotals !== undefined && !isRecord(value.lineageTotals)) ||
+    !isRecord(value.target) ||
+    !isRecord(value.structuredOutput) ||
+    !Array.isArray(value.contextBlocks) ||
+    value.contextBlocks.length > 3
+  ) {
+    invalidManifest();
+  }
+  if (value.usage !== null) validateUsage(value.usage);
+  if (value.lineageTotals !== undefined) validateLineageTotals(value.lineageTotals);
+  validateUsageBudgetStatus(value.usageBudgetStatus);
+  validateStructuredOutput(value.structuredOutput);
+  if (value.review !== undefined) {
+    if (!isRecord(value.review)) invalidManifest();
+    assertAllowedKeys(value.review, REVIEW_KEYS);
+    if (
+      (value.review.requestedMode !== 'auto' &&
+        value.review.requestedMode !== 'bootstrap' &&
+        value.review.requestedMode !== 'incremental') ||
+      (value.review.executedPhase !== 'bootstrap' &&
+        value.review.executedPhase !== 'incremental') ||
+      !boundedString(value.review.phaseReason, 120) ||
+      (value.review.effectiveDiffSource !== 'target_changed_files' &&
+        value.review.effectiveDiffSource !== 'bootstrap_pr_files' &&
+        value.review.effectiveDiffSource !== 'incremental_pr_diff_snapshot_delta')
+    ) {
+      invalidManifest();
+    }
+  }
+  for (const block of value.contextBlocks) {
+    if (!isRecord(block)) invalidManifest();
+    assertAllowedKeys(block, CONTEXT_BLOCK_KEYS);
+    if (
+      !boundedString(block.name, 80) ||
+      (block.source !== 'input' && block.source !== 'path') ||
+      !nonNegativeInteger(block.bytes) ||
+      !/^[a-f0-9]{64}$/.test(String(block.sha256))
+    ) {
+      invalidManifest();
+    }
+  }
+  const target = value.target;
+  assertAllowedKeys(target, TARGET_KEYS);
+  if (
+    (target.mode !== 'pull-request' && target.mode !== 'synthetic-fixture') ||
+    !optionalPositiveInteger(target.prNumber) ||
+    (target.headRepository !== undefined && !boundedString(target.headRepository, 200)) ||
+    !boundedString(target.baseSha, 200) ||
+    !boundedString(target.headSha, 200) ||
+    !nonNegativeInteger(target.changedFiles) ||
+    (target.pullRequestDiffSnapshot !== undefined && !isRecord(target.pullRequestDiffSnapshot))
+  ) {
+    invalidManifest();
+  }
+  if (target.pullRequestDiffSnapshot !== undefined) {
+    validatePullRequestDiffSnapshot(target.pullRequestDiffSnapshot);
+  }
 }
 
 const SECRET_FILE_PATTERN =
@@ -79,13 +451,16 @@ const HIGH_RISK_TOKEN_PATTERN = /(ghp_|github_pat_|sk-[a-zA-Z0-9])\S*/g;
 export async function readRestoredState(root: string): Promise<RestoredState> {
   const manifestPath = path.join(root, 'manifest.json');
   const manifest = await readJsonFile<StateManifest>(manifestPath);
-  if (manifest.workflow !== 'agentic-pr-review') {
-    throw new Error('restored state manifest has unexpected workflow');
+  validateManifestShape(manifest);
+  const runtimeBackend = manifest.runtimeBackend ?? 'legacy';
+  if (runtimeBackend !== 'legacy' && runtimeBackend !== 'deterministic-csharp') {
+    throw new Error('restored state manifest has unknown runtime_backend');
   }
   const pullRequestDiffSnapshot = manifest.target?.pullRequestDiffSnapshot
     ? validatePullRequestDiffSnapshot(manifest.target.pullRequestDiffSnapshot)
     : undefined;
   return {
+    runtimeBackend,
     stateKey: manifest.stateKey,
     sessionId: manifest.sessionId,
     sessionName: manifest.sessionName ?? `agentic-pr-review-${manifest.stateKey}`,
@@ -105,6 +480,8 @@ export async function readRestoredState(root: string): Promise<RestoredState> {
     observedTurnSource: manifest.observedTurnSource,
     lineageTotals: manifest.lineageTotals,
     pullRequestDiffSnapshot,
+    prNumber: manifest.target.prNumber,
+    headRepository: manifest.target.headRepository,
     manifestPath,
   };
 }
@@ -115,7 +492,9 @@ export async function writeStateBundle(options: {
   target: ReviewTarget;
   stateKey: string;
   phase: Phase;
-  promptSha256: string;
+  promptSha256?: string;
+  reviewInputSha256?: string;
+  reviewInputBytes?: number;
   blocks: LoadedBlock[];
   runtimeResult: RuntimeResult;
   structuredReview: StructuredReviewEnvelopeV1;
@@ -128,13 +507,18 @@ export async function writeStateBundle(options: {
 }): Promise<string[]> {
   await rm(options.bundleDir, { recursive: true, force: true });
   await ensureDir(options.bundleDir);
-  await copyRuntimeStateToBundle(
-    options.runtimeDir,
-    options.config.runtimeProvider,
-    options.bundleDir,
-  );
-
-  await sanitizeRuntimeFiles(path.join(options.bundleDir, 'runtime'), knownSecrets(options.config));
+  const runtimeBackend = options.config.runtimeBackend ?? 'legacy';
+  if (runtimeBackend === 'legacy') {
+    await copyRuntimeStateToBundle(
+      options.runtimeDir,
+      options.config.runtimeProvider,
+      options.bundleDir,
+    );
+    await sanitizeRuntimeFiles(
+      path.join(options.bundleDir, 'runtime'),
+      knownSecrets(options.config),
+    );
+  }
 
   const now = new Date().toISOString();
   const manifest: StateManifest = {
@@ -143,12 +527,22 @@ export async function writeStateBundle(options: {
     stateKey: options.stateKey,
     phase: options.phase,
     runtimeProvider: options.config.runtimeProvider,
+    ...(runtimeBackend === 'deterministic-csharp' ? { runtimeBackend } : {}),
     toolMode: options.runtimeResult.toolMode,
     allowedTools: options.runtimeResult.allowedTools,
     sessionId: options.runtimeResult.sessionId,
     sessionName: options.runtimeResult.sessionName,
     reviewedHeadSha: options.target.headSha,
-    promptSha256: options.promptSha256,
+    ...(runtimeBackend === 'legacy'
+      ? { promptSha256: options.promptSha256 ?? '' }
+      : {
+          ...(options.reviewInputSha256 !== undefined
+            ? { reviewInputSha256: options.reviewInputSha256 }
+            : {}),
+          ...(options.reviewInputBytes !== undefined
+            ? { reviewInputBytes: options.reviewInputBytes }
+            : {}),
+        }),
     createdAt: options.createdAt ?? now,
     updatedAt: now,
     usage: options.runtimeResult.usage,
@@ -180,6 +574,7 @@ export async function writeStateBundle(options: {
     target: {
       mode: options.target.mode,
       prNumber: options.target.prNumber,
+      headRepository: options.target.headRepoFullName,
       baseSha: options.target.baseSha,
       headSha: options.target.headSha,
       changedFiles: options.target.changedFiles.length,
@@ -202,17 +597,21 @@ export async function writeStateBundle(options: {
 
 function validatePullRequestDiffSnapshot(value: unknown): PullRequestDiffSnapshotV1 {
   if (!value || typeof value !== 'object') {
-    throw new Error('restored state manifest pull request diff snapshot is incompatible');
+    throw new RestoredSnapshotInvalidError();
   }
   const snapshot = value as PullRequestDiffSnapshotV1;
+  if (isRecord(value) && Object.keys(value).some((key) => !SNAPSHOT_KEYS.has(key))) {
+    throw new RestoredSnapshotInvalidError();
+  }
   if (
     snapshot.version !== 1 ||
     snapshot.source !== 'github-pulls-list-files' ||
-    typeof snapshot.headSha !== 'string' ||
-    typeof snapshot.baseSha !== 'string' ||
-    !Array.isArray(snapshot.files)
+    !boundedString(snapshot.headSha, 200) ||
+    !boundedString(snapshot.baseSha, 200) ||
+    !Array.isArray(snapshot.files) ||
+    snapshot.files.length > 10_000
   ) {
-    throw new Error('restored state manifest pull request diff snapshot is incompatible');
+    throw new RestoredSnapshotInvalidError();
   }
   return {
     version: 1,
@@ -221,29 +620,32 @@ function validatePullRequestDiffSnapshot(value: unknown): PullRequestDiffSnapsho
     baseSha: snapshot.baseSha,
     files: snapshot.files.map((entry) => {
       if (!entry || typeof entry !== 'object') {
-        throw new Error('restored state manifest pull request diff snapshot is incompatible');
+        throw new RestoredSnapshotInvalidError();
       }
       const candidate = entry as PullRequestDiffSnapshotV1['files'][number];
+      if (isRecord(entry) && Object.keys(entry).some((key) => !SNAPSHOT_FILE_KEYS.has(key))) {
+        throw new RestoredSnapshotInvalidError();
+      }
       if (
-        typeof candidate.filename !== 'string' ||
+        !boundedString(candidate.filename, 500) ||
         (candidate.previousFilename !== undefined &&
-          typeof candidate.previousFilename !== 'string') ||
-        typeof candidate.status !== 'string' ||
-        typeof candidate.additions !== 'number' ||
-        typeof candidate.deletions !== 'number' ||
-        typeof candidate.changes !== 'number' ||
-        (candidate.fileSha !== undefined && typeof candidate.fileSha !== 'string') ||
+          !boundedString(candidate.previousFilename, 500)) ||
+        !boundedString(candidate.status, 80) ||
+        !nonNegativeInteger(candidate.additions) ||
+        !nonNegativeInteger(candidate.deletions) ||
+        !nonNegativeInteger(candidate.changes) ||
+        (candidate.fileSha !== undefined && !boundedString(candidate.fileSha, 200)) ||
         typeof candidate.patchAvailable !== 'boolean' ||
-        (candidate.patchSha256 !== null && typeof candidate.patchSha256 !== 'string')
+        (candidate.patchSha256 !== null && !/^[a-f0-9]{64}$/.test(candidate.patchSha256))
       ) {
-        throw new Error('restored state manifest pull request diff snapshot is incompatible');
+        throw new RestoredSnapshotInvalidError();
       }
       if (
         candidate.patchAvailable
           ? typeof candidate.patchSha256 !== 'string'
           : candidate.patchSha256 !== null
       ) {
-        throw new Error('restored state manifest pull request diff snapshot is incompatible');
+        throw new RestoredSnapshotInvalidError();
       }
       return {
         filename: normalizeRepoRelativePath(candidate.filename),
@@ -415,6 +817,14 @@ function safeParseJson(value: string): unknown | undefined {
 
 export function stateArtifactName(stateKey: string): string {
   return `agentic-pr-review-state-${stateKey}`;
+}
+
+export function deterministicStateKey(baseStateKey: string): string {
+  return `cs-${sha256(baseStateKey).slice(0, 20)}`;
+}
+
+export function deterministicStateArtifactName(logicalStateKey: string): string {
+  return `agentic-pr-review-deterministic-csharp-state-${logicalStateKey}`;
 }
 
 export function debugArtifactName(stateKey: string): string {

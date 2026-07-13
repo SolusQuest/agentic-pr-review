@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assembleStructuredReviewFromRuntimeContent,
   buildReviewedRange,
   normalizeStructuredReview,
   StructuredReviewValidationError,
@@ -447,5 +448,45 @@ describe('structured review normalization', () => {
         }),
       ),
     ).toThrow(/path/);
+  });
+});
+
+describe('assembleStructuredReviewFromRuntimeContent', () => {
+  it('maps typed runtime content while preserving host-owned metadata', () => {
+    const result = assembleStructuredReviewFromRuntimeContent({
+      content: {
+        summary: 'typed summary',
+        findings: [
+          {
+            severity: 'high',
+            confidence: 'high',
+            category: 'correctness',
+            title: 'Typed finding',
+            body: 'Runtime content only.',
+            path: null,
+            startLine: null,
+            endLine: null,
+            inlinePreference: 'preferred',
+          },
+        ],
+        limitations: [],
+      },
+      target,
+      phase: 'bootstrap',
+      reviewedRange: buildReviewedRange({ phase: 'bootstrap', target }),
+      config,
+      sessionId: 'host-session',
+      usage: null,
+      observedTurns: null,
+      observedTurnSource: 'not_applicable',
+      lineageTotals,
+      maxFindings: 10,
+    });
+
+    expect(result.metadata.status).toBe('valid');
+    expect(result.envelope.summary).toBe('typed summary');
+    expect(result.envelope.sessionId).toBe('host-session');
+    expect(result.envelope.findings[0]?.fingerprint).toMatch(/^[a-f0-9]{16}$/);
+    expect(result.envelope.findings[0]).not.toHaveProperty('inlinePreference');
   });
 });

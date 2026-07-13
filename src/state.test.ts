@@ -2,7 +2,13 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { readRestoredState, stateArtifactName, writeStateBundle } from './state.js';
+import {
+  deterministicStateArtifactName,
+  deterministicStateKey,
+  readRestoredState,
+  stateArtifactName,
+  writeStateBundle,
+} from './state.js';
 import {
   type ActionConfig,
   type PullRequestDiffSnapshotV1,
@@ -114,6 +120,31 @@ describe('state helpers', () => {
     expect(stateArtifactName(key)).toBe('agentic-pr-review-state-pr-42-test');
   });
 
+  it('keeps deterministic state identity outside the legacy artifact namespace', () => {
+    const logical = deterministicStateKey('explicit-state-key');
+    expect(logical).toMatch(/^cs-[a-f0-9]{20}$/);
+    expect(deterministicStateArtifactName(logical)).toBe(
+      `agentic-pr-review-deterministic-csharp-state-${logical}`,
+    );
+    expect(deterministicStateArtifactName(logical)).not.toBe(stateArtifactName(logical));
+  });
+
+  it('rejects unknown state manifest versions and top-level fields', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'agentic-pr-review-state-'));
+    try {
+      await writeFile(
+        path.join(dir, 'manifest.json'),
+        JSON.stringify({ version: 2, workflow: 'agentic-pr-review' }),
+        'utf8',
+      );
+      await expect(readRestoredState(dir)).rejects.toThrow(
+        'restored state manifest shape is invalid',
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('writes restorable sanitized state without context bodies', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'agentic-pr-review-state-'));
     try {
@@ -141,14 +172,14 @@ describe('state helpers', () => {
         },
         stateKey: 'synthetic-test',
         phase: 'bootstrap',
-        promptSha256: 'prompt-hash',
+        promptSha256: sha256('prompt-hash'),
         blocks: [
           {
             name: 'instructions',
             source: 'input',
             text: 'do not persist this body',
             bytes: 24,
-            sha256: 'block-hash',
+            sha256: sha256('block-hash'),
           },
         ],
         runtimeResult: {
@@ -217,6 +248,76 @@ describe('state helpers', () => {
     }
   });
 
+  it('rejects control characters in bounded manifest strings', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'agentic-pr-review-state-'));
+    try {
+      const runtimeDir = path.join(dir, 'runtime-source');
+      const bundleDir = path.join(dir, 'bundle');
+      await mkdir(runtimeDir, { recursive: true });
+      await writeStateBundle({
+        bundleDir,
+        config: config(),
+        target: {
+          mode: 'synthetic-fixture',
+          title: 'Synthetic',
+          body: '',
+          baseRef: 'main',
+          baseSha: 'base',
+          headRef: 'branch',
+          headSha: 'head',
+          draft: false,
+          changedFiles: [],
+        },
+        stateKey: 'control-test',
+        phase: 'bootstrap',
+        promptSha256: sha256('prompt-hash'),
+        blocks: [],
+        runtimeResult: {
+          sessionId: 'session-1',
+          sessionName: 'session-name',
+          modelReviewJson: '{"schemaVersion":1}',
+          debugFiles: [],
+          toolMode: 'none',
+          allowedTools: [],
+          observedTurns: 0,
+          observedTurnSource: 'unavailable',
+          usage: null,
+          usageBudgetStatus: {
+            status: 'disabled',
+            limits: config().usageBudgetLimits,
+            usageRecordsObserved: 0,
+          },
+          lineageTotals: {
+            observedTurns: 0,
+            usage: {
+              inputTokens: 0,
+              cacheReadInputTokens: 0,
+              cacheCreationInputTokens: 0,
+              outputTokens: 0,
+            },
+            source: 'current_run_only',
+            partial: false,
+          },
+        },
+        structuredReview: structuredReview(),
+        structuredMetadata,
+        renderedReviewMarkdown: 'review',
+        runtimeDir,
+        phaseReason: 'manual_bootstrap',
+        effectiveDiffSource: 'target_changed_files',
+      });
+      const manifestPath = path.join(bundleDir, 'manifest.json');
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>;
+      manifest.sessionName = 'session\u001bname';
+      await writeFile(manifestPath, JSON.stringify(manifest), 'utf8');
+      await expect(readRestoredState(bundleDir)).rejects.toThrow(
+        'restored state manifest shape is invalid',
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('writes and restores PR diff snapshot metadata without patch bodies', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'agentic-pr-review-state-'));
     try {
@@ -251,7 +352,7 @@ describe('state helpers', () => {
         },
         stateKey: 'pr-1-test',
         phase: 'bootstrap',
-        promptSha256: 'prompt-hash',
+        promptSha256: sha256('prompt-hash'),
         blocks: [],
         runtimeResult: {
           sessionId: 'session-1',
@@ -331,7 +432,7 @@ describe('state helpers', () => {
           },
           stateKey: 'synthetic-test',
           phase: 'bootstrap',
-          promptSha256: 'prompt-hash',
+          promptSha256: sha256('prompt-hash'),
           blocks: [],
           runtimeResult: {
             sessionId: 'session-1',

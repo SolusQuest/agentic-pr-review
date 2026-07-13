@@ -30,10 +30,8 @@
  * Findings do not carry fingerprint; the host computes it (consistent with #14).
  */
 
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { Ajv, type ErrorObject } from 'ajv';
+import schema from '../../protocol/schemas/review-result.v1.json' with { type: 'json' };
 
 export interface ReviewResultUsageV1 {
   inputTokens: number;
@@ -102,10 +100,6 @@ export interface ReviewResultValidationResult {
   ok: boolean;
   errors?: string[];
 }
-
-const here = dirname(fileURLToPath(import.meta.url));
-const schemaPath = join(here, '..', '..', 'protocol', 'schemas', 'review-result.v1.json');
-const schema = JSON.parse(readFileSync(schemaPath, 'utf8')) as object;
 
 const ajv = new Ajv({ strict: true, allErrors: true });
 const validateSchema = ajv.compile<ReviewResultV1>(schema);

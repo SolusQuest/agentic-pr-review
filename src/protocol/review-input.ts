@@ -24,10 +24,8 @@
  *   commentEvidence             <- existing inline-comment finding fingerprints (runtime scan)
  */
 
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { Ajv, type ErrorObject } from 'ajv';
+import schema from '../../protocol/schemas/review-input.v1.json' with { type: 'json' };
 
 export interface ReviewInputBoundedPatchV1 {
   text: string;
@@ -122,10 +120,6 @@ export interface ReviewInputValidationResult {
   ok: boolean;
   errors?: string[];
 }
-
-const here = dirname(fileURLToPath(import.meta.url));
-const schemaPath = join(here, '..', '..', 'protocol', 'schemas', 'review-input.v1.json');
-const schema = JSON.parse(readFileSync(schemaPath, 'utf8')) as object;
 
 const ajv = new Ajv({ strict: true, allErrors: true });
 const validateSchema = ajv.compile<ReviewInputV1>(schema);
