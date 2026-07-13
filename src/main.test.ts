@@ -406,12 +406,16 @@ describe('run', () => {
       path.join(process.cwd(), 'src/runtime-invocation/__test-fixtures__/fake-runtime.mjs'),
     ]);
     process.env.FAKE_RUNTIME_SCENARIO = 'success';
-    const blockedArtifactRoot = path.join(root, 'artifact-root-file');
-    await writeFile(blockedArtifactRoot, 'not a directory', 'utf8');
-    process.env.AGENTIC_REVIEW_LOCAL_ARTIFACT_DIR = blockedArtifactRoot;
+    const uploadSpy = vi
+      .spyOn(LocalArtifactStore.prototype, 'upload')
+      .mockRejectedValueOnce(new Error('blocked state upload'));
 
     const { run } = await import('./main.js');
-    await expect(run()).rejects.toThrow('state-invalid: state artifact upload failed');
+    try {
+      await expect(run()).rejects.toThrow('state-invalid: state artifact upload failed');
+    } finally {
+      uploadSpy.mockRestore();
+    }
     expect(mocks.setOutput).toHaveBeenCalledWith('runtime_error_kind', '');
     expect(mocks.summary.addRaw.mock.calls.at(-1)?.[0]).toContain('State artifact upload: failed');
     expect(mocks.summary.addRaw.mock.calls.at(-1)?.[0]).not.toContain(tempRoot);
@@ -435,12 +439,16 @@ describe('run', () => {
       path.join(process.cwd(), 'src/runtime-invocation/__test-fixtures__/fake-runtime.mjs'),
     ]);
     process.env.FAKE_RUNTIME_SCENARIO = 'success';
-    const blockedArtifactRoot = path.join(root, 'artifact-root-file');
-    await writeFile(blockedArtifactRoot, 'not a directory', 'utf8');
-    process.env.AGENTIC_REVIEW_LOCAL_ARTIFACT_DIR = blockedArtifactRoot;
+    const uploadSpy = vi
+      .spyOn(LocalArtifactStore.prototype, 'upload')
+      .mockRejectedValueOnce(new Error('blocked state upload'));
 
     const { run } = await import('./main.js');
-    await expect(run()).rejects.toThrow('state-invalid: state artifact upload failed');
+    try {
+      await expect(run()).rejects.toThrow('state-invalid: state artifact upload failed');
+    } finally {
+      uploadSpy.mockRestore();
+    }
 
     expect(mocks.setOutput).toHaveBeenCalledWith('runtime_error_kind', '');
     const summary = mocks.summary.addRaw.mock.calls.at(-1)?.[0] as string;
