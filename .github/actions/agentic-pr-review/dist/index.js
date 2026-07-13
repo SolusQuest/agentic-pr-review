@@ -104401,10 +104401,10 @@ var GitHubArtifactStore = class {
     const id = Number(run2?.id);
     const workflowPath = run2?.path;
     const event = run2?.event;
-    const conclusion = run2?.conclusion;
+    const conclusion = typeof run2?.conclusion === "string" ? run2.conclusion : void 0;
     const headSha = run2?.head_sha;
     const headRepository = run2?.head_repository?.full_name;
-    if (!Number.isSafeInteger(id) || id <= 0 || !Number.isSafeInteger(workflowId) || workflowId <= 0 || typeof workflowPath !== "string" || !workflowPath || typeof event !== "string" || !event || typeof conclusion !== "string" || typeof headSha !== "string" || !headSha || typeof headRepository !== "string" || !headRepository) {
+    if (!Number.isSafeInteger(id) || id <= 0 || !Number.isSafeInteger(workflowId) || workflowId <= 0 || typeof workflowPath !== "string" || !workflowPath || typeof event !== "string" || !event || typeof headSha !== "string" || !headSha || typeof headRepository !== "string" || !headRepository) {
       throw new Error("artifact provenance metadata is incomplete");
     }
     return {

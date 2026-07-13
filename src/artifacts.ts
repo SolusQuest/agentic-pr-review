@@ -21,7 +21,7 @@ interface WorkflowRunMetadata {
   workflowId: number;
   workflowPath: string;
   event: string;
-  conclusion: string;
+  conclusion?: string;
   headSha: string;
   headRepository: string;
   pullRequestNumbers: number[];
@@ -149,7 +149,7 @@ export class GitHubArtifactStore implements ArtifactStore {
     const id = Number(run?.id);
     const workflowPath = run?.path;
     const event = run?.event;
-    const conclusion = run?.conclusion;
+    const conclusion = typeof run?.conclusion === 'string' ? run.conclusion : undefined;
     const headSha = run?.head_sha;
     const headRepository = run?.head_repository?.full_name;
     if (
@@ -161,7 +161,6 @@ export class GitHubArtifactStore implements ArtifactStore {
       !workflowPath ||
       typeof event !== 'string' ||
       !event ||
-      typeof conclusion !== 'string' ||
       typeof headSha !== 'string' ||
       !headSha ||
       typeof headRepository !== 'string' ||
