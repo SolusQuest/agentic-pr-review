@@ -68,6 +68,7 @@ interface StateManifest {
   target: {
     mode: ReviewTarget['mode'];
     prNumber?: number;
+    headRepository?: string;
     baseSha: string;
     headSha: string;
     changedFiles: number;
@@ -81,6 +82,63 @@ export class RestoredSnapshotInvalidError extends Error {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+const MANIFEST_KEYS = new Set([
+  'version',
+  'workflow',
+  'stateKey',
+  'phase',
+  'runtimeProvider',
+  'runtimeBackend',
+  'toolMode',
+  'allowedTools',
+  'sessionId',
+  'sessionName',
+  'reviewedHeadSha',
+  'promptSha256',
+  'reviewInputSha256',
+  'reviewInputBytes',
+  'createdAt',
+  'updatedAt',
+  'usage',
+  'observedTurns',
+  'observedTurnSource',
+  'lineageTotals',
+  'usageBudgetStatus',
+  'review',
+  'structuredOutput',
+  'contextBlocks',
+  'target',
+]);
+
+function validateManifestShape(value: unknown): asserts value is StateManifest {
+  if (!isRecord(value) || [...Object.keys(value)].some((key) => !MANIFEST_KEYS.has(key))) {
+    throw new RestoredSnapshotInvalidError();
+  }
+  if (
+    value.version !== 1 ||
+    value.workflow !== 'agentic-pr-review' ||
+    typeof value.stateKey !== 'string' ||
+    (value.phase !== 'bootstrap' && value.phase !== 'incremental') ||
+    typeof value.runtimeProvider !== 'string' ||
+    typeof value.toolMode !== 'string' ||
+    !Array.isArray(value.allowedTools) ||
+    value.allowedTools.some((item) => typeof item !== 'string') ||
+    typeof value.sessionId !== 'string' ||
+    typeof value.sessionName !== 'string' ||
+    !isRecord(value.target) ||
+    typeof value.target.mode !== 'string' ||
+    typeof value.target.baseSha !== 'string' ||
+    typeof value.target.headSha !== 'string' ||
+    typeof value.target.changedFiles !== 'number'
+  ) {
+    throw new RestoredSnapshotInvalidError();
+  }
+}
+
 const SECRET_FILE_PATTERN =
   /(^|[\\/])(\.env|credentials?|secrets?|tokens?|settings\.local)(\.|[\\/]|$)/i;
 const SECRET_CONTENT_PATTERN = /(ghp_|github_pat_|sk-[a-zA-Z0-9]|authorization:\s*bearer)/i;
@@ -90,9 +148,7 @@ const HIGH_RISK_TOKEN_PATTERN = /(ghp_|github_pat_|sk-[a-zA-Z0-9])\S*/g;
 export async function readRestoredState(root: string): Promise<RestoredState> {
   const manifestPath = path.join(root, 'manifest.json');
   const manifest = await readJsonFile<StateManifest>(manifestPath);
-  if (manifest.workflow !== 'agentic-pr-review') {
-    throw new Error('restored state manifest has unexpected workflow');
-  }
+  validateManifestShape(manifest);
   const runtimeBackend = manifest.runtimeBackend ?? 'legacy';
   if (runtimeBackend !== 'legacy' && runtimeBackend !== 'deterministic-csharp') {
     throw new Error('restored state manifest has unknown runtime_backend');
@@ -121,6 +177,8 @@ export async function readRestoredState(root: string): Promise<RestoredState> {
     observedTurnSource: manifest.observedTurnSource,
     lineageTotals: manifest.lineageTotals,
     pullRequestDiffSnapshot,
+    prNumber: manifest.target.prNumber,
+    headRepository: manifest.target.headRepository,
     manifestPath,
   };
 }
@@ -213,6 +271,7 @@ export async function writeStateBundle(options: {
     target: {
       mode: options.target.mode,
       prNumber: options.target.prNumber,
+      headRepository: options.target.headRepoFullName,
       baseSha: options.target.baseSha,
       headSha: options.target.headSha,
       changedFiles: options.target.changedFiles.length,

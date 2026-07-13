@@ -8,6 +8,23 @@ export interface ArtifactRef {
   id: number;
   name: string;
   workflowRunId: number;
+  runHeadSha?: string;
+}
+
+export interface ArtifactLookupContext {
+  targetMode: 'pull-request' | 'synthetic-fixture';
+  prNumber?: number;
+}
+
+interface WorkflowRunMetadata {
+  id: number;
+  workflowId?: number;
+  workflowPath?: string;
+  event?: string;
+  conclusion?: string;
+  headSha?: string;
+  headRepository?: string;
+  pullRequestNumbers: number[];
 }
 
 export interface ArtifactStore {
@@ -28,22 +45,35 @@ export class GitHubArtifactStore implements ArtifactStore {
     private readonly owner: string,
     private readonly repo: string,
     private readonly currentRunId: number,
+    private readonly lookupContext?: ArtifactLookupContext,
   ) {}
 
   async findStateArtifact(name: string, explicitRunId?: number): Promise<ArtifactRef | undefined> {
+    const currentRun = await this.getWorkflowRun(this.currentRunId);
     const artifacts = explicitRunId
       ? await this.listWorkflowRunArtifacts(name, explicitRunId)
       : await this.listRepoArtifacts(name);
-    const match = artifacts
-      .filter((artifact: any) => artifact.name === name && !artifact.expired)
-      .sort((a: any, b: any) => String(b.created_at).localeCompare(String(a.created_at)))[0];
-    if (!match?.id) {
+    const trusted = [] as Array<{ artifact: any; run: WorkflowRunMetadata }>;
+    for (const artifact of artifacts) {
+      if (artifact.name !== name || artifact.expired || !artifact.id) continue;
+      const runId = Number(artifact.workflow_run?.id ?? explicitRunId ?? 0);
+      if (!runId) continue;
+      const run = runId === currentRun.id ? currentRun : await this.getWorkflowRun(runId);
+      if (this.isTrustedRun(run, currentRun, explicitRunId !== undefined)) {
+        trusted.push({ artifact, run });
+      }
+    }
+    const match = trusted.sort((a, b) =>
+      String(b.artifact.created_at).localeCompare(String(a.artifact.created_at)),
+    )[0];
+    if (!match?.artifact?.id) {
       return undefined;
     }
     return {
-      id: Number(match.id),
-      name: String(match.name),
-      workflowRunId: Number(match.workflow_run?.id ?? explicitRunId ?? this.currentRunId),
+      id: Number(match.artifact.id),
+      name: String(match.artifact.name),
+      workflowRunId: match.run.id,
+      runHeadSha: match.run.headSha,
     };
   }
 
@@ -101,6 +131,59 @@ export class GitHubArtifactStore implements ArtifactStore {
       },
     );
     return response.data.artifacts ?? [];
+  }
+
+  private async getWorkflowRun(runId: number): Promise<WorkflowRunMetadata> {
+    const response = await this.octokit.request('GET /repos/{owner}/{repo}/actions/runs/{run_id}', {
+      owner: this.owner,
+      repo: this.repo,
+      run_id: runId,
+    });
+    const run = response.data;
+    return {
+      id: Number(run.id),
+      workflowId: Number(run.workflow_id) || undefined,
+      workflowPath: typeof run.path === 'string' ? run.path : undefined,
+      event: typeof run.event === 'string' ? run.event : undefined,
+      conclusion: typeof run.conclusion === 'string' ? run.conclusion : undefined,
+      headSha: typeof run.head_sha === 'string' ? run.head_sha : undefined,
+      headRepository:
+        typeof run.head_repository?.full_name === 'string'
+          ? run.head_repository.full_name
+          : undefined,
+      pullRequestNumbers: Array.isArray(run.pull_requests)
+        ? run.pull_requests
+            .map((pull: any) => Number(pull.number))
+            .filter((number: number) => Number.isInteger(number) && number > 0)
+        : [],
+    };
+  }
+
+  private isTrustedRun(
+    candidate: WorkflowRunMetadata,
+    current: WorkflowRunMetadata,
+    explicitRunId: boolean,
+  ): boolean {
+    if (candidate.conclusion !== 'success') return false;
+    if (current.workflowId && candidate.workflowId && current.workflowId !== candidate.workflowId) {
+      return false;
+    }
+    if (
+      current.workflowPath &&
+      candidate.workflowPath &&
+      current.workflowPath !== candidate.workflowPath
+    ) {
+      return false;
+    }
+    if (!current.workflowId && !current.workflowPath) return false;
+    if (current.event && candidate.event !== current.event) return false;
+    if (current.headRepository && candidate.headRepository !== current.headRepository) return false;
+    if (this.lookupContext?.targetMode === 'pull-request' && this.lookupContext.prNumber) {
+      if (!candidate.pullRequestNumbers.includes(this.lookupContext.prNumber) && !explicitRunId) {
+        return false;
+      }
+    }
+    return true;
   }
 }
 

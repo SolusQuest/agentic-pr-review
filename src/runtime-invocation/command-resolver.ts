@@ -26,8 +26,10 @@ export async function resolveTrustedRuntimeCommand(
   }
 
   const prefixArgs = parsePrefixArgs(env.AGENTIC_REVIEW_RUNTIME_PREFIX_ARGS_JSON);
+  const resolvedPrefixArgs: string[] = [];
   for (const arg of prefixArgs) {
     if (!path.isAbsolute(arg)) {
+      resolvedPrefixArgs.push(arg);
       continue;
     }
     const argReal = await resolveRegularPath(arg, 'runtime prefix argument', true, false);
@@ -36,12 +38,13 @@ export async function resolveTrustedRuntimeCommand(
         'command-unavailable: absolute runtime prefix path is inside GITHUB_WORKSPACE',
       );
     }
+    resolvedPrefixArgs.push(argReal);
   }
 
   return {
     command: {
       executablePath: executableReal,
-      ...(prefixArgs.length > 0 ? { prefixArgs } : {}),
+      ...(resolvedPrefixArgs.length > 0 ? { prefixArgs: resolvedPrefixArgs } : {}),
     },
   };
 }

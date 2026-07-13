@@ -22,8 +22,9 @@
     },
     "runtimeVersion": {
       "type": "string",
+      "maxLength": 120,
       "minLength": 1,
-      "pattern": "\\S",
+      "pattern": "^(?!.*[\\u0000-\\u001f\\u007f\\r\\n])(?=.*\\S).+$",
       "description": "Opaque runtime version supplied by the runtime. Semver interpretation is out of scope."
     },
     "inputSha256": {

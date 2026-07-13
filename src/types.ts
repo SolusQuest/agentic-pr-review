@@ -253,6 +253,8 @@ export interface RestoredState {
   observedTurns?: number | null;
   observedTurnSource?: string;
   lineageTotals?: RuntimeLineageTotals;
+  prNumber?: number;
+  headRepository?: string;
   pullRequestDiffSnapshot?: PullRequestDiffSnapshotV1;
   manifestPath: string;
 }

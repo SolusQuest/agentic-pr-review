@@ -54,6 +54,20 @@ describe('ReviewTraceV1 - valid traces', () => {
     expect(result.ok).toBe(true);
   });
 
+  it.each(['x'.repeat(120), 'runtime v1.2.3'])(
+    'accepts bounded runtimeVersion %s',
+    (runtimeVersion) => {
+      expect(validateReviewTraceV1({ ...minimalTrace(), runtimeVersion }).ok).toBe(true);
+    },
+  );
+
+  it.each(['x'.repeat(121), 'runtime\nversion', 'runtime\u0000version'])(
+    'rejects unsafe runtimeVersion %s',
+    (runtimeVersion) => {
+      expect(validateReviewTraceV1({ ...minimalTrace(), runtimeVersion }).ok).toBe(false);
+    },
+  );
+
   it('accepts a full trace with all optional fields', () => {
     const result = validateReviewTraceV1(fullTrace());
     expect(result.ok).toBe(true);

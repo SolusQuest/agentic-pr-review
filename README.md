@@ -198,6 +198,7 @@ preempt the provider call that emitted the over-budget usage record.
 | `runtime_trace_sha256`                      | Validated deterministic trace hash                                                      |
 | `runtime_error_kind`                        | Bounded deterministic runtime or host error kind                                        |
 | `runtime_error_class`                       | Bounded deterministic runtime exit class                                                |
+| `usage_budget_status`                       | Human-readable usage status; deterministic runs use `not_applicable (records=0)`        |
 | `state_key`                                 | Resolved state key                                                                      |
 | `review_mode`                               | Requested review mode                                                                   |
 | `phase`                                     | Actual phase: `bootstrap` or `incremental`                                              |

@@ -27,6 +27,20 @@ describe('ReviewResultV1', () => {
     expect(validateReviewResultV1(validResult).ok).toBe(true);
   });
 
+  it.each(['x'.repeat(120), 'runtime v1.2.3'])(
+    'accepts bounded runtimeVersion %s',
+    (runtimeVersion) => {
+      expect(validateReviewResultV1({ ...validResult, runtimeVersion }).ok).toBe(true);
+    },
+  );
+
+  it.each(['x'.repeat(121), 'runtime\nversion', 'runtime\u0000version'])(
+    'rejects unsafe runtimeVersion %s',
+    (runtimeVersion) => {
+      expect(validateReviewResultV1({ ...validResult, runtimeVersion }).ok).toBe(false);
+    },
+  );
+
   it('accepts a no-finding result', () => {
     expect(validateReviewResultV1({ ...validResult, findings: [] }).ok).toBe(true);
   });

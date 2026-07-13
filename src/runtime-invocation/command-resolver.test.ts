@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -32,6 +32,18 @@ describe('resolveTrustedRuntimeCommand', () => {
     });
     expect(resolved.command.executablePath).toBe(fixture.executable);
     expect(resolved.command.prefixArgs).toEqual(['--framework', '@/opaque/path']);
+  });
+
+  it('canonicalizes absolute prefix paths before returning the command', async () => {
+    const fixture = await fixtureRoot();
+    const prefixPath = path.join(fixture.outside, 'framework.dll');
+    await writeFile(prefixPath, 'fixture');
+    const resolved = await resolveTrustedRuntimeCommand({
+      GITHUB_WORKSPACE: fixture.workspace,
+      AGENTIC_REVIEW_RUNTIME_EXECUTABLE: fixture.executable,
+      AGENTIC_REVIEW_RUNTIME_PREFIX_ARGS_JSON: JSON.stringify([prefixPath]),
+    });
+    expect(resolved.command.prefixArgs).toEqual([await realpath(prefixPath)]);
   });
 
   it('rejects malformed prefix JSON', async () => {

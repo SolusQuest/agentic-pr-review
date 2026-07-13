@@ -43,6 +43,23 @@ Malformed command configuration fails closed before spawn. The deterministic pat
 GitHub or provider credentials, does not use `PATH` search or downloads, and does not publish inline
 comments. Its local state bundle is sanitized before the sticky comment or artifact upload barrier.
 
+State artifact restore is provenance-bound. The GitHub artifact store accepts only successful
+runs from the same workflow and event, with the same head repository and requested pull request;
+the restored manifest must be version 1, match the artifact run head SHA, target PR, and head
+repository. Unknown manifest versions and unknown top-level fields fail closed. Explicit
+`state_artifact_run_id` selection does not bypass these manifest checks.
+
+The host rechecks the pull request head immediately before publishing state. Downstream workflows
+should also configure per-PR concurrency with cancellation to prevent stale writers from replacing
+a newer review; the host-side check is a final stale-head barrier, not a replacement for workflow
+concurrency.
+
+Deterministic summaries omit runner-local bundle and result paths. Runtime versions are bounded
+single-line metadata, and host warnings, diagnostics, authorization headers, token-shaped values,
+and filesystem paths are sanitized before publication. If state upload fails after deterministic
+runtime success, the action keeps the success outputs and writes a bounded partial-side-effect
+summary identifying the failed state upload.
+
 An identical incremental PR snapshot is a host short-circuit: it does not parse command settings,
 construct runtime input, invoke the runtime, or validate a trace. It still constructs and sanitizes
 the host-owned structured result and state bundle before upload.

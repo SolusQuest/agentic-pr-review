@@ -240,6 +240,7 @@ describe('run', () => {
           target: {
             mode: 'pull-request',
             prNumber: 1,
+            headRepository: 'example/repo',
             baseSha: 'base-sha',
             headSha: 'old-head-sha',
             changedFiles: snapshot?.files.length ?? 1,
@@ -289,6 +290,13 @@ describe('run', () => {
     expect(mocks.setOutput).toHaveBeenCalledWith('runtime_trace_sha256', '');
     expect(mocks.setOutput).toHaveBeenCalledWith('runtime_error_kind', '');
     expect(mocks.createComment).not.toHaveBeenCalled();
+    const manifest = JSON.parse(
+      await readFile(
+        path.join(artifactRoot, deterministicStateArtifactName(logicalStateKey), 'manifest.json'),
+        'utf8',
+      ),
+    ) as { sessionName: string };
+    expect(manifest.sessionName).toBe(`agentic-pr-review-${logicalStateKey}`);
   });
 
   it('runs the guarded deterministic backend through the fake runtime', async () => {
@@ -321,6 +329,30 @@ describe('run', () => {
         ),
       ),
     ).resolves.toBeTruthy();
+    expect(mocks.summary.addRaw.mock.calls.at(-1)?.[0]).not.toContain(tempRoot);
+  });
+
+  it('keeps runtime success outputs and writes a bounded summary when state upload fails', async () => {
+    Object.assign(mocks.inputs, {
+      runtime_backend: 'deterministic-csharp',
+      post_comment: 'false',
+      review_mode: 'bootstrap',
+      state_key: 'deterministic-upload-failure',
+    });
+    process.env.AGENTIC_REVIEW_RUNTIME_EXECUTABLE = process.execPath;
+    process.env.AGENTIC_REVIEW_RUNTIME_PREFIX_ARGS_JSON = JSON.stringify([
+      path.join(process.cwd(), 'src/runtime-invocation/__test-fixtures__/fake-runtime.mjs'),
+    ]);
+    process.env.FAKE_RUNTIME_SCENARIO = 'success';
+    const blockedArtifactRoot = path.join(root, 'artifact-root-file');
+    await writeFile(blockedArtifactRoot, 'not a directory', 'utf8');
+    process.env.AGENTIC_REVIEW_LOCAL_ARTIFACT_DIR = blockedArtifactRoot;
+
+    const { run } = await import('./main.js');
+    await expect(run()).rejects.toThrow('state-invalid: state artifact upload failed');
+    expect(mocks.setOutput).toHaveBeenCalledWith('runtime_error_kind', '');
+    expect(mocks.summary.addRaw.mock.calls.at(-1)?.[0]).toContain('State artifact upload: failed');
+    expect(mocks.summary.addRaw.mock.calls.at(-1)?.[0]).not.toContain(tempRoot);
   });
 
   it('reports bounded command errors before deterministic side effects', async () => {

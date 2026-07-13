@@ -129,6 +129,22 @@ describe('state helpers', () => {
     expect(deterministicStateArtifactName(logical)).not.toBe(stateArtifactName(logical));
   });
 
+  it('rejects unknown state manifest versions and top-level fields', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'agentic-pr-review-state-'));
+    try {
+      await writeFile(
+        path.join(dir, 'manifest.json'),
+        JSON.stringify({ version: 2, workflow: 'agentic-pr-review' }),
+        'utf8',
+      );
+      await expect(readRestoredState(dir)).rejects.toThrow(
+        'restored state manifest pull request diff snapshot is incompatible',
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('writes restorable sanitized state without context bodies', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'agentic-pr-review-state-'));
     try {
