@@ -14,6 +14,12 @@ public static class LedgerBuilder
     public static ProjectionOutcome<ReviewContextRecord> BuildReviewContext(
         ValidatedContextSource source, ExpectedIdentities identities, InteractionIdentity interaction)
     {
+        // Preflight (null and lone-surrogate on every caller-supplied string)
+        // runs before any pattern / length / enum helper touches the values.
+        var contextUnicode = PreflightContextSourceUnicode(source, identities, interaction);
+        if (contextUnicode is not null)
+            return new ProjectionOutcome<ReviewContextRecord>(null, contextUnicode);
+
         // Identity constraints
         var idFailure = ValidateIdentities(identities);
         if (idFailure is not null) return new ProjectionOutcome<ReviewContextRecord>(null, idFailure);
@@ -73,6 +79,11 @@ public static class LedgerBuilder
     public static ProjectionOutcome<ReviewOutcomeRecord> BuildReviewOutcome(
         ValidatedOutcomeSource source, InteractionIdentity interaction)
     {
+        // Preflight null/lone-surrogate on every caller-supplied string first.
+        var unicode = PreflightOutcomeSourceUnicode(source, interaction);
+        if (unicode is not null)
+            return new ProjectionOutcome<ReviewOutcomeRecord>(null, unicode);
+
         // Interaction identity
         if (!IsHex64(interaction.InteractionId) || interaction.InteractionOrdinal < 0)
             return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
@@ -137,6 +148,9 @@ public static class LedgerBuilder
 
     public static BuildOutcome CreateBootstrap(BootstrapTransition expected, ReviewContextRecord context, ReviewOutcomeRecord outcome)
     {
+        // Identity unicode preflight is performed later by PreflightCandidate,
+        // but ExpectedTransition string fields must be checked before the
+        // schema/const enum path below can access them.
         if (expected.StateGeneration != 0)
             return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.BootstrapShapeViolation));
         var header = BuildHeader(expected.Identities, "bootstrap",
@@ -148,6 +162,8 @@ public static class LedgerBuilder
 
     public static BuildOutcome CreateRecovery(RecoveryTransition expected, ReviewContextRecord context, ReviewOutcomeRecord outcome)
     {
+        if (HasInvalidUnicode(expected.RecoveryReason))
+            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode));
         if (expected.StateGeneration != 0)
             return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.RecoveryShapeViolation));
         if (!IsValidRecoveryReason(expected.RecoveryReason))
@@ -162,6 +178,8 @@ public static class LedgerBuilder
 
     public static BuildOutcome AppendContinuation(ValidatedLedger predecessor, ContinuationTransition expected, ReviewContextRecord context, ReviewOutcomeRecord outcome)
     {
+        if (HasInvalidUnicode(expected.PredecessorLedgerSha256))
+            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode));
         var header = BuildHeader(expected.Identities, "continuation",
             stateGeneration: expected.StateGeneration,
             ledgerEpoch: expected.LedgerEpoch,
@@ -178,6 +196,10 @@ public static class LedgerBuilder
 
     public static BuildOutcome CreateReset(ValidatedLedger predecessor, ResetTransition expected, ReviewContextRecord context, ReviewOutcomeRecord outcome)
     {
+        if (HasInvalidUnicode(expected.ResetReason) ||
+            HasInvalidUnicode(expected.PredecessorLedgerSha256) ||
+            HasInvalidUnicode(expected.PredecessorManifestSha256))
+            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode));
         if (!IsValidResetReason(expected.ResetReason))
             return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.ResetReasonMissing));
         var header = BuildHeader(expected.Identities, "reset",
@@ -288,6 +310,78 @@ public static class LedgerBuilder
                 foreach (var l in oc.Limitations)
                 {
                     if (HasInvalidUnicode(l)) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+                }
+            }
+        }
+        return null;
+    }
+
+    private static LedgerDiagnostic? ValidateModelSchemaAndSemantics(LedgerModel model)
+    {
+        // Identity byte-length caps and control-character rejection on
+        // header identities (same rules the parser applies post-schema).
+        var bounds = LedgerSemanticChecks.CheckIdentityBounds(model);
+        if (bounds is not null) return bounds;
+
+        // Structural / cross-record semantic invariants (pair order, ordinal
+        // continuity, digest recomputation).
+        var semantic = LedgerSemanticChecks.CheckSemanticInvariants(model);
+        if (semantic is not null) return semantic;
+
+        // Per-record schema-shape validation on the manually-constructed
+        // records — the same overlong / path / patch / finding checks that
+        // BuildReviewContext / BuildReviewOutcome apply when a caller uses
+        // the projection helpers.
+        foreach (var rec in model.Records)
+        {
+            if (rec.Context is ReviewContextRecord ctx)
+            {
+                if (ctx.ChangedFiles.Length > LedgerLimits.MaxChangedFilesPerContext)
+                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.ChangedFileLimitExceeded);
+                if (!IsSha1(ctx.ReviewedHeadSha) || !IsSha1(ctx.ReviewedBaseSha) ||
+                    !IsHex64(ctx.SubjectDigest) || !IsHex64(ctx.CacheContractDigest) ||
+                    !IsHex64(ctx.InteractionId))
+                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
+                foreach (var f in ctx.ChangedFiles)
+                {
+                    if (!IsSupportedStatus(f.Status))
+                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.UnsupportedChangeStatus);
+                    if (!IsSafeRelativePath(f.Path) ||
+                        (f.PreviousPath is not null && !IsSafeRelativePath(f.PreviousPath)))
+                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
+                    if (f.Additions < 0 || f.Deletions < 0 || f.Changes < 0)
+                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
+                    if (f.Path.Length > LedgerLimits.MaxSafeRelativePathChars)
+                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
+                    if (f.Patch is not null && !IsHex64(f.Patch.Sha256))
+                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
+                }
+            }
+            if (rec.Outcome is ReviewOutcomeRecord oc)
+            {
+                if (!IsHex64(oc.InteractionId))
+                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
+                if (oc.Summary.Length > LedgerLimits.MaxSummaryChars)
+                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
+                if (oc.Findings.Length > LedgerLimits.MaxFindingsPerOutcome)
+                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.FindingLimitExceeded);
+                if (oc.Limitations.Length > LedgerLimits.MaxLimitationsPerOutcome)
+                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.LimitationsLimitExceeded);
+                foreach (var f in oc.Findings)
+                {
+                    if (f.Body.Length > LedgerLimits.MaxFindingBodyChars ||
+                        f.Title.Length > LedgerLimits.MaxFindingTitleChars ||
+                        (f.Evidence is not null && f.Evidence.Length > LedgerLimits.MaxFindingEvidenceChars) ||
+                        (f.SuggestedAction is not null && f.SuggestedAction.Length > LedgerLimits.MaxFindingSuggestedActionChars) ||
+                        (f.Path is not null && f.Path.Length > LedgerLimits.MaxSafeRelativePathChars))
+                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
+                    var locFailure = LedgerSemanticChecks.ValidateFindingLocation(f);
+                    if (locFailure is not null) return locFailure;
+                }
+                foreach (var l in oc.Limitations)
+                {
+                    if (l.Length > LedgerLimits.MaxLimitationsItemChars)
+                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
                 }
             }
         }
@@ -412,6 +506,16 @@ public static class LedgerBuilder
 
         var model = new LedgerModel(1, 1, header, records);
 
+        // Run model-level schema/semantic invariants BEFORE serializing so
+        // manually-constructed records that would blow past the 256 KiB
+        // canonical cap still surface their specific projection code
+        // (overlong summary, identity byte-length, invalid path, invalid
+        // finding location, digest recompute, etc.) instead of being masked
+        // by ledger_over_bound_append / canonical_byte_limit_exceeded.
+        var modelValidationFailure = ValidateModelSchemaAndSemantics(model);
+        if (modelValidationFailure is not null)
+            return new BuildOutcome(null, modelValidationFailure);
+
         // Serialize to canonical bytes so we can produce a ValidatedLedger.
         var canonical = LedgerCanonicalizer.SerializeCanonical(model);
 
@@ -456,6 +560,63 @@ public static class LedgerBuilder
             return new BuildOutcome(null, transitionOutcome.Failure);
         }
         return new BuildOutcome(transitionOutcome.Candidate, null);
+    }
+
+    private static LedgerDiagnostic? PreflightContextSourceUnicode(
+        ValidatedContextSource source, ExpectedIdentities identities, InteractionIdentity interaction)
+    {
+        foreach (var s in new[]
+        {
+            identities.Repository, identities.HeadRepository,
+            identities.WorkflowIdentity, identities.TrustedExecutionDomain, identities.SessionEpoch,
+            identities.ProviderId, identities.ModelId,
+            identities.AdapterId, identities.TemplateId, identities.PolicyId,
+            identities.ToolDefinitionId, identities.CacheConfigId,
+            source.ReviewedHeadSha, source.ReviewedBaseSha,
+            interaction.InteractionId,
+        })
+        {
+            if (HasInvalidUnicode(s)) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+        }
+        foreach (var f in source.ChangedFiles)
+        {
+            if (HasInvalidUnicode(f.Path) || HasInvalidUnicode(f.Status))
+                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+            if (f.PreviousPath is not null && HasInvalidUnicode(f.PreviousPath))
+                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+            if (f.Patch is ValidatedPatchSource ps && HasInvalidUnicode(ps.Sha256))
+                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+        }
+        return null;
+    }
+
+    private static LedgerDiagnostic? PreflightOutcomeSourceUnicode(
+        ValidatedOutcomeSource source, InteractionIdentity interaction)
+    {
+        if (HasInvalidUnicode(interaction.InteractionId))
+            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+        if (HasInvalidUnicode(source.Summary))
+            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+        foreach (var f in source.Findings)
+        {
+            if (HasInvalidUnicode(f.Severity) || HasInvalidUnicode(f.Confidence) ||
+                HasInvalidUnicode(f.Category) || HasInvalidUnicode(f.Title) ||
+                HasInvalidUnicode(f.Body))
+                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+            if (f.Path is not null && HasInvalidUnicode(f.Path))
+                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+            if (f.Evidence is not null && HasInvalidUnicode(f.Evidence))
+                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+            if (f.SuggestedAction is not null && HasInvalidUnicode(f.SuggestedAction))
+                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+            if (f.InlinePreference is not null && HasInvalidUnicode(f.InlinePreference))
+                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+        }
+        foreach (var l in source.Limitations)
+        {
+            if (HasInvalidUnicode(l)) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+        }
+        return null;
     }
 
     private static LedgerDiagnostic? ValidateIdentities(ExpectedIdentities i)

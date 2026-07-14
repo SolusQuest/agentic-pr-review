@@ -21,9 +21,14 @@ internal static class LedgerSchemaMapper
             ? kindEl.GetString()
             : null;
 
-        // Rule 1: additionalProperties violation - determine whether the extra
-        // property is header-vocabulary (variant-forbidden) or truly unknown.
-        // Rule 1a (variant-forbidden) is checked first.
+        // Refined precedence: unknown-field is highest priority. Only if no
+        // truly-unknown property exists do we consider header-vocabulary
+        // variant-forbidden fields.
+        var extra = FindAnyAdditionalProperty(root);
+        if (extra is not null)
+        {
+            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.UnknownField);
+        }
         if (kind is not null &&
             headerElement.ValueKind == JsonValueKind.Object)
         {
@@ -32,13 +37,6 @@ internal static class LedgerSchemaMapper
             {
                 return LedgerDiagnosticMessages.Of(variantForbidden);
             }
-        }
-
-        // Detect any additional property anywhere.
-        var extra = FindAnyAdditionalProperty(root);
-        if (extra is not null)
-        {
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.UnknownField);
         }
 
         // Missing required fields.

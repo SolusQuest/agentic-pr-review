@@ -133,4 +133,24 @@ public sealed class LedgerSchemaMapperTests
         Assert.Null(result.Ledger);
         Assert.NotNull(result.Failure);
     }
+
+
+    /// <summary>
+    /// Unknown-field precedence over variant-forbidden: a bootstrap header
+    /// carrying both a truly-unknown property AND a known-but-forbidden field
+    /// (resetReason) must report ledger_unknown_field.
+    /// </summary>
+    [Fact]
+    public void UnknownHeaderField_PrecedesVariantForbiddenField()
+    {
+        var text = System.Text.Encoding.UTF8.GetString(ReadFixture("bootstrap-minimal.json"));
+        var modified = text
+            .Replace(
+                "\"predecessorLedgerSha256\":",
+                "\"resetReason\":\"base_changed\",\"unknownHeaderField\":true,\"predecessorLedgerSha256\":");
+        var payload = System.Text.Encoding.UTF8.GetBytes(modified);
+        var result = LedgerParser.ParseAndValidate(payload);
+        Assert.Null(result.Ledger);
+        Assert.Equal(LedgerDiagnosticCodes.UnknownField, result.Failure!.Code);
+    }
 }

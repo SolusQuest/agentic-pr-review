@@ -294,4 +294,130 @@ public sealed class LedgerBuilderTests
         var outcome = LedgerBuilder.BuildReviewOutcome(OutcomeSource("Bootstrap"), IId(0)).Record!;
         return LedgerBuilder.CreateBootstrap(new BootstrapTransition(Identities, 0, 1), context, outcome).Ledger!;
     }
+
+
+    // ---------- Composite over-bound-append cause precedence ----------
+
+    [Fact]
+    public void AppendContinuation_InteractionLimit_ReportsInteractionCause()
+    {
+        // Predecessor at cap; adding one more pair pushes over MaxInteractionPairs.
+        var maxBytes = File.ReadAllBytes(
+            Path.Combine(AppContext.BaseDirectory, "protocol", "fixtures", "v1",
+                "provider-session-ledger", "continuation-max-interactions.json"));
+        var predecessor = LedgerParser.ParseAndValidate(maxBytes).Ledger!;
+        var identities = Identities;
+        var context = LedgerBuilder.BuildReviewContext(ContextSource(), identities, IId(1)).Record!;
+        var outcome = LedgerBuilder.BuildReviewOutcome(OutcomeSource("cont"), IId(1)).Record!;
+        // Match predecessor's state generation and epoch so the transition
+        // check passes far enough to reach the interaction structural cap.
+        var expected = new ContinuationTransition(
+            identities, predecessor.ContentSha256,
+            PredecessorStateGeneration: predecessor.Model.Header.StateGeneration,
+            StateGeneration: predecessor.Model.Header.StateGeneration + 1,
+            LedgerEpoch: predecessor.Model.Header.LedgerEpoch);
+        var build = LedgerBuilder.AppendContinuation(predecessor, expected, context, outcome);
+        Assert.Null(build.Ledger);
+        Assert.Equal(LedgerDiagnosticCodes.OverBoundAppend, build.Failure!.Code);
+        Assert.Equal(LedgerDiagnosticCodes.InteractionLimitExceeded, build.Failure.CauseCode);
+    }
+
+    [Fact]
+    public void CreateBootstrap_CanonicalByteLimit_ReportsCanonicalByteCause()
+    {
+        var giantSummary = new string('a', LedgerLimits.MaxSummaryChars);
+        var lims = ImmutableArray.CreateBuilder<string>();
+        for (var i = 0; i < LedgerLimits.MaxLimitationsPerOutcome; i++)
+            lims.Add(new string('b', LedgerLimits.MaxLimitationsItemChars));
+        var findings = ImmutableArray.CreateBuilder<ValidatedFindingSource>();
+        for (var i = 0; i < LedgerLimits.MaxFindingsPerOutcome; i++)
+        {
+            findings.Add(new ValidatedFindingSource(
+                Severity: "low", Confidence: "medium", Category: "correctness",
+                Title: "t", Body: new string('c', LedgerLimits.MaxFindingBodyChars),
+                Path: null, StartLine: null, EndLine: null,
+                Evidence: new string('d', LedgerLimits.MaxFindingEvidenceChars),
+                SuggestedAction: null, InlinePreference: null));
+        }
+        var outcomeSource = OutcomeSource(giantSummary) with
+        {
+            Limitations = lims.ToImmutable(),
+            Findings = findings.ToImmutable(),
+        };
+        var outcome = LedgerBuilder.BuildReviewOutcome(outcomeSource, IId(0)).Record!;
+        var context = LedgerBuilder.BuildReviewContext(ContextSource(), Identities, IId(0)).Record!;
+        var build = LedgerBuilder.CreateBootstrap(
+            new BootstrapTransition(Identities, 0, 1), context, outcome);
+        Assert.Null(build.Ledger);
+        Assert.Equal(LedgerDiagnosticCodes.OverBoundAppend, build.Failure!.Code);
+        Assert.Equal(LedgerDiagnosticCodes.CanonicalByteLimitExceeded, build.Failure.CauseCode);
+    }
+
+    // ---------- Null-safe / lone-surrogate preflight ----------
+
+    private const string LoneSurrogate = "\uD800";
+
+    [Fact]
+    public void BuildReviewContext_NullReviewedHeadSha_IsRejectedAsInvalidUnicode()
+    {
+        var source = ContextSource() with { ReviewedHeadSha = null! };
+        var outcome = LedgerBuilder.BuildReviewContext(source, Identities, IId(0));
+        Assert.Null(outcome.Record);
+        Assert.Equal(LedgerDiagnosticCodes.InvalidUnicode, outcome.Failure!.Code);
+    }
+
+    [Fact]
+    public void BuildReviewContext_LoneSurrogateInReviewedBaseSha_IsRejectedAsInvalidUnicode()
+    {
+        var source = ContextSource() with { ReviewedBaseSha = new string('1', 39) + LoneSurrogate };
+        var outcome = LedgerBuilder.BuildReviewContext(source, Identities, IId(0));
+        Assert.Null(outcome.Record);
+        Assert.Equal(LedgerDiagnosticCodes.InvalidUnicode, outcome.Failure!.Code);
+    }
+
+    [Fact]
+    public void BuildReviewOutcome_NullSummary_IsRejectedAsInvalidUnicode()
+    {
+        var source = OutcomeSource() with { Summary = null! };
+        var outcome = LedgerBuilder.BuildReviewOutcome(source, IId(0));
+        Assert.Null(outcome.Record);
+        Assert.Equal(LedgerDiagnosticCodes.InvalidUnicode, outcome.Failure!.Code);
+    }
+
+    [Fact]
+    public void BuildReviewOutcome_OverlongSummaryContainingLoneSurrogate_ReportsInvalidUnicode()
+    {
+        var summary = new string('x', LedgerLimits.MaxSummaryChars + 100) + LoneSurrogate;
+        var source = OutcomeSource() with { Summary = summary };
+        var outcome = LedgerBuilder.BuildReviewOutcome(source, IId(0));
+        Assert.Null(outcome.Record);
+        Assert.Equal(LedgerDiagnosticCodes.InvalidUnicode, outcome.Failure!.Code);
+    }
+
+    [Fact]
+    public void CreateRecovery_LoneSurrogateReason_IsRejectedAsInvalidUnicode()
+    {
+        var context = LedgerBuilder.BuildReviewContext(ContextSource(), Identities, IId(0)).Record!;
+        var outcome = LedgerBuilder.BuildReviewOutcome(OutcomeSource(), IId(0)).Record!;
+        var expected = new RecoveryTransition(Identities, 0, 1, LoneSurrogate);
+        var build = LedgerBuilder.CreateRecovery(expected, context, outcome);
+        Assert.Null(build.Ledger);
+        Assert.Equal(LedgerDiagnosticCodes.InvalidUnicode, build.Failure!.Code);
+    }
+
+    [Fact]
+    public void CreateReset_LoneSurrogateReason_IsRejectedAsInvalidUnicode()
+    {
+        var predecessor = MakeValidBootstrap();
+        var context = LedgerBuilder.BuildReviewContext(ContextSource(), Identities, IId(0)).Record!;
+        var outcome = LedgerBuilder.BuildReviewOutcome(OutcomeSource(), IId(0)).Record!;
+        var expected = new ResetTransition(
+            Identities, predecessor.ContentSha256, new string('7', 64),
+            PredecessorStateGeneration: 0, StateGeneration: 1, LedgerEpoch: 2,
+            ResetReason: LoneSurrogate);
+        var build = LedgerBuilder.CreateReset(predecessor, expected, context, outcome);
+        Assert.Null(build.Ledger);
+        Assert.Equal(LedgerDiagnosticCodes.InvalidUnicode, build.Failure!.Code);
+    }
+
 }
