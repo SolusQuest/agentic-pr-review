@@ -3,3 +3,7 @@ dist/
 .github/actions/agentic-pr-review/dist/
 runtime/tests/fixtures/deterministic/**
 .codex/
+
+protocol/fixtures/state-manifest-v2/**/bundle/ledger.json
+protocol/fixtures/state-manifest-v2/**/bundle/provider-run-metadata.json
+
