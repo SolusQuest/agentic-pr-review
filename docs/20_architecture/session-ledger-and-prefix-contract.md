@@ -72,6 +72,8 @@ The exact environment variable names, executable construction, SDK, and provider
 
 ## StateManifestV2 And Legacy Policy
 
+The implementation-level contract library, exact schema `$id`, closed shape, byte caps, and classifier step order are documented in [`state-manifest-v2.md`](state-manifest-v2.md) (issue #48). That document is authoritative for JSON property names, diagnostic codes, and the composite ledger descriptor.
+
 The existing state manifest is an active v1 contract for current action paths. It is not rewritten in place under `version: 1`. M4 adds a v2 shape for the ledger-aware live path.
 
 The v2 manifest keeps the existing host-owned state metadata and adds ledger and provider-run-metadata descriptors with at least:
