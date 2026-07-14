@@ -363,7 +363,7 @@ internal static class LedgerSchemaMapper
         {
             foreach (var idName in IdentityStringNames)
             {
-                if (hdr.TryGetProperty(idName, out var v) && v.ValueKind == JsonValueKind.String && v.GetString()!.Length > 256)
+                if (hdr.TryGetProperty(idName, out var v) && v.ValueKind == JsonValueKind.String && LedgerLimits.SchemaStringLength(v.GetString()!) > 256)
                     return true;
             }
         }
@@ -372,12 +372,12 @@ internal static class LedgerSchemaMapper
             foreach (var rec in recs.EnumerateArray())
             {
                 if (rec.ValueKind != JsonValueKind.Object) continue;
-                if (rec.TryGetProperty("summary", out var s) && s.ValueKind == JsonValueKind.String && s.GetString()!.Length > LedgerLimits.MaxSummaryChars) return true;
+                if (rec.TryGetProperty("summary", out var s) && s.ValueKind == JsonValueKind.String && LedgerLimits.SchemaStringLength(s.GetString()!) > LedgerLimits.MaxSummaryChars) return true;
                 if (rec.TryGetProperty("limitations", out var l) && l.ValueKind == JsonValueKind.Array)
                 {
                     foreach (var li in l.EnumerateArray())
                     {
-                        if (li.ValueKind == JsonValueKind.String && li.GetString()!.Length > LedgerLimits.MaxLimitationsItemChars) return true;
+                        if (li.ValueKind == JsonValueKind.String && LedgerLimits.SchemaStringLength(li.GetString()!) > LedgerLimits.MaxLimitationsItemChars) return true;
                     }
                 }
                 if (rec.TryGetProperty("findings", out var fs) && fs.ValueKind == JsonValueKind.Array)
@@ -385,11 +385,11 @@ internal static class LedgerSchemaMapper
                     foreach (var f in fs.EnumerateArray())
                     {
                         if (f.ValueKind != JsonValueKind.Object) continue;
-                        if (f.TryGetProperty("body", out var b) && b.ValueKind == JsonValueKind.String && b.GetString()!.Length > LedgerLimits.MaxFindingBodyChars) return true;
-                        if (f.TryGetProperty("title", out var t) && t.ValueKind == JsonValueKind.String && t.GetString()!.Length > LedgerLimits.MaxFindingTitleChars) return true;
-                        if (f.TryGetProperty("evidence", out var ev) && ev.ValueKind == JsonValueKind.String && ev.GetString()!.Length > LedgerLimits.MaxFindingEvidenceChars) return true;
-                        if (f.TryGetProperty("suggestedAction", out var sa) && sa.ValueKind == JsonValueKind.String && sa.GetString()!.Length > LedgerLimits.MaxFindingSuggestedActionChars) return true;
-                        if (f.TryGetProperty("path", out var p) && p.ValueKind == JsonValueKind.String && p.GetString()!.Length > LedgerLimits.MaxSafeRelativePathChars) return true;
+                        if (f.TryGetProperty("body", out var b) && b.ValueKind == JsonValueKind.String && LedgerLimits.SchemaStringLength(b.GetString()!) > LedgerLimits.MaxFindingBodyChars) return true;
+                        if (f.TryGetProperty("title", out var t) && t.ValueKind == JsonValueKind.String && LedgerLimits.SchemaStringLength(t.GetString()!) > LedgerLimits.MaxFindingTitleChars) return true;
+                        if (f.TryGetProperty("evidence", out var ev) && ev.ValueKind == JsonValueKind.String && LedgerLimits.SchemaStringLength(ev.GetString()!) > LedgerLimits.MaxFindingEvidenceChars) return true;
+                        if (f.TryGetProperty("suggestedAction", out var sa) && sa.ValueKind == JsonValueKind.String && LedgerLimits.SchemaStringLength(sa.GetString()!) > LedgerLimits.MaxFindingSuggestedActionChars) return true;
+                        if (f.TryGetProperty("path", out var p) && p.ValueKind == JsonValueKind.String && LedgerLimits.SchemaStringLength(p.GetString()!) > LedgerLimits.MaxSafeRelativePathChars) return true;
                     }
                 }
             }

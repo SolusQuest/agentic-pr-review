@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace AgenticPrReview.Runtime.Ledger;
 
 public static class LedgerLimits
@@ -15,7 +17,8 @@ public static class LedgerLimits
     public const int MaxIdentityUtf8Bytes = 256;
     public const int MaxIdentityChars = 256;
 
-    // String maxLengths (characters)
+    // String maxLengths (characters, counted as Unicode text elements to
+    // match Draft-7 JSON Schema definition and JsonSchema.Net evaluator).
     public const int MaxSummaryChars = 4000;
     public const int MaxFindingBodyChars = 4000;
     public const int MaxFindingTitleChars = 240;
@@ -25,4 +28,15 @@ public static class LedgerLimits
     public const int MaxSafeRelativePathChars = 500;
 
     public const int MaxIntegerValue = 1_000_000;
+
+    /// <summary>
+    /// Returns the length of <paramref name="value"/> in Unicode text elements,
+    /// matching Draft-7 JSON Schema's `maxLength` semantics and the count used
+    /// by the authoritative JsonSchema.Net evaluator (StringInfo-based).
+    /// Callers must use this helper wherever a schema maxLength / minLength /
+    /// pattern length is enforced so builder / projection / mapper classify
+    /// identically on supplementary-plane and combining-sequence inputs.
+    /// </summary>
+    internal static int SchemaStringLength(string value)
+        => new StringInfo(value).LengthInTextElements;
 }

@@ -108,7 +108,7 @@ public static class LedgerBuilder
             return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
 
         // schema maxLength before \S pattern (mapper precedence 6 before 7).
-        if (source.Summary.Length > LedgerLimits.MaxSummaryChars)
+        if (LedgerLimits.SchemaStringLength(source.Summary) > LedgerLimits.MaxSummaryChars)
             return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue));
         if (HasInvalidUnicode(source.Summary))
             return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode));
@@ -138,11 +138,11 @@ public static class LedgerBuilder
                 (f2.InlinePreference is not null && HasInvalidUnicode(f2.InlinePreference)))
                 return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode));
             // schema string maxLength (mapper precedence 6) before \S pattern
-            if (f2.Body.Length > LedgerLimits.MaxFindingBodyChars ||
-                f2.Title.Length > LedgerLimits.MaxFindingTitleChars ||
-                (f2.Evidence is not null && f2.Evidence.Length > LedgerLimits.MaxFindingEvidenceChars) ||
-                (f2.SuggestedAction is not null && f2.SuggestedAction.Length > LedgerLimits.MaxFindingSuggestedActionChars) ||
-                (f2.Path is not null && f2.Path.Length > LedgerLimits.MaxSafeRelativePathChars))
+            if (LedgerLimits.SchemaStringLength(f2.Body) > LedgerLimits.MaxFindingBodyChars ||
+                LedgerLimits.SchemaStringLength(f2.Title) > LedgerLimits.MaxFindingTitleChars ||
+                (f2.Evidence is not null && LedgerLimits.SchemaStringLength(f2.Evidence) > LedgerLimits.MaxFindingEvidenceChars) ||
+                (f2.SuggestedAction is not null && LedgerLimits.SchemaStringLength(f2.SuggestedAction) > LedgerLimits.MaxFindingSuggestedActionChars) ||
+                (f2.Path is not null && LedgerLimits.SchemaStringLength(f2.Path) > LedgerLimits.MaxSafeRelativePathChars))
                 return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue));
             // schema enums
             if (f2.Severity is not ("low" or "medium" or "high") ||
@@ -174,7 +174,7 @@ public static class LedgerBuilder
             if (HasInvalidUnicode(l))
                 return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode));
             // schema maxLength before \S pattern.
-            if (l.Length > LedgerLimits.MaxLimitationsItemChars)
+            if (LedgerLimits.SchemaStringLength(l) > LedgerLimits.MaxLimitationsItemChars)
                 return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue));
             if (!ContainsNonWhitespace(l))
                 return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
@@ -199,7 +199,7 @@ public static class LedgerBuilder
         // Null context or outcome would otherwise reach PreflightCandidate as
         // a schema-shape mismatch classified as pair_order — issue #49 pins
         // schema-shape errors to ledger_schema_violation, so we normalize here.
-        if (expected is null || context is null || outcome is null)
+        if (expected is null || context is null || outcome is null || expected.Identities is null)
             return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
         // Identity unicode preflight is performed later by PreflightCandidate,
         // but ExpectedTransition string fields must be checked before the
@@ -215,7 +215,7 @@ public static class LedgerBuilder
 
     public static BuildOutcome CreateRecovery(RecoveryTransition expected, ReviewContextRecord context, ReviewOutcomeRecord outcome)
     {
-        if (expected is null || context is null || outcome is null)
+        if (expected is null || context is null || outcome is null || expected.Identities is null)
             return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
         if (HasInvalidUnicode(expected.RecoveryReason))
             return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode));
@@ -233,7 +233,7 @@ public static class LedgerBuilder
 
     public static BuildOutcome AppendContinuation(ValidatedLedger predecessor, ContinuationTransition expected, ReviewContextRecord context, ReviewOutcomeRecord outcome)
     {
-        if (predecessor is null || expected is null || context is null || outcome is null)
+        if (predecessor is null || expected is null || context is null || outcome is null || expected.Identities is null)
             return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
         if (HasInvalidUnicode(expected.PredecessorLedgerSha256))
             return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode));
@@ -253,7 +253,7 @@ public static class LedgerBuilder
 
     public static BuildOutcome CreateReset(ValidatedLedger predecessor, ResetTransition expected, ReviewContextRecord context, ReviewOutcomeRecord outcome)
     {
-        if (predecessor is null || expected is null || context is null || outcome is null)
+        if (predecessor is null || expected is null || context is null || outcome is null || expected.Identities is null)
             return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
         if (HasInvalidUnicode(expected.ResetReason) ||
             HasInvalidUnicode(expected.PredecessorLedgerSha256) ||
@@ -405,7 +405,7 @@ public static class LedgerBuilder
         {
             if (s.Length == 0) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
             // maxLength: 256 characters (before UTF-8 byte-length check).
-            if (s.Length > 256) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
+            if (LedgerLimits.SchemaStringLength(s) > 256) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
         }
         if (h.PullRequest < 1) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
         if (h.StateGeneration < 0 || h.StateGeneration > 1_000_000)
@@ -480,7 +480,7 @@ public static class LedgerBuilder
                         f.Deletions < 0 || f.Deletions > 1_000_000 ||
                         f.Changes < 0 || f.Changes > 1_000_000)
                         return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                    if (f.Path.Length > LedgerLimits.MaxSafeRelativePathChars)
+                    if (LedgerLimits.SchemaStringLength(f.Path) > LedgerLimits.MaxSafeRelativePathChars)
                         return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
                     if (f.Patch is not null)
                     {
@@ -499,7 +499,7 @@ public static class LedgerBuilder
                     return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
                 // Order matches authoritative parser: string maxLength before
                 // \S pattern (schema-first, section 6 precedence).
-                if (oc.Summary.Length > LedgerLimits.MaxSummaryChars)
+                if (LedgerLimits.SchemaStringLength(oc.Summary) > LedgerLimits.MaxSummaryChars)
                     return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
                 if (!ContainsNonWhitespace(oc.Summary))
                     return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
@@ -510,11 +510,11 @@ public static class LedgerBuilder
                 foreach (var f in oc.Findings)
                 {
                     // Length caps (schema maxLength).
-                    if (f.Body.Length > LedgerLimits.MaxFindingBodyChars ||
-                        f.Title.Length > LedgerLimits.MaxFindingTitleChars ||
-                        (f.Evidence is not null && f.Evidence.Length > LedgerLimits.MaxFindingEvidenceChars) ||
-                        (f.SuggestedAction is not null && f.SuggestedAction.Length > LedgerLimits.MaxFindingSuggestedActionChars) ||
-                        (f.Path is not null && f.Path.Length > LedgerLimits.MaxSafeRelativePathChars))
+                    if (LedgerLimits.SchemaStringLength(f.Body) > LedgerLimits.MaxFindingBodyChars ||
+                        LedgerLimits.SchemaStringLength(f.Title) > LedgerLimits.MaxFindingTitleChars ||
+                        (f.Evidence is not null && LedgerLimits.SchemaStringLength(f.Evidence) > LedgerLimits.MaxFindingEvidenceChars) ||
+                        (f.SuggestedAction is not null && LedgerLimits.SchemaStringLength(f.SuggestedAction) > LedgerLimits.MaxFindingSuggestedActionChars) ||
+                        (f.Path is not null && LedgerLimits.SchemaStringLength(f.Path) > LedgerLimits.MaxSafeRelativePathChars))
                         return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
                     // Enum constraints (authoritative ledger schema).
                     if (f.Severity is not ("low" or "medium" or "high"))
@@ -546,7 +546,7 @@ public static class LedgerBuilder
                 foreach (var l in oc.Limitations)
                 {
                     // maxLength before \S (mapper precedence 6 before 7).
-                    if (l.Length > LedgerLimits.MaxLimitationsItemChars)
+                    if (LedgerLimits.SchemaStringLength(l) > LedgerLimits.MaxLimitationsItemChars)
                         return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
                     if (!ContainsNonWhitespace(l))
                         return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
@@ -836,8 +836,7 @@ public static class LedgerBuilder
         {
             if (s.Length == 0)
                 return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-            if (s.Length > 256)
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
+            if (LedgerLimits.SchemaStringLength(s) > 256) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
         }
         foreach (var s in identityStrings)
         {
@@ -883,7 +882,11 @@ public static class LedgerBuilder
 
     private static bool IsSafeRelativePath(string p)
     {
-        if (p.Length < 1 || p.Length > LedgerLimits.MaxSafeRelativePathChars) return false;
+        // Length is counted in Unicode text elements to match schema maxLength
+        // semantics (Draft-7 / JsonSchema.Net) and stay parity-consistent with
+        // the authoritative parser.
+        if (p.Length < 1) return false;
+        if (LedgerLimits.SchemaStringLength(p) > LedgerLimits.MaxSafeRelativePathChars) return false;
         // Schema \S pattern: whitespace-only paths are rejected before any
         // segment / scheme rule can pass by structural accident.
         if (!ContainsNonWhitespace(p)) return false;

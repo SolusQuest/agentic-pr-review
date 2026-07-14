@@ -776,22 +776,154 @@ public sealed class LedgerBuilderTests
     [Fact]
     public void BuildReviewContext_IdentityMultiByteCharsWithinCharCapExceedsByteCap_ReportsByteLength()
     {
-        // 129 x 4-byte code points = 516 bytes but only 258 UTF-16 units
-        // (>256 chars). Char maxLength catches this first as OverlongValue.
-        // To exercise the byte cap classification we need a string of <=256
-        // chars whose UTF-8 encoding still exceeds 256 bytes: 100 x U+1F600
-        // = 100 chars in .NET string API (surrogate pairs count 2) = actually
-        // 200 UTF-16 units. UTF-8 encoding = 400 bytes. String.Length in C#
-        // returns UTF-16 unit count, so a 200-length string of 100 emoji
-        // still has s.Length = 200 <= 256 but byte-count 400 > 256.
-        var emoji = new string('a', 0);
-        for (var i = 0; i < 100; i++) emoji += "\uD83D\uDE00"; // U+1F600
-        Assert.True(emoji.Length <= 256);
+        // 128 U+1F600 emoji: schema text-element length = 128 (<=256), so
+        // char maxLength does NOT fire. UTF-8 encoding = 512 bytes (>256),
+        // so the semantic byte cap must fire and classify as
+        // ledger_identity_byte_length_exceeded.
+        var emoji = string.Concat(System.Linq.Enumerable.Repeat("\uD83D\uDE00", 128));
+        Assert.Equal(128, LedgerLimits.SchemaStringLength(emoji));
         Assert.True(System.Text.Encoding.UTF8.GetByteCount(emoji) > 256);
         var identities = Identities with { ProviderId = emoji };
         var o = LedgerBuilder.BuildReviewContext(ContextSource(), identities, IId(0));
         Assert.Null(o.Record);
         Assert.Equal(LedgerDiagnosticCodes.IdentityByteLengthExceeded, o.Failure!.Code);
+    }
+
+    // -----------------------------------------------------------------
+    // R9: schema string length in Unicode text elements + transition
+    // identities null guard.
+
+    [Fact]
+    public void SchemaStringLength_CountsSupplementaryPlaneAsOneTextElement()
+    {
+        // U+1F600 grinning face is one text element but two UTF-16 code units.
+        var s = "\uD83D\uDE00";
+        Assert.Equal(2, s.Length);
+        Assert.Equal(1, LedgerLimits.SchemaStringLength(s));
+    }
+
+    [Fact]
+    public void SchemaStringLength_CountsCombiningSequenceAsOneTextElement()
+    {
+        // 'e' + U+0301 combining acute accent renders as one text element ("é")
+        // but the string.Length is 2 UTF-16 code units.
+        var s = "e\u0301";
+        Assert.Equal(2, s.Length);
+        Assert.Equal(1, LedgerLimits.SchemaStringLength(s));
+    }
+
+    [Fact]
+    public void BuildReviewContext_IdentityWith256SupplementaryTextElements_IsAccepted()
+    {
+        // 256 U+1F600 = 512 UTF-16 units but only 256 text elements, right at
+        // maxLength. UTF-8 encoding = 1024 bytes > 256 semantic byte cap, so
+        // the byte cap fires; char maxLength must NOT fire because schema
+        // length equals cap exactly.
+        var s = string.Concat(System.Linq.Enumerable.Repeat("\uD83D\uDE00", 256));
+        Assert.Equal(256, LedgerLimits.SchemaStringLength(s));
+        var identities = Identities with { WorkflowIdentity = s };
+        var o = LedgerBuilder.BuildReviewContext(ContextSource(), identities, IId(0));
+        Assert.Null(o.Record);
+        Assert.Equal(LedgerDiagnosticCodes.IdentityByteLengthExceeded, o.Failure!.Code);
+    }
+
+    [Fact]
+    public void BuildReviewContext_IdentityWith257SupplementaryTextElements_ReportsOverlong()
+    {
+        // 257 U+1F600 = 257 text elements > 256, so char maxLength fires
+        // first and classifies as OverlongValue.
+        var s = string.Concat(System.Linq.Enumerable.Repeat("\uD83D\uDE00", 257));
+        Assert.Equal(257, LedgerLimits.SchemaStringLength(s));
+        var identities = Identities with { WorkflowIdentity = s };
+        var o = LedgerBuilder.BuildReviewContext(ContextSource(), identities, IId(0));
+        Assert.Null(o.Record);
+        Assert.Equal(LedgerDiagnosticCodes.OverlongValue, o.Failure!.Code);
+    }
+
+    [Fact]
+    public void BuildReviewOutcome_FindingTitleWith240SupplementaryTextElements_IsAccepted()
+    {
+        // 240 emoji title = 480 UTF-16 units but 240 text elements == cap.
+        // Should not fire schema maxLength; the finding is otherwise valid.
+        var title = string.Concat(System.Linq.Enumerable.Repeat("\uD83D\uDE00", 240));
+        Assert.Equal(240, LedgerLimits.SchemaStringLength(title));
+        var source = OutcomeSource() with
+        {
+            Findings = System.Collections.Immutable.ImmutableArray.Create(
+                new ValidatedFindingSource(
+                    Severity: "medium", Confidence: "medium", Category: "correctness",
+                    Title: title, Body: "b", Path: null,
+                    StartLine: null, EndLine: null, Evidence: null, SuggestedAction: null, InlinePreference: null)),
+        };
+        var o = LedgerBuilder.BuildReviewOutcome(source, IId(0));
+        Assert.NotNull(o.Record);
+        Assert.Null(o.Failure);
+    }
+
+    [Fact]
+    public void BuildReviewOutcome_FindingTitleWith241SupplementaryTextElements_ReportsOverlong()
+    {
+        var title = string.Concat(System.Linq.Enumerable.Repeat("\uD83D\uDE00", 241));
+        Assert.Equal(241, LedgerLimits.SchemaStringLength(title));
+        var source = OutcomeSource() with
+        {
+            Findings = System.Collections.Immutable.ImmutableArray.Create(
+                new ValidatedFindingSource(
+                    Severity: "medium", Confidence: "medium", Category: "correctness",
+                    Title: title, Body: "b", Path: null,
+                    StartLine: null, EndLine: null, Evidence: null, SuggestedAction: null, InlinePreference: null)),
+        };
+        var o = LedgerBuilder.BuildReviewOutcome(source, IId(0));
+        Assert.Null(o.Record);
+        Assert.Equal(LedgerDiagnosticCodes.OverlongValue, o.Failure!.Code);
+    }
+
+    [Fact]
+    public void CreateBootstrap_NullExpectedIdentities_ReturnsSchemaViolation()
+    {
+        var contextR = LedgerBuilder.BuildReviewContext(ContextSource(), Identities, IId(0)).Record!;
+        var outcomeR = LedgerBuilder.BuildReviewOutcome(OutcomeSource(), IId(0)).Record!;
+        var b = LedgerBuilder.CreateBootstrap(new BootstrapTransition(null!, 0, 1), contextR, outcomeR);
+        Assert.Null(b.Ledger);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, b.Failure!.Code);
+    }
+
+    [Fact]
+    public void CreateRecovery_NullExpectedIdentities_ReturnsSchemaViolation()
+    {
+        var contextR = LedgerBuilder.BuildReviewContext(ContextSource(), Identities, IId(0)).Record!;
+        var outcomeR = LedgerBuilder.BuildReviewOutcome(OutcomeSource(), IId(0)).Record!;
+        var b = LedgerBuilder.CreateRecovery(new RecoveryTransition(null!, 0, 1, "predecessor_unavailable"), contextR, outcomeR);
+        Assert.Null(b.Ledger);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, b.Failure!.Code);
+    }
+
+    [Fact]
+    public void AppendContinuation_NullExpectedIdentities_ReturnsSchemaViolation()
+    {
+        var seed = MakeValidBootstrap();
+        var contextR = LedgerBuilder.BuildReviewContext(ContextSource(), Identities, IId(1)).Record!;
+        var outcomeR = LedgerBuilder.BuildReviewOutcome(OutcomeSource(), IId(1)).Record!;
+        var b = LedgerBuilder.AppendContinuation(
+            seed,
+            new ContinuationTransition(null!, seed.ContentSha256, 0, 1, 1),
+            contextR, outcomeR);
+        Assert.Null(b.Ledger);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, b.Failure!.Code);
+    }
+
+    [Fact]
+    public void CreateReset_NullExpectedIdentities_ReturnsSchemaViolation()
+    {
+        var seed = MakeValidBootstrap();
+        var contextR = LedgerBuilder.BuildReviewContext(ContextSource(), Identities, IId(0)).Record!;
+        var outcomeR = LedgerBuilder.BuildReviewOutcome(OutcomeSource(), IId(0)).Record!;
+        var b = LedgerBuilder.CreateReset(
+            seed,
+            new ResetTransition(null!, seed.ContentSha256, new string('a', 64), 0, 1, 2, "base_changed"),
+            contextR, outcomeR);
+        Assert.Null(b.Ledger);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, b.Failure!.Code);
     }
 
 }
