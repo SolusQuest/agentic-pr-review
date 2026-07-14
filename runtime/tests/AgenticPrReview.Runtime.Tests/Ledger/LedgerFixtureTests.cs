@@ -62,9 +62,15 @@ public sealed class LedgerFixtureTests
             {
                 throw new XunitException($"[{file}] expected invalid but parser accepted");
             }
+            // ParseOutcome is Ledger XOR Failure. When Ledger is null the
+            // Failure must be non-null; extract a local instead of relying on
+            // the null-forgiving operator so subsequent diagnostics compare
+            // through a nullable-checked reference.
+            var failure = result.Failure ??
+                throw new XunitException($"[{file}] expected invalid but parser returned null Failure");
             var code = expectation.GetProperty("code").GetString();
-            if (code != result.Failure!.Code)
-                throw new XunitException($"[{file}] expected code={code} but got {result.Failure.Code} ({result.Failure.Message})");
+            if (code != failure.Code)
+                throw new XunitException($"[{file}] expected code={code} but got {failure.Code} ({failure.Message})");
         }
     }
 
