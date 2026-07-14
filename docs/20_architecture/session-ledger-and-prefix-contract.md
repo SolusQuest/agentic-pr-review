@@ -974,9 +974,12 @@ supported above (in particular `if` / `then` / `else`, `not`,
 presence at a node does NOT erase knowledge produced by supported
 siblings at the same node. Concretely, if a node declares both
 `properties.known` (supported) and `patternProperties.^x`
-(unsupported), `resolveProperty(node, "known")` still returns
-`schemaKnown = true` for the declared key, and
-`resolveProperty(node, "other")` returns `schemaKnown = false`.
+(unsupported), a caller that has an
+`ObjectPosition(node, activeSchemaNodes)` for that node observes
+`resolveProperty(objectPos, "known")` return `schemaKnown = true`
+with the declared child's normalized position, and
+`resolveProperty(objectPos, "other")` return `schemaKnown = false`
+with `UnknownPosition`.
 
 **Root-call convention.** The traversal is invoked as
 `scan(rootValue, "", rootSchemaPosition, /*trustedChain=*/ true)`
@@ -1009,6 +1012,46 @@ verdict for an explicitly declared key/item.
 Mere presence of an unsupported schema keyword does NOT trigger
 fail-closed on the whole node; the unsupported keyword simply
 contributes no schema-known keys.
+
+**Concrete observable consequences** (any conformant implementation
+MUST produce these results):
+
+- **Root back-edge via `$ref`.** Given a root schema
+  `{"type":"object","properties":{"next":{"$ref":"#"}}}`, let
+  `rootPos = normalizePosition(root, {})`. Then
+  `resolveProperty(rootPos, "next")` returns
+  `schemaKnown = true` with a `childSchemaPosition`
+  observationally equivalent to `UnknownPosition` (the `next`
+  child normalizes into a cycle at the first back-edge hop, so
+  the declared key stays `schemaKnown = true` but no further
+  schema-known descent follows).
+
+- **Inline ancestor back-edge via `$ref`.** Given a root schema
+  `{"type":"object","properties":{"payload":{"type":"object","properties":{"next":{"$ref":"#/properties/payload"}}}}}`,
+  let `rootPos = normalizePosition(root, {})` and
+  `P_payload = resolveProperty(rootPos, "payload").childSchemaPosition`.
+  Then `resolveProperty(P_payload, "next")` returns
+  `schemaKnown = true` with a `childSchemaPosition`
+  observationally equivalent to `UnknownPosition` (the `next`
+  child's `$ref` back-edge to `#/properties/payload` is detected
+  because `activeSchemaNodes` includes the ancestor `payload`
+  schema node from the surrounding descent chain).
+
+- **Independent multi-branch reference is not a cycle.** Given a
+  root schema whose two `oneOf` branches each declare a property
+  `payload` whose value is `{"$ref":"#/$defs/leaf"}` where the
+  shared target `#/$defs/leaf` is
+  `{"type":"object","properties":{"value":{"type":"string"}}}`,
+  let `rootPos = normalizePosition(root, {})` and
+  `P_payload = resolveProperty(rootPos, "payload").childSchemaPosition`.
+  Then `resolveProperty(P_payload, "value")` returns
+  `schemaKnown = true` (both branches independently normalize
+  `leaf` successfully; neither branch's descent chain contains
+  the leaf node when the other branch is normalized; an
+  implementation that used a global visited-set instead of the
+  per-call `activeSchemaNodes` would treat the second branch's
+  visit of `leaf` as a cycle and return `schemaKnown = false`
+  here).
 
 ### Shared traversal order and stage precedence
 
