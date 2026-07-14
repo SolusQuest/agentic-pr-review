@@ -58,12 +58,37 @@ internal static partial class Program
 
     private static byte[] MakePropertyCountExceeded()
     {
+        // Produce more than 65_536 top-level properties while staying below the
+        // 512 KiB raw byte cap. Uses short single- and multi-letter keys so the
+        // total byte count remains ~500 KiB.
         var sb = new StringBuilder();
         sb.Append('{');
-        for (var i = 0; i < LedgerLimits.MaxTotalProperties + 5; i++)
+        var count = 0;
+        var alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        var target = LedgerLimits.MaxTotalProperties + 5;
+        for (var i = 0; i < alphabet.Length && count < target; i++, count++)
         {
-            if (i > 0) sb.Append(',');
-            sb.Append("\"k").Append(i).Append("\":").Append(i);
+            if (count > 0) sb.Append(',');
+            sb.Append('"').Append(alphabet[i]).Append("\":1");
+        }
+        for (var i = 0; i < alphabet.Length && count < target; i++)
+        {
+            for (var j = 0; j < alphabet.Length && count < target; j++, count++)
+            {
+                if (count > 0) sb.Append(',');
+                sb.Append('"').Append(alphabet[i]).Append(alphabet[j]).Append("\":1");
+            }
+        }
+        for (var i = 0; i < alphabet.Length && count < target; i++)
+        {
+            for (var j = 0; j < alphabet.Length && count < target; j++)
+            {
+                for (var k = 0; k < alphabet.Length && count < target; k++, count++)
+                {
+                    if (count > 0) sb.Append(',');
+                    sb.Append('"').Append(alphabet[i]).Append(alphabet[j]).Append(alphabet[k]).Append("\":1");
+                }
+            }
         }
         sb.Append('}');
         return Encoding.UTF8.GetBytes(sb.ToString());
@@ -242,6 +267,28 @@ internal static partial class Program
         var text = Encoding.UTF8.GetString(reset.CanonicalBytes.Span);
         var idx = text.IndexOf("\"resetReason\":");
         return Encoding.UTF8.GetBytes(text.Substring(0, idx) + "\"recoveryReason\":\"predecessor_unavailable\"," + text.Substring(idx));
+    }
+
+    private static byte[] MakeContinuationForbiddenField(ValidatedLedger continuation)
+    {
+        var text = Encoding.UTF8.GetString(continuation.CanonicalBytes.Span);
+        var idx = text.IndexOf("\"repository\":");
+        return Encoding.UTF8.GetBytes(text.Substring(0, idx) + "\"recoveryReason\":\"predecessor_unavailable\"," + text.Substring(idx));
+    }
+
+    private static byte[] MakeRecoveryForbiddenField(ValidatedLedger recovery)
+    {
+        var text = Encoding.UTF8.GetString(recovery.CanonicalBytes.Span);
+        var idx = text.IndexOf("\"sessionEpoch\":");
+        return Encoding.UTF8.GetBytes(text.Substring(0, idx) + "\"resetReason\":\"base_changed\"," + text.Substring(idx));
+    }
+
+    private static byte[] MakeRecordRoleTool(ValidatedLedger bootstrap)
+    {
+        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var idx = text.IndexOf("\"role\":\"review_context\"");
+        var replaced = text.Substring(0, idx) + "\"role\":\"tool\"" + text.Substring(idx + "\"role\":\"review_context\"".Length);
+        return Encoding.UTF8.GetBytes(replaced);
     }
 
     private static byte[] MakeFindingLineRangeInvalid()

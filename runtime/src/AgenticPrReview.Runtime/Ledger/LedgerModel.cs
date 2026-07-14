@@ -102,20 +102,71 @@ public sealed record LedgerFinding(
 public sealed class ValidatedLedger
 {
     private readonly byte[] canonicalBytes;
+    private readonly SafeByteMemoryManager memoryManager;
 
     internal ValidatedLedger(LedgerModel model, byte[] canonicalBytes, string contentSha256)
     {
         // Defensive copy: the constructor owns the sole reference to the byte buffer.
         this.canonicalBytes = new byte[canonicalBytes.Length];
         Buffer.BlockCopy(canonicalBytes, 0, this.canonicalBytes, 0, canonicalBytes.Length);
+        this.memoryManager = new SafeByteMemoryManager(this.canonicalBytes);
         Model = model;
         ContentSha256 = contentSha256;
     }
 
     public LedgerModel Model { get; }
-    public ReadOnlyMemory<byte> CanonicalBytes => this.canonicalBytes;
+
+    /// <summary>
+    /// Canonical UTF-8 bytes of the ledger. The returned <see cref="ReadOnlyMemory{Byte}"/>
+    /// is backed by a <see cref="System.Buffers.MemoryManager{Byte}"/> whose
+    /// <c>TryGetArray</c> refuses to expose the underlying array, so
+    /// <c>MemoryMarshal.TryGetArray</c> returns <c>false</c> and callers cannot
+    /// obtain a mutable segment aliasing the ledger's internal storage. Use
+    /// <see cref="ToCanonicalByteArray"/> when a mutable copy is required.
+    /// </summary>
+    public ReadOnlyMemory<byte> CanonicalBytes => this.memoryManager.Memory;
+
+    /// <summary>
+    /// Returns a freshly allocated copy of the canonical bytes. Each call
+    /// allocates; mutating the returned array cannot affect this ledger.
+    /// </summary>
+    public byte[] ToCanonicalByteArray()
+    {
+        var copy = new byte[this.canonicalBytes.Length];
+        Buffer.BlockCopy(this.canonicalBytes, 0, copy, 0, this.canonicalBytes.Length);
+        return copy;
+    }
+
     public string ContentSha256 { get; }
     public int ByteLength => this.canonicalBytes.Length;
+}
+
+/// <summary>
+/// Backing store for <see cref="ValidatedLedger.CanonicalBytes"/>. Refuses to
+/// expose the underlying array through <c>MemoryMarshal.TryGetArray</c>, so
+/// callers can only read through <see cref="ReadOnlyMemory{Byte}"/> /
+/// <see cref="ReadOnlySpan{Byte}"/> without gaining a mutable alias.
+/// </summary>
+internal sealed class SafeByteMemoryManager : System.Buffers.MemoryManager<byte>
+{
+    private readonly byte[] buffer;
+
+    public SafeByteMemoryManager(byte[] buffer) => this.buffer = buffer;
+
+    public override Span<byte> GetSpan() => this.buffer;
+
+    public override System.Buffers.MemoryHandle Pin(int elementIndex = 0) =>
+        throw new NotSupportedException("Pinning is not supported for ledger canonical bytes.");
+
+    public override void Unpin() { }
+
+    protected override bool TryGetArray(out ArraySegment<byte> segment)
+    {
+        segment = default;
+        return false;
+    }
+
+    protected override void Dispose(bool disposing) { }
 }
 
 // ---------------------------------------------------------------------------

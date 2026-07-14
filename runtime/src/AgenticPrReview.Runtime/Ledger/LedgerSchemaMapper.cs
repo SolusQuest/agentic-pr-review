@@ -48,31 +48,33 @@ internal static class LedgerSchemaMapper
             return LedgerDiagnosticMessages.Of(missing);
         }
 
-        // Records array size / emptiness.
-        if (root.TryGetProperty("records", out var records) && records.ValueKind == JsonValueKind.Array)
-        {
-            var length = records.GetArrayLength();
-            if (length < 2) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.RecordsEmpty);
-            if (length > LedgerLimits.MaxRecords) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InteractionLimitExceeded);
-        }
+        var records = default(JsonElement);
+        var recordsPresent = root.TryGetProperty("records", out records) && records.ValueKind == JsonValueKind.Array;
 
-        // Per-record arrays.
-        if (records.ValueKind == JsonValueKind.Array)
+        // Precedence step 3: oneOf variant discriminator (header.kind).
+        // Bootstrap/recovery must have stateGeneration == 0 and
+        // predecessorLedgerSha256 == "bootstrap"; violation is a shape-violation.
+        if (kind is "bootstrap" or "recovery")
         {
-            foreach (var rec in records.EnumerateArray())
+            if (headerElement.TryGetProperty("stateGeneration", out var sg) &&
+                sg.ValueKind == JsonValueKind.Number && sg.GetInt32() != 0)
             {
-                if (rec.ValueKind != JsonValueKind.Object) continue;
-                if (rec.TryGetProperty("changedFiles", out var cf) && cf.ValueKind == JsonValueKind.Array && cf.GetArrayLength() > LedgerLimits.MaxChangedFilesPerContext)
-                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.ChangedFileLimitExceeded);
-                if (rec.TryGetProperty("findings", out var fn) && fn.ValueKind == JsonValueKind.Array && fn.GetArrayLength() > LedgerLimits.MaxFindingsPerOutcome)
-                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.FindingLimitExceeded);
-                if (rec.TryGetProperty("limitations", out var lm) && lm.ValueKind == JsonValueKind.Array && lm.GetArrayLength() > LedgerLimits.MaxLimitationsPerOutcome)
-                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.LimitationsLimitExceeded);
+                return LedgerDiagnosticMessages.Of(kind == "bootstrap"
+                    ? LedgerDiagnosticCodes.BootstrapShapeViolation
+                    : LedgerDiagnosticCodes.RecoveryShapeViolation);
+            }
+            if (headerElement.TryGetProperty("predecessorLedgerSha256", out var pls) &&
+                pls.ValueKind == JsonValueKind.String && pls.GetString() != "bootstrap")
+            {
+                return LedgerDiagnosticMessages.Of(kind == "bootstrap"
+                    ? LedgerDiagnosticCodes.BootstrapShapeViolation
+                    : LedgerDiagnosticCodes.RecoveryShapeViolation);
             }
         }
 
-        // Record role mismatch.
-        if (records.ValueKind == JsonValueKind.Array)
+        // Precedence step 4: const / enum violations. Record role and changed-file
+        // status are enum violations that map to specific ledger diagnostic codes.
+        if (recordsPresent)
         {
             foreach (var rec in records.EnumerateArray())
             {
@@ -85,11 +87,6 @@ internal static class LedgerSchemaMapper
                         return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.RecordRoleMismatch);
                 }
             }
-        }
-
-        // Changed-file status enum.
-        if (records.ValueKind == JsonValueKind.Array)
-        {
             foreach (var rec in records.EnumerateArray())
             {
                 if (rec.ValueKind == JsonValueKind.Object &&
@@ -109,29 +106,30 @@ internal static class LedgerSchemaMapper
             }
         }
 
-        // Bootstrap/recovery shape: state generation const violation.
-        if (kind is "bootstrap" or "recovery")
+        // Precedence step 5: array minItems / maxItems.
+        if (recordsPresent)
         {
-            if (headerElement.TryGetProperty("stateGeneration", out var sg) &&
-                sg.ValueKind == JsonValueKind.Number && sg.GetInt32() != 0)
+            var length = records.GetArrayLength();
+            if (length < 2) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.RecordsEmpty);
+            if (length > LedgerLimits.MaxRecords) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InteractionLimitExceeded);
+
+            foreach (var rec in records.EnumerateArray())
             {
-                return LedgerDiagnosticMessages.Of(kind == "bootstrap"
-                    ? LedgerDiagnosticCodes.BootstrapShapeViolation
-                    : LedgerDiagnosticCodes.RecoveryShapeViolation);
-            }
-            if (headerElement.TryGetProperty("predecessorLedgerSha256", out var pls) &&
-                pls.ValueKind == JsonValueKind.String && pls.GetString() != "bootstrap")
-            {
-                return LedgerDiagnosticMessages.Of(kind == "bootstrap"
-                    ? LedgerDiagnosticCodes.BootstrapShapeViolation
-                    : LedgerDiagnosticCodes.RecoveryShapeViolation);
+                if (rec.ValueKind != JsonValueKind.Object) continue;
+                if (rec.TryGetProperty("changedFiles", out var cf) && cf.ValueKind == JsonValueKind.Array && cf.GetArrayLength() > LedgerLimits.MaxChangedFilesPerContext)
+                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.ChangedFileLimitExceeded);
+                if (rec.TryGetProperty("findings", out var fn) && fn.ValueKind == JsonValueKind.Array && fn.GetArrayLength() > LedgerLimits.MaxFindingsPerOutcome)
+                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.FindingLimitExceeded);
+                if (rec.TryGetProperty("limitations", out var lm) && lm.ValueKind == JsonValueKind.Array && lm.GetArrayLength() > LedgerLimits.MaxLimitationsPerOutcome)
+                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.LimitationsLimitExceeded);
             }
         }
 
-        // Overlong string values.
+        // Precedence step 6: string maxLength.
         var overlong = FindOverlongString(root);
         if (overlong) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
 
+        // Precedence step 7: pattern / numeric-range / catch-all.
         return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
     }
 

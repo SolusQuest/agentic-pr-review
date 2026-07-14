@@ -29,7 +29,7 @@ public static class LedgerCanonicalizer
     /// order is derived from the input dictionary insertion order after being
     /// sorted by unsigned UTF-16 code-unit ordering.
     /// </summary>
-    public static byte[] SerializeEnvelope(IReadOnlyDictionary<string, object> envelope)
+    internal static byte[] SerializeEnvelope(IReadOnlyDictionary<string, object> envelope)
     {
         using var buffer = new PooledMemoryStream();
         WriteEnvelope(buffer, envelope);

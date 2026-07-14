@@ -535,6 +535,30 @@
   },
   {
     "type": "ledger-restore",
+    "file": "provider-session-ledger/continuation-forbidden-field.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_continuation_shape_violation"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/recovery-forbidden-field.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_recovery_shape_violation"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/record-role-tool.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_record_role_mismatch"
+    }
+  },
+  {
+    "type": "ledger-restore",
     "file": "provider-session-ledger/finding-line-range-invalid.json",
     "expectation": {
       "valid": false,
@@ -814,7 +838,7 @@
         "predecessorManifestSha256": "7777777777777777777777777777777777777777777777777777777777777777",
         "predecessorStateGeneration": 0,
         "stateGeneration": 1,
-        "ledgerEpoch": 2,
+        "ledgerEpoch": 1,
         "resetReason": "cache_contract_changed"
       }
     },
@@ -824,7 +848,7 @@
     },
     "transitionExpectation": {
       "valid": false,
-      "code": "ledger_ledger_epoch_mismatch"
+      "code": "ledger_reset_epoch_not_fresh"
     }
   },
   {

@@ -21,4 +21,8 @@
     <EmbeddedResource Include="..\..\..\protocol\schemas\review-trace.v1.json" LogicalName="AgenticPrReview.Protocol.review-trace.v1.json" />
     <EmbeddedResource Include="..\..\..\protocol\schemas\provider-session-ledger.v1.json" LogicalName="AgenticPrReview.Protocol.provider-session-ledger.v1.json" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="AgenticPrReview.Runtime.Tests" />
+    <InternalsVisibleTo Include="LedgerFixtureGen" />
+  </ItemGroup>
 </Project>

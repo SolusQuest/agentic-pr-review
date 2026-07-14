@@ -70,6 +70,9 @@ internal static partial class Program
         WriteRaw("recovery-missing-reason.json", MakeRecoveryMissingReason(recovery));
         WriteRaw("reset-missing-reason.json", MakeResetMissingReason(resetCc));
         WriteRaw("reset-forbidden-field.json", MakeResetForbiddenField(resetCc));
+        WriteRaw("continuation-forbidden-field.json", MakeContinuationForbiddenField(continuation));
+        WriteRaw("recovery-forbidden-field.json", MakeRecoveryForbiddenField(recovery));
+        WriteRaw("record-role-tool.json", MakeRecordRoleTool(bootstrap));
         WriteRaw("finding-line-range-invalid.json", MakeFindingLineRangeInvalid());
         WriteRaw("finding-location-mismatch.json", MakeFindingLocationMismatch());
         WriteRaw("finding-location-missing-path.json", MakeFindingLocationMissingPath());

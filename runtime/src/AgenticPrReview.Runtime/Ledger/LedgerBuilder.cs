@@ -29,7 +29,8 @@ public static class LedgerBuilder
         var files = ImmutableArray.CreateBuilder<ChangedFileEntry>();
         foreach (var f in source.ChangedFiles)
         {
-            if (HasInvalidUnicode(f.Path) || (f.PreviousPath is not null && HasInvalidUnicode(f.PreviousPath)))
+            if (HasInvalidUnicode(f.Path) || (f.PreviousPath is not null && HasInvalidUnicode(f.PreviousPath)) ||
+                HasInvalidUnicode(f.Status))
                 return new ProjectionOutcome<ReviewContextRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode));
             if (!IsSafeRelativePath(f.Path) || (f.PreviousPath is not null && !IsSafeRelativePath(f.PreviousPath)))
                 return new ProjectionOutcome<ReviewContextRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
@@ -96,7 +97,10 @@ public static class LedgerBuilder
             if (HasInvalidUnicode(f2.Title) || HasInvalidUnicode(f2.Body) ||
                 (f2.Evidence is not null && HasInvalidUnicode(f2.Evidence)) ||
                 (f2.SuggestedAction is not null && HasInvalidUnicode(f2.SuggestedAction)) ||
-                (f2.Path is not null && HasInvalidUnicode(f2.Path)))
+                (f2.Path is not null && HasInvalidUnicode(f2.Path)) ||
+                HasInvalidUnicode(f2.Severity) || HasInvalidUnicode(f2.Confidence) ||
+                HasInvalidUnicode(f2.Category) ||
+                (f2.InlinePreference is not null && HasInvalidUnicode(f2.InlinePreference)))
                 return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode));
             if (f2.Body.Length > LedgerLimits.MaxFindingBodyChars ||
                 f2.Title.Length > LedgerLimits.MaxFindingTitleChars ||
@@ -138,7 +142,8 @@ public static class LedgerBuilder
         var header = BuildHeader(expected.Identities, "bootstrap",
             stateGeneration: 0, ledgerEpoch: expected.LedgerEpoch, predecessor: "bootstrap");
         return AssembleAndValidate(header, ImmutableArray.Create(
-            new LedgerRecord(context, null), new LedgerRecord(null, outcome)));
+            new LedgerRecord(context, null), new LedgerRecord(null, outcome)),
+            candidate => LedgerAppend.ValidateBootstrap(candidate, expected));
     }
 
     public static BuildOutcome CreateRecovery(RecoveryTransition expected, ReviewContextRecord context, ReviewOutcomeRecord outcome)
@@ -151,7 +156,8 @@ public static class LedgerBuilder
             stateGeneration: 0, ledgerEpoch: expected.LedgerEpoch, predecessor: "bootstrap",
             recoveryReason: expected.RecoveryReason);
         return AssembleAndValidate(header, ImmutableArray.Create(
-            new LedgerRecord(context, null), new LedgerRecord(null, outcome)));
+            new LedgerRecord(context, null), new LedgerRecord(null, outcome)),
+            candidate => LedgerAppend.ValidateRecovery(candidate, expected));
     }
 
     public static BuildOutcome AppendContinuation(ValidatedLedger predecessor, ContinuationTransition expected, ReviewContextRecord context, ReviewOutcomeRecord outcome)
@@ -170,7 +176,8 @@ public static class LedgerBuilder
         foreach (var r in predecessor.Model.Records) records.Add(r);
         records.Add(new LedgerRecord(context, null));
         records.Add(new LedgerRecord(null, outcome));
-        return AssembleAndValidate(header, records.ToImmutable());
+        return AssembleAndValidate(header, records.ToImmutable(),
+            candidate => LedgerAppend.ValidateContinuation(predecessor, candidate, expected));
     }
 
     public static BuildOutcome CreateReset(ValidatedLedger predecessor, ResetTransition expected, ReviewContextRecord context, ReviewOutcomeRecord outcome)
@@ -189,7 +196,8 @@ public static class LedgerBuilder
             predecessorManifestSha256: expected.PredecessorManifestSha256,
             resetReason: expected.ResetReason);
         return AssembleAndValidate(header, ImmutableArray.Create(
-            new LedgerRecord(context, null), new LedgerRecord(null, outcome)));
+            new LedgerRecord(context, null), new LedgerRecord(null, outcome)),
+            candidate => LedgerAppend.ValidateReset(predecessor, candidate, expected));
     }
 
     // -----------------------------------------------------------------
@@ -238,9 +246,16 @@ public static class LedgerBuilder
             RecoveryReason: recoveryReason);
     }
 
-    private static BuildOutcome AssembleAndValidate(LedgerHeader header, ImmutableArray<LedgerRecord> records)
+    private static BuildOutcome AssembleAndValidate(
+        LedgerHeader header,
+        ImmutableArray<LedgerRecord> records,
+        Func<ValidatedLedger, TransitionOutcome> transitionValidator)
     {
-        // Structural bounds first (interactions).
+        // Builder-level cause precedence (frozen order):
+        //   1. interaction limit
+        //   2. structural array/property caps (raised by canonical re-parse)
+        //   3. canonical byte limit
+        // Interaction limit is checked structurally before serialization.
         if (records.Length / 2 > LedgerLimits.MaxInteractionPairs)
         {
             return new BuildOutcome(null, LedgerDiagnosticMessages.Of(
@@ -249,26 +264,62 @@ public static class LedgerBuilder
 
         var model = new LedgerModel(1, 1, header, records);
 
-        // Serialize to canonical bytes so we can check byte cap and produce ValidatedLedger.
+        // Serialize to canonical bytes so we can produce a ValidatedLedger.
         var canonical = LedgerCanonicalizer.SerializeCanonical(model);
-        if (canonical.Length > LedgerLimits.MaxCanonicalBytes)
-        {
-            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(
-                LedgerDiagnosticCodes.OverBoundAppend, LedgerDiagnosticCodes.CanonicalByteLimitExceeded));
-        }
 
-        // Full-pipeline re-validation via ParseAndValidate to catch any manually-constructed
-        // records that bypass BuildReviewContext/BuildReviewOutcome invariants.
+        // Full-pipeline re-validation via ParseAndValidate to catch any
+        // manually-constructed records that bypass Build{Context,Outcome}
+        // invariants. This must run before the canonical byte cap so that
+        // property-count / array-length failures raised deep inside the
+        // ledger surface as their specific causeCode rather than being
+        // masked by a byte-limit rejection.
         var parseResult = LedgerParser.ParseAndValidate(canonical);
         if (parseResult.Failure is not null)
         {
-            return new BuildOutcome(null, parseResult.Failure);
+            var fail = parseResult.Failure;
+            if (fail.Code == LedgerDiagnosticCodes.JsonPropertyCountExceeded ||
+                fail.Code == LedgerDiagnosticCodes.JsonArrayLengthExceeded ||
+                fail.Code == LedgerDiagnosticCodes.InteractionLimitExceeded ||
+                fail.Code == LedgerDiagnosticCodes.ChangedFileLimitExceeded ||
+                fail.Code == LedgerDiagnosticCodes.FindingLimitExceeded ||
+                fail.Code == LedgerDiagnosticCodes.LimitationsLimitExceeded ||
+                fail.Code == LedgerDiagnosticCodes.CanonicalByteLimitExceeded ||
+                fail.Code == LedgerDiagnosticCodes.RawByteLimitExceeded)
+            {
+                return new BuildOutcome(null, LedgerDiagnosticMessages.Of(
+                    LedgerDiagnosticCodes.OverBoundAppend, fail.Code));
+            }
+            return new BuildOutcome(null, fail);
         }
-        return new BuildOutcome(parseResult.Ledger, null);
+
+        // Re-run the transition cross-check matrix so caller-supplied
+        // ExpectedTransition disagreements surface as build failures rather
+        // than being deferred to a later Validate* call.
+        var transitionOutcome = transitionValidator(parseResult.Ledger!);
+        if (transitionOutcome.Candidate is null)
+        {
+            return new BuildOutcome(null, transitionOutcome.Failure);
+        }
+        return new BuildOutcome(transitionOutcome.Candidate, null);
     }
 
     private static LedgerDiagnostic? ValidateIdentities(ExpectedIdentities i)
     {
+        // Every caller-supplied identity string must be free of NUL and lone
+        // surrogates before any downstream encoder can see it. Canonicalization
+        // otherwise throws on lone surrogates.
+        var allIdentityStrings = new[]
+        {
+            i.Repository, i.HeadRepository,
+            i.WorkflowIdentity, i.TrustedExecutionDomain, i.SessionEpoch,
+            i.ProviderId, i.ModelId,
+            i.AdapterId, i.TemplateId, i.PolicyId, i.ToolDefinitionId, i.CacheConfigId,
+        };
+        foreach (var s in allIdentityStrings)
+        {
+            if (HasInvalidUnicode(s))
+                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+        }
         // UTF-8 byte length and control-character checks (schema handles char maxLength and patterns).
         var identityStrings = new[] { i.WorkflowIdentity, i.TrustedExecutionDomain, i.SessionEpoch, i.ProviderId, i.ModelId };
         foreach (var s in identityStrings)

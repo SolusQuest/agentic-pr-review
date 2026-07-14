@@ -45,24 +45,12 @@ public sealed class LedgerDiagnosticCoverageTests
             // Reachable only through direct malformed byte payloads, covered by dedicated
             // canonicalizer/scanner tests.
             LedgerDiagnosticCodes.InvalidJson,
-            // Reachable only through the schema-result mapper's variant discriminator on a
-            // continuation header that carries a forbidden field. Reset/reset-forbidden-field
-            // covers the "reset variant" branch; continuation-shape-violation is exercised by
-            // LedgerSchemaMapperTests.
-            LedgerDiagnosticCodes.ContinuationShapeViolation,
-            // recovery-shape-violation: reachable via recovery + forbidden field; covered in
-            // LedgerSchemaMapperTests as a focused case rather than a fixture.
-            LedgerDiagnosticCodes.RecoveryShapeViolation,
-            // record_role_mismatch: reachable only by a record with role="tool"; covered by
-            // LedgerSchemaMapperTests.
-            LedgerDiagnosticCodes.RecordRoleMismatch,
             // Reachable only through caller-supplied ExpectedTransition values
             // that disagree with the candidate/predecessor; covered by
             // LedgerAppendTests focused unit cases.
             LedgerDiagnosticCodes.StateGenerationMismatch,
             LedgerDiagnosticCodes.ResetReasonMismatch,
             LedgerDiagnosticCodes.RecoveryReasonMismatch,
-            LedgerDiagnosticCodes.ResetEpochNotFresh,
             // schema_violation: catch-all reachable in many negative fixtures but not always
             // named directly; several fixtures already map to it.
             // Covered via absolute-path-in-finding.json fixture.
