@@ -20,6 +20,7 @@ const repoRoot = path.resolve(here, '..');
 const entry = path.join(repoRoot, 'src', 'state-v2', 'regenerate-fixtures.testhelper.ts');
 
 const workdir = mkdtempSync(path.join(tmpdir(), 'state-v2-regen-'));
+let exitCode = 0;
 try {
   const bundlePath = path.join(workdir, 'regen.mjs');
   await esbuild.build({
@@ -35,7 +36,11 @@ try {
     stdio: 'inherit',
     cwd: repoRoot,
   });
-  process.exit(result.status ?? 1);
+  exitCode = result.status ?? 1;
 } finally {
   rmSync(workdir, { recursive: true, force: true });
 }
+// Setting process.exitCode (rather than calling process.exit) lets Node
+// flush any pending output and lets the finally block above complete
+// cleanly before the process terminates.
+process.exitCode = exitCode;

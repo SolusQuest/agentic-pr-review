@@ -57,18 +57,18 @@ describe('buildStateBundleV2 input-domain rejection (canonical accepted domain)'
     }
     const input = baseInput() as unknown as { fancy?: Fancy };
     (input as unknown as { fancy: Fancy }).fancy = new Fancy();
-    expect(() => buildStateBundleV2(input as StateManifestV2Input, LEDGER, METADATA)).toThrow(
-      BuilderInputRejectedError,
-    );
+    expect(() =>
+      buildStateBundleV2(input as unknown as StateManifestV2Input, LEDGER, METADATA),
+    ).toThrow(BuilderInputRejectedError);
   });
 
   it('rejects a sparse array', () => {
     const input = baseInput() as unknown as { spare?: unknown[] };
     // eslint-disable-next-line no-sparse-arrays
     input.spare = [1, , 3];
-    expect(() => buildStateBundleV2(input as StateManifestV2Input, LEDGER, METADATA)).toThrow(
-      BuilderInputRejectedError,
-    );
+    expect(() =>
+      buildStateBundleV2(input as unknown as StateManifestV2Input, LEDGER, METADATA),
+    ).toThrow(BuilderInputRejectedError);
   });
 
   it('rejects a cyclic structure', () => {
@@ -82,17 +82,85 @@ describe('buildStateBundleV2 input-domain rejection (canonical accepted domain)'
   it('rejects a non-finite number', () => {
     const input = baseInput() as unknown as { generation: { stateGeneration: number } };
     input.generation.stateGeneration = Number.POSITIVE_INFINITY;
-    expect(() => buildStateBundleV2(input as StateManifestV2Input, LEDGER, METADATA)).toThrow(
-      BuilderInputRejectedError,
-    );
+    expect(() =>
+      buildStateBundleV2(input as unknown as StateManifestV2Input, LEDGER, METADATA),
+    ).toThrow(BuilderInputRejectedError);
   });
 
   it('rejects a NaN number', () => {
     const input = baseInput() as unknown as { generation: { stateGeneration: number } };
     input.generation.stateGeneration = Number.NaN;
-    expect(() => buildStateBundleV2(input as StateManifestV2Input, LEDGER, METADATA)).toThrow(
-      BuilderInputRejectedError,
-    );
+    expect(() =>
+      buildStateBundleV2(input as unknown as StateManifestV2Input, LEDGER, METADATA),
+    ).toThrow(BuilderInputRejectedError);
+  });
+
+  it('rejects a lone high surrogate inside a string value', () => {
+    const input = baseInput() as unknown as { cacheContractIdentity: { providerId: string } };
+    input.cacheContractIdentity.providerId = 'anthropic-\uD800';
+    expect(() =>
+      buildStateBundleV2(input as unknown as StateManifestV2Input, LEDGER, METADATA),
+    ).toThrow(BuilderInputRejectedError);
+  });
+
+  it('rejects a lone low surrogate inside a string value', () => {
+    const input = baseInput() as unknown as { cacheContractIdentity: { providerId: string } };
+    input.cacheContractIdentity.providerId = 'anthropic-\uDC00';
+    expect(() =>
+      buildStateBundleV2(input as unknown as StateManifestV2Input, LEDGER, METADATA),
+    ).toThrow(BuilderInputRejectedError);
+  });
+
+  it('rejects a lone surrogate as a property name', () => {
+    const input = baseInput() as unknown as { stateKey: Record<string, unknown> };
+    input.stateKey['bad-\uD800-key'] = 'x';
+    expect(() =>
+      buildStateBundleV2(input as unknown as StateManifestV2Input, LEDGER, METADATA),
+    ).toThrow(BuilderInputRejectedError);
+  });
+
+  it('BuilderInputRejectedError.message does not leak the caller property name', () => {
+    const secretName = 'top-secret-accessor-name-that-should-not-appear-anywhere';
+    const input = baseInput() as unknown as { stateKey: Record<string, unknown> };
+    Object.defineProperty(input.stateKey, secretName, {
+      configurable: true,
+      enumerable: true,
+      get: () => 'x',
+    });
+    try {
+      buildStateBundleV2(input as unknown as StateManifestV2Input, LEDGER, METADATA);
+      throw new Error('expected BuilderInputRejectedError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(BuilderInputRejectedError);
+      if (err instanceof BuilderInputRejectedError) {
+        expect(err.message).not.toContain(secretName);
+        expect(err.path).not.toContain(secretName);
+        // Path is collapsed to structural placeholders only.
+        expect(err.path).toMatch(/^\$(?:\.<segment>|\[<i>\])*$/);
+      }
+    }
+  });
+
+  it('BuilderInputRejectedError.message stays within the diagnostic byte cap', () => {
+    // A pathological caller shaping deeply-nested own properties with
+    // secret-like names must not produce an unbounded builder message.
+    const input = baseInput() as unknown as Record<string, unknown>;
+    const longKey = 'k'.repeat(500);
+    Object.defineProperty(input, longKey, {
+      configurable: true,
+      enumerable: true,
+      get: () => 'x',
+    });
+    try {
+      buildStateBundleV2(input as unknown as StateManifestV2Input, LEDGER, METADATA);
+      throw new Error('expected BuilderInputRejectedError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(BuilderInputRejectedError);
+      if (err instanceof BuilderInputRejectedError) {
+        expect(new TextEncoder().encode(err.message).byteLength).toBeLessThanOrEqual(1024);
+        expect(err.message).not.toContain(longKey);
+      }
+    }
   });
 
   it('cap check runs before any input-object traversal (ledger over cap)', () => {

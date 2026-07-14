@@ -51,7 +51,10 @@ export type {
 } from './manifest.js';
 
 export {
+  boundedDiagnosticMessage,
+  boundedJoin,
   crossFieldValidate,
+  isRfc3339,
   semanticIdentityValidate,
   validateStateManifestV2,
   type ValidationResult,

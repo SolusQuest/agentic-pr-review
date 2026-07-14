@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { canonicalJsonBytes, type CanonicalJsonValue } from '../canonical-json/index.js';
+import { CanonicalJsonInputError, canonicalJsonBytes } from '../canonical-json/index.js';
 import { LEDGER_MAX_BYTES, METADATA_MAX_BYTES } from './constants.js';
 import type { Sha256Hex, StateManifestV2, StateManifestV2Input } from './manifest.js';
-import { validateStateManifestV2 } from './schema.js';
+import { validateStateManifestV2, boundedDiagnosticMessage } from './schema.js';
 import { serializeStateManifestV2 } from './serializer.js';
 
 export class LedgerOverBoundError extends Error {
@@ -26,18 +26,25 @@ export class MetadataOverBoundError extends Error {
 export class BuilderValidationError extends Error {
   readonly detail: string;
   constructor(detail: string) {
-    super(`state manifest v2 builder rejected the finalized manifest: ${detail}`);
+    super(boundedDiagnosticMessage(`builder rejected finalized manifest: ${detail}`));
     this.name = 'BuilderValidationError';
     this.detail = detail;
   }
 }
 
 export class BuilderInputRejectedError extends Error {
+  readonly reason: string;
   readonly path: string;
   constructor(reason: string, path: string) {
-    super(`state manifest v2 builder rejected input at ${path}: ${reason}`);
+    // Both `reason` and `path` may come from the shared canonical helper,
+    // whose messages embed caller-controlled property names. Reduce them
+    // to a bounded, structural form before including in the public error.
+    const safeReason = sanitizeInputReason(reason);
+    const safePath = sanitizeInputPath(path);
+    super(boundedDiagnosticMessage(`builder_input_rejected:${safeReason}@${safePath}`));
     this.name = 'BuilderInputRejectedError';
-    this.path = path;
+    this.reason = safeReason;
+    this.path = safePath;
   }
 }
 
@@ -56,13 +63,16 @@ export type BuildStateBundleV2Result = BuildResult;
  *
  * Order of operations:
  *   1. Size caps on the caller's byte views (byteLength on original view).
- *   2. Reject non-plain input structures (getters, symbol keys,
- *      non-enumerable own properties, custom prototypes, etc.) by traversing
- *      the input under the same rules as `canonicalJsonBytes`; produce a
- *      typed error immediately.
- *   3. Deep-copy the accepted input object using own enumerable data
- *      properties only, so mutation of the caller's input after return
- *      cannot mutate any BuildResult byte.
+ *   2. Validate the caller's input tree against the canonical-JSON accepted
+ *      domain by running it through the shared `canonicalJsonBytes` helper.
+ *      Any `CanonicalJsonInputError` becomes a `BuilderInputRejectedError`
+ *      so callers see a single typed rejection instead of two overlapping
+ *      contracts. This also rejects lone UTF-16 surrogates in both string
+ *      values and property names.
+ *   3. Deep-copy the accepted input by round-tripping the canonical bytes
+ *      through `JSON.parse` — the tree returned to the manifest builder is
+ *      brand-new plain objects/arrays completely disconnected from the
+ *      caller's input references.
  *   4. Copy the accepted byte views into fresh Uint8Array snapshots.
  *   5. Compute SHA-256 over the snapshots and fill descriptor + transaction
  *      binding fields.
@@ -80,7 +90,19 @@ export function buildStateBundleV2(
     throw new MetadataOverBoundError(providerRunMetadataBytes.byteLength);
   }
 
-  const clonedInput = canonicalDeepClone(input as unknown, '$') as StateManifestV2Input;
+  let canonicalBytes: Uint8Array;
+  try {
+    canonicalBytes = canonicalJsonBytes(input as unknown);
+  } catch (err) {
+    if (err instanceof CanonicalJsonInputError) {
+      throw new BuilderInputRejectedError(err.reason, err.path);
+    }
+    throw err;
+  }
+  const clonedInput = JSON.parse(
+    new TextDecoder('utf-8').decode(canonicalBytes),
+  ) as StateManifestV2Input;
+
   const ledgerSnapshot = copyBytes(ledgerBytes);
   const metadataSnapshot = copyBytes(providerRunMetadataBytes);
 
@@ -139,105 +161,59 @@ function sha256Hex(bytes: Uint8Array): Sha256Hex {
 }
 
 /**
- * Deep-clone using the canonical-JSON accepted domain. This is the same
- * accepted-domain contract as `canonicalJsonBytes` — it rejects getters,
- * symbol-keyed properties, non-enumerable own properties, non-plain
- * prototypes, sparse arrays, and non-JSON primitives. Every accepted value
- * is copied into a brand-new plain-object / array with `Object.prototype` /
- * `Array.prototype`, so subsequent mutation of the caller's input object
- * cannot reach into the returned tree.
+ * Sanitize a canonical-domain rejection path to a bounded form. Path
+ * segments are supplied by the canonical helper and can include
+ * caller-controlled property names. We only keep the top-level structure
+ * shape (`$.a.b.c` or `$[0].x`) with each segment collapsed to `<segment>`
+ * so unknown or hostile names never appear in the emitted error message.
  */
-function canonicalDeepClone(
-  value: unknown,
-  path: string,
-  seen: WeakSet<object> = new WeakSet(),
-): unknown {
-  if (value === null) return null;
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'number') {
-    if (Number.isNaN(value) || !Number.isFinite(value)) {
-      throw new BuilderInputRejectedError('non_finite_number', path);
+function sanitizeInputPath(path: string): string {
+  // Preserve the leading `$` and the delimiters (`.`, `[`, `]`), but
+  // replace each named segment with `<segment>` and each numeric index
+  // with `<i>`. A defensive character cap prevents runaway paths.
+  const MAX = 128;
+  let out = '';
+  let i = 0;
+  while (i < path.length && out.length < MAX) {
+    const ch = path[i];
+    if (ch === '$' || ch === '.' || ch === '[' || ch === ']') {
+      out += ch;
+      i += 1;
+      continue;
     }
-    return value;
+    // Scan until the next delimiter and collapse.
+    let j = i;
+    let isIndex = true;
+    while (j < path.length && path[j] !== '.' && path[j] !== '[' && path[j] !== ']') {
+      if (path[j] < '0' || path[j] > '9') isIndex = false;
+      j += 1;
+    }
+    out += isIndex ? '<i>' : '<segment>';
+    i = j;
   }
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) {
-    if (seen.has(value)) {
-      throw new BuilderInputRejectedError('cyclic_structure', path);
-    }
-    seen.add(value);
-    try {
-      if (Object.getPrototypeOf(value) !== Array.prototype) {
-        throw new BuilderInputRejectedError('array_non_array_prototype', path);
-      }
-      if (Object.getOwnPropertySymbols(value).length > 0) {
-        throw new BuilderInputRejectedError('array_symbol_key', path);
-      }
-      for (const name of Object.getOwnPropertyNames(value)) {
-        if (name === 'length') continue;
-        const desc = Object.getOwnPropertyDescriptor(value, name);
-        if (!desc) continue;
-        if ('get' in desc || 'set' in desc) {
-          throw new BuilderInputRejectedError('array_accessor', path);
-        }
-        if (!isNonNegativeIntegerString(name) || Number(name) >= value.length) {
-          throw new BuilderInputRejectedError('array_extra_own_property', path);
-        }
-        if (!desc.enumerable) {
-          throw new BuilderInputRejectedError('array_non_enumerable_index', path);
-        }
-      }
-      const out: unknown[] = [];
-      for (let i = 0; i < value.length; i++) {
-        const idx = String(i);
-        if (!Object.prototype.hasOwnProperty.call(value, idx)) {
-          throw new BuilderInputRejectedError('sparse_array', path);
-        }
-        out.push(canonicalDeepClone(value[i], `${path}[${i}]`, seen));
-      }
-      return out;
-    } finally {
-      seen.delete(value);
-    }
-  }
-  if (typeof value === 'object') {
-    const record = value as object;
-    if (seen.has(record)) {
-      throw new BuilderInputRejectedError('cyclic_structure', path);
-    }
-    seen.add(record);
-    try {
-      const proto = Object.getPrototypeOf(record);
-      if (proto !== Object.prototype && proto !== null) {
-        throw new BuilderInputRejectedError('non_plain_object', path);
-      }
-      if (Object.getOwnPropertySymbols(record).length > 0) {
-        throw new BuilderInputRejectedError('symbol_key', path);
-      }
-      const out: Record<string, unknown> = {};
-      for (const key of Object.getOwnPropertyNames(record)) {
-        const desc = Object.getOwnPropertyDescriptor(record, key);
-        if (!desc) continue;
-        if ('get' in desc || 'set' in desc) {
-          throw new BuilderInputRejectedError('accessor_property', `${path}.${key}`);
-        }
-        if (!desc.enumerable) {
-          throw new BuilderInputRejectedError('non_enumerable_property', `${path}.${key}`);
-        }
-        out[key] = canonicalDeepClone(desc.value, `${path}.${key}`, seen);
-      }
-      return out;
-    } finally {
-      seen.delete(record);
-    }
-  }
-  throw new BuilderInputRejectedError('unsupported_runtime_value', path);
+  return out;
 }
 
-function isNonNegativeIntegerString(name: string): boolean {
-  return /^(?:0|[1-9]\d*)$/.test(name);
+/**
+ * Reduce a canonical-domain rejection reason to a fixed structural code.
+ * The shared canonical helper embeds caller-controlled property names in
+ * some of its reason strings (for example, "accessor property 'foo'"). We
+ * translate the family of reasons to fixed codes and drop the embedded
+ * names so no caller-controlled content survives.
+ */
+function sanitizeInputReason(reason: string): string {
+  if (reason.startsWith('accessor property')) return 'accessor_property';
+  if (reason.startsWith('non-enumerable own property')) return 'non_enumerable_property';
+  if (reason === 'symbol-keyed own property') return 'symbol_key';
+  if (reason === 'non-plain object') return 'non_plain_object';
+  if (reason === 'cyclic structure') return 'cyclic_structure';
+  if (reason === 'lone high surrogate') return 'lone_high_surrogate';
+  if (reason === 'lone low surrogate') return 'lone_low_surrogate';
+  if (reason.startsWith('sparse array')) return 'sparse_array';
+  if (reason.includes('bigint')) return 'bigint';
+  if (reason.includes('symbol')) return 'symbol';
+  if (reason.includes('function')) return 'function';
+  if (reason.includes('undefined')) return 'undefined';
+  if (reason.includes('NaN') || reason.includes('Infinity')) return 'non_finite_number';
+  return 'canonical_domain_reject';
 }
-
-// Force TS to import `canonicalJsonBytes` so the module boundary is visible in
-// import-graph tests. Not used at runtime.
-void (canonicalJsonBytes as unknown as (value: CanonicalJsonValue) => Uint8Array);

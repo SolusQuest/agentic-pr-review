@@ -43,4 +43,5 @@ export type CrossFieldMessageCode =
   | 'x_identity_empty'
   | 'x_identity_too_long'
   | 'x_identity_control_chars'
-  | 'x_repository_syntax';
+  | 'x_repository_syntax'
+  | 'x_producedAt_invalid_rfc3339';

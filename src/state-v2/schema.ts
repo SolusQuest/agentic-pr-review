@@ -4,6 +4,7 @@ import type { CrossFieldMessageCode, DiagnosticCode } from './diagnostics.js';
 import type { StateManifestV2 } from './manifest.js';
 import {
   MAX_DIAGNOSTIC_ERRORS,
+  MAX_DIAGNOSTIC_MESSAGE_CHARS,
   MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES,
   STATE_NAMESPACE,
 } from './constants.js';
@@ -54,19 +55,26 @@ function classifyAjvErrors(errors: readonly ErrorObject[]): {
   diagnostic: DiagnosticCode;
   message: string;
 } {
-  let diagnostic: DiagnosticCode = 'manifest_shape_invalid';
   let hasAdditional = false;
   let hasVersion = false;
   for (const err of errors) {
-    if ((err.params as { additionalProperty?: string } | undefined)?.additionalProperty) {
+    // Use own-property presence (not truthiness) so an unknown property
+    // with an empty-string name (JSON permits "") still classifies as
+    // manifest_unknown_field rather than falling through to a generic
+    // manifest_shape_invalid or manifest_unknown_version verdict.
+    const params = err.params as { additionalProperty?: unknown } | undefined;
+    if (params && Object.prototype.hasOwnProperty.call(params, 'additionalProperty')) {
       hasAdditional = true;
     }
     if (err.instancePath === '/version') {
       hasVersion = true;
     }
   }
-  if (hasAdditional) diagnostic = 'manifest_unknown_field';
-  else if (hasVersion) diagnostic = 'manifest_unknown_version';
+  const diagnostic: DiagnosticCode = hasAdditional
+    ? 'manifest_unknown_field'
+    : hasVersion
+      ? 'manifest_unknown_version'
+      : 'manifest_shape_invalid';
 
   const messages: string[] = [];
   const seenKeys = new Set<string>();
@@ -279,8 +287,10 @@ function calendarDaysInMonth(year: number, month: number): number {
  * UTF-8 codepoint boundary and never emits a replacement character.
  */
 export function boundedJoin(messages: readonly string[]): string {
-  const kept = messages.slice(0, MAX_DIAGNOSTIC_ERRORS);
-  const joined = kept.join('; ');
+  const trimmed = messages
+    .slice(0, MAX_DIAGNOSTIC_ERRORS)
+    .map((m) => truncateToCodepoints(m, MAX_DIAGNOSTIC_MESSAGE_CHARS));
+  const joined = trimmed.join('; ');
   const encoder = new TextEncoder();
   const encoded = encoder.encode(joined);
   if (encoded.byteLength <= MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES) return joined;
@@ -321,4 +331,32 @@ function truncateAtCodepointBoundary(value: string, maxBytes: number): string {
     cutOffset = charOffset;
   }
   return value.slice(0, cutOffset);
+}
+
+/**
+ * Truncate `value` to at most `maxCodepoints` Unicode code points. Iterates
+ * with `for..of` so surrogate pairs count as one code point and are never
+ * split. Used as the per-message cap inside `boundedJoin`.
+ */
+function truncateToCodepoints(value: string, maxCodepoints: number): string {
+  if (maxCodepoints <= 0) return '';
+  let count = 0;
+  let cut = 0;
+  for (const cp of value) {
+    if (count >= maxCodepoints) break;
+    count += 1;
+    cut += cp.length;
+  }
+  return value.slice(0, cut);
+}
+
+/**
+ * Public wrapper: format a single bounded diagnostic message. Applies the
+ * per-message code-point cap and the total UTF-8 byte cap through the same
+ * `boundedJoin` pipeline. All builder / classifier error paths must funnel
+ * their final `Error.message` payload through this helper so no code path
+ * can bypass the diagnostic bounds.
+ */
+export function boundedDiagnosticMessage(message: string): string {
+  return boundedJoin([message]);
 }
