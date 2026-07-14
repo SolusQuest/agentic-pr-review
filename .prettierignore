@@ -3,3 +3,13 @@ dist/
 .github/actions/agentic-pr-review/dist/
 runtime/tests/fixtures/deterministic/**
 .codex/
+protocol/fixtures/v1/provider-session-ledger/
+.phase*
+.fixture-shas.txt
+.*.py
+.write-schema.py
+.update-manifest.py
+.gen-property-count.py
+.regen-fixtures.py
+.patch-*.py
+

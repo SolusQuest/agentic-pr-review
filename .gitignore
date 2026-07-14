@@ -9,3 +9,7 @@ dist/
 .codex/
 runtime/**/bin/
 runtime/**/obj/
+.phase*
+.fixture-shas.txt
+.*.py
+

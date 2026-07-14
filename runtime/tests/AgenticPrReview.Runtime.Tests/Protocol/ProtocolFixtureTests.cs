@@ -16,25 +16,34 @@ public sealed class ProtocolFixtureTests
 
         foreach (var entry in manifest.RootElement.EnumerateArray())
         {
-            if (entry.GetProperty("type").GetString() == "fixture")
+            var entryType = entry.GetProperty("type").GetString();
+            switch (entryType)
             {
-                AssertFixture(entry, root, schemas);
-                registeredFiles.Add(entry.GetProperty("file").GetString()!);
-                continue;
+                case "fixture":
+                    AssertFixture(entry, root, schemas);
+                    registeredFiles.Add(entry.GetProperty("file").GetString()!);
+                    break;
+                case "case":
+                    AssertCase(entry, root, schemas);
+                    var directory = entry.GetProperty("directory").GetString()!;
+                    foreach (var contract in entry.GetProperty("contracts").EnumerateObject())
+                    {
+                        registeredFiles.Add($"{directory}/{contract.Value.GetString()}");
+                    }
+                    break;
+                case "ledger-restore":
+                case "ledger-transition":
+                case "ledger-build":
+                    // Ledger-family entries are exercised by LedgerFixtureTests.
+                    registeredFiles.Add(entry.GetProperty("file").GetString()!);
+                    if (entryType != "ledger-restore" && entry.TryGetProperty("predecessor", out var pred))
+                    {
+                        registeredFiles.Add(pred.GetString()!);
+                    }
+                    break;
+                default:
+                    throw new InvalidOperationException($"Unknown manifest entry type: {entryType}");
             }
-
-            if (entry.GetProperty("type").GetString() == "case")
-            {
-                AssertCase(entry, root, schemas);
-                var directory = entry.GetProperty("directory").GetString()!;
-                foreach (var contract in entry.GetProperty("contracts").EnumerateObject())
-                {
-                    registeredFiles.Add($"{directory}/{contract.Value.GetString()}");
-                }
-                continue;
-            }
-
-            throw new InvalidOperationException("Unknown manifest entry type.");
         }
 
         var actualFiles = Directory.EnumerateFiles(root, "*.json", SearchOption.AllDirectories)
@@ -105,3 +114,4 @@ public sealed class ProtocolFixtureTests
 
     private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 }
+

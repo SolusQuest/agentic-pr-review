@@ -1,2 +1,3 @@
 protocol/fixtures/v1/cases/** -text
+protocol/fixtures/v1/provider-session-ledger/** -text
 runtime/scripts/*.sh text eol=lf

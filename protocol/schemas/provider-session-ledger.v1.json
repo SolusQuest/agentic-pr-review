@@ -1,0 +1,756 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentic-pr-review/protocol/schemas/provider-session-ledger.v1.json",
+  "title": "ProviderSessionLedgerV1",
+  "description": "Provider-neutral bounded session ledger for the M4 live-provider path. Runtime-owned; host authoritative for identities. See docs/20_architecture/session-ledger-and-prefix-contract.md and issue #49.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "prefixContractVersion", "header", "records"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "prefixContractVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "header": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/bootstrapHeader"
+        },
+        {
+          "$ref": "#/definitions/continuationHeader"
+        },
+        {
+          "$ref": "#/definitions/resetHeader"
+        },
+        {
+          "$ref": "#/definitions/recoveryHeader"
+        }
+      ]
+    },
+    "records": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 64,
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/definitions/reviewContext"
+          },
+          {
+            "$ref": "#/definitions/reviewOutcome"
+          }
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "safeRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "pattern": "\\S",
+      "allOf": [
+        {
+          "pattern": "^[^/]"
+        },
+        {
+          "not": {
+            "pattern": "\\\\"
+          }
+        },
+        {
+          "not": {
+            "pattern": "^[A-Za-z][A-Za-z0-9+.-]*:"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(^|/)\\.\\.?(/|$)"
+          }
+        }
+      ]
+    },
+    "bootstrapHeader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "repository",
+        "headRepository",
+        "pullRequest",
+        "workflowIdentity",
+        "trustedExecutionDomain",
+        "sessionEpoch",
+        "providerId",
+        "modelId",
+        "adapterId",
+        "templateId",
+        "policyId",
+        "toolDefinitionId",
+        "cacheConfigId",
+        "stateGeneration",
+        "ledgerEpoch",
+        "predecessorLedgerSha256"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "bootstrap"
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
+        },
+        "headRepository": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
+        },
+        "pullRequest": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "workflowIdentity": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "trustedExecutionDomain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "sessionEpoch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "providerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "modelId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "adapterId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "templateId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "policyId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "toolDefinitionId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "cacheConfigId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "stateGeneration": {
+          "type": "integer",
+          "const": 0
+        },
+        "ledgerEpoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "predecessorLedgerSha256": {
+          "type": "string",
+          "const": "bootstrap"
+        }
+      }
+    },
+    "continuationHeader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "repository",
+        "headRepository",
+        "pullRequest",
+        "workflowIdentity",
+        "trustedExecutionDomain",
+        "sessionEpoch",
+        "providerId",
+        "modelId",
+        "adapterId",
+        "templateId",
+        "policyId",
+        "toolDefinitionId",
+        "cacheConfigId",
+        "stateGeneration",
+        "ledgerEpoch",
+        "predecessorLedgerSha256",
+        "predecessorStateGeneration"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "continuation"
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
+        },
+        "headRepository": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
+        },
+        "pullRequest": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "workflowIdentity": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "trustedExecutionDomain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "sessionEpoch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "providerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "modelId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "adapterId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "templateId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "policyId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "toolDefinitionId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "cacheConfigId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "stateGeneration": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "ledgerEpoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "predecessorLedgerSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "predecessorStateGeneration": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        }
+      }
+    },
+    "resetHeader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "repository",
+        "headRepository",
+        "pullRequest",
+        "workflowIdentity",
+        "trustedExecutionDomain",
+        "sessionEpoch",
+        "providerId",
+        "modelId",
+        "adapterId",
+        "templateId",
+        "policyId",
+        "toolDefinitionId",
+        "cacheConfigId",
+        "stateGeneration",
+        "ledgerEpoch",
+        "predecessorLedgerSha256",
+        "predecessorStateGeneration",
+        "predecessorManifestSha256",
+        "resetReason"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "reset"
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
+        },
+        "headRepository": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
+        },
+        "pullRequest": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "workflowIdentity": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "trustedExecutionDomain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "sessionEpoch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "providerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "modelId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "adapterId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "templateId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "policyId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "toolDefinitionId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "cacheConfigId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "stateGeneration": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "ledgerEpoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "predecessorLedgerSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "predecessorStateGeneration": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "predecessorManifestSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "resetReason": {
+          "type": "string",
+          "enum": ["base_changed", "force_push", "cache_contract_changed"]
+        }
+      }
+    },
+    "recoveryHeader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "repository",
+        "headRepository",
+        "pullRequest",
+        "workflowIdentity",
+        "trustedExecutionDomain",
+        "sessionEpoch",
+        "providerId",
+        "modelId",
+        "adapterId",
+        "templateId",
+        "policyId",
+        "toolDefinitionId",
+        "cacheConfigId",
+        "stateGeneration",
+        "ledgerEpoch",
+        "predecessorLedgerSha256",
+        "recoveryReason"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "recovery"
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
+        },
+        "headRepository": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
+        },
+        "pullRequest": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "workflowIdentity": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "trustedExecutionDomain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "sessionEpoch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "providerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "modelId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "adapterId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "templateId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "policyId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "toolDefinitionId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "cacheConfigId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "stateGeneration": {
+          "type": "integer",
+          "const": 0
+        },
+        "ledgerEpoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "predecessorLedgerSha256": {
+          "type": "string",
+          "const": "bootstrap"
+        },
+        "recoveryReason": {
+          "type": "string",
+          "enum": [
+            "predecessor_unavailable",
+            "predecessor_integrity_failure",
+            "predecessor_unsafe_provenance",
+            "predecessor_expired",
+            "predecessor_over_bound",
+            "predecessor_incompatible_contract"
+          ]
+        }
+      }
+    },
+    "reviewContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "interactionId",
+        "interactionOrdinal",
+        "reviewedHeadSha",
+        "reviewedBaseSha",
+        "subjectDigest",
+        "cacheContractDigest",
+        "changedFiles"
+      ],
+      "properties": {
+        "role": {
+          "type": "string",
+          "const": "review_context"
+        },
+        "interactionId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "interactionOrdinal": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "reviewedHeadSha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "reviewedBaseSha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "subjectDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "cacheContractDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "changedFiles": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "status", "additions", "deletions", "changes"],
+            "properties": {
+              "path": {
+                "$ref": "#/definitions/safeRelativePath"
+              },
+              "previousPath": {
+                "$ref": "#/definitions/safeRelativePath"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["added", "modified", "removed", "renamed", "copied"]
+              },
+              "additions": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000
+              },
+              "deletions": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000
+              },
+              "changes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000
+              },
+              "patch": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["sha256", "truncated", "maxChars"],
+                "properties": {
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "truncated": {
+                    "type": "boolean"
+                  },
+                  "maxChars": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 10000000
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "reviewOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "interactionId",
+        "interactionOrdinal",
+        "summary",
+        "findings",
+        "limitations"
+      ],
+      "properties": {
+        "role": {
+          "type": "string",
+          "const": "review_outcome"
+        },
+        "interactionId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "interactionOrdinal": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "findings": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/definitions/finding"
+          }
+        },
+        "limitations": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "maxLength": 1200,
+            "pattern": "\\S"
+          }
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "severity",
+        "confidence",
+        "category",
+        "title",
+        "body",
+        "path",
+        "startLine",
+        "endLine"
+      ],
+      "properties": {
+        "severity": {
+          "enum": ["low", "medium", "high"]
+        },
+        "confidence": {
+          "enum": ["medium", "high"]
+        },
+        "category": {
+          "enum": [
+            "correctness",
+            "security",
+            "requirements",
+            "test_coverage",
+            "build",
+            "performance",
+            "maintainability",
+            "documentation"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 240,
+          "pattern": "\\S"
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "evidence": {
+          "type": "string",
+          "maxLength": 2000,
+          "pattern": "\\S"
+        },
+        "path": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/safeRelativePath"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "startLine": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "endLine": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "suggestedAction": {
+          "type": "string",
+          "maxLength": 1600,
+          "pattern": "\\S"
+        },
+        "inlinePreference": {
+          "enum": ["allowed", "preferred", "avoid"]
+        }
+      }
+    }
+  }
+}
