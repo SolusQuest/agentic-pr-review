@@ -318,20 +318,54 @@ public static class LedgerBuilder
 
     private static LedgerDiagnostic? ValidateModelSchemaAndSemantics(LedgerModel model)
     {
+        // Header-level schema shape checks. Repository / head repository
+        // slugs and hex64 identity fields belong to the schema stage, not
+        // the semantic stage.
+        var h = model.Header;
+        if (!IsRepositorySlug(h.Repository) || !IsRepositorySlug(h.HeadRepository))
+            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
+        foreach (var s in new[] { h.AdapterId, h.TemplateId, h.PolicyId, h.ToolDefinitionId, h.CacheConfigId })
+        {
+            if (!IsHex64(s)) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
+        }
+        if (h.PullRequest < 1) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
+        if (h.StateGeneration < 0 || h.StateGeneration > 1_000_000)
+            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
+        if (h.LedgerEpoch < 0 || h.LedgerEpoch > 1_000_000)
+            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
+        if (h.PredecessorStateGeneration is long psg && (psg < 0 || psg > 1_000_000))
+            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
+
+        // Per-record aggregate limits FIRST — these are schema-level
+        // maxItems constraints and must take precedence over the JSON
+        // property/array aggregate causes.
+        foreach (var rec in model.Records)
+        {
+            if (rec.Context is ReviewContextRecord ctxA)
+            {
+                if (ctxA.ChangedFiles.Length > LedgerLimits.MaxChangedFilesPerContext)
+                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.ChangedFileLimitExceeded);
+            }
+            if (rec.Outcome is ReviewOutcomeRecord ocA)
+            {
+                if (ocA.Findings.Length > LedgerLimits.MaxFindingsPerOutcome)
+                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.FindingLimitExceeded);
+                if (ocA.Limitations.Length > LedgerLimits.MaxLimitationsPerOutcome)
+                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.LimitationsLimitExceeded);
+            }
+        }
+
         // Identity byte-length caps and control-character rejection on
-        // header identities (same rules the parser applies post-schema).
+        // header identities.
         var bounds = LedgerSemanticChecks.CheckIdentityBounds(model);
         if (bounds is not null) return bounds;
-
-        // Structural / cross-record semantic invariants (pair order, ordinal
-        // continuity, digest recomputation).
-        var semantic = LedgerSemanticChecks.CheckSemanticInvariants(model);
-        if (semantic is not null) return semantic;
 
         // Per-record schema-shape validation on the manually-constructed
         // records — the same overlong / path / patch / finding checks that
         // BuildReviewContext / BuildReviewOutcome apply when a caller uses
-        // the projection helpers.
+        // the projection helpers. Must run BEFORE semantic invariants such
+        // as digest recomputation so schema errors are not masked by a
+        // digest_mismatch diagnostic.
         foreach (var rec in model.Records)
         {
             if (rec.Context is ReviewContextRecord ctx)
@@ -385,6 +419,14 @@ public static class LedgerBuilder
                 }
             }
         }
+
+        // Structural / cross-record semantic invariants (pair order, ordinal
+        // continuity, digest recomputation). Runs AFTER schema shape checks
+        // so a malformed reviewed-SHA surfaces as ledger_schema_violation
+        // instead of ledger_digest_mismatch.
+        var semantic = LedgerSemanticChecks.CheckSemanticInvariants(model);
+        if (semantic is not null) return semantic;
+
         return null;
     }
 
@@ -465,13 +507,27 @@ public static class LedgerBuilder
         ImmutableArray<LedgerRecord> records,
         Func<ValidatedLedger, TransitionOutcome> transitionValidator)
     {
-        // Builder-level composite cause precedence (frozen order, refined issue Ā9):
-        //   1. ledger_interaction_limit_exceeded
-        //   2. ledger_json_property_count_exceeded
-        //   3. ledger_json_array_length_exceeded
-        //   4. ledger_canonical_byte_limit_exceeded
-        // We enforce each level explicitly here so a later stage cannot mask an
-        // earlier failure.
+        // Builder pipeline (frozen precedence):
+        //   1. ledger_interaction_limit_exceeded  (composite cause)
+        //   2. Unicode preflight (null / NUL / lone-surrogate)
+        //   3. Model-level schema-first validation:
+        //        - per-record aggregate limits (changed_file / finding /
+        //          limitations); these fire BEFORE the JSON property /
+        //          array aggregate counts so a caller who bypasses the
+        //          projection helpers still receives the specific
+        //          per-record diagnostic.
+        //        - schema shape (patterns, enums, hex64, safe path,
+        //          numeric ranges, overlong values).
+        //        - semantic invariants (pair order, ordinal continuity,
+        //          identity byte-length, digest recomputation).
+        //   4. ledger_json_property_count_exceeded  (composite cause;
+        //      currently unreachable through legal per-record limits but
+        //      retained for closed-set completeness).
+        //   5. ledger_json_array_length_exceeded  (composite cause; same
+        //      caveat as property count).
+        //   6. ledger_canonical_byte_limit_exceeded  (composite cause).
+        //   7. Authoritative parser round-trip on the canonical bytes.
+        //   8. Transition cross-check via LedgerAppend.Validate*.
         //
         // Step 1: interaction limit.
         if (records.Length / 2 > LedgerLimits.MaxInteractionPairs)
@@ -480,18 +536,20 @@ public static class LedgerBuilder
                 LedgerDiagnosticCodes.OverBoundAppend, LedgerDiagnosticCodes.InteractionLimitExceeded));
         }
 
-        // Preflight: run every downstream invariant on caller-constructed
-        // records before we feed them to the canonicalizer. The canonicalizer
-        // throws on lone-surrogate strings and does not know about our identity
-        // caps, so any invalid input we would otherwise surface as a specific
-        // diagnostic code must be caught here.
+        // Step 2: Unicode / null preflight.
         var preflight = PreflightCandidate(header, records);
         if (preflight is not null) return new BuildOutcome(null, preflight);
 
-        // Steps 2-3: property-count and array-length. Values are computed from
-        // the structured model with counts that match the canonical writer
-        // exactly, so the frozen precedence is preserved even if the canonical
-        // bytes would also exceed the 256 KiB byte cap.
+        // Step 3: model-level schema-first validation. Runs the per-record
+        // aggregate limits first so a caller bypassing BuildReviewContext /
+        // BuildReviewOutcome receives the correct per-record diagnostic
+        // instead of the more generic property/array/byte causes.
+        var model = new LedgerModel(1, 1, header, records);
+        var modelValidationFailure = ValidateModelSchemaAndSemantics(model);
+        if (modelValidationFailure is not null)
+            return new BuildOutcome(null, modelValidationFailure);
+
+        // Steps 4-5: aggregate property-count and array-length.
         var (totalProperties, maxArrayLength) = CountStructural(header, records);
         if (totalProperties > LedgerLimits.MaxTotalProperties)
         {
@@ -503,18 +561,6 @@ public static class LedgerBuilder
             return new BuildOutcome(null, LedgerDiagnosticMessages.Of(
                 LedgerDiagnosticCodes.OverBoundAppend, LedgerDiagnosticCodes.JsonArrayLengthExceeded));
         }
-
-        var model = new LedgerModel(1, 1, header, records);
-
-        // Run model-level schema/semantic invariants BEFORE serializing so
-        // manually-constructed records that would blow past the 256 KiB
-        // canonical cap still surface their specific projection code
-        // (overlong summary, identity byte-length, invalid path, invalid
-        // finding location, digest recompute, etc.) instead of being masked
-        // by ledger_over_bound_append / canonical_byte_limit_exceeded.
-        var modelValidationFailure = ValidateModelSchemaAndSemantics(model);
-        if (modelValidationFailure is not null)
-            return new BuildOutcome(null, modelValidationFailure);
 
         // Serialize to canonical bytes so we can produce a ValidatedLedger.
         var canonical = LedgerCanonicalizer.SerializeCanonical(model);

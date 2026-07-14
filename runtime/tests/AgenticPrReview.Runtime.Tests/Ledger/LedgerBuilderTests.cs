@@ -37,7 +37,7 @@ public sealed class LedgerBuilderTests
         Limitations: ImmutableArray<string>.Empty);
 
     private static InteractionIdentity IId(int ord) =>
-        new(new string('0', 63) + ord.ToString("x1"), ord);
+        new(new string('0', 64 - ord.ToString("x").Length) + ord.ToString("x"), ord);
 
     // ---------- BuildReviewContext ----------
 
@@ -301,16 +301,16 @@ public sealed class LedgerBuilderTests
     [Fact]
     public void AppendContinuation_InteractionLimit_ReportsInteractionCause()
     {
-        // Predecessor at cap; adding one more pair pushes over MaxInteractionPairs.
+        // Predecessor is at the cap of 32 pairs (last ordinal = 31), so the
+        // legal next pair must use ordinal 32; the append then pushes the
+        // total records/2 to 33, which is one over MaxInteractionPairs.
         var maxBytes = File.ReadAllBytes(
             Path.Combine(AppContext.BaseDirectory, "protocol", "fixtures", "v1",
                 "provider-session-ledger", "continuation-max-interactions.json"));
         var predecessor = LedgerParser.ParseAndValidate(maxBytes).Ledger!;
         var identities = Identities;
-        var context = LedgerBuilder.BuildReviewContext(ContextSource(), identities, IId(1)).Record!;
-        var outcome = LedgerBuilder.BuildReviewOutcome(OutcomeSource("cont"), IId(1)).Record!;
-        // Match predecessor's state generation and epoch so the transition
-        // check passes far enough to reach the interaction structural cap.
+        var context = LedgerBuilder.BuildReviewContext(ContextSource(), identities, IId(32)).Record!;
+        var outcome = LedgerBuilder.BuildReviewOutcome(OutcomeSource("cont"), IId(32)).Record!;
         var expected = new ContinuationTransition(
             identities, predecessor.ContentSha256,
             PredecessorStateGeneration: predecessor.Model.Header.StateGeneration,
@@ -418,6 +418,90 @@ public sealed class LedgerBuilderTests
         var build = LedgerBuilder.CreateReset(predecessor, expected, context, outcome);
         Assert.Null(build.Ledger);
         Assert.Equal(LedgerDiagnosticCodes.InvalidUnicode, build.Failure!.Code);
+    }
+
+
+
+    // ---------- Per-record limits precede aggregate property/array causes ----------
+
+    [Fact]
+    public void CreateBootstrap_ChangedFileLimitPrecedesArrayAggregate()
+    {
+        // Directly construct a ReviewContextRecord with more than 200 changed
+        // files (bypassing BuildReviewContext). AssembleAndValidate must
+        // report the per-record ledger_changed_file_limit_exceeded, not the
+        // aggregate ledger_json_array_length_exceeded cause.
+        var files = ImmutableArray.CreateBuilder<ChangedFileEntry>();
+        for (var i = 0; i < LedgerLimits.MaxChangedFilesPerContext + 1; i++)
+        {
+            files.Add(new ChangedFileEntry("src/f" + i + ".cs", null, "modified", 0, 0, 0, null));
+        }
+        var subject = new string('a', 64);
+        var cacheContract = new string('b', 64);
+        var ctx = new ReviewContextRecord(
+            InteractionId: new string('0', 64), InteractionOrdinal: 0,
+            ReviewedHeadSha: new string('1', 40),
+            ReviewedBaseSha: new string('2', 40),
+            SubjectDigest: subject,
+            CacheContractDigest: cacheContract,
+            ChangedFiles: files.ToImmutable());
+        var oc = new ReviewOutcomeRecord(
+            InteractionId: new string('0', 64), InteractionOrdinal: 0,
+            Summary: "s",
+            Findings: ImmutableArray<LedgerFinding>.Empty,
+            Limitations: ImmutableArray<string>.Empty);
+        var build = LedgerBuilder.CreateBootstrap(
+            new BootstrapTransition(Identities, 0, 1), ctx, oc);
+        Assert.Null(build.Ledger);
+        Assert.Equal(LedgerDiagnosticCodes.ChangedFileLimitExceeded, build.Failure!.Code);
+    }
+
+    [Fact]
+    public void CreateBootstrap_FindingLimitPrecedesArrayAggregate()
+    {
+        var findings = ImmutableArray.CreateBuilder<LedgerFinding>();
+        for (var i = 0; i < LedgerLimits.MaxFindingsPerOutcome + 1; i++)
+        {
+            findings.Add(new LedgerFinding(
+                Severity: "low", Confidence: "medium", Category: "correctness",
+                Title: "t", Body: "b", Path: null, StartLine: null, EndLine: null,
+                Evidence: null, SuggestedAction: null, InlinePreference: null));
+        }
+        var context = LedgerBuilder.BuildReviewContext(ContextSource(), Identities, IId(0)).Record!;
+        var oc = new ReviewOutcomeRecord(
+            InteractionId: new string('0', 64), InteractionOrdinal: 0,
+            Summary: "s",
+            Findings: findings.ToImmutable(),
+            Limitations: ImmutableArray<string>.Empty);
+        var build = LedgerBuilder.CreateBootstrap(
+            new BootstrapTransition(Identities, 0, 1), context, oc);
+        Assert.Null(build.Ledger);
+        Assert.Equal(LedgerDiagnosticCodes.FindingLimitExceeded, build.Failure!.Code);
+    }
+
+    [Fact]
+    public void CreateBootstrap_ManualRecordInvalidReviewedSha_ReportsSchemaViolationNotDigestMismatch()
+    {
+        // Schema-first ordering: an invalid reviewedHeadSha must surface as
+        // ledger_schema_violation, not as ledger_digest_mismatch (which would
+        // otherwise fire because subjectDigest is recomputed against the
+        // invalid SHA).
+        var ctx = new ReviewContextRecord(
+            InteractionId: new string('0', 64), InteractionOrdinal: 0,
+            ReviewedHeadSha: "not-a-sha",
+            ReviewedBaseSha: new string('2', 40),
+            SubjectDigest: new string('a', 64),
+            CacheContractDigest: new string('b', 64),
+            ChangedFiles: ImmutableArray<ChangedFileEntry>.Empty);
+        var oc = new ReviewOutcomeRecord(
+            InteractionId: new string('0', 64), InteractionOrdinal: 0,
+            Summary: "s",
+            Findings: ImmutableArray<LedgerFinding>.Empty,
+            Limitations: ImmutableArray<string>.Empty);
+        var build = LedgerBuilder.CreateBootstrap(
+            new BootstrapTransition(Identities, 0, 1), ctx, oc);
+        Assert.Null(build.Ledger);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, build.Failure!.Code);
     }
 
 }
