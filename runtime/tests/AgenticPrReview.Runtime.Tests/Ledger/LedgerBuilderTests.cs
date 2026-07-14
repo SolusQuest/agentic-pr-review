@@ -551,17 +551,12 @@ public sealed class LedgerBuilderTests
     [Fact]
     public void BuildReviewOutcome_WhitespaceOnlySummary_IsSchemaViolation()
     {
+        // \S pattern is enforced by both projection helper AND model validator
+        // so parser / projection / candidate paths classify identically.
         var source = OutcomeSource() with { Summary = "     " };
         var outcome = LedgerBuilder.BuildReviewOutcome(source, IId(0));
-        // Projection helper does not enforce \S itself; but any candidate
-        // built from this would fail schema at the model validator stage.
-        // The projection helper still returns a Record; downstream Create*
-        // catches the issue. We assert only the manual-record path here.
-        Assert.NotNull(outcome.Record);
-        var context = LedgerBuilder.BuildReviewContext(ContextSource(), Identities, IId(0)).Record!;
-        var build = LedgerBuilder.CreateBootstrap(new BootstrapTransition(Identities, 0, 1), context, outcome.Record!);
-        Assert.Null(build.Ledger);
-        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, build.Failure!.Code);
+        Assert.Null(outcome.Record);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, outcome.Failure!.Code);
     }
 
     [Fact]
@@ -618,19 +613,185 @@ public sealed class LedgerBuilderTests
     [Fact]
     public void CreateBootstrap_IdentityMaxLengthExceededBeforeByteCap_ReportsOverlong()
     {
+        // Identity char maxLength (256) is a schema-owned rule and must map
+        // to ledger_overlong_value on every path (mapper / projection /
+        // candidate). Byte-length cap only fires when the char count is <=256
+        // but UTF-8 encoding exceeds 256 bytes (multi-byte identity chars).
         var identities = Identities with
         {
             WorkflowIdentity = new string('w', 257),
         };
         var context = LedgerBuilder.BuildReviewContext(ContextSource(), identities, IId(0));
-        // Projection layer surfaces identity_byte_length_exceeded because 257
-        // ASCII chars is also 257 bytes > 256 UTF-8 byte cap. We check the
-        // model validator instead by constructing manually.
         Assert.Null(context.Record);
-        // Either code is acceptable; both come from the identity chain, not
-        // from a byte-cap masking.
-        Assert.True(context.Failure!.Code is LedgerDiagnosticCodes.OverlongValue
-            or LedgerDiagnosticCodes.IdentityByteLengthExceeded);
+        Assert.Equal(LedgerDiagnosticCodes.OverlongValue, context.Failure!.Code);
+    }
+
+    // -----------------------------------------------------------------
+    // R8: schema-first and public-boundary defenses.
+
+    [Fact]
+    public void BuildReviewContext_NullSource_ReturnsSchemaViolation()
+    {
+        var o = LedgerBuilder.BuildReviewContext(null!, Identities, IId(0));
+        Assert.Null(o.Record);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, o.Failure!.Code);
+    }
+
+    [Fact]
+    public void BuildReviewContext_NullIdentities_ReturnsSchemaViolation()
+    {
+        var o = LedgerBuilder.BuildReviewContext(ContextSource(), null!, IId(0));
+        Assert.Null(o.Record);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, o.Failure!.Code);
+    }
+
+    [Fact]
+    public void BuildReviewContext_NullInteraction_ReturnsSchemaViolation()
+    {
+        var o = LedgerBuilder.BuildReviewContext(ContextSource(), Identities, null!);
+        Assert.Null(o.Record);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, o.Failure!.Code);
+    }
+
+    [Fact]
+    public void BuildReviewOutcome_NullSource_ReturnsSchemaViolation()
+    {
+        var o = LedgerBuilder.BuildReviewOutcome(null!, IId(0));
+        Assert.Null(o.Record);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, o.Failure!.Code);
+    }
+
+    [Fact]
+    public void BuildReviewOutcome_NullInteraction_ReturnsSchemaViolation()
+    {
+        var o = LedgerBuilder.BuildReviewOutcome(OutcomeSource(), null!);
+        Assert.Null(o.Record);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, o.Failure!.Code);
+    }
+
+    [Fact]
+    public void CreateBootstrap_NullContextRecord_ReturnsSchemaViolation()
+    {
+        var expected = new BootstrapTransition(Identities, 0, 1);
+        var outcomeR = LedgerBuilder.BuildReviewOutcome(OutcomeSource(), IId(0)).Record!;
+        var b = LedgerBuilder.CreateBootstrap(expected, null!, outcomeR);
+        Assert.Null(b.Ledger);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, b.Failure!.Code);
+    }
+
+    [Fact]
+    public void CreateBootstrap_NullOutcomeRecord_ReturnsSchemaViolation()
+    {
+        var expected = new BootstrapTransition(Identities, 0, 1);
+        var contextR = LedgerBuilder.BuildReviewContext(ContextSource(), Identities, IId(0)).Record!;
+        var b = LedgerBuilder.CreateBootstrap(expected, contextR, null!);
+        Assert.Null(b.Ledger);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, b.Failure!.Code);
+    }
+
+    [Fact]
+    public void CreateBootstrap_NullExpected_ReturnsSchemaViolation()
+    {
+        var contextR = LedgerBuilder.BuildReviewContext(ContextSource(), Identities, IId(0)).Record!;
+        var outcomeR = LedgerBuilder.BuildReviewOutcome(OutcomeSource(), IId(0)).Record!;
+        var b = LedgerBuilder.CreateBootstrap(null!, contextR, outcomeR);
+        Assert.Null(b.Ledger);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, b.Failure!.Code);
+    }
+
+    [Fact]
+    public void BuildReviewContext_WhitespaceOnlyPath_IsSchemaViolation()
+    {
+        var source = ContextSource() with
+        {
+            ChangedFiles = System.Collections.Immutable.ImmutableArray.Create(
+                new ValidatedChangedFileSource("   ", null, "modified", 0, 0, 0, null)),
+        };
+        var o = LedgerBuilder.BuildReviewContext(source, Identities, IId(0));
+        Assert.Null(o.Record);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, o.Failure!.Code);
+    }
+
+    [Fact]
+    public void BuildReviewContext_WhitespaceOnlyPreviousPath_IsSchemaViolation()
+    {
+        var source = ContextSource() with
+        {
+            ChangedFiles = System.Collections.Immutable.ImmutableArray.Create(
+                new ValidatedChangedFileSource("src/a.ts", "   ", "renamed", 0, 0, 0, null)),
+        };
+        var o = LedgerBuilder.BuildReviewContext(source, Identities, IId(0));
+        Assert.Null(o.Record);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, o.Failure!.Code);
+    }
+
+    [Fact]
+    public void BuildReviewOutcome_WhitespaceOnlyFindingPath_IsSchemaViolation()
+    {
+        var source = OutcomeSource() with
+        {
+            Findings = System.Collections.Immutable.ImmutableArray.Create(
+                new ValidatedFindingSource(
+                    Severity: "medium", Confidence: "medium", Category: "correctness",
+                    Title: "t", Body: "b", Path: "   ",
+                    StartLine: null, EndLine: null, Evidence: null, SuggestedAction: null, InlinePreference: null)),
+        };
+        var o = LedgerBuilder.BuildReviewOutcome(source, IId(0));
+        Assert.Null(o.Record);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, o.Failure!.Code);
+    }
+
+    [Fact]
+    public void BuildReviewOutcome_SummaryOverlongAndWhitespaceOnly_ReportsOverlongFirst()
+    {
+        // maxLength (schema step 6) precedes \S pattern (schema step 7).
+        var source = OutcomeSource() with { Summary = new string(' ', 4001) };
+        var o = LedgerBuilder.BuildReviewOutcome(source, IId(0));
+        Assert.Null(o.Record);
+        Assert.Equal(LedgerDiagnosticCodes.OverlongValue, o.Failure!.Code);
+    }
+
+    [Fact]
+    public void BuildReviewOutcome_LimitationOverlongAndWhitespaceOnly_ReportsOverlongFirst()
+    {
+        var source = OutcomeSource() with
+        {
+            Limitations = System.Collections.Immutable.ImmutableArray.Create(new string(' ', 1201)),
+        };
+        var o = LedgerBuilder.BuildReviewOutcome(source, IId(0));
+        Assert.Null(o.Record);
+        Assert.Equal(LedgerDiagnosticCodes.OverlongValue, o.Failure!.Code);
+    }
+
+    [Fact]
+    public void BuildReviewContext_IdentityCharMaxLengthPrecedesByteCap_ReportsOverlong()
+    {
+        // 257 ASCII chars: char maxLength (256) fires before UTF-8 byte cap.
+        var identities = Identities with { ProviderId = new string('p', 257) };
+        var o = LedgerBuilder.BuildReviewContext(ContextSource(), identities, IId(0));
+        Assert.Null(o.Record);
+        Assert.Equal(LedgerDiagnosticCodes.OverlongValue, o.Failure!.Code);
+    }
+
+    [Fact]
+    public void BuildReviewContext_IdentityMultiByteCharsWithinCharCapExceedsByteCap_ReportsByteLength()
+    {
+        // 129 x 4-byte code points = 516 bytes but only 258 UTF-16 units
+        // (>256 chars). Char maxLength catches this first as OverlongValue.
+        // To exercise the byte cap classification we need a string of <=256
+        // chars whose UTF-8 encoding still exceeds 256 bytes: 100 x U+1F600
+        // = 100 chars in .NET string API (surrogate pairs count 2) = actually
+        // 200 UTF-16 units. UTF-8 encoding = 400 bytes. String.Length in C#
+        // returns UTF-16 unit count, so a 200-length string of 100 emoji
+        // still has s.Length = 200 <= 256 but byte-count 400 > 256.
+        var emoji = new string('a', 0);
+        for (var i = 0; i < 100; i++) emoji += "\uD83D\uDE00"; // U+1F600
+        Assert.True(emoji.Length <= 256);
+        Assert.True(System.Text.Encoding.UTF8.GetByteCount(emoji) > 256);
+        var identities = Identities with { ProviderId = emoji };
+        var o = LedgerBuilder.BuildReviewContext(ContextSource(), identities, IId(0));
+        Assert.Null(o.Record);
+        Assert.Equal(LedgerDiagnosticCodes.IdentityByteLengthExceeded, o.Failure!.Code);
     }
 
 }

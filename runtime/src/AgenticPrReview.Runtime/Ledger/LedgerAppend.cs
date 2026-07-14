@@ -13,6 +13,8 @@ public static class LedgerAppend
 {
     public static TransitionOutcome ValidateBootstrap(ValidatedLedger candidate, BootstrapTransition expected)
     {
+        if (candidate is null || expected is null)
+            return new TransitionOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
         if (candidate.PrivateModel.Header.Kind != "bootstrap")
             return Fail(LedgerDiagnosticCodes.TransitionKindMismatch);
 
@@ -29,6 +31,8 @@ public static class LedgerAppend
 
     public static TransitionOutcome ValidateRecovery(ValidatedLedger candidate, RecoveryTransition expected)
     {
+        if (candidate is null || expected is null)
+            return new TransitionOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
         if (candidate.PrivateModel.Header.Kind != "recovery")
             return Fail(LedgerDiagnosticCodes.TransitionKindMismatch);
 
@@ -46,6 +50,8 @@ public static class LedgerAppend
 
     public static TransitionOutcome ValidateContinuation(ValidatedLedger predecessor, ValidatedLedger candidate, ContinuationTransition expected)
     {
+        if (predecessor is null || candidate is null || expected is null)
+            return new TransitionOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
         if (candidate.PrivateModel.Header.Kind != "continuation")
             return Fail(LedgerDiagnosticCodes.TransitionKindMismatch);
 
@@ -87,6 +93,8 @@ public static class LedgerAppend
 
     public static TransitionOutcome ValidateReset(ValidatedLedger predecessor, ValidatedLedger candidate, ResetTransition expected)
     {
+        if (predecessor is null || candidate is null || expected is null)
+            return new TransitionOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
         if (candidate.PrivateModel.Header.Kind != "reset")
             return Fail(LedgerDiagnosticCodes.TransitionKindMismatch);
 

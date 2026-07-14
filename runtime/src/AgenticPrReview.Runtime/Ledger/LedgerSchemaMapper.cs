@@ -131,6 +131,13 @@ internal static class LedgerSchemaMapper
         return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
     }
 
+    // Free-form identity fields governed by string maxLength: 256 in the
+    // ledger schema. Kept in sync with LedgerBuilder / LedgerSemanticChecks.
+    private static readonly string[] IdentityStringNames =
+    {
+        "workflowIdentity","trustedExecutionDomain","sessionEpoch","providerId","modelId",
+    };
+
     private static readonly HashSet<string> HeaderVocabulary = new(StringComparer.Ordinal)
     {
         "kind","repository","headRepository","pullRequest","workflowIdentity","trustedExecutionDomain","sessionEpoch",
@@ -347,9 +354,19 @@ internal static class LedgerSchemaMapper
 
     private static bool FindOverlongString(JsonElement root)
     {
-        // Only detect obvious over-lengths visible on well-shaped records:
-        // summary > 4000, finding.body > 4000, title > 240, evidence > 2000,
-        // suggestedAction > 1600, limitations item > 1200, path > 500.
+        // Detect over-lengths on all string-maxLength fields governed by the
+        // ledger schema. Identity strings (workflowIdentity, trustedExecutionDomain,
+        // sessionEpoch, providerId, modelId) have maxLength 256; free-form record
+        // fields have their own caps. All map to ledger_overlong_value so
+        // parser / projection / candidate paths classify identically.
+        if (root.TryGetProperty("header", out var hdr) && hdr.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var idName in IdentityStringNames)
+            {
+                if (hdr.TryGetProperty(idName, out var v) && v.ValueKind == JsonValueKind.String && v.GetString()!.Length > 256)
+                    return true;
+            }
+        }
         if (root.TryGetProperty("records", out var recs) && recs.ValueKind == JsonValueKind.Array)
         {
             foreach (var rec in recs.EnumerateArray())
