@@ -1042,16 +1042,45 @@ MUST produce these results):
   `payload` whose value is `{"$ref":"#/$defs/leaf"}` where the
   shared target `#/$defs/leaf` is
   `{"type":"object","properties":{"value":{"type":"string"}}}`,
-  let `rootPos = normalizePosition(root, {})` and
+  let `rootPos = normalizePosition(root, {})`,
+  `rootBranchAPos` and `rootBranchBPos` denote the normalized
+  positions of branch A's and branch B's roots respectively,
+  `P_A_payload = resolveProperty(rootBranchAPos, "payload").childSchemaPosition`,
+  `P_B_payload = resolveProperty(rootBranchBPos, "payload").childSchemaPosition`,
+  and
   `P_payload = resolveProperty(rootPos, "payload").childSchemaPosition`.
-  Then `resolveProperty(P_payload, "value")` returns
-  `schemaKnown = true` (both branches independently normalize
-  `leaf` successfully; neither branch's descent chain contains
-  the leaf node when the other branch is normalized; an
-  implementation that used a global visited-set instead of the
-  per-call `activeSchemaNodes` would treat the second branch's
-  visit of `leaf` as a cycle and return `schemaKnown = false`
-  here).
+  Then BOTH of the following per-branch assertions MUST hold in
+  addition to the aggregate assertion:
+
+  - `resolveProperty(P_A_payload, "value")` returns
+    `schemaKnown = true` with a `childSchemaPosition`
+    observationally equivalent to `UnknownPosition` (branch A
+    normalizes `leaf` successfully; the `value` scalar has no
+    supported structural keywords).
+  - `resolveProperty(P_B_payload, "value")` returns
+    `schemaKnown = true` with a `childSchemaPosition`
+    observationally equivalent to `UnknownPosition` (branch B
+    independently normalizes the SAME shared `leaf` target;
+    since neither branch's descent chain contains the leaf node
+    when the other branch is being normalized, the per-call
+    `activeSchemaNodes` guard does NOT treat this as a cycle).
+  - `resolveProperty(P_payload, "value")` returns
+    `schemaKnown = true` with a `childSchemaPosition`
+    observationally equivalent to `UnknownPosition` (aggregate;
+    follows from either per-branch match under the composite
+    union rule).
+
+  The two per-branch assertions are what distinguish a correct
+  per-call `activeSchemaNodes` implementation from an incorrect
+  global visited-set implementation: under a global visited-set,
+  branch B's second visit of `leaf` would degrade to
+  `UnknownPosition` at the `leaf` normalization step, so
+  `resolveProperty(P_B_payload, "value")` would return
+  `schemaKnown = false` (since `P_B_payload` would itself be
+  `UnknownPosition`). The aggregate assertion alone does NOT
+  distinguish the two implementations because a still-correct
+  branch A would keep the aggregate `schemaKnown = true` under
+  the composite union rule.
 
 ### Shared traversal order and stage precedence
 
