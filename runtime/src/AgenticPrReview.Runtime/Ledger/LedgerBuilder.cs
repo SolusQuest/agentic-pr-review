@@ -287,6 +287,8 @@ public static class LedgerBuilder
         {
             if (rec.Context is ReviewContextRecord ctx)
             {
+                if (ctx.ChangedFiles.IsDefault)
+                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
                 if (HasInvalidUnicode(ctx.InteractionId) ||
                     HasInvalidUnicode(ctx.ReviewedHeadSha) ||
                     HasInvalidUnicode(ctx.ReviewedBaseSha) ||
@@ -295,6 +297,8 @@ public static class LedgerBuilder
                     return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
                 foreach (var f in ctx.ChangedFiles)
                 {
+                    if (f is null)
+                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
                     if (HasInvalidUnicode(f.Path) || HasInvalidUnicode(f.Status) ||
                         (f.PreviousPath is not null && HasInvalidUnicode(f.PreviousPath)))
                         return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
@@ -304,10 +308,14 @@ public static class LedgerBuilder
             }
             if (rec.Outcome is ReviewOutcomeRecord oc)
             {
+                if (oc.Findings.IsDefault || oc.Limitations.IsDefault)
+                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
                 if (HasInvalidUnicode(oc.InteractionId) || HasInvalidUnicode(oc.Summary))
                     return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
                 foreach (var f in oc.Findings)
                 {
+                    if (f is null)
+                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
                     if (HasInvalidUnicode(f.Severity) || HasInvalidUnicode(f.Confidence) ||
                         HasInvalidUnicode(f.Category) || HasInvalidUnicode(f.Title) ||
                         HasInvalidUnicode(f.Body) ||
@@ -319,6 +327,8 @@ public static class LedgerBuilder
                 }
                 foreach (var l in oc.Limitations)
                 {
+                    if (l is null)
+                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
                     if (HasInvalidUnicode(l)) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
                 }
             }
@@ -345,6 +355,8 @@ public static class LedgerBuilder
         foreach (var s in new[] { h.WorkflowIdentity, h.TrustedExecutionDomain, h.SessionEpoch, h.ProviderId, h.ModelId })
         {
             if (s.Length == 0) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
+            // maxLength: 256 characters (before UTF-8 byte-length check).
+            if (s.Length > 256) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
         }
         if (h.PullRequest < 1) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
         if (h.StateGeneration < 0 || h.StateGeneration > 1_000_000)
@@ -436,6 +448,8 @@ public static class LedgerBuilder
                     return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
                 if (oc.InteractionOrdinal < 0 || oc.InteractionOrdinal > 1_000_000)
                     return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
+                if (!ContainsNonWhitespace(oc.Summary))
+                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
                 if (oc.Summary.Length > LedgerLimits.MaxSummaryChars)
                     return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
                 if (oc.Findings.Length > LedgerLimits.MaxFindingsPerOutcome)
@@ -451,16 +465,22 @@ public static class LedgerBuilder
                         (f.SuggestedAction is not null && f.SuggestedAction.Length > LedgerLimits.MaxFindingSuggestedActionChars) ||
                         (f.Path is not null && f.Path.Length > LedgerLimits.MaxSafeRelativePathChars))
                         return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
-                    // Enum constraints.
-                    if (f.Severity is not ("blocker" or "critical" or "high" or "medium" or "low" or "info"))
+                    // Enum constraints (authoritative ledger schema).
+                    if (f.Severity is not ("low" or "medium" or "high"))
                         return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                    if (f.Confidence is not ("high" or "medium" or "low"))
+                    if (f.Confidence is not ("medium" or "high"))
                         return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                    if (f.Category is not ("correctness" or "security" or "performance" or "style" or "docs"
-                        or "test" or "design" or "dependency" or "other"))
+                    if (f.Category is not ("correctness" or "security" or "requirements"
+                        or "test_coverage" or "build" or "performance"
+                        or "maintainability" or "documentation"))
                         return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
                     if (f.InlinePreference is not null &&
-                        f.InlinePreference is not ("inline" or "summary" or "either"))
+                        f.InlinePreference is not ("allowed" or "preferred" or "avoid"))
+                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
+                    // \S pattern: non-empty and contains at least one non-whitespace.
+                    if (!ContainsNonWhitespace(f.Title) || !ContainsNonWhitespace(f.Body) ||
+                        (f.Evidence is not null && !ContainsNonWhitespace(f.Evidence)) ||
+                        (f.SuggestedAction is not null && !ContainsNonWhitespace(f.SuggestedAction)))
                         return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
                     // Safe-relative-path for finding.path.
                     if (f.Path is not null && !IsSafeRelativePath(f.Path))
@@ -474,6 +494,8 @@ public static class LedgerBuilder
                 }
                 foreach (var l in oc.Limitations)
                 {
+                    if (!ContainsNonWhitespace(l))
+                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
                     if (l.Length > LedgerLimits.MaxLimitationsItemChars)
                         return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
                 }
@@ -691,6 +713,8 @@ public static class LedgerBuilder
         }
         foreach (var f in source.ChangedFiles)
         {
+            if (f is null)
+                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
             if (HasInvalidUnicode(f.Path) || HasInvalidUnicode(f.Status))
                 return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
             if (f.PreviousPath is not null && HasInvalidUnicode(f.PreviousPath))
@@ -710,6 +734,8 @@ public static class LedgerBuilder
             return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
         foreach (var f in source.Findings)
         {
+            if (f is null)
+                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
             if (HasInvalidUnicode(f.Severity) || HasInvalidUnicode(f.Confidence) ||
                 HasInvalidUnicode(f.Category) || HasInvalidUnicode(f.Title) ||
                 HasInvalidUnicode(f.Body))
@@ -725,6 +751,8 @@ public static class LedgerBuilder
         }
         foreach (var l in source.Limitations)
         {
+            if (l is null)
+                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
             if (HasInvalidUnicode(l)) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
         }
         return null;
@@ -809,6 +837,15 @@ public static class LedgerBuilder
             if (seg == "." || seg == "..") return false;
         }
         return true;
+    }
+
+    private static bool ContainsNonWhitespace(string s)
+    {
+        for (var i = 0; i < s.Length; i++)
+        {
+            if (!char.IsWhiteSpace(s[i])) return true;
+        }
+        return false;
     }
 
     private static bool HasInvalidUnicode(string? s)
