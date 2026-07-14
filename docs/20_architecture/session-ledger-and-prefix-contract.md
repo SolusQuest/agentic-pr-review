@@ -11,7 +11,7 @@ This document defines the cross-issue semantics for the project-owned live provi
 - TypeScript remains the GitHub Action host. It owns workflow facts, target and provenance validation, secret/trust-mode selection, state artifact transport, publishing, and the final fail-closed side-effect barrier.
 - M4 implementation must prove one explicit, default-off, trusted-workflow-only live path. Its deterministic and trusted live gates each use two separate workflow runs. It remains sticky-only, does not replace `claude-code-cli`, does not implement the full tool loop, and does not require production Native AOT release packaging.
 - M4 introduces `StateManifestV2`, which references an independent ledger file in the same state artifact bundle. The M4 live path writes and fully validates v2. Existing v1 paths remain outside this ledger contract until a separately documented breaking cutover.
-- A pre-v2 manifest is not migrated or used to construct a ledger. In the M4 live path, v1 is recognized as `unsupported_legacy_state` and follows the safe bootstrap policy. A v1 rejection fixture prevents accidental reuse.
+- A pre-v2 manifest is not migrated or used to construct a ledger. In the M4 live path, v1 is recognized as `unsupported_legacy_v1` and follows the safe bootstrap policy. A v1 rejection fixture prevents accidental reuse.
 
 ## Scope And Non-Goals
 
@@ -95,7 +95,7 @@ Compatibility policy:
 
 - v1 is not converted to v2;
 - v1 fields such as session id, usage, prompt hash, review input hash, or legacy runtime files are not used to synthesize a ledger;
-- v1 is classified as `unsupported_legacy_state` for the M4 live path and follows the safe bootstrap policy;
+- v1 is classified as `unsupported_legacy_v1` for the M4 live path and follows the safe bootstrap policy;
 - missing, incompatible, corrupt, unsafe, or integrity-mismatched ledger state also follows safe bootstrap without unsafe reuse;
 - existing v1 legacy/deterministic paths are not silently cut over by #29; global removal of v1 is a separate breaking-release decision;
 - v2 is the first supported manifest contract for the live ledger path.
@@ -334,3 +334,327 @@ These do not reopen the cross-issue contract:
 - C# namespaces and file layout;
 - test framework, helper layout, and diagnostic code strings;
 - exact provider model snapshot used by the reference adapter.
+
+## M4 Batch #1 Frozen Vocabulary
+
+This section is normative for the first foundational M4 implementation batch (issues #48, #49, #51) and inherited by later follow-ups (#50, #52-#55). It freezes exactly those cross-workstream contract values that must not diverge between the host (TypeScript) and the runtime (C#). Fields not explicitly listed here remain workstream-scoped. For any field that is duplicated across manifest / ledger / metadata boundaries, the accepted domain, pattern, and equality semantics default to shared: sibling workstreams may only diverge with an explicit note in this section.
+
+### Epoch identity encoding and lifecycle
+
+- `sessionEpoch`, `ledgerEpoch`, `transition.predecessorLedgerEpoch`, and every `producingGeneration.{sessionEpoch,ledgerEpoch}` are opaque host-generated strings of exactly 22 characters over the base64url alphabet, matching the regex `^[A-Za-z0-9_-]{22}$`. #48 exports the constant as `EPOCH_ID_REGEX` and the branded TypeScript alias `EpochId`.
+- The literal string `"bootstrap"` is not an `EpochId`. It is the fixed sentinel used only in `transition.predecessorLedgerSha256` (and in the ledger root header equivalent), and in `transition.predecessorManifestSha256` on the manifest side, for `bootstrap` and `recovery_root` kinds. It never appears in any epoch field.
+- **Root-header sentinel disparity.** The manifest root transition (`bootstrap`, `recovery_root`) carries both `predecessorManifestSha256` and `predecessorLedgerSha256` with the `"bootstrap"` sentinel. The ledger root header carries only `predecessorLedgerSha256` with that sentinel; `predecessorManifestSha256` is absent from `bootstrap` and `recovery_root` ledger headers.
+- **Lifecycle matrix.** The `sessionEpoch` / `ledgerEpoch` / `predecessorLedgerEpoch` freshness relationship is normative:
+
+  | kind            | `sessionEpoch`              | `ledgerEpoch`                        | `predecessorLedgerEpoch`                  |
+  | --------------- | --------------------------- | ------------------------------------ | ----------------------------------------- |
+  | `bootstrap`     | fresh                       | fresh                                | absent                                    |
+  | `continuation`  | equals accepted predecessor | equals accepted predecessor          | equals `generation.ledgerEpoch`           |
+  | `reset`         | equals accepted predecessor | fresh and different from predecessor | equals accepted predecessor `ledgerEpoch` |
+  | `recovery_root` | fresh                       | fresh                                | absent                                    |
+
+  #48 verifies candidate-internal relationships only (`predecessorLedgerEpoch` presence per kind, continuation vs reset epoch equality/inequality, bootstrap/recovery*root `stateGeneration == 0`). Comparison against the \_actual accepted predecessor* is #53's and #55's responsibility.
+
+- **Generator authority (#55).** The token validator (#48) accepts any string matching `EPOCH_ID_REGEX`. The token producer (#55) uses this per-kind matrix:
+
+  | kind            | producer action                                                                  |
+  | --------------- | -------------------------------------------------------------------------------- |
+  | `bootstrap`     | generate fresh `sessionEpoch`; generate fresh `ledgerEpoch`                      |
+  | `continuation`  | reuse both epochs from the accepted predecessor                                  |
+  | `reset`         | reuse `sessionEpoch` from the accepted predecessor; generate fresh `ledgerEpoch` |
+  | `recovery_root` | generate fresh `sessionEpoch`; generate fresh `ledgerEpoch`                      |
+
+  A fresh token MUST be produced from 16 cryptographically random bytes encoded as unpadded base64url. Freshness is a correctness condition, not a recommendation. `reset` is not a root transition; it stays within the same session scope.
+
+### Transition kinds
+
+Both the manifest (`transition.kind`) and the ledger header (`header.kind`) use the same four values as the wire vocabulary:
+
+- `bootstrap`
+- `continuation`
+- `reset`
+- `recovery_root`
+
+The legacy `"recovery"` spelling is not used on the wire.
+
+**Public API naming.** C# / TypeScript public types, method names, and diagnostic codes track the wire vocabulary: `RecoveryRootTransition`, `CreateRecoveryRoot`, `ValidateRecoveryRoot`, `ledger_recovery_root_shape_violation`, `ledger_recovery_root_reason_missing`, `ledger_recovery_root_reason_mismatch`. Internal test file names and local variable names are not constrained.
+
+### Reset reasons (closed enum)
+
+`transition.reason` under `kind == "reset"` and the ledger header `resetReason` under `kind == "reset"` use the same three values:
+
+- `base_change`
+- `head_history_discontinuity`
+- `cache_contract_change`
+
+`head_history_discontinuity` covers both force-push and non-descendant / unknown-ancestry advances of the head SHA. The legacy `force_push` / `base_changed` / `cache_contract_changed` spellings are not used.
+
+### Recovery-root reasons (closed enum) and observed-condition mapping
+
+`transition.reason` under `kind == "recovery_root"` and the ledger header `recoveryReason` under `kind == "recovery_root"` use the same seven values. Their normative mapping to observed conditions:
+
+| Observed condition                                                                                                                                                                                                                                                                                                    | Transition                                           |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| No accepted selector / no current state exists                                                                                                                                                                                                                                                                        | `bootstrap` (not a recovery root)                    |
+| Accepted artifact expired, deleted, or otherwise cannot be downloaded within the transport contract                                                                                                                                                                                                                   | `recovery_root` with `unavailable_accepted_artifact` |
+| Selected artifact is v1 or an unknown contract version                                                                                                                                                                                                                                                                | `recovery_root` with `contract_version_incompatible` |
+| Malformed JSON, schema-invalid or internally semantic-invalid manifest / ledger / metadata payload (semantic-invalid includes cross-field / ordering / partition / aggregate / Unicode-well-formedness failures), non-canonical ledger bytes (per #49), duplicate JSON keys, or over-bound manifest or metadata bytes | `recovery_root` with `corrupt_accepted_artifact`     |
+| Descriptor length / hash mismatch, ledger digest mismatch, transaction-binding mismatch, host-authoritative identity mismatch between manifest / ledger / metadata sidecars                                                                                                                                           | `recovery_root` with `integrity_mismatch`            |
+| Provenance / trust failure                                                                                                                                                                                                                                                                                            | `recovery_root` with `unsafe_provenance`             |
+| Selected manifest disagrees with expected state key                                                                                                                                                                                                                                                                   | `recovery_root` with `state_key_mismatch`            |
+| Ledger raw bytes exceed 512 KiB, or an otherwise-decoded ledger exceeds the 256 KiB canonical-byte cap                                                                                                                                                                                                                | `recovery_root` with `over_bound_ledger`             |
+
+The legacy `predecessor_*` spellings are not used. Note that `unavailable_accepted_artifact` includes artifact expiry.
+
+**String safety applies to every persisted sidecar.** #48 (manifest), #49 (ledger), and #51 (metadata) each recursively reject both **unpaired UTF-16 surrogates** and the character **`U+0000` (NUL)** in every string value and every property name of their persisted sidecar payload, before their canonical serializers or hash producers run. This is a correctness requirement — a persisted sidecar with a lone surrogate would fail canonical serialization / hash reproduction downstream. #48 emits `manifest_shape_invalid` with message code `x_invalid_unicode`; #49 emits `ledger_invalid_unicode`; #51 emits `invalid-metadata-unicode`. #48's Unicode scan runs after JSON parse and after the legacy-v1 short-circuit, and before any Ajv or cross-field evaluation. A v1 legacy manifest that also contains a lone surrogate is still classified as `unsupported_legacy_v1` (legacy short-circuit wins); a v2 manifest that would otherwise be valid but carries a lone surrogate anywhere is `manifest_shape_invalid` with message code `x_invalid_unicode`.
+
+### Numeric bounds intersection
+
+- `stateGeneration`, `predecessorStateGeneration`, `interactionOrdinal`: integer `0..1_000_000`.
+- `runAttempt` / `producingRunAttempt`: integer `1..2_147_483_647`.
+- `pullRequest`: integer `1..2_147_483_647`.
+- `producingRunId`: canonical decimal string matching `^[1-9][0-9]{0,18}$`. This applies to every occurrence (manifest `provenance.producingRunId`, metadata `producingRunId`).
+- `stateKey.repository`, `stateKey.headRepository`: JSON Schema draft-07 constraints `minLength: 3`, `maxLength: 200` (character count), `pattern: ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`. The semantic validator additionally enforces `<= 256 UTF-8 bytes` (byte length cannot be expressed by draft-07).
+- Identity strings (`workflowIdentity`, `trustedExecutionDomain`, `providerId`, `modelId`, and the metadata `selectedProviderId` / `observedProviderId` / `resolvedModelId`): non-empty, `minLength: 1`, `maxLength: 256` characters, `<= 256 UTF-8 bytes`, case-sensitive, no Unicode normalization, no control characters (`U+0000..U+001F` and `U+007F` rejected). The metadata 128-ASCII-only rule is superseded by this shared domain.
+- Git SHA fields (`reviewedHeadSha`, `reviewedBaseSha`, `currentHeadSha`, `currentBaseSha`, `producingActionSourceSha`): every occurrence matches `/^([a-f0-9]{40}|[a-f0-9]{64})$/`. Ledger `review_context.reviewedHeadSha` / `reviewedBaseSha` follows the same pattern; the previously issue-scoped "SHA-256 support requires a schema-version bump" note is superseded.
+
+### Floating alias rejection
+
+`modelId` and `resolvedModelId` must be host-selected canonical snapshot strings. The exact literal `latest` is rejected in every contract:
+
+- `#48` semantic validator maps it to `manifest_shape_invalid` with message code `x_model_alias_literal`.
+- `#49` semantic validator maps it to `ledger_model_alias_literal`.
+- `#51` semantic validator maps it to `invalid-metadata-model-alias-literal`.
+
+Broader floating-alias policy remains #52's host configuration responsibility.
+
+### Duplicate identity equality (host-authoritative)
+
+The manifest is authoritative for host / cache-contract identity. Runtime validators only compare equality against caller-supplied expected values; they never translate between vocabularies. Sibling workstreams must accept the following equalities in the accepted domain intersection given above:
+
+- `metadata.selectedProviderId == manifest.cacheContractIdentity.providerId`.
+- `metadata.observedProviderId == manifest.cacheContractIdentity.providerId`.
+- `metadata.resolvedModelId == manifest.cacheContractIdentity.modelId`.
+- `metadata.adapterId == manifest.cacheContractIdentity.adapterId`.
+- `metadata.interactionId == manifest.transaction.interactionId`.
+- `metadata.{consumedInputSha256,resultSha256,traceSha256,candidateLedgerSha256} == manifest.transaction.{consumedInputSha256,resultSha256,traceSha256,candidateLedgerSha256}`.
+- `metadata.predecessorLedgerSha256 == manifest.transition.predecessorLedgerSha256` (both may be the `"bootstrap"` sentinel).
+- `ledger.header.{sessionEpoch,ledgerEpoch,repository,headRepository,pullRequest,workflowIdentity,trustedExecutionDomain,providerId,modelId,adapterId,templateId,policyId,toolDefinitionId,cacheConfigId} == manifest.{sessionEpoch,generation.ledgerEpoch,stateKey.*,cacheContractIdentity.*}` verbatim.
+
+The runtime and metadata validators are self-checking and per-contract; end-to-end host-side equality across all three sidecars is enforced by #53 (selection / acceptance) and #55 (sidecar transport / manifest-last commit).
+
+### Sidecar byte caps (parser is authoritative, descriptor is outer bound)
+
+- `ledger.json` raw bytes: `<= 524_288` (512 KiB). Canonical bytes: `<= 262_144` (256 KiB). Parser (#49) is authoritative for both.
+- `provider-run-metadata.json` raw bytes: `<= 32_768` (32 KiB). Parser (#51) is authoritative.
+- The v2 manifest descriptor JSON Schema `maximum` constraints (`ledger.bytes.maximum`, `providerRunMetadata.bytes.maximum`) must equal the parser raw caps: `524288` and `32768` respectively.
+- **Layering.** #48 `valid` means the manifest schema / cross-field is valid and every sidecar descriptor / hash / length matches the caller-supplied bytes. It does _not_ mean the ledger or metadata payloads have passed their own authoritative validation. #55 must run #49 and #51 validation before completing the manifest-last local-candidate commit or returning local-candidate success; a payload within the descriptor raw cap but exceeding the parser canonical cap is a #49 semantic rejection.
+- **Producer responsibility.** #49 ledger builder / #52 metadata producer must fail closed before writing a sidecar whose bytes would exceed the parser cap. The manifest descriptor `bytes` value is the exact byte count of the sidecar bytes bound into the manifest; producers may not overstate size.
+
+**#51 raw-byte cap API.** The 32 KiB cap is a raw-bytes property, not a JS-string property. `parseProviderRunMetadata` receives `Uint8Array` bytes and produces one of the following outcomes before schema evaluation:
+
+- `bytes.byteLength > 32_768` -> `invalid-metadata-bounds` (raw-byte cap violation).
+- Bytes begin with UTF-8 BOM `0xEF 0xBB 0xBF` -> `invalid-metadata-bom`.
+- UTF-8 decoding rejects illegal byte sequences -> `invalid-metadata-utf8`. (JSON-escaped `\uXXXX` sequences that decode to unpaired UTF-16 surrogates are legal UTF-8; they are rejected by the Unicode/string-safety stage, after JSON parse and before JSON Schema evaluation, as `invalid-metadata-unicode`.)
+- JSON parse fails on the decoded string -> `invalid-metadata-json`.
+- JSON parse succeeds but the parser detects a duplicate JSON property name at any object level -> `invalid-metadata-duplicate-json-property`.
+
+`invalid-metadata-duplicate-json-property` is enforced by a duplicate-key-aware JSON parser (or an equivalent stream-level check) because JSON Schema draft-07 cannot detect duplicate keys after `JSON.parse`. Only after all five raw-transport checks succeed does the value enter the Unicode/string-safety stage. Only after that stage succeeds does the value enter JSON Schema validation.
+
+### Canonical JSON helper (per-language)
+
+- **#48 (TypeScript)** owns the reusable RFC 8785 canonical-JSON helper under `src/canonical-json/`, exported as `canonicalJsonBytes(value): Uint8Array` and `CANONICAL_JSON_VERSION = 1`.
+- **#51 (TypeScript)** consumes the helper once #48 has landed. Until then it may vendor a metadata-envelope-scoped RFC 8785 producer whose golden bytes must remain unchanged; a follow-up PR replaces the vendored implementation with the shared helper in place.
+- **#49 (C#) and #50 (C#)** own runtime-scoped canonical writers / primitives; they do not import the TypeScript helper. Cross-language equivalence is enforced through shared golden byte / hash vectors, not through source-level sharing.
+
+### `unsupported_legacy_*` naming (global)
+
+The classifier discriminator kind is `unsupported_legacy_v1`; the diagnostic code is `state_unsupported_legacy_v1`. The legacy `unsupported_legacy_state` spelling is not used. This update propagates to #29's body, the earlier legacy-policy paragraphs of this design document, #48, and any related fixtures.
+
+### `interactionId` scope (clarification)
+
+`interactionId` is not globally unique across session epochs. Its acceptance and semantic-duplicate scope includes `sessionEpoch`; retries within one accepted interaction reuse the same id. `bootstrap` and `recovery_root` use the literal `"bootstrap"` sentinel as the `predecessorLedgerSha256` component of the interaction-id preimage; `reset` uses the actual accepted predecessor ledger hash.
+
+### Safe diagnostic path for Unicode / additional-property rejections
+
+Because the Unicode/string-safety stage runs before JSON Schema, `additionalProperties: false`, and any cross-field checks, a naive `JSON Pointer of the offending element` would echo attacker-controlled ancestor property names into the diagnostic `message` before those names have been validated against a schema, alphabet, or byte cap. #48 (`x_invalid_unicode:...`), #49 (`ledger_invalid_unicode:...`), and #51 (`invalid-metadata-unicode:...`) therefore share one **safe diagnostic-path encoding**:
+
+- Path segments come from the RFC 6901 JSON Pointer of the offending element's location, but each **property-name segment** is sanitized by the deterministic table below **before** it is spliced into the message. Numeric array-index segments are passed through as ASCII decimal.
+- Sanitization table (deterministic, first match wins):
+  1. Empty property name (JSON allows `""`) → literal marker `<empty-name>`.
+  2. Property name is exactly one of the schema-known top-level or nested property names for the sidecar (i.e. appears in the closed JSON Schema for that sidecar at that depth): passed through with RFC 6901 escaping of `~` (as `~0`) and `/` (as `~1`), no further transformation. This is the **only** case in which the property-name segment is echoed verbatim.
+  3. Property name contains an unpaired UTF-16 surrogate → literal marker `<invalid-utf16>`.
+  4. Property name contains `U+0000` (NUL) → literal marker `<invalid-nul>`.
+  5. Property name contains any other control character (`U+0001..U+001F` or `U+007F`) → literal marker `<invalid-control>`.
+  6. Otherwise (property name is not schema-known but is otherwise well-formed, including plain ASCII identifiers, non-ASCII well-formed Unicode, or oversize) → literal marker `<untrusted-property>`.
+
+This is a **closed rule set**: an unknown ASCII property such as `secretToken`, `apiKey`, `AWS_SECRET_ACCESS_KEY`, or `sk-proj-abc123` is not schema-known at any depth and therefore always resolves to `<untrusted-property>`. A well-formed non-ASCII property name is also always `<untrusted-property>` (never echoed) unless it is a schema-known property at that depth. This eliminates any avenue for an attacker to route content through the diagnostic message.
+
+The offending **leaf value** is _not_ reported with an additional path segment. The safe path points at the leaf value's own JSON Pointer (sanitized). The diagnostic template is:
+
+- **String value with unpaired surrogate:** safe path = `<safe-pointer-to-value>` (no trailing marker segment).
+- **String value with NUL character:** safe path = `<safe-pointer-to-value>` (no trailing marker segment).
+- **Property name with unpaired surrogate:** safe path = `<safe-pointer-to-parent>/<invalid-utf16>`.
+- **Property name with NUL character:** safe path = `<safe-pointer-to-parent>/<invalid-nul>`.
+- **Property name with other control character (`U+0001..U+001F` or `U+007F`, excluding NUL):** _not_ a string-safety-stage rejection on its own — see the shared traversal pseudocode. The `<invalid-control>` marker only appears in these two situations:
+  1. As an **ancestor segment** in a descendant's diagnostic path when a lone surrogate or NUL is found deeper in the tree (e.g. G2).
+  2. As the **final segment** of a schema-stage additional-property / unknown-field diagnostic when the offending property name itself is unknown at that schema position.
+     In particular, a property name containing only `U+0001..U+001F` or `U+007F` (no NUL, no surrogate) whose value is a normal string does _not_ produce a `<code>:/<invalid-control>` Unicode-stage diagnostic. Sibling issue bodies MUST NOT describe `<invalid-control>` as an independent Unicode-stage rejection.
+
+Each sidecar carries the workstream-specific code (`x_invalid_unicode` for #48, `ledger_invalid_unicode` for #49, `invalid-metadata-unicode` for #51) alongside the safe path. Concrete representation:
+
+- **#48 and #49** emit a single `message: string` whose value is `<code>:<safe-path>` (colon-joined). The complete `message` (including the code prefix and colon) is capped at each sidecar's already-frozen per-diagnostic byte and character caps.
+- **#51** emits a structured `MetadataError` with `code: <code>` and `path: <safe-path>` as separate fields; the safe path never repeats the code prefix.
+
+**Path truncation algorithm.** When the encoded safe path would exceed the effective per-sidecar path budget, apply the following deterministic algorithm. The effective budgets are:
+
+- **#48 and #49** operate on a single `message` field. The path budget is the message cap minus the length of the code prefix `<code>` plus the `:` separator. Specifically: `pathCharBudget = MAX_DIAGNOSTIC_MESSAGE_CHARS - length(code) - 1`, `pathByteBudget = MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES - utf8Length(code) - 1`. If either cap would be exceeded after truncation, use whichever binds first.
+- **#51** operates on a dedicated `MetadataError.path` field with its own frozen caps (`MAX_METADATA_PATH_CHARS`, `MAX_METADATA_PATH_UTF8_BYTES`); truncation applies directly to `path`.
+
+Invariant: every possible **final segment** (the fixed markers `<empty-name>` / `<invalid-utf16>` / `<invalid-nul>` / `<invalid-control>` / `<untrusted-property>` and the fixed placeholder `<path-truncated>`, plus any single schema-known leaf segment) is shorter than every sidecar's effective path budget. Producer-side unit tests assert this invariant against every sidecar's actual cap.
+
+**Pre-check.** Before applying the greedy algorithm, compute the fully-sanitized path `/s0/s1/.../sN` and its char/byte length. If both budgets are already satisfied, the untruncated path is emitted unchanged and `<path-truncated>` never appears.
+
+**Root scalar violation.** If the offending element is the JSON document's root value (a top-level scalar), there is no ancestor and no property-name segment. The emitted safe path is the empty string `""` (a valid RFC 6901 pointer at the document root); no leading `/`, no marker segment. Sibling tests exercise this via a `root-scalar-lone-surrogate.json` fixture and, for sidecars where NUL is also a value-level rejection, a `root-scalar-nul.json` fixture.
+
+**Additional-property (schema-stage) final segment.** For G5 and other schema-stage additional-property / unknown-field / forbidden-field vectors, the finalSegment is the sanitized property-name segment as produced by the six-rule table (`<empty-name>`, `<invalid-utf16>`, `<invalid-nul>`, `<invalid-control>`, `<untrusted-property>`, or a schema-known name — the last case cannot arise here because a schema-known property is by definition not an additional-property violation). The truncation algorithm operates the same way on schema-stage diagnostics as it does on Unicode-stage diagnostics.
+
+Algorithm (deterministic; produces the same bytes on every implementation):
+
+1. Compute the fully-sanitized ordered segment list `[s0, s1, ..., sN]` per the six-rule table, and the **final segment**: for a property-name violation the final marker (`<invalid-utf16>` / `<invalid-nul>` / `<invalid-control>`); for a string-value violation the offending leaf's own sanitized segment.
+2. Compute the reserved budget: `reserved = length("/" + finalSegment) + length("/<path-truncated>")`, and its UTF-8 counterpart.
+3. Greedily join `s0`, `s1`, ..., `sN-1` with leading `/`. Stop as soon as adding the next segment would push the joined prefix past `budget - reserved` (character or byte). If all N leading segments fit within `budget - reserved`, no placeholder is inserted and the untruncated path is `/s0/s1/.../sN`.
+4. If a truncation was applied, emit `/prefix/<path-truncated>/<finalSegment>`, where `prefix` is the greedily-accepted concatenation from step 3 (which may be empty, giving `/<path-truncated>/<finalSegment>`). By the invariant, `<path-truncated>/<finalSegment>` alone always fits within `budget`, so the result never exceeds `budget`.
+
+`<path-truncated>` never appears in an untruncated path. Sibling test suites include **two deep-path** golden vectors per sidecar (a no-truncation vector verifying the pre-check branch, and a truncation vector verifying the greedy-truncation branch), defined by a specific nested chain of `<untrusted-property>` segments long enough to force truncation. Each sidecar's deep-path expected output is byte-exact and includes the code prefix (or, for #51, the exact `MetadataError.path`). Deep-path expected outputs for the three sidecars follow (schema-known ancestors elided as `...`):
+
+**Concrete deep-path golden vectors.** Each sidecar has TWO named vectors (a no-truncation case for the pre-check branch and a truncation case for the greedy-truncation branch). All expected outputs below are frozen literals; producer implementations must reproduce these exact bytes.
+
+- **#48 (`x_invalid_unicode:`)**: char budget = 256 - 18 = 238; reserved for `/<path-truncated>/<invalid-utf16>` = 33 chars; prefix allowance = 205.
+  - `manifest-deep-path-no-truncation`: input = a top-level v2 manifest with 8 unknown-property ancestors above a `<invalid-utf16>` leaf (`{"a1": {"a2": {..."a8": {"leaf": "\uD800"}}}}` — none of `a1..a8` or `leaf` is schema-known at their positions, so all become `<untrusted-property>`). Full sanitized path = `/<untrusted-property>` × 9 = 189 chars ≤ 238 char budget. Expected message: `x_invalid_unicode:/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>` (189 chars for the path, 207 total with the `x_invalid_unicode:` prefix).
+  - `manifest-deep-path-truncation`: input = 12 unknown-property ancestors above a `<invalid-utf16>` value. Full path would be 13 × 21 = 273 chars, exceeding 238. Applying the algorithm: char budget = 238; reserved for `/<path-truncated>/<untrusted-property>` = 17 + 21 = 38; prefix budget = 238 − 38 = 200; ⌊200 / 21⌋ = 9 leading segments (189 chars). Expected message: `x_invalid_unicode:/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<path-truncated>/<untrusted-property>` (245 chars total: 18 for the `x_invalid_unicode:` prefix + 189 for 9 leading segments + 17 for `/<path-truncated>` + 21 for the terminal `<untrusted-property>`).
+- **#49 (`ledger_invalid_unicode:`)**: char budget = 256 - 23 = 233; reserved = 33; prefix allowance = 200. The ledger's JSON depth cap 32 provides ample room.
+  - `ledger-deep-path-no-truncation`: input = a `review_context.changedFiles[0].patch` scenario chained with 8 unknown-property ancestors (via unrecognized keys inside `patch.notes`, which is not a schema-known field; the entire chain is `<untrusted-property>`). Expected message computable identically to the #48 no-truncation case with the sidecar code prefix.
+  - `ledger-deep-path-truncation`: input = 12 unknown-property ancestors (same shape, at a location where the schema is permissive; the entire chain is `<untrusted-property>`). Applying the algorithm: char budget = 256 − 23 = 233; reserved = 38; prefix budget = 195; ⌊195 / 21⌋ = 9 leading segments (189 chars). Expected message: `ledger_invalid_unicode:` + `/<untrusted-property>` × 9 + `/<path-truncated>` + `/<untrusted-property>` (250 chars total: 23 for the prefix + 189 + 17 + 21).
+- **#51 (`invalid-metadata-unicode` code; `path` field only, no prefix)**: `path` char budget = 256; reserved = 33; prefix allowance = 223.
+  - `metadata-deep-path-no-truncation.json`: 10 unknown-property ancestors around a lone-surrogate string. Full path = 11 × 21 = 231 chars > 223 prefix allowance, so this actually enters the truncation branch. **Adjusted:** the no-truncation fixture uses 9 unknown-property ancestors — full path = 10 × 21 = 210 chars ≤ 256 total budget; algorithm's pre-check emits the untruncated `path`.
+  - `metadata-deep-path-truncation.json`: 13 unknown-property ancestors around a lone-surrogate string. Full path would be 14 × 21 = 294 chars > 256. Algorithm: reserved for `/<path-truncated>/<untrusted-property>` = 38 chars; prefix budget = 218; ⌊218/21⌋ = 10 leading segments (210 chars). Expected `path` = `/<untrusted-property>` × 10 + `/<path-truncated>` + `/<untrusted-property>` = 210 + 17 + 21 = 248 chars.
+
+Producer-side tests assert the full expected message / `path` byte-exact against these frozen literals. `<code>:` prefixes and delimiter characters are counted per the algorithm's `pathCharBudget` / `pathByteBudget` formulas. Neither branch's expected output is re-derived from the production implementation; both are computed once and stored as constants in the test source.
+
+**No untrusted content is ever placed in the diagnostic message.** Every sidecar's Acceptance Criteria includes the following **shared golden vectors** (each sidecar realises them with sidecar-specific code prefix and MetadataError / BundleClassification / LedgerDiagnostic shape):
+
+**Path-sensitive schema-known-property rule.** Rule 2 (schema-known passthrough) applies **only when the entire ancestor chain up to and including that segment is schema-known**. Once traversal enters an unknown property, all its descendants are treated as unknown (rule 6). Global name vocabularies are not used; depth-indexed vocabularies are not used.
+
+**Unicode-stage golden vectors.** These vectors are produced by the Unicode/string-safety stage of each sidecar (both unpaired surrogate rejection and NUL rejection are universal across #48 / #49 / #51). `<code>` is `x_invalid_unicode` / `ledger_invalid_unicode` / `invalid-metadata-unicode` respectively.
+
+| #   | Input scenario                                                                                                                                                          | Expected `code`    | Expected safe path                           | Note                                                                                                                              |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| G1  | Attacker-controlled ancestor property name `secretToken` (well-formed ASCII, not schema-known) with a descendant lone-surrogate **value** at any property name below it | `<code>` (Unicode) | `/<untrusted-property>/<untrusted-property>` | Path-sensitive: once traversal enters an unknown ancestor, every descendant property-name segment is also `<untrusted-property>`. |
+| G2  | Attacker-controlled ancestor property name `attacker\ncontrolled` (contains U+000A) with a descendant lone-surrogate **value** at any property below it                 | `<code>` (Unicode) | `/<invalid-control>/<untrusted-property>`    | Ancestor sanitized as control; descendants under an unknown ancestor stay unknown.                                                |
+| G3  | Lone-surrogate **property name** at the top level of the persisted sidecar                                                                                              | `<code>` (Unicode) | `/<invalid-utf16>`                           | Parent pointer empty.                                                                                                             |
+| G6  | Schema-known top-level property (e.g. `stateKey` for #48) with a lone-surrogate **value** at a schema-known descendant (e.g. `workflowIdentity`)                        | `<code>` (Unicode) | `/stateKey/workflowIdentity`                 | Only fully schema-known ancestor chains echo the real names.                                                                      |
+| G7  | A well-formed surrogate pair in a schema-valid string value field                                                                                                       | _accepted_         | _n/a_                                        | Unicode stage passes it; canonical serialization preserves it byte-exact.                                                         |
+
+**Property-existence and NUL vectors.** NUL rejection is a **uniform** contract across the three sidecars (see the String-safety paragraph above): G4 always produces the Unicode-stage code. G5 (empty property name) is a well-formed UTF-16 name and therefore reaches the schema stage. The frozen expected outcomes:
+
+| #   | Input scenario                                                                 | #48 outcome                                                                                                                                                                                                                                                                                                                                                                                                                               | #49 outcome                                                                                   | #51 outcome                                                                                    |
+| --- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| G4  | NUL character in a **property name** at the top level of the persisted sidecar | `manifest_shape_invalid` with `message = x_invalid_unicode:/<invalid-nul>` (Unicode stage rejects NUL in any string; the stage covers property names because NUL rejection is a uniform sidecar-wide safety and privacy policy (allowing NUL in string content would let attacker-controlled bytes flow into diagnostics, canonical serializer inputs, and any downstream log stream even though RFC 8785 could technically escape them)) | `ledger_invalid_unicode:/<invalid-nul>` (Section 5 rejects NUL globally at the Unicode stage) | `invalid-metadata-unicode` with `path = /<invalid-nul>` (matching the Section 3 Unicode stage) |
+| G5  | Empty property name `""` at the top level of the persisted sidecar             | `manifest_unknown_field` with `message` referencing `/<empty-name>` (a well-formed empty name reaches the schema stage; `additionalProperties: false` rejects it)                                                                                                                                                                                                                                                                         | `ledger_unknown_field` with the same path shape                                               | `invalid-metadata-additional-property` with `path = /<empty-name>`                             |
+
+All three sidecars therefore adopt a uniform Unicode stage that rejects **NUL in string values and in property names**, in addition to unpaired surrogates. The corresponding stage description in each issue body has been updated accordingly. G5 stays a schema-stage vector because an empty property name is well-formed UTF-16; each sidecar's schema-stage diagnostic uses its own additional-property / unknown-field code with the safe empty-name marker.
+
+Each sibling test suite implements these seven vectors with the workstream-appropriate code and error object, and every AC lists them as named tests (not merely "a fixture that exceeds the cap"). Path truncation, if it applies, must occur only at the RFC 6901 segment boundary and preserve the final marker segment; each sidecar's message cap already provides the numeric byte budget.
+
+### Shared traversal order and stage precedence
+
+All three sidecars implement the following deterministic traversal so multi-violation inputs produce byte-identical diagnostics within each sidecar (only the `<code>` and error object shape differ across sidecars).
+
+```text
+function scan(node, path, schemaNode, trustedChain):
+  // `schemaNode` is the closed JSON Schema node describing `node`'s expected
+  // shape at this position (or `null` if the ancestor chain has already
+  // entered an unknown property). `trustedChain` is true only when every
+  // ancestor property name is schema-known at its exact position.
+  if node is a string:
+    // Scan the string's UTF-16 code units left-to-right (index 0, 1, 2, ...).
+    // The FIRST code unit that fails one of the rules below terminates the
+    // scan and produces the diagnostic.
+    for i in 0 .. node.length - 1:
+      c = node[i]
+      if c == U+0000 (NUL):
+        return {code: <code>, path: path}  // value-level; safe pointer = leaf
+      if c is a high surrogate (U+D800..U+DBFF):
+        if i + 1 >= node.length or node[i+1] not in U+DC00..U+DFFF:
+          return {code: <code>, path: path}
+        i += 1  // valid surrogate pair, skip low surrogate
+        continue
+      if c is a low surrogate (U+DC00..U+DFFF):
+        return {code: <code>, path: path}
+      // Any other code unit is accepted at this stage.
+  if node is an array:
+    // Array items inherit the array's item schema (or `null` if the ancestor
+    // chain has already entered an unknown property).
+    itemSchema = trustedChain && schemaNode != null ? schemaNode.itemSchema() : null
+    itemTrusted = trustedChain && schemaNode != null && itemSchema != null
+    for i in 0 .. node.length - 1:
+      result = scan(node[i], path.append(i), itemSchema, itemTrusted)
+      if result != null:
+        return result
+    return null
+  if node is an object:
+    // RFC 8785 canonical order: property names sorted by unsigned UTF-16
+    // code units.
+    for key in sortByUtf16CodeUnits(Object.keys(node)):
+      // (1) Validate the property name itself first. Only two rules terminate
+      //     the scan at the property-name level:
+      if key contains an unpaired UTF-16 surrogate:
+        return {code: <code>, path: path.append("<invalid-utf16>")}
+      if key contains U+0000 (NUL):
+        return {code: <code>, path: path.append("<invalid-nul>")}
+      // A property name that only contains U+0001..U+001F or U+007F does NOT
+      // terminate the string-safety stage. It is only sanitized to
+      // "<invalid-control>" when the ancestor segment is emitted as part of
+      // a descendant's diagnostic path.
+      //
+      // (2) Compute the sanitized ancestor segment and the child schema state.
+      keyIsSchemaKnown = trustedChain
+                     && schemaNode != null
+                     && schemaNode.declaresProperty(key)  // exact position match
+      segment = sanitize(key, keyIsSchemaKnown)
+      childSchema = keyIsSchemaKnown ? schemaNode.propertySchema(key) : null
+      childTrusted = keyIsSchemaKnown
+      // (3) Recurse into the property's value. If any descendant produces a
+      //     violation, the returned path already contains the sanitized
+      //     ancestor. Once traversal enters an unknown property
+      //     (keyIsSchemaKnown == false), childTrusted is forced false and
+      //     every descendant property name will be sanitized as unknown.
+      result = scan(node[key], path.append(segment), childSchema, childTrusted)
+      if result != null:
+        return result
+    return null
+  return null    // primitive node with no string content
+```
+
+**Property-name marker precedence** (when a property name contains more than one violating character) is:
+
+1. Unpaired UTF-16 surrogate at any code-unit position → `<invalid-utf16>`.
+2. Otherwise, `U+0000` (NUL) at any code-unit position → `<invalid-nul>`.
+
+This is a category precedence, not a code-unit-position precedence, so implementations can decide category first and then find the first offending code unit within that category. The result is deterministic across implementations.
+
+**Value-level scan** (a plain string node) uses code-unit-position precedence: the first violating code unit (by index) wins, whether it is a NUL or a surrogate.
+
+The initial invocation is `scan(rootValue, emptyPath, rootSidecarSchema, true)`. This shared pseudocode is authoritative for `validateStateManifestV2` / `classifyStateBundleV2` step 5 / `buildStateBundleV2` step 3 (#48), for `LedgerParser.ParseAndValidate` and the builder pipeline (#49), and for `parseProviderRunMetadata` stage 2 (#51).
+
+### Aggregate token overflow
+
+`invalid-metadata-token-out-of-range` is produced by two distinct stages:
+
+- **Stage 3 (JSON Schema)** rejects any single-value token count that exceeds `2^53 - 1`.
+- **Stage 4 (semantic validator)** rejects an aggregate token sum that would overflow `Number.MAX_SAFE_INTEGER` during attempt → request or request → run reduction. Overflow detection uses the pre-addition test `if aggregate + operand > Number.MAX_SAFE_INTEGER: return invalid-metadata-token-out-of-range` before performing the addition.
+
+Precedence: because stage 3 runs before stage 4, single-value overflow always wins over sum overflow. When both a single value and an aggregate would exceed, the diagnostic reports the single value's JSON path. Named fixtures cover both cases (`invalid-token-out-of-range-single-value.json`, `invalid-token-out-of-range-aggregate-sum.json`).
+
+This is a documented exception to the "each code is produced by exactly one stage" rule.
