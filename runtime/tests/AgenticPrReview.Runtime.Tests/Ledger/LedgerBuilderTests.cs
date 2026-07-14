@@ -1040,4 +1040,103 @@ public sealed class LedgerBuilderTests
         Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, t.Failure!.Code);
     }
 
+    // -----------------------------------------------------------------
+    // R11: URI-scheme detection in safe-relative-path must require an ASCII
+    // letter as the first character. Digit-, "+"-, "."-, "-"-prefixed paths
+    // with an embedded ":" are legal per the schema pattern
+    // ^[A-Za-z][A-Za-z0-9+.-]*:.
+
+    [Fact]
+    public void BuildReviewContext_DigitLeadingPathWithColon_IsAccepted()
+    {
+        // "1:a" has a colon but the leading char is a digit, so it is not a
+        // URI scheme and must be accepted as a safe-relative-path.
+        var source = ContextSource() with
+        {
+            ChangedFiles = ImmutableArray.Create(
+                new ValidatedChangedFileSource("1:a", null, "modified", 0, 0, 0, null)),
+        };
+        var o = LedgerBuilder.BuildReviewContext(source, Identities, IId(0));
+        Assert.NotNull(o.Record);
+    }
+
+    [Fact]
+    public void BuildReviewContext_DotLeadingPathWithColon_IsAccepted()
+    {
+        var source = ContextSource() with
+        {
+            ChangedFiles = ImmutableArray.Create(
+                new ValidatedChangedFileSource(".foo:bar", null, "modified", 0, 0, 0, null)),
+        };
+        var o = LedgerBuilder.BuildReviewContext(source, Identities, IId(0));
+        Assert.NotNull(o.Record);
+    }
+
+    [Fact]
+    public void BuildReviewContext_HyphenLeadingPathWithColon_IsAccepted()
+    {
+        var source = ContextSource() with
+        {
+            ChangedFiles = ImmutableArray.Create(
+                new ValidatedChangedFileSource("-x:y", null, "modified", 0, 0, 0, null)),
+        };
+        var o = LedgerBuilder.BuildReviewContext(source, Identities, IId(0));
+        Assert.NotNull(o.Record);
+    }
+
+    [Fact]
+    public void BuildReviewContext_LetterLeadingSchemePath_IsRejected()
+    {
+        var source = ContextSource() with
+        {
+            ChangedFiles = ImmutableArray.Create(
+                new ValidatedChangedFileSource("http:foo", null, "modified", 0, 0, 0, null)),
+        };
+        var o = LedgerBuilder.BuildReviewContext(source, Identities, IId(0));
+        Assert.Null(o.Record);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, o.Failure!.Code);
+    }
+
+    [Fact]
+    public void BuildReviewContext_LetterLeadingWithSchemeChars_IsRejected()
+    {
+        // "a1+.-:x" — first char is a letter and subsequent are valid scheme
+        // chars, so it looks like an absolute URI scheme and must be rejected.
+        var source = ContextSource() with
+        {
+            ChangedFiles = ImmutableArray.Create(
+                new ValidatedChangedFileSource("a1+.-:x", null, "modified", 0, 0, 0, null)),
+        };
+        var o = LedgerBuilder.BuildReviewContext(source, Identities, IId(0));
+        Assert.Null(o.Record);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, o.Failure!.Code);
+    }
+
+    [Fact]
+    public void BuildReviewContext_DigitLeadingPreviousPathWithColon_IsAccepted()
+    {
+        var source = ContextSource() with
+        {
+            ChangedFiles = ImmutableArray.Create(
+                new ValidatedChangedFileSource("src/a.ts", "1:a", "renamed", 0, 0, 0, null)),
+        };
+        var o = LedgerBuilder.BuildReviewContext(source, Identities, IId(0));
+        Assert.NotNull(o.Record);
+    }
+
+    [Fact]
+    public void BuildReviewOutcome_DigitLeadingFindingPathWithColon_IsAccepted()
+    {
+        var source = OutcomeSource() with
+        {
+            Findings = ImmutableArray.Create(
+                new ValidatedFindingSource(
+                    Severity: "medium", Confidence: "medium", Category: "correctness",
+                    Title: "t", Body: "b", Path: "1:a",
+                    StartLine: null, EndLine: null, Evidence: null, SuggestedAction: null, InlinePreference: null)),
+        };
+        var o = LedgerBuilder.BuildReviewOutcome(source, IId(0));
+        Assert.NotNull(o.Record);
+    }
+
 }

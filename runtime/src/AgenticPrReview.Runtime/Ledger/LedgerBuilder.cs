@@ -912,12 +912,25 @@ public static class LedgerBuilder
         if (!ContainsNonWhitespace(p)) return false;
         if (p[0] == '/') return false;
         if (p.Contains('\\')) return false;
-        // Reject absolute URI scheme like "http:" or "file:".
+        // Reject absolute URI schemes like "http:" or "file:". Schema pattern
+        // is ^[A-Za-z][A-Za-z0-9+.-]*: — the FIRST scheme character must be an
+        // ASCII letter. Paths whose first character is a digit / "+" / "." /
+        // "-" contain a colon in a non-scheme context and are legal (e.g.
+        // "1:a", ".foo:bar").
         var colon = p.IndexOf(':');
-        if (colon > 0)
+        if (colon > 0 && char.IsAsciiLetter(p[0]))
         {
-            var scheme = p.Substring(0, colon);
-            if (scheme.All(c => char.IsAsciiLetterOrDigit(c) || c == '+' || c == '.' || c == '-')) return false;
+            var isScheme = true;
+            for (var i = 1; i < colon; i++)
+            {
+                var c = p[i];
+                if (!char.IsAsciiLetterOrDigit(c) && c is not '+' and not '.' and not '-')
+                {
+                    isScheme = false;
+                    break;
+                }
+            }
+            if (isScheme) return false;
         }
         // Reject . and .. segments
         foreach (var seg in p.Split('/'))
