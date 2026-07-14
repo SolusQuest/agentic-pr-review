@@ -100,7 +100,7 @@ interface AjvErrorSummary {
 function summarizeAjvError(err: ErrorObject): AjvErrorSummary {
   const path = err.instancePath || '/';
   const keyword = err.keyword ?? 'invalid';
-  let code = 'invalid';
+  let code: string;
   switch (keyword) {
     case 'additionalProperties':
       code = 'unknown_property';
