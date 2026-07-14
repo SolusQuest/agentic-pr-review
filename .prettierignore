@@ -4,6 +4,9 @@ dist/
 runtime/tests/fixtures/deterministic/**
 .codex/
 
-protocol/fixtures/state-manifest-v2/**/bundle/ledger.json
-protocol/fixtures/state-manifest-v2/**/bundle/provider-run-metadata.json
+# State v2 fixtures are byte-stable golden artifacts and must not be re-formatted.
+protocol/fixtures/state-manifest-v2/**
+
+# Agent-local scratch (never committed)
+.scratch/
 

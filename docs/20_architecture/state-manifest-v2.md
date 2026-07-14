@@ -52,24 +52,24 @@ No other entries; no sub-directories. Rendered review and structured-result belo
 
 Exported from `src/state-v2/constants.ts`:
 
-| Constant                               | Value                          | Purpose                                                             |
-| -------------------------------------- | ------------------------------ | ------------------------------------------------------------------- | --------------------------------- |
-| `MANIFEST_MAX_BYTES`                   | `65536`                        | Classifier byte cap on `manifest.json` bytes.                       |
-| `LEDGER_MAX_BYTES`                     | `1048576`                      | Descriptor and classifier byte cap on `ledger.json`.                |
-| `METADATA_MAX_BYTES`                   | `65536`                        | Descriptor and classifier byte cap on `provider-run-metadata.json`. |
-| `MANIFEST_FILENAME`                    | `"manifest.json"`              |                                                                     |
-| `LEDGER_FILENAME`                      | `"ledger.json"`                |                                                                     |
-| `PROVIDER_RUN_METADATA_FILENAME`       | `"provider-run-metadata.json"` |                                                                     |
-| `LEDGER_SCHEMA_VERSION`                | `1`                            | Ledger schema version bound by descriptor.                          |
-| `PROVIDER_RUN_METADATA_SCHEMA_VERSION` | `1`                            | Metadata schema version bound by descriptor.                        |
-| `PREFIX_CONTRACT_VERSION`              | `1`                            | Prefix contract version bound by cache-contract identity.           |
-| `STATE_NAMESPACE`                      | `"m4-ledger-v2"`               | Logical state-key namespace.                                        |
-| `EPOCH_ID_REGEX`                       | `/^[A-Za-z0-9_-]{22}$/`        | Session/ledger epoch string format.                                 |
-| `SHA256_HEX_REGEX`                     | `/^[a-f0-9]{64}$/`             | Lowercase-hex SHA-256.                                              |
-| `GIT_SHA_REGEX`                        | `/^([a-f0-9]{40}               | [a-f0-9]{64})$/`                                                    | Git object ID (SHA-1 or SHA-256). |
-| `MAX_DIAGNOSTIC_ERRORS`                | `8`                            | Diagnostic aggregation cap.                                         |
-| `MAX_DIAGNOSTIC_MESSAGE_CHARS`         | `256`                          | Per-message truncation.                                             |
-| `MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES`    | `1024`                         | Total UTF-8 byte cap including sentinel.                            |
+| Constant                               | Value                              | Purpose                                                             |
+| -------------------------------------- | ---------------------------------- | ------------------------------------------------------------------- |
+| `MANIFEST_MAX_BYTES`                   | `65536`                            | Classifier byte cap on `manifest.json` bytes.                       |
+| `LEDGER_MAX_BYTES`                     | `1048576`                          | Descriptor and classifier byte cap on `ledger.json`.                |
+| `METADATA_MAX_BYTES`                   | `65536`                            | Descriptor and classifier byte cap on `provider-run-metadata.json`. |
+| `MANIFEST_FILENAME`                    | `"manifest.json"`                  |                                                                     |
+| `LEDGER_FILENAME`                      | `"ledger.json"`                    |                                                                     |
+| `PROVIDER_RUN_METADATA_FILENAME`       | `"provider-run-metadata.json"`     |                                                                     |
+| `LEDGER_SCHEMA_VERSION`                | `1`                                | Ledger schema version bound by descriptor.                          |
+| `PROVIDER_RUN_METADATA_SCHEMA_VERSION` | `1`                                | Metadata schema version bound by descriptor.                        |
+| `PREFIX_CONTRACT_VERSION`              | `1`                                | Prefix contract version bound by cache-contract identity.           |
+| `STATE_NAMESPACE`                      | `"m4-ledger-v2"`                   | Logical state-key namespace.                                        |
+| `EPOCH_ID_REGEX`                       | `/^[A-Za-z0-9_-]{22}$/`            | Session/ledger epoch string format.                                 |
+| `SHA256_HEX_REGEX`                     | `/^[a-f0-9]{64}$/`                 | Lowercase-hex SHA-256.                                              |
+| `GIT_SHA_REGEX`                        | `/^([a-f0-9]{40}\|[a-f0-9]{64})$/` | Git object ID (SHA-1 or SHA-256).                                   |
+| `MAX_DIAGNOSTIC_ERRORS`                | `8`                                | Diagnostic aggregation cap.                                         |
+| `MAX_DIAGNOSTIC_MESSAGE_CHARS`         | `256`                              | Per-message truncation.                                             |
+| `MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES`    | `1024`                             | Total UTF-8 byte cap including sentinel.                            |
 
 The JSON Schema is the authoritative representation of filename `const`s and descriptor-payload `maximum` byte limits. `MANIFEST_MAX_BYTES` is a classifier-contract constant, not a schema `maximum`, because the manifest's own serialized byte count is not a field inside the manifest.
 
@@ -101,6 +101,33 @@ Git SHAs match `/^([a-f0-9]{40}|[a-f0-9]{64})$/`. Refs and RFC-3339 timestamps k
 5. Remaining v2 layout/listing consistency (ledger and metadata entries plus extras).
 6. Ledger byte cap and integrity.
 7. Provider-run metadata byte cap and integrity.
+
+## Public TypeScript surface
+
+`src/state-v2/index.ts` is the only supported consumer entry point. Sibling packages must not reach into individual files under `src/state-v2/**`.
+
+Exported functions:
+
+- `buildStateBundleV2(input, ledgerBytes, providerRunMetadataBytes): BuildResult`
+- `classifyStateBundleV2(input): BundleClassification`
+- `validateStateManifestV2(value): ValidationResult`
+- `crossFieldValidate(manifest): string[]`
+- `semanticIdentityValidate(manifest): string[]`
+- `serializeStateManifestV2(manifest): Uint8Array`
+- `checkStateManifestV2Compatibility(manifest, expected): CompatibilityOutcome`
+- `canonicalJsonBytes(value): Uint8Array` (re-exported from `../canonical-json/`)
+
+Exported error classes:
+
+- `BuilderInputRejectedError` — the builder rejected the caller's input because it violates the canonical-JSON accepted-domain contract (getters, symbol keys, non-enumerable properties, non-plain prototypes, sparse arrays, cyclic references, or non-finite numbers).
+- `BuilderValidationError` — the finalized manifest failed the schema + cross-field + semantic validators.
+- `LedgerOverBoundError` / `MetadataOverBoundError` — supplied bytes exceed the frozen caps.
+- `StateManifestSerializationError` — the manifest cannot be canonicalized.
+- `CanonicalJsonInputError` — the canonical-JSON helper rejected its input.
+
+Branded string types: `EpochId`, `Sha256Hex`, and `GitSha` are declared as branded aliases (a `unique symbol` phantom field). A bare `string` literal cannot be assigned to any of these without an explicit `as` cast, and the validator/builder boundary is responsible for producing a validated instance. This keeps generic strings, session/ledger epochs, SHA-256 digests, and Git object IDs distinct at compile time.
+
+The AC-visible result-type alias for the builder is `BuildResult`. `BuildStateBundleV2Result` is retained as a synonym for stability with the earlier draft AC.
 
 ## Diagnostic taxonomy
 

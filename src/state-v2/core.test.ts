@@ -11,6 +11,7 @@ import {
   semanticIdentityValidate,
   serializeStateManifestV2,
   validateStateManifestV2,
+  type EpochId,
   type StateManifestV2,
 } from './index.js';
 import type { CanonicalJsonValue } from '../canonical-json/index.js';
@@ -158,9 +159,9 @@ describe('buildStateBundleV2', () => {
         predecessorManifestSha256: sha256Hex('pred-manifest'),
         predecessorLedgerSha256: sha256Hex('pred-ledger'),
         predecessorStateGeneration: 5,
-        predecessorLedgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA',
+        predecessorLedgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA' as EpochId,
       },
-      generation: { stateGeneration: 99, ledgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA' },
+      generation: { stateGeneration: 99, ledgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA' as EpochId },
       transaction: { interactionOrdinal: 3 },
     });
     expect(() => buildStateBundleV2(input, LEDGER, METADATA)).toThrow(BuilderValidationError);

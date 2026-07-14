@@ -22,7 +22,7 @@ import {
 
 export function sha256Hex(bytes: Uint8Array | string): Sha256Hex {
   const input = typeof bytes === 'string' ? new TextEncoder().encode(bytes) : bytes;
-  return createHash('sha256').update(input).digest('hex');
+  return createHash('sha256').update(input).digest('hex') as Sha256Hex;
 }
 
 export function makeStateKey(overrides: Partial<StateKeyV2> = {}): StateKeyV2 {
@@ -57,7 +57,7 @@ export function makeCacheContract(
 export function makeGeneration(overrides: Partial<GenerationV2> = {}): GenerationV2 {
   return {
     stateGeneration: 0,
-    ledgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA',
+    ledgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA' as EpochId,
     ...overrides,
   };
 }
@@ -75,9 +75,9 @@ export function makeProducingGeneration(
   };
 }
 
-const FAKE_HEAD_SHA: GitSha = 'a'.repeat(40);
-const FAKE_BASE_SHA: GitSha = 'b'.repeat(40);
-const FAKE_ACTION_SHA: GitSha = 'c'.repeat(40);
+const FAKE_HEAD_SHA: GitSha = 'a'.repeat(40) as GitSha;
+const FAKE_BASE_SHA: GitSha = 'b'.repeat(40) as GitSha;
+const FAKE_ACTION_SHA: GitSha = 'c'.repeat(40) as GitSha;
 
 export function makeProvenance(overrides: Partial<ProvenanceV2> = {}): ProvenanceV2 {
   return {
@@ -111,7 +111,7 @@ export interface MakeInputOptions {
 }
 
 export function makeStateManifestV2Input(opts: MakeInputOptions = {}): StateManifestV2Input {
-  const sessionEpoch = opts.sessionEpoch ?? 'S00000000000000000000A';
+  const sessionEpoch = opts.sessionEpoch ?? ('S00000000000000000000A' as EpochId);
   const generation = makeGeneration(opts.generation);
   const stateKey = makeStateKey(opts.stateKey);
   const transition: StateManifestV2Transition = opts.transition ?? {

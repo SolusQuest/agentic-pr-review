@@ -35,6 +35,32 @@ describe('diagnostic bounds', () => {
     }
   });
 
+  it('4-byte codepoints stay within the UTF-8 byte cap', () => {
+    // "\u{1f600}" (😀) is one codepoint but encodes to 4 UTF-8 bytes.
+    // Repeat it enough times that the raw byte length far exceeds the cap.
+    const flood = ['\u{1f600}'.repeat(2000)];
+    const result = boundedJoin(flood);
+    expect(result.endsWith('...[truncated]')).toBe(true);
+    const bytes = new TextEncoder().encode(result).byteLength;
+    expect(bytes).toBeLessThanOrEqual(MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES);
+    // Everything before the sentinel must be valid UTF-8 with no U+FFFD.
+    const decoded = result.slice(0, -'...[truncated]'.length);
+    expect(decoded).not.toContain('\uFFFD');
+  });
+
+  it('never leaks a lone high surrogate through truncation', () => {
+    // A lone leading surrogate as the final character of the pre-cap prefix
+    // must not be emitted; the truncator iterates codepoints, so an unpaired
+    // lone surrogate remains its own iteration and either fits fully or is
+    // dropped entirely. Prepend enough padding that truncation must run.
+    const pad = 'x'.repeat(MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES);
+    const withLone = pad + '\uD83D';
+    const result = boundedJoin([withLone]);
+    expect(result.endsWith('...[truncated]')).toBe(true);
+    const bytes = new TextEncoder().encode(result).byteLength;
+    expect(bytes).toBeLessThanOrEqual(MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES);
+  });
+
   it('does not add sentinel when message fits under cap', () => {
     const result = boundedJoin(['small']);
     expect(result).toBe('small');

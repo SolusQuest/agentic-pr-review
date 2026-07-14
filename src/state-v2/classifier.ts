@@ -49,10 +49,20 @@ interface ListingIndex {
   nonRegular: EntryDescriptor[];
 }
 
+const EXPECTED_NAMES = new Set<string>([
+  MANIFEST_FILENAME,
+  LEDGER_FILENAME,
+  PROVIDER_RUN_METADATA_FILENAME,
+]);
+
 /**
  * Pure classifier. Reads the caller-supplied listing plus buffers; never
  * touches the filesystem. Byte caps run on the caller's original views;
  * accepted buffers are copied into internal snapshots before parsing/hashing.
+ *
+ * Diagnostic messages carry only fixed reason codes, structural JSON paths,
+ * and generic descriptions. They never include unknown property names,
+ * duplicate keys, unexpected entry filenames, or observed hash digests.
  */
 export function classifyStateBundleV2(input: ClassifyStateBundleV2Input): BundleClassification {
   const listing = input.entryListing ?? [];
@@ -60,32 +70,26 @@ export function classifyStateBundleV2(input: ClassifyStateBundleV2Input): Bundle
 
   // Step 1: manifest-entry safety and manifest listing/bytes consistency.
   if (listingIndex.duplicates.has(MANIFEST_FILENAME)) {
-    return invalid('bundle_listing_mismatch', 'duplicate entry: manifest.json');
+    return invalid('bundle_listing_mismatch', 'duplicate_expected_entry:manifest.json');
   }
   const manifestEntry = listingIndex.entries.get(MANIFEST_FILENAME);
   if (manifestEntry && !manifestEntry.isRegularFile) {
-    return invalid('bundle_path_unsafe', 'manifest.json is not a regular file');
+    return invalid('bundle_path_unsafe', 'non_regular_entry:manifest.json');
   }
   const manifestBytes = input.manifestBytes;
   if (manifestEntry && manifestBytes === undefined) {
-    return invalid('bundle_listing_mismatch', 'manifest.json listed but manifestBytes missing');
+    return invalid('bundle_listing_mismatch', 'listing_present_bytes_missing:manifest.json');
   }
   if (!manifestEntry && manifestBytes !== undefined) {
-    return invalid(
-      'bundle_listing_mismatch',
-      'manifestBytes provided but manifest.json not listed',
-    );
+    return invalid('bundle_listing_mismatch', 'listing_absent_bytes_present:manifest.json');
   }
   if (manifestBytes === undefined) {
-    return invalid('manifest_missing', 'manifest.json is not present');
+    return invalid('manifest_missing', 'manifest_missing');
   }
 
   // Step 2: manifest byte cap and parse.
   if (manifestBytes.byteLength > MANIFEST_MAX_BYTES) {
-    return invalid(
-      'manifest_byte_limit_exceeded',
-      `manifest bytes ${manifestBytes.byteLength} exceed MANIFEST_MAX_BYTES=${MANIFEST_MAX_BYTES}`,
-    );
+    return invalid('manifest_byte_limit_exceeded', 'manifest_bytes_over_cap');
   }
   const manifestSnapshot = copyBytes(manifestBytes);
 
@@ -93,17 +97,16 @@ export function classifyStateBundleV2(input: ClassifyStateBundleV2Input): Bundle
   try {
     manifestString = decodeManifest(manifestSnapshot);
   } catch (err) {
-    return invalid('manifest_invalid_json', errorMessage(err));
+    return invalid('manifest_invalid_json', `manifest_decode:${errorKind(err)}`);
   }
   let parsed: unknown;
   try {
     parsed = strictParseJson(manifestString);
   } catch (err) {
-    return invalid('manifest_invalid_json', errorMessage(err));
+    return invalid('manifest_invalid_json', `manifest_parse:${errorKind(err)}`);
   }
 
-  // Step 3: legacy v1 short-circuit. If own `version` equals JSON number 1,
-  // classify as unsupported_legacy_v1 without applying any v2-layout rule.
+  // Step 3: legacy v1 short-circuit.
   if (isLegacyV1Manifest(parsed)) {
     return { kind: 'unsupported_legacy_v1', diagnostic: 'state_unsupported_legacy_v1' };
   }
@@ -115,18 +118,20 @@ export function classifyStateBundleV2(input: ClassifyStateBundleV2Input): Bundle
   }
   const manifest = validation.manifest;
 
-  // Step 5: remaining v2 layout/listing consistency (ledger + metadata + extras).
-  if (listingIndex.nonRegular.length > 0) {
-    const bad = listingIndex.nonRegular[0];
-    return invalid('bundle_path_unsafe', `entry '${bad.name}' is not a regular file`);
-  }
+  // Step 5: remaining v2 layout/listing consistency (ledger + metadata entries + extras).
+  // Precedence within this step: duplicates > non-regular > extras. This
+  // ordering is test-observable via the classifier fixture matrix.
   for (const dup of listingIndex.duplicates) {
     if (dup !== MANIFEST_FILENAME) {
-      return invalid('bundle_listing_mismatch', `duplicate entry: ${dup}`);
+      return invalid('bundle_listing_mismatch', `duplicate_expected_entry:${sanitizeName(dup)}`);
     }
   }
+  if (listingIndex.nonRegular.length > 0) {
+    const bad = listingIndex.nonRegular[0];
+    return invalid('bundle_path_unsafe', `non_regular_entry:${sanitizeName(bad.name)}`);
+  }
   if (listingIndex.extraNames.length > 0) {
-    return invalid('bundle_extra_entry', `unexpected entry: ${listingIndex.extraNames[0]}`);
+    return invalid('bundle_extra_entry', 'unexpected_entry_present');
   }
   const ledgerConsistency = expectedFileConsistency(
     LEDGER_FILENAME,
@@ -145,51 +150,39 @@ export function classifyStateBundleV2(input: ClassifyStateBundleV2Input): Bundle
 
   // Step 6: ledger byte cap + integrity.
   const ledger = input.ledgerBytes;
-  if (ledger === undefined) return invalid('ledger_missing', 'ledger.json is not present');
+  if (ledger === undefined) return invalid('ledger_missing', 'ledger_missing');
   if (ledger.byteLength > LEDGER_MAX_BYTES) {
-    return invalid(
-      'ledger_byte_limit_exceeded',
-      `ledger bytes ${ledger.byteLength} exceed LEDGER_MAX_BYTES=${LEDGER_MAX_BYTES}`,
-    );
+    return invalid('ledger_byte_limit_exceeded', 'ledger_bytes_over_cap');
   }
   const ledgerSnapshot = copyBytes(ledger);
   if (ledgerSnapshot.byteLength !== manifest.ledger.bytes) {
-    return invalid(
-      'ledger_bytes_mismatch',
-      `ledger byte length ${ledgerSnapshot.byteLength} does not match manifest.ledger.bytes ${manifest.ledger.bytes}`,
-    );
+    return invalid('ledger_bytes_mismatch', 'ledger_byte_length_disagrees_with_descriptor');
   }
   const ledgerHash = sha256Hex(ledgerSnapshot);
   if (ledgerHash !== manifest.ledger.sha256) {
-    return invalid(
-      'ledger_hash_mismatch',
-      `ledger sha256 ${ledgerHash} does not match manifest.ledger.sha256 ${manifest.ledger.sha256}`,
-    );
+    return invalid('ledger_hash_mismatch', 'ledger_sha256_disagrees_with_descriptor');
   }
 
   // Step 7: provider run metadata byte cap + integrity.
   const metadata = input.providerRunMetadataBytes;
   if (metadata === undefined) {
-    return invalid('provider_run_metadata_missing', 'provider-run-metadata.json is not present');
+    return invalid('provider_run_metadata_missing', 'provider_run_metadata_missing');
   }
   if (metadata.byteLength > METADATA_MAX_BYTES) {
-    return invalid(
-      'provider_run_metadata_byte_limit_exceeded',
-      `provider-run-metadata bytes ${metadata.byteLength} exceed METADATA_MAX_BYTES=${METADATA_MAX_BYTES}`,
-    );
+    return invalid('provider_run_metadata_byte_limit_exceeded', 'metadata_bytes_over_cap');
   }
   const metadataSnapshot = copyBytes(metadata);
   if (metadataSnapshot.byteLength !== manifest.providerRunMetadata.bytes) {
     return invalid(
       'provider_run_metadata_bytes_mismatch',
-      `metadata byte length ${metadataSnapshot.byteLength} does not match manifest.providerRunMetadata.bytes ${manifest.providerRunMetadata.bytes}`,
+      'metadata_byte_length_disagrees_with_descriptor',
     );
   }
   const metadataHash = sha256Hex(metadataSnapshot);
   if (metadataHash !== manifest.providerRunMetadata.sha256) {
     return invalid(
       'provider_run_metadata_hash_mismatch',
-      `metadata sha256 ${metadataHash} does not match manifest.providerRunMetadata.sha256 ${manifest.providerRunMetadata.sha256}`,
+      'metadata_sha256_disagrees_with_descriptor',
     );
   }
 
@@ -207,16 +200,11 @@ function indexByName(listing: readonly EntryDescriptor[]): ListingIndex {
   const duplicates = new Set<string>();
   const extraNames: string[] = [];
   const nonRegular: EntryDescriptor[] = [];
-  const expected = new Set<string>([
-    MANIFEST_FILENAME,
-    LEDGER_FILENAME,
-    PROVIDER_RUN_METADATA_FILENAME,
-  ]);
   for (const entry of listing) {
     if (!entry.isRegularFile) {
       nonRegular.push(entry);
     }
-    if (expected.has(entry.name)) {
+    if (EXPECTED_NAMES.has(entry.name)) {
       if (entries.has(entry.name)) {
         duplicates.add(entry.name);
       } else {
@@ -237,13 +225,16 @@ function expectedFileConsistency(
 ): BundleClassification | null {
   const listed = index.entries.has(name);
   if (listed && bytes === undefined) {
-    return invalid('bundle_listing_mismatch', `${name} listed but bytes missing`);
+    return invalid(
+      'bundle_listing_mismatch',
+      `listing_present_bytes_missing:${sanitizeName(name)}`,
+    );
   }
   if (!listed && bytes !== undefined) {
-    return invalid('bundle_listing_mismatch', `${name} bytes provided but not listed`);
+    return invalid('bundle_listing_mismatch', `listing_absent_bytes_present:${sanitizeName(name)}`);
   }
   if (!listed && bytes === undefined) {
-    return invalid(missingCode, `${name} is not present`);
+    return invalid(missingCode, `${sanitizeName(name)}_missing`);
   }
   return null;
 }
@@ -256,7 +247,7 @@ function copyBytes(source: Uint8Array): Uint8Array {
 
 function decodeManifest(bytes: Uint8Array): string {
   if (bytes.byteLength >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
-    throw new Error('BOM not permitted');
+    throw new Error('bom_not_permitted');
   }
   return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
 }
@@ -277,8 +268,23 @@ function invalid(diagnostic: DiagnosticCode, message: string): BundleClassificat
   };
 }
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+/**
+ * Reduce a caller-supplied filename to one of the known expected filenames.
+ * Any other value collapses to `<extra>` so unexpected filenames from a
+ * misfiled or attacker-controlled listing never leak into a diagnostic
+ * message.
+ */
+function sanitizeName(name: string): string {
+  if (EXPECTED_NAMES.has(name)) return name;
+  return '<extra>';
+}
+
+/** Reduce an unknown error to a short structural label (never the raw text). */
+function errorKind(err: unknown): string {
+  if (err instanceof Error && err.name) {
+    return err.name.toLowerCase();
+  }
+  return 'error';
 }
 
 function sha256Hex(bytes: Uint8Array): string {

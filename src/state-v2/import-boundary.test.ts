@@ -1,25 +1,52 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import ts from 'typescript';
 
-const FORBIDDEN_SPECIFIERS = ['node:fs', 'node:fs/promises', 'fs', 'fs/promises'] as const;
+/**
+ * Enforce the state-v2 / canonical-json import boundary using the real
+ * TypeScript compiler API. This catches every kind of module reference:
+ *   - `import x from 'spec'`
+ *   - `import 'spec'` (side-effect only)
+ *   - `import type ... from 'spec'`
+ *   - `export ... from 'spec'`
+ *   - `export * from 'spec'`
+ *   - `import('spec')` dynamic import
+ *   - `require('spec')` (rejected outright inside these modules)
+ *
+ * Both exact specifiers and directory prefixes are forbidden — e.g. any
+ * import whose specifier resolves under `../runtime-invocation/`, not just
+ * `../runtime-invocation` exactly.
+ */
 
-const FORBIDDEN_SIBLING_PATHS = [
-  '../main.js',
+const FORBIDDEN_EXACT = new Set<string>(['fs', 'fs/promises', 'node:fs', 'node:fs/promises']);
+
+// Forbidden sibling *prefixes*. A specifier is forbidden when, after
+// dropping any trailing `.js` / `.ts` and normalizing slashes, it either
+// equals the prefix or starts with the prefix followed by `/`.
+const FORBIDDEN_SIBLING_PREFIXES = [
   '../main',
-  '../runtime.js',
   '../runtime',
   '../runtime-invocation',
   '../runtime-integration',
-  '../state.js',
   '../state',
 ] as const;
 
-// Extremely small AST-ish scanner: matches ES `import` / `export ... from`
-// statements (ignoring block comments and line comments) so we do not confuse
-// string mentions inside comments or unrelated code.
-const IMPORT_FROM_REGEX =
-  /(?:^|\n|;)\s*(?:import|export)\b[^"'\n;]*from\s*(?<quote>["'])(?<spec>[^"'\n]+)\k<quote>/g;
+function normalizeSpecifier(spec: string): string {
+  let s = spec.replace(/\\/g, '/');
+  s = s.replace(/\.(?:js|mjs|cjs|ts|mts|cts)$/, '');
+  return s;
+}
+
+function siblingIsForbidden(spec: string): string | null {
+  const norm = normalizeSpecifier(spec);
+  for (const prefix of FORBIDDEN_SIBLING_PREFIXES) {
+    if (norm === prefix || norm.startsWith(`${prefix}/`)) {
+      return prefix;
+    }
+  }
+  return null;
+}
 
 async function collectTsFiles(root: string): Promise<string[]> {
   const out: string[] = [];
@@ -34,6 +61,7 @@ async function collectTsFiles(root: string): Promise<string[]> {
           full.endsWith('.ts') &&
           !full.endsWith('.test.ts') &&
           !full.endsWith('.testhelper.ts') &&
+          !full.endsWith('.mts') &&
           !full.endsWith('.d.ts')
         ) {
           out.push(full);
@@ -45,56 +73,103 @@ async function collectTsFiles(root: string): Promise<string[]> {
   return out;
 }
 
-function stripComments(text: string): string {
-  // block comments
-  let stripped = text.replace(/\/\*[\s\S]*?\*\//g, '');
-  // line comments
-  stripped = stripped.replace(/(^|[^:])\/\/[^\n]*/g, '$1');
-  return stripped;
+interface Reference {
+  specifier: string;
+  kind: 'static' | 'dynamic' | 'require';
 }
 
-async function specifiersIn(file: string): Promise<string[]> {
-  const raw = await readFile(file, 'utf8');
-  const clean = stripComments(raw);
-  const out: string[] = [];
-  for (const match of clean.matchAll(IMPORT_FROM_REGEX)) {
-    out.push(match.groups!.spec);
-  }
-  return out;
+function collectReferences(source: ts.SourceFile): Reference[] {
+  const refs: Reference[] = [];
+  const visit = (node: ts.Node): void => {
+    // Static import / export ... from 'x'
+    if (
+      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+      node.moduleSpecifier &&
+      ts.isStringLiteral(node.moduleSpecifier)
+    ) {
+      refs.push({ specifier: node.moduleSpecifier.text, kind: 'static' });
+    }
+    // `import x = require('spec')`
+    if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference) &&
+      ts.isStringLiteral(node.moduleReference.expression)
+    ) {
+      refs.push({ specifier: node.moduleReference.expression.text, kind: 'require' });
+    }
+    // Dynamic import('spec')
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      node.arguments.length >= 1 &&
+      ts.isStringLiteral(node.arguments[0])
+    ) {
+      refs.push({ specifier: node.arguments[0].text, kind: 'dynamic' });
+    }
+    // require('spec')
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === 'require' &&
+      node.arguments.length >= 1 &&
+      ts.isStringLiteral(node.arguments[0])
+    ) {
+      refs.push({ specifier: node.arguments[0].text, kind: 'require' });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return refs;
 }
 
-describe('state-v2 import boundary', () => {
-  it('src/state-v2/**/*.ts does not import node:fs or the legacy state module', async () => {
+async function parseFile(file: string): Promise<ts.SourceFile> {
+  const text = await readFile(file, 'utf8');
+  return ts.createSourceFile(
+    file,
+    text,
+    ts.ScriptTarget.Latest,
+    /*setParentNodes*/ true,
+    ts.ScriptKind.TS,
+  );
+}
+
+describe('state-v2 import boundary (AST-based)', () => {
+  it('src/state-v2/**/*.ts does not reach into fs, legacy state, or runtime layers', async () => {
     const root = path.resolve('src/state-v2');
     const files = await collectTsFiles(root);
     expect(files.length).toBeGreaterThan(0);
     const violations: string[] = [];
     for (const file of files) {
-      const specs = await specifiersIn(file);
-      for (const spec of specs) {
-        if (FORBIDDEN_SPECIFIERS.includes(spec as (typeof FORBIDDEN_SPECIFIERS)[number])) {
-          violations.push(`${file} imports forbidden module '${spec}'`);
+      const source = await parseFile(file);
+      for (const ref of collectReferences(source)) {
+        if (FORBIDDEN_EXACT.has(ref.specifier)) {
+          violations.push(
+            `${path.relative(process.cwd(), file)}: ${ref.kind} '${ref.specifier}' is forbidden`,
+          );
         }
-        for (const forbidden of FORBIDDEN_SIBLING_PATHS) {
-          if (spec === forbidden) {
-            violations.push(`${file} imports forbidden sibling '${spec}'`);
-          }
+        const prefixMatch = siblingIsForbidden(ref.specifier);
+        if (prefixMatch) {
+          violations.push(
+            `${path.relative(process.cwd(), file)}: ${ref.kind} '${ref.specifier}' reaches into forbidden layer '${prefixMatch}'`,
+          );
         }
       }
     }
     expect(violations).toEqual([]);
   });
 
-  it('src/canonical-json/**/*.ts does not import node:fs', async () => {
+  it('src/canonical-json/**/*.ts does not reach into fs', async () => {
     const root = path.resolve('src/canonical-json');
     const files = await collectTsFiles(root);
     expect(files.length).toBeGreaterThan(0);
     const violations: string[] = [];
     for (const file of files) {
-      const specs = await specifiersIn(file);
-      for (const spec of specs) {
-        if (FORBIDDEN_SPECIFIERS.includes(spec as (typeof FORBIDDEN_SPECIFIERS)[number])) {
-          violations.push(`${file} imports forbidden module '${spec}'`);
+      const source = await parseFile(file);
+      for (const ref of collectReferences(source)) {
+        if (FORBIDDEN_EXACT.has(ref.specifier)) {
+          violations.push(
+            `${path.relative(process.cwd(), file)}: ${ref.kind} '${ref.specifier}' is forbidden`,
+          );
         }
       }
     }

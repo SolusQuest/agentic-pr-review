@@ -60,10 +60,12 @@ export {
 export { StateManifestSerializationError, serializeStateManifestV2 } from './serializer.js';
 
 export {
+  BuilderInputRejectedError,
   BuilderValidationError,
   LedgerOverBoundError,
   MetadataOverBoundError,
   buildStateBundleV2,
+  type BuildResult,
   type BuildStateBundleV2Result,
 } from './builder.js';
 

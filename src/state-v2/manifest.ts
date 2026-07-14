@@ -6,9 +6,15 @@ import type {
   STATE_NAMESPACE,
 } from './constants.js';
 
-export type EpochId = string;
-export type Sha256Hex = string;
-export type GitSha = string;
+// Branded string types provide compile-time separation between generic
+// strings and validated identity strings. At runtime they remain plain
+// strings; validation runs through validateStateManifestV2.
+declare const epochIdBrand: unique symbol;
+declare const sha256HexBrand: unique symbol;
+declare const gitShaBrand: unique symbol;
+export type EpochId = string & { readonly [epochIdBrand]: 'EpochId' };
+export type Sha256Hex = string & { readonly [sha256HexBrand]: 'Sha256Hex' };
+export type GitSha = string & { readonly [gitShaBrand]: 'GitSha' };
 
 export interface StateKeyV2 {
   namespace: typeof STATE_NAMESPACE;

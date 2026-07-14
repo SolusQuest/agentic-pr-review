@@ -3,6 +3,7 @@ import {
   buildStateBundleV2,
   crossFieldValidate,
   validateStateManifestV2,
+  type EpochId,
   type StateManifestV2,
   type StateManifestV2Transition,
 } from './index.js';
@@ -62,13 +63,13 @@ describe('cross-field validation matrix', () => {
     predecessorManifestSha256: PRED_MANIFEST,
     predecessorLedgerSha256: PRED_LEDGER,
     predecessorStateGeneration: 4,
-    predecessorLedgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA',
+    predecessorLedgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA' as EpochId,
   };
 
   it('valid continuation: predecessor+1 == generation and ordinal >= 1', () => {
     const built = build({
       transition: continuation,
-      generation: { stateGeneration: 5, ledgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA' },
+      generation: { stateGeneration: 5, ledgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA' as EpochId },
       transaction: { interactionOrdinal: 1 },
     });
     const result = validateStateManifestV2(built.manifest);
@@ -78,7 +79,7 @@ describe('cross-field validation matrix', () => {
   it('continuation rejects zero ordinal', () => {
     const input = makeStateManifestV2Input({
       transition: continuation,
-      generation: { stateGeneration: 5, ledgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA' },
+      generation: { stateGeneration: 5, ledgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA' as EpochId },
       transaction: { interactionOrdinal: 0 },
     });
     expect(() => buildStateBundleV2(input, LEDGER, METADATA)).toThrow();
@@ -88,9 +89,9 @@ describe('cross-field validation matrix', () => {
     const input = makeStateManifestV2Input({
       transition: {
         ...continuation,
-        predecessorLedgerEpoch: 'BBBBBBBBBBBBBBBBBBBBBB',
+        predecessorLedgerEpoch: 'BBBBBBBBBBBBBBBBBBBBBB' as EpochId,
       },
-      generation: { stateGeneration: 5, ledgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA' },
+      generation: { stateGeneration: 5, ledgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA' as EpochId },
       transaction: { interactionOrdinal: 1 },
     });
     expect(() => buildStateBundleV2(input, LEDGER, METADATA)).toThrow();
@@ -101,14 +102,14 @@ describe('cross-field validation matrix', () => {
     predecessorManifestSha256: PRED_MANIFEST,
     predecessorLedgerSha256: PRED_LEDGER,
     predecessorStateGeneration: 4,
-    predecessorLedgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA',
+    predecessorLedgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA' as EpochId,
     reason: 'base_change',
   };
 
   it('valid reset: fresh ledgerEpoch and ordinal 0', () => {
     const built = build({
       transition: reset,
-      generation: { stateGeneration: 5, ledgerEpoch: 'BBBBBBBBBBBBBBBBBBBBBB' },
+      generation: { stateGeneration: 5, ledgerEpoch: 'BBBBBBBBBBBBBBBBBBBBBB' as EpochId },
       transaction: { interactionOrdinal: 0 },
     });
     const result = validateStateManifestV2(built.manifest);
@@ -118,7 +119,7 @@ describe('cross-field validation matrix', () => {
   it('reset rejects same ledger epoch', () => {
     const input = makeStateManifestV2Input({
       transition: reset,
-      generation: { stateGeneration: 5, ledgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA' },
+      generation: { stateGeneration: 5, ledgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA' as EpochId },
       transaction: { interactionOrdinal: 0 },
     });
     expect(() => buildStateBundleV2(input, LEDGER, METADATA)).toThrow();
@@ -127,7 +128,7 @@ describe('cross-field validation matrix', () => {
   it('reset rejects nonzero ordinal', () => {
     const input = makeStateManifestV2Input({
       transition: reset,
-      generation: { stateGeneration: 5, ledgerEpoch: 'BBBBBBBBBBBBBBBBBBBBBB' },
+      generation: { stateGeneration: 5, ledgerEpoch: 'BBBBBBBBBBBBBBBBBBBBBB' as EpochId },
       transaction: { interactionOrdinal: 3 },
     });
     expect(() => buildStateBundleV2(input, LEDGER, METADATA)).toThrow();
@@ -141,7 +142,7 @@ describe('cross-field validation matrix', () => {
         predecessorLedgerSha256: 'bootstrap',
         reason: 'corrupt_accepted_artifact',
       },
-      generation: { stateGeneration: 3, ledgerEpoch: 'CCCCCCCCCCCCCCCCCCCCCC' },
+      generation: { stateGeneration: 3, ledgerEpoch: 'CCCCCCCCCCCCCCCCCCCCCC' as EpochId },
       transaction: { interactionOrdinal: 1 },
     });
     expect(() => buildStateBundleV2(input, LEDGER, METADATA)).toThrow();

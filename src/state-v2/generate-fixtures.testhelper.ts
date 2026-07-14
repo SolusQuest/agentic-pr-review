@@ -3,6 +3,7 @@ import path from 'node:path';
 import {
   buildStateBundleV2,
   type EntryDescriptor,
+  type EpochId,
   type StateManifestV2Transition,
 } from './index.js';
 import { makeStateManifestV2Input, sha256Hex } from './test-helpers.js';
@@ -36,9 +37,9 @@ const POSITIVES: PositiveSpec[] = [
         predecessorManifestSha256: PRED_MANIFEST,
         predecessorLedgerSha256: PRED_LEDGER,
         predecessorStateGeneration: 3,
-        predecessorLedgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA',
+        predecessorLedgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA' as EpochId,
       } satisfies StateManifestV2Transition,
-      generation: { stateGeneration: 4, ledgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA' },
+      generation: { stateGeneration: 4, ledgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA' as EpochId },
       transaction: { interactionOrdinal: 4 },
     }),
     ledger: enc.encode('positive-continuation-ledger'),
@@ -52,10 +53,10 @@ const POSITIVES: PositiveSpec[] = [
         predecessorManifestSha256: PRED_MANIFEST,
         predecessorLedgerSha256: PRED_LEDGER,
         predecessorStateGeneration: 3,
-        predecessorLedgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA',
+        predecessorLedgerEpoch: 'AAAAAAAAAAAAAAAAAAAAAA' as EpochId,
         reason: 'base_change',
       } satisfies StateManifestV2Transition,
-      generation: { stateGeneration: 4, ledgerEpoch: 'BBBBBBBBBBBBBBBBBBBBBB' },
+      generation: { stateGeneration: 4, ledgerEpoch: 'BBBBBBBBBBBBBBBBBBBBBB' as EpochId },
       transaction: { interactionOrdinal: 0 },
     }),
     ledger: enc.encode('positive-reset-ledger'),
@@ -64,14 +65,14 @@ const POSITIVES: PositiveSpec[] = [
   {
     name: 'positive-recovery-root',
     makeInput: () => ({
-      sessionEpoch: 'S00000000000000000000B',
+      sessionEpoch: 'S00000000000000000000B' as EpochId,
       transition: {
         kind: 'recovery_root',
         predecessorManifestSha256: 'bootstrap',
         predecessorLedgerSha256: 'bootstrap',
         reason: 'corrupt_accepted_artifact',
       } satisfies StateManifestV2Transition,
-      generation: { stateGeneration: 0, ledgerEpoch: 'CCCCCCCCCCCCCCCCCCCCCC' },
+      generation: { stateGeneration: 0, ledgerEpoch: 'CCCCCCCCCCCCCCCCCCCCCC' as EpochId },
       transaction: { interactionOrdinal: 0 },
     }),
     ledger: enc.encode('positive-recovery-root-ledger'),
@@ -111,13 +112,4 @@ export async function generateAllPositiveFixtures(): Promise<void> {
   for (const spec of POSITIVES) {
     await writeBundle(spec);
   }
-}
-
-if (
-  typeof process !== 'undefined' &&
-  process.argv &&
-  process.argv[1] &&
-  process.argv[1].endsWith('generate-state-v2-fixtures.ts')
-) {
-  await generateAllPositiveFixtures();
 }
