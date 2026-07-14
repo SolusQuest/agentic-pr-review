@@ -156,7 +156,6 @@ public sealed class LedgerFixtureGeneratorTests
         psi.ArgumentList.Add(genProject);
         psi.ArgumentList.Add("--configuration");
         psi.ArgumentList.Add("Debug");
-        psi.ArgumentList.Add("--no-restore");
         psi.ArgumentList.Add("--");
         psi.ArgumentList.Add(outDir);
         using var proc = Process.Start(psi)!;
