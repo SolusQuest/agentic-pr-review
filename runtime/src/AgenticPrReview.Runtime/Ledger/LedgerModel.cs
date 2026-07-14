@@ -35,10 +35,10 @@ public sealed record LedgerHeader(
     string ToolDefinitionId,
     string CacheConfigId,
     // Generation / transition provenance
-    int StateGeneration,
-    int LedgerEpoch,
+    long StateGeneration,
+    long LedgerEpoch,
     string PredecessorLedgerSha256,
-    int? PredecessorStateGeneration,
+    long? PredecessorStateGeneration,
     string? PredecessorManifestSha256,
     string? ResetReason,
     string? RecoveryReason);
@@ -102,17 +102,57 @@ public sealed record LedgerFinding(
 public sealed class ValidatedLedger
 {
     private readonly byte[] canonicalBytes;
+    // Private snapshot used by LedgerAppend / LedgerBuilder. Distinct from the
+    // public LedgerModel so that any caller mutation of the public Model via
+    // ImmutableCollectionsMarshal.AsArray (documented "unsafe" API) cannot
+    // affect append validation, history equality, or prefix-hash binding.
+    private readonly LedgerModel privateModel;
 
     internal ValidatedLedger(LedgerModel model, byte[] canonicalBytes, string contentSha256)
     {
-        // Defensive copy: the constructor owns the sole reference to the byte buffer.
         this.canonicalBytes = new byte[canonicalBytes.Length];
         Buffer.BlockCopy(canonicalBytes, 0, this.canonicalBytes, 0, canonicalBytes.Length);
-        Model = model;
+        this.privateModel = DeepClone(model);
+        Model = DeepClone(model);
         ContentSha256 = contentSha256;
     }
 
     public LedgerModel Model { get; }
+
+    /// <summary>
+    /// Internal accessor returning the frozen snapshot captured at construction.
+    /// LedgerAppend and LedgerBuilder read this instead of <see cref="Model"/>
+    /// so any caller mutation of the public model — for example via
+    /// <c>ImmutableCollectionsMarshal.AsArray</c> — cannot influence append
+    /// validation, history equality, or the prefix-hash binding.
+    /// </summary>
+    internal LedgerModel PrivateModel => this.privateModel;
+
+    private static LedgerModel DeepClone(LedgerModel model)
+    {
+        var records = ImmutableArray.CreateBuilder<LedgerRecord>(model.Records.Length);
+        foreach (var r in model.Records) records.Add(CloneRecord(r));
+        return new LedgerModel(model.SchemaVersion, model.PrefixContractVersion, model.Header, records.ToImmutable());
+    }
+
+    private static LedgerRecord CloneRecord(LedgerRecord r)
+    {
+        if (r.Context is ReviewContextRecord ctx)
+        {
+            var files = ImmutableArray.CreateBuilder<ChangedFileEntry>(ctx.ChangedFiles.Length);
+            foreach (var f in ctx.ChangedFiles) files.Add(f);
+            return new LedgerRecord(ctx with { ChangedFiles = files.ToImmutable() }, null);
+        }
+        if (r.Outcome is ReviewOutcomeRecord oc)
+        {
+            var findings = ImmutableArray.CreateBuilder<LedgerFinding>(oc.Findings.Length);
+            foreach (var f in oc.Findings) findings.Add(f);
+            var lims = ImmutableArray.CreateBuilder<string>(oc.Limitations.Length);
+            foreach (var l in oc.Limitations) lims.Add(l);
+            return new LedgerRecord(null, oc with { Findings = findings.ToImmutable(), Limitations = lims.ToImmutable() });
+        }
+        return r;
+    }
 
     /// <summary>
     /// The lowercase-hex SHA-256 of <see cref="ToCanonicalByteArray"/> as measured
@@ -227,56 +267,56 @@ public sealed record ExpectedIdentities(
 public abstract record ExpectedTransition(ExpectedIdentities Identities)
 {
     public abstract string Kind { get; }
-    public abstract int GetStateGeneration();
-    public abstract int GetLedgerEpoch();
+    public abstract long GetStateGeneration();
+    public abstract long GetLedgerEpoch();
 }
 
-public sealed record BootstrapTransition(ExpectedIdentities Identities, int StateGeneration, int LedgerEpoch)
+public sealed record BootstrapTransition(ExpectedIdentities Identities, long StateGeneration, long LedgerEpoch)
     : ExpectedTransition(Identities)
 {
     public override string Kind => "bootstrap";
-    public override int GetStateGeneration() => StateGeneration;
-    public override int GetLedgerEpoch() => LedgerEpoch;
+    public override long GetStateGeneration() => StateGeneration;
+    public override long GetLedgerEpoch() => LedgerEpoch;
 }
 
 public sealed record ContinuationTransition(
     ExpectedIdentities Identities,
     string PredecessorLedgerSha256,
-    int PredecessorStateGeneration,
-    int StateGeneration,
-    int LedgerEpoch)
+    long PredecessorStateGeneration,
+    long StateGeneration,
+    long LedgerEpoch)
     : ExpectedTransition(Identities)
 {
     public override string Kind => "continuation";
-    public override int GetStateGeneration() => StateGeneration;
-    public override int GetLedgerEpoch() => LedgerEpoch;
+    public override long GetStateGeneration() => StateGeneration;
+    public override long GetLedgerEpoch() => LedgerEpoch;
 }
 
 public sealed record ResetTransition(
     ExpectedIdentities Identities,
     string PredecessorLedgerSha256,
     string PredecessorManifestSha256,
-    int PredecessorStateGeneration,
-    int StateGeneration,
-    int LedgerEpoch,
+    long PredecessorStateGeneration,
+    long StateGeneration,
+    long LedgerEpoch,
     string ResetReason)
     : ExpectedTransition(Identities)
 {
     public override string Kind => "reset";
-    public override int GetStateGeneration() => StateGeneration;
-    public override int GetLedgerEpoch() => LedgerEpoch;
+    public override long GetStateGeneration() => StateGeneration;
+    public override long GetLedgerEpoch() => LedgerEpoch;
 }
 
 public sealed record RecoveryTransition(
     ExpectedIdentities Identities,
-    int StateGeneration,
-    int LedgerEpoch,
+    long StateGeneration,
+    long LedgerEpoch,
     string RecoveryReason)
     : ExpectedTransition(Identities)
 {
     public override string Kind => "recovery";
-    public override int GetStateGeneration() => StateGeneration;
-    public override int GetLedgerEpoch() => LedgerEpoch;
+    public override long GetStateGeneration() => StateGeneration;
+    public override long GetLedgerEpoch() => LedgerEpoch;
 }
 
 // Outcomes

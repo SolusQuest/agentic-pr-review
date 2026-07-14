@@ -81,7 +81,7 @@ public static class LedgerCanonicalizer
             ["cacheConfigId"] = () => WriteString(buffer, h.CacheConfigId),
             ["headRepository"] = () => WriteString(buffer, h.HeadRepository),
             ["kind"] = () => WriteString(buffer, h.Kind),
-            ["ledgerEpoch"] = () => WriteInt(buffer, h.LedgerEpoch),
+            ["ledgerEpoch"] = () => WriteLong(buffer, h.LedgerEpoch),
             ["modelId"] = () => WriteString(buffer, h.ModelId),
             ["policyId"] = () => WriteString(buffer, h.PolicyId),
             ["predecessorLedgerSha256"] = () => WriteString(buffer, h.PredecessorLedgerSha256),
@@ -89,14 +89,14 @@ public static class LedgerCanonicalizer
             ["pullRequest"] = () => WriteInt(buffer, h.PullRequest),
             ["repository"] = () => WriteString(buffer, h.Repository),
             ["sessionEpoch"] = () => WriteString(buffer, h.SessionEpoch),
-            ["stateGeneration"] = () => WriteInt(buffer, h.StateGeneration),
+            ["stateGeneration"] = () => WriteLong(buffer, h.StateGeneration),
             ["templateId"] = () => WriteString(buffer, h.TemplateId),
             ["toolDefinitionId"] = () => WriteString(buffer, h.ToolDefinitionId),
             ["trustedExecutionDomain"] = () => WriteString(buffer, h.TrustedExecutionDomain),
             ["workflowIdentity"] = () => WriteString(buffer, h.WorkflowIdentity),
         };
-        if (h.PredecessorStateGeneration is int psg)
-            props["predecessorStateGeneration"] = () => WriteInt(buffer, psg);
+        if (h.PredecessorStateGeneration is long psg)
+            props["predecessorStateGeneration"] = () => WriteLong(buffer, psg);
         if (h.PredecessorManifestSha256 is string pms)
             props["predecessorManifestSha256"] = () => WriteString(buffer, pms);
         if (h.ResetReason is string rr)

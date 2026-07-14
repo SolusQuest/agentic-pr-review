@@ -45,30 +45,47 @@ public sealed class LedgerSchemaMapperTests
 
     /// <summary>
     /// Enum violations (const/enum) precede array minItems/maxItems violations.
-    /// If both an unsupported status and a records-array too-long condition were
-    /// present, the status enum mismatch must fire first. Existing fixtures
-    /// cover each in isolation; here we exercise the ordering directly.
+    /// A single payload here simultaneously has an unsupported change-status AND
+    /// a findings array over its limit; the parser must report the specific
+    /// unsupported-status code, not the array-limit code.
     /// </summary>
     [Fact]
     public void ConstEnumViolation_PrecedesArrayLimitViolation()
     {
-        // unsupported-change-status.json exercises the enum path; the parser
-        // must report the specific unsupported-status code, not a generic
-        // schema/array-limit code.
-        var bytes = ReadFixture("unsupported-change-status.json");
-        var result = LedgerParser.ParseAndValidate(bytes);
+        var text = System.Text.Encoding.UTF8.GetString(ReadFixture("bootstrap-minimal.json"));
+        // Change the changed-file status to an unsupported enum literal AND
+        // populate the outcome findings array with more than the 50-entry cap.
+        var oversize = new System.Text.StringBuilder("[");
+        for (var i = 0; i < 60; i++)
+        {
+            if (i > 0) oversize.Append(',');
+            oversize.Append("{\"body\":\"b\",\"category\":\"correctness\",\"confidence\":\"medium\",\"endLine\":null,\"path\":null,\"severity\":\"low\",\"startLine\":null,\"title\":\"t\"}");
+        }
+        oversize.Append(']');
+        var modified = text
+            .Replace("\"status\":\"modified\"", "\"status\":\"__unknown__\"")
+            .Replace("\"findings\":[]", "\"findings\":" + oversize.ToString());
+        var payload = System.Text.Encoding.UTF8.GetBytes(modified);
+        var result = LedgerParser.ParseAndValidate(payload);
         Assert.Null(result.Ledger);
         Assert.Equal(LedgerDiagnosticCodes.UnsupportedChangeStatus, result.Failure!.Code);
     }
 
     /// <summary>
     /// unknown_field precedes any subsequent const/enum/array violation.
+    /// A single payload here simultaneously has an unknown top-level property
+    /// AND an unsupported changed-file status; the parser must report the
+    /// unknown-field code.
     /// </summary>
     [Fact]
     public void UnknownField_PrecedesOtherClassifications()
     {
-        var bytes = ReadFixture("unknown-top-level-field.json");
-        var result = LedgerParser.ParseAndValidate(bytes);
+        var text = System.Text.Encoding.UTF8.GetString(ReadFixture("bootstrap-minimal.json"));
+        var modified = text
+            .Replace("\"status\":\"modified\"", "\"status\":\"__unknown__\"")
+            .Replace("\"schemaVersion\":1", "\"schemaVersion\":1,\"extraField\":\"junk\"");
+        var payload = System.Text.Encoding.UTF8.GetBytes(modified);
+        var result = LedgerParser.ParseAndValidate(payload);
         Assert.Null(result.Ledger);
         Assert.Equal(LedgerDiagnosticCodes.UnknownField, result.Failure!.Code);
     }

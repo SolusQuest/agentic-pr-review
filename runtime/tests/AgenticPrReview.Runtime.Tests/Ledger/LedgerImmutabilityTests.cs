@@ -141,4 +141,76 @@ public sealed class LedgerImmutabilityTests
         Assert.IsType<ImmutableArray<LedgerFinding>>(oc.Findings);
         Assert.IsType<ImmutableArray<string>>(oc.Limitations);
     }
+
+
+    [Fact]
+    public void ValidatedLedger_PublicModelMutation_DoesNotAffectAppendHistoryOrBinding()
+    {
+        // Build a bootstrap via the runtime (so its ContentSha256 is the
+        // authoritative anchor), then attempt to mutate the underlying array
+        // that Model.Records surfaces via ImmutableCollectionsMarshal.AsArray.
+        var identities = new ExpectedIdentities(
+            Repository: "acme/example", HeadRepository: "acme/example",
+            PullRequest: 123,
+            WorkflowIdentity: "acme/example/.github/workflows/ci.yml",
+            TrustedExecutionDomain: "github-actions", SessionEpoch: "epoch-0",
+            ProviderId: "provider.reference", ModelId: "model-2026-01",
+            AdapterId: new string('a', 64), TemplateId: new string('b', 64),
+            PolicyId: new string('c', 64), ToolDefinitionId: new string('d', 64),
+            CacheConfigId: new string('e', 64));
+        var context = LedgerBuilder.BuildReviewContext(
+            new ValidatedContextSource(
+                ReviewedHeadSha: "1111111111111111111111111111111111111111",
+                ReviewedBaseSha: "2222222222222222222222222222222222222222",
+                ChangedFiles: ImmutableArray<ValidatedChangedFileSource>.Empty),
+            identities,
+            new InteractionIdentity(new string('0', 64), 0)).Record!;
+        var outcome = LedgerBuilder.BuildReviewOutcome(
+            new ValidatedOutcomeSource(
+                Summary: "Bootstrap",
+                Findings: ImmutableArray<ValidatedFindingSource>.Empty,
+                Limitations: ImmutableArray<string>.Empty),
+            new InteractionIdentity(new string('0', 64), 0)).Record!;
+        var bootstrap = LedgerBuilder.CreateBootstrap(
+            new BootstrapTransition(identities, 0, 1), context, outcome).Ledger!;
+
+        var originalSha = bootstrap.ContentSha256;
+        var originalBytes = bootstrap.ToCanonicalByteArray();
+
+        // Attempt to mutate the public Model's records via the documented
+        // "unsafe" interop helper.
+        var backing = ImmutableCollectionsMarshal.AsArray(bootstrap.Model.Records);
+        Assert.NotNull(backing);
+        backing![0] = bootstrap.Model.Records[1];
+
+        // Public byte accessor and hash remain unaffected.
+        Assert.Equal(originalSha, bootstrap.ContentSha256);
+        Assert.Equal(originalBytes, bootstrap.ToCanonicalByteArray());
+
+        // Extend the ledger by one continuation. The append must be driven by
+        // the internal private snapshot, not the (now-mutated) public Model.
+        var context2 = LedgerBuilder.BuildReviewContext(
+            new ValidatedContextSource(
+                ReviewedHeadSha: "1111111111111111111111111111111111111111",
+                ReviewedBaseSha: "2222222222222222222222222222222222222222",
+                ChangedFiles: ImmutableArray<ValidatedChangedFileSource>.Empty),
+            identities,
+            new InteractionIdentity(new string('0', 63) + "1", 1)).Record!;
+        var outcome2 = LedgerBuilder.BuildReviewOutcome(
+            new ValidatedOutcomeSource(
+                Summary: "Continuation",
+                Findings: ImmutableArray<ValidatedFindingSource>.Empty,
+                Limitations: ImmutableArray<string>.Empty),
+            new InteractionIdentity(new string('0', 63) + "1", 1)).Record!;
+        var cont = LedgerBuilder.AppendContinuation(
+            bootstrap,
+            new ContinuationTransition(identities, originalSha, 0, 1, 1),
+            context2,
+            outcome2);
+        // Must succeed. If AppendContinuation had consulted the mutated public
+        // Model, either the predecessor prefix equality or the ordinal chain
+        // would have been broken and the outcome would be a failure diagnostic.
+        Assert.NotNull(cont.Ledger);
+        Assert.Null(cont.Failure);
+    }
 }

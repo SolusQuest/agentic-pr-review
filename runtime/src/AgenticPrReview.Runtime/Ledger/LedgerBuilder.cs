@@ -162,10 +162,6 @@ public static class LedgerBuilder
 
     public static BuildOutcome AppendContinuation(ValidatedLedger predecessor, ContinuationTransition expected, ReviewContextRecord context, ReviewOutcomeRecord outcome)
     {
-        // Basic expected/predecessor checks
-        var predFailure = ContinuationSanityCheck(predecessor, expected);
-        if (predFailure is not null) return new BuildOutcome(null, predFailure);
-
         var header = BuildHeader(expected.Identities, "continuation",
             stateGeneration: expected.StateGeneration,
             ledgerEpoch: expected.LedgerEpoch,
@@ -173,7 +169,7 @@ public static class LedgerBuilder
             predecessorStateGeneration: expected.PredecessorStateGeneration);
 
         var records = ImmutableArray.CreateBuilder<LedgerRecord>();
-        foreach (var r in predecessor.Model.Records) records.Add(r);
+        foreach (var r in predecessor.PrivateModel.Records) records.Add(r);
         records.Add(new LedgerRecord(context, null));
         records.Add(new LedgerRecord(null, outcome));
         return AssembleAndValidate(header, records.ToImmutable(),
@@ -184,10 +180,6 @@ public static class LedgerBuilder
     {
         if (!IsValidResetReason(expected.ResetReason))
             return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.ResetReasonMissing));
-        if (predecessor.ContentSha256 != expected.PredecessorLedgerSha256)
-            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.PredecessorHashMismatch));
-        if (predecessor.Model.Header.StateGeneration != expected.PredecessorStateGeneration)
-            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.PredecessorGenerationMismatch));
         var header = BuildHeader(expected.Identities, "reset",
             stateGeneration: expected.StateGeneration,
             ledgerEpoch: expected.LedgerEpoch,
@@ -203,21 +195,10 @@ public static class LedgerBuilder
     // -----------------------------------------------------------------
     // Helpers
 
-    private static LedgerDiagnostic? ContinuationSanityCheck(ValidatedLedger predecessor, ContinuationTransition expected)
-    {
-        if (predecessor.ContentSha256 != expected.PredecessorLedgerSha256)
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.PredecessorHashMismatch);
-        if (predecessor.Model.Header.StateGeneration != expected.PredecessorStateGeneration)
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.PredecessorGenerationMismatch);
-        if (predecessor.Model.Header.LedgerEpoch != expected.LedgerEpoch)
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.LedgerEpochMismatch);
-        return null;
-    }
-
     private static LedgerHeader BuildHeader(
         ExpectedIdentities i, string kind,
-        int stateGeneration, int ledgerEpoch, string predecessor,
-        int? predecessorStateGeneration = null,
+        long stateGeneration, long ledgerEpoch, string predecessor,
+        long? predecessorStateGeneration = null,
         string? predecessorManifestSha256 = null,
         string? resetReason = null,
         string? recoveryReason = null)
@@ -315,39 +296,66 @@ public static class LedgerBuilder
 
     private static (int TotalProperties, int MaxArrayLength) CountStructural(LedgerHeader header, ImmutableArray<LedgerRecord> records)
     {
-        // Header properties (present ones only).
-        var headerProps = 15;
+        // These counts must equal the exact number of "key":value pairs emitted
+        // by LedgerCanonicalizer.WriteLedger. Any drift breaks the builder-level
+        // composite cause precedence.
+
+        // Top-level: schemaVersion, prefixContractVersion, header, records.
+        var total = 4;
+
+        // Header canonical writer always emits 17 base properties (see LedgerCanonicalizer.WriteHeader).
+        var headerProps = 17;
         if (header.PredecessorStateGeneration is not null) headerProps++;
         if (header.PredecessorManifestSha256 is not null) headerProps++;
         if (header.ResetReason is not null) headerProps++;
         if (header.RecoveryReason is not null) headerProps++;
-        var total = 4 /* schemaVersion, prefixContractVersion, header:object, records:array */ + headerProps;
+        total += headerProps;
+
+        // Track the maximum array length across the ledger. records itself is
+        // the top-level array.
         var maxArrayLen = records.Length;
+
         foreach (var rec in records)
         {
             if (rec.Context is ReviewContextRecord ctx)
             {
-                total += 8; // role, interactionId, interactionOrdinal, reviewedHeadSha, reviewedBaseSha, subjectDigest, cacheContractDigest, changedFiles
+                // Context canonical writer emits 8 base properties:
+                // role, interactionId, interactionOrdinal,
+                // reviewedHeadSha, reviewedBaseSha, subjectDigest,
+                // cacheContractDigest, changedFiles.
+                total += 8;
                 maxArrayLen = Math.Max(maxArrayLen, ctx.ChangedFiles.Length);
                 foreach (var f in ctx.ChangedFiles)
                 {
-                    var fProps = 6; // path, status, additions, deletions, changes plus one for the file object being counted as a property? Actually file properties: path, status, additions, deletions, changes, patch/previousPath.
+                    // Changed-file canonical writer emits 5 base properties:
+                    // path, status, additions, deletions, changes.
+                    var fProps = 5;
                     if (f.PreviousPath is not null) fProps++;
-                    if (f.Patch is not null) { fProps++; total += 3; /* sha256, truncated, maxChars */ }
+                    if (f.Patch is not null)
+                    {
+                        fProps++;
+                        // Patch envelope: sha256, truncated, maxChars.
+                        total += 3;
+                    }
                     total += fProps;
                 }
             }
             if (rec.Outcome is ReviewOutcomeRecord oc)
             {
-                total += 5; // role, interactionId, interactionOrdinal, summary, findings, limitations
+                // Outcome canonical writer emits 6 base properties:
+                // role, interactionId, interactionOrdinal, summary,
+                // findings, limitations.
+                total += 6;
                 maxArrayLen = Math.Max(maxArrayLen, oc.Findings.Length);
                 maxArrayLen = Math.Max(maxArrayLen, oc.Limitations.Length);
                 foreach (var f in oc.Findings)
                 {
-                    var fProps = 5; // severity, confidence, category, title, body
-                    if (f.Path is not null) fProps++;
-                    if (f.StartLine is not null) fProps++;
-                    if (f.EndLine is not null) fProps++;
+                    // Finding canonical writer emits 5 base properties (severity,
+                    // confidence, category, title, body) plus path / startLine /
+                    // endLine which are always serialized (null-explicit) and
+                    // evidence / suggestedAction / inlinePreference which are
+                    // omitted when null.
+                    var fProps = 5 + 3;
                     if (f.Evidence is not null) fProps++;
                     if (f.SuggestedAction is not null) fProps++;
                     if (f.InlinePreference is not null) fProps++;
@@ -386,9 +394,10 @@ public static class LedgerBuilder
         var preflight = PreflightCandidate(header, records);
         if (preflight is not null) return new BuildOutcome(null, preflight);
 
-        // Steps 2-3: property-count and array-length. We estimate both from
-        // the structured model before serialization so the frozen precedence
-        // is preserved even if the canonical bytes would exceed the byte cap.
+        // Steps 2-3: property-count and array-length. Values are computed from
+        // the structured model with counts that match the canonical writer
+        // exactly, so the frozen precedence is preserved even if the canonical
+        // bytes would also exceed the 256 KiB byte cap.
         var (totalProperties, maxArrayLength) = CountStructural(header, records);
         if (totalProperties > LedgerLimits.MaxTotalProperties)
         {
@@ -412,18 +421,25 @@ public static class LedgerBuilder
         // property-count / array-length failures raised deep inside the
         // ledger surface as their specific causeCode rather than being
         // masked by a byte-limit rejection.
+        // Step 4 explicit: canonical byte cap (256 KiB) is checked BEFORE the
+        // raw byte cap (512 KiB) that ParseAndValidate would report first.
+        // Otherwise a 512+ KiB candidate would surface as raw_byte_limit_exceeded,
+        // which is not one of the four allowed causes.
+        if (canonical.Length > LedgerLimits.MaxCanonicalBytes)
+        {
+            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(
+                LedgerDiagnosticCodes.OverBoundAppend, LedgerDiagnosticCodes.CanonicalByteLimitExceeded));
+        }
+
         var parseResult = LedgerParser.ParseAndValidate(canonical);
         if (parseResult.Failure is not null)
         {
             var fail = parseResult.Failure;
-            if (fail.Code == LedgerDiagnosticCodes.JsonPropertyCountExceeded ||
+            // Only the four frozen causes may be wrapped as over-bound-append.
+            if (fail.Code == LedgerDiagnosticCodes.InteractionLimitExceeded ||
+                fail.Code == LedgerDiagnosticCodes.JsonPropertyCountExceeded ||
                 fail.Code == LedgerDiagnosticCodes.JsonArrayLengthExceeded ||
-                fail.Code == LedgerDiagnosticCodes.InteractionLimitExceeded ||
-                fail.Code == LedgerDiagnosticCodes.ChangedFileLimitExceeded ||
-                fail.Code == LedgerDiagnosticCodes.FindingLimitExceeded ||
-                fail.Code == LedgerDiagnosticCodes.LimitationsLimitExceeded ||
-                fail.Code == LedgerDiagnosticCodes.CanonicalByteLimitExceeded ||
-                fail.Code == LedgerDiagnosticCodes.RawByteLimitExceeded)
+                fail.Code == LedgerDiagnosticCodes.CanonicalByteLimitExceeded)
             {
                 return new BuildOutcome(null, LedgerDiagnosticMessages.Of(
                     LedgerDiagnosticCodes.OverBoundAppend, fail.Code));
@@ -523,8 +539,9 @@ public static class LedgerBuilder
         return true;
     }
 
-    private static bool HasInvalidUnicode(string s)
+    private static bool HasInvalidUnicode(string? s)
     {
+        if (s is null) return true;
         for (var i = 0; i < s.Length; i++)
         {
             var ch = s[i];

@@ -13,44 +13,44 @@ public static class LedgerAppend
 {
     public static TransitionOutcome ValidateBootstrap(ValidatedLedger candidate, BootstrapTransition expected)
     {
-        if (candidate.Model.Header.Kind != "bootstrap")
+        if (candidate.PrivateModel.Header.Kind != "bootstrap")
             return Fail(LedgerDiagnosticCodes.TransitionKindMismatch);
 
         var common = CommonCrossChecks(candidate, expected);
         if (common is not null) return new TransitionOutcome(null, common);
 
         // Records: exactly one pair, ordinal 0.
-        if (candidate.Model.Records.Length != 2)
+        if (candidate.PrivateModel.Records.Length != 2)
             return Fail(LedgerDiagnosticCodes.BootstrapShapeViolation);
-        if (candidate.Model.Records[0].InteractionOrdinal != 0)
+        if (candidate.PrivateModel.Records[0].InteractionOrdinal != 0)
             return Fail(LedgerDiagnosticCodes.BootstrapShapeViolation);
         return new TransitionOutcome(candidate, null);
     }
 
     public static TransitionOutcome ValidateRecovery(ValidatedLedger candidate, RecoveryTransition expected)
     {
-        if (candidate.Model.Header.Kind != "recovery")
+        if (candidate.PrivateModel.Header.Kind != "recovery")
             return Fail(LedgerDiagnosticCodes.TransitionKindMismatch);
 
         var common = CommonCrossChecks(candidate, expected);
         if (common is not null) return new TransitionOutcome(null, common);
 
-        if (candidate.Model.Header.RecoveryReason != expected.RecoveryReason)
+        if (candidate.PrivateModel.Header.RecoveryReason != expected.RecoveryReason)
             return Fail(LedgerDiagnosticCodes.RecoveryReasonMismatch);
-        if (candidate.Model.Records.Length != 2)
+        if (candidate.PrivateModel.Records.Length != 2)
             return Fail(LedgerDiagnosticCodes.RecoveryShapeViolation);
-        if (candidate.Model.Records[0].InteractionOrdinal != 0)
+        if (candidate.PrivateModel.Records[0].InteractionOrdinal != 0)
             return Fail(LedgerDiagnosticCodes.RecoveryShapeViolation);
         return new TransitionOutcome(candidate, null);
     }
 
     public static TransitionOutcome ValidateContinuation(ValidatedLedger predecessor, ValidatedLedger candidate, ContinuationTransition expected)
     {
-        if (candidate.Model.Header.Kind != "continuation")
+        if (candidate.PrivateModel.Header.Kind != "continuation")
             return Fail(LedgerDiagnosticCodes.TransitionKindMismatch);
 
         // Predecessor identities match expected.
-        if (!IdentitiesEqual(predecessor.Model.Header, expected.Identities))
+        if (!IdentitiesEqual(predecessor.PrivateModel.Header, expected.Identities))
             return Fail(LedgerDiagnosticCodes.IdentityMismatch);
 
         var common = CommonCrossChecks(candidate, expected);
@@ -58,18 +58,18 @@ public static class LedgerAppend
 
         if (expected.PredecessorLedgerSha256 != predecessor.ContentSha256)
             return Fail(LedgerDiagnosticCodes.PredecessorHashMismatch);
-        if (candidate.Model.Header.PredecessorLedgerSha256 != predecessor.ContentSha256)
+        if (candidate.PrivateModel.Header.PredecessorLedgerSha256 != predecessor.ContentSha256)
             return Fail(LedgerDiagnosticCodes.PredecessorHashMismatch);
-        if (expected.PredecessorStateGeneration != predecessor.Model.Header.StateGeneration)
+        if (expected.PredecessorStateGeneration != predecessor.PrivateModel.Header.StateGeneration)
             return Fail(LedgerDiagnosticCodes.PredecessorGenerationMismatch);
-        if (candidate.Model.Header.PredecessorStateGeneration != predecessor.Model.Header.StateGeneration)
+        if (candidate.PrivateModel.Header.PredecessorStateGeneration != predecessor.PrivateModel.Header.StateGeneration)
             return Fail(LedgerDiagnosticCodes.PredecessorGenerationMismatch);
-        if (candidate.Model.Header.LedgerEpoch != predecessor.Model.Header.LedgerEpoch)
+        if (candidate.PrivateModel.Header.LedgerEpoch != predecessor.PrivateModel.Header.LedgerEpoch)
             return Fail(LedgerDiagnosticCodes.LedgerEpochMismatch);
 
         // Records prefix element-for-element (structural).
-        var predRecs = predecessor.Model.Records;
-        var candRecs = candidate.Model.Records;
+        var predRecs = predecessor.PrivateModel.Records;
+        var candRecs = candidate.PrivateModel.Records;
         if (candRecs.Length != predRecs.Length + 2)
             return Fail(LedgerDiagnosticCodes.ContinuationPrefixMismatch);
         for (var i = 0; i < predRecs.Length; i++)
@@ -87,35 +87,35 @@ public static class LedgerAppend
 
     public static TransitionOutcome ValidateReset(ValidatedLedger predecessor, ValidatedLedger candidate, ResetTransition expected)
     {
-        if (candidate.Model.Header.Kind != "reset")
+        if (candidate.PrivateModel.Header.Kind != "reset")
             return Fail(LedgerDiagnosticCodes.TransitionKindMismatch);
 
         // Predecessor session-scope must match expected/current.
-        if (!SessionScopeEqual(predecessor.Model.Header, expected.Identities))
+        if (!SessionScopeEqual(predecessor.PrivateModel.Header, expected.Identities))
             return Fail(LedgerDiagnosticCodes.IdentityMismatch);
         // Candidate identities must equal expected.
-        if (!IdentitiesEqual(candidate.Model.Header, expected.Identities))
+        if (!IdentitiesEqual(candidate.PrivateModel.Header, expected.Identities))
             return Fail(LedgerDiagnosticCodes.IdentityMismatch);
-        if (candidate.Model.Header.StateGeneration != expected.StateGeneration)
+        if (candidate.PrivateModel.Header.StateGeneration != expected.StateGeneration)
             return Fail(LedgerDiagnosticCodes.StateGenerationMismatch);
-        if (candidate.Model.Header.LedgerEpoch != expected.LedgerEpoch)
+        if (candidate.PrivateModel.Header.LedgerEpoch != expected.LedgerEpoch)
             return Fail(LedgerDiagnosticCodes.LedgerEpochMismatch);
 
         if (expected.PredecessorLedgerSha256 != predecessor.ContentSha256 ||
-            candidate.Model.Header.PredecessorLedgerSha256 != predecessor.ContentSha256)
+            candidate.PrivateModel.Header.PredecessorLedgerSha256 != predecessor.ContentSha256)
             return Fail(LedgerDiagnosticCodes.PredecessorHashMismatch);
-        if (expected.PredecessorStateGeneration != predecessor.Model.Header.StateGeneration ||
-            candidate.Model.Header.PredecessorStateGeneration != predecessor.Model.Header.StateGeneration)
+        if (expected.PredecessorStateGeneration != predecessor.PrivateModel.Header.StateGeneration ||
+            candidate.PrivateModel.Header.PredecessorStateGeneration != predecessor.PrivateModel.Header.StateGeneration)
             return Fail(LedgerDiagnosticCodes.PredecessorGenerationMismatch);
-        if (candidate.Model.Header.PredecessorManifestSha256 != expected.PredecessorManifestSha256)
+        if (candidate.PrivateModel.Header.PredecessorManifestSha256 != expected.PredecessorManifestSha256)
             return Fail(LedgerDiagnosticCodes.PredecessorManifestHashMismatch);
-        if (candidate.Model.Header.LedgerEpoch == predecessor.Model.Header.LedgerEpoch)
+        if (candidate.PrivateModel.Header.LedgerEpoch == predecessor.PrivateModel.Header.LedgerEpoch)
             return Fail(LedgerDiagnosticCodes.ResetEpochNotFresh);
-        if (candidate.Model.Header.ResetReason != expected.ResetReason)
+        if (candidate.PrivateModel.Header.ResetReason != expected.ResetReason)
             return Fail(LedgerDiagnosticCodes.ResetReasonMismatch);
-        if (candidate.Model.Records.Length != 2)
+        if (candidate.PrivateModel.Records.Length != 2)
             return Fail(LedgerDiagnosticCodes.ResetRecordsShapeMismatch);
-        if (candidate.Model.Records[0].InteractionOrdinal != 0)
+        if (candidate.PrivateModel.Records[0].InteractionOrdinal != 0)
             return Fail(LedgerDiagnosticCodes.ResetRecordsShapeMismatch);
         return new TransitionOutcome(candidate, null);
     }
@@ -125,11 +125,11 @@ public static class LedgerAppend
 
     private static LedgerDiagnostic? CommonCrossChecks(ValidatedLedger candidate, ExpectedTransition expected)
     {
-        if (!IdentitiesEqual(candidate.Model.Header, expected.Identities))
+        if (!IdentitiesEqual(candidate.PrivateModel.Header, expected.Identities))
             return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.IdentityMismatch);
-        if (candidate.Model.Header.StateGeneration != expected.GetStateGeneration())
+        if (candidate.PrivateModel.Header.StateGeneration != expected.GetStateGeneration())
             return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.StateGenerationMismatch);
-        if (candidate.Model.Header.LedgerEpoch != expected.GetLedgerEpoch())
+        if (candidate.PrivateModel.Header.LedgerEpoch != expected.GetLedgerEpoch())
             return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.LedgerEpochMismatch);
         return null;
     }
