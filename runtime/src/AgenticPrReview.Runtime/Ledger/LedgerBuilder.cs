@@ -246,20 +246,159 @@ public static class LedgerBuilder
             RecoveryReason: recoveryReason);
     }
 
+    private static LedgerDiagnostic? PreflightCandidate(LedgerHeader header, ImmutableArray<LedgerRecord> records)
+    {
+        // Header identity strings
+        var identityStrings = new[]
+        {
+            header.Kind,
+            header.Repository, header.HeadRepository,
+            header.WorkflowIdentity, header.TrustedExecutionDomain, header.SessionEpoch,
+            header.ProviderId, header.ModelId,
+            header.AdapterId, header.TemplateId, header.PolicyId, header.ToolDefinitionId, header.CacheConfigId,
+            header.PredecessorLedgerSha256,
+        };
+        foreach (var s in identityStrings)
+        {
+            if (HasInvalidUnicode(s)) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+        }
+        if (header.PredecessorManifestSha256 is not null && HasInvalidUnicode(header.PredecessorManifestSha256))
+            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+        if (header.ResetReason is not null && HasInvalidUnicode(header.ResetReason))
+            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+        if (header.RecoveryReason is not null && HasInvalidUnicode(header.RecoveryReason))
+            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+
+        // Records: verify every user-visible string.
+        foreach (var rec in records)
+        {
+            if (rec.Context is ReviewContextRecord ctx)
+            {
+                if (HasInvalidUnicode(ctx.InteractionId) ||
+                    HasInvalidUnicode(ctx.ReviewedHeadSha) ||
+                    HasInvalidUnicode(ctx.ReviewedBaseSha) ||
+                    HasInvalidUnicode(ctx.SubjectDigest) ||
+                    HasInvalidUnicode(ctx.CacheContractDigest))
+                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+                foreach (var f in ctx.ChangedFiles)
+                {
+                    if (HasInvalidUnicode(f.Path) || HasInvalidUnicode(f.Status) ||
+                        (f.PreviousPath is not null && HasInvalidUnicode(f.PreviousPath)))
+                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+                    if (f.Patch is not null && HasInvalidUnicode(f.Patch.Sha256))
+                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+                }
+            }
+            if (rec.Outcome is ReviewOutcomeRecord oc)
+            {
+                if (HasInvalidUnicode(oc.InteractionId) || HasInvalidUnicode(oc.Summary))
+                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+                foreach (var f in oc.Findings)
+                {
+                    if (HasInvalidUnicode(f.Severity) || HasInvalidUnicode(f.Confidence) ||
+                        HasInvalidUnicode(f.Category) || HasInvalidUnicode(f.Title) ||
+                        HasInvalidUnicode(f.Body) ||
+                        (f.Path is not null && HasInvalidUnicode(f.Path)) ||
+                        (f.Evidence is not null && HasInvalidUnicode(f.Evidence)) ||
+                        (f.SuggestedAction is not null && HasInvalidUnicode(f.SuggestedAction)) ||
+                        (f.InlinePreference is not null && HasInvalidUnicode(f.InlinePreference)))
+                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+                }
+                foreach (var l in oc.Limitations)
+                {
+                    if (HasInvalidUnicode(l)) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+                }
+            }
+        }
+        return null;
+    }
+
+    private static (int TotalProperties, int MaxArrayLength) CountStructural(LedgerHeader header, ImmutableArray<LedgerRecord> records)
+    {
+        // Header properties (present ones only).
+        var headerProps = 15;
+        if (header.PredecessorStateGeneration is not null) headerProps++;
+        if (header.PredecessorManifestSha256 is not null) headerProps++;
+        if (header.ResetReason is not null) headerProps++;
+        if (header.RecoveryReason is not null) headerProps++;
+        var total = 4 /* schemaVersion, prefixContractVersion, header:object, records:array */ + headerProps;
+        var maxArrayLen = records.Length;
+        foreach (var rec in records)
+        {
+            if (rec.Context is ReviewContextRecord ctx)
+            {
+                total += 8; // role, interactionId, interactionOrdinal, reviewedHeadSha, reviewedBaseSha, subjectDigest, cacheContractDigest, changedFiles
+                maxArrayLen = Math.Max(maxArrayLen, ctx.ChangedFiles.Length);
+                foreach (var f in ctx.ChangedFiles)
+                {
+                    var fProps = 6; // path, status, additions, deletions, changes plus one for the file object being counted as a property? Actually file properties: path, status, additions, deletions, changes, patch/previousPath.
+                    if (f.PreviousPath is not null) fProps++;
+                    if (f.Patch is not null) { fProps++; total += 3; /* sha256, truncated, maxChars */ }
+                    total += fProps;
+                }
+            }
+            if (rec.Outcome is ReviewOutcomeRecord oc)
+            {
+                total += 5; // role, interactionId, interactionOrdinal, summary, findings, limitations
+                maxArrayLen = Math.Max(maxArrayLen, oc.Findings.Length);
+                maxArrayLen = Math.Max(maxArrayLen, oc.Limitations.Length);
+                foreach (var f in oc.Findings)
+                {
+                    var fProps = 5; // severity, confidence, category, title, body
+                    if (f.Path is not null) fProps++;
+                    if (f.StartLine is not null) fProps++;
+                    if (f.EndLine is not null) fProps++;
+                    if (f.Evidence is not null) fProps++;
+                    if (f.SuggestedAction is not null) fProps++;
+                    if (f.InlinePreference is not null) fProps++;
+                    total += fProps;
+                }
+            }
+        }
+        return (total, maxArrayLen);
+    }
+
     private static BuildOutcome AssembleAndValidate(
         LedgerHeader header,
         ImmutableArray<LedgerRecord> records,
         Func<ValidatedLedger, TransitionOutcome> transitionValidator)
     {
-        // Builder-level cause precedence (frozen order):
-        //   1. interaction limit
-        //   2. structural array/property caps (raised by canonical re-parse)
-        //   3. canonical byte limit
-        // Interaction limit is checked structurally before serialization.
+        // Builder-level composite cause precedence (frozen order, refined issue Ā9):
+        //   1. ledger_interaction_limit_exceeded
+        //   2. ledger_json_property_count_exceeded
+        //   3. ledger_json_array_length_exceeded
+        //   4. ledger_canonical_byte_limit_exceeded
+        // We enforce each level explicitly here so a later stage cannot mask an
+        // earlier failure.
+        //
+        // Step 1: interaction limit.
         if (records.Length / 2 > LedgerLimits.MaxInteractionPairs)
         {
             return new BuildOutcome(null, LedgerDiagnosticMessages.Of(
                 LedgerDiagnosticCodes.OverBoundAppend, LedgerDiagnosticCodes.InteractionLimitExceeded));
+        }
+
+        // Preflight: run every downstream invariant on caller-constructed
+        // records before we feed them to the canonicalizer. The canonicalizer
+        // throws on lone-surrogate strings and does not know about our identity
+        // caps, so any invalid input we would otherwise surface as a specific
+        // diagnostic code must be caught here.
+        var preflight = PreflightCandidate(header, records);
+        if (preflight is not null) return new BuildOutcome(null, preflight);
+
+        // Steps 2-3: property-count and array-length. We estimate both from
+        // the structured model before serialization so the frozen precedence
+        // is preserved even if the canonical bytes would exceed the byte cap.
+        var (totalProperties, maxArrayLength) = CountStructural(header, records);
+        if (totalProperties > LedgerLimits.MaxTotalProperties)
+        {
+            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(
+                LedgerDiagnosticCodes.OverBoundAppend, LedgerDiagnosticCodes.JsonPropertyCountExceeded));
+        }
+        if (maxArrayLength > LedgerLimits.MaxArrayLength)
+        {
+            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(
+                LedgerDiagnosticCodes.OverBoundAppend, LedgerDiagnosticCodes.JsonArrayLengthExceeded));
         }
 
         var model = new LedgerModel(1, 1, header, records);

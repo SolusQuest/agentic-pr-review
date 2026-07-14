@@ -23,13 +23,13 @@ internal static partial class Program
 
     private static byte[] MakeNulInSummary(ValidatedLedger bootstrap)
     {
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         return Encoding.UTF8.GetBytes(text.Replace("Bootstrap review complete.", "Bootstrap\\u0000complete"));
     }
 
     private static byte[] MakeLoneSurrogate(ValidatedLedger bootstrap)
     {
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         return Encoding.UTF8.GetBytes(text.Replace("Bootstrap review complete.", "Bootstrap\\uD800complete"));
     }
 
@@ -101,27 +101,27 @@ internal static partial class Program
 
     private static byte[] MakeUnknownHeaderField(ValidatedLedger bootstrap)
     {
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         var idx = text.IndexOf("\"header\":{", StringComparison.Ordinal) + "\"header\":{".Length;
         return Encoding.UTF8.GetBytes(text.Substring(0, idx) + "\"extraField\":\"x\"," + text.Substring(idx));
     }
 
     private static byte[] MakeOverlongSummary(ValidatedLedger bootstrap)
     {
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         var oversize = new string('y', LedgerLimits.MaxSummaryChars + 100);
         return Encoding.UTF8.GetBytes(text.Replace("Bootstrap review complete.", oversize));
     }
 
     private static byte[] MakeUnsupportedSchemaVersion(ValidatedLedger bootstrap)
     {
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         return Encoding.UTF8.GetBytes(text.Replace("\"schemaVersion\":1", "\"schemaVersion\":99"));
     }
 
     private static byte[] MakeUnsupportedPrefixContractVersion(ValidatedLedger bootstrap)
     {
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         return Encoding.UTF8.GetBytes(text.Replace("\"prefixContractVersion\":1", "\"prefixContractVersion\":99"));
     }
 
@@ -132,7 +132,7 @@ internal static partial class Program
 
     private static byte[] MakeAbsolutePathInFinding(ValidatedLedger bootstrap)
     {
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         var mutated = text.Replace(
             "\"findings\":[]",
             "\"findings\":[{\"body\":\"body text\",\"category\":\"correctness\",\"confidence\":\"medium\",\"endLine\":null,\"path\":\"/etc/passwd\",\"severity\":\"low\",\"startLine\":null,\"title\":\"Absolute path\"}]");
@@ -141,20 +141,20 @@ internal static partial class Program
 
     private static byte[] MakeIdentityByteLengthExceeded(ValidatedLedger bootstrap)
     {
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         var big = new string('\u00E9', 200);
         return Encoding.UTF8.GetBytes(text.Replace("\"workflowIdentity\":\"acme/example/.github/workflows/ci.yml\"", "\"workflowIdentity\":\"" + big + "\""));
     }
 
     private static byte[] MakeControlCharInIdentity(ValidatedLedger bootstrap)
     {
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         return Encoding.UTF8.GetBytes(text.Replace("\"workflowIdentity\":\"acme/example/.github/workflows/ci.yml\"", "\"workflowIdentity\":\"acme\\u0001example\""));
     }
 
     private static byte[] MakeUnsupportedChangeStatus(ValidatedLedger bootstrap)
     {
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         return Encoding.UTF8.GetBytes(text.Replace("\"status\":\"modified\"", "\"status\":\"weird\""));
     }
 
@@ -165,7 +165,7 @@ internal static partial class Program
         // schema-valid, so the pipeline advances past schema evaluation and rejects it
         // with ledger_non_canonical.
         var bootstrap = BuildBootstrap();
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         // The canonical form ends with ,"schemaVersion":1}
         var mutated = "{\"schemaVersion\":1," + text.Substring(1);
         // Now remove the trailing ,"schemaVersion":1 that appears just before the final }
@@ -179,13 +179,13 @@ internal static partial class Program
 
     private static byte[] MakeNonCanonicalStringEscape(ValidatedLedger bootstrap)
     {
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         return Encoding.UTF8.GetBytes(text.Replace("Bootstrap review complete.", "Bootstr\\u0041p complete."));
     }
 
     private static byte[] MakeRecordsEmpty(ValidatedLedger bootstrap)
     {
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         var startIdx = text.IndexOf("\"records\":[");
         var end = FindMatchingBracket(text, startIdx + "\"records\":".Length);
         return Encoding.UTF8.GetBytes(text.Substring(0, startIdx + "\"records\":".Length) + "[]" + text.Substring(end + 1));
@@ -196,7 +196,7 @@ internal static partial class Program
         // Start from a valid 2-record ledger and duplicate the first record so we have
         // 3 records total. schema minItems=2 is satisfied, but the semantic invariant
         // "records.Length is even" fires.
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         var arrayStart = text.IndexOf("\"records\":[") + "\"records\":".Length;
         var arrayEnd = FindMatchingBracket(text, arrayStart);
         var body = text.Substring(arrayStart + 1, arrayEnd - arrayStart - 1);
@@ -208,7 +208,7 @@ internal static partial class Program
     private static byte[] MakeOrdinalGap(ValidatedLedger bootstrap)
     {
         var continuation = BuildContinuation(bootstrap);
-        var text = Encoding.UTF8.GetString(continuation.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(continuation.ToCanonicalByteArray());
         return Encoding.UTF8.GetBytes(text.Replace("\"interactionOrdinal\":1", "\"interactionOrdinal\":2"));
     }
 
@@ -217,7 +217,7 @@ internal static partial class Program
         // Force the second pair's interactionId to match the first pair's so parser sees
         // two ordered pairs with distinct ordinals but a shared interactionId.
         var continuation = BuildContinuation(bootstrap);
-        var text = Encoding.UTF8.GetString(continuation.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(continuation.ToCanonicalByteArray());
         var id0 = "00000000" + new string('0', 56);
         var id1 = "00000001" + new string('0', 56);
         return Encoding.UTF8.GetBytes(text.Replace(id1, id0));
@@ -225,7 +225,7 @@ internal static partial class Program
 
     private static byte[] MakePairOrderSwapped(ValidatedLedger bootstrap)
     {
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         var arrayStart = text.IndexOf("\"records\":[") + "\"records\":".Length;
         var arrayEnd = FindMatchingBracket(text, arrayStart);
         var body = text.Substring(arrayStart + 1, arrayEnd - arrayStart - 1);
@@ -236,7 +236,7 @@ internal static partial class Program
 
     private static byte[] MakeDigestMismatch(ValidatedLedger bootstrap)
     {
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         // Replace subjectDigest value with a distinct 64-hex string.
         var replacement = new string('0', 64);
         var idx = text.IndexOf("\"subjectDigest\":\"");
@@ -246,46 +246,46 @@ internal static partial class Program
 
     private static byte[] MakeBootstrapNonzeroGeneration(ValidatedLedger bootstrap)
     {
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         return Encoding.UTF8.GetBytes(text.Replace("\"stateGeneration\":0", "\"stateGeneration\":3"));
     }
 
     private static byte[] MakeRecoveryMissingReason(ValidatedLedger recovery)
     {
-        var text = Encoding.UTF8.GetString(recovery.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(recovery.ToCanonicalByteArray());
         return DropField(text, "recoveryReason");
     }
 
     private static byte[] MakeResetMissingReason(ValidatedLedger reset)
     {
-        var text = Encoding.UTF8.GetString(reset.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(reset.ToCanonicalByteArray());
         return DropField(text, "resetReason");
     }
 
     private static byte[] MakeResetForbiddenField(ValidatedLedger reset)
     {
-        var text = Encoding.UTF8.GetString(reset.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(reset.ToCanonicalByteArray());
         var idx = text.IndexOf("\"resetReason\":");
         return Encoding.UTF8.GetBytes(text.Substring(0, idx) + "\"recoveryReason\":\"predecessor_unavailable\"," + text.Substring(idx));
     }
 
     private static byte[] MakeContinuationForbiddenField(ValidatedLedger continuation)
     {
-        var text = Encoding.UTF8.GetString(continuation.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(continuation.ToCanonicalByteArray());
         var idx = text.IndexOf("\"repository\":");
         return Encoding.UTF8.GetBytes(text.Substring(0, idx) + "\"recoveryReason\":\"predecessor_unavailable\"," + text.Substring(idx));
     }
 
     private static byte[] MakeRecoveryForbiddenField(ValidatedLedger recovery)
     {
-        var text = Encoding.UTF8.GetString(recovery.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(recovery.ToCanonicalByteArray());
         var idx = text.IndexOf("\"sessionEpoch\":");
         return Encoding.UTF8.GetBytes(text.Substring(0, idx) + "\"resetReason\":\"base_changed\"," + text.Substring(idx));
     }
 
     private static byte[] MakeRecordRoleTool(ValidatedLedger bootstrap)
     {
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         var idx = text.IndexOf("\"role\":\"review_context\"");
         var replaced = text.Substring(0, idx) + "\"role\":\"tool\"" + text.Substring(idx + "\"role\":\"review_context\"".Length);
         return Encoding.UTF8.GetBytes(replaced);
@@ -294,7 +294,7 @@ internal static partial class Program
     private static byte[] MakeFindingLineRangeInvalid()
     {
         var bootstrap = BuildBootstrap();
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         var finding = "{\"body\":\"b\",\"category\":\"correctness\",\"confidence\":\"medium\",\"endLine\":1,\"path\":\"src/a.cs\",\"severity\":\"low\",\"startLine\":5,\"title\":\"t\"}";
         return Encoding.UTF8.GetBytes(text.Replace("\"findings\":[]", "\"findings\":[" + finding + "]"));
     }
@@ -302,7 +302,7 @@ internal static partial class Program
     private static byte[] MakeFindingLocationMismatch()
     {
         var bootstrap = BuildBootstrap();
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         var finding = "{\"body\":\"b\",\"category\":\"correctness\",\"confidence\":\"medium\",\"endLine\":null,\"path\":\"src/a.cs\",\"severity\":\"low\",\"startLine\":5,\"title\":\"t\"}";
         return Encoding.UTF8.GetBytes(text.Replace("\"findings\":[]", "\"findings\":[" + finding + "]"));
     }
@@ -310,7 +310,7 @@ internal static partial class Program
     private static byte[] MakeFindingLocationMissingPath()
     {
         var bootstrap = BuildBootstrap();
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         var finding = "{\"body\":\"b\",\"category\":\"correctness\",\"confidence\":\"medium\",\"endLine\":10,\"path\":null,\"severity\":\"low\",\"startLine\":5,\"title\":\"t\"}";
         return Encoding.UTF8.GetBytes(text.Replace("\"findings\":[]", "\"findings\":[" + finding + "]"));
     }
@@ -318,7 +318,7 @@ internal static partial class Program
     private static byte[] MakeInteractionLimitExceeded()
     {
         var max = BuildMaxInteractions();
-        var text = Encoding.UTF8.GetString(max.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(max.ToCanonicalByteArray());
         var arrayStart = text.IndexOf("\"records\":[") + "\"records\":".Length;
         var arrayEnd = FindMatchingBracket(text, arrayStart);
         var body = text.Substring(arrayStart + 1, arrayEnd - arrayStart - 1);
@@ -334,7 +334,7 @@ internal static partial class Program
     private static byte[] MakeChangedFileLimitExceeded()
     {
         var bootstrap = BuildBootstrap();
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         var sb = new StringBuilder("[");
         for (var i = 0; i < 201; i++)
         {
@@ -348,7 +348,7 @@ internal static partial class Program
     private static byte[] MakeFindingLimitExceeded()
     {
         var bootstrap = BuildBootstrap();
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         var sb = new StringBuilder("[");
         for (var i = 0; i < 51; i++)
         {
@@ -362,7 +362,7 @@ internal static partial class Program
     private static byte[] MakeLimitationsLimitExceeded()
     {
         var bootstrap = BuildBootstrap();
-        var text = Encoding.UTF8.GetString(bootstrap.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(bootstrap.ToCanonicalByteArray());
         var sb = new StringBuilder("[");
         for (var i = 0; i < 17; i++)
         {
@@ -379,7 +379,7 @@ internal static partial class Program
         // so canonical bytes cross 256 KiB. Manual JSON assembly since the builder rejects
         // over-bound candidates.
         var max = BuildMaxInteractions();
-        var text = Encoding.UTF8.GetString(max.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(max.ToCanonicalByteArray());
         var body4000 = new string('x', LedgerLimits.MaxFindingBodyChars);
         var findings = new System.Text.StringBuilder("[");
         // 4 findings per outcome × 32 outcomes = 128 findings; each ~4100 bytes; total ~524 KB.
@@ -406,7 +406,7 @@ internal static partial class Program
         var realBootstrap = BuildBootstrap();
         var altBootstrap = BuildAltBootstrap();
         var altContinuation = BuildContinuationFrom(altBootstrap);
-        var text = Encoding.UTF8.GetString(altContinuation.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(altContinuation.ToCanonicalByteArray());
         var mutated = text.Replace(altBootstrap.ContentSha256, realBootstrap.ContentSha256);
         return Reparse(mutated, "continuation-modified-history");
     }
@@ -430,7 +430,7 @@ internal static partial class Program
 
     private static ValidatedLedger MutatePredecessorHash(ValidatedLedger continuation)
     {
-        var text = Encoding.UTF8.GetString(continuation.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(continuation.ToCanonicalByteArray());
         var idx = text.IndexOf("\"predecessorLedgerSha256\":\"");
         var start = idx + "\"predecessorLedgerSha256\":\"".Length;
         var mutated = text.Substring(0, start) + new string('f', 64) + text.Substring(start + 64);
@@ -439,7 +439,7 @@ internal static partial class Program
 
     private static ValidatedLedger MutateCacheContract(ValidatedLedger continuation)
     {
-        var text = Encoding.UTF8.GetString(continuation.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(continuation.ToCanonicalByteArray());
         // Change the adapterId to a different valid 64-hex string. Also update
         // cacheContractDigest values in records to match so digest checks still pass.
         var newAdapter = new string('f', 64);
@@ -461,14 +461,14 @@ internal static partial class Program
 
     private static ValidatedLedger MutateLedgerEpoch(ValidatedLedger continuation)
     {
-        var text = Encoding.UTF8.GetString(continuation.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(continuation.ToCanonicalByteArray());
         var mutated = text.Replace("\"ledgerEpoch\":1", "\"ledgerEpoch\":9");
         return Reparse(mutated, "continuation-epoch-changed");
     }
 
     private static ValidatedLedger MutatePredecessorStateGeneration(ValidatedLedger continuation)
     {
-        var text = Encoding.UTF8.GetString(continuation.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(continuation.ToCanonicalByteArray());
         var mutated = text.Replace("\"predecessorStateGeneration\":0", "\"predecessorStateGeneration\":7");
         return Reparse(mutated, "continuation-predecessor-generation-mismatch");
     }
@@ -483,7 +483,7 @@ internal static partial class Program
         // Assemble the extra pair by building a fresh continuation candidate from the current
         // reset ledger — that yields byte-canonical (ord 1) records with matching digests.
         var extraLedger = ExtendResetWithContinuation(reset);
-        var extraText = Encoding.UTF8.GetString(extraLedger.CanonicalBytes.Span);
+        var extraText = Encoding.UTF8.GetString(extraLedger.ToCanonicalByteArray());
         var extraArrStart = extraText.IndexOf("\"records\":[") + "\"records\":".Length;
         var extraArrEnd = FindMatchingBracket(extraText, extraArrStart);
         var extraBody = extraText.Substring(extraArrStart + 1, extraArrEnd - extraArrStart - 1);
@@ -492,7 +492,7 @@ internal static partial class Program
         var extraCtx = extraParts[2];
         var extraOc = extraParts[3];
 
-        var text = Encoding.UTF8.GetString(reset.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(reset.ToCanonicalByteArray());
         var arrStart = text.IndexOf("\"records\":[") + "\"records\":".Length;
         var arrEnd = FindMatchingBracket(text, arrStart);
         var body = text.Substring(arrStart + 1, arrEnd - arrStart - 1);
@@ -515,14 +515,14 @@ internal static partial class Program
 
     private static ValidatedLedger MutateResetSameEpoch(ValidatedLedger reset)
     {
-        var text = Encoding.UTF8.GetString(reset.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(reset.ToCanonicalByteArray());
         var mutated = text.Replace("\"ledgerEpoch\":2", "\"ledgerEpoch\":1");
         return Reparse(mutated, "reset-same-epoch");
     }
 
     private static ValidatedLedger MutateResetManifestHash(ValidatedLedger reset)
     {
-        var text = Encoding.UTF8.GetString(reset.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(reset.ToCanonicalByteArray());
         var idx = text.IndexOf("\"predecessorManifestSha256\":\"");
         var start = idx + "\"predecessorManifestSha256\":\"".Length;
         var mutated = text.Substring(0, start) + new string('9', 64) + text.Substring(start + 64);
@@ -587,7 +587,7 @@ internal static partial class Program
 
     private static byte[] InjectTopLevel(ValidatedLedger v, string extraJsonProperty)
     {
-        var text = Encoding.UTF8.GetString(v.CanonicalBytes.Span);
+        var text = Encoding.UTF8.GetString(v.ToCanonicalByteArray());
         return Encoding.UTF8.GetBytes("{" + extraJsonProperty + "," + text.Substring(1));
     }
 

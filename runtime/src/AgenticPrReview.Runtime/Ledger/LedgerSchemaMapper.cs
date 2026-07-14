@@ -57,7 +57,7 @@ internal static class LedgerSchemaMapper
         if (kind is "bootstrap" or "recovery")
         {
             if (headerElement.TryGetProperty("stateGeneration", out var sg) &&
-                sg.ValueKind == JsonValueKind.Number && sg.GetInt32() != 0)
+                sg.ValueKind == JsonValueKind.Number && sg.TryGetInt32(out var sgVal) && sgVal != 0)
             {
                 return LedgerDiagnosticMessages.Of(kind == "bootstrap"
                     ? LedgerDiagnosticCodes.BootstrapShapeViolation
@@ -223,6 +223,16 @@ internal static class LedgerSchemaMapper
     private static readonly HashSet<string> FindingAllowed = new(StringComparer.Ordinal)
     { "severity","confidence","category","title","body","evidence","path","startLine","endLine","suggestedAction","inlinePreference" };
 
+    // Union of legal fields across both record roles, used when the role
+    // literal is unknown and we want to prioritize an unknown-field violation
+    // over role-mismatch.
+    private static readonly HashSet<string> RecordUnionAllowed = new(StringComparer.Ordinal)
+    {
+        "role","interactionId","interactionOrdinal",
+        "reviewedHeadSha","reviewedBaseSha","subjectDigest","cacheContractDigest","changedFiles",
+        "summary","findings","limitations",
+    };
+
     private static string? FindExtra(JsonElement root)
     {
         foreach (var p in root.EnumerateObject())
@@ -236,10 +246,14 @@ internal static class LedgerSchemaMapper
                 if (rec.ValueKind != JsonValueKind.Object) continue;
                 var role = rec.TryGetProperty("role", out var r) && r.ValueKind == JsonValueKind.String ? r.GetString() : null;
                 var allowed = role switch { "review_context" => ContextRecordAllowed, "review_outcome" => OutcomeRecordAllowed, _ => null };
-                if (allowed is null) continue;
+                // When the role does not identify a known record shape we still
+                // check every field against the union of legal context+outcome
+                // fields; an unknown-field violation there is higher precedence
+                // than the record-role-mismatch that will otherwise fire below.
+                var effective = allowed ?? RecordUnionAllowed;
                 foreach (var pr in rec.EnumerateObject())
                 {
-                    if (!allowed.Contains(pr.Name)) return pr.Name;
+                    if (!effective.Contains(pr.Name)) return pr.Name;
                 }
                 if (rec.TryGetProperty("changedFiles", out var cfs) && cfs.ValueKind == JsonValueKind.Array)
                 {

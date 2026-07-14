@@ -72,4 +72,48 @@ public sealed class LedgerSchemaMapperTests
         Assert.Null(result.Ledger);
         Assert.Equal(LedgerDiagnosticCodes.UnknownField, result.Failure!.Code);
     }
+
+
+    /// <summary>
+    /// A single record that simultaneously has an unknown property AND an
+    /// invalid role literal must surface the unknown-field violation, not the
+    /// role-mismatch.
+    /// </summary>
+    [Fact]
+    public void UnknownFieldInsideRecord_PrecedesRecordRoleMismatch()
+    {
+        var bytes = ReadFixture("bootstrap-minimal.json");
+        var text = System.Text.Encoding.UTF8.GetString(bytes);
+        // Replace the first record's role with an unknown value AND add an
+        // unknown property alongside it.
+        var modified = text.Replace("\"role\":\"review_context\"", "\"role\":\"tool\",\"unknownField\":true");
+        var payload = System.Text.Encoding.UTF8.GetBytes(modified);
+        var result = LedgerParser.ParseAndValidate(payload);
+        Assert.Null(result.Ledger);
+        Assert.Equal(LedgerDiagnosticCodes.UnknownField, result.Failure!.Code);
+    }
+
+    /// <summary>
+    /// A ledger whose header carries an integer larger than int.MaxValue must
+    /// not throw from the mapper; the parser must return a stable
+    /// classification instead.
+    /// </summary>
+    [Fact]
+    public void SchemaInvalidLargeInteger_DoesNotThrow()
+    {
+        // Schema evaluation should reject the maximum-exceeded value before
+        // the mapper walks it; but even if the mapper visits the property it
+        // must not throw.
+        var text = System.Text.Encoding.UTF8.GetString(ReadFixture("bootstrap-minimal.json"));
+        var modified = text.Replace(
+            "\"stateGeneration\":0",
+            "\"stateGeneration\":9999999999999999999");
+        var payload = System.Text.Encoding.UTF8.GetBytes(modified);
+        var result = LedgerParser.ParseAndValidate(payload);
+        // The parser must not throw; any of the following classifications is
+        // acceptable because the exact code depends on schema/mapper routing
+        // for oversize integers.
+        Assert.Null(result.Ledger);
+        Assert.NotNull(result.Failure);
+    }
 }

@@ -102,14 +102,12 @@ public sealed record LedgerFinding(
 public sealed class ValidatedLedger
 {
     private readonly byte[] canonicalBytes;
-    private readonly SafeByteMemoryManager memoryManager;
 
     internal ValidatedLedger(LedgerModel model, byte[] canonicalBytes, string contentSha256)
     {
         // Defensive copy: the constructor owns the sole reference to the byte buffer.
         this.canonicalBytes = new byte[canonicalBytes.Length];
         Buffer.BlockCopy(canonicalBytes, 0, this.canonicalBytes, 0, canonicalBytes.Length);
-        this.memoryManager = new SafeByteMemoryManager(this.canonicalBytes);
         Model = model;
         ContentSha256 = contentSha256;
     }
@@ -117,19 +115,27 @@ public sealed class ValidatedLedger
     public LedgerModel Model { get; }
 
     /// <summary>
-    /// Canonical UTF-8 bytes of the ledger. The returned <see cref="ReadOnlyMemory{Byte}"/>
-    /// is backed by a <see cref="System.Buffers.MemoryManager{Byte}"/> whose
-    /// <c>TryGetArray</c> refuses to expose the underlying array, so
-    /// <c>MemoryMarshal.TryGetArray</c> returns <c>false</c> and callers cannot
-    /// obtain a mutable segment aliasing the ledger's internal storage. Use
-    /// <see cref="ToCanonicalByteArray"/> when a mutable copy is required.
+    /// The lowercase-hex SHA-256 of <see cref="ToCanonicalByteArray"/> as measured
+    /// at construction. Never recomputed; the underlying bytes are held by a
+    /// private array and cannot be observed except through the copy accessors
+    /// on this class.
     /// </summary>
-    public ReadOnlyMemory<byte> CanonicalBytes => this.memoryManager.Memory;
+    public string ContentSha256 { get; }
+
+    /// <summary>Length in bytes of the canonical form.</summary>
+    public int ByteLength => this.canonicalBytes.Length;
 
     /// <summary>
-    /// Returns a freshly allocated copy of the canonical bytes. Each call
-    /// allocates; mutating the returned array cannot affect this ledger.
+    /// Returns a freshly allocated copy of the canonical UTF-8 bytes. Each call
+    /// allocates; mutating the returned array cannot affect the ledger.
     /// </summary>
+    /// <remarks>
+    /// This is the only public byte accessor. There is no <c>ReadOnlyMemory</c>
+    /// or <c>ReadOnlySpan</c> property, because the standard interop helpers
+    /// (<c>MemoryMarshal.TryGetArray</c>, <c>MemoryMarshal.TryGetMemoryManager</c>,
+    /// or <c>MemoryMarshal.CreateSpan</c>) would otherwise let callers alias the
+    /// internal buffer and violate the deep-immutability invariant.
+    /// </remarks>
     public byte[] ToCanonicalByteArray()
     {
         var copy = new byte[this.canonicalBytes.Length];
@@ -137,36 +143,27 @@ public sealed class ValidatedLedger
         return copy;
     }
 
-    public string ContentSha256 { get; }
-    public int ByteLength => this.canonicalBytes.Length;
-}
-
-/// <summary>
-/// Backing store for <see cref="ValidatedLedger.CanonicalBytes"/>. Refuses to
-/// expose the underlying array through <c>MemoryMarshal.TryGetArray</c>, so
-/// callers can only read through <see cref="ReadOnlyMemory{Byte}"/> /
-/// <see cref="ReadOnlySpan{Byte}"/> without gaining a mutable alias.
-/// </summary>
-internal sealed class SafeByteMemoryManager : System.Buffers.MemoryManager<byte>
-{
-    private readonly byte[] buffer;
-
-    public SafeByteMemoryManager(byte[] buffer) => this.buffer = buffer;
-
-    public override Span<byte> GetSpan() => this.buffer;
-
-    public override System.Buffers.MemoryHandle Pin(int elementIndex = 0) =>
-        throw new NotSupportedException("Pinning is not supported for ledger canonical bytes.");
-
-    public override void Unpin() { }
-
-    protected override bool TryGetArray(out ArraySegment<byte> segment)
+    /// <summary>
+    /// Copies the canonical bytes into <paramref name="destination"/>. Throws
+    /// <see cref="ArgumentException"/> if the destination is not long enough.
+    /// This avoids the allocation of <see cref="ToCanonicalByteArray"/> while
+    /// still preventing internal-buffer aliasing.
+    /// </summary>
+    public int CopyCanonicalBytesTo(Span<byte> destination)
     {
-        segment = default;
-        return false;
+        if (destination.Length < this.canonicalBytes.Length)
+            throw new ArgumentException("Destination too short.", nameof(destination));
+        this.canonicalBytes.AsSpan().CopyTo(destination);
+        return this.canonicalBytes.Length;
     }
 
-    protected override void Dispose(bool disposing) { }
+    /// <summary>
+    /// Internal accessor for use by <see cref="LedgerAppend"/> /
+    /// <see cref="LedgerBuilder"/> that need to compare canonical bytes without
+    /// paying the copy cost. Not exposed publicly; consumers outside the runtime
+    /// assembly must use the copy-returning accessors.
+    /// </summary>
+    internal ReadOnlySpan<byte> CanonicalBytesUnsafeSpan => this.canonicalBytes;
 }
 
 // ---------------------------------------------------------------------------

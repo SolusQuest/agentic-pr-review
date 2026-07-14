@@ -73,6 +73,7 @@ internal static partial class Program
         WriteRaw("continuation-forbidden-field.json", MakeContinuationForbiddenField(continuation));
         WriteRaw("recovery-forbidden-field.json", MakeRecoveryForbiddenField(recovery));
         WriteRaw("record-role-tool.json", MakeRecordRoleTool(bootstrap));
+        WriteRaw("invalid-json-truncated.json", System.Text.Encoding.UTF8.GetBytes("{\"header\":{\"kind\":\"bootstrap\""));
         WriteRaw("finding-line-range-invalid.json", MakeFindingLineRangeInvalid());
         WriteRaw("finding-location-mismatch.json", MakeFindingLocationMismatch());
         WriteRaw("finding-location-missing-path.json", MakeFindingLocationMissingPath());
@@ -104,7 +105,7 @@ internal static partial class Program
     private static void Write(string name, ValidatedLedger v)
     {
         var path = Path.Combine(root, name);
-        File.WriteAllBytes(path, v.CanonicalBytes.ToArray());
+        File.WriteAllBytes(path, v.ToCanonicalByteArray());
         Console.WriteLine($"{name}: {v.ContentSha256}");
     }
 

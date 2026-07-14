@@ -42,15 +42,6 @@ public sealed class LedgerDiagnosticCoverageTests
         // Codes only reachable via focused unit tests (not through the fixture corpus).
         var allowlist = new HashSet<string>(StringComparer.Ordinal)
         {
-            // Reachable only through direct malformed byte payloads, covered by dedicated
-            // canonicalizer/scanner tests.
-            LedgerDiagnosticCodes.InvalidJson,
-            // Reachable only through caller-supplied ExpectedTransition values
-            // that disagree with the candidate/predecessor; covered by
-            // LedgerAppendTests focused unit cases.
-            LedgerDiagnosticCodes.StateGenerationMismatch,
-            LedgerDiagnosticCodes.ResetReasonMismatch,
-            LedgerDiagnosticCodes.RecoveryReasonMismatch,
             // schema_violation: catch-all reachable in many negative fixtures but not always
             // named directly; several fixtures already map to it.
             // Covered via absolute-path-in-finding.json fixture.

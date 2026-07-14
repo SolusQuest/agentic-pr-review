@@ -35,7 +35,15 @@ public static class LedgerParser
         var evalResults = schemas.Evaluate(SchemaKind.Ledger, root);
         if (!evalResults.IsValid)
         {
-            var mapped = LedgerSchemaMapper.Map(root, evalResults);
+            LedgerDiagnostic mapped;
+            try
+            {
+                mapped = LedgerSchemaMapper.Map(root, evalResults);
+            }
+            catch (Exception)
+            {
+                mapped = LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
+            }
             return new ParseOutcome(null, mapped);
         }
 
@@ -48,6 +56,22 @@ public static class LedgerParser
         catch (LedgerDeserializationException ex)
         {
             return new ParseOutcome(null, LedgerDiagnosticMessages.Of(ex.Code));
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return new ParseOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+        }
+        catch (FormatException)
+        {
+            return new ParseOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+        }
+        catch (OverflowException)
+        {
+            return new ParseOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+        }
+        catch (InvalidOperationException)
+        {
+            return new ParseOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
         }
 
         // ------ Structural bounds (post-schema; identity byte lengths / control chars in identities)

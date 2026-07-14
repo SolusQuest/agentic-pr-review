@@ -232,7 +232,7 @@ public sealed class LedgerBuilderTests
         Assert.NotNull(build1.Ledger);
         Assert.NotNull(build2.Ledger);
         Assert.Equal(build1.Ledger!.ContentSha256, build2.Ledger!.ContentSha256);
-        Assert.Equal(build1.Ledger.CanonicalBytes.ToArray(), build2.Ledger.CanonicalBytes.ToArray());
+        Assert.Equal(build1.Ledger.ToCanonicalByteArray(), build2.Ledger.ToCanonicalByteArray());
     }
 
     [Fact]

@@ -559,6 +559,14 @@
   },
   {
     "type": "ledger-restore",
+    "file": "provider-session-ledger/invalid-json-truncated.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_invalid_json"
+    }
+  },
+  {
+    "type": "ledger-restore",
     "file": "provider-session-ledger/finding-line-range-invalid.json",
     "expectation": {
       "valid": false,
@@ -969,6 +977,45 @@
   },
   {
     "type": "ledger-transition",
+    "file": "provider-session-ledger/continuation-one-append.json",
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "kind": "continuation",
+        "identities": {
+          "repository": "acme/example",
+          "headRepository": "acme/example",
+          "pullRequest": 123,
+          "workflowIdentity": "acme/example/.github/workflows/ci.yml",
+          "trustedExecutionDomain": "github-actions",
+          "sessionEpoch": "epoch-0",
+          "providerId": "provider.reference",
+          "modelId": "model-2026-01",
+          "adapterId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "templateId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "policyId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "toolDefinitionId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "predecessorLedgerSha256": "db1e576929474a4c5b375049f5c1b083644fa905f1d32b73c208ac354f44462a",
+        "predecessorStateGeneration": 0,
+        "stateGeneration": 42,
+        "ledgerEpoch": 1
+      }
+    },
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "5ec984f1190d792667fc7b0dc26a6353d35993abd5f9290c085bf4d40f4c92b7"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_state_generation_mismatch"
+    },
+    "scenarioSuffix": "expected-state-generation-mismatch"
+  },
+  {
+    "type": "ledger-transition",
     "file": "provider-session-ledger/reset-cache-contract-changed.json",
     "predecessor": "provider-session-ledger/bootstrap-minimal.json",
     "transition": {
@@ -1046,6 +1093,83 @@
       "valid": true,
       "candidateContentSha256": "91421f532ee7f0813756666bf67de60faca016d3baf136f60f37ba9f72caa658"
     }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/reset-base-changed.json",
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "transition": {
+      "kind": "reset",
+      "expected": {
+        "kind": "reset",
+        "identities": {
+          "repository": "acme/example",
+          "headRepository": "acme/example",
+          "pullRequest": 123,
+          "workflowIdentity": "acme/example/.github/workflows/ci.yml",
+          "trustedExecutionDomain": "github-actions",
+          "sessionEpoch": "epoch-0",
+          "providerId": "provider.reference",
+          "modelId": "model-2026-01",
+          "adapterId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "templateId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "policyId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "toolDefinitionId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "predecessorLedgerSha256": "db1e576929474a4c5b375049f5c1b083644fa905f1d32b73c208ac354f44462a",
+        "predecessorManifestSha256": "8888888888888888888888888888888888888888888888888888888888888888",
+        "predecessorStateGeneration": 0,
+        "stateGeneration": 1,
+        "ledgerEpoch": 2,
+        "resetReason": "cache_contract_changed"
+      }
+    },
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "91421f532ee7f0813756666bf67de60faca016d3baf136f60f37ba9f72caa658"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_reset_reason_mismatch"
+    },
+    "scenarioSuffix": "expected-reset-reason-mismatch"
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/recovery-predecessor-unavailable.json",
+    "transition": {
+      "kind": "recovery",
+      "expected": {
+        "kind": "recovery",
+        "identities": {
+          "repository": "acme/example",
+          "headRepository": "acme/example",
+          "pullRequest": 123,
+          "workflowIdentity": "acme/example/.github/workflows/ci.yml",
+          "trustedExecutionDomain": "github-actions",
+          "sessionEpoch": "epoch-0",
+          "providerId": "provider.reference",
+          "modelId": "model-2026-01",
+          "adapterId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "templateId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "policyId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "toolDefinitionId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "stateGeneration": 0,
+        "ledgerEpoch": 1,
+        "recoveryReason": "predecessor_expired"
+      }
+    },
+    "parseExpectation": {
+      "valid": true
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_recovery_reason_mismatch"
+    },
+    "scenarioSuffix": "expected-recovery-reason-mismatch"
   },
   {
     "type": "ledger-build",
