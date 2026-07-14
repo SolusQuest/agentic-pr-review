@@ -52,6 +52,11 @@ public static class LedgerBuilder
             if (HasInvalidUnicode(f.Path) || (f.PreviousPath is not null && HasInvalidUnicode(f.PreviousPath)) ||
                 HasInvalidUnicode(f.Status))
                 return new ProjectionOutcome<ReviewContextRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode));
+            // schema maxLength (500 text elements) for safeRelativePath, before
+            // pattern/segment shape (mapper precedence 6 before 7).
+            if (LedgerLimits.SchemaStringLength(f.Path) > LedgerLimits.MaxSafeRelativePathChars ||
+                (f.PreviousPath is not null && LedgerLimits.SchemaStringLength(f.PreviousPath) > LedgerLimits.MaxSafeRelativePathChars))
+                return new ProjectionOutcome<ReviewContextRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue));
             if (!IsSafeRelativePath(f.Path) || (f.PreviousPath is not null && !IsSafeRelativePath(f.PreviousPath)))
                 return new ProjectionOutcome<ReviewContextRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
             if (!IsSupportedStatus(f.Status))
@@ -394,6 +399,10 @@ public static class LedgerBuilder
 
         // Header shape.
         var h = model.Header;
+        // schema maxLength before pattern.
+        if (LedgerLimits.SchemaStringLength(h.Repository) > 200 ||
+            LedgerLimits.SchemaStringLength(h.HeadRepository) > 200)
+            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
         if (!IsRepositorySlug(h.Repository) || !IsRepositorySlug(h.HeadRepository))
             return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
         foreach (var s in new[] { h.AdapterId, h.TemplateId, h.PolicyId, h.ToolDefinitionId, h.CacheConfigId })
@@ -473,6 +482,11 @@ public static class LedgerBuilder
                 {
                     if (!IsSupportedStatus(f.Status))
                         return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.UnsupportedChangeStatus);
+                    // schema maxLength (500 text elements) before safeRelativePath
+                    // pattern (mapper precedence 6 before 7).
+                    if (LedgerLimits.SchemaStringLength(f.Path) > LedgerLimits.MaxSafeRelativePathChars ||
+                        (f.PreviousPath is not null && LedgerLimits.SchemaStringLength(f.PreviousPath) > LedgerLimits.MaxSafeRelativePathChars))
+                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
                     if (!IsSafeRelativePath(f.Path) ||
                         (f.PreviousPath is not null && !IsSafeRelativePath(f.PreviousPath)))
                         return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
@@ -480,8 +494,6 @@ public static class LedgerBuilder
                         f.Deletions < 0 || f.Deletions > 1_000_000 ||
                         f.Changes < 0 || f.Changes > 1_000_000)
                         return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                    if (LedgerLimits.SchemaStringLength(f.Path) > LedgerLimits.MaxSafeRelativePathChars)
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
                     if (f.Patch is not null)
                     {
                         if (!IsHex64(f.Patch.Sha256))
@@ -853,7 +865,11 @@ public static class LedgerBuilder
         {
             if (!IsHex64(s)) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
         }
-        // Repository slug
+        // Repository / HeadRepository: schema maxLength (200 text elements)
+        // before pattern (mapper precedence).
+        if (LedgerLimits.SchemaStringLength(i.Repository) > 200 ||
+            LedgerLimits.SchemaStringLength(i.HeadRepository) > 200)
+            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
         if (!IsRepositorySlug(i.Repository) || !IsRepositorySlug(i.HeadRepository))
             return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
         if (i.PullRequest < 1)
@@ -870,9 +886,13 @@ public static class LedgerBuilder
         "predecessor_unsafe_provenance" or "predecessor_expired" or
         "predecessor_over_bound" or "predecessor_incompatible_contract";
 
+    // Pattern / shape only. Length maxLength (200 text elements) is enforced
+    // separately so the mapper "maxLength before pattern" precedence surfaces
+    // as ledger_overlong_value rather than being absorbed into the pattern
+    // fallback.
     private static bool IsRepositorySlug(string s)
     {
-        if (s.Length < 3 || s.Length > 200) return false;
+        if (s.Length < 3) return false;
         var slash = s.IndexOf('/');
         if (slash <= 0 || slash == s.Length - 1) return false;
         if (s.IndexOf('/', slash + 1) >= 0) return false;
@@ -880,13 +900,13 @@ public static class LedgerBuilder
         return s.All(valid);
     }
 
+    // Pattern / shape only. Length maxLength (500 text elements) is enforced
+    // by callers before invoking this helper, so overlong safeRelativePath
+    // strings are classified as ledger_overlong_value, not the pattern
+    // fallback ledger_schema_violation.
     private static bool IsSafeRelativePath(string p)
     {
-        // Length is counted in Unicode text elements to match schema maxLength
-        // semantics (Draft-7 / JsonSchema.Net) and stay parity-consistent with
-        // the authoritative parser.
         if (p.Length < 1) return false;
-        if (LedgerLimits.SchemaStringLength(p) > LedgerLimits.MaxSafeRelativePathChars) return false;
         // Schema \S pattern: whitespace-only paths are rejected before any
         // segment / scheme rule can pass by structural accident.
         if (!ContainsNonWhitespace(p)) return false;

@@ -926,4 +926,118 @@ public sealed class LedgerBuilderTests
         Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, b.Failure!.Code);
     }
 
+    // -----------------------------------------------------------------
+    // R10: maxLength parity on repository / changed-file path fields and
+    // LedgerAppend.Validate* null-identities coverage.
+
+    [Fact]
+    public void BuildReviewContext_RepositoryAt200_IsAccepted()
+    {
+        // 200 ASCII chars: "a" x 100 + "/" + "b" x 99 = length 200.
+        var repo = new string('a', 100) + "/" + new string('b', 99);
+        Assert.Equal(200, repo.Length);
+        var identities = Identities with { Repository = repo };
+        var o = LedgerBuilder.BuildReviewContext(ContextSource(), identities, IId(0));
+        Assert.NotNull(o.Record);
+        Assert.Null(o.Failure);
+    }
+
+    [Fact]
+    public void BuildReviewContext_RepositoryAt201_ReportsOverlong()
+    {
+        var repo = new string('a', 100) + "/" + new string('b', 100);
+        Assert.Equal(201, repo.Length);
+        var identities = Identities with { Repository = repo };
+        var o = LedgerBuilder.BuildReviewContext(ContextSource(), identities, IId(0));
+        Assert.Null(o.Record);
+        Assert.Equal(LedgerDiagnosticCodes.OverlongValue, o.Failure!.Code);
+    }
+
+    [Fact]
+    public void BuildReviewContext_HeadRepositoryAt201_ReportsOverlong()
+    {
+        var repo = new string('a', 100) + "/" + new string('b', 100);
+        var identities = Identities with { HeadRepository = repo };
+        var o = LedgerBuilder.BuildReviewContext(ContextSource(), identities, IId(0));
+        Assert.Null(o.Record);
+        Assert.Equal(LedgerDiagnosticCodes.OverlongValue, o.Failure!.Code);
+    }
+
+    [Fact]
+    public void BuildReviewContext_ChangedFilePathAt500_IsAccepted()
+    {
+        var path = new string('a', 500);
+        var source = ContextSource() with
+        {
+            ChangedFiles = ImmutableArray.Create(
+                new ValidatedChangedFileSource(path, null, "modified", 0, 0, 0, null)),
+        };
+        var o = LedgerBuilder.BuildReviewContext(source, Identities, IId(0));
+        Assert.NotNull(o.Record);
+    }
+
+    [Fact]
+    public void BuildReviewContext_ChangedFilePathAt501_ReportsOverlong()
+    {
+        var path = new string('a', 501);
+        var source = ContextSource() with
+        {
+            ChangedFiles = ImmutableArray.Create(
+                new ValidatedChangedFileSource(path, null, "modified", 0, 0, 0, null)),
+        };
+        var o = LedgerBuilder.BuildReviewContext(source, Identities, IId(0));
+        Assert.Null(o.Record);
+        Assert.Equal(LedgerDiagnosticCodes.OverlongValue, o.Failure!.Code);
+    }
+
+    [Fact]
+    public void BuildReviewContext_ChangedFilePreviousPathAt501_ReportsOverlong()
+    {
+        var prev = new string('a', 501);
+        var source = ContextSource() with
+        {
+            ChangedFiles = ImmutableArray.Create(
+                new ValidatedChangedFileSource("src/a.ts", prev, "renamed", 0, 0, 0, null)),
+        };
+        var o = LedgerBuilder.BuildReviewContext(source, Identities, IId(0));
+        Assert.Null(o.Record);
+        Assert.Equal(LedgerDiagnosticCodes.OverlongValue, o.Failure!.Code);
+    }
+
+    [Fact]
+    public void ValidateBootstrap_NullExpectedIdentities_ReturnsSchemaViolation()
+    {
+        var seed = MakeValidBootstrap();
+        var t = LedgerAppend.ValidateBootstrap(seed, new BootstrapTransition(null!, 0, 1));
+        Assert.Null(t.Candidate);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, t.Failure!.Code);
+    }
+
+    [Fact]
+    public void ValidateRecovery_NullExpectedIdentities_ReturnsSchemaViolation()
+    {
+        var seed = MakeValidBootstrap();
+        var t = LedgerAppend.ValidateRecovery(seed, new RecoveryTransition(null!, 0, 1, "predecessor_unavailable"));
+        Assert.Null(t.Candidate);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, t.Failure!.Code);
+    }
+
+    [Fact]
+    public void ValidateContinuation_NullExpectedIdentities_ReturnsSchemaViolation()
+    {
+        var seed = MakeValidBootstrap();
+        var t = LedgerAppend.ValidateContinuation(seed, seed, new ContinuationTransition(null!, seed.ContentSha256, 0, 1, 1));
+        Assert.Null(t.Candidate);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, t.Failure!.Code);
+    }
+
+    [Fact]
+    public void ValidateReset_NullExpectedIdentities_ReturnsSchemaViolation()
+    {
+        var seed = MakeValidBootstrap();
+        var t = LedgerAppend.ValidateReset(seed, seed, new ResetTransition(null!, seed.ContentSha256, new string('a', 64), 0, 1, 2, "base_changed"));
+        Assert.Null(t.Candidate);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, t.Failure!.Code);
+    }
+
 }

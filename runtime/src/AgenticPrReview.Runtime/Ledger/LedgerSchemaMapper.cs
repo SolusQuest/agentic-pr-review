@@ -356,9 +356,12 @@ internal static class LedgerSchemaMapper
     {
         // Detect over-lengths on all string-maxLength fields governed by the
         // ledger schema. Identity strings (workflowIdentity, trustedExecutionDomain,
-        // sessionEpoch, providerId, modelId) have maxLength 256; free-form record
-        // fields have their own caps. All map to ledger_overlong_value so
-        // parser / projection / candidate paths classify identically.
+        // sessionEpoch, providerId, modelId) have maxLength 256; repository /
+        // headRepository have maxLength 200; free-form record fields have
+        // their own caps; safeRelativePath has maxLength 500 on changed-file
+        // paths (path and previousPath) and finding.path. All map to
+        // ledger_overlong_value so parser / projection / candidate paths
+        // classify identically.
         if (root.TryGetProperty("header", out var hdr) && hdr.ValueKind == JsonValueKind.Object)
         {
             foreach (var idName in IdentityStringNames)
@@ -366,12 +369,25 @@ internal static class LedgerSchemaMapper
                 if (hdr.TryGetProperty(idName, out var v) && v.ValueKind == JsonValueKind.String && LedgerLimits.SchemaStringLength(v.GetString()!) > 256)
                     return true;
             }
+            if (hdr.TryGetProperty("repository", out var repo) && repo.ValueKind == JsonValueKind.String && LedgerLimits.SchemaStringLength(repo.GetString()!) > 200)
+                return true;
+            if (hdr.TryGetProperty("headRepository", out var hRepo) && hRepo.ValueKind == JsonValueKind.String && LedgerLimits.SchemaStringLength(hRepo.GetString()!) > 200)
+                return true;
         }
         if (root.TryGetProperty("records", out var recs) && recs.ValueKind == JsonValueKind.Array)
         {
             foreach (var rec in recs.EnumerateArray())
             {
                 if (rec.ValueKind != JsonValueKind.Object) continue;
+                if (rec.TryGetProperty("changedFiles", out var cfArr) && cfArr.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var cf in cfArr.EnumerateArray())
+                    {
+                        if (cf.ValueKind != JsonValueKind.Object) continue;
+                        if (cf.TryGetProperty("path", out var pth) && pth.ValueKind == JsonValueKind.String && LedgerLimits.SchemaStringLength(pth.GetString()!) > LedgerLimits.MaxSafeRelativePathChars) return true;
+                        if (cf.TryGetProperty("previousPath", out var pp) && pp.ValueKind == JsonValueKind.String && LedgerLimits.SchemaStringLength(pp.GetString()!) > LedgerLimits.MaxSafeRelativePathChars) return true;
+                    }
+                }
                 if (rec.TryGetProperty("summary", out var s) && s.ValueKind == JsonValueKind.String && LedgerLimits.SchemaStringLength(s.GetString()!) > LedgerLimits.MaxSummaryChars) return true;
                 if (rec.TryGetProperty("limitations", out var l) && l.ValueKind == JsonValueKind.Array)
                 {
