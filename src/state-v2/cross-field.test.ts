@@ -47,6 +47,36 @@ describe('cross-field validation matrix', () => {
     expect(result.codes).toContain('x_metadata_producing_state_generation');
   });
 
+  it('x_metadata_producing_session_epoch when producing sessionEpoch disagrees', () => {
+    const built = build();
+    const result = invalidate(built.manifest, (m) => {
+      m.providerRunMetadata.producingGeneration.sessionEpoch = 'S00000000000000000000C' as EpochId;
+    });
+    expect(result.codes).toContain('x_metadata_producing_session_epoch');
+    // validateStateManifestV2 surfaces the same fixed code so downstream
+    // consumers get the manifest_shape_invalid diagnostic without any
+    // caller-controlled content.
+    expect(result.message).toContain('x_metadata_producing_session_epoch');
+  });
+
+  it('x_metadata_producing_ledger_epoch when producing ledgerEpoch disagrees', () => {
+    const built = build();
+    const result = invalidate(built.manifest, (m) => {
+      m.providerRunMetadata.producingGeneration.ledgerEpoch = 'BBBBBBBBBBBBBBBBBBBBBB' as EpochId;
+    });
+    expect(result.codes).toContain('x_metadata_producing_ledger_epoch');
+    expect(result.message).toContain('x_metadata_producing_ledger_epoch');
+  });
+
+  it('x_metadata_producing_state_generation also surfaces through validateStateManifestV2', () => {
+    const built = build();
+    const result = invalidate(built.manifest, (m) => {
+      m.providerRunMetadata.producingGeneration.stateGeneration = 42;
+    });
+    expect(result.codes).toContain('x_metadata_producing_state_generation');
+    expect(result.message).toContain('x_metadata_producing_state_generation');
+  });
+
   it('bootstrap must have stateGeneration 0 and ordinal 0', () => {
     const built = build();
     const result = invalidate(built.manifest, (m) => {

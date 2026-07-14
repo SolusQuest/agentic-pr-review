@@ -50,7 +50,7 @@ function encodeValue(value: unknown, path: string, seen: WeakSet<object>): strin
   if (typeof value === 'number') return encodeNumber(value, path);
   if (typeof value === 'string') return encodeString(value, path);
   if (Array.isArray(value)) return encodeArray(value, path, seen);
-  if (typeof value === 'object' && value !== null) return encodeObject(value, path, seen);
+  if (typeof value === 'object') return encodeObject(value, path, seen);
 
   // Rejected runtime types
   const type = value === undefined ? 'undefined' : typeof value;

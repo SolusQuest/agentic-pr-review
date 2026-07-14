@@ -1,0 +1,107 @@
+{
+  "description": "Compatibility comparator fixture: expected_invalidation:head_history_discontinuity",
+  "manifest": {
+    "version": 2,
+    "stateNamespace": "m4-ledger-v2",
+    "stateKey": {
+      "headRepository": "SolusQuest/agentic-pr-review",
+      "namespace": "m4-ledger-v2",
+      "pullRequest": 48,
+      "repository": "SolusQuest/agentic-pr-review",
+      "trustedExecutionDomain": "trusted",
+      "workflowIdentity": "agentic-pr-review"
+    },
+    "sessionEpoch": "S00000000000000000000A",
+    "cacheContractIdentity": {
+      "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+      "cacheConfigId": "e1630a47c2ed20d5d5fb9dc526ad79f265566f202ca2a30acde59225daf8120f",
+      "ledgerSchemaVersion": 1,
+      "modelId": "claude-sonnet-4-20250514",
+      "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+      "prefixContractVersion": 1,
+      "providerId": "anthropic",
+      "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+      "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281"
+    },
+    "generation": {
+      "ledgerEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
+      "stateGeneration": 0
+    },
+    "transition": {
+      "kind": "bootstrap",
+      "predecessorLedgerSha256": "bootstrap",
+      "predecessorManifestSha256": "bootstrap",
+      "reason": "new_session"
+    },
+    "provenance": {
+      "currentBaseRef": "refs/heads/main",
+      "currentBaseSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "currentHeadSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "producedAt": "2026-07-14T00:00:00Z",
+      "producingActionSourceSha": "cccccccccccccccccccccccccccccccccccccccc",
+      "producingGitRef": "refs/pull/48/merge",
+      "producingRunAttempt": 1,
+      "producingRunId": "123456789",
+      "producingWorkflowRef": "SolusQuest/agentic-pr-review/.github/workflows/review.yml@refs/heads/main",
+      "reviewedBaseRef": "refs/heads/main",
+      "reviewedBaseSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "reviewedHeadSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "workflowEvent": "pull_request"
+    },
+    "transaction": {
+      "consumedInputSha256": "c96c6d5be8d08a12e7b5cdc1b207fa6b2430974c86803d8891675e76fd992c20",
+      "interactionId": "167d4b09d014f218c42abf5ebb397a2fc819401fe709223fbd729f1f8e9e790e",
+      "interactionOrdinal": 0,
+      "metadataSemanticSha256": "c1ab16b523fba54343ae1920856b575a720c6071bf90e51c1b95f188101e19b5",
+      "resultSha256": "f6a214f7a5fcda0c2cee9660b7fc29f5649e3c68aad48e20e950137c98913a68",
+      "traceSha256": "eafe895eb8119e6e5d06463590b2ef81b3651c157d5c8e18f1889186c7fd0ac0",
+      "candidateLedgerSha256": "8c3bd73d14bbdc9f48ad5493f3fc5cef7224842621139a8b7fe83b03e4516c6d"
+    },
+    "ledger": {
+      "path": "ledger.json",
+      "sha256": "8c3bd73d14bbdc9f48ad5493f3fc5cef7224842621139a8b7fe83b03e4516c6d",
+      "bytes": 13,
+      "schemaVersion": 1
+    },
+    "providerRunMetadata": {
+      "path": "provider-run-metadata.json",
+      "sha256": "6cf30cb546adc125e01b9fbb8fe6a79618a4413d44e370dfd5a50b9dad375c87",
+      "bytes": 15,
+      "schemaVersion": 1,
+      "producingGeneration": {
+        "ledgerEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
+        "sessionEpoch": "S00000000000000000000A",
+        "stateGeneration": 0
+      }
+    }
+  },
+  "expected": {
+    "stateKey": {
+      "headRepository": "SolusQuest/agentic-pr-review",
+      "namespace": "m4-ledger-v2",
+      "pullRequest": 48,
+      "repository": "SolusQuest/agentic-pr-review",
+      "trustedExecutionDomain": "trusted",
+      "workflowIdentity": "agentic-pr-review"
+    },
+    "expectedLedgerSchemaVersion": 1,
+    "expectedPrefixContractVersion": 1,
+    "cacheContractIdentity": {
+      "providerId": "anthropic",
+      "modelId": "claude-sonnet-4-20250514",
+      "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+      "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+      "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+      "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+      "cacheConfigId": "e1630a47c2ed20d5d5fb9dc526ad79f265566f202ca2a30acde59225daf8120f"
+    },
+    "currentBaseSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "currentBaseRef": "refs/heads/main",
+    "headRelationship": "unknown",
+    "provenanceTrusted": true
+  },
+  "outcome": {
+    "kind": "expected_invalidation",
+    "code": "head_history_discontinuity"
+  }
+}

@@ -6,7 +6,7 @@ Parent design: [`session-ledger-and-prefix-contract.md`](./session-ledger-and-pr
 
 ## Purpose
 
-`StateManifestV2` is the manifest for the M4 live-ledger state bundle. It is a distinct contract from the existing v1 manifest used by the legacy and deterministic-C# runtime paths (`src/state.ts`). v1 is never converted, backfilled, or used to synthesize a ledger; under the M4 live path v1 is only observable as `unsupported_legacy_state` and follows the safe-bootstrap policy.
+`StateManifestV2` is the manifest for the M4 live-ledger state bundle. It is a distinct contract from the existing v1 manifest used by the legacy and deterministic-C# runtime paths (`src/state.ts`). v1 is never converted, backfilled, or used to synthesize a ledger; under the M4 live path v1 is only observable as `unsupported_legacy_v1` and follows the safe-bootstrap policy.
 
 This document describes the shape, invariants, diagnostic taxonomy, byte caps, and ownership boundary. It reflects the code and JSON Schema; those artifacts are authoritative and this document explains them.
 
@@ -143,6 +143,19 @@ Cross-field failures always surface as `manifest_shape_invalid` with a specific 
 
 - Automatic caller: `unsupported_legacy_v1` and any `invalid` -> observable bootstrap lifecycle. `#55` chooses `transition.kind: bootstrap` for a clean new scope or missing initial state, and `transition.kind: recovery_root` for an invalid or unavailable selected accepted artifact.
 - Explicit caller: any classification other than `valid` -> fail closed before provider invocation.
+
+## Reusable protocol fixtures
+
+Two committed fixture sets under `protocol/fixtures/`:
+
+- `state-manifest-v2/positive-{bootstrap,continuation,reset,recovery-root}/` — golden bundle bytes plus `entryListing.json` and `manifest.serialized.bin`. Read-only in `fixtures.test.ts`; regenerable with `node scripts/regenerate-state-v2-fixtures.mjs`.
+- `state-manifest-v2-compat/compat-*.json` — one JSON per `CompatibilityOutcome` code covering the full seven-outcome contract (`compatible_continuation`, three `expected_invalidation` codes, three `incompatible` codes). Verified read-only in `compat-fixtures.test.ts`; regenerable with `node scripts/regenerate-state-v2-compat-fixtures.mjs`. Sibling workstreams (#49 / #53 / #55) may consume these files directly rather than reconstructing them.
+
+Regeneration is a maintainer-only step; changes to committed fixture bytes must be reviewed alongside the source change that motivated them.
+
+## Constants mirror
+
+`src/state-v2/constants.ts` mirrors the descriptor byte caps, filename `const`s, and schema-version `const`s that the JSON Schema declares authoritative. `constants-mirror.test.ts` pins the mirror against the loaded schema so a schema-only update fails typecheck-adjacent testing rather than at runtime.
 
 ## Coordination with sibling M4 workstreams
 
