@@ -1,0 +1,276 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentic-pr-review/protocol/schemas/state-manifest.v2.json",
+  "title": "StateManifestV2",
+  "description": "M4 live-ledger state manifest. Authoritative for the v2 state-bundle contract. TypeScript interfaces in src/state-v2/ are ergonomic only. Owned by issue #48; see docs/20_architecture/state-manifest-v2.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "stateNamespace",
+    "stateKey",
+    "sessionEpoch",
+    "cacheContractIdentity",
+    "generation",
+    "transition",
+    "provenance",
+    "transaction",
+    "ledger",
+    "providerRunMetadata"
+  ],
+  "properties": {
+    "version": { "type": "integer", "const": 2 },
+    "stateNamespace": { "type": "string", "const": "m4-ledger-v2" },
+    "stateKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "namespace",
+        "repository",
+        "headRepository",
+        "pullRequest",
+        "workflowIdentity",
+        "trustedExecutionDomain"
+      ],
+      "properties": {
+        "namespace": { "type": "string", "const": "m4-ledger-v2" },
+        "repository": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "headRepository": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "pullRequest": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "workflowIdentity": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "trustedExecutionDomain": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "sessionEpoch": { "$ref": "#/definitions/epochId" },
+    "cacheContractIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ledgerSchemaVersion",
+        "prefixContractVersion",
+        "providerId",
+        "modelId",
+        "adapterId",
+        "templateId",
+        "policyId",
+        "toolDefinitionId",
+        "cacheConfigId"
+      ],
+      "properties": {
+        "ledgerSchemaVersion": { "type": "integer", "const": 1 },
+        "prefixContractVersion": { "type": "integer", "const": 1 },
+        "providerId": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "modelId": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "adapterId": { "$ref": "#/definitions/sha256Hex" },
+        "templateId": { "$ref": "#/definitions/sha256Hex" },
+        "policyId": { "$ref": "#/definitions/sha256Hex" },
+        "toolDefinitionId": { "$ref": "#/definitions/sha256Hex" },
+        "cacheConfigId": { "$ref": "#/definitions/sha256Hex" }
+      }
+    },
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stateGeneration", "ledgerEpoch"],
+      "properties": {
+        "stateGeneration": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "ledgerEpoch": { "$ref": "#/definitions/epochId" }
+      }
+    },
+    "transition": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "predecessorManifestSha256", "predecessorLedgerSha256", "reason"],
+          "properties": {
+            "kind": { "type": "string", "const": "bootstrap" },
+            "predecessorManifestSha256": { "type": "string", "const": "bootstrap" },
+            "predecessorLedgerSha256": { "type": "string", "const": "bootstrap" },
+            "reason": { "type": "string", "const": "new_session" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "predecessorManifestSha256",
+            "predecessorLedgerSha256",
+            "predecessorStateGeneration",
+            "predecessorLedgerEpoch"
+          ],
+          "properties": {
+            "kind": { "type": "string", "const": "continuation" },
+            "predecessorManifestSha256": { "$ref": "#/definitions/sha256Hex" },
+            "predecessorLedgerSha256": { "$ref": "#/definitions/sha256Hex" },
+            "predecessorStateGeneration": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740990
+            },
+            "predecessorLedgerEpoch": { "$ref": "#/definitions/epochId" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "predecessorManifestSha256",
+            "predecessorLedgerSha256",
+            "predecessorStateGeneration",
+            "predecessorLedgerEpoch",
+            "reason"
+          ],
+          "properties": {
+            "kind": { "type": "string", "const": "reset" },
+            "predecessorManifestSha256": { "$ref": "#/definitions/sha256Hex" },
+            "predecessorLedgerSha256": { "$ref": "#/definitions/sha256Hex" },
+            "predecessorStateGeneration": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740990
+            },
+            "predecessorLedgerEpoch": { "$ref": "#/definitions/epochId" },
+            "reason": {
+              "type": "string",
+              "enum": ["base_change", "head_history_discontinuity", "cache_contract_change"]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "predecessorManifestSha256", "predecessorLedgerSha256", "reason"],
+          "properties": {
+            "kind": { "type": "string", "const": "recovery_root" },
+            "predecessorManifestSha256": { "type": "string", "const": "bootstrap" },
+            "predecessorLedgerSha256": { "type": "string", "const": "bootstrap" },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "corrupt_accepted_artifact",
+                "integrity_mismatch",
+                "unsafe_provenance",
+                "state_key_mismatch",
+                "contract_version_incompatible",
+                "over_bound_ledger",
+                "unavailable_accepted_artifact"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reviewedHeadSha",
+        "reviewedBaseSha",
+        "reviewedBaseRef",
+        "currentHeadSha",
+        "currentBaseSha",
+        "currentBaseRef",
+        "workflowEvent",
+        "producingRunId",
+        "producingRunAttempt",
+        "producingWorkflowRef",
+        "producingGitRef",
+        "producingActionSourceSha",
+        "producedAt"
+      ],
+      "properties": {
+        "reviewedHeadSha": { "$ref": "#/definitions/gitSha" },
+        "reviewedBaseSha": { "$ref": "#/definitions/gitSha" },
+        "reviewedBaseRef": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "currentHeadSha": { "$ref": "#/definitions/gitSha" },
+        "currentBaseSha": { "$ref": "#/definitions/gitSha" },
+        "currentBaseRef": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "workflowEvent": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "producingRunId": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "producingRunAttempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "producingWorkflowRef": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "producingGitRef": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "producingActionSourceSha": { "$ref": "#/definitions/gitSha" },
+        "producedAt": { "type": "string", "minLength": 1, "maxLength": 40 }
+      }
+    },
+    "transaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "interactionId",
+        "interactionOrdinal",
+        "consumedInputSha256",
+        "resultSha256",
+        "traceSha256",
+        "candidateLedgerSha256",
+        "metadataSemanticSha256"
+      ],
+      "properties": {
+        "interactionId": { "$ref": "#/definitions/sha256Hex" },
+        "interactionOrdinal": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "consumedInputSha256": { "$ref": "#/definitions/sha256Hex" },
+        "resultSha256": { "$ref": "#/definitions/sha256Hex" },
+        "traceSha256": { "$ref": "#/definitions/sha256Hex" },
+        "candidateLedgerSha256": { "$ref": "#/definitions/sha256Hex" },
+        "metadataSemanticSha256": { "$ref": "#/definitions/sha256Hex" }
+      }
+    },
+    "ledger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "bytes", "schemaVersion"],
+      "properties": {
+        "path": { "type": "string", "const": "ledger.json" },
+        "sha256": { "$ref": "#/definitions/sha256Hex" },
+        "bytes": { "type": "integer", "minimum": 0, "maximum": 1048576 },
+        "schemaVersion": { "type": "integer", "const": 1 }
+      }
+    },
+    "providerRunMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "bytes", "schemaVersion", "producingGeneration"],
+      "properties": {
+        "path": { "type": "string", "const": "provider-run-metadata.json" },
+        "sha256": { "$ref": "#/definitions/sha256Hex" },
+        "bytes": { "type": "integer", "minimum": 0, "maximum": 65536 },
+        "schemaVersion": { "type": "integer", "const": 1 },
+        "producingGeneration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sessionEpoch", "stateGeneration", "ledgerEpoch"],
+          "properties": {
+            "sessionEpoch": { "$ref": "#/definitions/epochId" },
+            "stateGeneration": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "ledgerEpoch": { "$ref": "#/definitions/epochId" }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "sha256Hex": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "gitSha": { "type": "string", "pattern": "^([a-f0-9]{40}|[a-f0-9]{64})$" },
+    "epochId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{22}$" }
+  }
+}
