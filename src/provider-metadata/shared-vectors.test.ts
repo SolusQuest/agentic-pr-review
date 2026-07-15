@@ -31,7 +31,8 @@ import {
 } from '../state-v2/shared-safe-path.js';
 import { scanStringSafetyIterative as scanStringSafety } from './string-safety.js';
 import { parseProviderRunMetadata } from './parse.js';
-import { computeMetadataSemanticSha256 } from './semantic-hash.js';
+import { buildSemanticEnvelope, computeMetadataSemanticSha256 } from './semantic-hash.js';
+import { canonicalJsonBytes } from '../canonical-json/index.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixturesDir = join(here, '..', '..', 'protocol', 'fixtures', 'provider-run-metadata', 'v1');
@@ -158,31 +159,64 @@ describe('shared conformance vector G6 -- schema-known top-level property with l
   });
 });
 
-describe('shared conformance vector G7 -- well-formed surrogate pair (U+1F600) in a schema-valid string field is accepted end-to-end', () => {
-  it('parser returns valid, canonical serialization preserves the value byte-exact', () => {
+describe('shared conformance vector G7 -- well-formed surrogate pair (U+1F600) in a schema-valid string field is accepted end-to-end and canonical serialization preserves it byte-exact', () => {
+  it('parser accepts through stages 6/7/8; canonical bytes from #48 canonicalJsonBytes contain the UTF-8 encoding of U+1F600 and round-trip back to the exact identity string', () => {
     const base = JSON.parse(
       readFileSync(join(fixturesDir, 'valid-bootstrap-hit.json'), 'utf8'),
     ) as Record<string, unknown>;
-    const grinning = 'x\uD83D\uDE00'; // U+1F600 encoded as UTF-16 surrogate pair
+    // Prefix with an ASCII byte so the canonical string is trivially locatable.
+    const grinning = 'x\uD83D\uDE00';
     base.selectedProviderId = grinning;
-    base.observedProviderId = grinning; // preserve identity cross-mismatch invariant
+    base.observedProviderId = grinning;
+
     const r = parseProviderRunMetadata(encoder.encode(JSON.stringify(base)));
     expect(r.valid).toBe(true);
     if (!r.valid) return;
-    // Stage 6 accepted the surrogate pair.
+
+    // Stages 6/7/8 accepted the surrogate pair; the branded metadata
+    // preserves it code-unit-exact.
     expect(r.metadata.selectedProviderId).toBe(grinning);
     expect(r.metadata.observedProviderId).toBe(grinning);
-    // Canonical serialization is deterministic and preserves the character:
-    // the hash of the parsed metadata is well-defined, and re-parsing the
-    // canonical bytes reproduces the same field value.
+
+    // Canonical serialization must preserve U+1F600 byte-exact. Build the
+    // semantic envelope and serialize with the merged #48 canonicalJsonBytes
+    // helper (NOT an independent serializer).
+    const envelope = buildSemanticEnvelope(r.metadata);
+    const canonicalBytes = canonicalJsonBytes(envelope);
+
+    // U+1F600 encodes to the four UTF-8 bytes F0 9F 98 80. The canonical bytes
+    // must contain this contiguous sequence at least twice (once each for
+    // selectedProviderId and observedProviderId).
+    const grinningUtf8 = new Uint8Array([0xf0, 0x9f, 0x98, 0x80]);
+    function indexOfSubarray(hay: Uint8Array, needle: Uint8Array, from: number): number {
+      outer: for (let i = from; i <= hay.length - needle.length; i += 1) {
+        for (let j = 0; j < needle.length; j += 1) {
+          if (hay[i + j] !== needle[j]) continue outer;
+        }
+        return i;
+      }
+      return -1;
+    }
+    const first = indexOfSubarray(canonicalBytes, grinningUtf8, 0);
+    const second = indexOfSubarray(canonicalBytes, grinningUtf8, first + 1);
+    expect(first).toBeGreaterThan(-1);
+    expect(second).toBeGreaterThan(first);
+
+    // Round-trip: decode the canonical bytes as UTF-8, reparse as JSON, and
+    // assert the exact identity value survives the shared canonical helper.
+    const canonicalText = new TextDecoder('utf-8', { fatal: true }).decode(canonicalBytes);
+    const reparsed = JSON.parse(canonicalText) as {
+      selectedProviderId: string;
+      observedProviderId: string;
+    };
+    expect(reparsed.selectedProviderId).toBe(grinning);
+    expect(reparsed.observedProviderId).toBe(grinning);
+
+    // Downstream: the semantic hash is well-defined and deterministic.
     const hash = computeMetadataSemanticSha256(r.metadata);
     expect(hash).toMatch(/^[0-9a-f]{64}$/);
   });
 });
-
-// ---------------------------------------------------------------------------
-// V1..V3 -- hypothetical schemas per the shared subsection.
-// ---------------------------------------------------------------------------
 
 describe('shared conformance vector V1 -- shared-unknown-ancestor-with-value-level-surrogate', () => {
   it('scanStringSafety returns [<untrusted-property> x3] on the frozen input', () => {
