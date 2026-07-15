@@ -44,3 +44,19 @@ describe('provider-metadata public API restriction', () => {
     expect(exported).toContain('parseProviderRunMetadata');
   });
 });
+
+describe('parseProviderRunMetadataFromString convenience', () => {
+  it('is exported alongside parseProviderRunMetadata', async () => {
+    const mod = await import('./index.js');
+    expect(Object.keys(mod)).toContain('parseProviderRunMetadataFromString');
+  });
+  it('delegates to the byte parser (produces identical result to encode+parse)', async () => {
+    const { parseProviderRunMetadataFromString, parseProviderRunMetadata } =
+      await import('./index.js');
+    const oversized = 'x'.repeat(33 * 1024); // > 32 KiB after UTF-8 encoding.
+    const asBytes = new TextEncoder().encode(oversized);
+    const byBytes = parseProviderRunMetadata(asBytes);
+    const byString = parseProviderRunMetadataFromString(oversized);
+    expect(byString).toEqual(byBytes);
+  });
+});

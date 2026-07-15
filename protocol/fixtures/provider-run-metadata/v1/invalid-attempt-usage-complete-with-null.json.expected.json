@@ -1,0 +1,8 @@
+{
+  "errors": [
+    {
+      "code": "invalid-metadata-attempt-usage-inconsistent",
+      "path": "/normalizedUsage/attempts/0"
+    }
+  ]
+}

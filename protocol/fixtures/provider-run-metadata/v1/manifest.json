@@ -218,5 +218,10 @@
     "file": "invalid-producing-run-id-non-numeric.json",
     "valid": false,
     "expectedCodes": ["invalid-metadata-schema"]
+  },
+  {
+    "file": "invalid-error-list-truncated.json",
+    "valid": false,
+    "expectedCodes": ["invalid-metadata-unknown-enum", "invalid-metadata-error-list-truncated"]
   }
 ]

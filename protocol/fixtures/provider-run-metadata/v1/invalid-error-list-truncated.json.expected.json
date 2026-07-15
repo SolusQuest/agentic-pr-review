@@ -1,0 +1,132 @@
+{
+  "errors": [
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/0/capability"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/0/outcome"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/1/capability"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/1/outcome"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/10/capability"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/10/outcome"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/11/capability"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/11/outcome"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/12/capability"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/12/outcome"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/13/capability"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/13/outcome"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/14/capability"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/14/outcome"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/15/capability"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/15/outcome"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/16/capability"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/16/outcome"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/17/capability"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/17/outcome"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/18/capability"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/18/outcome"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/19/capability"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/19/outcome"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/2/capability"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/2/outcome"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/20/capability"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/20/outcome"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/21/capability"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/21/outcome"
+    },
+    {
+      "code": "invalid-metadata-unknown-enum",
+      "path": "/normalizedUsage/attempts/22/capability"
+    },
+    {
+      "code": "invalid-metadata-error-list-truncated",
+      "path": ""
+    }
+  ]
+}

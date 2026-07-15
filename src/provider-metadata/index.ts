@@ -12,7 +12,7 @@
  */
 
 export * from './types.js';
-export { parseProviderRunMetadata } from './parse.js';
+export { parseProviderRunMetadata, parseProviderRunMetadataFromString } from './parse.js';
 export {
   deriveAggregate,
   type DeriveAggregateInput,

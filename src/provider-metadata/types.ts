@@ -256,8 +256,19 @@ export const IDENTITY_CONTROL_CHARS_REGEX = /[\u0000-\u001F\u007F]/;
  * all eight stages pass. `buildSemanticEnvelope` accepts only this brand.
  */
 declare const __providerRunMetadataValidated: unique symbol;
-export type ValidatedProviderRunMetadataV1 = ProviderRunMetadataV1 & {
+
+/**
+ * Validated projection of `ProviderRunMetadataV1`. Structurally identical, but
+ * with `normalizedUsage.attempts` refined to `readonly ValidatedAttempt[]` so
+ * downstream aggregate consumers can iterate individual attempts without
+ * dropping the parser-produced brand. Obtainable only by calling
+ * `parseProviderRunMetadata` (or the string-convenience wrapper).
+ */
+export type ValidatedProviderRunMetadataV1 = Omit<ProviderRunMetadataV1, 'normalizedUsage'> & {
   readonly [__providerRunMetadataValidated]: true;
+  readonly normalizedUsage: Omit<ProviderRunMetadataV1['normalizedUsage'], 'attempts'> & {
+    readonly attempts: readonly ValidatedAttempt[];
+  };
 };
 
 declare const __providerRunMetadataAttemptValidated: unique symbol;

@@ -31,9 +31,11 @@ describe('fixture manifest integrity', () => {
       expect(() => readFileSync(join(fixturesDir, entry.file), 'utf8')).not.toThrow();
     }
   });
-  it('every file on disk is listed in the manifest (other than manifest.json)', () => {
+  it('every non-oracle file on disk is listed in the manifest', () => {
     const listed = new Set(manifest.map((e) => e.file));
-    const onDisk = readdirSync(fixturesDir).filter((f) => f !== 'manifest.json');
+    const onDisk = readdirSync(fixturesDir).filter(
+      (f) => f !== 'manifest.json' && !f.endsWith('.expected.json'),
+    );
     for (const f of onDisk) expect(listed.has(f)).toBe(true);
   });
 });
@@ -74,18 +76,24 @@ describe('golden-hash fixtures reproduce metadataSemanticSha256', () => {
   }
 });
 
-describe('invalid fixtures produce the expected error codes', () => {
+describe('invalid fixtures produce the exact expected MetadataError[]', () => {
   for (const entry of manifest) {
     if (entry.valid) continue;
-    it(`${entry.file} produces every expected code`, () => {
+    it(`${entry.file} matches its .expected.json oracle exactly`, () => {
       const text = readFileSync(join(fixturesDir, entry.file), 'utf8');
       const r = parseProviderRunMetadata(encoder.encode(text));
       expect(r.valid).toBe(false);
       if (r.valid) return;
+      // Also verify the manifest's expectedCodes are present (redundant sanity).
       const emittedCodes = new Set(r.errors.map((e) => e.code));
       for (const expected of entry.expectedCodes) {
         expect(emittedCodes.has(expected as never)).toBe(true);
       }
+      const oraclePath = join(fixturesDir, entry.file + '.expected.json');
+      const oracle = JSON.parse(readFileSync(oraclePath, 'utf8')) as {
+        errors: Array<{ code: string; path: string }>;
+      };
+      expect(r.errors).toEqual(oracle.errors);
     });
   }
 });

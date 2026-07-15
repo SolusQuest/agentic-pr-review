@@ -1,0 +1,16 @@
+{
+  "errors": [
+    {
+      "code": "invalid-metadata-stateless-proof",
+      "path": "/normalizedUsage/attempts"
+    },
+    {
+      "code": "invalid-metadata-aggregate-mismatch",
+      "path": "/telemetryCompleteness/aggregate"
+    },
+    {
+      "code": "invalid-metadata-aggregate-mismatch",
+      "path": "/telemetryCompleteness/statelessProof"
+    }
+  ]
+}

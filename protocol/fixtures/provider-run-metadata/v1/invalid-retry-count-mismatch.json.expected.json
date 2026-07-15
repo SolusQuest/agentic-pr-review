@@ -1,0 +1,16 @@
+{
+  "errors": [
+    {
+      "code": "invalid-metadata-aggregate-mismatch",
+      "path": "/retryObservations/aggregate/attemptCount"
+    },
+    {
+      "code": "invalid-metadata-aggregate-mismatch",
+      "path": "/retryObservations/requests/0/attemptCount"
+    },
+    {
+      "code": "invalid-metadata-aggregate-mismatch",
+      "path": "/retryObservations/requests/0/failedCount"
+    }
+  ]
+}

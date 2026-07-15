@@ -1,0 +1,8 @@
+{
+  "errors": [
+    {
+      "code": "invalid-metadata-provider-identity-cross-mismatch",
+      "path": "/observedProviderId"
+    }
+  ]
+}

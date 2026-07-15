@@ -102,7 +102,11 @@ function rebuildUsageAggregate(usage: UsageAggregate): UsageAggregate {
   };
 }
 
-function rebuildNormalizedUsage(usage: NormalizedUsage): NormalizedUsage {
+function rebuildNormalizedUsage(
+  usage:
+    | NormalizedUsage
+    | (Omit<NormalizedUsage, 'attempts'> & { readonly attempts: readonly AttemptObservation[] }),
+): NormalizedUsage {
   return {
     attempts: usage.attempts.map(rebuildAttempt),
     requests: usage.requests.map(rebuildRequest),

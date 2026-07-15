@@ -384,8 +384,8 @@ for (const [name, m] of goldenSubjects) {
 {
   const m = build({ attempts: [att()] });
   const cast = m as unknown as { selectedProviderId: string; observedProviderId: string };
-  cast.selectedProviderId = 'anthr\u00f6pic';
-  cast.observedProviderId = 'anthr\u00f6pic';
+  cast.selectedProviderId = 'anthr\u0007pic';
+  cast.observedProviderId = 'anthr\u0007pic';
   write('invalid-identity-syntax-unicode.json', m);
 }
 

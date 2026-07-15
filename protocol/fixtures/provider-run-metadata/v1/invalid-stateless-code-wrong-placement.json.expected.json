@@ -1,0 +1,8 @@
+{
+  "errors": [
+    {
+      "code": "invalid-metadata-stateless-proof",
+      "path": "/normalizedUsage/attempts/1/attemptErrorCodes"
+    }
+  ]
+}

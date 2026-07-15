@@ -1,0 +1,12 @@
+{
+  "errors": [
+    {
+      "code": "invalid-metadata-identity-syntax",
+      "path": "/observedProviderId"
+    },
+    {
+      "code": "invalid-metadata-identity-syntax",
+      "path": "/selectedProviderId"
+    }
+  ]
+}

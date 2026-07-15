@@ -16,7 +16,7 @@ function bytes(s: string): Uint8Array {
  * change alongside the source without a byte-level fixture regeneration step.
  */
 describe('stage 7 ordered-exception mapping produces per-Ajv-error codes', () => {
-  it('an enum violation at path A and an unrelated maxLength violation at path B return both mapped codes in sorted order', () => {
+  it('an enum violation at path A and an unrelated pattern violation at path B return both mapped codes in sorted order', () => {
     // Build a minimal shape violating two schema keywords at different paths:
     //  - `cacheStatus`: unknown enum value.
     //  - `producingRunId`: fails the ^[1-9][0-9]{0,18}$ pattern.

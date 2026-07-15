@@ -1,0 +1,52 @@
+{
+  "errors": [
+    {
+      "code": "invalid-metadata-aggregate-mismatch",
+      "path": "/normalizedUsage/aggregate/attemptCount"
+    },
+    {
+      "code": "invalid-metadata-aggregate-mismatch",
+      "path": "/normalizedUsage/aggregate/cacheReadInputTokens"
+    },
+    {
+      "code": "invalid-metadata-aggregate-mismatch",
+      "path": "/normalizedUsage/aggregate/outputTokens"
+    },
+    {
+      "code": "invalid-metadata-aggregate-mismatch",
+      "path": "/normalizedUsage/aggregate/totalInputTokens"
+    },
+    {
+      "code": "invalid-metadata-multiple-succeeded-attempts",
+      "path": "/normalizedUsage/attempts/1"
+    },
+    {
+      "code": "invalid-metadata-aggregate-mismatch",
+      "path": "/normalizedUsage/requests/0/cacheReadInputTokens"
+    },
+    {
+      "code": "invalid-metadata-aggregate-mismatch",
+      "path": "/normalizedUsage/requests/0/outputTokens"
+    },
+    {
+      "code": "invalid-metadata-aggregate-mismatch",
+      "path": "/normalizedUsage/requests/0/totalInputTokens"
+    },
+    {
+      "code": "invalid-metadata-aggregate-mismatch",
+      "path": "/retryObservations/aggregate/attemptCount"
+    },
+    {
+      "code": "invalid-metadata-aggregate-mismatch",
+      "path": "/retryObservations/aggregate/succeededCount"
+    },
+    {
+      "code": "invalid-metadata-aggregate-mismatch",
+      "path": "/retryObservations/requests/0/attemptCount"
+    },
+    {
+      "code": "invalid-metadata-aggregate-mismatch",
+      "path": "/retryObservations/requests/0/succeededCount"
+    }
+  ]
+}

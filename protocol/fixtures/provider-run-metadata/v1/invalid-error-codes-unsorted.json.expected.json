@@ -1,0 +1,16 @@
+{
+  "errors": [
+    {
+      "code": "invalid-metadata-aggregate-mismatch",
+      "path": "/errorCodes/0"
+    },
+    {
+      "code": "invalid-metadata-aggregate-mismatch",
+      "path": "/errorCodes/1"
+    },
+    {
+      "code": "invalid-metadata-error-code-order",
+      "path": "/errorCodes/1"
+    }
+  ]
+}
