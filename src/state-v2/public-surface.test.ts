@@ -16,6 +16,7 @@ import type {
   ValidationResult,
   InvalidDiagnosticCode,
   UnsupportedLegacyDiagnostic,
+  StateManifestSerializationDiagnostic,
   StateManifestSerializationReason,
 } from './index.js';
 
@@ -117,5 +118,21 @@ describe('state-v2 public surface', () => {
     type Excludes = 'state_unsupported_legacy_v1' extends InvalidDiagnosticCode ? false : true;
     const c: Excludes = true;
     expect(c).toBe(true);
+  });
+
+  it('StateManifestSerializationDiagnostic is a closed 3-member enum (subset of the invalid diagnostic union)', () => {
+    const diagnostics: readonly StateManifestSerializationDiagnostic[] = [
+      'manifest_shape_invalid',
+      'manifest_unknown_field',
+      'manifest_unknown_version',
+    ];
+    expect(diagnostics.length).toBe(3);
+    // Compile-only: StateManifestSerializationDiagnostic is assignable to
+    // InvalidDiagnosticCode (never carries the canonical-only reason).
+    type Assignable = StateManifestSerializationDiagnostic extends InvalidDiagnosticCode
+      ? true
+      : false;
+    const a: Assignable = true;
+    expect(a).toBe(true);
   });
 });

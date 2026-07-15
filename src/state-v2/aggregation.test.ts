@@ -369,57 +369,90 @@ describe('bounded aggregation unit — exactly 9 distinct short-path candidates 
 });
 
 describe('bounded aggregation unit — post-truncation-collision', () => {
-  it('two candidates with different ancestor prefixes but identical preserved final segment collapse to ONE wire entry after truncation', async () => {
+  it('two candidates that share the SAME greedily retained ancestors + final segment but DIFFER in later (discarded) ancestors collapse to ONE wire entry after per-path truncation', async () => {
     const { _testOnlyFinalizeAggregation } = await import('./schema.js');
-    const longAncestors1 = new Array(20).fill('<untrusted-property>');
-    const longAncestors2 = new Array(20).fill('<invalid-control>');
+    // Construct segments so that per-path truncation:
+    //   - preserves the FIRST 9 <untrusted-property> ancestors (same in both);
+    //   - drops all the LATER ancestors (differing between the two candidates);
+    //   - preserves the final <untrusted-property> segment (same in both).
+    // Rendered wire entries then match byte-exactly and dedup collapses
+    // to a single entry. The frozen deep-path oracle establishes that at
+    // most 9 leading <untrusted-property> segments survive; put the
+    // differing segments after position 9.
+    const kept = new Array(9).fill('<untrusted-property>');
     const finalSeg = '<untrusted-property>';
+    // First candidate: 9 kept + 6 discarded '<untrusted-property>' + final.
+    const segsA = [...kept, ...new Array(6).fill('<untrusted-property>'), finalSeg];
+    // Second candidate: 9 kept + 6 discarded '<invalid-control>' + final.
+    // Its RAW safe path differs from A, but after per-path truncation
+    // the discarded region collapses to '<path-truncated>' in BOTH.
+    const segsB = [...kept, ...new Array(6).fill('<invalid-control>'), finalSeg];
     const cA = {
       stage: 7 as const,
       index: 0,
-      rawSafePath: '/' + [...longAncestors1, finalSeg].join('/'),
+      rawSafePath: '/' + segsA.join('/'),
       subCode: 'cross_transaction_ledger_binding' as const,
       code: 'x_invalid_field' as const,
-      segments: [...longAncestors1, finalSeg],
+      segments: segsA,
       diagnostic: 'manifest_shape_invalid' as const,
     };
     const cB = {
       stage: 7 as const,
       index: 1,
-      rawSafePath: '/' + [...longAncestors2, finalSeg].join('/'),
+      rawSafePath: '/' + segsB.join('/'),
       subCode: 'cross_transaction_ledger_binding' as const,
       code: 'x_invalid_field' as const,
-      segments: [...longAncestors2, finalSeg],
+      segments: segsB,
       diagnostic: 'manifest_shape_invalid' as const,
     };
     const res = _testOnlyFinalizeAggregation([cA, cB], 'manifest_shape_invalid');
     if (res.ok) return;
     const nonSentinel = res.message.split('; ').filter((e) => e !== '...[truncated]');
-    // After truncation both entries render identically; dedup → 1.
     expect(nonSentinel.length).toBe(1);
+    // No cap-forced truncation because dedup collapsed the pair to a
+    // single unique entry.
     expect(res.message.endsWith('...[truncated]')).toBe(false);
   });
 });
 
 describe('bounded aggregation unit — first-entry-plus-sentinel branches', () => {
-  it('first entry + sentinel fits: message contains exactly the first entry and the sentinel', async () => {
+  it('first-entry-plus-sentinel fits: two unique entries; the aggregate cap drops the second; message ends with the sentinel', async () => {
     const { _testOnlyFinalizeAggregation } = await import('./schema.js');
-    const longSeg = new Array(30).fill('<untrusted-property>');
+    // Two DISTINCT rawSafePaths that render to two byte-distinct wire
+    // entries after per-path truncation. Each entry alone is long
+    // enough that the two entries together exceed the aggregate cap.
+    // The aggregator must keep the first entry, drop the second, and
+    // append `; ...[truncated]`.
+    const seg30A = new Array(30).fill('<untrusted-property>');
+    const seg30B = [...new Array(29).fill('<untrusted-property>'), '<invalid-nul>'];
     const c1 = {
       stage: 7 as const,
       index: 0,
-      rawSafePath: '/' + longSeg.join('/'),
+      rawSafePath: '/' + seg30A.join('/'),
       subCode: 'cross_transaction_ledger_binding' as const,
       code: 'x_invalid_field' as const,
-      segments: longSeg,
+      segments: seg30A,
       diagnostic: 'manifest_shape_invalid' as const,
     };
-    const c2 = { ...c1, index: 1, subCode: 'cross_bootstrap_ordinal_nonzero' as const };
+    const c2 = {
+      stage: 7 as const,
+      index: 1,
+      rawSafePath: '/' + seg30B.join('/'),
+      subCode: 'cross_bootstrap_ordinal_nonzero' as const,
+      code: 'x_invalid_field' as const,
+      segments: seg30B,
+      diagnostic: 'manifest_shape_invalid' as const,
+    };
     const res = _testOnlyFinalizeAggregation([c1, c2], 'manifest_shape_invalid');
     if (res.ok) return;
     const nonSentinel = res.message.split('; ').filter((e) => e !== '...[truncated]');
     expect(nonSentinel.length).toBe(1);
-    for (const e of nonSentinel) expect(e.includes('; ')).toBe(false);
+    // The aggregator preserved exactly the first entry.
+    expect(nonSentinel[0]!.startsWith('x_invalid_field:')).toBe(true);
+    // Sentinel MUST be present because a distinct entry was dropped.
+    expect(res.message.endsWith('...[truncated]')).toBe(true);
+    // Never split inside an entry.
+    for (const e of nonSentinel) expect(e.endsWith('...[truncated]')).toBe(false);
   });
 
   it('single candidate: never emits a sentinel', async () => {
