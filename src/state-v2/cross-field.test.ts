@@ -27,7 +27,12 @@ function invalidate(
   const errs = crossFieldValidate(clone);
   const validation = validateStateManifestV2(clone);
   const message = validation.ok ? '' : validation.message;
-  return { message, codes: errs.map((e) => e.split(':')[0]) };
+  return {
+    message,
+    codes: errs.map((e) =>
+      e.startsWith('x_invalid_field:') ? e.slice('x_invalid_field:'.length) : e,
+    ),
+  };
 }
 
 describe('cross-field validation matrix', () => {
@@ -36,7 +41,7 @@ describe('cross-field validation matrix', () => {
     const result = invalidate(built.manifest, (m) => {
       (m.stateKey as unknown as Record<string, unknown>).namespace = 'other';
     });
-    expect(result.codes).toContain('x_state_namespace_mismatch');
+    expect(result.codes).toContain('/stateKey/namespace');
   });
 
   it('x_metadata_producing_state_generation when producing generation disagrees', () => {
@@ -44,7 +49,7 @@ describe('cross-field validation matrix', () => {
     const result = invalidate(built.manifest, (m) => {
       m.providerRunMetadata.producingGeneration.stateGeneration = 99;
     });
-    expect(result.codes).toContain('x_metadata_producing_state_generation');
+    expect(result.codes).toContain('/providerRunMetadata/producingGeneration/stateGeneration');
   });
 
   it('x_metadata_producing_session_epoch when producing sessionEpoch disagrees', () => {
@@ -52,11 +57,11 @@ describe('cross-field validation matrix', () => {
     const result = invalidate(built.manifest, (m) => {
       m.providerRunMetadata.producingGeneration.sessionEpoch = 'S00000000000000000000C' as EpochId;
     });
-    expect(result.codes).toContain('x_metadata_producing_session_epoch');
+    expect(result.codes).toContain('/providerRunMetadata/producingGeneration/sessionEpoch');
     // validateStateManifestV2 surfaces the same fixed code so downstream
     // consumers get the manifest_shape_invalid diagnostic without any
     // caller-controlled content.
-    expect(result.message).toContain('x_metadata_producing_session_epoch');
+    expect(result.message).toContain('/providerRunMetadata/producingGeneration/sessionEpoch');
   });
 
   it('x_metadata_producing_ledger_epoch when producing ledgerEpoch disagrees', () => {
@@ -64,8 +69,8 @@ describe('cross-field validation matrix', () => {
     const result = invalidate(built.manifest, (m) => {
       m.providerRunMetadata.producingGeneration.ledgerEpoch = 'BBBBBBBBBBBBBBBBBBBBBB' as EpochId;
     });
-    expect(result.codes).toContain('x_metadata_producing_ledger_epoch');
-    expect(result.message).toContain('x_metadata_producing_ledger_epoch');
+    expect(result.codes).toContain('/providerRunMetadata/producingGeneration/ledgerEpoch');
+    expect(result.message).toContain('/providerRunMetadata/producingGeneration/ledgerEpoch');
   });
 
   it('x_metadata_producing_state_generation also surfaces through validateStateManifestV2', () => {
@@ -73,8 +78,8 @@ describe('cross-field validation matrix', () => {
     const result = invalidate(built.manifest, (m) => {
       m.providerRunMetadata.producingGeneration.stateGeneration = 42;
     });
-    expect(result.codes).toContain('x_metadata_producing_state_generation');
-    expect(result.message).toContain('x_metadata_producing_state_generation');
+    expect(result.codes).toContain('/providerRunMetadata/producingGeneration/stateGeneration');
+    expect(result.message).toContain('/providerRunMetadata/producingGeneration/stateGeneration');
   });
 
   it('bootstrap must have stateGeneration 0 and ordinal 0', () => {
@@ -84,8 +89,8 @@ describe('cross-field validation matrix', () => {
       m.transaction.interactionOrdinal = 1;
       m.providerRunMetadata.producingGeneration.stateGeneration = 1;
     });
-    expect(result.codes).toContain('x_bootstrap_generation_nonzero');
-    expect(result.codes).toContain('x_bootstrap_ordinal_nonzero');
+    expect(result.codes).toContain('/generation/stateGeneration');
+    expect(result.codes).toContain('/transaction/interactionOrdinal');
   });
 
   const continuation: StateManifestV2Transition = {

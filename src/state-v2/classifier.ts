@@ -11,6 +11,8 @@ import type { DiagnosticCode } from './diagnostics.js';
 import type { StateManifestV2 } from './manifest.js';
 import { boundedJoin, validateStateManifestV2 } from './schema.js';
 import { strictParseJson } from './strict-json.js';
+import { renderWireEntry, scanStringSafety } from './shared-safe-path.js';
+import schema from '../../protocol/schemas/state-manifest.v2.json' with { type: 'json' };
 
 export interface EntryDescriptor {
   name: string;
@@ -111,14 +113,27 @@ export function classifyStateBundleV2(input: ClassifyStateBundleV2Input): Bundle
     return { kind: 'unsupported_legacy_v1', diagnostic: 'state_unsupported_legacy_v1' };
   }
 
-  // Step 4: v2 Ajv + cross-field validation.
+  // Step 4: shared string-safety traversal (NUL + unpaired UTF-16 surrogate)
+  // per the design contract's `### Shared traversal order and stage
+  // precedence`. Runs before Ajv so attacker-controlled property names do
+  // not leak into Ajv error paths.
+  const stringSafety = scanStringSafety(
+    parsed,
+    schema as unknown as Parameters<typeof scanStringSafety>[1],
+  );
+  if (stringSafety) {
+    const { wireEntry } = renderWireEntry('x_invalid_unicode', stringSafety.segments);
+    return invalid('manifest_shape_invalid', wireEntry);
+  }
+
+  // Step 5: v2 Ajv + cross-field validation.
   const validation = validateStateManifestV2(parsed);
   if (!validation.ok) {
     return invalid(validation.diagnostic, validation.message);
   }
   const manifest = validation.manifest;
 
-  // Step 5: remaining v2 layout/listing consistency (ledger + metadata entries + extras).
+  // Step 6: remaining v2 layout/listing consistency (ledger + metadata entries + extras).
   // Precedence within this step: duplicates > non-regular > extras. This
   // ordering is test-observable via the classifier fixture matrix.
   for (const dup of listingIndex.duplicates) {
@@ -148,7 +163,7 @@ export function classifyStateBundleV2(input: ClassifyStateBundleV2Input): Bundle
   );
   if (metadataConsistency) return metadataConsistency;
 
-  // Step 6: ledger byte cap + integrity.
+  // Step 7: ledger byte cap + integrity.
   const ledger = input.ledgerBytes;
   if (ledger === undefined) return invalid('ledger_missing', 'ledger_missing');
   if (ledger.byteLength > LEDGER_MAX_BYTES) {
@@ -163,7 +178,7 @@ export function classifyStateBundleV2(input: ClassifyStateBundleV2Input): Bundle
     return invalid('ledger_hash_mismatch', 'ledger_sha256_disagrees_with_descriptor');
   }
 
-  // Step 7: provider run metadata byte cap + integrity.
+  // Step 8: provider run metadata byte cap + integrity.
   const metadata = input.providerRunMetadataBytes;
   if (metadata === undefined) {
     return invalid('provider_run_metadata_missing', 'provider_run_metadata_missing');

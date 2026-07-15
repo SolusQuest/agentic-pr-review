@@ -33,7 +33,8 @@ describe('diagnostic privacy (blocker #2)', () => {
       expect(result.message).not.toContain('__proto_pollute__');
       expect(result.message).not.toContain('secret-value');
       // Fixed code appears instead.
-      expect(result.message).toContain('unknown_property');
+      expect(result.message).toContain('x_invalid_field:');
+      expect(result.message).toContain('<untrusted-property>');
     }
   });
 
@@ -44,7 +45,7 @@ describe('diagnostic privacy (blocker #2)', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.message).not.toContain('attacker-controlled-string');
-      expect(result.message).toContain('type_mismatch');
+      expect(result.message).toContain('x_invalid_field:/generation/stateGeneration');
     }
   });
 

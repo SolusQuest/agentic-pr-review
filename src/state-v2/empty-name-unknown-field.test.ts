@@ -31,9 +31,12 @@ describe('unknown-property diagnostic classification (blocker #3)', () => {
     const result = validateStateManifestV2(manifest);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      // additionalProperties takes precedence over unknown_version, per
-      // fixed diagnostic taxonomy.
-      expect(result.diagnostic).toBe('manifest_unknown_field');
+      // Under the reworked shared contract, any Ajv error whose
+      // instancePath === '/version' remaps to manifest_unknown_version
+      // regardless of the Ajv keyword; that error takes top-level
+      // precedence when a /version error is present alongside other
+      // additionalProperties errors.
+      expect(result.diagnostic).toBe('manifest_unknown_version');
     }
   });
 

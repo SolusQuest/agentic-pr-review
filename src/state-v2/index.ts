@@ -31,7 +31,12 @@ export {
   STATE_NAMESPACE,
 } from './constants.js';
 
-export type { CrossFieldMessageCode, DiagnosticCode } from './diagnostics.js';
+export type {
+  CrossFieldMessageCode,
+  DiagnosticCode,
+  InvalidDiagnosticCode,
+  UnsupportedLegacyDiagnostic,
+} from './diagnostics.js';
 
 export type {
   CacheContractIdentityV2,

@@ -34,9 +34,19 @@
       ],
       "properties": {
         "namespace": { "type": "string", "const": "m4-ledger-v2" },
-        "repository": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "headRepository": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "pullRequest": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "repository": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
+        },
+        "headRepository": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
+        },
+        "pullRequest": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
         "workflowIdentity": { "type": "string", "minLength": 1, "maxLength": 256 },
         "trustedExecutionDomain": { "type": "string", "minLength": 1, "maxLength": 256 }
       }
@@ -76,7 +86,7 @@
         "stateGeneration": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 9007199254740991
+          "maximum": 1000000
         },
         "ledgerEpoch": { "$ref": "#/definitions/epochId" }
       }
@@ -111,7 +121,7 @@
             "predecessorStateGeneration": {
               "type": "integer",
               "minimum": 0,
-              "maximum": 9007199254740990
+              "maximum": 999999
             },
             "predecessorLedgerEpoch": { "$ref": "#/definitions/epochId" }
           }
@@ -134,7 +144,7 @@
             "predecessorStateGeneration": {
               "type": "integer",
               "minimum": 0,
-              "maximum": 9007199254740990
+              "maximum": 999999
             },
             "predecessorLedgerEpoch": { "$ref": "#/definitions/epochId" },
             "reason": {
@@ -193,11 +203,16 @@
         "currentBaseSha": { "$ref": "#/definitions/gitSha" },
         "currentBaseRef": { "type": "string", "minLength": 1, "maxLength": 200 },
         "workflowEvent": { "type": "string", "minLength": 1, "maxLength": 200 },
-        "producingRunId": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "producingRunId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 19,
+          "pattern": "^[1-9][0-9]{0,18}$"
+        },
         "producingRunAttempt": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 9007199254740991
+          "maximum": 2147483647
         },
         "producingWorkflowRef": { "type": "string", "minLength": 1, "maxLength": 200 },
         "producingGitRef": { "type": "string", "minLength": 1, "maxLength": 200 },
@@ -222,7 +237,7 @@
         "interactionOrdinal": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 9007199254740991
+          "maximum": 1000000
         },
         "consumedInputSha256": { "$ref": "#/definitions/sha256Hex" },
         "resultSha256": { "$ref": "#/definitions/sha256Hex" },
@@ -238,7 +253,7 @@
       "properties": {
         "path": { "type": "string", "const": "ledger.json" },
         "sha256": { "$ref": "#/definitions/sha256Hex" },
-        "bytes": { "type": "integer", "minimum": 0, "maximum": 1048576 },
+        "bytes": { "type": "integer", "minimum": 0, "maximum": 524288 },
         "schemaVersion": { "type": "integer", "const": 1 }
       }
     },
@@ -249,7 +264,7 @@
       "properties": {
         "path": { "type": "string", "const": "provider-run-metadata.json" },
         "sha256": { "$ref": "#/definitions/sha256Hex" },
-        "bytes": { "type": "integer", "minimum": 0, "maximum": 65536 },
+        "bytes": { "type": "integer", "minimum": 0, "maximum": 32768 },
         "schemaVersion": { "type": "integer", "const": 1 },
         "producingGeneration": {
           "type": "object",
@@ -260,7 +275,7 @@
             "stateGeneration": {
               "type": "integer",
               "minimum": 0,
-              "maximum": 9007199254740991
+              "maximum": 1000000
             },
             "ledgerEpoch": { "$ref": "#/definitions/epochId" }
           }

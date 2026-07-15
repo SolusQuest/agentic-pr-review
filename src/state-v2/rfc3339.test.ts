@@ -64,6 +64,6 @@ describe('semantic validator surfaces RFC 3339 producedAt errors', () => {
       candidateLedgerSha256: 'a'.repeat(64),
     };
     const errs = semanticIdentityValidate(built);
-    expect(errs).toContain('x_producedAt_invalid_rfc3339:provenance.producedAt');
+    expect(errs).toContain('x_invalid_field:/provenance/producedAt');
   });
 });

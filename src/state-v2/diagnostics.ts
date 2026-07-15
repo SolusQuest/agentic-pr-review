@@ -1,10 +1,20 @@
 /**
  * Bundle-loading diagnostic codes returned by `classifyStateBundleV2`.
- * The list is stable and test-observable; new codes must be documented in
- * docs/20_architecture/state-manifest-v2.md before use.
+ *
+ * The full `DiagnosticCode` union splits into two mutually exclusive
+ * halves per the design contract:
+ *   - `UnsupportedLegacyDiagnostic` — only ever appears on the
+ *     `kind: 'unsupported_legacy_v1'` branch of `BundleClassification`.
+ *   - `InvalidDiagnosticCode` — the closed enum of failure codes on the
+ *     `kind: 'invalid'` branch.
+ *
+ * The stable `DiagnosticCode` alias remains the union of the two halves
+ * for API back-compat.
  */
-export type DiagnosticCode =
-  | 'state_unsupported_legacy_v1'
+
+export type UnsupportedLegacyDiagnostic = 'state_unsupported_legacy_v1';
+
+export type InvalidDiagnosticCode =
   | 'bundle_path_unsafe'
   | 'bundle_extra_entry'
   | 'bundle_listing_mismatch'
@@ -22,6 +32,8 @@ export type DiagnosticCode =
   | 'provider_run_metadata_byte_limit_exceeded'
   | 'provider_run_metadata_bytes_mismatch'
   | 'provider_run_metadata_hash_mismatch';
+
+export type DiagnosticCode = UnsupportedLegacyDiagnostic | InvalidDiagnosticCode;
 
 /** Cross-field validation failure `message` codes. Always paired with `manifest_shape_invalid`. */
 export type CrossFieldMessageCode =
