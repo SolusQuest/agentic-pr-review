@@ -335,3 +335,144 @@ describe('bounded aggregation — first-entry-plus-sentinel fits and does-not-fi
     }
   });
 });
+
+// -------------------------------------------------------------------------
+// Deterministic unit-level aggregation tests (test-only seam).
+// -------------------------------------------------------------------------
+
+describe('bounded aggregation unit — exactly 9 distinct short-path candidates → 8 entries + sentinel', () => {
+  it('caps at 8 and appends the aggregate sentinel', async () => {
+    const { _testOnlyFinalizeAggregation } = await import('./schema.js');
+    const shortPaths = ['/a', '/b', '/c', '/d', '/e', '/f', '/g', '/h', '/i'];
+    const candidates = shortPaths.map((p, i) => ({
+      stage: 7 as const,
+      index: i,
+      rawSafePath: p,
+      subCode: 'cross_transaction_ledger_binding' as const,
+      code: 'x_invalid_field' as const,
+      segments: p === '' ? [] : p.slice(1).split('/'),
+      diagnostic: 'manifest_shape_invalid' as const,
+    }));
+    const res = _testOnlyFinalizeAggregation(candidates, 'manifest_shape_invalid');
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    const parts = res.message.split('; ');
+    const nonSentinel = parts.filter((e) => e !== '...[truncated]');
+    expect(nonSentinel.length).toBe(8);
+    expect(new Set(nonSentinel).size).toBe(8);
+    expect(res.message.endsWith('...[truncated]')).toBe(true);
+    for (const e of nonSentinel) {
+      expect(e.startsWith('x_invalid_field:/')).toBe(true);
+      expect(e.endsWith('...[truncated]')).toBe(false);
+    }
+  });
+});
+
+describe('bounded aggregation unit — post-truncation-collision', () => {
+  it('two candidates with different ancestor prefixes but identical preserved final segment collapse to ONE wire entry after truncation', async () => {
+    const { _testOnlyFinalizeAggregation } = await import('./schema.js');
+    const longAncestors1 = new Array(20).fill('<untrusted-property>');
+    const longAncestors2 = new Array(20).fill('<invalid-control>');
+    const finalSeg = '<untrusted-property>';
+    const cA = {
+      stage: 7 as const,
+      index: 0,
+      rawSafePath: '/' + [...longAncestors1, finalSeg].join('/'),
+      subCode: 'cross_transaction_ledger_binding' as const,
+      code: 'x_invalid_field' as const,
+      segments: [...longAncestors1, finalSeg],
+      diagnostic: 'manifest_shape_invalid' as const,
+    };
+    const cB = {
+      stage: 7 as const,
+      index: 1,
+      rawSafePath: '/' + [...longAncestors2, finalSeg].join('/'),
+      subCode: 'cross_transaction_ledger_binding' as const,
+      code: 'x_invalid_field' as const,
+      segments: [...longAncestors2, finalSeg],
+      diagnostic: 'manifest_shape_invalid' as const,
+    };
+    const res = _testOnlyFinalizeAggregation([cA, cB], 'manifest_shape_invalid');
+    if (res.ok) return;
+    const nonSentinel = res.message.split('; ').filter((e) => e !== '...[truncated]');
+    // After truncation both entries render identically; dedup → 1.
+    expect(nonSentinel.length).toBe(1);
+    expect(res.message.endsWith('...[truncated]')).toBe(false);
+  });
+});
+
+describe('bounded aggregation unit — first-entry-plus-sentinel branches', () => {
+  it('first entry + sentinel fits: message contains exactly the first entry and the sentinel', async () => {
+    const { _testOnlyFinalizeAggregation } = await import('./schema.js');
+    const longSeg = new Array(30).fill('<untrusted-property>');
+    const c1 = {
+      stage: 7 as const,
+      index: 0,
+      rawSafePath: '/' + longSeg.join('/'),
+      subCode: 'cross_transaction_ledger_binding' as const,
+      code: 'x_invalid_field' as const,
+      segments: longSeg,
+      diagnostic: 'manifest_shape_invalid' as const,
+    };
+    const c2 = { ...c1, index: 1, subCode: 'cross_bootstrap_ordinal_nonzero' as const };
+    const res = _testOnlyFinalizeAggregation([c1, c2], 'manifest_shape_invalid');
+    if (res.ok) return;
+    const nonSentinel = res.message.split('; ').filter((e) => e !== '...[truncated]');
+    expect(nonSentinel.length).toBe(1);
+    for (const e of nonSentinel) expect(e.includes('; ')).toBe(false);
+  });
+
+  it('single candidate: never emits a sentinel', async () => {
+    const { _testOnlyFinalizeAggregation } = await import('./schema.js');
+    const longSeg = new Array(30).fill('<untrusted-property>');
+    const c1 = {
+      stage: 7 as const,
+      index: 0,
+      rawSafePath: '/' + longSeg.join('/'),
+      subCode: 'cross_transaction_ledger_binding' as const,
+      code: 'x_invalid_field' as const,
+      segments: longSeg,
+      diagnostic: 'manifest_shape_invalid' as const,
+    };
+    const res = _testOnlyFinalizeAggregation([c1], 'manifest_shape_invalid');
+    if (res.ok) return;
+    expect(res.message.endsWith('...[truncated]')).toBe(false);
+    expect(res.message.startsWith('x_invalid_field:')).toBe(true);
+  });
+});
+
+describe('StateManifestSerializationError reason → diagnostic mapping matrix', () => {
+  it('maps every reason to the correct legacy diagnostic', async () => {
+    const { StateManifestSerializationError } = await import('./serializer.js');
+    const cases: readonly [
+      import('./serializer.js').StateManifestSerializationReason,
+      import('./serializer.js').StateManifestSerializationDiagnostic,
+    ][] = [
+      ['manifest_shape_invalid', 'manifest_shape_invalid'],
+      ['manifest_unknown_field', 'manifest_unknown_field'],
+      ['manifest_unknown_version', 'manifest_unknown_version'],
+      ['canonical_json_input_rejected', 'manifest_shape_invalid'],
+    ];
+    for (const [reason, expected] of cases) {
+      const err = new StateManifestSerializationError(reason, 'x_invalid_field:/');
+      expect(err.reason).toBe(reason);
+      expect(err.diagnostic).toBe(expected);
+    }
+  });
+});
+
+describe('bounded-message helper handles UTF-16 code-unit boundary correctly', () => {
+  it('astral emoji input is truncated on a UTF-16 code-unit boundary', async () => {
+    const { boundedDiagnosticMessage } = await import('./schema.js');
+    const { MAX_DIAGNOSTIC_MESSAGE_CHARS, MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES } =
+      await import('./constants.js');
+    // \uD83D\uDE00 == U+1F600 (grinning face). 2 UTF-16 units, 4 UTF-8 bytes.
+    const emoji = String.fromCharCode(0xd83d, 0xde00);
+    const input = emoji.repeat(200);
+    const bounded = boundedDiagnosticMessage(input);
+    expect(bounded.length).toBeLessThanOrEqual(MAX_DIAGNOSTIC_MESSAGE_CHARS);
+    expect(new TextEncoder().encode(bounded).byteLength).toBeLessThanOrEqual(
+      MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES,
+    );
+  });
+});

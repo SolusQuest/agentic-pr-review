@@ -251,7 +251,7 @@ describe('normalizePosition and dereferenceJsonPointer regression', () => {
     expect(posSigned.kind).toBe('unknown');
   });
 
-  it('`#/` does not alias to array root: fails on an array-typed root, resolves an empty-name member on an object root', async () => {
+  it('`#/` does not alias to root: on an object root it points to the empty-name member; array element zero is NOT resolved', async () => {
     const { normalizePosition } = await import('./shared-safe-path.js');
     const rootObj = {
       properties: { '': { type: 'string' } },
@@ -262,5 +262,29 @@ describe('normalizePosition and dereferenceJsonPointer regression', () => {
     // so normalizePosition on it returns UnknownPosition — but not because
     // of any alias to root.
     expect(pos.kind).toBe('unknown');
+  });
+});
+
+describe('dereferenceJsonPointer array-index grammar', () => {
+  it('exact array-index grammar test: only base-10, no leading zero, no sign, no scientific', async () => {
+    const { dereferenceJsonPointer } = await import('./shared-safe-path.js');
+    // Non-array root: reject `#/0`, accept `#/valid`.
+    const root = {
+      valid: { properties: { a: { type: 'string' } } },
+    } as unknown as import('./shared-safe-path.js').SchemaNode;
+    expect(dereferenceJsonPointer(root, '#/valid')).toBeDefined();
+    // Array subtree: build one under `oneOf`.
+    const rootArr = {
+      oneOf: [{ type: 'string' }, { type: 'number' }],
+    } as unknown as import('./shared-safe-path.js').SchemaNode;
+    expect(dereferenceJsonPointer(rootArr, '#/oneOf/0')).toBeDefined();
+    expect(dereferenceJsonPointer(rootArr, '#/oneOf/1')).toBeDefined();
+    // Rejected canonical grammar violations.
+    expect(dereferenceJsonPointer(rootArr, '#/oneOf/01')).toBeUndefined();
+    expect(dereferenceJsonPointer(rootArr, '#/oneOf/1e0')).toBeUndefined();
+    expect(dereferenceJsonPointer(rootArr, '#/oneOf/+1')).toBeUndefined();
+    expect(dereferenceJsonPointer(rootArr, '#/oneOf/-1')).toBeUndefined();
+    expect(dereferenceJsonPointer(rootArr, '#/oneOf/2')).toBeUndefined();
+    expect(dereferenceJsonPointer(rootArr, '#/oneOf/x')).toBeUndefined();
   });
 });

@@ -112,6 +112,13 @@ export interface AggregatorCandidate {
 
 const AGG_SENTINEL = '; ...[truncated]';
 
+export function _testOnlyFinalizeAggregation(
+  candidates: readonly AggregatorCandidate[],
+  fallbackDiagnostic: DiagnosticCode,
+): { ok: false; diagnostic: DiagnosticCode; message: string } {
+  return finalizeAggregation(candidates, fallbackDiagnostic);
+}
+
 function finalizeAggregation(
   candidates: readonly AggregatorCandidate[],
   fallbackDiagnostic: DiagnosticCode,
@@ -546,50 +553,59 @@ function calendarDaysInMonth(year: number, month: number): number {
 // ---------------------------------------------------------------------------
 
 export function boundedJoin(messages: readonly string[]): string {
+  // Per-message caps: each individual entry is capped at
+  // MAX_DIAGNOSTIC_MESSAGE_CHARS UTF-16 code units. Truncation preserves
+  // surrogate pairs (never splits an astral character).
   const trimmed = messages
     .slice(0, MAX_DIAGNOSTIC_ERRORS)
-    .map((m) => truncateToCodepoints(m, MAX_DIAGNOSTIC_MESSAGE_CHARS));
+    .map((m) => truncateToUtf16Units(m, MAX_DIAGNOSTIC_MESSAGE_CHARS));
   const joined = trimmed.join('; ');
   const encoder = new TextEncoder();
-  const encoded = encoder.encode(joined);
-  if (encoded.byteLength <= MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES) return joined;
-
-  const sentinel = '...[truncated]';
-  const sentinelBytes = encoder.encode(sentinel);
-  const budget = MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES - sentinelBytes.byteLength;
-  const truncated = truncateAtCodepointBoundary(joined, Math.max(0, budget));
-  const result = `${truncated}${sentinel}`;
-  const finalBytes = encoder.encode(result).byteLength;
-  if (finalBytes > MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES) {
-    return boundedJoin([truncated.slice(0, Math.floor(truncated.length / 2))]);
+  const jUnits = joined.length;
+  const jBytes = encoder.encode(joined).byteLength;
+  if (jUnits <= MAX_DIAGNOSTIC_MESSAGE_CHARS && jBytes <= MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES) {
+    return joined;
   }
-  return result;
+  const sentinel = '...[truncated]';
+  const sentinelUnits = sentinel.length;
+  const sentinelBytes = encoder.encode(sentinel).byteLength;
+  const budgetUnits = MAX_DIAGNOSTIC_MESSAGE_CHARS - sentinelUnits;
+  const budgetBytes = MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES - sentinelBytes;
+  const truncated = truncateToUtf16UnitsWithinBytes(
+    joined,
+    Math.max(0, budgetUnits),
+    Math.max(0, budgetBytes),
+  );
+  return `${truncated}${sentinel}`;
 }
 
-function truncateAtCodepointBoundary(value: string, maxBytes: number): string {
-  if (maxBytes <= 0) return '';
+function truncateToUtf16Units(value: string, maxUnits: number): string {
+  if (maxUnits <= 0) return '';
+  if (value.length <= maxUnits) return value;
+  // Cut at maxUnits, but if that would split a surrogate pair, back up.
+  let cut = maxUnits;
+  const c = value.charCodeAt(cut - 1);
+  if (c >= 0xd800 && c <= 0xdbff) cut -= 1;
+  return value.slice(0, cut);
+}
+
+function truncateToUtf16UnitsWithinBytes(
+  value: string,
+  maxUnits: number,
+  maxBytes: number,
+): string {
+  if (maxUnits <= 0 || maxBytes <= 0) return '';
   const encoder = new TextEncoder();
   let bytes = 0;
-  let cutOffset = 0;
-  let charOffset = 0;
-  for (const codepoint of value) {
-    const encoded = encoder.encode(codepoint);
-    if (bytes + encoded.byteLength > maxBytes) break;
-    bytes += encoded.byteLength;
-    charOffset += codepoint.length;
-    cutOffset = charOffset;
-  }
-  return value.slice(0, cutOffset);
-}
-
-function truncateToCodepoints(value: string, maxCodepoints: number): string {
-  if (maxCodepoints <= 0) return '';
-  let count = 0;
+  let units = 0;
   let cut = 0;
   for (const cp of value) {
-    if (count >= maxCodepoints) break;
-    count += 1;
-    cut += cp.length;
+    const encoded = encoder.encode(cp);
+    const cpUnits = cp.length; // 1 or 2 UTF-16 code units.
+    if (bytes + encoded.byteLength > maxBytes || units + cpUnits > maxUnits) break;
+    bytes += encoded.byteLength;
+    units += cpUnits;
+    cut += cpUnits;
   }
   return value.slice(0, cut);
 }
