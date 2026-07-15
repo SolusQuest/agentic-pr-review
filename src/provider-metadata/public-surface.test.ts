@@ -1,0 +1,37 @@
+import { describe, expect, it } from 'vitest';
+import { parseProviderRunMetadata } from './parse.js';
+import { computeMetadataSemanticSha256, buildSemanticEnvelope } from './semantic-hash.js';
+import { deriveAggregate } from './aggregate.js';
+import { identityAgrees } from './identity.js';
+import {
+  METADATA_MAX_BYTES,
+  MAX_METADATA_ERRORS,
+  MAX_METADATA_PATH_CHARS,
+  MAX_METADATA_PATH_UTF8_BYTES,
+  PROVIDER_RUN_METADATA_SCHEMA_VERSION,
+  METADATA_SEMANTIC_HASH_DOMAIN_TAG,
+} from './types.js';
+
+describe('provider-metadata public surface', () => {
+  it('exports shared constants (imported from #48)', () => {
+    expect(METADATA_MAX_BYTES).toBe(32768);
+    expect(PROVIDER_RUN_METADATA_SCHEMA_VERSION).toBe(1);
+  });
+
+  it('exports workstream-local constants at frozen values', () => {
+    expect(MAX_METADATA_ERRORS).toBe(32);
+    expect(MAX_METADATA_PATH_CHARS).toBe(256);
+    expect(MAX_METADATA_PATH_UTF8_BYTES).toBe(1024);
+    expect(METADATA_SEMANTIC_HASH_DOMAIN_TAG).toBe(
+      'agentic-pr-review/provider-run-metadata-semantic/v1',
+    );
+  });
+
+  it('exports functions', () => {
+    expect(typeof parseProviderRunMetadata).toBe('function');
+    expect(typeof computeMetadataSemanticSha256).toBe('function');
+    expect(typeof buildSemanticEnvelope).toBe('function');
+    expect(typeof deriveAggregate).toBe('function');
+    expect(typeof identityAgrees).toBe('function');
+  });
+});

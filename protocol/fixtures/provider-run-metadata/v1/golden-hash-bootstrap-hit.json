@@ -1,0 +1,91 @@
+{
+  "metadata": {
+    "schemaVersion": 1,
+    "selectedProviderId": "anthropic",
+    "observedProviderId": "anthropic",
+    "resolvedModelId": "claude-sonnet-4-5-2025-09-29",
+    "adapterId": "1111111111111111111111111111111111111111111111111111111111111111",
+    "logicalPrefixSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "prefixSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "capability": {
+      "mode": "standard",
+      "aggregate": "eligible",
+      "statelessProof": null
+    },
+    "cacheStatus": "hit",
+    "normalizedUsage": {
+      "attempts": [
+        {
+          "requestOrdinal": 0,
+          "attemptOrdinal": 0,
+          "outcome": "succeeded",
+          "capability": "eligible",
+          "cacheStatus": "hit",
+          "usageCompleteness": "complete",
+          "totalInputTokens": 100,
+          "uncachedInputTokens": 0,
+          "cacheWriteInputTokens": 0,
+          "cacheReadInputTokens": 100,
+          "outputTokens": 10,
+          "attemptErrorCodes": []
+        }
+      ],
+      "requests": [
+        {
+          "requestOrdinal": 0,
+          "capability": "eligible",
+          "cacheStatus": "hit",
+          "usageCompleteness": "complete",
+          "totalInputTokens": 100,
+          "uncachedInputTokens": 0,
+          "cacheWriteInputTokens": 0,
+          "cacheReadInputTokens": 100,
+          "outputTokens": 10
+        }
+      ],
+      "aggregate": {
+        "totalInputTokens": 100,
+        "uncachedInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "cacheReadInputTokens": 100,
+        "outputTokens": 10,
+        "requestCount": 1,
+        "attemptCount": 1
+      }
+    },
+    "retryObservations": {
+      "requests": [
+        {
+          "requestOrdinal": 0,
+          "attemptCount": 1,
+          "succeededCount": 1,
+          "failedCount": 0,
+          "cancelledCount": 0
+        }
+      ],
+      "aggregate": {
+        "requestCount": 1,
+        "attemptCount": 1,
+        "succeededCount": 1,
+        "failedCount": 0,
+        "cancelledCount": 0
+      }
+    },
+    "errorCodes": [],
+    "telemetryCompleteness": {
+      "usage": "complete",
+      "cache": "complete",
+      "statelessProof": "notApplicable",
+      "aggregate": "complete"
+    },
+    "producingRunId": "17123456789",
+    "runAttempt": 1,
+    "interactionId": "4444444444444444444444444444444444444444444444444444444444444444",
+    "consumedInputSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+    "resultSha256": "6666666666666666666666666666666666666666666666666666666666666666",
+    "traceSha256": "7777777777777777777777777777777777777777777777777777777777777777",
+    "predecessorLedgerSha256": "bootstrap",
+    "candidateLedgerSha256": "8888888888888888888888888888888888888888888888888888888888888888"
+  },
+  "metadataSemanticSha256": "42cc4846876b6d02d03d228148624bff74e1a99d7b7afd5a0bcce06699e6fdbb"
+}

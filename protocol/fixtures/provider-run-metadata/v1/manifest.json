@@ -1,0 +1,227 @@
+[
+  {
+    "file": "valid-bootstrap-hit.json",
+    "valid": true,
+    "purpose": "bootstrap single-request hit"
+  },
+  {
+    "file": "valid-resumed-cachewrite-then-hit.json",
+    "valid": true,
+    "purpose": "resumed run: cache write then hit"
+  },
+  {
+    "file": "valid-miss-only.json",
+    "valid": true,
+    "purpose": "all miss aggregate"
+  },
+  {
+    "file": "valid-partial-cache.json",
+    "valid": true,
+    "purpose": "mixed hit/miss => aggregate partial"
+  },
+  {
+    "file": "valid-unsupported.json",
+    "valid": true,
+    "purpose": "capability unsupported => cacheStatus unsupported"
+  },
+  {
+    "file": "valid-ineligible.json",
+    "valid": true,
+    "purpose": "capability ineligible collapses into aggregate unsupported"
+  },
+  {
+    "file": "valid-unknown.json",
+    "valid": true,
+    "purpose": "capability unknown => aggregate unknown"
+  },
+  {
+    "file": "valid-telemetry-unavailable.json",
+    "valid": true,
+    "purpose": "capability telemetryUnavailable => aggregate unknown"
+  },
+  {
+    "file": "valid-zero-request.json",
+    "valid": true,
+    "purpose": "zero-request precedence rule fires first"
+  },
+  {
+    "file": "valid-stateless-provider-advertised.json",
+    "valid": true,
+    "purpose": "stateless mode with verified providerAdvertised proof"
+  },
+  {
+    "file": "valid-stateless-synthetic-unverified.json",
+    "valid": true,
+    "purpose": "stateless mode with unverified synthetic proof and stateless_proof_missing on (0,0)"
+  },
+  {
+    "file": "valid-retries-summed-by-attempt.json",
+    "valid": true,
+    "purpose": "retries: failed attempt 0 + succeeded attempt 1, tokens summed"
+  },
+  {
+    "file": "valid-partial-usage.json",
+    "valid": true,
+    "purpose": "attempt-level partial usage completeness"
+  },
+  {
+    "file": "golden-hash-bootstrap-hit.json",
+    "valid": true,
+    "purpose": "golden metadataSemanticSha256 vector"
+  },
+  {
+    "file": "golden-hash-resumed-partial.json",
+    "valid": true,
+    "purpose": "golden metadataSemanticSha256 vector"
+  },
+  {
+    "file": "golden-hash-stateless-synthetic-unverified.json",
+    "valid": true,
+    "purpose": "golden metadataSemanticSha256 vector"
+  },
+  {
+    "file": "invalid-forbidden-field-endpoint.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-additional-property"
+  },
+  {
+    "file": "invalid-forbidden-field-provider-request-id.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-additional-property"
+  },
+  {
+    "file": "invalid-forbidden-field-raw-error.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-additional-property"
+  },
+  {
+    "file": "invalid-forbidden-field-notes.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-additional-property"
+  },
+  {
+    "file": "invalid-forbidden-field-provider-extensions.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-additional-property"
+  },
+  {
+    "file": "invalid-unknown-enum-cache-status.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-unknown-enum"
+  },
+  {
+    "file": "invalid-model-alias-latest.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-model-alias-literal"
+  },
+  {
+    "file": "invalid-provider-identity-cross-mismatch.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-provider-identity-cross-mismatch"
+  },
+  {
+    "file": "invalid-identity-syntax-unicode.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-identity-syntax"
+  },
+  {
+    "file": "invalid-predecessor-syntax.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-predecessor-syntax"
+  },
+  {
+    "file": "invalid-token-negative.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-token-out-of-range"
+  },
+  {
+    "file": "invalid-retry-count-mismatch.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-aggregate-mismatch"
+  },
+  {
+    "file": "invalid-aggregate-mismatch-cache-status.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-aggregate-mismatch"
+  },
+  {
+    "file": "invalid-error-codes-unsorted.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-error-code"
+  },
+  {
+    "file": "invalid-error-codes-contains-validator-code.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-unknown-enum"
+  },
+  {
+    "file": "invalid-attempt-duplicate.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-attempt-uniqueness"
+  },
+  {
+    "file": "invalid-attempt-non-contiguous.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-attempt-contiguity"
+  },
+  {
+    "file": "invalid-request-non-contiguous.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-request-ordering"
+  },
+  {
+    "file": "invalid-multiple-succeeded-attempts.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-multiple-succeeded-attempts"
+  },
+  {
+    "file": "invalid-partition-inconsistent.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-partition-inconsistent"
+  },
+  {
+    "file": "invalid-attempt-usage-complete-with-null.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-attempt-usage-inconsistent"
+  },
+  {
+    "file": "invalid-outcome-succeeded-with-provider-error.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-attempt-outcome-error-consistency"
+  },
+  {
+    "file": "invalid-stateless-mode-null-proof.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-stateless-proof"
+  },
+  {
+    "file": "invalid-standard-mode-with-proof.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-stateless-proof"
+  },
+  {
+    "file": "invalid-stateless-unverified-missing-code.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-stateless-proof"
+  },
+  {
+    "file": "invalid-stateless-code-wrong-placement.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-stateless-proof"
+  },
+  {
+    "file": "invalid-producing-run-id-zero.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-schema"
+  },
+  {
+    "file": "invalid-producing-run-id-non-numeric.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-schema"
+  },
+  {
+    "file": "invalid-token-negative-zero.json",
+    "valid": false,
+    "expectedErrorCode": "invalid-metadata-token-negative"
+  }
+]
