@@ -1,0 +1,8 @@
+{
+  "errors": [
+    {
+      "code": "invalid-metadata-unicode",
+      "path": "/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<path-truncated>/<untrusted-property>"
+    }
+  ]
+}

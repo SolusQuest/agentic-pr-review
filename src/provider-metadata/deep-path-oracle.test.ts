@@ -1,115 +1,84 @@
 import { describe, it, expect } from 'vitest';
-import { finalizePath, utf8ByteLength } from './safe-path-helpers.js';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseProviderRunMetadata } from './parse.js';
 import { MAX_METADATA_PATH_CHARS, MAX_METADATA_PATH_UTF8_BYTES } from './types.js';
+import { utf8ByteLength } from './safe-path-helpers.js';
 
 /**
- * Deep-path oracle -- byte-exact truncation and no-truncation cases against
- * the frozen `MetadataError.path` caps (`MAX_METADATA_PATH_CHARS = 256`,
- * `MAX_METADATA_PATH_UTF8_BYTES = 1024`). Values are asserted through the
- * public parser wherever meaningful, and through `finalizePath` directly for
- * cases the parser cannot reach (e.g. artificially long path segments the
- * schema wouldn't tolerate).
+ * Deep-path oracle for issue #51.
+ *
+ * The design contract `docs/20_architecture/session-ledger-and-prefix-contract.md`
+ * (subsection "Concrete deep-path golden vectors -- frozen oracle") freezes
+ * two exact `MetadataError.path` literals for the metadata sidecar:
+ *
+ *   metadata-deep-path-no-truncation  -- fullSanitizedSegmentCount = 10.
+ *   metadata-deep-path-truncation     -- fullSanitizedSegmentCount = 14
+ *                                        (10 leading + <path-truncated> +
+ *                                        terminal <untrusted-property>).
+ *
+ * Both vectors are exercised through the public parser (`parseProviderRunMetadata`)
+ * on named fixtures whose input JSON is a top-level chain of unknown
+ * properties terminated by a lone-surrogate string value. The complete
+ * `MetadataError[]` is asserted byte-exact against the frozen literal via
+ * the fixture's `.expected.json` oracle (never re-derived through
+ * `finalizePath`).
  */
 
-describe('deep-path safe-path oracle -- no truncation for short paths', () => {
-  it('composes a 5-segment schema-known path unchanged (under both caps)', () => {
-    const segments = ['normalizedUsage', 'attempts', '0', 'attemptErrorCodes', '2'];
-    const out = finalizePath(segments);
-    expect(out).toBe('/normalizedUsage/attempts/0/attemptErrorCodes/2');
-    expect(out.length).toBeLessThanOrEqual(MAX_METADATA_PATH_CHARS);
-    expect(utf8ByteLength(out)).toBeLessThanOrEqual(MAX_METADATA_PATH_UTF8_BYTES);
-  });
-});
+const here = dirname(fileURLToPath(import.meta.url));
+const fixturesDir = join(here, '..', '..', 'protocol', 'fixtures', 'provider-run-metadata', 'v1');
+const encoder = new TextEncoder();
 
-describe('deep-path safe-path oracle -- truncation preserves the final segment and inserts <path-truncated>', () => {
-  it('40 x 8-char leading segments + 1 final segment triggers truncation and preserves the final segment', () => {
-    const long: string[] = [];
-    for (let i = 0; i < 40; i += 1) long.push(`seg${String(i).padStart(4, '0')}`);
-    long.push('leaf-final-segment');
-    const out = finalizePath(long);
-    expect(out.length).toBeLessThanOrEqual(MAX_METADATA_PATH_CHARS);
-    expect(utf8ByteLength(out)).toBeLessThanOrEqual(MAX_METADATA_PATH_UTF8_BYTES);
-    expect(out.endsWith('/leaf-final-segment')).toBe(true);
-    expect(out).toMatch(/<path-truncated>\/leaf-final-segment$/);
-  });
+const NO_TRUNCATION_PATH =
+  '/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>';
 
-  it('single multi-byte final segment above both caps still preserves the final segment (final-segment rule normative)', () => {
-    const seg = '\u4e00'.repeat(400); // 400 chars, 1200 UTF-8 bytes
-    const out = finalizePath([seg]);
-    // The frozen algorithm preserves the final segment verbatim even when it
-    // alone exceeds the caps.
-    expect(out.endsWith('/' + seg)).toBe(true);
-  });
-});
+const TRUNCATION_PATH =
+  '/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<path-truncated>/<untrusted-property>';
 
-describe('deep-path safe-path oracle -- exercised through the parser', () => {
-  it('a stage-8 aggregate-mismatch on a deeply-nested schema-known field emits the byte-exact schema-known path', () => {
-    // Construct a valid document with normalizedUsage.aggregate that drifts
-    // from deriveAggregate; the aggregate-mismatch code should carry a byte-
-    // exact schema-known path (e.g. /normalizedUsage/aggregate/attemptCount).
-    const doc = {
-      schemaVersion: 1,
-      selectedProviderId: 'a',
-      observedProviderId: 'a',
-      resolvedModelId: 'm',
-      adapterId: 'a'.repeat(64),
-      logicalPrefixSha256: 'a'.repeat(64),
-      prefixSha256: 'a'.repeat(64),
-      capability: { mode: 'standard', aggregate: 'unknown', statelessProof: null },
-      cacheStatus: 'unknown',
-      normalizedUsage: {
-        attempts: [],
-        requests: [],
-        aggregate: {
-          totalInputTokens: null,
-          uncachedInputTokens: null,
-          cacheWriteInputTokens: null,
-          cacheReadInputTokens: null,
-          outputTokens: null,
-          requestCount: 0,
-          attemptCount: 3, // drift: derivation would produce 0 (no attempts)
-        },
-      },
-      retryObservations: {
-        requests: [],
-        aggregate: {
-          requestCount: 0,
-          attemptCount: 0,
-          succeededCount: 0,
-          failedCount: 0,
-          cancelledCount: 0,
-        },
-      },
-      errorCodes: [],
-      telemetryCompleteness: {
-        usage: 'missing',
-        cache: 'missing',
-        statelessProof: 'notApplicable',
-        aggregate: 'missing',
-      },
-      producingRunId: '1',
-      runAttempt: 1,
-      interactionId: 'a'.repeat(64),
-      consumedInputSha256: 'a'.repeat(64),
-      resultSha256: 'a'.repeat(64),
-      traceSha256: 'a'.repeat(64),
-      predecessorLedgerSha256: 'bootstrap',
-      candidateLedgerSha256: 'a'.repeat(64),
-    };
-    const r = parseProviderRunMetadata(new TextEncoder().encode(JSON.stringify(doc)));
+function loadFixture(name: string): Uint8Array {
+  return encoder.encode(readFileSync(join(fixturesDir, name), 'utf8'));
+}
+function loadOracle(name: string): { errors: Array<{ code: string; path: string }> } {
+  return JSON.parse(readFileSync(join(fixturesDir, name + '.expected.json'), 'utf8'));
+}
+
+describe('metadata-deep-path-no-truncation -- fullSanitizedSegmentCount = 10, top-level unknown-property chain', () => {
+  it('parser emits the exact frozen path literal (byte-exact) and stays inside both caps', () => {
+    const fixture = 'invalid-unicode-deep-path-no-truncation.json';
+    const oracle = loadOracle(fixture);
+    // Sanity: the oracle stores the exact frozen literal.
+    expect(oracle.errors).toEqual([{ code: 'invalid-metadata-unicode', path: NO_TRUNCATION_PATH }]);
+    expect(NO_TRUNCATION_PATH.length).toBe(210);
+    expect(utf8ByteLength(NO_TRUNCATION_PATH)).toBe(210);
+    expect(NO_TRUNCATION_PATH.length).toBeLessThanOrEqual(MAX_METADATA_PATH_CHARS);
+    expect(utf8ByteLength(NO_TRUNCATION_PATH)).toBeLessThanOrEqual(MAX_METADATA_PATH_UTF8_BYTES);
+
+    const r = parseProviderRunMetadata(loadFixture(fixture));
     expect(r.valid).toBe(false);
     if (r.valid) return;
-    const attemptErr = r.errors.find(
-      (e) =>
-        e.code === 'invalid-metadata-aggregate-mismatch' &&
-        e.path === '/normalizedUsage/aggregate/attemptCount',
-    );
-    expect(attemptErr).toBeDefined();
-    // Every returned path is within caps.
-    for (const err of r.errors) {
-      expect(err.path.length).toBeLessThanOrEqual(MAX_METADATA_PATH_CHARS);
-      expect(utf8ByteLength(err.path)).toBeLessThanOrEqual(MAX_METADATA_PATH_UTF8_BYTES);
-    }
+    // Complete MetadataError[] equals the frozen oracle literal.
+    expect(r.errors).toEqual(oracle.errors);
+  });
+});
+
+describe('metadata-deep-path-truncation -- fullSanitizedSegmentCount = 14, top-level unknown-property chain, greedy truncation branch', () => {
+  it('parser emits the exact frozen path literal (byte-exact) with <path-truncated> inserted before the final segment', () => {
+    const fixture = 'invalid-unicode-deep-path-truncation.json';
+    const oracle = loadOracle(fixture);
+    expect(oracle.errors).toEqual([{ code: 'invalid-metadata-unicode', path: TRUNCATION_PATH }]);
+    expect(TRUNCATION_PATH.length).toBe(248);
+    expect(utf8ByteLength(TRUNCATION_PATH)).toBe(248);
+    expect(TRUNCATION_PATH.length).toBeLessThanOrEqual(MAX_METADATA_PATH_CHARS);
+    expect(utf8ByteLength(TRUNCATION_PATH)).toBeLessThanOrEqual(MAX_METADATA_PATH_UTF8_BYTES);
+    // The truncated path preserves the terminal <untrusted-property> segment
+    // (final-segment rule) and inserts a single <path-truncated> marker
+    // immediately before it.
+    expect(TRUNCATION_PATH.endsWith('/<path-truncated>/<untrusted-property>')).toBe(true);
+
+    const r = parseProviderRunMetadata(loadFixture(fixture));
+    expect(r.valid).toBe(false);
+    if (r.valid) return;
+    expect(r.errors).toEqual(oracle.errors);
   });
 });

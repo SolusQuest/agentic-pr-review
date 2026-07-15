@@ -289,5 +289,15 @@
     "file": "invalid-aggregate-token-overflow.json",
     "valid": false,
     "expectedCodes": ["invalid-metadata-token-out-of-range"]
+  },
+  {
+    "file": "invalid-unicode-deep-path-no-truncation.json",
+    "valid": false,
+    "expectedCodes": ["invalid-metadata-unicode"]
+  },
+  {
+    "file": "invalid-unicode-deep-path-truncation.json",
+    "valid": false,
+    "expectedCodes": ["invalid-metadata-unicode"]
   }
 ]
