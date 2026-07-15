@@ -1,15 +1,10 @@
 /**
  * Iterative implementation of the shared stage-6 string-safety scan for the
- * ProviderRunMetadataV1 pipeline. Semantically identical to
- * `scanStringSafety` from `src/state-v2/shared-safe-path.ts` but uses an
- * explicit work stack so a deeply-nested value tree (up to
- * `METADATA_MAX_BYTES` worth of `[[[...[0]...]]]`) cannot exhaust the
- * JavaScript call stack.
- *
- * Segment sanitization uses the same shared helpers as the recursive version:
- * a schema-known key appears verbatim after RFC 6901 escaping; every other
- * key is replaced with the closed marker (`<invalid-utf16>`, `<invalid-nul>`,
- * `<invalid-control>`, `<empty-name>`, or `<untrusted-property>`).
+ * ProviderRunMetadataV1 pipeline. Semantically identical to `scanStringSafety`
+ * from `src/state-v2/shared-safe-path.ts` but uses an explicit work stack so a
+ * deeply-nested value tree cannot exhaust the JavaScript call stack. Path
+ * management uses a single mutable stack; traversal memory is O(depth) rather
+ * than O(depth^2).
  */
 
 import {
@@ -23,182 +18,169 @@ import {
   type StringSafetyViolation,
 } from '../state-v2/shared-safe-path.js';
 
+interface ArrayFrame {
+  kind: 'array';
+  node: unknown[];
+  schemaPosition: SchemaPosition;
+  trustedChain: boolean;
+  index: number;
+  itemPosition: SchemaPosition;
+  itemTrusted: boolean;
+  segmentPushed: boolean;
+}
+interface ObjectFrame {
+  kind: 'object';
+  node: Record<string, unknown>;
+  schemaPosition: SchemaPosition;
+  trustedChain: boolean;
+  keys: string[];
+  keyIdx: number;
+  segmentPushed: boolean;
+}
+type Frame = ArrayFrame | ObjectFrame;
+
 export function scanStringSafetyIterative(
   value: unknown,
   rootSchema: SchemaNode | undefined,
 ): StringSafetyViolation | undefined {
   const rootPosition = normalizePosition(rootSchema, new Set<SchemaNode>(), rootSchema);
+  const currentPath: string[] = [];
 
-  interface Frame {
-    node: unknown;
-    schemaPosition: SchemaPosition;
-    trustedChain: boolean;
-    path: readonly string[];
-    // For arrays: current child index. For objects: sorted key iterator index
-    // plus the pre-sorted key list.
-    kind: 'root' | 'array' | 'object';
-    childIdx: number;
-    keys: string[]; // populated for object frames
+  // Root check first.
+  if (typeof value === 'string') {
+    if (violatesStringSafety(value)) return { segments: [] };
+    return undefined;
   }
+  if (!Array.isArray(value) && !isObject(value)) return undefined;
 
-  const initial: Frame = {
-    node: value,
-    schemaPosition: rootPosition,
-    trustedChain: true,
-    path: [],
-    kind: 'root',
-    childIdx: 0,
-    keys: [],
-  };
-  const stack: Frame[] = [initial];
+  const stack: Frame[] = [];
+  if (Array.isArray(value)) {
+    const itemR = resolveArrayItem(rootPosition);
+    const itemTrusted = itemR.schemaKnown; // root trustedChain=true
+    stack.push({
+      kind: 'array',
+      node: value,
+      schemaPosition: rootPosition,
+      trustedChain: true,
+      index: 0,
+      itemPosition: itemTrusted ? itemR.childSchemaPosition : UNKNOWN_POSITION,
+      itemTrusted,
+      segmentPushed: false,
+    });
+  } else {
+    stack.push({
+      kind: 'object',
+      node: value as Record<string, unknown>,
+      schemaPosition: rootPosition,
+      trustedChain: true,
+      keys: Object.keys(value as Record<string, unknown>).sort(utf16Compare),
+      keyIdx: 0,
+      segmentPushed: false,
+    });
+  }
 
   while (stack.length > 0) {
     const frame = stack[stack.length - 1]!;
-    const val = frame.node;
-
-    if (frame.kind === 'root' && frame.childIdx === 0) {
-      const check = checkStringOrEnter(val, frame);
-      if (check.type === 'violation') return check.violation;
-      if (check.type === 'done') {
-        stack.pop();
-        continue;
-      }
-      // 'enter' -- push a container child for later descent handling
-      frame.childIdx = 1; // mark root processed
-      // We convert the root frame into the container that will be popped
-      // when its children complete.
-      if (Array.isArray(val)) {
-        // Re-frame the root as an array container.
-        stack[stack.length - 1] = {
-          ...frame,
-          kind: 'array',
-          childIdx: 0,
-        };
-        continue;
-      }
-      // Object.
-      const keys = Object.keys(val as Record<string, unknown>).sort(utf16Compare);
-      stack[stack.length - 1] = {
-        ...frame,
-        kind: 'object',
-        childIdx: 0,
-        keys,
-      };
-      continue;
-    }
 
     if (frame.kind === 'array') {
-      const arr = frame.node as unknown[];
-      if (frame.childIdx >= arr.length) {
+      // Pop the previous element's segment if it is still on the path.
+      if (frame.segmentPushed) {
+        currentPath.pop();
+        frame.segmentPushed = false;
+      }
+      if (frame.index >= frame.node.length) {
         stack.pop();
         continue;
       }
-      const idx = frame.childIdx;
-      frame.childIdx += 1;
-      const itemResult = resolveArrayItem(frame.schemaPosition);
-      const trusted = frame.trustedChain && itemResult.schemaKnown;
-      const childPosition = trusted ? itemResult.childSchemaPosition : UNKNOWN_POSITION;
-      const child = arr[idx];
-      const childPath = [...frame.path, String(idx)];
-      const step = descendChild(child, childPosition, trusted, childPath);
-      if (step.type === 'violation') return step.violation;
-      if (step.type === 'push') stack.push(step.frame);
+      const child = frame.node[frame.index]!;
+      currentPath.push(String(frame.index));
+      frame.segmentPushed = true;
+      frame.index += 1;
+      const violation = descendChild(
+        child,
+        frame.itemPosition,
+        frame.itemTrusted,
+        currentPath,
+        stack,
+      );
+      if (violation) return violation;
       continue;
     }
 
-    if (frame.kind === 'object') {
-      const obj = frame.node as Record<string, unknown>;
-      if (frame.childIdx >= frame.keys.length) {
-        stack.pop();
-        continue;
-      }
-      const key = frame.keys[frame.childIdx]!;
-      frame.childIdx += 1;
-      if (containsLoneSurrogate(key)) {
-        return { segments: [...frame.path, '<invalid-utf16>'] };
-      }
-      if (key.includes('\u0000')) {
-        return { segments: [...frame.path, '<invalid-nul>'] };
-      }
-      const propResult = resolveProperty(frame.schemaPosition, key);
-      const keyIsSchemaKnown = frame.trustedChain && propResult.schemaKnown;
-      const segment = sanitizeSegment(key, keyIsSchemaKnown);
-      const childTrusted = keyIsSchemaKnown;
-      const childPosition = childTrusted ? propResult.childSchemaPosition : UNKNOWN_POSITION;
-      const child = obj[key];
-      const childPath = [...frame.path, segment];
-      const step = descendChild(child, childPosition, childTrusted, childPath);
-      if (step.type === 'violation') return step.violation;
-      if (step.type === 'push') stack.push(step.frame);
+    // Object frame.
+    if (frame.segmentPushed) {
+      currentPath.pop();
+      frame.segmentPushed = false;
+    }
+    if (frame.keyIdx >= frame.keys.length) {
+      stack.pop();
       continue;
     }
+    const key = frame.keys[frame.keyIdx]!;
+    frame.keyIdx += 1;
+    if (containsLoneSurrogate(key)) {
+      currentPath.push('<invalid-utf16>');
+      return { segments: [...currentPath] };
+    }
+    if (key.includes('\u0000')) {
+      currentPath.push('<invalid-nul>');
+      return { segments: [...currentPath] };
+    }
+    const propR = resolveProperty(frame.schemaPosition, key);
+    const keyIsSchemaKnown = frame.trustedChain && propR.schemaKnown;
+    const segment = sanitizeSegment(key, keyIsSchemaKnown);
+    const childTrusted = keyIsSchemaKnown;
+    const childPosition = childTrusted ? propR.childSchemaPosition : UNKNOWN_POSITION;
+    currentPath.push(segment);
+    frame.segmentPushed = true;
+    const child = frame.node[key];
+    const violation = descendChild(child, childPosition, childTrusted, currentPath, stack);
+    if (violation) return violation;
   }
   return undefined;
+}
 
-  function checkStringOrEnter(
-    v: unknown,
-    frame: Frame,
-  ):
-    | { type: 'violation'; violation: StringSafetyViolation }
-    | { type: 'done' }
-    | { type: 'enter' } {
-    if (typeof v === 'string') {
-      if (violatesStringSafety(v)) {
-        return { type: 'violation', violation: { segments: [...frame.path] } };
-      }
-      return { type: 'done' };
+function descendChild(
+  child: unknown,
+  childPosition: SchemaPosition,
+  trusted: boolean,
+  currentPath: string[],
+  stack: Frame[],
+): StringSafetyViolation | undefined {
+  if (typeof child === 'string') {
+    if (violatesStringSafety(child)) {
+      return { segments: [...currentPath] };
     }
-    if (Array.isArray(v)) return { type: 'enter' };
-    if (isObject(v)) return { type: 'enter' };
-    return { type: 'done' };
+    return undefined;
   }
-
-  function descendChild(
-    child: unknown,
-    childPosition: SchemaPosition,
-    trusted: boolean,
-    childPath: readonly string[],
-  ):
-    | { type: 'violation'; violation: StringSafetyViolation }
-    | { type: 'push'; frame: Frame }
-    | { type: 'done' } {
-    if (typeof child === 'string') {
-      if (violatesStringSafety(child)) {
-        return { type: 'violation', violation: { segments: [...childPath] } };
-      }
-      return { type: 'done' };
-    }
-    if (Array.isArray(child)) {
-      return {
-        type: 'push',
-        frame: {
-          node: child,
-          schemaPosition: childPosition,
-          trustedChain: trusted,
-          path: childPath,
-          kind: 'array',
-          childIdx: 0,
-          keys: [],
-        },
-      };
-    }
-    if (isObject(child)) {
-      const keys = Object.keys(child as Record<string, unknown>).sort(utf16Compare);
-      return {
-        type: 'push',
-        frame: {
-          node: child,
-          schemaPosition: childPosition,
-          trustedChain: trusted,
-          path: childPath,
-          kind: 'object',
-          childIdx: 0,
-          keys,
-        },
-      };
-    }
-    return { type: 'done' };
+  if (Array.isArray(child)) {
+    const itemR = resolveArrayItem(childPosition);
+    const itemTrusted = trusted && itemR.schemaKnown;
+    stack.push({
+      kind: 'array',
+      node: child,
+      schemaPosition: childPosition,
+      trustedChain: trusted,
+      index: 0,
+      itemPosition: itemTrusted ? itemR.childSchemaPosition : UNKNOWN_POSITION,
+      itemTrusted,
+      segmentPushed: false,
+    });
+    return undefined;
   }
+  if (isObject(child)) {
+    stack.push({
+      kind: 'object',
+      node: child as Record<string, unknown>,
+      schemaPosition: childPosition,
+      trustedChain: trusted,
+      keys: Object.keys(child as Record<string, unknown>).sort(utf16Compare),
+      keyIdx: 0,
+      segmentPushed: false,
+    });
+    return undefined;
+  }
+  return undefined;
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {

@@ -128,20 +128,20 @@ interface ObjectFrame {
   expect: 'key-or-close' | 'colon' | 'value' | 'comma-or-close';
   schemaPosition: SchemaPosition;
   trustedChain: boolean;
-  pathSegments: string[];
   pendingChildPosition: SchemaPosition;
   pendingChildTrusted: boolean;
   pendingChildSegment: string;
+  pendingChildPushed: boolean;
 }
 interface ArrayFrame {
   kind: 'array';
   expect: 'value-or-close' | 'comma-or-close';
   schemaPosition: SchemaPosition;
   trustedChain: boolean;
-  pathSegments: string[];
   index: number;
   itemPosition: SchemaPosition;
   itemTrusted: boolean;
+  pendingIndexPushed: boolean;
 }
 type Frame = ObjectFrame | ArrayFrame;
 
@@ -152,14 +152,13 @@ function strictJsonParseIterative(text: string): StrictResult {
   let expectingRootValue = true;
   let rootValueSeen = false;
   const rootPos = normalizePosition(rootSchema, new Set<SchemaNode>(), rootSchema);
-  // The "next container" position is the schema position that will be adopted
-  // by the next opened object/array. For the root it is the normalized root
-  // schema; when descending into a property value inside an object frame it is
-  // that frame's `pendingChildPosition`; when descending into an array element
-  // it is the array frame's `itemPosition`.
+  // Single mutable path stack. Segments are pushed when entering a property
+  // value (in an object frame) or an array element (in an array frame) and
+  // popped when the corresponding value completes. This keeps memory O(depth)
+  // rather than the O(depth^2) an eager path-clone-per-frame would need.
+  const currentPath: string[] = [];
   let nextPosition: SchemaPosition = rootPos;
   let nextTrusted = true;
-  let nextPathSegments: string[] = [];
 
   const jsonErr = (): StrictErr => ({ ok: false, error: JSON_ERR });
 
@@ -299,10 +298,10 @@ function strictJsonParseIterative(text: string): StrictResult {
         expect: 'key-or-close',
         schemaPosition: nextPosition,
         trustedChain: nextTrusted,
-        pathSegments: nextPathSegments,
         pendingChildPosition: UNKNOWN_POSITION,
         pendingChildTrusted: false,
         pendingChildSegment: '',
+        pendingChildPushed: false,
       });
       return 'container';
     }
@@ -315,10 +314,10 @@ function strictJsonParseIterative(text: string): StrictResult {
         expect: 'value-or-close',
         schemaPosition: nextPosition,
         trustedChain: nextTrusted,
-        pathSegments: nextPathSegments,
         index: 0,
         itemPosition: itemTrusted ? itemR.childSchemaPosition : UNKNOWN_POSITION,
         itemTrusted,
+        pendingIndexPushed: false,
       });
       return 'container';
     }
@@ -366,7 +365,7 @@ function strictJsonParseIterative(text: string): StrictResult {
           if (c === 0x7d) {
             pos += 1;
             stack.pop();
-            afterValueOrClose(stack);
+            afterValueOrClose(stack, currentPath);
             continue;
           }
           if (c !== 0x22) return jsonErr();
@@ -381,7 +380,7 @@ function strictJsonParseIterative(text: string): StrictResult {
           if (frame.names.has(r.value) && firstDuplicate === null) {
             firstDuplicate = {
               code: 'invalid-metadata-duplicate-json-property',
-              path: finalizePath(frame.pathSegments),
+              path: finalizePath(currentPath),
             };
           } else {
             frame.names.add(r.value);
@@ -398,12 +397,18 @@ function strictJsonParseIterative(text: string): StrictResult {
         case 'value': {
           nextPosition = frame.pendingChildPosition;
           nextTrusted = frame.pendingChildTrusted;
-          nextPathSegments = [...frame.pathSegments, frame.pendingChildSegment];
+          currentPath.push(frame.pendingChildSegment);
+          frame.pendingChildPushed = true;
           const r = scanPrimitiveOrOpenContainer();
           if (r === 'error') return jsonErr();
           if (r === 'primitive') {
+            // Primitive value complete -- pop the pushed segment immediately.
+            currentPath.pop();
+            frame.pendingChildPushed = false;
             frame.expect = 'comma-or-close';
           }
+          // If a container was opened, the pushed segment remains on
+          // currentPath until the container closes (see afterValueOrClose).
           continue;
         }
         case 'comma-or-close': {
@@ -418,7 +423,7 @@ function strictJsonParseIterative(text: string): StrictResult {
           if (c === 0x7d) {
             pos += 1;
             stack.pop();
-            afterValueOrClose(stack);
+            afterValueOrClose(stack, currentPath);
             continue;
           }
           return jsonErr();
@@ -431,15 +436,18 @@ function strictJsonParseIterative(text: string): StrictResult {
           if (c === 0x5d) {
             pos += 1;
             stack.pop();
-            afterValueOrClose(stack);
+            afterValueOrClose(stack, currentPath);
             continue;
           }
           nextPosition = frame.itemPosition;
           nextTrusted = frame.itemTrusted;
-          nextPathSegments = [...frame.pathSegments, String(frame.index)];
+          currentPath.push(String(frame.index));
+          frame.pendingIndexPushed = true;
           const r = scanPrimitiveOrOpenContainer();
           if (r === 'error') return jsonErr();
           if (r === 'primitive') {
+            currentPath.pop();
+            frame.pendingIndexPushed = false;
             frame.expect = 'comma-or-close';
           }
           continue;
@@ -457,7 +465,7 @@ function strictJsonParseIterative(text: string): StrictResult {
           if (c === 0x5d) {
             pos += 1;
             stack.pop();
-            afterValueOrClose(stack);
+            afterValueOrClose(stack, currentPath);
             continue;
           }
           return jsonErr();
@@ -475,11 +483,21 @@ function strictJsonParseIterative(text: string): StrictResult {
   }
 }
 
-function afterValueOrClose(stack: Frame[]): void {
-  // Called when a value or container just closed. If a parent frame exists it
-  // now transitions to 'comma-or-close'.
+function afterValueOrClose(stack: Frame[], currentPath: string[]): void {
+  // Called when a value or container just closed. Pop the segment that was
+  // pushed for this value if it is still on the path (i.e. this was a container
+  // value or a primitive that did not run its own immediate pop). Then transition
+  // the parent frame to comma-or-close so the next comma or close bracket is
+  // accepted.
   const parent = stack[stack.length - 1];
   if (!parent) return;
+  if (parent.kind === 'object' && parent.pendingChildPushed) {
+    currentPath.pop();
+    parent.pendingChildPushed = false;
+  } else if (parent.kind === 'array' && parent.pendingIndexPushed) {
+    currentPath.pop();
+    parent.pendingIndexPushed = false;
+  }
   parent.expect = 'comma-or-close';
 }
 

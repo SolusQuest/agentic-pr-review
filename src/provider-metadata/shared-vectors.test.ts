@@ -12,12 +12,12 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  scanStringSafety,
   normalizePosition,
   resolveProperty,
   UNKNOWN_POSITION,
   type SchemaNode,
 } from '../state-v2/shared-safe-path.js';
+import { scanStringSafetyIterative as scanStringSafety } from './string-safety.js';
 import { parseProviderRunMetadata } from './parse.js';
 import metadataSchema from '../../protocol/schemas/provider-run-metadata.v1.json' with { type: 'json' };
 
