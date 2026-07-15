@@ -361,7 +361,7 @@ This section is normative for the first foundational M4 implementation batch (is
   | `reset`         | equals accepted predecessor | fresh and different from predecessor | equals accepted predecessor `ledgerEpoch` |
   | `recovery_root` | fresh                       | fresh                                | absent                                    |
 
-  #48 verifies candidate-internal relationships only (`predecessorLedgerEpoch` presence per kind, continuation vs reset epoch equality/inequality, bootstrap/recovery*root `stateGeneration == 0`). Comparison against the \_actual accepted predecessor* is #53's and #55's responsibility.
+  #48 verifies candidate-internal relationships only (`predecessorLedgerEpoch` presence per kind, continuation vs reset epoch equality/inequality, `bootstrap` and `recovery_root` requiring `stateGeneration == 0`). Comparison against the actual accepted predecessor is #53's and #55's responsibility.
 
 - **Generator authority (#55).** The token validator (#48) accepts any string matching `EPOCH_ID_REGEX`. The token producer (#55) uses this per-kind matrix:
 
@@ -529,7 +529,7 @@ Invariant: every possible **final segment** (the fixed markers `<empty-name>` / 
 
 Algorithm (deterministic; produces the same bytes on every implementation):
 
-1. Compute the fully-sanitized ordered segment list `[s0, s1, ..., sN]` per the six-rule table, and the **final segment**: for a property-name violation the final marker (`<invalid-utf16>` / `<invalid-nul>` / `<invalid-control>`); for a string-value violation the offending leaf's own sanitized segment.
+1. Compute the fully-sanitized ordered segment list `[s0, s1, ..., sN]` per the six-rule table, and the **final segment**. The final segment is one of: the two terminal string-safety markers `<invalid-utf16>` / `<invalid-nul>` for a property-name string-safety violation; one of `<invalid-control>`, `<empty-name>`, `<untrusted-property>`, or a schema-known name for a schema-stage additional-property / unknown-field diagnostic on the offending key (per the sanitizer table applied at the schema stage, which runs after the string-safety stage and therefore never sees NUL or unpaired-surrogate property names); or the offending leaf's own sanitized segment for a string-value violation. In all cases the resulting finalSegment length is bounded by the invariant above; the truncation reference table below enumerates the specific lengths.
 2. Compute the reserved budget: `reserved = length("/" + finalSegment) + length("/<path-truncated>")`, and its UTF-8 counterpart.
 3. Greedily join `s0`, `s1`, ..., `sN-1` with leading `/`. Stop as soon as adding the next segment would push the joined prefix past `budget - reserved` (character or byte). If all N leading segments fit within `budget - reserved`, no placeholder is inserted and the untruncated path is `/s0/s1/.../sN`.
 4. If a truncation was applied, emit `/prefix/<path-truncated>/<finalSegment>`, where `prefix` is the greedily-accepted concatenation from step 3 (which may be empty, giving `/<path-truncated>/<finalSegment>`). By the invariant, `<path-truncated>/<finalSegment>` alone always fits within `budget`, so the result never exceeds `budget`.
@@ -1009,9 +1009,13 @@ schema normalizes to `UnknownPosition`. A child-side normalization
 failure never retroactively downgrades the parent's `schemaKnown`
 verdict for an explicitly declared key/item.
 
-Mere presence of an unsupported schema keyword does NOT trigger
-fail-closed on the whole node; the unsupported keyword simply
-contributes no schema-known keys.
+For nodes that do NOT contain `$ref`, mere presence of an
+unsupported schema keyword does NOT trigger fail-closed on the
+whole node; the unsupported keyword simply contributes no
+schema-known keys. Nodes that DO contain `$ref` follow the
+exclusive-`$ref` rule above: any sibling keyword at all
+(supported or unsupported) causes `normalizePosition` to return
+`UnknownPosition`.
 
 **Concrete observable consequences** (any conformant implementation
 MUST produce these results):
