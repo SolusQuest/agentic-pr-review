@@ -268,3 +268,158 @@ describe('shared vocabulary realization — identity-string boundaries', () => {
     expect(errors.some((e) => e.includes('/stateKey/workflowIdentity'))).toBe(true);
   });
 });
+
+// -------------------------------------------------------------------------
+// Additional numeric bounds: predecessor generations and producing generation.
+// -------------------------------------------------------------------------
+
+describe('shared vocabulary realization — predecessor and producing generations', () => {
+  it('predecessorStateGeneration (continuation) has a 0..999_999 integer range', () => {
+    const manifest = buildValidManifest() as unknown as Record<string, unknown>;
+    // Reshape to a continuation manifest to reach the predecessor field.
+    manifest.transition = {
+      kind: 'continuation',
+      predecessorLedgerEpoch: (manifest.generation as any).ledgerEpoch,
+      predecessorStateGeneration: 0,
+      predecessorAcceptanceMarkerSha256: 'a'.repeat(64),
+    };
+    (manifest.generation as any).stateGeneration = 1;
+    (manifest.transaction as any).interactionOrdinal = 1;
+    const transition = manifest.transition as Record<string, unknown>;
+    const rangeErrsAt = (): unknown[] => {
+      validate(manifest);
+      return (validate.errors ?? []).filter(
+        (e) =>
+          e.instancePath === '/transition/predecessorStateGeneration' &&
+          (e.keyword === 'minimum' || e.keyword === 'maximum' || e.keyword === 'type'),
+      );
+    };
+    transition.predecessorStateGeneration = 0;
+    expect(rangeErrsAt().length).toBe(0);
+    transition.predecessorStateGeneration = 999_999;
+    expect(rangeErrsAt().length).toBe(0);
+    transition.predecessorStateGeneration = -1;
+    expect(rangeErrsAt().length).toBeGreaterThan(0);
+    transition.predecessorStateGeneration = 1_000_000;
+    expect(rangeErrsAt().length).toBeGreaterThan(0);
+    transition.predecessorStateGeneration = 1.5;
+    expect(rangeErrsAt().length).toBeGreaterThan(0);
+  });
+
+  it('providerRunMetadata.producingGeneration.stateGeneration rejects below 0 / above 1_000_000 / non-integer', () => {
+    const manifest = buildValidManifest() as unknown as Record<string, unknown>;
+    const producing = (manifest.providerRunMetadata as any).producingGeneration as Record<
+      string,
+      unknown
+    >;
+    producing.stateGeneration = 0;
+    expect(schemaAccepts(manifest)).toBe(true);
+    producing.stateGeneration = 1_000_000;
+    validate(manifest);
+    const rangeErrs = (validate.errors ?? []).filter(
+      (e) =>
+        e.instancePath === '/providerRunMetadata/producingGeneration/stateGeneration' &&
+        (e.keyword === 'minimum' || e.keyword === 'maximum'),
+    );
+    expect(rangeErrs.length).toBe(0);
+    producing.stateGeneration = -1;
+    expect(schemaAccepts(manifest)).toBe(false);
+    producing.stateGeneration = 1_000_001;
+    expect(schemaAccepts(manifest)).toBe(false);
+    producing.stateGeneration = 1.5;
+    expect(schemaAccepts(manifest)).toBe(false);
+  });
+});
+
+// -------------------------------------------------------------------------
+// producingRunId regex boundary.
+// -------------------------------------------------------------------------
+
+describe('shared vocabulary realization — producingRunId regex', () => {
+  it('accepts positive-integer decimal strings without leading zeros', () => {
+    const manifest = buildValidManifest() as unknown as Record<string, unknown>;
+    const provenance = manifest.provenance as Record<string, unknown>;
+    for (const good of ['1', '9', '10', '1234567890', '9999999999999999999']) {
+      provenance.producingRunId = good;
+      expect(schemaAccepts(manifest)).toBe(true);
+    }
+    for (const bad of ['', '0', '01', '00', 'a', '-1', '1.5', '10000000000000000000']) {
+      provenance.producingRunId = bad;
+      expect(schemaAccepts(manifest)).toBe(false);
+    }
+  });
+});
+
+// -------------------------------------------------------------------------
+// Repository length boundaries.
+// -------------------------------------------------------------------------
+
+describe('shared vocabulary realization — repository length boundaries', () => {
+  it('accepts owner/name at exactly 200 chars and rejects 201 chars', () => {
+    const manifest = buildValidManifest() as unknown as Record<string, unknown>;
+    const stateKey = manifest.stateKey as Record<string, unknown>;
+    // owner: 99 chars, slash, name: 100 chars => 200 chars total.
+    const owner99 = 'a'.repeat(99);
+    const name100 = 'b'.repeat(100);
+    stateKey.repository = owner99 + '/' + name100;
+    stateKey.headRepository = 'ok/ok';
+    expect(schemaAccepts(manifest)).toBe(true);
+    // 201 chars.
+    stateKey.repository = owner99 + '/' + 'b'.repeat(101);
+    expect(schemaAccepts(manifest)).toBe(false);
+  });
+
+  it('rejects minLength boundary: 2-character repository is rejected', () => {
+    const manifest = buildValidManifest() as unknown as Record<string, unknown>;
+    const stateKey = manifest.stateKey as Record<string, unknown>;
+    // Schema minLength = 3. Try 2 chars.
+    stateKey.repository = 'a/';
+    expect(schemaAccepts(manifest)).toBe(false);
+  });
+
+  it('headRepository is independently subject to the same length and syntax bounds', () => {
+    const manifest = buildValidManifest() as unknown as Record<string, unknown>;
+    const stateKey = manifest.stateKey as Record<string, unknown>;
+    stateKey.repository = 'ok/ok';
+    for (const bad of ['x', 'no-slash', 'a/', '/b', 'a'.repeat(99) + '/' + 'b'.repeat(102)]) {
+      stateKey.headRepository = bad;
+      expect(schemaAccepts(manifest)).toBe(false);
+    }
+    // Valid.
+    stateKey.headRepository = 'good/repo';
+    expect(schemaAccepts(manifest)).toBe(true);
+  });
+});
+
+// -------------------------------------------------------------------------
+// Identity boundary: UTF-16 code-unit cap vs UTF-8 byte cap.
+// -------------------------------------------------------------------------
+
+describe('shared vocabulary realization — identity UTF-16 / UTF-8 boundaries', () => {
+  it('accepts 256 UTF-16 code units of ASCII and rejects 257 code units', () => {
+    const manifest = buildValidManifest();
+    const clone = structuredClone(manifest);
+    // 256 ASCII chars = 256 UTF-16 code units = 256 UTF-8 bytes.
+    clone.cacheContractIdentity.providerId = 'a'.repeat(256);
+    // Schema maxLength = 256 UTF-16 code units, so accepted.
+    expect(schemaAccepts(clone as unknown)).toBe(true);
+    // Semantic UTF-8 check: 256 bytes <= 256 -> not rejected by semantic.
+    const errs256 = semanticIdentityValidate(clone);
+    expect(errs256.some((e) => e.includes('/cacheContractIdentity/providerId'))).toBe(false);
+
+    clone.cacheContractIdentity.providerId = 'a'.repeat(257);
+    expect(schemaAccepts(clone as unknown)).toBe(false);
+  });
+
+  it('rejects exactly 257 UTF-8 bytes reached via multibyte chars while UTF-16 length stays <= 256', () => {
+    const manifest = buildValidManifest();
+    const clone = structuredClone(manifest);
+    // 129 CJK (3-byte UTF-8) chars = 387 UTF-8 bytes, 129 UTF-16 units.
+    // Use 86 * 3 = 258 bytes with 86 UTF-16 units -> 258 > 256 -> rejected.
+    clone.cacheContractIdentity.providerId = '中'.repeat(86);
+    // Schema maxLength (UTF-16) still satisfied.
+    expect(schemaAccepts(clone as unknown)).toBe(true);
+    const errs = semanticIdentityValidate(clone);
+    expect(errs.some((e) => e.includes('/cacheContractIdentity/providerId'))).toBe(true);
+  });
+});

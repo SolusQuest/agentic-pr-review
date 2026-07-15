@@ -1,23 +1,17 @@
 /**
  * Shared safe-diagnostic-path machinery for M4 Batch #1 workstreams.
  *
- * This module implements the algorithms frozen in the design contract
- * `docs/20_architecture/session-ledger-and-prefix-contract.md`, section
- * `## M4 Batch #1 Frozen Vocabulary`:
+ * Implements the algorithms frozen in the design contract
+ * `docs/20_architecture/session-ledger-and-prefix-contract.md`,
+ * section `## M4 Batch #1 Frozen Vocabulary`:
  *
- * - `### Schema-position resolver` — `SchemaPosition`, `normalizePosition`,
- *   `resolveProperty`, `resolveArrayItem`, `CompositePosition`, per-call
- *   `activeSchemaNodes` cycle guard.
+ * - `### Schema-position resolver`
  * - `### Safe diagnostic path for Unicode / additional-property rejections`
- *   — the six-rule sanitizer table, JSON-Pointer safe-path composition, and
- *   greedy per-path truncation with the `<path-truncated>` placeholder.
- * - `### Shared traversal order and stage precedence` — the deterministic
- *   traversal that scans string values and property names for NUL and
- *   unpaired UTF-16 surrogates.
+ * - `### Shared traversal order and stage precedence`
  *
- * Sibling workstream sidecars (#49 C# ledger, #51 metadata) implement the
- * same algorithms in their target language. Cross-language byte-equality is
- * asserted through the shared conformance vectors G1..G7 and V1..V3.
+ * Sibling workstreams (#49 C# ledger, #51 metadata) implement the same
+ * algorithms in their target language. Byte-equality is asserted by the
+ * shared conformance vectors G1..G7 and V1..V3.
  */
 
 import { MAX_DIAGNOSTIC_MESSAGE_CHARS, MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES } from './constants.js';
@@ -33,20 +27,31 @@ export interface UnknownPosition {
   readonly kind: 'unknown';
 }
 
+/**
+ * A schema position that carries its rootSchema context. Every resolved
+ * child position is derived from the same rootSchema, so callers of
+ * `resolveProperty` / `resolveArrayItem` never need to pass the root
+ * schema explicitly. This mirrors the frozen resolver contract:
+ *   rootPos = normalizePosition(root)
+ *   resolveProperty(rootPos, key)  // no root argument required
+ */
 export interface ObjectPosition {
   readonly kind: 'object';
   readonly node: SchemaNode;
+  readonly rootSchema: SchemaNode | undefined;
   readonly activeSchemaNodes: ReadonlySet<SchemaNode>;
 }
 
 export interface ArrayPosition {
   readonly kind: 'array';
   readonly node: SchemaNode;
+  readonly rootSchema: SchemaNode | undefined;
   readonly activeSchemaNodes: ReadonlySet<SchemaNode>;
 }
 
 export interface CompositePosition {
   readonly kind: 'composite';
+  readonly rootSchema: SchemaNode | undefined;
   readonly children: readonly SchemaPosition[];
 }
 
@@ -65,13 +70,15 @@ const UNKNOWN_RESULT: ResolveResult = {
 };
 
 // ---------------------------------------------------------------------------
-// normalizePosition: turn a schema node into a SchemaPosition.
-//
-// Follows the shared contract: exclusive-$ref rule; per-call activeSchemaNodes
-// cycle guard; unsupported schema keywords contribute no schema-known keys
-// but do not fail-closed the whole node unless $ref is present.
+// normalizePosition.
 // ---------------------------------------------------------------------------
 
+/**
+ * Turn a schema node into a SchemaPosition. Follows the shared contract:
+ * exclusive-$ref rule, per-call activeSchemaNodes cycle guard, and
+ * fail-closed behavior when supported schema keywords have a malformed
+ * shape.
+ */
 export function normalizePosition(
   node: unknown,
   activeSchemaNodes: ReadonlySet<SchemaNode> = new Set<SchemaNode>(),
@@ -88,64 +95,85 @@ export function normalizePosition(
     if (rootSchema === undefined) return UNKNOWN_POSITION;
     const target = dereferenceJsonPointer(rootSchema, schemaNode.$ref);
     if (target === undefined) return UNKNOWN_POSITION;
-    // Include the current node in the activeSchemaNodes set so a
-    // back-edge from within the target that lands on `schemaNode` again
-    // is detected. The recursive call will itself add `target` to the
-    // active set (per its own head-of-function guard), so we don't add
-    // it here — otherwise independent branches sharing the same target
-    // would be misclassified as cyclic.
     const childActive = union(activeSchemaNodes, [schemaNode]);
     return normalizePosition(target, childActive, rootSchema);
   }
 
   const childActive = union(activeSchemaNodes, [schemaNode]);
   const positions: SchemaPosition[] = [];
+  let hasSupportedKeyword = false;
 
-  // Object-shape keyword.
-  if (isObject(schemaNode.properties)) {
+  // Object-shape keyword. Fail-closed if `properties` exists but is not
+  // an object.
+  if ('properties' in schemaNode) {
+    hasSupportedKeyword = true;
+    if (!isObject(schemaNode.properties)) {
+      return UNKNOWN_POSITION;
+    }
     positions.push({
       kind: 'object',
       node: schemaNode,
+      rootSchema,
       activeSchemaNodes: childActive,
     });
   }
 
-  // Array-shape keyword. `items` must be a single schema (tuple-form
-  // rejected at author time). If items is missing/not-a-schema, the
-  // ArrayPosition still resolves to unknown for items, but it exists so
-  // resolveArrayItem returns a consistent result.
+  // Array-shape keyword. `items` must be a single schema (tuple-form is
+  // rejected at author time by the conformance checker). Fail-closed if
+  // items exists but is not a schema object.
   if ('items' in schemaNode) {
+    hasSupportedKeyword = true;
+    if (!isObject(schemaNode.items)) {
+      return UNKNOWN_POSITION;
+    }
     positions.push({
       kind: 'array',
       node: schemaNode,
+      rootSchema,
       activeSchemaNodes: childActive,
     });
   }
 
-  // Composition keywords.
+  // Composition keywords. Fail-closed if the value is present but not an
+  // array of schema objects.
   const composedChildren: SchemaPosition[] = [];
   for (const keyword of ['oneOf', 'anyOf', 'allOf'] as const) {
+    if (!(keyword in schemaNode)) continue;
+    hasSupportedKeyword = true;
     const branches = schemaNode[keyword];
-    if (Array.isArray(branches)) {
-      for (const branch of branches) {
-        composedChildren.push(normalizePosition(branch, childActive, rootSchema));
-      }
+    if (!Array.isArray(branches)) return UNKNOWN_POSITION;
+    for (const branch of branches) {
+      if (!isObject(branch)) return UNKNOWN_POSITION;
+      composedChildren.push(normalizePosition(branch, childActive, rootSchema));
     }
   }
   if (composedChildren.length > 0) {
-    positions.push(compositeOf(composedChildren));
+    positions.push(compositeOf(composedChildren, rootSchema));
   }
 
+  if (!hasSupportedKeyword) return UNKNOWN_POSITION;
   if (positions.length === 0) return UNKNOWN_POSITION;
   if (positions.length === 1) return positions[0]!;
-  return compositeOf(positions);
+  return compositeOf(positions, rootSchema);
 }
 
-function compositeOf(children: readonly SchemaPosition[]): SchemaPosition {
+function compositeOf(
+  children: readonly SchemaPosition[],
+  rootSchema: SchemaNode | undefined,
+): SchemaPosition {
   const filtered = children.filter((c) => c.kind !== 'unknown');
   if (filtered.length === 0) return UNKNOWN_POSITION;
   if (filtered.length === 1) return filtered[0]!;
-  return { kind: 'composite', children: filtered };
+  return { kind: 'composite', rootSchema, children: filtered };
+}
+
+function positionRoot(position: SchemaPosition): SchemaNode | undefined {
+  switch (position.kind) {
+    case 'unknown':
+      return undefined;
+    default:
+      return position.rootSchema;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -155,8 +183,9 @@ function compositeOf(children: readonly SchemaPosition[]): SchemaPosition {
 export function resolveProperty(
   position: SchemaPosition,
   key: string,
-  rootSchema?: SchemaNode,
+  rootSchemaOverride?: SchemaNode,
 ): ResolveResult {
+  const rootSchema = rootSchemaOverride ?? positionRoot(position);
   switch (position.kind) {
     case 'unknown':
       return UNKNOWN_RESULT;
@@ -178,13 +207,17 @@ export function resolveProperty(
       if (matches.length === 0) return UNKNOWN_RESULT;
       return {
         schemaKnown: true,
-        childSchemaPosition: compositeOf(matches),
+        childSchemaPosition: compositeOf(matches, rootSchema),
       };
     }
   }
 }
 
-export function resolveArrayItem(position: SchemaPosition, rootSchema?: SchemaNode): ResolveResult {
+export function resolveArrayItem(
+  position: SchemaPosition,
+  rootSchemaOverride?: SchemaNode,
+): ResolveResult {
+  const rootSchema = rootSchemaOverride ?? positionRoot(position);
   switch (position.kind) {
     case 'unknown':
     case 'object':
@@ -204,28 +237,16 @@ export function resolveArrayItem(position: SchemaPosition, rootSchema?: SchemaNo
       if (matches.length === 0) return UNKNOWN_RESULT;
       return {
         schemaKnown: true,
-        childSchemaPosition: compositeOf(matches),
+        childSchemaPosition: compositeOf(matches, rootSchema),
       };
     }
   }
 }
 
 // ---------------------------------------------------------------------------
-// Property-name sanitizer (six-rule table). Ancestor segments use this table.
+// Property-name sanitizer (six-rule table).
 // ---------------------------------------------------------------------------
 
-/**
- * Sanitize a property-name segment for inclusion in a safe path. The
- * six-rule table (deterministic, first match wins):
- *
- *   1. Empty name -> `<empty-name>`.
- *   2. Schema-known name -> RFC 6901 escaped verbatim.
- *   3. Contains unpaired UTF-16 surrogate -> `<invalid-utf16>`.
- *   4. Contains U+0000 -> `<invalid-nul>`.
- *   5. Contains any other control char (U+0001..U+001F or U+007F) ->
- *      `<invalid-control>`.
- *   6. Otherwise -> `<untrusted-property>`.
- */
 export function sanitizeSegment(key: string, keyIsSchemaKnown: boolean): string {
   if (key.length === 0) return '<empty-name>';
   if (keyIsSchemaKnown) return rfc6901Escape(key);
@@ -235,10 +256,6 @@ export function sanitizeSegment(key: string, keyIsSchemaKnown: boolean): string 
   return '<untrusted-property>';
 }
 
-/**
- * RFC 6901 JSON Pointer segment escape: `~` -> `~0`, `/` -> `~1`.
- * The order (~ first) matters.
- */
 export function rfc6901Escape(segment: string): string {
   return segment.replace(/~/g, '~0').replace(/\//g, '~1');
 }
@@ -247,29 +264,16 @@ export function rfc6901Escape(segment: string): string {
 // Shared traversal.
 // ---------------------------------------------------------------------------
 
-/**
- * Result of running the shared traversal over a parsed JSON value against
- * a starting schema position. When no violation is found, returns
- * `undefined`; otherwise returns the safe path (before per-path
- * truncation is applied) as an ordered list of already-sanitized segments,
- * plus the terminal marker if the violation is at a property-name
- * position.
- */
 export interface StringSafetyViolation {
   readonly segments: readonly string[];
 }
 
-/**
- * Recursive shared traversal. Rejects the first NUL or unpaired UTF-16
- * surrogate found in either a string value or a property name. Returns
- * `undefined` if no violation is found.
- */
 export function scanStringSafety(
   value: unknown,
   rootSchema: SchemaNode | undefined,
 ): StringSafetyViolation | undefined {
   const rootPosition = normalizePosition(rootSchema, new Set<SchemaNode>(), rootSchema);
-  return scanInternal(value, [], rootPosition, true, rootSchema);
+  return scanInternal(value, [], rootPosition, true);
 }
 
 function scanInternal(
@@ -277,7 +281,6 @@ function scanInternal(
   path: readonly string[],
   schemaPosition: SchemaPosition,
   trustedChain: boolean,
-  rootSchema: SchemaNode | undefined,
 ): StringSafetyViolation | undefined {
   if (typeof value === 'string') {
     if (violatesStringSafety(value)) {
@@ -286,36 +289,32 @@ function scanInternal(
     return undefined;
   }
   if (Array.isArray(value)) {
-    const arrResult = resolveArrayItem(schemaPosition, rootSchema);
+    const arrResult = resolveArrayItem(schemaPosition);
     const itemTrusted = trustedChain && arrResult.schemaKnown;
     const itemPosition = itemTrusted ? arrResult.childSchemaPosition : UNKNOWN_POSITION;
     for (let i = 0; i < value.length; i += 1) {
       const child = value[i];
-      const res = scanInternal(child, [...path, String(i)], itemPosition, itemTrusted, rootSchema);
+      const res = scanInternal(child, [...path, String(i)], itemPosition, itemTrusted);
       if (res) return res;
     }
     return undefined;
   }
   if (isObject(value)) {
-    // Sort keys by UTF-16 code units (RFC 8785 canonical order) so the
-    // traversal is deterministic and matches the shared pseudocode.
     const keys = Object.keys(value as Record<string, unknown>).sort(utf16CodeUnitCompare);
     for (const key of keys) {
-      // Property-name terminal safety: unpaired surrogate or NUL
-      // terminate the scan.
       if (containsLoneSurrogate(key)) {
         return { segments: [...path, '<invalid-utf16>'] };
       }
       if (key.includes('\u0000')) {
         return { segments: [...path, '<invalid-nul>'] };
       }
-      const propResult = resolveProperty(schemaPosition, key, rootSchema);
+      const propResult = resolveProperty(schemaPosition, key);
       const keyIsSchemaKnown = trustedChain && propResult.schemaKnown;
       const segment = sanitizeSegment(key, keyIsSchemaKnown);
       const childTrusted = keyIsSchemaKnown;
       const childPosition = childTrusted ? propResult.childSchemaPosition : UNKNOWN_POSITION;
       const child = (value as Record<string, unknown>)[key];
-      const res = scanInternal(child, [...path, segment], childPosition, childTrusted, rootSchema);
+      const res = scanInternal(child, [...path, segment], childPosition, childTrusted);
       if (res) return res;
     }
     return undefined;
@@ -360,7 +359,7 @@ function containsLoneSurrogate(s: string): boolean {
 function containsOtherControlChar(s: string): boolean {
   for (let i = 0; i < s.length; i += 1) {
     const c = s.charCodeAt(i);
-    if (c === 0x0000) continue; // covered by rule 4
+    if (c === 0x0000) continue;
     if ((c >= 0x0001 && c <= 0x001f) || c === 0x007f) return true;
   }
   return false;
@@ -370,24 +369,11 @@ function containsOtherControlChar(s: string): boolean {
 // Safe-path composition and per-path truncation.
 // ---------------------------------------------------------------------------
 
-/**
- * Compose a list of already-sanitized segments into a JSON-Pointer-shaped
- * safe path. An empty list yields the empty string (root).
- */
 export function composeSafePath(segments: readonly string[]): string {
   if (segments.length === 0) return '';
   return '/' + segments.join('/');
 }
 
-/**
- * Apply the shared greedy per-path truncation algorithm from
- * `### Safe diagnostic path for Unicode / additional-property rejections`.
- *
- * The result includes the `<code>:` prefix and honors both the UTF-16
- * code-unit and UTF-8 byte caps. When truncation is applied the
- * `<path-truncated>` JSON Pointer segment appears immediately before the
- * preserved final segment: `<code>:/prefix/<path-truncated>/<finalSegment>`.
- */
 export interface TruncatedPath {
   readonly wireEntry: string;
   readonly truncated: boolean;
@@ -405,10 +391,7 @@ export function renderWireEntry(code: string, segments: readonly string[]): Trun
     return { wireEntry: prefix + fullPath, truncated: false };
   }
 
-  // Greedy: find longest prefix of segments (excluding final) that fits
-  // together with `/<path-truncated>/<finalSegment>` under both caps.
   if (segments.length === 0) {
-    // No final segment; fall back to just the prefix + <path-truncated>.
     return { wireEntry: prefix + PATH_TRUNCATED_SEGMENT, truncated: true };
   }
   const finalSegment = segments[segments.length - 1]!;
@@ -454,11 +437,16 @@ function union<T>(base: ReadonlySet<T>, extras: readonly T[]): Set<T> {
   return result;
 }
 
-function dereferenceJsonPointer(root: SchemaNode, ref: string): SchemaNode | undefined {
+/**
+ * Dereference an RFC 6901 JSON Pointer against `root`. Handles object
+ * property segments, numeric array-index segments (base-10 non-negative,
+ * in-range only), and the RFC 6901 empty-name member (`#/` returns
+ * undefined unless the root has an empty-name property). `#` returns the
+ * root document itself.
+ */
+export function dereferenceJsonPointer(root: SchemaNode, ref: string): SchemaNode | undefined {
   if (!ref.startsWith('#')) return undefined;
   const pointer = ref.slice(1);
-  // Per RFC 6901: `#` denotes the root document; `#/` denotes the empty-
-  // name member of the root object. Only `#` is a root reference.
   if (pointer === '') return root;
   if (!pointer.startsWith('/')) return undefined;
   const parts = pointer

@@ -32,8 +32,9 @@ export {
 } from './constants.js';
 
 export type {
-  CrossFieldMessageCode,
+  CrossFieldSubCode,
   DiagnosticCode,
+  SemanticSubCode,
   InvalidDiagnosticCode,
   UnsupportedLegacyDiagnostic,
 } from './diagnostics.js';
@@ -65,7 +66,11 @@ export {
   type ValidationResult,
 } from './schema.js';
 
-export { StateManifestSerializationError, serializeStateManifestV2 } from './serializer.js';
+export {
+  StateManifestSerializationError,
+  serializeStateManifestV2,
+  type StateManifestSerializationReason,
+} from './serializer.js';
 
 export {
   BuilderInputRejectedError,

@@ -14,6 +14,9 @@ import type {
   StateManifestV2Input,
   StateManifestV2Transition,
   ValidationResult,
+  InvalidDiagnosticCode,
+  UnsupportedLegacyDiagnostic,
+  StateManifestSerializationReason,
 } from './index.js';
 
 // The public surface of src/state-v2/index.ts is the only supported way for
@@ -79,5 +82,39 @@ describe('state-v2 public surface', () => {
     ] = [undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined];
     void _typeCheck;
     expect(true).toBe(true);
+  });
+  it('BundleClassification.invalid.diagnostic is narrowed to InvalidDiagnosticCode (no legacy code allowed)', () => {
+    type InvalidBranchDiag = Extract<BundleClassification, { kind: 'invalid' }>['diagnostic'];
+    const okDiag: InvalidBranchDiag = 'manifest_shape_invalid';
+    expect(okDiag).toBe('manifest_shape_invalid');
+    type LegacyOnlyIsExcluded = UnsupportedLegacyDiagnostic extends InvalidBranchDiag
+      ? false
+      : true;
+    const excluded: LegacyOnlyIsExcluded = true;
+    expect(excluded).toBe(true);
+  });
+
+  it('StateManifestSerializationReason is a closed enum with three members', () => {
+    const reasons: readonly StateManifestSerializationReason[] = [
+      'manifest_shape_invalid',
+      'manifest_unknown_field',
+      'manifest_unknown_version',
+    ];
+    expect(reasons.length).toBe(3);
+  });
+
+  it('canonicalJsonBytes public overload accepts CanonicalJsonValue without a manual cast', () => {
+    const value: import('./index.js').CanonicalJsonValue = { a: 1, b: [null, true, 'x'] };
+    const bytes = pub.canonicalJsonBytes(value);
+    expect(bytes.byteLength).toBeGreaterThan(0);
+    const unk: unknown = { c: 42 };
+    const bytes2 = pub.canonicalJsonBytes(unk);
+    expect(bytes2.byteLength).toBeGreaterThan(0);
+  });
+
+  it('InvalidDiagnosticCode structurally excludes state_unsupported_legacy_v1', () => {
+    type Excludes = 'state_unsupported_legacy_v1' extends InvalidDiagnosticCode ? false : true;
+    const c: Excludes = true;
+    expect(c).toBe(true);
   });
 });

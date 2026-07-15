@@ -35,25 +35,33 @@ export type InvalidDiagnosticCode =
 
 export type DiagnosticCode = UnsupportedLegacyDiagnostic | InvalidDiagnosticCode;
 
-/** Cross-field validation failure `message` codes. Always paired with `manifest_shape_invalid`. */
-export type CrossFieldMessageCode =
-  | 'x_state_namespace_mismatch'
-  | 'x_transaction_ledger_binding'
-  | 'x_metadata_producing_session_epoch'
-  | 'x_metadata_producing_state_generation'
-  | 'x_metadata_producing_ledger_epoch'
-  | 'x_bootstrap_generation_nonzero'
-  | 'x_bootstrap_ordinal_nonzero'
-  | 'x_recovery_root_generation_nonzero'
-  | 'x_recovery_root_ordinal_nonzero'
-  | 'x_continuation_epoch_mismatch'
-  | 'x_continuation_generation_step'
-  | 'x_continuation_ordinal_zero'
-  | 'x_reset_epoch_same'
-  | 'x_reset_generation_step'
-  | 'x_reset_ordinal_nonzero'
-  | 'x_identity_empty'
-  | 'x_identity_too_long'
-  | 'x_identity_control_chars'
-  | 'x_repository_syntax'
-  | 'x_producedAt_invalid_rfc3339';
+/**
+ * Internal cross-field / semantic sub-codes attached to
+ * `AggregatorCandidate.subCode` for stable ordering. These are never
+ * emitted on the wire; only `<code>:<safe-path>` (with `<code>` in the
+ * three-value wire enum) reaches the classifier / validator message.
+ * The old `x_*` alias has been retired; new sub-codes follow the
+ * `cross_*` / `semantic_*` naming convention.
+ */
+export type CrossFieldSubCode =
+  | 'cross_transaction_ledger_binding'
+  | 'cross_metadata_producing_session_epoch'
+  | 'cross_metadata_producing_state_generation'
+  | 'cross_metadata_producing_ledger_epoch'
+  | 'cross_bootstrap_generation_nonzero'
+  | 'cross_bootstrap_ordinal_nonzero'
+  | 'cross_recovery_root_generation_nonzero'
+  | 'cross_recovery_root_ordinal_nonzero'
+  | 'cross_continuation_epoch_mismatch'
+  | 'cross_continuation_generation_step'
+  | 'cross_continuation_ordinal_zero'
+  | 'cross_reset_epoch_same'
+  | 'cross_reset_generation_step'
+  | 'cross_reset_ordinal_nonzero';
+
+export type SemanticSubCode =
+  | 'semantic_identity_empty'
+  | 'semantic_identity_utf8_over_cap'
+  | 'semantic_identity_control_char'
+  | 'semantic_floating_alias'
+  | 'semantic_produced_at_rfc3339';

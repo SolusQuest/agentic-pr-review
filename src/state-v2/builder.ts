@@ -64,21 +64,28 @@ export type BuildStateBundleV2Result = BuildResult;
  * Pure builder. Never touches the filesystem.
  *
  * Order of operations:
- *   1. Size caps on the caller's byte views (byteLength on original view).
- *   2. Validate the caller's input tree against the canonical-JSON accepted
- *      domain by running it through the shared `canonicalJsonBytes` helper.
- *      Any `CanonicalJsonInputError` becomes a `BuilderInputRejectedError`
- *      so callers see a single typed rejection instead of two overlapping
- *      contracts. This also rejects lone UTF-16 surrogates in both string
- *      values and property names.
- *   3. Deep-copy the accepted input by round-tripping the canonical bytes
- *      through `JSON.parse` — the tree returned to the manifest builder is
- *      brand-new plain objects/arrays completely disconnected from the
- *      caller's input references.
- *   4. Copy the accepted byte views into fresh Uint8Array snapshots.
- *   5. Compute SHA-256 over the snapshots and fill descriptor + transaction
- *      binding fields.
- *   6. Validate the finalized manifest and serialize it.
+ *   1. Sidecar byte caps on the caller's byte views (byteLength on the
+ *      caller's original view).
+ *   2. Structural-only canonical-domain shape check. Walks the input
+ *      tree using the same rules `canonicalJsonBytes` enforces (types,
+ *      prototypes, cycles, symbols, accessors, sparse arrays, non-
+ *      enumerable own properties) but never inspects UTF-16 code-unit
+ *      content of any string. Structural rejection becomes
+ *      `BuilderInputRejectedError`.
+ *   3. Authoritative shared string-safety traversal (`scanStringSafety`).
+ *      NUL or unpaired UTF-16 surrogate in any string value or property
+ *      name becomes `BuilderValidationError` whose `.message` is the bounded
+ *      wire string `x_invalid_unicode:<safe-path>`.
+ *   4. `canonicalJsonBytes` on the accepted input; steps 2 and 3
+ *      guarantee this succeeds, but defense-in-depth re-throws are
+ *      surfaced as `BuilderInputRejectedError`.
+ *   5. Deep-copy the accepted input by round-tripping canonical bytes
+ *      through `JSON.parse` — the tree returned to the manifest builder
+ *      is brand-new plain objects/arrays disconnected from the caller.
+ *   6. Copy the accepted byte views into fresh `Uint8Array` snapshots
+ *      and compute SHA-256 over each.
+ *   7. Fill descriptor / transaction binding fields, validate the
+ *      finalized manifest, and serialize.
  */
 export function buildStateBundleV2(
   input: StateManifestV2Input,

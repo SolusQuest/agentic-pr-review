@@ -51,6 +51,15 @@ function conformanceCheck(root: Node): ConformanceReport {
       .map((p) => p.replace(/~1/g, '/').replace(/~0/g, '~'));
     let cur: unknown = root;
     for (const p of parts) {
+      // Array-aware traversal: accept a numeric segment against an array
+      // (base-10 non-negative in-range only), reject any other segment
+      // against an array.
+      if (Array.isArray(cur)) {
+        const idx = Number(p);
+        if (!Number.isInteger(idx) || idx < 0 || idx >= (cur as unknown[]).length) return undefined;
+        cur = (cur as unknown[])[idx];
+        continue;
+      }
       if (!isObject(cur)) return undefined;
       cur = (cur as Record<string, unknown>)[p];
     }

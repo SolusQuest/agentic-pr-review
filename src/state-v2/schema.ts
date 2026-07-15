@@ -1,10 +1,11 @@
 import { Ajv, type ErrorObject } from 'ajv';
 import schema from '../../protocol/schemas/state-manifest.v2.json' with { type: 'json' };
-import type { CrossFieldMessageCode, DiagnosticCode } from './diagnostics.js';
+import type { DiagnosticCode } from './diagnostics.js';
 import type { StateManifestV2 } from './manifest.js';
 import {
   normalizePosition,
   renderWireEntry,
+  resolveArrayItem,
   resolveProperty,
   sanitizeSegment,
   scanStringSafety,
@@ -36,7 +37,7 @@ const validateSchema = ajv.compile<StateManifestV2>(schema);
  * sensitive data through classification output.
  */
 export function validateStateManifestV2(value: unknown): ValidationResult {
-  // Shared string-safety traversal runs before Ajv, mirroring the
+  // Stage: shared string-safety traversal runs before Ajv, mirroring the
   // classifier stage order. Any NUL or unpaired UTF-16 surrogate in a
   // string value or property name yields manifest_shape_invalid with
   // wire message x_invalid_unicode:<safe-path>.
@@ -49,110 +50,121 @@ export function validateStateManifestV2(value: unknown): ValidationResult {
     return classifyAjvErrors(validateSchema.errors ?? []);
   }
   const manifest = value as StateManifestV2;
-  const crossErrors = crossFieldValidate(manifest);
-  if (crossErrors.length > 0) {
-    return {
-      ok: false,
-      diagnostic: 'manifest_shape_invalid',
-      message: boundedJoin(crossErrors),
-    };
-  }
-  const semanticErrors = semanticIdentityValidate(manifest);
-  if (semanticErrors.length > 0) {
-    return {
-      ok: false,
-      diagnostic: 'manifest_shape_invalid',
-      message: boundedJoin(semanticErrors),
-    };
+  const crossCandidates = crossFieldCandidates(manifest);
+  const semanticCandidates = semanticIdentityCandidates(manifest);
+  const combined = [...crossCandidates, ...semanticCandidates];
+  if (combined.length > 0) {
+    return finalizeAggregation(combined, 'manifest_shape_invalid');
   }
   return { ok: true, manifest };
 }
 
-function classifyAjvErrors(errors: readonly ErrorObject[]): {
-  ok: false;
-  diagnostic: DiagnosticCode;
-  message: string;
-} {
-  // Layer 1: order, render, wire-dedup, cap.
-  // Ordering key: (step=6, resolver-mapped raw safe path, subCode, ajv-index).
-  // Because ordering is stable and dedup runs on the fully rendered wire
-  // entry AFTER shared per-path truncation, the resulting entries are
-  // guaranteed byte-distinct on the wire.
-  interface Candidate {
-    readonly index: number;
-    readonly rawSafePath: string;
-    readonly subCode: string;
-    readonly wireEntry: string;
-    readonly diagnostic: DiagnosticCode;
-  }
-  const rootPos = normalizePosition(schema as unknown as SchemaNode);
+// ---------------------------------------------------------------------------
+// Aggregation pipeline (candidate-v7 shared algorithm).
+//
+// Every candidate (Ajv-derived, cross-field, semantic) is rendered through
+// `renderWireEntry` and then fed to the same pipeline:
+//   1. Stable-sort by (stage, rawSafePath, subCode, index).
+//   2. Render all candidates.
+//   3. Dedup on the fully rendered wire entry.
+//   4. Cap at MAX_DIAGNOSTIC_ERRORS distinct entries.
+//   5. Sentinel only when distinct-entry count exceeded the cap.
+//   6. Enforce absolute char/byte caps by dropping trailing entries.
+// ---------------------------------------------------------------------------
 
-  const candidates: Candidate[] = [];
-  errors.forEach((err, i) => {
-    const c = renderAjvError(err, i, rootPos);
-    candidates.push(c);
-  });
+/**
+ * A single validator finding, pre-render. All stages produce candidates in
+ * this shape so they can flow through a single aggregation pipeline.
+ */
+export interface AggregatorCandidate {
+  /** Stage of origin; lower runs first for ties. */
+  readonly stage: number;
+  /** Stable index within a stage (insertion order). */
+  readonly index: number;
+  /** JSON-Pointer-shaped rendering used for stable ordering only. */
+  readonly rawSafePath: string;
+  /** Internal, never-emitted sub-code used for stable ordering only. */
+  readonly subCode: string;
+  /** Wire code prefix. */
+  readonly code: 'x_invalid_field';
+  /** Already-sanitized ordered segments. */
+  readonly segments: readonly string[];
+  /** Per-candidate top-level diagnostic contribution. */
+  readonly diagnostic: DiagnosticCode;
+}
 
-  // Stable sort by (rawSafePath lex, subCode, index).
-  candidates.sort((a, b) => {
-    if (a.rawSafePath !== b.rawSafePath) {
-      return a.rawSafePath < b.rawSafePath ? -1 : 1;
-    }
-    if (a.subCode !== b.subCode) {
-      return a.subCode < b.subCode ? -1 : 1;
-    }
+const AGG_SENTINEL = '; ...[truncated]';
+
+function finalizeAggregation(
+  candidates: readonly AggregatorCandidate[],
+  fallbackDiagnostic: DiagnosticCode,
+): { ok: false; diagnostic: DiagnosticCode; message: string } {
+  // 1. Stable sort by (stage, rawSafePath, subCode, index).
+  const sorted = candidates.slice().sort((a, b) => {
+    if (a.stage !== b.stage) return a.stage - b.stage;
+    if (a.rawSafePath !== b.rawSafePath) return a.rawSafePath < b.rawSafePath ? -1 : 1;
+    if (a.subCode !== b.subCode) return a.subCode < b.subCode ? -1 : 1;
     return a.index - b.index;
   });
 
-  // Wire-level dedup by rendered wireEntry (post-truncation).
+  // 2. Render every candidate through the shared truncation algorithm.
+  const rendered = sorted.map((c) => ({
+    candidate: c,
+    wireEntry: renderWireEntry(c.code, c.segments).wireEntry,
+  }));
+
+  // 3. Dedup by fully rendered wire entry, preserving stable order.
   const seen = new Set<string>();
-  const kept: Candidate[] = [];
-  for (const c of candidates) {
-    if (seen.has(c.wireEntry)) continue;
-    seen.add(c.wireEntry);
-    kept.push(c);
-    if (kept.length >= MAX_DIAGNOSTIC_ERRORS) break;
+  const unique: typeof rendered = [];
+  for (const r of rendered) {
+    if (seen.has(r.wireEntry)) continue;
+    seen.add(r.wireEntry);
+    unique.push(r);
   }
 
-  // Top-level diagnostic precedence: unknown_version > unknown_field > shape_invalid.
-  const hasVersion = candidates.some((c) => c.diagnostic === 'manifest_unknown_version');
-  const hasUnknownField = candidates.some((c) => c.diagnostic === 'manifest_unknown_field');
+  // 4. Cap at MAX_DIAGNOSTIC_ERRORS distinct entries.
+  const kept = unique.slice(0, MAX_DIAGNOSTIC_ERRORS);
+
+  // 5. Sentinel iff distinct-entry count > cap (i.e. entries were dropped
+  //    because of the cap, NOT because of ordinary dedup).
+  const droppedByCap = unique.length > kept.length;
+
+  // Top-level diagnostic precedence: unknown_version > unknown_field >
+  // shape_invalid > fallback.
+  const hasVersion = sorted.some((c) => c.diagnostic === 'manifest_unknown_version');
+  const hasUnknownField = sorted.some((c) => c.diagnostic === 'manifest_unknown_field');
   const diagnostic: DiagnosticCode = hasVersion
     ? 'manifest_unknown_version'
     : hasUnknownField
       ? 'manifest_unknown_field'
-      : 'manifest_shape_invalid';
+      : fallbackDiagnostic;
 
-  // If only one distinct rendered wire entry survives, emit exactly that
-  // entry with no aggregate sentinel — this matches the shared deep-path
-  // oracle byte-exact requirement.
-  if (kept.length <= 1) {
-    return { ok: false, diagnostic, message: kept[0]?.wireEntry ?? '' };
+  if (kept.length === 0) {
+    return { ok: false, diagnostic, message: '' };
+  }
+  if (kept.length === 1 && !droppedByCap) {
+    return { ok: false, diagnostic, message: kept[0]!.wireEntry };
   }
 
-  // Multiple entries. Join with `; ` and append aggregate sentinel when
-  // more errors were dropped than the kept set.
-  // Only fire the aggregate sentinel if the 8-entry cap actually forced a
-  // truncation. Ordinary wire dedup collapsing duplicate rendered entries
-  // does not count as truncation for the purpose of the sentinel.
-  const droppedByCap = kept.length >= MAX_DIAGNOSTIC_ERRORS && candidates.length > kept.length;
-  const AGG_SENTINEL = '; ...[truncated]';
-  const parts = kept.map((c) => c.wireEntry);
-  let joined = parts.join('; ');
-  if (droppedByCap) {
-    joined += AGG_SENTINEL;
-  }
-  // Enforce absolute UTF-16 and UTF-8 caps by dropping trailing entries.
+  // 6. Assemble the message with `; ` and append the aggregate sentinel
+  //    when the cap actually forced truncation. Enforce absolute char /
+  //    byte caps by dropping trailing entries; never truncate inside an
+  //    entry. If only the first entry plus sentinel fits, emit just the
+  //    first entry.
   const encoder = new TextEncoder();
+  let parts = kept.map((k) => k.wireEntry);
+  let joined = parts.join('; ') + (droppedByCap ? AGG_SENTINEL : '');
   while (
     (joined.length > MAX_DIAGNOSTIC_MESSAGE_CHARS ||
       encoder.encode(joined).byteLength > MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES) &&
     parts.length > 1
   ) {
-    parts.pop();
+    parts = parts.slice(0, parts.length - 1);
+    // Once we drop an entry to make room, the message is definitionally
+    // truncated even if dedup was the only reason the count dropped
+    // before this loop.
     joined = parts.join('; ') + AGG_SENTINEL;
   }
-  // Fallback: first-entry + sentinel does not fit — emit just the first entry.
   if (
     parts.length === 1 &&
     (joined.length > MAX_DIAGNOSTIC_MESSAGE_CHARS ||
@@ -163,35 +175,36 @@ function classifyAjvErrors(errors: readonly ErrorObject[]): {
   return { ok: false, diagnostic, message: joined };
 }
 
-interface RenderedAjvCandidate {
-  readonly index: number;
-  readonly rawSafePath: string;
-  readonly subCode: string;
-  readonly wireEntry: string;
-  readonly diagnostic: DiagnosticCode;
+function classifyAjvErrors(errors: readonly ErrorObject[]): ValidationResult {
+  const rootPos = normalizePosition(schema as unknown as SchemaNode);
+  const candidates: AggregatorCandidate[] = [];
+  errors.forEach((err, i) => {
+    candidates.push(renderAjvCandidate(err, i, rootPos));
+  });
+  return finalizeAggregation(candidates, 'manifest_shape_invalid');
 }
 
-function renderAjvError(
+function renderAjvCandidate(
   err: ErrorObject,
   index: number,
   rootPos: SchemaPosition,
-): RenderedAjvCandidate {
+): AggregatorCandidate {
   const instancePath = err.instancePath ?? '';
   const rawSegments = instancePath === '' ? [] : instancePath.slice(1).split('/');
 
   // Resolve schema positions for the raw path and sanitize each ancestor
-  // segment via the shared six-rule table.
-  let pos = rootPos;
+  // segment via the shared six-rule table. Use resolveArrayItem when the
+  // current position is an ArrayPosition and the segment parses as a
+  // non-negative base-10 integer.
+  let pos: SchemaPosition = rootPos;
   let trusted = true;
   const sanitized: string[] = [];
   for (const rawSeg of rawSegments) {
     const decoded = rawSeg.replace(/~1/g, '/').replace(/~0/g, '~');
-    const propResult = resolveProperty(pos, decoded);
-    const segKnown: boolean = trusted && propResult.schemaKnown;
-    const seg = sanitizeSegment(decoded, segKnown);
-    sanitized.push(seg);
-    trusted = segKnown;
-    pos = segKnown ? propResult.childSchemaPosition : UNKNOWN_POSITION;
+    const [nextPos, nextTrusted, segment] = advanceAjvSegment(pos, decoded, trusted);
+    sanitized.push(segment);
+    trusted = nextTrusted;
+    pos = nextPos;
   }
 
   // If the offending Ajv keyword names a specific final property/item, add
@@ -202,8 +215,6 @@ function renderAjvError(
   let topDiagnostic: DiagnosticCode = 'manifest_shape_invalid';
 
   const keyword = err.keyword ?? 'invalid';
-
-  // Special-case: any /version error remaps to manifest_unknown_version.
   const isVersion = instancePath === '/version';
 
   if (
@@ -216,8 +227,6 @@ function renderAjvError(
     finalSegment = sanitizeSegment(offendingKey, isKnown);
     if (isKnown) {
       subCode = 'variant_forbidden_field';
-      // Variant-forbidden: schema-known name at a schema-known parent —
-      // remains manifest_shape_invalid.
       topDiagnostic = 'manifest_shape_invalid';
     } else {
       subCode = 'unknown_field';
@@ -229,52 +238,7 @@ function renderAjvError(
     finalSegment = sanitizeSegment(missing, trusted && missingResult.schemaKnown);
     subCode = 'missing_required_property';
   } else {
-    switch (keyword) {
-      case 'type':
-        subCode = 'type_mismatch';
-        break;
-      case 'const':
-        subCode = 'const_mismatch';
-        break;
-      case 'enum':
-        subCode = 'enum_mismatch';
-        break;
-      case 'pattern':
-        subCode = 'pattern_mismatch';
-        break;
-      case 'format':
-        subCode = 'format_mismatch';
-        break;
-      case 'minimum':
-      case 'maximum':
-      case 'exclusiveMinimum':
-      case 'exclusiveMaximum':
-      case 'multipleOf':
-        subCode = 'range_out_of_bounds';
-        break;
-      case 'minLength':
-      case 'maxLength':
-        subCode = 'length_out_of_bounds';
-        break;
-      case 'minItems':
-      case 'maxItems':
-      case 'uniqueItems':
-        subCode = 'array_bounds';
-        break;
-      case 'oneOf':
-      case 'anyOf':
-      case 'allOf':
-      case 'if':
-      case 'then':
-      case 'else':
-      case 'not':
-      case 'discriminator':
-        subCode = 'discriminator_mismatch';
-        break;
-      default:
-        subCode = 'type_mismatch';
-        break;
-    }
+    subCode = keywordToSubCode(keyword);
   }
 
   if (isVersion) {
@@ -283,53 +247,137 @@ function renderAjvError(
   }
 
   const segments = finalSegment === undefined ? sanitized : [...sanitized, finalSegment];
-  const rendered = renderWireEntry('x_invalid_field', segments);
-
-  // Raw path for stable ordering (post-sanitization but pre-truncation).
   const rawSafePath = segments.length === 0 ? '' : '/' + segments.join('/');
 
   return {
+    stage: 6,
     index,
     rawSafePath,
     subCode,
-    wireEntry: rendered.wireEntry,
+    code: 'x_invalid_field',
+    segments,
     diagnostic: topDiagnostic,
   };
 }
 
-/** Cross-field runtime rules that go beyond what the JSON Schema encodes. */
-export function crossFieldValidate(manifest: StateManifestV2): string[] {
-  const errors: string[] = [];
-  function add(code: CrossFieldMessageCode, safePath: string): void {
-    errors.push(
-      renderWireEntry('x_invalid_field', safePath === '' ? [] : safePath.slice(1).split('/'))
-        .wireEntry,
-    );
-    void code; // sub-code kept in code for ordering; internal only.
+function advanceAjvSegment(
+  pos: SchemaPosition,
+  decoded: string,
+  trusted: boolean,
+): [SchemaPosition, boolean, string] {
+  // Numeric array index against an array position uses resolveArrayItem
+  // per the frozen resolver contract.
+  if (pos.kind === 'array' || pos.kind === 'composite') {
+    const asIndex = Number(decoded);
+    if (Number.isInteger(asIndex) && asIndex >= 0 && String(asIndex) === decoded) {
+      const arrResult = resolveArrayItemIfPresent(pos);
+      if (arrResult.schemaKnown) {
+        return [
+          trusted ? arrResult.childSchemaPosition : UNKNOWN_POSITION,
+          trusted,
+          decoded, // numeric indices pass through verbatim (ASCII digits are safe)
+        ];
+      }
+    }
   }
+  const propResult = resolveProperty(pos, decoded);
+  const segKnown: boolean = trusted && propResult.schemaKnown;
+  const seg = sanitizeSegment(decoded, segKnown);
+  return [segKnown ? propResult.childSchemaPosition : UNKNOWN_POSITION, segKnown, seg];
+}
+
+function resolveArrayItemIfPresent(pos: SchemaPosition): {
+  schemaKnown: boolean;
+  childSchemaPosition: SchemaPosition;
+} {
+  return resolveArrayItem(pos);
+}
+
+function keywordToSubCode(keyword: string): string {
+  switch (keyword) {
+    case 'type':
+      return 'type_mismatch';
+    case 'const':
+      return 'const_mismatch';
+    case 'enum':
+      return 'enum_mismatch';
+    case 'pattern':
+      return 'pattern_mismatch';
+    case 'format':
+      return 'format_mismatch';
+    case 'minimum':
+    case 'maximum':
+    case 'exclusiveMinimum':
+    case 'exclusiveMaximum':
+    case 'multipleOf':
+      return 'range_out_of_bounds';
+    case 'minLength':
+    case 'maxLength':
+      return 'length_out_of_bounds';
+    case 'minItems':
+    case 'maxItems':
+    case 'uniqueItems':
+      return 'array_bounds';
+    case 'oneOf':
+    case 'anyOf':
+    case 'allOf':
+    case 'if':
+    case 'then':
+    case 'else':
+    case 'not':
+    case 'discriminator':
+      return 'discriminator_mismatch';
+    default:
+      return 'type_mismatch';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cross-field candidates.
+// ---------------------------------------------------------------------------
+
+/**
+ * Emit structured cross-field candidates. `crossFieldValidate` (which
+ * historically returned rendered wire strings) remains available as a
+ * convenience wrapper for external callers and legacy tests.
+ */
+export function crossFieldCandidates(manifest: StateManifestV2): AggregatorCandidate[] {
+  const out: AggregatorCandidate[] = [];
+  let index = 0;
+  const add = (subCode: string, safePath: string): void => {
+    const segments = safePath === '' ? [] : safePath.slice(1).split('/');
+    out.push({
+      stage: 7,
+      index: index++,
+      rawSafePath: safePath,
+      subCode,
+      code: 'x_invalid_field',
+      segments,
+      diagnostic: 'manifest_shape_invalid',
+    });
+  };
 
   // stateKey.namespace/stateNamespace equality is owned by JSON Schema
-  // const at classifier step 6 (const_mismatch); the semantic stage no
-  // longer checks it.
+  // const at Ajv step; the semantic stage no longer checks it.
   if (manifest.transaction.candidateLedgerSha256 !== manifest.ledger.sha256) {
-    add('x_transaction_ledger_binding', '/transaction/candidateLedgerSha256');
+    add('cross_transaction_ledger_binding', '/transaction/candidateLedgerSha256');
   }
   const producing = manifest.providerRunMetadata.producingGeneration;
   if (producing.sessionEpoch !== manifest.sessionEpoch) {
     add(
-      'x_metadata_producing_session_epoch',
+      'cross_metadata_producing_session_epoch',
       '/providerRunMetadata/producingGeneration/sessionEpoch',
     );
   }
   if (producing.stateGeneration !== manifest.generation.stateGeneration) {
     add(
-      'x_metadata_producing_state_generation',
+      'cross_metadata_producing_state_generation',
       '/providerRunMetadata/producingGeneration/stateGeneration',
     );
   }
   if (producing.ledgerEpoch !== manifest.generation.ledgerEpoch) {
     add(
-      'x_metadata_producing_ledger_epoch',
+      'cross_metadata_producing_ledger_epoch',
       '/providerRunMetadata/producingGeneration/ledgerEpoch',
     );
   }
@@ -339,58 +387,70 @@ export function crossFieldValidate(manifest: StateManifestV2): string[] {
   const tx = manifest.transaction;
   if (t.kind === 'bootstrap') {
     if (g.stateGeneration !== 0)
-      add('x_bootstrap_generation_nonzero', '/generation/stateGeneration');
+      add('cross_bootstrap_generation_nonzero', '/generation/stateGeneration');
     if (tx.interactionOrdinal !== 0)
-      add('x_bootstrap_ordinal_nonzero', '/transaction/interactionOrdinal');
+      add('cross_bootstrap_ordinal_nonzero', '/transaction/interactionOrdinal');
   } else if (t.kind === 'recovery_root') {
     if (g.stateGeneration !== 0)
-      add('x_recovery_root_generation_nonzero', '/generation/stateGeneration');
+      add('cross_recovery_root_generation_nonzero', '/generation/stateGeneration');
     if (tx.interactionOrdinal !== 0)
-      add('x_recovery_root_ordinal_nonzero', '/transaction/interactionOrdinal');
+      add('cross_recovery_root_ordinal_nonzero', '/transaction/interactionOrdinal');
   } else if (t.kind === 'continuation') {
     if (t.predecessorLedgerEpoch !== g.ledgerEpoch)
-      add('x_continuation_epoch_mismatch', '/transition/predecessorLedgerEpoch');
+      add('cross_continuation_epoch_mismatch', '/transition/predecessorLedgerEpoch');
     if (t.predecessorStateGeneration + 1 !== g.stateGeneration)
-      add('x_continuation_generation_step', '/transition/predecessorStateGeneration');
+      add('cross_continuation_generation_step', '/transition/predecessorStateGeneration');
     if (tx.interactionOrdinal < 1)
-      add('x_continuation_ordinal_zero', '/transaction/interactionOrdinal');
+      add('cross_continuation_ordinal_zero', '/transaction/interactionOrdinal');
   } else if (t.kind === 'reset') {
     if (t.predecessorLedgerEpoch === g.ledgerEpoch)
-      add('x_reset_epoch_same', '/transition/predecessorLedgerEpoch');
+      add('cross_reset_epoch_same', '/transition/predecessorLedgerEpoch');
     if (t.predecessorStateGeneration + 1 !== g.stateGeneration)
-      add('x_reset_generation_step', '/transition/predecessorStateGeneration');
+      add('cross_reset_generation_step', '/transition/predecessorStateGeneration');
     if (tx.interactionOrdinal !== 0)
-      add('x_reset_ordinal_nonzero', '/transaction/interactionOrdinal');
+      add('cross_reset_ordinal_nonzero', '/transaction/interactionOrdinal');
   }
-
-  return errors;
+  return out;
 }
 
-/**
- * UTF-8 byte-length + control-char + repository-syntax + RFC 3339 checks for
- * identity and provenance strings. Emits fixed code paths only; identity
- * values, repository names, and timestamps are never echoed.
- */
-export function semanticIdentityValidate(manifest: StateManifestV2): string[] {
-  const errors: string[] = [];
+/** Legacy string-array wrapper (already-rendered wire entries). */
+export function crossFieldValidate(manifest: StateManifestV2): string[] {
+  return crossFieldCandidates(manifest).map((c) => renderWireEntry(c.code, c.segments).wireEntry);
+}
+
+// ---------------------------------------------------------------------------
+// Semantic identity candidates.
+// ---------------------------------------------------------------------------
+
+export function semanticIdentityCandidates(manifest: StateManifestV2): AggregatorCandidate[] {
+  const out: AggregatorCandidate[] = [];
+  let index = 0;
   const encoder = new TextEncoder();
   const control = /[\u0000-\u001f\u007f]/;
 
-  function emit(safePath: string): void {
-    const segs = safePath === '' ? [] : safePath.slice(1).split('/');
-    errors.push(renderWireEntry('x_invalid_field', segs).wireEntry);
-  }
+  const add = (subCode: string, safePath: string): void => {
+    const segments = safePath === '' ? [] : safePath.slice(1).split('/');
+    out.push({
+      stage: 8,
+      index: index++,
+      rawSafePath: safePath,
+      subCode,
+      code: 'x_invalid_field',
+      segments,
+      diagnostic: 'manifest_shape_invalid',
+    });
+  };
 
   function checkIdentity(path: string, value: string): void {
     if (value.length === 0) {
-      emit(path);
+      add('semantic_identity_empty', path);
       return;
     }
     if (encoder.encode(value).byteLength > 256) {
-      emit(path);
+      add('semantic_identity_utf8_over_cap', path);
     }
     if (control.test(value)) {
-      emit(path);
+      add('semantic_identity_control_char', path);
     }
   }
 
@@ -401,17 +461,22 @@ export function semanticIdentityValidate(manifest: StateManifestV2): string[] {
   checkIdentity('/cacheContractIdentity/providerId', manifest.cacheContractIdentity.providerId);
   checkIdentity('/cacheContractIdentity/modelId', manifest.cacheContractIdentity.modelId);
 
-  // Floating-alias rejection restricted to modelId per the shared contract
-  // (### Floating alias rejection).
   if (manifest.cacheContractIdentity.modelId === 'latest') {
-    emit('/cacheContractIdentity/modelId');
+    add('semantic_floating_alias', '/cacheContractIdentity/modelId');
   }
 
   if (!isRfc3339(manifest.provenance.producedAt)) {
-    emit('/provenance/producedAt');
+    add('semantic_produced_at_rfc3339', '/provenance/producedAt');
   }
 
-  return errors;
+  return out;
+}
+
+/** Legacy string-array wrapper. */
+export function semanticIdentityValidate(manifest: StateManifestV2): string[] {
+  return semanticIdentityCandidates(manifest).map(
+    (c) => renderWireEntry(c.code, c.segments).wireEntry,
+  );
 }
 
 /**
@@ -437,7 +502,6 @@ export function isRfc3339(value: string): boolean {
   if (day < 1 || day > daysInMonth) return false;
   if (hour > 23) return false;
   if (minute > 59) return false;
-  // RFC 3339 allows :60 for leap seconds; treat 0..60 inclusive.
   if (second > 60) return false;
   if (tz && tz.toUpperCase() !== 'Z') {
     const off = /^([+-])(\d{2}):(\d{2})$/.exec(tz);
@@ -457,11 +521,13 @@ function calendarDaysInMonth(year: number, month: number): number {
   return [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
 }
 
-/**
- * Join messages with `; ` and enforce a hard total UTF-8 byte cap that
- * includes the trailing `...[truncated]` sentinel. Truncation happens on a
- * UTF-8 codepoint boundary and never emits a replacement character.
- */
+// ---------------------------------------------------------------------------
+// Legacy boundedJoin / boundedDiagnosticMessage — retained for callers that
+// operate on already-rendered strings (builder detail messages, classifier
+// wire-format short-circuits). These do NOT drive multi-candidate
+// aggregation; that pipeline is `finalizeAggregation`.
+// ---------------------------------------------------------------------------
+
 export function boundedJoin(messages: readonly string[]): string {
   const trimmed = messages
     .slice(0, MAX_DIAGNOSTIC_ERRORS)
@@ -476,28 +542,18 @@ export function boundedJoin(messages: readonly string[]): string {
   const budget = MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES - sentinelBytes.byteLength;
   const truncated = truncateAtCodepointBoundary(joined, Math.max(0, budget));
   const result = `${truncated}${sentinel}`;
-  // Defensive: recompute and confirm we are strictly at or below the cap.
   const finalBytes = encoder.encode(result).byteLength;
   if (finalBytes > MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES) {
-    // Recurse with a smaller message to absorb any remaining slack; the
-    // truncation algorithm should not require this in practice.
     return boundedJoin([truncated.slice(0, Math.floor(truncated.length / 2))]);
   }
   return result;
 }
 
-/**
- * Take the longest prefix of `value` whose UTF-8 encoding is at most
- * `maxBytes` bytes long, preserving codepoint boundaries. This iterates
- * through the string character by character and never returns a partial
- * multi-byte codepoint.
- */
 function truncateAtCodepointBoundary(value: string, maxBytes: number): string {
   if (maxBytes <= 0) return '';
   const encoder = new TextEncoder();
   let bytes = 0;
   let cutOffset = 0;
-  // for..of iterates full codepoints (handling surrogate pairs).
   let charOffset = 0;
   for (const codepoint of value) {
     const encoded = encoder.encode(codepoint);
@@ -509,11 +565,6 @@ function truncateAtCodepointBoundary(value: string, maxBytes: number): string {
   return value.slice(0, cutOffset);
 }
 
-/**
- * Truncate `value` to at most `maxCodepoints` Unicode code points. Iterates
- * with `for..of` so surrogate pairs count as one code point and are never
- * split. Used as the per-message cap inside `boundedJoin`.
- */
 function truncateToCodepoints(value: string, maxCodepoints: number): string {
   if (maxCodepoints <= 0) return '';
   let count = 0;
@@ -526,13 +577,6 @@ function truncateToCodepoints(value: string, maxCodepoints: number): string {
   return value.slice(0, cut);
 }
 
-/**
- * Public wrapper: format a single bounded diagnostic message. Applies the
- * per-message code-point cap and the total UTF-8 byte cap through the same
- * `boundedJoin` pipeline. All builder / classifier error paths must funnel
- * their final `Error.message` payload through this helper so no code path
- * can bypass the diagnostic bounds.
- */
 export function boundedDiagnosticMessage(message: string): string {
   return boundedJoin([message]);
 }

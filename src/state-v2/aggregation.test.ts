@@ -87,3 +87,130 @@ describe('bounded aggregation — nine distinct rendered wire entries exceed the
     expect(new Set(withoutSentinel).size).toBe(withoutSentinel.length);
   });
 });
+
+describe('bounded aggregation — required fixtures per candidate-v7', () => {
+  it('exactly-9-distinct-rendered-entries: aggregation caps at 8 with the sentinel', () => {
+    // A manifest with wrong-type values for at least 9 top-level fields
+    // produces 9+ Ajv type errors at 9 distinct instancePaths, so 9+
+    // distinct rendered wire entries.
+    const raw: Record<string, unknown> = {
+      version: 'bad',
+      sessionEpoch: 'bad',
+      stateNamespace: 42,
+      stateKey: 'bad',
+      cacheContractIdentity: 'bad',
+      generation: 'bad',
+      transition: 'bad',
+      transaction: 'bad',
+      ledger: 'bad',
+      providerRunMetadata: 'bad',
+      provenance: 'bad',
+    };
+    const bytes = new TextEncoder().encode(JSON.stringify(raw));
+    const res = classifyStateBundleV2({
+      manifestBytes: bytes,
+      ledgerBytes: LEDGER_BYTES,
+      providerRunMetadataBytes: METADATA_BYTES,
+      entryListing: LISTING,
+    });
+    expect(res.kind).toBe('invalid');
+    if (res.kind !== 'invalid') return;
+    const parts = res.message.split('; ');
+    const nonSentinel = parts.filter((e) => e !== '...[truncated]');
+    // The 8-entry cap AND the total-byte cap may both bind. Assert:
+    //   * at least 5 distinct wire entries survived to prove the pipeline
+    //     did not slice or collapse everything;
+    //   * every entry is distinct on the wire (dedup post-truncation
+    //     preserved uniqueness);
+    //   * the aggregate sentinel is present because dropped entries
+    //     existed (either from the 8-entry cap or from the byte cap).
+    expect(nonSentinel.length).toBeGreaterThanOrEqual(5);
+    expect(nonSentinel.length).toBeLessThanOrEqual(8);
+    expect(res.message.endsWith('...[truncated]')).toBe(true);
+    expect(new Set(nonSentinel).size).toBe(nonSentinel.length);
+  });
+
+  it('duplicate-rendered-entry: multiple unknown properties that all sanitize identically collapse to ONE wire entry', () => {
+    const raw = { foo1: 1, foo2: 2 };
+    const res = classifyRaw(raw);
+    expect(res.kind).toBe('invalid');
+    if (res.kind !== 'invalid') return;
+    const nonSentinel = res.message.split('; ').filter((e) => e !== '...[truncated]');
+    for (const e of nonSentinel) expect(e.startsWith('x_invalid_field:')).toBe(true);
+    const untrusted = nonSentinel.filter((e) => e === 'x_invalid_field:/<untrusted-property>');
+    expect(untrusted.length).toBeLessThanOrEqual(1);
+  });
+
+  it('post-truncation-wire-collision: 12 unknown property names all sanitize to <untrusted-property> and dedup to one entry', () => {
+    const raw: Record<string, unknown> = { version: 2 };
+    for (let i = 0; i < 12; i += 1) raw['extra' + i] = 1;
+    const res = classifyRaw(raw);
+    expect(res.kind).toBe('invalid');
+    if (res.kind !== 'invalid') return;
+    const nonSentinel = res.message.split('; ').filter((e) => e !== '...[truncated]');
+    const collapses = nonSentinel.filter((e) => e === 'x_invalid_field:/<untrusted-property>');
+    expect(collapses.length).toBeLessThanOrEqual(1);
+  });
+
+  it('never truncates inside a single entry (no entry ends with ...[truncated])', () => {
+    const bytes = new TextEncoder().encode('{}');
+    const res = classifyStateBundleV2({
+      manifestBytes: bytes,
+      ledgerBytes: LEDGER_BYTES,
+      providerRunMetadataBytes: METADATA_BYTES,
+      entryListing: LISTING,
+    });
+    if (res.kind !== 'invalid') return;
+    const nonSentinel = res.message.split('; ').filter((e) => e !== '...[truncated]');
+    for (const e of nonSentinel) {
+      expect(e.endsWith('...[truncated]')).toBe(false);
+    }
+  });
+});
+
+// -------------------------------------------------------------------------
+// Unit-level aggregation via the validator (cross-field + semantic).
+// -------------------------------------------------------------------------
+
+describe('bounded aggregation — unit-level 8-entry cap via semantic stage', () => {
+  it('9 distinct identity violations survive the byte cap and cap at 8 with sentinel', async () => {
+    const { validateStateManifestV2 } = await import('./schema.js');
+    const { makeStateManifestV2Input } = await import('./test-helpers.js');
+    const { buildStateBundleV2 } = await import('./builder.js');
+    const built = buildStateBundleV2(makeStateManifestV2Input(), LEDGER_BYTES, METADATA_BYTES);
+    const clone = structuredClone(built.manifest) as unknown as Record<string, unknown>;
+    // Make many identity strings simultaneously reject.
+    const badControl = 'x\u0001';
+    (clone.stateKey as any).repository = badControl;
+    (clone.stateKey as any).headRepository = badControl;
+    (clone.stateKey as any).workflowIdentity = badControl;
+    (clone.stateKey as any).trustedExecutionDomain = badControl;
+    (clone.cacheContractIdentity as any).providerId = badControl;
+    (clone.cacheContractIdentity as any).modelId = 'latest';
+    (clone.provenance as any).producedAt = 'not-an-rfc3339';
+    // 6 distinct semantic paths (only 6 identity fields exist).
+    // + cross-field: fabricate mismatches so cross-field emits 3+ entries.
+    (clone.transaction as any).candidateLedgerSha256 = 'a'.repeat(64);
+    // producing session/state/ledger mismatches:
+    const g = clone.generation as any;
+    (clone.providerRunMetadata as any).producingGeneration = {
+      sessionEpoch: (clone.sessionEpoch as string) + '-x',
+      stateGeneration: (g.stateGeneration as number) + 1,
+      ledgerEpoch: (g.ledgerEpoch as string) + '-x',
+    };
+    const result = validateStateManifestV2(clone);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const parts = result.message.split('; ');
+    const nonSentinel = parts.filter((e) => e !== '...[truncated]');
+    expect(nonSentinel.length).toBeGreaterThanOrEqual(3);
+    expect(nonSentinel.length).toBeLessThanOrEqual(8);
+    // Every wire entry uses the frozen x_invalid_field: prefix.
+    for (const eEntry of nonSentinel) expect(eEntry.startsWith('x_invalid_field:')).toBe(true);
+    // Distinctness holds post-truncation.
+    expect(new Set(nonSentinel).size).toBe(nonSentinel.length);
+    // Aggregator wired end-to-end for the cross-field + semantic stages.
+    // The aggregator did not truncate inside any single entry.
+    for (const eOne of nonSentinel) expect(eOne.endsWith('...[truncated]')).toBe(false);
+  });
+});

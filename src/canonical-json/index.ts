@@ -37,7 +37,14 @@ export class CanonicalJsonInputError extends Error {
 
 /**
  * Canonicalize a `CanonicalJsonValue` into RFC 8785 canonical UTF-8 bytes.
+ *
+ * The primary public signature accepts `CanonicalJsonValue`. A secondary
+ * overload accepts `unknown` so caller-side unknown or `JSON.parse`
+ * values can be fed in without a manual cast; runtime rejection still
+ * fires for any value outside the canonical accepted domain.
  */
+export function canonicalJsonBytes(value: CanonicalJsonValue): Uint8Array;
+export function canonicalJsonBytes(value: unknown): Uint8Array;
 export function canonicalJsonBytes(value: unknown): Uint8Array {
   const seen = new WeakSet<object>();
   const text = encodeValue(value, '$', seen);
