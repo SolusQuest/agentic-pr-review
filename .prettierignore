@@ -3,3 +3,11 @@ dist/
 .github/actions/agentic-pr-review/dist/
 runtime/tests/fixtures/deterministic/**
 .codex/
+
+# State v2 fixtures are byte-stable golden artifacts and must not be re-formatted.
+protocol/fixtures/state-manifest-v2/**
+protocol/fixtures/state-manifest-v2-compat/**
+
+# Agent-local scratch (never committed)
+.scratch/
+

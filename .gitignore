@@ -9,3 +9,7 @@ dist/
 .codex/
 runtime/**/bin/
 runtime/**/obj/
+
+.scratch/
+.relay-*.txt
+

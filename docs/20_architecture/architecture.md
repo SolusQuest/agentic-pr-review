@@ -96,6 +96,8 @@ Supported adapters should normalize cache-read, cache-write, uncached-input, and
 
 The ledger must not be raw API request storage. See `docs/20_architecture/security-boundary.md` for the artifact-class constraints the ledger must satisfy.
 
+The v2 state-bundle manifest for the M4 live-ledger path is defined by `docs/20_architecture/state-manifest-v2.md` (contract library, issue #48). Filesystem I/O, manifest-last local commit, and cross-workflow artifact selection remain out of scope for that library.
+
 ## Non-Goals
 
 Do not build these in the initial architecture:

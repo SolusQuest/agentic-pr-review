@@ -1,0 +1,8 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "oneOf": [
+    { "type": "object", "properties": { "payload": { "$ref": "#/$defs/leaf" } } },
+    { "type": "object", "properties": { "payload": { "$ref": "#/$defs/leaf" } } }
+  ],
+  "$defs": { "leaf": { "type": "object", "properties": { "value": { "type": "string" } } } }
+}

@@ -199,3 +199,5 @@ This ledger artifact is distinct from `ReviewTraceV1`:
 The protocol will also need to partition stable context (system instructions, policy, tool definitions, canonical prior turns) from volatile context (current PR delta, run metadata) to serve prefix-cache stability. See `docs/20_architecture/architecture.md` (Provider Request Prefix Contract) for the invariants.
 
 The existing `Review*V1` schemas remain unchanged. The ledger artifact, provider-run metadata sidecar, and stable/volatile partitioning are designed by issue #29; implementation follow-ups own the concrete process flags and file names.
+
+The implementation-level `StateManifestV2` contract library (issue #48) is documented in [`state-manifest-v2.md`](state-manifest-v2.md); it owns the manifest schema, byte-stable serializer, closed-shape validator, pure builder, pure classifier, and host-compatibility comparator. Filesystem I/O and manifest-last commit are owned by workstream 8 (#55).
