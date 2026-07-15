@@ -3,13 +3,14 @@ dist/
 .github/actions/agentic-pr-review/dist/
 runtime/tests/fixtures/deterministic/**
 .codex/
-protocol/fixtures/v1/provider-session-ledger/
-.phase*
-.fixture-shas.txt
-.*.py
-.write-schema.py
-.update-manifest.py
-.gen-property-count.py
-.regen-fixtures.py
-.patch-*.py
 
+# State v2 fixtures are byte-stable golden artifacts and must not be re-formatted.
+protocol/fixtures/state-manifest-v2/**
+protocol/fixtures/state-manifest-v2-compat/**
+
+# Agent-local scratch (never committed)
+.scratch/
+
+
+# Ledger fixtures: byte-stable golden artifacts, must not be re-formatted.
+protocol/fixtures/v1/provider-session-ledger/

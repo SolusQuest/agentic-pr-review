@@ -1,0 +1,14 @@
+[
+  {
+    "name": "manifest.json",
+    "isRegularFile": true
+  },
+  {
+    "name": "ledger.json",
+    "isRegularFile": true
+  },
+  {
+    "name": "provider-run-metadata.json",
+    "isRegularFile": true
+  }
+]
