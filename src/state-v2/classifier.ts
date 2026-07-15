@@ -252,17 +252,20 @@ function expectedFileConsistency(
   index: ListingIndex,
   bytes: Uint8Array | undefined,
   missingCode: InvalidDiagnosticCode,
-  safePath: string,
+  sidecarSafePath: string,
 ): BundleClassification | null {
   const listed = index.entries.has(name);
+  // Listing/bytes disagreement is a bundle-level layout problem; the wire
+  // path is the bundle root, never a sidecar-specific path.
   if (listed && bytes === undefined) {
-    return invalidWire('bundle_listing_mismatch', 'x_invalid_field', safePath);
+    return invalidWire('bundle_listing_mismatch', 'x_invalid_field', '/');
   }
   if (!listed && bytes !== undefined) {
-    return invalidWire('bundle_listing_mismatch', 'x_invalid_field', safePath);
+    return invalidWire('bundle_listing_mismatch', 'x_invalid_field', '/');
   }
+  // Both-absent points at the specific missing sidecar.
   if (!listed && bytes === undefined) {
-    return invalidWire(missingCode, 'x_invalid_field', safePath);
+    return invalidWire(missingCode, 'x_invalid_field', sidecarSafePath);
   }
   return null;
 }

@@ -159,3 +159,108 @@ describe('serializeStateManifestV2 rejection regression', () => {
     expect(caught.message).toContain('x_invalid_unicode:/cacheContractIdentity/providerId');
   });
 });
+
+describe('serializeStateManifestV2 canonicalization failure regression', () => {
+  it('a schema-valid manifest carrying a canonical-only violation (symbol-keyed own property in a schema-known object) is caught and wrapped', async () => {
+    const { StateManifestSerializationError } = await import('./serializer.js');
+    const built = buildStateBundleV2(makeStateManifestV2Input(), LEDGER, METADATA);
+    const clone = structuredClone(built.manifest) as unknown as Record<string, unknown>;
+    // Attach a symbol-keyed own property to a schema-known nested
+    // object. The shared string-safety scan and the Ajv validator both
+    // ignore symbol keys, so the manifest reaches canonicalization.
+    Object.defineProperty(clone.stateKey, Symbol('canonical-only'), {
+      value: 'x',
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+    let caught: unknown;
+    try {
+      const { serializeStateManifestV2 } = await import('./serializer.js');
+      serializeStateManifestV2(clone as unknown as import('./manifest.js').StateManifestV2);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(StateManifestSerializationError);
+    if (!(caught instanceof StateManifestSerializationError)) return;
+    expect(caught.reason).toBe('canonical_json_input_rejected');
+    // Detail collapses to the root safe path; no caller structural
+    // information leaks.
+    expect(caught.detail).toBe('x_invalid_field:');
+    // diagnostic alias maps to the legacy shape_invalid enum.
+    expect(caught.diagnostic).toBe('manifest_shape_invalid');
+  });
+
+  it('StateManifestSerializationError.message is bounded (<= MAX_DIAGNOSTIC_MESSAGE_CHARS)', async () => {
+    const { StateManifestSerializationError } = await import('./serializer.js');
+    const { MAX_DIAGNOSTIC_MESSAGE_CHARS } = await import('./constants.js');
+    // Manually construct with a maximally long detail (already bounded).
+    const longDetail = 'x_invalid_field:/' + '<untrusted-property>'.repeat(20);
+    const err = new StateManifestSerializationError('manifest_shape_invalid', longDetail);
+    expect(err.message.length).toBeLessThanOrEqual(MAX_DIAGNOSTIC_MESSAGE_CHARS);
+    // The bounded-wire detail still appears verbatim on `.detail` even
+    // if the assembled message is truncated.
+    expect(err.detail).toBe(longDetail);
+  });
+});
+
+describe('normalizePosition and dereferenceJsonPointer regression', () => {
+  it('malformed $ref (non-string) returns UnknownPosition regardless of sibling supported keywords', async () => {
+    const { normalizePosition } = await import('./shared-safe-path.js');
+    const badSchema1 = { $ref: 42, properties: { known: { type: 'string' } } };
+    const badSchema2 = { $ref: 42 };
+    const pos1 = normalizePosition(badSchema1);
+    const pos2 = normalizePosition(badSchema2);
+    expect(pos1.kind).toBe('unknown');
+    expect(pos2.kind).toBe('unknown');
+  });
+
+  it('canonical decimal array-index rules apply to $ref targeting array-shaped subschemas', async () => {
+    const { normalizePosition } = await import('./shared-safe-path.js');
+    // Root has oneOf: [ {properties: {a: {type:'string'}}}, ... ].
+    const root = {
+      oneOf: [{ properties: { a: { type: 'string' } } }, { properties: { b: { type: 'string' } } }],
+    };
+    // Canonical: #/oneOf/0 → the first branch (schema-known 'a').
+    const posValid = normalizePosition(
+      { $ref: '#/oneOf/0' },
+      new Set(),
+      root as import('./shared-safe-path.js').SchemaNode,
+    );
+    expect(posValid.kind).toBe('object');
+    // Malformed: #/oneOf/01 → invalid canonical index → UnknownPosition.
+    const posLeading = normalizePosition(
+      { $ref: '#/oneOf/01' },
+      new Set(),
+      root as import('./shared-safe-path.js').SchemaNode,
+    );
+    expect(posLeading.kind).toBe('unknown');
+    // Malformed: #/oneOf/1e0 → not decimal → UnknownPosition.
+    const posSci = normalizePosition(
+      { $ref: '#/oneOf/1e0' },
+      new Set(),
+      root as import('./shared-safe-path.js').SchemaNode,
+    );
+    expect(posSci.kind).toBe('unknown');
+    // Malformed: #/oneOf/+1 → signed → UnknownPosition.
+    const posSigned = normalizePosition(
+      { $ref: '#/oneOf/+1' },
+      new Set(),
+      root as import('./shared-safe-path.js').SchemaNode,
+    );
+    expect(posSigned.kind).toBe('unknown');
+  });
+
+  it('`#/` does not alias to array root: fails on an array-typed root, resolves an empty-name member on an object root', async () => {
+    const { normalizePosition } = await import('./shared-safe-path.js');
+    const rootObj = {
+      properties: { '': { type: 'string' } },
+    } as unknown as import('./shared-safe-path.js').SchemaNode;
+    // #/ against an object root points to the '' property.
+    const pos = normalizePosition({ $ref: '#/' }, new Set(), rootObj);
+    // The empty-name property is not a schema object here (it's { type: 'string' }),
+    // so normalizePosition on it returns UnknownPosition — but not because
+    // of any alias to root.
+    expect(pos.kind).toBe('unknown');
+  });
+});

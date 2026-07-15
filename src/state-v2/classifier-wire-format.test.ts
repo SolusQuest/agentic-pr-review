@@ -175,3 +175,93 @@ describe('classifier wire-format exact-message coverage', () => {
     );
   });
 });
+
+describe('classifier wire-format additional invalid branches', () => {
+  it('bundle_path_unsafe (non-regular manifest entry) → x_invalid_field:/', () => {
+    const built = buildStateBundleV2(makeStateManifestV2Input(), LEDGER, METADATA);
+    const bytes = serializeStateManifestV2(built.manifest);
+    const res = classifyStateBundleV2({
+      manifestBytes: bytes,
+      ledgerBytes: LEDGER,
+      providerRunMetadataBytes: METADATA,
+      entryListing: [
+        { name: MANIFEST_FILENAME, isRegularFile: false },
+        { name: LEDGER_FILENAME, isRegularFile: true },
+        { name: PROVIDER_RUN_METADATA_FILENAME, isRegularFile: true },
+      ],
+    });
+    expectInvalidWith(res, 'bundle_path_unsafe', 'x_invalid_field:/');
+  });
+
+  it('bundle_listing_mismatch (duplicate manifest entry) → x_invalid_field:/', () => {
+    const built = buildStateBundleV2(makeStateManifestV2Input(), LEDGER, METADATA);
+    const bytes = serializeStateManifestV2(built.manifest);
+    const res = classifyStateBundleV2({
+      manifestBytes: bytes,
+      ledgerBytes: LEDGER,
+      providerRunMetadataBytes: METADATA,
+      entryListing: [
+        { name: MANIFEST_FILENAME, isRegularFile: true },
+        { name: MANIFEST_FILENAME, isRegularFile: true },
+        { name: LEDGER_FILENAME, isRegularFile: true },
+        { name: PROVIDER_RUN_METADATA_FILENAME, isRegularFile: true },
+      ],
+    });
+    expectInvalidWith(res, 'bundle_listing_mismatch', 'x_invalid_field:/');
+  });
+
+  it('bundle_listing_mismatch (ledger entry present but bytes missing) → x_invalid_field:/', () => {
+    const built = buildStateBundleV2(makeStateManifestV2Input(), LEDGER, METADATA);
+    const bytes = serializeStateManifestV2(built.manifest);
+    const res = classify(new TextDecoder().decode(bytes), {
+      ledgerBytes: undefined,
+      // listing keeps the ledger entry
+    });
+    // listing present, bytes absent -> bundle_listing_mismatch at root.
+    expectInvalidWith(res, 'bundle_listing_mismatch', 'x_invalid_field:/');
+  });
+
+  it('bundle_listing_mismatch (bytes present but no ledger listing entry) → x_invalid_field:/', () => {
+    const built = buildStateBundleV2(makeStateManifestV2Input(), LEDGER, METADATA);
+    const bytes = serializeStateManifestV2(built.manifest);
+    const res = classify(new TextDecoder().decode(bytes), {
+      entryListing: [
+        { name: MANIFEST_FILENAME, isRegularFile: true },
+        { name: PROVIDER_RUN_METADATA_FILENAME, isRegularFile: true },
+      ],
+    });
+    expectInvalidWith(res, 'bundle_listing_mismatch', 'x_invalid_field:/');
+  });
+
+  it('manifest_byte_limit_exceeded → x_invalid_field:/', async () => {
+    const { MANIFEST_MAX_BYTES } = await import('./constants.js');
+    const big = new Uint8Array(MANIFEST_MAX_BYTES + 1);
+    big.fill(0x7b); // '{' but overflowing anyway
+    const res = classify('', { manifestBytes: big });
+    expectInvalidWith(res, 'manifest_byte_limit_exceeded', 'x_invalid_field:/');
+  });
+
+  it('ledger_byte_limit_exceeded → x_invalid_field:/ledger', async () => {
+    const { LEDGER_MAX_BYTES } = await import('./constants.js');
+    const built = buildStateBundleV2(makeStateManifestV2Input(), LEDGER, METADATA);
+    const bytes = serializeStateManifestV2(built.manifest);
+    const bigLedger = new Uint8Array(LEDGER_MAX_BYTES + 1);
+    bigLedger.fill(0x30);
+    const res = classify(new TextDecoder().decode(bytes), { ledgerBytes: bigLedger });
+    expectInvalidWith(res, 'ledger_byte_limit_exceeded', 'x_invalid_field:/ledger');
+  });
+
+  it('provider_run_metadata_byte_limit_exceeded → x_invalid_field:/providerRunMetadata', async () => {
+    const { METADATA_MAX_BYTES } = await import('./constants.js');
+    const built = buildStateBundleV2(makeStateManifestV2Input(), LEDGER, METADATA);
+    const bytes = serializeStateManifestV2(built.manifest);
+    const big = new Uint8Array(METADATA_MAX_BYTES + 1);
+    big.fill(0x30);
+    const res = classify(new TextDecoder().decode(bytes), { providerRunMetadataBytes: big });
+    expectInvalidWith(
+      res,
+      'provider_run_metadata_byte_limit_exceeded',
+      'x_invalid_field:/providerRunMetadata',
+    );
+  });
+});

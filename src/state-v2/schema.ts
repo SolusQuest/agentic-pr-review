@@ -1,6 +1,23 @@
 import { Ajv, type ErrorObject } from 'ajv';
 import schema from '../../protocol/schemas/state-manifest.v2.json' with { type: 'json' };
-import type { DiagnosticCode } from './diagnostics.js';
+import type { CrossFieldSubCode, DiagnosticCode, SemanticSubCode } from './diagnostics.js';
+
+type AggregatorSubCode = CrossFieldSubCode | SemanticSubCode | AjvSubCode;
+
+type AjvSubCode =
+  | 'type_mismatch'
+  | 'const_mismatch'
+  | 'enum_mismatch'
+  | 'pattern_mismatch'
+  | 'format_mismatch'
+  | 'range_out_of_bounds'
+  | 'length_out_of_bounds'
+  | 'array_bounds'
+  | 'discriminator_mismatch'
+  | 'missing_required_property'
+  | 'unknown_field'
+  | 'variant_forbidden_field'
+  | 'unknown_version';
 import type { StateManifestV2 } from './manifest.js';
 import {
   normalizePosition,
@@ -84,7 +101,7 @@ export interface AggregatorCandidate {
   /** JSON-Pointer-shaped rendering used for stable ordering only. */
   readonly rawSafePath: string;
   /** Internal, never-emitted sub-code used for stable ordering only. */
-  readonly subCode: string;
+  readonly subCode: AggregatorSubCode;
   /** Wire code prefix. */
   readonly code: 'x_invalid_field';
   /** Already-sanitized ordered segments. */
@@ -211,7 +228,7 @@ function renderAjvCandidate(
   // it to the safe path as an additional segment.
   const params = (err.params ?? {}) as Record<string, unknown>;
   let finalSegment: string | undefined;
-  let subCode: string;
+  let subCode: AjvSubCode;
   let topDiagnostic: DiagnosticCode = 'manifest_shape_invalid';
 
   const keyword = err.keyword ?? 'invalid';
@@ -293,7 +310,7 @@ function resolveArrayItemIfPresent(pos: SchemaPosition): {
   return resolveArrayItem(pos);
 }
 
-function keywordToSubCode(keyword: string): string {
+function keywordToSubCode(keyword: string): AjvSubCode {
   switch (keyword) {
     case 'type':
       return 'type_mismatch';
@@ -344,7 +361,7 @@ function keywordToSubCode(keyword: string): string {
 export function crossFieldCandidates(manifest: StateManifestV2): AggregatorCandidate[] {
   const out: AggregatorCandidate[] = [];
   let index = 0;
-  const add = (subCode: string, safePath: string): void => {
+  const add = (subCode: CrossFieldSubCode, safePath: string): void => {
     const segments = safePath === '' ? [] : safePath.slice(1).split('/');
     out.push({
       stage: 7,
@@ -428,7 +445,7 @@ export function semanticIdentityCandidates(manifest: StateManifestV2): Aggregato
   const encoder = new TextEncoder();
   const control = /[\u0000-\u001f\u007f]/;
 
-  const add = (subCode: string, safePath: string): void => {
+  const add = (subCode: SemanticSubCode, safePath: string): void => {
     const segments = safePath === '' ? [] : safePath.slice(1).split('/');
     out.push({
       stage: 7,

@@ -67,6 +67,7 @@ export {
 export {
   StateManifestSerializationError,
   serializeStateManifestV2,
+  type StateManifestSerializationDiagnostic,
   type StateManifestSerializationReason,
 } from './serializer.js';
 
