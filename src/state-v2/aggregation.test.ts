@@ -405,13 +405,21 @@ describe('bounded aggregation unit — post-truncation-collision', () => {
       segments: segsB,
       diagnostic: 'manifest_shape_invalid' as const,
     };
+    const { renderWireEntry: rw } = await import('./shared-safe-path.js');
+    // Discriminating pre-check: BOTH candidates render to the SAME wire
+    // entry after per-path truncation. This isolates dedup from any
+    // budget-fallback observation.
+    const wireA = rw('x_invalid_field', segsA).wireEntry;
+    const wireB = rw('x_invalid_field', segsB).wireEntry;
+    expect(wireA).toBe(wireB);
     const res = _testOnlyFinalizeAggregation([cA, cB], 'manifest_shape_invalid');
     if (res.ok) return;
     const nonSentinel = res.message.split('; ').filter((e) => e !== '...[truncated]');
     expect(nonSentinel.length).toBe(1);
-    // No cap-forced truncation because dedup collapsed the pair to a
-    // single unique entry.
+    // Dedup collapsed the pair to a single unique entry; no aggregate
+    // sentinel because no distinct entry was dropped.
     expect(res.message.endsWith('...[truncated]')).toBe(false);
+    expect(nonSentinel[0]).toBe(wireA);
   });
 });
 
@@ -453,6 +461,55 @@ describe('bounded aggregation unit — first-entry-plus-sentinel branches', () =
     expect(res.message.endsWith('...[truncated]')).toBe(true);
     // Never split inside an entry.
     for (const e of nonSentinel) expect(e.endsWith('...[truncated]')).toBe(false);
+  });
+
+  it('first-entry-plus-sentinel does-NOT-fit: the fallback branch emits ONLY the first entry (no sentinel) when firstEntry + sentinel exceeds the char cap', async () => {
+    const { _testOnlyFinalizeAggregation } = await import('./schema.js');
+    const { renderWireEntry: rw } = await import('./shared-safe-path.js');
+    // Construct a per-path wire entry whose length lands close to but
+    // under MAX_DIAGNOSTIC_MESSAGE_CHARS (256), yet firstEntry +
+    // '; ...[truncated]' overflows. Use 15 leading 20-char segments +
+    // a 30-char final segment: rendered wire length = 253.
+    const leading = new Array(15).fill('longsegmentofsize20x');
+    const finalA = 'z'.repeat(30);
+    const segsA = [...leading, finalA];
+    // Second candidate must be byte-distinct and sort AFTER the first
+    // (so segsA remains the first entry). Its rawSafePath sorts by
+    // its DIFFERING later ancestor characters. Use a distinct final
+    // segment starting with a character > 'z'.
+    const finalB = '{'.repeat(30);
+    const segsB = [...leading, finalB];
+    const wireA = rw('x_invalid_field', segsA).wireEntry;
+    const wireB = rw('x_invalid_field', segsB).wireEntry;
+    // Precondition: firstEntry + '; ...[truncated]' > 256.
+    expect(wireA.length + '; ...[truncated]'.length).toBeGreaterThan(256);
+    const cA = {
+      stage: 7 as const,
+      index: 0,
+      rawSafePath: '/' + segsA.join('/'),
+      subCode: 'cross_transaction_ledger_binding' as const,
+      code: 'x_invalid_field' as const,
+      segments: segsA,
+      diagnostic: 'manifest_shape_invalid' as const,
+    };
+    const cB = {
+      stage: 7 as const,
+      index: 1,
+      rawSafePath: '/' + segsB.join('/'),
+      subCode: 'cross_bootstrap_ordinal_nonzero' as const,
+      code: 'x_invalid_field' as const,
+      segments: segsB,
+      diagnostic: 'manifest_shape_invalid' as const,
+    };
+    // Assert segsA sorts first.
+    expect(cA.rawSafePath < cB.rawSafePath).toBe(true);
+    const res = _testOnlyFinalizeAggregation([cA, cB], 'manifest_shape_invalid');
+    if (res.ok) return;
+    // Fallback: firstEntry alone, no sentinel.
+    expect(res.message).toBe(wireA);
+    expect(res.message.endsWith('...[truncated]')).toBe(false);
+    expect(res.message.includes('; ')).toBe(false);
+    expect(res.message.includes(wireB)).toBe(false);
   });
 
   it('single candidate: never emits a sentinel', async () => {

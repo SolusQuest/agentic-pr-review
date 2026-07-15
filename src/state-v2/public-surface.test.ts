@@ -95,7 +95,7 @@ describe('state-v2 public surface', () => {
     expect(excluded).toBe(true);
   });
 
-  it('StateManifestSerializationReason is a closed 4-member enum (adds canonical_json_input_rejected)', () => {
+  it('StateManifestSerializationReason is EXACTLY the four-member union (bidirectional structural equality)', () => {
     const reasons: readonly StateManifestSerializationReason[] = [
       'manifest_shape_invalid',
       'manifest_unknown_field',
@@ -103,6 +103,18 @@ describe('state-v2 public surface', () => {
       'canonical_json_input_rejected',
     ];
     expect(reasons.length).toBe(4);
+    type Expected =
+      | 'manifest_shape_invalid'
+      | 'manifest_unknown_field'
+      | 'manifest_unknown_version'
+      | 'canonical_json_input_rejected';
+    type Exact = [StateManifestSerializationReason] extends [Expected]
+      ? [Expected] extends [StateManifestSerializationReason]
+        ? true
+        : false
+      : false;
+    const exact: Exact = true;
+    expect(exact).toBe(true);
   });
 
   it('canonicalJsonBytes public overload accepts CanonicalJsonValue without a manual cast', () => {
@@ -120,19 +132,31 @@ describe('state-v2 public surface', () => {
     expect(c).toBe(true);
   });
 
-  it('StateManifestSerializationDiagnostic is a closed 3-member enum (subset of the invalid diagnostic union)', () => {
+  it('StateManifestSerializationDiagnostic is EXACTLY the three-member union (bidirectional structural equality)', () => {
     const diagnostics: readonly StateManifestSerializationDiagnostic[] = [
       'manifest_shape_invalid',
       'manifest_unknown_field',
       'manifest_unknown_version',
     ];
     expect(diagnostics.length).toBe(3);
-    // Compile-only: StateManifestSerializationDiagnostic is assignable to
-    // InvalidDiagnosticCode (never carries the canonical-only reason).
+    // Compile-only: assignable to InvalidDiagnosticCode.
     type Assignable = StateManifestSerializationDiagnostic extends InvalidDiagnosticCode
       ? true
       : false;
     const a: Assignable = true;
     expect(a).toBe(true);
+    // Compile-only: bidirectional structural equality with the intended
+    // three-member union. Removal, rename, or expansion breaks the build.
+    type Expected =
+      | 'manifest_shape_invalid'
+      | 'manifest_unknown_field'
+      | 'manifest_unknown_version';
+    type Exact = [StateManifestSerializationDiagnostic] extends [Expected]
+      ? [Expected] extends [StateManifestSerializationDiagnostic]
+        ? true
+        : false
+      : false;
+    const exact: Exact = true;
+    expect(exact).toBe(true);
   });
 });
