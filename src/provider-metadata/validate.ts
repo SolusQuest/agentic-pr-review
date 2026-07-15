@@ -33,9 +33,8 @@ import {
   type MetadataError,
   type MetadataErrorCode,
   type ProviderRunMetadataV1,
-  type ValidatedProviderRunMetadataV1,
 } from './types.js';
-import { utf8ByteLength } from './safe-path-helpers.js';
+import { finalizePath, utf8ByteLength } from './safe-path-helpers.js';
 
 export interface Stage8Result {
   metadata: ProviderRunMetadataV1;
@@ -58,36 +57,10 @@ export function validateStage8(m: ProviderRunMetadataV1): Stage8Result {
   return { metadata: m, errors };
 }
 
-// Re-export a compatibility public entry point that accepts a parsed JSON tree
-// as `unknown` and runs stages 6..8 for existing callers/tests. Internal usage
-// prefers `parseProviderRunMetadata(bytes)` from `parse.ts`.
-export function validateProviderRunMetadata(
-  raw: unknown,
-):
-  | { valid: true; metadata: ValidatedProviderRunMetadataV1 }
-  | { valid: false; errors: MetadataError[] } {
-  // Structural sanity: we cannot brand without running stage 7 (schema) here
-  // because the caller may hand us anything. This helper is kept for backward
-  // compatibility with tests written against the previous surface and delegates
-  // to the byte parser after canonicalizing.
-  //
-  // For a schema-shaped value we defer to `validateStage8` on best effort:
-  if (raw === null || typeof raw !== 'object') {
-    return {
-      valid: false,
-      errors: [{ code: 'invalid-metadata-schema', path: '' } as MetadataError],
-    };
-  }
-  const result = validateStage8(raw as ProviderRunMetadataV1);
-  if (result.errors.length > 0) {
-    return { valid: false, errors: result.errors };
-  }
-  return { valid: true, metadata: result.metadata as ValidatedProviderRunMetadataV1 };
-}
-
 // ---------------------------------------------------------------------------
 
 function pushIdentityByteCap(path: string, errors: MetadataError[]): void {
+  // Identity paths are always schema-known (/selectedProviderId, etc.).
   errors.push({ code: 'invalid-metadata-identity-syntax', path });
 }
 
@@ -167,30 +140,35 @@ function validateAttemptOrdering(
   const requestOrdinals = Array.from(perRequestNext.keys()).sort((x, y) => x - y);
   for (let i = 0; i < requestOrdinals.length; i += 1) {
     if (requestOrdinals[i] !== i) {
-      errors.push({
-        code: 'invalid-metadata-request-ordering',
-        path: '/normalizedUsage/attempts',
-      });
+      // Report the first attempt whose requestOrdinal starts a gap.
+      let offendingIdx = -1;
+      for (let j = 0; j < attempts.length; j += 1) {
+        if (attempts[j]!.requestOrdinal === requestOrdinals[i]) {
+          offendingIdx = j;
+          break;
+        }
+      }
+      const p =
+        offendingIdx >= 0
+          ? finalizePath(['normalizedUsage', 'attempts', String(offendingIdx)])
+          : finalizePath(['normalizedUsage', 'attempts']);
+      errors.push({ code: 'invalid-metadata-request-ordering', path: p });
       break;
     }
   }
   // Multiple succeeded per request.
-  const succeededPerRequest = new Map<number, number>();
-  for (const a of attempts) {
-    if (a.outcome === 'succeeded') {
-      succeededPerRequest.set(
-        a.requestOrdinal,
-        (succeededPerRequest.get(a.requestOrdinal) ?? 0) + 1,
-      );
-    }
-  }
-  for (const [, count] of succeededPerRequest) {
-    if (count > 1) {
+  const succeededSeen = new Map<number, number>(); // requestOrdinal -> count
+  for (let i = 0; i < attempts.length; i += 1) {
+    const a = attempts[i]!;
+    if (a.outcome !== 'succeeded') continue;
+    const prev = succeededSeen.get(a.requestOrdinal) ?? 0;
+    succeededSeen.set(a.requestOrdinal, prev + 1);
+    if (prev >= 1) {
+      // This attempt is the (n+1)th successful attempt in its request.
       errors.push({
         code: 'invalid-metadata-multiple-succeeded-attempts',
-        path: '/normalizedUsage/attempts',
+        path: finalizePath(['normalizedUsage', 'attempts', String(i)]),
       });
-      break;
     }
   }
 }
@@ -366,20 +344,28 @@ function validateStatelessProofPlacement(m: ProviderRunMetadataV1, errors: Metad
 
 function validateErrorCodeAllowlistOrder(m: ProviderRunMetadataV1, errors: MetadataError[]): void {
   const allowedIndex = new Map(ALLOWED_ERROR_CODES.map((c, i) => [c, i]));
-  const check = (codes: ErrorCode[], path: string) => {
+  const check = (codes: ErrorCode[], base: readonly string[]) => {
     for (let i = 1; i < codes.length; i += 1) {
       const prev = allowedIndex.get(codes[i - 1]!) ?? -1;
       const cur = allowedIndex.get(codes[i]!) ?? -1;
       if (cur <= prev) {
-        errors.push({ code: 'invalid-metadata-error-code-order', path });
+        errors.push({
+          code: 'invalid-metadata-error-code-order',
+          path: finalizePath([...base, String(i)]),
+        });
         return;
       }
     }
   };
-  check(m.errorCodes, '/errorCodes');
+  check(m.errorCodes, ['errorCodes']);
   const attempts = m.normalizedUsage.attempts;
   for (let i = 0; i < attempts.length; i += 1) {
-    check(attempts[i]!.attemptErrorCodes, `/normalizedUsage/attempts/${i}/attemptErrorCodes`);
+    check(attempts[i]!.attemptErrorCodes, [
+      'normalizedUsage',
+      'attempts',
+      String(i),
+      'attemptErrorCodes',
+    ]);
   }
 }
 
@@ -394,19 +380,78 @@ function validateAggregate(m: ProviderRunMetadataV1, errors: MetadataError[]): v
     return;
   }
   const expected = derived.aggregate;
-  const pairs: Array<[string, unknown, unknown]> = [
-    ['/normalizedUsage/requests', m.normalizedUsage.requests, expected.normalizedUsage.requests],
-    ['/normalizedUsage/aggregate', m.normalizedUsage.aggregate, expected.normalizedUsage.aggregate],
-    ['/capability/aggregate', m.capability.aggregate, expected.capability.aggregate],
-    ['/cacheStatus', m.cacheStatus, expected.cacheStatus],
-    ['/retryObservations', m.retryObservations, expected.retryObservations],
-    ['/errorCodes', m.errorCodes, expected.errorCodes],
-    ['/telemetryCompleteness', m.telemetryCompleteness, expected.telemetryCompleteness],
-  ];
-  for (const [path, stored, exp] of pairs) {
-    if (!deepEqual(stored, exp)) {
-      errors.push({ code: 'invalid-metadata-aggregate-mismatch' as MetadataErrorCode, path });
+  // Walk the derived aggregate output and emit one mismatch per leaf that
+  // disagrees. Leaves are the smallest comparable units (numbers, strings,
+  // enums). Objects and arrays are descended into so the reported path targets
+  // the exact offending field instead of the enclosing block.
+  compareLeaves(
+    m.normalizedUsage.requests,
+    expected.normalizedUsage.requests,
+    ['normalizedUsage', 'requests'],
+    errors,
+  );
+  compareLeaves(
+    m.normalizedUsage.aggregate,
+    expected.normalizedUsage.aggregate,
+    ['normalizedUsage', 'aggregate'],
+    errors,
+  );
+  compareLeaves(
+    m.capability.aggregate,
+    expected.capability.aggregate,
+    ['capability', 'aggregate'],
+    errors,
+  );
+  compareLeaves(m.cacheStatus, expected.cacheStatus, ['cacheStatus'], errors);
+  compareLeaves(m.retryObservations, expected.retryObservations, ['retryObservations'], errors);
+  compareLeaves(m.errorCodes, expected.errorCodes, ['errorCodes'], errors);
+  compareLeaves(
+    m.telemetryCompleteness,
+    expected.telemetryCompleteness,
+    ['telemetryCompleteness'],
+    errors,
+  );
+}
+
+function compareLeaves(
+  stored: unknown,
+  expected: unknown,
+  path: readonly string[],
+  errors: MetadataError[],
+): void {
+  if (
+    stored === null ||
+    expected === null ||
+    typeof stored !== 'object' ||
+    typeof expected !== 'object'
+  ) {
+    if (!deepEqual(stored, expected)) {
+      errors.push({
+        code: 'invalid-metadata-aggregate-mismatch' as MetadataErrorCode,
+        path: finalizePath(path),
+      });
     }
+    return;
+  }
+  if (Array.isArray(stored) && Array.isArray(expected)) {
+    const maxLen = Math.max(stored.length, expected.length);
+    if (stored.length !== expected.length) {
+      errors.push({
+        code: 'invalid-metadata-aggregate-mismatch' as MetadataErrorCode,
+        path: finalizePath(path),
+      });
+      return;
+    }
+    for (let i = 0; i < maxLen; i += 1) {
+      compareLeaves(stored[i], expected[i], [...path, String(i)], errors);
+    }
+    return;
+  }
+  const so = stored as Record<string, unknown>;
+  const eo = expected as Record<string, unknown>;
+  const keys = Object.keys(eo);
+  for (const k of keys) {
+    compareLeaves(so[k], eo[k], [...path, k], errors);
   }
 }
 

@@ -35,3 +35,12 @@ describe('provider-metadata public surface', () => {
     expect(typeof identityAgrees).toBe('function');
   });
 });
+
+describe('provider-metadata public API restriction', () => {
+  it('does not export validateProviderRunMetadata (only parseProviderRunMetadata is public)', async () => {
+    const mod = await import('./index.js');
+    const exported = Object.keys(mod);
+    expect(exported).not.toContain('validateProviderRunMetadata');
+    expect(exported).toContain('parseProviderRunMetadata');
+  });
+});

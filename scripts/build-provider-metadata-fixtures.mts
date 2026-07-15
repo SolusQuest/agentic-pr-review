@@ -1,4 +1,4 @@
-import { deriveAggregate } from '../src/provider-metadata/aggregate.js';
+import { deriveAggregateInternal } from '../src/provider-metadata/aggregate.js';
 import type {
   AttemptObservation,
   CapabilityMode,
@@ -6,7 +6,7 @@ import type {
   StatelessProof,
 } from '../src/provider-metadata/types.js';
 import { computeMetadataSemanticSha256 } from '../src/provider-metadata/semantic-hash.js';
-import { validateProviderRunMetadata } from '../src/provider-metadata/validate.js';
+import { parseProviderRunMetadata } from '../src/provider-metadata/parse.js';
 import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,11 +42,17 @@ function h(byte: number): string {
 function build(input: BaseInput): ProviderRunMetadataV1 {
   const capabilityMode = input.capabilityMode ?? 'standard';
   const statelessProof = input.statelessProof ?? null;
-  const derived = deriveAggregate({
+  const result = deriveAggregateInternal({
     attempts: input.attempts,
     capabilityMode,
     statelessProof,
   });
+  if (!result.valid) {
+    throw new Error(
+      `deriveAggregate failed while building fixture: ${JSON.stringify(result.errors)}`,
+    );
+  }
+  const derived = result.aggregate;
   return {
     schemaVersion: 1,
     selectedProviderId: input.selectedProviderId ?? 'anthropic',
@@ -316,7 +322,8 @@ for (const [name, m] of goldenSubjects) {
   // Golden vectors must be hashed only after full schema + semantic validation.
   // Otherwise a tightened rule could silently permit an invalid shape to seed the
   // byte oracle that #48/#52/#55 rely on.
-  const result = validateProviderRunMetadata(m);
+  const bytes = new TextEncoder().encode(JSON.stringify(m));
+  const result = parseProviderRunMetadata(bytes);
   if (!result.valid) {
     throw new Error(`golden ${name} failed validation: ${JSON.stringify(result.errors)}`);
   }

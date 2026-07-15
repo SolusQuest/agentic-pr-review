@@ -17,7 +17,7 @@
  * passed. Consumers should not call it directly on unvalidated JSON.
  */
 
-import type { MetadataError } from './types.js';
+import type { MetadataError, ValidatedAttempt } from './types.js';
 import type {
   AttemptObservation,
   CacheStatusEnum,
@@ -40,20 +40,22 @@ import { ALLOWED_ERROR_CODES } from './types.js';
 
 export type DeriveAggregateInput =
   | {
-      attempts: readonly AttemptObservation[];
+      attempts: readonly ValidatedAttempt[];
       capabilityMode: 'standard';
       statelessProof: null;
     }
   | {
-      attempts: readonly AttemptObservation[];
+      attempts: readonly ValidatedAttempt[];
       capabilityMode: 'stateless';
       statelessProof: StatelessProof;
     };
 
-// Backwards-friendly alias used by internal callers that still hold a plain
-// object shape (semantic validator constructs one from a validated metadata
-// value). Public callers must use `DeriveAggregateInput`.
-export interface DeriveAggregateInputLoose {
+/**
+ * Internal loose shape used by the semantic validator, which owns the
+ * capability.mode / statelessProof cross-check separately. Not exported from
+ * the module.
+ */
+interface DeriveAggregateInputLoose {
   attempts: readonly AttemptObservation[];
   capabilityMode: CapabilityMode;
   statelessProof: StatelessProof | null;

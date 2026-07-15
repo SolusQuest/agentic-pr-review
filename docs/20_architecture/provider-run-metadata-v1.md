@@ -29,7 +29,7 @@ Excluded from the hash (bound by the outer duplicate key at ledger/manifest laye
 - `producingRunId`, `runAttempt` (provenance)
 - `interactionId`, `consumedInputSha256`, `resultSha256`, `traceSha256`, `predecessorLedgerSha256`, `candidateLedgerSha256` (transaction-binding)
 
-The golden byte oracle for this hash lives in `protocol/fixtures/provider-run-metadata/v1/golden-hash-*.json`. If #50 later replaces the internal RFC 8785 JCS producer with a shared helper, the bytes and hashes must not change; the goldens gate that migration.
+The golden byte oracle for this hash lives in `protocol/fixtures/provider-run-metadata/v1/golden-hash-*.json`. Canonical JSON serialization is provided by `src/canonical-json/` (owned by `#48`, merged as PR `#59`). `#51` does not vendor a second RFC 8785 implementation; an import-boundary test enforces that policy.
 
 ## Two-stage derivation
 
@@ -54,7 +54,7 @@ Validator failure codes (`invalid-metadata-*`) live in a separate namespace and 
 
 ## Host authority
 
-`identityAgrees(metadata, expectedHostIdentity)` compares metadata identity fields against a host-supplied expected identity, never against metadata itself. The literal `latest` model id and characters outside the allowed ASCII class are rejected. Identity values are bounded, ASCII, and case-sensitive (`[A-Za-z0-9._:/-]`); case is never normalized. Host-authoritative identity agreement, not string normalization, is the protection against an incorrect provider, model, or adapter identity.
+`identityAgrees(metadata, expectedHostIdentity)` compares metadata identity fields against a host-supplied expected identity, never against metadata itself. Identity strings are non-empty, case-sensitive, non-normalized Unicode values bounded by schema `minLength: 1` / `maxLength: 256` (draft-07 string-length semantics) and by a semantic UTF-8 byte cap of 256 bytes. Identity values that contain any control character in `U+0000..U+001F` or `U+007F` are rejected. NUL and unpaired UTF-16 surrogates are rejected earlier by the shared stage-6 string-safety traversal. The literal `latest` is rejected on `resolvedModelId` only; `selectedProviderId` / `observedProviderId` may legitimately equal `latest`. Host-authoritative identity agreement, not string normalization, is the protection against an incorrect provider, model, or adapter identity.
 
 ## Downstream consumers
 
@@ -70,4 +70,4 @@ Provider `errorCodes` and per-attempt `attemptErrorCodes` are sorted by the posi
 
 `provider_timeout`, `provider_4xx`, `provider_5xx`, `provider_rate_limited`, `provider_cancelled`, `capability_unsupported`, `cache_marker_mismatch`, `stateless_proof_missing`.
 
-This ordering is what the reference aggregator emits, what the golden hashes fix, and what a C# or other cross-language implementation of `#52` must reproduce. Ordinal ASCII sort would not match this order (e.g. `capability_unsupported` sorts before `provider_*` alphabetically) and must not be used.
+This ordering is what the reference aggregator emits, what the golden hashes fix, and what a C# or other cross-language implementation of `#52` must reproduce. Ordinal byte / lexicographic sort would not match this order (e.g. `capability_unsupported` sorts before `provider_*` alphabetically) and must not be used; deviation is `invalid-metadata-error-code-order` at stage 8.

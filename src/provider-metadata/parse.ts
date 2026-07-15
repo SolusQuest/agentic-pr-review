@@ -15,16 +15,26 @@
  *                              stateless proof / error-code order /
  *                              aggregate-mismatch / model-alias / etc.
  *
+ * Stages 4 + 5 run in a single strict JSON parser pass that rejects duplicate
+ * property names on descent, so the JSON.parse duplicate-collapsing behavior
+ * is never observed. Only after stage 5 passes is `JSON.parse` invoked (the
+ * grammar has already been proven by the strict parser).
+ *
  * The first stage that emits at least one error terminates the pipeline. All
- * errors returned come from that single stage. `MetadataError.path` is produced
- * by the shared safe-diagnostic-path helpers imported from `src/state-v2/`;
- * caller-controlled property names never appear verbatim.
+ * errors returned come from that single stage. Every `MetadataError.path` is
+ * post-processed by `finalizePath` so caller-controlled property names never
+ * leak into diagnostics and every path is bounded by the workstream-local
+ * `MAX_METADATA_PATH_CHARS` / `MAX_METADATA_PATH_UTF8_BYTES` caps with the
+ * final-segment-preserving truncation from the shared safe-diagnostic-path
+ * subsection.
  */
 
 import schema from '../../protocol/schemas/provider-run-metadata.v1.json' with { type: 'json' };
 import { scanStringSafety, type SchemaNode } from '../state-v2/shared-safe-path.js';
-import { validateStage8 } from './validate.js';
+import { finalizeErrors } from './error-list.js';
+import { finalizePath } from './safe-path-helpers.js';
 import { runSchemaStage } from './schema-stage.js';
+import { validateStage8 } from './validate.js';
 import {
   METADATA_MAX_BYTES,
   type MetadataError,
@@ -32,10 +42,8 @@ import {
   type ValidatedProviderRunMetadataV1,
   type ValidationResult,
 } from './types.js';
-import { finalizeErrors } from './error-list.js';
 
 const rootSchema = schema as unknown as SchemaNode;
-
 const BOM = new Uint8Array([0xef, 0xbb, 0xbf]);
 
 /**
@@ -47,18 +55,15 @@ const BOM = new Uint8Array([0xef, 0xbb, 0xbf]);
 export function parseProviderRunMetadata(
   bytes: Uint8Array,
 ): ValidationResult<ValidatedProviderRunMetadataV1> {
-  // Stage 1 -- raw-transport bounds.
+  // Stage 1 -- raw byte bounds.
   if (bytes.byteLength > METADATA_MAX_BYTES) {
     return fail([{ code: 'invalid-metadata-bounds', path: '' }]);
   }
-
-  // Stage 2 -- BOM.
+  // Stage 2 -- UTF-8 BOM.
   if (bytes.byteLength >= 3 && bytes[0] === BOM[0] && bytes[1] === BOM[1] && bytes[2] === BOM[2]) {
     return fail([{ code: 'invalid-metadata-bom', path: '' }]);
   }
-
-  // Stage 3 -- UTF-8 decode. Node's TextDecoder with fatal: true throws on any
-  // invalid UTF-8 sequence, including overlong forms and lone surrogates.
+  // Stage 3 -- UTF-8 decode.
   let text: string;
   try {
     text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -66,38 +71,38 @@ export function parseProviderRunMetadata(
     return fail([{ code: 'invalid-metadata-utf8', path: '' }]);
   }
 
-  // Stage 4 -- JSON syntax + Stage 5 -- duplicate property. Both are performed
-  // by a streaming JSON checker so duplicate detection precedes ordinary
-  // `JSON.parse` (which would otherwise silently overwrite the earlier value).
-  const jsonResult = parseJsonStrict(text);
-  if (!jsonResult.ok) {
-    return fail([jsonResult.error]);
+  // Stages 4 + 5 -- strict JSON parse + duplicate-property detection. If the
+  // strict parser reports a grammar failure, that is stage 4; if it reports a
+  // duplicate name, that is stage 5 and takes precedence over the (later)
+  // JSON.parse call, which is only used to construct the value once stages 4
+  // and 5 have both passed.
+  const strict = strictJsonParse(text);
+  if (!strict.ok) {
+    return fail([strict.error]);
   }
-  const parsed = jsonResult.value;
+  const parsed = strict.value;
 
-  // Stage 6 -- string-safety scan (NUL / unpaired UTF-16 surrogate) using the
-  // shared traversal and Schema-position resolver.
+  // Stage 6 -- string-safety (NUL / lone UTF-16 surrogate) via shared traversal.
   const safety = scanStringSafety(parsed, rootSchema);
   if (safety !== undefined) {
-    return fail([{ code: 'invalid-metadata-unicode', path: safeSegmentPath(safety.segments) }]);
+    return fail([{ code: 'invalid-metadata-unicode', path: finalizePath(safety.segments) }]);
   }
 
-  // Stage 7 -- JSON Schema.
+  // Stage 7 -- schema.
   const schemaErrors = runSchemaStage(parsed, rootSchema);
   if (schemaErrors.length > 0) {
     return fail(schemaErrors);
   }
 
   // Stage 8 -- semantic invariants.
-  const semanticResult = validateStage8(parsed as ProviderRunMetadataV1);
-  if (semanticResult.errors.length > 0) {
-    return fail(semanticResult.errors);
+  const semantic = validateStage8(parsed as ProviderRunMetadataV1);
+  if (semantic.errors.length > 0) {
+    return fail(semantic.errors);
   }
 
-  // Success: apply the brand once.
   return {
     valid: true,
-    metadata: semanticResult.metadata as ValidatedProviderRunMetadataV1,
+    metadata: semantic.metadata as ValidatedProviderRunMetadataV1,
   };
 }
 
@@ -105,185 +110,256 @@ function fail(errors: MetadataError[]): ValidationResult<ValidatedProviderRunMet
   return { valid: false, errors: finalizeErrors(errors) };
 }
 
-function safeSegmentPath(segments: readonly string[]): string {
-  if (segments.length === 0) return '';
-  return '/' + segments.join('/');
-}
-
 // ---------------------------------------------------------------------------
-// Stage 4 + Stage 5 -- JSON parser that rejects duplicate properties before
-// they are collapsed by JSON.parse.
+// Strict JSON parser -- stage 4 + stage 5.
 // ---------------------------------------------------------------------------
 
-interface JsonOk {
+interface StrictOk {
   ok: true;
   value: unknown;
 }
-interface JsonErr {
+interface StrictErr {
   ok: false;
   error: MetadataError;
 }
-type JsonResult = JsonOk | JsonErr;
+type StrictResult = StrictOk | StrictErr;
 
-function parseJsonStrict(text: string): JsonResult {
-  // First run JSON.parse for shape; a syntactic failure trumps duplicate.
+/**
+ * Grammar-preserving JSON tokenizer + validator. Emits at most one error:
+ * `invalid-metadata-json` for any grammar failure or `invalid-metadata-duplicate-json-property`
+ * for the first duplicate object name encountered on descent. The value is
+ * reconstructed via `JSON.parse` only after both stages pass; the reconstruction
+ * cannot introduce any error not already visible.
+ *
+ * Path reporting for duplicates uses safe segments only. Object keys that are
+ * NOT schema-known at that depth are replaced by the shared sanitizer marker;
+ * caller-controlled key text never appears verbatim.
+ */
+function strictJsonParse(text: string): StrictResult {
+  const state: State = {
+    text,
+    pos: 0,
+  };
+  skipWhitespace(state);
+  const stack: string[][] = [];
+  const path: string[] = [];
+  const dupResult = parseValue(state, stack, path);
+  if (dupResult !== null) return { ok: false, error: dupResult };
+  skipWhitespace(state);
+  if (state.pos !== text.length) {
+    return { ok: false, error: { code: 'invalid-metadata-json', path: '' } };
+  }
   try {
-    JSON.parse(text);
+    return { ok: true, value: JSON.parse(text) };
   } catch {
     return { ok: false, error: { code: 'invalid-metadata-json', path: '' } };
   }
-  // Then scan for duplicate keys and return the parsed value alongside.
-  const dup = findDuplicateKey(text);
-  if (dup !== undefined) {
-    return {
-      ok: false,
-      error: {
-        code: 'invalid-metadata-duplicate-json-property',
-        path: dup,
-      },
-    };
-  }
-  return { ok: true, value: JSON.parse(text) };
 }
 
-/**
- * Lightweight streaming key scanner. Walks the JSON text character-by-character
- * tracking object/array stack; each `"key":` inside an object is checked
- * against the sibling set at the same object depth. On the first duplicate
- * this returns the safe path to the parent (the resolver name of the offending
- * key is intentionally NOT included; only the parent scope is reported so
- * caller-controlled keys never leak).
- */
-function findDuplicateKey(text: string): string | undefined {
-  interface Frame {
-    kind: 'object' | 'array';
-    keys: Set<string>;
-    parentPath: string;
-    parentKey: string; // last seen key from parent scope for array indexing
-    arrayIndex: number;
-  }
-  const stack: Frame[] = [];
-  let i = 0;
-  const pushObject = (parentPath: string) => {
-    stack.push({
-      kind: 'object',
-      keys: new Set<string>(),
-      parentPath,
-      parentKey: '',
-      arrayIndex: 0,
-    });
-  };
-  const pushArray = (parentPath: string) => {
-    stack.push({
-      kind: 'array',
-      keys: new Set<string>(),
-      parentPath,
-      parentKey: '',
-      arrayIndex: 0,
-    });
-  };
-  while (i < text.length) {
-    const c = text.charCodeAt(i);
-    // whitespace
+interface State {
+  readonly text: string;
+  pos: number;
+}
+
+function skipWhitespace(s: State): void {
+  const t = s.text;
+  while (s.pos < t.length) {
+    const c = t.charCodeAt(s.pos);
     if (c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d) {
-      i += 1;
-      continue;
+      s.pos += 1;
+    } else {
+      break;
     }
-    if (c === 0x7b /* { */) {
-      pushObject(currentPath(stack));
-      i += 1;
-      continue;
-    }
-    if (c === 0x7d /* } */) {
-      stack.pop();
-      i += 1;
-      continue;
-    }
-    if (c === 0x5b /* [ */) {
-      pushArray(currentPath(stack));
-      i += 1;
-      continue;
-    }
-    if (c === 0x5d /* ] */) {
-      stack.pop();
-      i += 1;
-      continue;
-    }
-    if (c === 0x22 /* " */) {
-      const stringEnd = scanStringEnd(text, i);
-      const raw = text.slice(i + 1, stringEnd);
-      const key = decodeJsonString(raw);
-      i = stringEnd + 1;
-      // After skipping whitespace, if next non-ws is `:`, this string was a key.
-      let j = i;
-      while (
-        j < text.length &&
-        (text.charCodeAt(j) === 0x20 ||
-          text.charCodeAt(j) === 0x09 ||
-          text.charCodeAt(j) === 0x0a ||
-          text.charCodeAt(j) === 0x0d)
-      ) {
-        j += 1;
-      }
-      if (j < text.length && text.charCodeAt(j) === 0x3a /* : */) {
-        // It was a key.
-        const top = stack[stack.length - 1];
-        if (top && top.kind === 'object') {
-          if (top.keys.has(key)) {
-            // Duplicate! Report the parent-object safe path.
-            return top.parentPath;
-          }
-          top.keys.add(key);
-        }
-        i = j + 1;
-      } else {
-        // Value string.
-      }
-      continue;
-    }
-    if (c === 0x2c /* , */) {
-      // Comma at object depth: reset currentKey. At array depth: advance index.
-      const top = stack[stack.length - 1];
-      if (top && top.kind === 'array') top.arrayIndex += 1;
-      i += 1;
-      continue;
-    }
-    // any other char -- number / literal / value body
-    i += 1;
   }
-  return undefined;
 }
 
-function scanStringEnd(text: string, start: number): number {
-  let i = start + 1;
-  while (i < text.length) {
-    const c = text.charCodeAt(i);
-    if (c === 0x5c /* \ */) {
-      i += 2;
-      continue;
-    }
-    if (c === 0x22 /* " */) return i;
-    i += 1;
-  }
-  return text.length;
+const JSON_ERR: MetadataError = { code: 'invalid-metadata-json', path: '' };
+
+/**
+ * Parses one JSON value at the current position. Returns `null` on success or
+ * the first `MetadataError` encountered (grammar or duplicate).
+ */
+function parseValue(s: State, stack: string[][], path: string[]): MetadataError | null {
+  skipWhitespace(s);
+  if (s.pos >= s.text.length) return JSON_ERR;
+  const c = s.text.charCodeAt(s.pos);
+  if (c === 0x7b /* { */) return parseObject(s, stack, path);
+  if (c === 0x5b /* [ */) return parseArray(s, stack, path);
+  if (c === 0x22 /* " */) return parseString(s);
+  if (c === 0x74 /* t */ || c === 0x66 /* f */) return parseLiteral(s);
+  if (c === 0x6e /* n */) return parseLiteral(s);
+  if (c === 0x2d /* - */ || (c >= 0x30 && c <= 0x39)) return parseNumber(s);
+  return JSON_ERR;
 }
 
-function decodeJsonString(raw: string): string {
-  // Fast path: no backslashes.
-  if (raw.indexOf('\\') === -1) return raw;
-  try {
-    return JSON.parse('"' + raw + '"');
-  } catch {
-    return raw;
+function parseObject(s: State, stack: string[][], path: string[]): MetadataError | null {
+  s.pos += 1; // '{'
+  const names = new Set<string>();
+  const currentPath: string[] = path.slice();
+  skipWhitespace(s);
+  if (s.pos < s.text.length && s.text.charCodeAt(s.pos) === 0x7d) {
+    s.pos += 1;
+    return null;
   }
+  while (s.pos < s.text.length) {
+    skipWhitespace(s);
+    // Key.
+    if (s.text.charCodeAt(s.pos) !== 0x22) return JSON_ERR;
+    const keyStart = s.pos;
+    const keyErr = parseString(s);
+    if (keyErr) return keyErr;
+    const rawKey = s.text.slice(keyStart, s.pos);
+    let key: string;
+    try {
+      key = JSON.parse(rawKey);
+    } catch {
+      return JSON_ERR;
+    }
+    if (typeof key !== 'string') return JSON_ERR;
+    if (names.has(key)) {
+      // Stage 5 duplicate. Report the parent-object safe path.
+      return {
+        code: 'invalid-metadata-duplicate-json-property',
+        path: finalizePath(currentPath),
+      };
+    }
+    names.add(key);
+    // ':'
+    skipWhitespace(s);
+    if (s.pos >= s.text.length || s.text.charCodeAt(s.pos) !== 0x3a) return JSON_ERR;
+    s.pos += 1;
+    // Value; descend with a schema-agnostic safe path (always <untrusted-property>).
+    // The correct schema-known/untrusted decision requires the shared resolver,
+    // but the duplicate path is defined only for the parent scope, so this
+    // descent segment is only used if a nested duplicate is found within the
+    // value itself.
+    stack.push([...currentPath, sanitizeParentSegment(key)]);
+    const childErr = parseValue(s, stack, stack[stack.length - 1]!);
+    stack.pop();
+    if (childErr) return childErr;
+    skipWhitespace(s);
+    if (s.pos >= s.text.length) return JSON_ERR;
+    const next = s.text.charCodeAt(s.pos);
+    if (next === 0x2c) {
+      s.pos += 1;
+      continue;
+    }
+    if (next === 0x7d) {
+      s.pos += 1;
+      return null;
+    }
+    return JSON_ERR;
+  }
+  return JSON_ERR;
+}
+
+function parseArray(s: State, stack: string[][], path: string[]): MetadataError | null {
+  s.pos += 1; // '['
+  skipWhitespace(s);
+  if (s.pos < s.text.length && s.text.charCodeAt(s.pos) === 0x5d) {
+    s.pos += 1;
+    return null;
+  }
+  let idx = 0;
+  while (s.pos < s.text.length) {
+    const nested = [...path, String(idx)];
+    stack.push(nested);
+    const err = parseValue(s, stack, nested);
+    stack.pop();
+    if (err) return err;
+    skipWhitespace(s);
+    if (s.pos >= s.text.length) return JSON_ERR;
+    const next = s.text.charCodeAt(s.pos);
+    if (next === 0x2c) {
+      s.pos += 1;
+      idx += 1;
+      continue;
+    }
+    if (next === 0x5d) {
+      s.pos += 1;
+      return null;
+    }
+    return JSON_ERR;
+  }
+  return JSON_ERR;
+}
+
+function parseString(s: State): MetadataError | null {
+  if (s.text.charCodeAt(s.pos) !== 0x22) return JSON_ERR;
+  s.pos += 1;
+  while (s.pos < s.text.length) {
+    const c = s.text.charCodeAt(s.pos);
+    if (c === 0x5c) {
+      s.pos += 2;
+      continue;
+    }
+    if (c === 0x22) {
+      s.pos += 1;
+      return null;
+    }
+    if (c < 0x20) return JSON_ERR;
+    s.pos += 1;
+  }
+  return JSON_ERR;
+}
+
+function parseLiteral(s: State): MetadataError | null {
+  const rest = s.text.slice(s.pos);
+  if (rest.startsWith('true')) {
+    s.pos += 4;
+    return null;
+  }
+  if (rest.startsWith('false')) {
+    s.pos += 5;
+    return null;
+  }
+  if (rest.startsWith('null')) {
+    s.pos += 4;
+    return null;
+  }
+  return JSON_ERR;
+}
+
+function parseNumber(s: State): MetadataError | null {
+  const start = s.pos;
+  let i = start;
+  const t = s.text;
+  if (t.charCodeAt(i) === 0x2d) i += 1;
+  // int part
+  if (i >= t.length) return JSON_ERR;
+  const c = t.charCodeAt(i);
+  if (c === 0x30) {
+    i += 1;
+  } else if (c >= 0x31 && c <= 0x39) {
+    i += 1;
+    while (i < t.length && t.charCodeAt(i) >= 0x30 && t.charCodeAt(i) <= 0x39) i += 1;
+  } else {
+    return JSON_ERR;
+  }
+  // frac
+  if (i < t.length && t.charCodeAt(i) === 0x2e) {
+    i += 1;
+    if (i >= t.length || !(t.charCodeAt(i) >= 0x30 && t.charCodeAt(i) <= 0x39)) return JSON_ERR;
+    while (i < t.length && t.charCodeAt(i) >= 0x30 && t.charCodeAt(i) <= 0x39) i += 1;
+  }
+  // exp
+  if (i < t.length && (t.charCodeAt(i) === 0x65 || t.charCodeAt(i) === 0x45)) {
+    i += 1;
+    if (i < t.length && (t.charCodeAt(i) === 0x2b || t.charCodeAt(i) === 0x2d)) i += 1;
+    if (i >= t.length || !(t.charCodeAt(i) >= 0x30 && t.charCodeAt(i) <= 0x39)) return JSON_ERR;
+    while (i < t.length && t.charCodeAt(i) >= 0x30 && t.charCodeAt(i) <= 0x39) i += 1;
+  }
+  if (i === start) return JSON_ERR;
+  s.pos = i;
+  return null;
 }
 
 /**
- * The current path is intentionally "" — reporting caller-controlled parent
- * keys verbatim would violate the safe-diagnostic-path contract. A future
- * enhancement can attach a resolver-derived breadcrumb per the shared
- * subsection, but the sentinel path is safe by construction.
+ * Every key encountered by this stage-5 tokenizer is untrusted at the time of
+ * inspection (the schema stage has not yet run), so a caller-controlled name
+ * MUST NOT appear verbatim in a duplicate-detection safe path. Every parent
+ * segment is replaced with the shared `<untrusted-property>` marker.
  */
-function currentPath(stack: ReadonlyArray<{ kind: 'object' | 'array' }>): string {
-  return stack.length === 0 ? '' : '';
+function sanitizeParentSegment(_key: string): string {
+  return '<untrusted-property>';
 }

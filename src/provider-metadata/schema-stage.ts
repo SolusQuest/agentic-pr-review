@@ -22,7 +22,7 @@
  */
 
 import { Ajv, type ErrorObject } from 'ajv';
-import { containsOtherControlChar, rfc6901Escape } from './safe-path-helpers.js';
+import { containsOtherControlChar, finalizePath, rfc6901Escape } from './safe-path-helpers.js';
 import type { MetadataError, MetadataErrorCode } from './types.js';
 import type { SchemaNode } from '../state-v2/shared-safe-path.js';
 
@@ -58,27 +58,43 @@ export function runSchemaStage(parsed: unknown, schema: SchemaNode): MetadataErr
 function mapAjvError(err: ErrorObject): MetadataError {
   const keyword = err.keyword;
   const location = err.instancePath ?? '';
+  const baseSegments = pathToSegments(location);
 
   // 1. additionalProperties
   if (keyword === 'additionalProperties') {
     const key = (err.params as { additionalProperty?: string }).additionalProperty ?? '';
     const marker = additionalPropertyMarker(key);
-    const suffix = location === '' ? '' : location;
-    return { code: 'invalid-metadata-additional-property', path: `${suffix}/${marker}` };
+    const segments = [...baseSegments, marker];
+    return { code: 'invalid-metadata-additional-property', path: finalizePath(segments) };
   }
 
   // 2. enum (anywhere)
   if (keyword === 'enum') {
-    return { code: 'invalid-metadata-unknown-enum', path: location };
+    return { code: 'invalid-metadata-unknown-enum', path: finalizePath(baseSegments) };
   }
 
   // 3. token-field maximum
   if (keyword === 'maximum' && TOKEN_FIELD_REGEX.test(location)) {
-    return { code: 'invalid-metadata-token-out-of-range', path: location };
+    return { code: 'invalid-metadata-token-out-of-range', path: finalizePath(baseSegments) };
   }
 
   // 4. fallthrough
-  return { code: 'invalid-metadata-schema' as MetadataErrorCode, path: location };
+  return {
+    code: 'invalid-metadata-schema' as MetadataErrorCode,
+    path: finalizePath(baseSegments),
+  };
+}
+
+function pathToSegments(instancePath: string): string[] {
+  if (instancePath === '' || instancePath === '/') return [];
+  return instancePath
+    .slice(1)
+    .split('/')
+    .map((seg) => rfc6901Escape(decodePointerSegment(seg)));
+}
+
+function decodePointerSegment(seg: string): string {
+  return seg.replace(/~1/g, '/').replace(/~0/g, '~');
 }
 
 function additionalPropertyMarker(rawKey: string): string {

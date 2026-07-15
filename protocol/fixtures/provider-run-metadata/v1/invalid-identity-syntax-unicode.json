@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "selectedProviderId": "anthröpic",
-  "observedProviderId": "anthröpic",
+  "selectedProviderId": "anthr\u0007pic",
+  "observedProviderId": "anthr\u0007pic",
   "resolvedModelId": "claude-sonnet-4-5-2025-09-29",
   "adapterId": "1111111111111111111111111111111111111111111111111111111111111111",
   "logicalPrefixSha256": "2222222222222222222222222222222222222222222222222222222222222222",

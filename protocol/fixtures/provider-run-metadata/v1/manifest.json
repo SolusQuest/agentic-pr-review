@@ -82,146 +82,141 @@
   {
     "file": "invalid-forbidden-field-endpoint.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-additional-property"
+    "expectedCodes": ["invalid-metadata-additional-property"]
   },
   {
     "file": "invalid-forbidden-field-provider-request-id.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-additional-property"
+    "expectedCodes": ["invalid-metadata-additional-property"]
   },
   {
     "file": "invalid-forbidden-field-raw-error.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-additional-property"
+    "expectedCodes": ["invalid-metadata-additional-property"]
   },
   {
     "file": "invalid-forbidden-field-notes.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-additional-property"
+    "expectedCodes": ["invalid-metadata-additional-property"]
   },
   {
     "file": "invalid-forbidden-field-provider-extensions.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-additional-property"
+    "expectedCodes": ["invalid-metadata-additional-property"]
   },
   {
     "file": "invalid-unknown-enum-cache-status.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-unknown-enum"
+    "expectedCodes": ["invalid-metadata-unknown-enum"]
   },
   {
     "file": "invalid-model-alias-latest.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-model-alias-literal"
+    "expectedCodes": ["invalid-metadata-model-alias-literal"]
   },
   {
     "file": "invalid-provider-identity-cross-mismatch.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-provider-identity-cross-mismatch"
+    "expectedCodes": ["invalid-metadata-provider-identity-cross-mismatch"]
   },
   {
     "file": "invalid-identity-syntax-unicode.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-identity-syntax"
+    "expectedCodes": ["invalid-metadata-identity-syntax"]
   },
   {
     "file": "invalid-predecessor-syntax.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-predecessor-syntax"
+    "expectedCodes": ["invalid-metadata-schema"]
   },
   {
     "file": "invalid-token-negative.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-token-out-of-range"
+    "expectedCodes": ["invalid-metadata-schema"]
   },
   {
     "file": "invalid-retry-count-mismatch.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-aggregate-mismatch"
+    "expectedCodes": ["invalid-metadata-aggregate-mismatch"]
   },
   {
     "file": "invalid-aggregate-mismatch-cache-status.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-aggregate-mismatch"
+    "expectedCodes": ["invalid-metadata-aggregate-mismatch"]
   },
   {
     "file": "invalid-error-codes-unsorted.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-error-code"
+    "expectedCodes": ["invalid-metadata-error-code-order"]
   },
   {
     "file": "invalid-error-codes-contains-validator-code.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-unknown-enum"
+    "expectedCodes": ["invalid-metadata-unknown-enum"]
   },
   {
     "file": "invalid-attempt-duplicate.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-attempt-uniqueness"
+    "expectedCodes": ["invalid-metadata-attempt-uniqueness"]
   },
   {
     "file": "invalid-attempt-non-contiguous.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-attempt-contiguity"
+    "expectedCodes": ["invalid-metadata-attempt-contiguity"]
   },
   {
     "file": "invalid-request-non-contiguous.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-request-ordering"
+    "expectedCodes": ["invalid-metadata-request-ordering"]
   },
   {
     "file": "invalid-multiple-succeeded-attempts.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-multiple-succeeded-attempts"
+    "expectedCodes": ["invalid-metadata-multiple-succeeded-attempts"]
   },
   {
     "file": "invalid-partition-inconsistent.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-partition-inconsistent"
+    "expectedCodes": ["invalid-metadata-attempt-usage-inconsistent"]
   },
   {
     "file": "invalid-attempt-usage-complete-with-null.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-attempt-usage-inconsistent"
+    "expectedCodes": ["invalid-metadata-attempt-usage-inconsistent"]
   },
   {
     "file": "invalid-outcome-succeeded-with-provider-error.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-attempt-outcome-error-consistency"
+    "expectedCodes": ["invalid-metadata-attempt-outcome-error-consistency"]
   },
   {
     "file": "invalid-stateless-mode-null-proof.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-stateless-proof"
+    "expectedCodes": ["invalid-metadata-stateless-proof"]
   },
   {
     "file": "invalid-standard-mode-with-proof.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-stateless-proof"
+    "expectedCodes": ["invalid-metadata-stateless-proof"]
   },
   {
     "file": "invalid-stateless-unverified-missing-code.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-stateless-proof"
+    "expectedCodes": ["invalid-metadata-stateless-proof"]
   },
   {
     "file": "invalid-stateless-code-wrong-placement.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-stateless-proof"
+    "expectedCodes": ["invalid-metadata-stateless-proof"]
   },
   {
     "file": "invalid-producing-run-id-zero.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-schema"
+    "expectedCodes": ["invalid-metadata-schema"]
   },
   {
     "file": "invalid-producing-run-id-non-numeric.json",
     "valid": false,
-    "expectedErrorCode": "invalid-metadata-schema"
-  },
-  {
-    "file": "invalid-token-negative-zero.json",
-    "valid": false,
-    "expectedErrorCode": "invalid-metadata-token-negative"
+    "expectedCodes": ["invalid-metadata-schema"]
   }
 ]

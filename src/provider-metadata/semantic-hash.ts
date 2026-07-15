@@ -171,10 +171,10 @@ export function buildSemanticEnvelope(metadata: ValidatedProviderRunMetadataV1):
 
 export function computeMetadataSemanticSha256(metadata: ValidatedProviderRunMetadataV1): string {
   const envelope = buildSemanticEnvelope(metadata);
-  const canonicalBytes = canonicalJsonBytes(envelope as unknown as CanonicalJsonValue);
+  const envelopeBytes = canonicalJsonBytes(envelope as unknown as CanonicalJsonValue);
   const hash = createHash('sha256');
   hash.update(Buffer.from(METADATA_SEMANTIC_HASH_DOMAIN_TAG, 'utf8'));
   hash.update(Buffer.from([0x00]));
-  hash.update(Buffer.from(canonicalBytes));
+  hash.update(Buffer.from(envelopeBytes));
   return hash.digest('hex');
 }

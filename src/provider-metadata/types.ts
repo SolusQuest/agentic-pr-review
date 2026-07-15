@@ -260,9 +260,14 @@ export type ValidatedProviderRunMetadataV1 = ProviderRunMetadataV1 & {
   readonly [__providerRunMetadataValidated]: true;
 };
 
+declare const __providerRunMetadataAttemptValidated: unique symbol;
 /**
- * Per-attempt entry of a validated value. Exposed so `deriveAggregate` and
- * downstream cost harness can consume individual attempts without weakening
- * the top-level brand.
+ * Per-attempt entry of a validated value. Branded: obtainable only by reading
+ * `metadata.normalizedUsage.attempts[i]` from a `ValidatedProviderRunMetadataV1`
+ * (which itself is produced only by `parseProviderRunMetadata`). Downstream
+ * consumers (`#54` cost harness) can iterate attempts without weakening the
+ * top-level brand; new attempts cannot be forged in userland.
  */
-export type ValidatedAttempt = AttemptObservation;
+export type ValidatedAttempt = AttemptObservation & {
+  readonly [__providerRunMetadataAttemptValidated]: true;
+};
