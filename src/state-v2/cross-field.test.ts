@@ -36,12 +36,20 @@ function invalidate(
 }
 
 describe('cross-field validation matrix', () => {
-  it('x_state_namespace_mismatch when stateKey.namespace differs from stateNamespace', () => {
+  it('stateKey.namespace/stateNamespace equality is enforced by JSON Schema const', () => {
     const built = build();
-    const result = invalidate(built.manifest, (m) => {
-      (m.stateKey as unknown as Record<string, unknown>).namespace = 'other';
-    });
-    expect(result.codes).toContain('/stateKey/namespace');
+    // The reworked contract moves this check into the schema layer via a
+    // const. The semantic-stage cross-field validator no longer emits
+    // for this case; validateStateManifestV2 catches it at Ajv step and
+    // returns manifest_shape_invalid.
+    const clone = structuredClone(built.manifest);
+    (clone.stateKey as unknown as Record<string, unknown>).namespace = 'other';
+    const validation = validateStateManifestV2(clone);
+    expect(validation.ok).toBe(false);
+    if (!validation.ok) {
+      expect(validation.diagnostic).toBe('manifest_shape_invalid');
+      expect(validation.message).toContain('x_invalid_field:');
+    }
   });
 
   it('x_metadata_producing_state_generation when producing generation disagrees', () => {

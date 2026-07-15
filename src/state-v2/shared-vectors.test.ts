@@ -224,59 +224,59 @@ describe('shared conformance vector V2 — terminal <invalid-utf16> in an unknow
   });
 });
 
-describe('shared conformance vector V3 — resolver union child position (oneOf branches)', () => {
-  it('resolveProperty returns schemaKnown for both branches at their respective payload.beta positions', () => {
-    // Branch A declares payload.alpha only; branch B declares payload.beta
-    // only. Union at the root level should mark both alpha and beta as
-    // schema-known when queried through the top-level root position.
-    const hypothetical: SchemaNode = {
-      oneOf: [
-        {
+describe('shared conformance vector V3 — resolver union child position (oneOf branches, per-branch)', () => {
+  it('per-branch: branchA payload.beta is unknown; branchB payload.beta is known; aggregate payload.beta is known', () => {
+    const branchA: SchemaNode = {
+      type: 'object',
+      properties: {
+        payload: {
           type: 'object',
           properties: {
-            payload: {
-              type: 'object',
-              properties: {
-                alpha: { type: 'string' },
-              },
-            },
+            alpha: { type: 'string' },
           },
         },
-        {
-          type: 'object',
-          properties: {
-            payload: {
-              type: 'object',
-              properties: {
-                beta: { type: 'string' },
-              },
-            },
-          },
-        },
-      ],
+      },
     };
+    const branchB: SchemaNode = {
+      type: 'object',
+      properties: {
+        payload: {
+          type: 'object',
+          properties: {
+            beta: { type: 'string' },
+          },
+        },
+      },
+    };
+    const hypothetical: SchemaNode = { oneOf: [branchA, branchB] };
     const rootPos = normalizePosition(hypothetical);
 
-    // Query the union at the top level.
-    const payloadResult = resolveProperty(rootPos, 'payload');
+    // Per-branch normalizations.
+    const rootBranchAPos = normalizePosition(branchA, undefined, hypothetical);
+    const rootBranchBPos = normalizePosition(branchB, undefined, hypothetical);
+    const branchAPayload = resolveProperty(rootBranchAPos, 'payload', hypothetical);
+    const branchBPayload = resolveProperty(rootBranchBPos, 'payload', hypothetical);
+    expect(branchAPayload.schemaKnown).toBe(true);
+    expect(branchBPayload.schemaKnown).toBe(true);
+    const branchABeta = resolveProperty(branchAPayload.childSchemaPosition, 'beta', hypothetical);
+    const branchBBeta = resolveProperty(branchBPayload.childSchemaPosition, 'beta', hypothetical);
+    expect(branchABeta.schemaKnown).toBe(false);
+    expect(branchBBeta.schemaKnown).toBe(true);
+
+    // Aggregate at the union parent.
+    const payloadResult = resolveProperty(rootPos, 'payload', hypothetical);
     expect(payloadResult.schemaKnown).toBe(true);
-    const betaResult = resolveProperty(payloadResult.childSchemaPosition, 'beta');
+    const betaResult = resolveProperty(payloadResult.childSchemaPosition, 'beta', hypothetical);
     expect(betaResult.schemaKnown).toBe(true);
-    // extraneous is not declared in any branch under payload.
-    const extraneousResult = resolveProperty(payloadResult.childSchemaPosition, 'extraneous');
+    const extraneousResult = resolveProperty(
+      payloadResult.childSchemaPosition,
+      'extraneous',
+      hypothetical,
+    );
     expect(extraneousResult.schemaKnown).toBe(false);
 
-    // Also per-branch: each branch's normalized position should
-    // independently declare its own leaf property. This is the assertion
-    // that distinguishes per-call activeSchemaNodes from a broken global
-    // visited-set.
-    // (Traversal of the top-level oneOf without an ObjectPosition yields
-    // a CompositePosition of two branch object positions, so we exercise
-    // them individually.)
-    void rootPos;
-    // Executing scanStringSafety with a value that would only trigger
-    // when beta is declared:
-    const violation = scanStringSafety({ payload: { beta: '\uD800' } }, hypothetical);
+    // scanStringSafety with a NUL value at beta emits [payload, beta].
+    const violation = scanStringSafety({ payload: { beta: '\u0000' } }, hypothetical);
     expect(violation).toBeDefined();
     expect(violation?.segments).toEqual(['payload', 'beta']);
 

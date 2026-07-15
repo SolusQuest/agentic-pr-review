@@ -7,7 +7,7 @@ import {
   METADATA_MAX_BYTES,
   PROVIDER_RUN_METADATA_FILENAME,
 } from './constants.js';
-import type { DiagnosticCode } from './diagnostics.js';
+import type { InvalidDiagnosticCode } from './diagnostics.js';
 import type { StateManifestV2 } from './manifest.js';
 import { boundedJoin, validateStateManifestV2 } from './schema.js';
 import { strictParseJson } from './strict-json.js';
@@ -40,7 +40,7 @@ export type BundleClassification =
     }
   | {
       kind: 'invalid';
-      diagnostic: DiagnosticCode;
+      diagnostic: InvalidDiagnosticCode;
       message: string;
     };
 
@@ -72,26 +72,26 @@ export function classifyStateBundleV2(input: ClassifyStateBundleV2Input): Bundle
 
   // Step 1: manifest-entry safety and manifest listing/bytes consistency.
   if (listingIndex.duplicates.has(MANIFEST_FILENAME)) {
-    return invalid('bundle_listing_mismatch', 'duplicate_expected_entry:manifest.json');
+    return invalidWire('bundle_listing_mismatch', 'x_invalid_field', '/');
   }
   const manifestEntry = listingIndex.entries.get(MANIFEST_FILENAME);
   if (manifestEntry && !manifestEntry.isRegularFile) {
-    return invalid('bundle_path_unsafe', 'non_regular_entry:manifest.json');
+    return invalidWire('bundle_path_unsafe', 'x_invalid_field', '/');
   }
   const manifestBytes = input.manifestBytes;
   if (manifestEntry && manifestBytes === undefined) {
-    return invalid('bundle_listing_mismatch', 'listing_present_bytes_missing:manifest.json');
+    return invalidWire('bundle_listing_mismatch', 'x_invalid_field', '/');
   }
   if (!manifestEntry && manifestBytes !== undefined) {
-    return invalid('bundle_listing_mismatch', 'listing_absent_bytes_present:manifest.json');
+    return invalidWire('bundle_listing_mismatch', 'x_invalid_field', '/');
   }
   if (manifestBytes === undefined) {
-    return invalid('manifest_missing', 'manifest_missing');
+    return invalidWire('manifest_missing', 'x_invalid_field', '/');
   }
 
   // Step 2: manifest byte cap and parse.
   if (manifestBytes.byteLength > MANIFEST_MAX_BYTES) {
-    return invalid('manifest_byte_limit_exceeded', 'manifest_bytes_over_cap');
+    return invalidWire('manifest_byte_limit_exceeded', 'x_invalid_field', '/');
   }
   const manifestSnapshot = copyBytes(manifestBytes);
 
@@ -99,13 +99,13 @@ export function classifyStateBundleV2(input: ClassifyStateBundleV2Input): Bundle
   try {
     manifestString = decodeManifest(manifestSnapshot);
   } catch (err) {
-    return invalid('manifest_invalid_json', `manifest_decode:${errorKind(err)}`);
+    return invalidWire('manifest_invalid_json', 'x_invalid_json', '/');
   }
   let parsed: unknown;
   try {
     parsed = strictParseJson(manifestString);
   } catch (err) {
-    return invalid('manifest_invalid_json', `manifest_parse:${errorKind(err)}`);
+    return invalidWire('manifest_invalid_json', 'x_invalid_json', '/');
   }
 
   // Step 3: legacy v1 short-circuit.
@@ -123,13 +123,21 @@ export function classifyStateBundleV2(input: ClassifyStateBundleV2Input): Bundle
   );
   if (stringSafety) {
     const { wireEntry } = renderWireEntry('x_invalid_unicode', stringSafety.segments);
-    return invalid('manifest_shape_invalid', wireEntry);
+    return {
+      kind: 'invalid',
+      diagnostic: 'manifest_shape_invalid',
+      message: boundedJoin([wireEntry]),
+    };
   }
 
   // Step 5: v2 Ajv + cross-field validation.
   const validation = validateStateManifestV2(parsed);
   if (!validation.ok) {
-    return invalid(validation.diagnostic, validation.message);
+    return {
+      kind: 'invalid',
+      diagnostic: validation.diagnostic as InvalidDiagnosticCode,
+      message: boundedJoin([validation.message]),
+    };
   }
   const manifest = validation.manifest;
 
@@ -138,15 +146,14 @@ export function classifyStateBundleV2(input: ClassifyStateBundleV2Input): Bundle
   // ordering is test-observable via the classifier fixture matrix.
   for (const dup of listingIndex.duplicates) {
     if (dup !== MANIFEST_FILENAME) {
-      return invalid('bundle_listing_mismatch', `duplicate_expected_entry:${sanitizeName(dup)}`);
+      return invalidWire('bundle_listing_mismatch', 'x_invalid_field', '/');
     }
   }
   if (listingIndex.nonRegular.length > 0) {
-    const bad = listingIndex.nonRegular[0];
-    return invalid('bundle_path_unsafe', `non_regular_entry:${sanitizeName(bad.name)}`);
+    return invalidWire('bundle_path_unsafe', 'x_invalid_field', '/');
   }
   if (listingIndex.extraNames.length > 0) {
-    return invalid('bundle_extra_entry', 'unexpected_entry_present');
+    return invalidWire('bundle_extra_entry', 'x_invalid_field', '/');
   }
   const ledgerConsistency = expectedFileConsistency(
     LEDGER_FILENAME,
@@ -165,39 +172,45 @@ export function classifyStateBundleV2(input: ClassifyStateBundleV2Input): Bundle
 
   // Step 7: ledger byte cap + integrity.
   const ledger = input.ledgerBytes;
-  if (ledger === undefined) return invalid('ledger_missing', 'ledger_missing');
+  if (ledger === undefined) return invalidWire('ledger_missing', 'x_invalid_field', '/ledger');
   if (ledger.byteLength > LEDGER_MAX_BYTES) {
-    return invalid('ledger_byte_limit_exceeded', 'ledger_bytes_over_cap');
+    return invalidWire('ledger_byte_limit_exceeded', 'x_invalid_field', '/ledger');
   }
   const ledgerSnapshot = copyBytes(ledger);
   if (ledgerSnapshot.byteLength !== manifest.ledger.bytes) {
-    return invalid('ledger_bytes_mismatch', 'ledger_byte_length_disagrees_with_descriptor');
+    return invalidWire('ledger_bytes_mismatch', 'x_invalid_field', '/ledger/bytes');
   }
   const ledgerHash = sha256Hex(ledgerSnapshot);
   if (ledgerHash !== manifest.ledger.sha256) {
-    return invalid('ledger_hash_mismatch', 'ledger_sha256_disagrees_with_descriptor');
+    return invalidWire('ledger_hash_mismatch', 'x_invalid_field', '/ledger/sha256');
   }
 
   // Step 8: provider run metadata byte cap + integrity.
   const metadata = input.providerRunMetadataBytes;
   if (metadata === undefined) {
-    return invalid('provider_run_metadata_missing', 'provider_run_metadata_missing');
+    return invalidWire('provider_run_metadata_missing', 'x_invalid_field', '/providerRunMetadata');
   }
   if (metadata.byteLength > METADATA_MAX_BYTES) {
-    return invalid('provider_run_metadata_byte_limit_exceeded', 'metadata_bytes_over_cap');
+    return invalidWire(
+      'provider_run_metadata_byte_limit_exceeded',
+      'x_invalid_field',
+      '/providerRunMetadata',
+    );
   }
   const metadataSnapshot = copyBytes(metadata);
   if (metadataSnapshot.byteLength !== manifest.providerRunMetadata.bytes) {
-    return invalid(
+    return invalidWire(
       'provider_run_metadata_bytes_mismatch',
-      'metadata_byte_length_disagrees_with_descriptor',
+      'x_invalid_field',
+      '/providerRunMetadata/bytes',
     );
   }
   const metadataHash = sha256Hex(metadataSnapshot);
   if (metadataHash !== manifest.providerRunMetadata.sha256) {
-    return invalid(
+    return invalidWire(
       'provider_run_metadata_hash_mismatch',
-      'metadata_sha256_disagrees_with_descriptor',
+      'x_invalid_field',
+      '/providerRunMetadata/sha256',
     );
   }
 
@@ -236,20 +249,17 @@ function expectedFileConsistency(
   name: string,
   index: ListingIndex,
   bytes: Uint8Array | undefined,
-  missingCode: DiagnosticCode,
+  missingCode: InvalidDiagnosticCode,
 ): BundleClassification | null {
   const listed = index.entries.has(name);
   if (listed && bytes === undefined) {
-    return invalid(
-      'bundle_listing_mismatch',
-      `listing_present_bytes_missing:${sanitizeName(name)}`,
-    );
+    return invalidWire('bundle_listing_mismatch', 'x_invalid_field', '/');
   }
   if (!listed && bytes !== undefined) {
-    return invalid('bundle_listing_mismatch', `listing_absent_bytes_present:${sanitizeName(name)}`);
+    return invalidWire('bundle_listing_mismatch', 'x_invalid_field', '/');
   }
   if (!listed && bytes === undefined) {
-    return invalid(missingCode, `${sanitizeName(name)}_missing`);
+    return invalidWire(missingCode, 'x_invalid_field', '/');
   }
   return null;
 }
@@ -275,31 +285,18 @@ function isLegacyV1Manifest(value: unknown): boolean {
   return typeof version === 'number' && version === 1;
 }
 
-function invalid(diagnostic: DiagnosticCode, message: string): BundleClassification {
+function invalidWire(
+  diagnostic: InvalidDiagnosticCode,
+  code: 'x_invalid_json' | 'x_invalid_unicode' | 'x_invalid_field',
+  safePath: string,
+): BundleClassification {
+  const segs = safePath === '' ? [] : safePath.slice(1).split('/');
+  const wire = renderWireEntry(code, segs).wireEntry;
   return {
     kind: 'invalid',
     diagnostic,
-    message: boundedJoin([message]),
+    message: boundedJoin([wire]),
   };
-}
-
-/**
- * Reduce a caller-supplied filename to one of the known expected filenames.
- * Any other value collapses to `<extra>` so unexpected filenames from a
- * misfiled or attacker-controlled listing never leak into a diagnostic
- * message.
- */
-function sanitizeName(name: string): string {
-  if (EXPECTED_NAMES.has(name)) return name;
-  return '<extra>';
-}
-
-/** Reduce an unknown error to a short structural label (never the raw text). */
-function errorKind(err: unknown): string {
-  if (err instanceof Error && err.name) {
-    return err.name.toLowerCase();
-  }
-  return 'error';
 }
 
 function sha256Hex(bytes: Uint8Array): string {

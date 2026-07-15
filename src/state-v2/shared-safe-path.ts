@@ -457,7 +457,9 @@ function union<T>(base: ReadonlySet<T>, extras: readonly T[]): Set<T> {
 function dereferenceJsonPointer(root: SchemaNode, ref: string): SchemaNode | undefined {
   if (!ref.startsWith('#')) return undefined;
   const pointer = ref.slice(1);
-  if (pointer === '' || pointer === '/') return root;
+  // Per RFC 6901: `#` denotes the root document; `#/` denotes the empty-
+  // name member of the root object. Only `#` is a root reference.
+  if (pointer === '') return root;
   if (!pointer.startsWith('/')) return undefined;
   const parts = pointer
     .slice(1)
@@ -465,6 +467,12 @@ function dereferenceJsonPointer(root: SchemaNode, ref: string): SchemaNode | und
     .map((p) => p.replace(/~1/g, '/').replace(/~0/g, '~'));
   let cur: unknown = root;
   for (const p of parts) {
+    if (Array.isArray(cur)) {
+      const idx = Number(p);
+      if (!Number.isInteger(idx) || idx < 0 || idx >= (cur as unknown[]).length) return undefined;
+      cur = (cur as unknown[])[idx];
+      continue;
+    }
     if (!isObject(cur)) return undefined;
     cur = (cur as Record<string, unknown>)[p];
   }

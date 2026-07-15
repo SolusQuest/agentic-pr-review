@@ -45,10 +45,30 @@ describe('resolver runtime consequence — inline ancestor back-edge', () => {
 });
 
 describe('resolver runtime consequence — independent multi-branch reference is not a cycle', () => {
-  it('both branches of a shared non-recursive $ref independently declare their leaf', () => {
+  it('both per-branch assertions hold: A payload.value and B payload.value each resolve schemaKnown = true', () => {
+    // Per the shared contract, this is the assertion that distinguishes
+    // a correct per-call activeSchemaNodes implementation from an
+    // incorrect global visited-set implementation. The aggregate
+    // assertion (union payload.value) is not sufficient by itself.
     const schema = loadFixture('independent-multi-branch-reference');
     const rootPos = normalizePosition(schema);
-    // Union at the top level should still find `payload` as schema-known.
+    const oneOf = (schema as unknown as { oneOf: SchemaNode[] }).oneOf;
+
+    // Normalize each branch independently.
+    const rootBranchAPos = normalizePosition(oneOf[0]!, undefined, schema);
+    const rootBranchBPos = normalizePosition(oneOf[1]!, undefined, schema);
+
+    const branchAPayload = resolveProperty(rootBranchAPos, 'payload', schema);
+    const branchBPayload = resolveProperty(rootBranchBPos, 'payload', schema);
+    expect(branchAPayload.schemaKnown).toBe(true);
+    expect(branchBPayload.schemaKnown).toBe(true);
+
+    const branchAValue = resolveProperty(branchAPayload.childSchemaPosition, 'value', schema);
+    const branchBValue = resolveProperty(branchBPayload.childSchemaPosition, 'value', schema);
+    expect(branchAValue.schemaKnown).toBe(true);
+    expect(branchBValue.schemaKnown).toBe(true);
+
+    // Aggregate assertion via the root union: payload.value is schema-known.
     const payloadResult = resolveProperty(rootPos, 'payload', schema);
     expect(payloadResult.schemaKnown).toBe(true);
     const valueResult = resolveProperty(payloadResult.childSchemaPosition, 'value', schema);

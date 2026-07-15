@@ -113,7 +113,7 @@ describe('classifier v2 listing precedence (blocker #7)', () => {
     if (result.kind === 'invalid') {
       // No attacker-controlled name can appear: the only names in the
       // message are drawn from the expected-name allow-list (`ledger.json`).
-      expect(result.message).toContain('duplicate_expected_entry:ledger.json');
+      expect(result.message).toBe('x_invalid_field:/');
     }
   });
 

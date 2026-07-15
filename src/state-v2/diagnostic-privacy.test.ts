@@ -87,7 +87,7 @@ describe('diagnostic privacy (blocker #2)', () => {
       // Neither the observed nor the expected hex hash appears in the
       // message; only a fixed structural label does.
       expect(result.message).not.toMatch(/[0-9a-f]{16}/i);
-      expect(result.message).toContain('ledger_sha256_disagrees_with_descriptor');
+      expect(result.message).toBe('x_invalid_field:/ledger/sha256');
     }
   });
 

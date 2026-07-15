@@ -7,6 +7,7 @@ import {
   renderWireEntry,
   resolveProperty,
   sanitizeSegment,
+  scanStringSafety,
   type SchemaNode,
   type SchemaPosition,
   UNKNOWN_POSITION,
@@ -35,6 +36,15 @@ const validateSchema = ajv.compile<StateManifestV2>(schema);
  * sensitive data through classification output.
  */
 export function validateStateManifestV2(value: unknown): ValidationResult {
+  // Shared string-safety traversal runs before Ajv, mirroring the
+  // classifier stage order. Any NUL or unpaired UTF-16 surrogate in a
+  // string value or property name yields manifest_shape_invalid with
+  // wire message x_invalid_unicode:<safe-path>.
+  const stringSafety = scanStringSafety(value, schema as unknown as SchemaNode);
+  if (stringSafety) {
+    const wire = renderWireEntry('x_invalid_unicode', stringSafety.segments);
+    return { ok: false, diagnostic: 'manifest_shape_invalid', message: wire.wireEntry };
+  }
   if (!validateSchema(value)) {
     return classifyAjvErrors(validateSchema.errors ?? []);
   }
@@ -122,7 +132,10 @@ function classifyAjvErrors(errors: readonly ErrorObject[]): {
 
   // Multiple entries. Join with `; ` and append aggregate sentinel when
   // more errors were dropped than the kept set.
-  const droppedByCap = candidates.length > kept.length;
+  // Only fire the aggregate sentinel if the 8-entry cap actually forced a
+  // truncation. Ordinary wire dedup collapsing duplicate rendered entries
+  // does not count as truncation for the purpose of the sentinel.
+  const droppedByCap = kept.length >= MAX_DIAGNOSTIC_ERRORS && candidates.length > kept.length;
   const AGG_SENTINEL = '; ...[truncated]';
   const parts = kept.map((c) => c.wireEntry);
   let joined = parts.join('; ');
@@ -295,9 +308,9 @@ export function crossFieldValidate(manifest: StateManifestV2): string[] {
     void code; // sub-code kept in code for ordering; internal only.
   }
 
-  if (manifest.stateKey.namespace !== manifest.stateNamespace) {
-    add('x_state_namespace_mismatch', '/stateKey/namespace');
-  }
+  // stateKey.namespace/stateNamespace equality is owned by JSON Schema
+  // const at classifier step 6 (const_mismatch); the semantic stage no
+  // longer checks it.
   if (manifest.transaction.candidateLedgerSha256 !== manifest.ledger.sha256) {
     add('x_transaction_ledger_binding', '/transaction/candidateLedgerSha256');
   }

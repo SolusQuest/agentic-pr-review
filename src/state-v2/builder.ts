@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import { CanonicalJsonInputError, canonicalJsonBytes } from '../canonical-json/index.js';
+import { renderWireEntry, scanStringSafety, type SchemaNode } from './shared-safe-path.js';
+import schemaJson from '../../protocol/schemas/state-manifest.v2.json' with { type: 'json' };
 import { LEDGER_MAX_BYTES, METADATA_MAX_BYTES } from './constants.js';
 import type { Sha256Hex, StateManifestV2, StateManifestV2Input } from './manifest.js';
 import { validateStateManifestV2, boundedDiagnosticMessage } from './schema.js';
@@ -26,7 +28,7 @@ export class MetadataOverBoundError extends Error {
 export class BuilderValidationError extends Error {
   readonly detail: string;
   constructor(detail: string) {
-    super(boundedDiagnosticMessage(`builder rejected finalized manifest: ${detail}`));
+    super(boundedDiagnosticMessage(detail));
     this.name = 'BuilderValidationError';
     this.detail = detail;
   }
@@ -90,6 +92,34 @@ export function buildStateBundleV2(
     throw new MetadataOverBoundError(providerRunMetadataBytes.byteLength);
   }
 
+  // Step 2: structural-only canonical-domain shape check.
+  // Enumerate the input tree using the same rules canonicalJsonBytes
+  // enforces (types, prototypes, cycles, symbol/non-enum own properties,
+  // etc.), BUT ignore UTF-16 code-unit content of any string. Any
+  // structural rejection becomes BuilderInputRejectedError; string-content
+  // rejection is deferred to step 3.
+  const structuralError = detectCanonicalDomainStructuralError(input);
+  if (structuralError) {
+    throw new BuilderInputRejectedError(structuralError.reason, structuralError.path);
+  }
+
+  // Step 3: authoritative shared string-safety traversal (from
+  // `### Shared traversal order and stage precedence`). Rejects NUL and
+  // unpaired UTF-16 surrogates in every string value and property name.
+  const stringSafetyViolation = scanStringSafety(
+    input as unknown,
+    schemaJson as unknown as SchemaNode,
+  );
+  if (stringSafetyViolation) {
+    const wire = renderWireEntry('x_invalid_unicode', stringSafetyViolation.segments);
+    throw new BuilderValidationError(wire.wireEntry);
+  }
+
+  // Step 4: canonical bytes for the defensive deep clone. Because
+  // steps 2 and 3 have already rejected every input the shared canonical
+  // helper would reject, this call is expected to succeed; if it still
+  // raises CanonicalJsonInputError (defense-in-depth), re-throw as
+  // BuilderInputRejectedError.
   let canonicalBytes: Uint8Array;
   try {
     canonicalBytes = canonicalJsonBytes(input as unknown);
@@ -216,4 +246,151 @@ function sanitizeInputReason(reason: string): string {
   if (reason.includes('undefined')) return 'undefined';
   if (reason.includes('NaN') || reason.includes('Infinity')) return 'non_finite_number';
   return 'canonical_domain_reject';
+}
+
+// -------------------------------------------------------------------------
+// Structural-only canonical-domain check for builder step 2.
+// -------------------------------------------------------------------------
+
+interface StructuralError {
+  readonly reason: string;
+  readonly path: string;
+}
+
+/**
+ * Walk the input tree once and detect JavaScript runtime shape violations
+ * without ever inspecting the UTF-16 code units of a string value or
+ * property name. Returns undefined if the tree is structurally accepted.
+ *
+ * Rejects (deliberately non-exhaustive; kept in lockstep with the
+ * canonical-JSON helper's rejection matrix minus the string-content rules):
+ *   - `undefined`, `function`, `symbol`, `bigint`, `NaN`, `Infinity`,
+ *     `-Infinity`.
+ *   - Cyclic reference (detected via a Set of visited container objects).
+ *   - Non-plain objects: `Map`, `Set`, `Date`, `RegExp`, `Error`, or any
+ *     object whose prototype is neither `Object.prototype` nor `null`.
+ *   - Plain objects with a symbol-keyed own property, a non-enumerable
+ *     own property, a getter, or a setter.
+ *   - Sparse arrays; arrays with a symbol-keyed own property, an extra
+ *     string property, an accessor index, a non-enumerable own property,
+ *     or a non-`Array.prototype` prototype.
+ */
+function detectCanonicalDomainStructuralError(root: unknown): StructuralError | undefined {
+  const visiting = new WeakSet<object>();
+
+  function fail(reason: string, path: string): StructuralError {
+    return { reason, path };
+  }
+
+  function walk(value: unknown, path: string): StructuralError | undefined {
+    if (value === null) return undefined;
+    if (value === undefined) return fail('undefined', path);
+    const t = typeof value;
+    if (t === 'string') return undefined; // string content is checked at step 3
+    if (t === 'boolean') return undefined;
+    if (t === 'number') {
+      if (!Number.isFinite(value as number)) return fail('non_finite_number', path);
+      return undefined;
+    }
+    if (t === 'bigint') return fail('bigint', path);
+    if (t === 'symbol') return fail('symbol', path);
+    if (t === 'function') return fail('function', path);
+    if (t !== 'object') return fail('unsupported_type', path);
+
+    const obj = value as object;
+    if (visiting.has(obj)) return fail('cyclic', path);
+    visiting.add(obj);
+
+    if (Array.isArray(value)) {
+      const arr = value as unknown[];
+      if (Object.getPrototypeOf(arr) !== Array.prototype) {
+        visiting.delete(obj);
+        return fail('non_array_prototype', path);
+      }
+      const ownKeys = Reflect.ownKeys(arr);
+      for (const k of ownKeys) {
+        if (typeof k === 'symbol') {
+          visiting.delete(obj);
+          return fail('symbol_own_property', path);
+        }
+        if (k === 'length') continue;
+        // Numeric index or extra string property.
+        const idx = Number(k);
+        if (!Number.isInteger(idx) || idx < 0 || String(idx) !== k) {
+          visiting.delete(obj);
+          return fail('array_extra_own_property', path);
+        }
+        const desc = Object.getOwnPropertyDescriptor(arr, k);
+        if (!desc) {
+          visiting.delete(obj);
+          return fail('array_sparse', path);
+        }
+        if (desc.get !== undefined || desc.set !== undefined) {
+          visiting.delete(obj);
+          return fail('array_accessor', path);
+        }
+        if (desc.enumerable === false) {
+          visiting.delete(obj);
+          return fail('array_non_enumerable', path);
+        }
+      }
+      // Detect sparseness by comparing length to number of indexed keys.
+      const numericCount = ownKeys.filter(
+        (k) => typeof k === 'string' && k !== 'length' && String(Number(k)) === k,
+      ).length;
+      if (numericCount !== arr.length) {
+        visiting.delete(obj);
+        return fail('array_sparse', path);
+      }
+      for (let i = 0; i < arr.length; i += 1) {
+        const err = walk(arr[i], `${path}/${i}`);
+        if (err) {
+          visiting.delete(obj);
+          return err;
+        }
+      }
+      visiting.delete(obj);
+      return undefined;
+    }
+
+    // Plain object check.
+    const proto = Object.getPrototypeOf(obj);
+    if (proto !== Object.prototype && proto !== null) {
+      visiting.delete(obj);
+      return fail('non_plain_object_prototype', path);
+    }
+    const ownKeys = Reflect.ownKeys(obj);
+    for (const k of ownKeys) {
+      if (typeof k === 'symbol') {
+        visiting.delete(obj);
+        return fail('symbol_own_property', path);
+      }
+      const desc = Object.getOwnPropertyDescriptor(obj, k);
+      if (!desc) {
+        visiting.delete(obj);
+        return fail('missing_descriptor', path);
+      }
+      if (desc.get !== undefined || desc.set !== undefined) {
+        visiting.delete(obj);
+        return fail('accessor_property', path);
+      }
+      if (desc.enumerable === false) {
+        visiting.delete(obj);
+        return fail('non_enumerable_property', path);
+      }
+    }
+    for (const k of ownKeys as string[]) {
+      const child = (obj as Record<string, unknown>)[k];
+      const childPath = `${path}/${k.replace(/~/g, '~0').replace(/\//g, '~1')}`;
+      const err = walk(child, childPath);
+      if (err) {
+        visiting.delete(obj);
+        return err;
+      }
+    }
+    visiting.delete(obj);
+    return undefined;
+  }
+
+  return walk(root, '');
 }
