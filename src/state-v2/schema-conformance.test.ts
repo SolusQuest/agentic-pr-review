@@ -55,8 +55,9 @@ function conformanceCheck(root: Node): ConformanceReport {
       // (base-10 non-negative in-range only), reject any other segment
       // against an array.
       if (Array.isArray(cur)) {
+        if (!/^(0|[1-9][0-9]*)$/.test(p)) return undefined;
         const idx = Number(p);
-        if (!Number.isInteger(idx) || idx < 0 || idx >= (cur as unknown[]).length) return undefined;
+        if (idx >= (cur as unknown[]).length) return undefined;
         cur = (cur as unknown[])[idx];
         continue;
       }

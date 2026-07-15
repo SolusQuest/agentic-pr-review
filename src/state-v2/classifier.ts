@@ -160,6 +160,7 @@ export function classifyStateBundleV2(input: ClassifyStateBundleV2Input): Bundle
     listingIndex,
     input.ledgerBytes,
     'ledger_missing',
+    '/ledger',
   );
   if (ledgerConsistency) return ledgerConsistency;
   const metadataConsistency = expectedFileConsistency(
@@ -167,6 +168,7 @@ export function classifyStateBundleV2(input: ClassifyStateBundleV2Input): Bundle
     listingIndex,
     input.providerRunMetadataBytes,
     'provider_run_metadata_missing',
+    '/providerRunMetadata',
   );
   if (metadataConsistency) return metadataConsistency;
 
@@ -250,16 +252,17 @@ function expectedFileConsistency(
   index: ListingIndex,
   bytes: Uint8Array | undefined,
   missingCode: InvalidDiagnosticCode,
+  safePath: string,
 ): BundleClassification | null {
   const listed = index.entries.has(name);
   if (listed && bytes === undefined) {
-    return invalidWire('bundle_listing_mismatch', 'x_invalid_field', '/');
+    return invalidWire('bundle_listing_mismatch', 'x_invalid_field', safePath);
   }
   if (!listed && bytes !== undefined) {
-    return invalidWire('bundle_listing_mismatch', 'x_invalid_field', '/');
+    return invalidWire('bundle_listing_mismatch', 'x_invalid_field', safePath);
   }
   if (!listed && bytes === undefined) {
-    return invalidWire(missingCode, 'x_invalid_field', '/');
+    return invalidWire(missingCode, 'x_invalid_field', safePath);
   }
   return null;
 }

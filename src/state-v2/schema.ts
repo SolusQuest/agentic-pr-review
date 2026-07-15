@@ -431,7 +431,7 @@ export function semanticIdentityCandidates(manifest: StateManifestV2): Aggregato
   const add = (subCode: string, safePath: string): void => {
     const segments = safePath === '' ? [] : safePath.slice(1).split('/');
     out.push({
-      stage: 8,
+      stage: 7,
       index: index++,
       rawSafePath: safePath,
       subCode,

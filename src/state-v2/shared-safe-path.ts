@@ -88,8 +88,10 @@ export function normalizePosition(
   const schemaNode = node as SchemaNode;
   if (activeSchemaNodes.has(schemaNode)) return UNKNOWN_POSITION;
 
-  // Exclusive-$ref rule.
-  if (typeof schemaNode.$ref === 'string') {
+  // Exclusive-$ref rule. Fail-closed when $ref is present but not a
+  // string, or when it is a string but has sibling supported keywords.
+  if ('$ref' in schemaNode) {
+    if (typeof schemaNode.$ref !== 'string') return UNKNOWN_POSITION;
     const siblingCount = Object.keys(schemaNode).filter((k) => k !== '$ref').length;
     if (siblingCount > 0) return UNKNOWN_POSITION;
     if (rootSchema === undefined) return UNKNOWN_POSITION;
@@ -456,8 +458,11 @@ export function dereferenceJsonPointer(root: SchemaNode, ref: string): SchemaNod
   let cur: unknown = root;
   for (const p of parts) {
     if (Array.isArray(cur)) {
+      // RFC 6901 canonical decimal index grammar: exactly '0' or an
+      // integer with no leading zero, no sign, no other characters.
+      if (!/^(0|[1-9][0-9]*)$/.test(p)) return undefined;
       const idx = Number(p);
-      if (!Number.isInteger(idx) || idx < 0 || idx >= (cur as unknown[]).length) return undefined;
+      if (idx >= (cur as unknown[]).length) return undefined;
       cur = (cur as unknown[])[idx];
       continue;
     }

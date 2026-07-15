@@ -423,3 +423,80 @@ describe('shared vocabulary realization — identity UTF-16 / UTF-8 boundaries',
     expect(errs.some((e) => e.includes('/cacheContractIdentity/providerId'))).toBe(true);
   });
 });
+
+// -------------------------------------------------------------------------
+// Reset transition predecessorStateGeneration range.
+// -------------------------------------------------------------------------
+
+describe('shared vocabulary realization — reset predecessorStateGeneration range', () => {
+  it('reset variant predecessorStateGeneration has a 0..999_999 integer range', () => {
+    const manifest = buildValidManifest() as unknown as Record<string, unknown>;
+    (manifest.transition as any) = {
+      kind: 'reset',
+      predecessorLedgerEpoch: 'B' + 'A'.repeat(21),
+      predecessorStateGeneration: 0,
+      predecessorAcceptanceMarkerSha256: 'a'.repeat(64),
+    };
+    (manifest.generation as any).stateGeneration = 1;
+    (manifest.transaction as any).interactionOrdinal = 0;
+    const transition = manifest.transition as Record<string, unknown>;
+    const rangeErrsAt = (): unknown[] => {
+      validate(manifest);
+      return (validate.errors ?? []).filter(
+        (e) =>
+          e.instancePath === '/transition/predecessorStateGeneration' &&
+          (e.keyword === 'minimum' || e.keyword === 'maximum' || e.keyword === 'type'),
+      );
+    };
+    transition.predecessorStateGeneration = 0;
+    expect(rangeErrsAt().length).toBe(0);
+    transition.predecessorStateGeneration = 999_999;
+    expect(rangeErrsAt().length).toBe(0);
+    transition.predecessorStateGeneration = -1;
+    expect(rangeErrsAt().length).toBeGreaterThan(0);
+    transition.predecessorStateGeneration = 1_000_000;
+    expect(rangeErrsAt().length).toBeGreaterThan(0);
+    transition.predecessorStateGeneration = 1.5;
+    expect(rangeErrsAt().length).toBeGreaterThan(0);
+  });
+});
+
+// -------------------------------------------------------------------------
+// Precise UTF-8 boundary: exactly 256 bytes accepted, exactly 257 rejected.
+// -------------------------------------------------------------------------
+
+describe('shared vocabulary realization — identity UTF-8 byte boundary is exactly 256', () => {
+  it('accepts exactly 256 UTF-8 bytes (256 ASCII chars)', () => {
+    const manifest = buildValidManifest();
+    const clone = structuredClone(manifest);
+    clone.cacheContractIdentity.providerId = 'a'.repeat(256);
+    const errs = semanticIdentityValidate(clone);
+    expect(errs.some((e) => e.includes('/cacheContractIdentity/providerId'))).toBe(false);
+  });
+
+  it('rejects exactly 257 UTF-8 bytes reached via a 254-ASCII + 1-CJK combo (254 + 3 = 257 bytes; 255 UTF-16 units)', () => {
+    const manifest = buildValidManifest();
+    const clone = structuredClone(manifest);
+    clone.cacheContractIdentity.providerId = 'a'.repeat(254) + '中';
+    const errs = semanticIdentityValidate(clone);
+    expect(errs.some((e) => e.includes('/cacheContractIdentity/providerId'))).toBe(true);
+  });
+});
+
+// -------------------------------------------------------------------------
+// headRepository precise 200/201 length boundary.
+// -------------------------------------------------------------------------
+
+describe('shared vocabulary realization — headRepository exact 200/201 boundary', () => {
+  it('accepts headRepository exactly 200 chars and rejects 201', () => {
+    const manifest = buildValidManifest() as unknown as Record<string, unknown>;
+    const stateKey = manifest.stateKey as Record<string, unknown>;
+    stateKey.repository = 'ok/ok';
+    const owner99 = 'a'.repeat(99);
+    const name100 = 'b'.repeat(100);
+    stateKey.headRepository = owner99 + '/' + name100;
+    expect(schemaAccepts(manifest)).toBe(true);
+    stateKey.headRepository = owner99 + '/' + 'b'.repeat(101);
+    expect(schemaAccepts(manifest)).toBe(false);
+  });
+});

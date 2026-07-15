@@ -32,9 +32,7 @@ export {
 } from './constants.js';
 
 export type {
-  CrossFieldSubCode,
   DiagnosticCode,
-  SemanticSubCode,
   InvalidDiagnosticCode,
   UnsupportedLegacyDiagnostic,
 } from './diagnostics.js';

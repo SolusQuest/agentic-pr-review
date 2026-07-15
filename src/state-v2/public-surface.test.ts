@@ -94,13 +94,14 @@ describe('state-v2 public surface', () => {
     expect(excluded).toBe(true);
   });
 
-  it('StateManifestSerializationReason is a closed enum with three members', () => {
+  it('StateManifestSerializationReason is a closed 4-member enum (adds canonical_json_input_rejected)', () => {
     const reasons: readonly StateManifestSerializationReason[] = [
       'manifest_shape_invalid',
       'manifest_unknown_field',
       'manifest_unknown_version',
+      'canonical_json_input_rejected',
     ];
-    expect(reasons.length).toBe(3);
+    expect(reasons.length).toBe(4);
   });
 
   it('canonicalJsonBytes public overload accepts CanonicalJsonValue without a manual cast', () => {

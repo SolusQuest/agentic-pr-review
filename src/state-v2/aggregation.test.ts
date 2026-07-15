@@ -130,15 +130,38 @@ describe('bounded aggregation — required fixtures per candidate-v7', () => {
     expect(new Set(nonSentinel).size).toBe(nonSentinel.length);
   });
 
-  it('duplicate-rendered-entry: multiple unknown properties that all sanitize identically collapse to ONE wire entry', () => {
-    const raw = { foo1: 1, foo2: 2 };
-    const res = classifyRaw(raw);
-    expect(res.kind).toBe('invalid');
-    if (res.kind !== 'invalid') return;
+  it('duplicate-rendered-entry: two semantic violations at the SAME identity path collapse to ONE entry with no aggregate sentinel', async () => {
+    // A single identity string that violates BOTH the UTF-8 byte cap AND
+    // the control-character rule emits TWO structured candidates at the
+    // same rawSafePath. After rendering, they produce byte-identical
+    // wire entries. Dedup collapses to exactly ONE entry; the aggregate
+    // sentinel must NOT fire (no cap-forced truncation).
+    //
+    // We craft a value with:
+    //   - 256 UTF-16 code units (accepted by schema maxLength)
+    //   - >256 UTF-8 bytes (fails UTF-8 rule)
+    //   - one control character (fails control rule)
+    const { validateStateManifestV2 } = await import('./schema.js');
+    const { makeStateManifestV2Input } = await import('./test-helpers.js');
+    const { buildStateBundleV2 } = await import('./builder.js');
+    const built = buildStateBundleV2(makeStateManifestV2Input(), LEDGER_BYTES, METADATA_BYTES);
+    const clone = structuredClone(built.manifest) as unknown as Record<string, unknown>;
+    // 128 CJK (2 UTF-16 units each? no, 1 unit each for BMP CJK) + 1 control
+    // = 129 UTF-16 code units, 128*3 + 1 = 385 UTF-8 bytes. Both rules
+    // fire; schema maxLength (256) still satisfied.
+    (clone.cacheContractIdentity as any).providerId = '\u4e2d'.repeat(128) + '\u0001';
+    const res = validateStateManifestV2(clone);
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
     const nonSentinel = res.message.split('; ').filter((e) => e !== '...[truncated]');
-    for (const e of nonSentinel) expect(e.startsWith('x_invalid_field:')).toBe(true);
-    const untrusted = nonSentinel.filter((e) => e === 'x_invalid_field:/<untrusted-property>');
-    expect(untrusted.length).toBeLessThanOrEqual(1);
+    const dupeCount = nonSentinel.filter(
+      (e) => e === 'x_invalid_field:/cacheContractIdentity/providerId',
+    ).length;
+    expect(dupeCount).toBe(1);
+    // With no other invalid conditions in the manifest, the message
+    // should contain exactly one entry and NO aggregate sentinel.
+    expect(nonSentinel.length).toBe(1);
+    expect(res.message.endsWith('...[truncated]')).toBe(false);
   });
 
   it('post-truncation-wire-collision: 12 unknown property names all sanitize to <untrusted-property> and dedup to one entry', () => {
