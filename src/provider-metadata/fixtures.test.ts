@@ -17,6 +17,7 @@ interface InvalidEntry {
   file: string;
   valid: false;
   expectedCodes: string[];
+  encoding?: 'binary';
 }
 type ManifestEntry = ValidEntry | InvalidEntry;
 
@@ -80,8 +81,11 @@ describe('invalid fixtures produce the exact expected MetadataError[]', () => {
   for (const entry of manifest) {
     if (entry.valid) continue;
     it(`${entry.file} matches its .expected.json oracle exactly`, () => {
-      const text = readFileSync(join(fixturesDir, entry.file), 'utf8');
-      const r = parseProviderRunMetadata(encoder.encode(text));
+      const bytes: Uint8Array =
+        entry.encoding === 'binary'
+          ? new Uint8Array(readFileSync(join(fixturesDir, entry.file)))
+          : encoder.encode(readFileSync(join(fixturesDir, entry.file), 'utf8'));
+      const r = parseProviderRunMetadata(bytes);
       expect(r.valid).toBe(false);
       if (r.valid) return;
       // Also verify the manifest's expectedCodes are present (redundant sanity).

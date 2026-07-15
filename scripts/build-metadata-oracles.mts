@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseProviderRunMetadata } from '../src/provider-metadata/parse.js';
@@ -9,13 +9,17 @@ const manifest = JSON.parse(readFileSync(join(fixturesDir, 'manifest.json'), 'ut
   file: string;
   valid: boolean;
   expectedCodes?: string[];
+  encoding?: 'binary';
 }>;
 const enc = new TextEncoder();
 
 for (const entry of manifest) {
   if (entry.valid) continue;
-  const text = readFileSync(join(fixturesDir, entry.file), 'utf8');
-  const r = parseProviderRunMetadata(enc.encode(text));
+  const bytes =
+    entry.encoding === 'binary'
+      ? new Uint8Array(readFileSync(join(fixturesDir, entry.file)))
+      : enc.encode(readFileSync(join(fixturesDir, entry.file), 'utf8'));
+  const r = parseProviderRunMetadata(bytes);
   if (r.valid) throw new Error(`unexpected valid: ${entry.file}`);
   const oracle = { errors: r.errors };
   writeFileSync(

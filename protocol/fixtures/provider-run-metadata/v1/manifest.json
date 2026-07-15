@@ -223,5 +223,49 @@
     "file": "invalid-error-list-truncated.json",
     "valid": false,
     "expectedCodes": ["invalid-metadata-unknown-enum", "invalid-metadata-error-list-truncated"]
+  },
+  {
+    "file": "invalid-raw-bounds.bin",
+    "valid": false,
+    "expectedCodes": ["invalid-metadata-bounds"],
+    "encoding": "binary"
+  },
+  {
+    "file": "invalid-raw-bom.bin",
+    "valid": false,
+    "expectedCodes": ["invalid-metadata-bom"],
+    "encoding": "binary"
+  },
+  {
+    "file": "invalid-raw-utf8.bin",
+    "valid": false,
+    "expectedCodes": ["invalid-metadata-utf8"],
+    "encoding": "binary"
+  },
+  {
+    "file": "invalid-raw-json.bin",
+    "valid": false,
+    "expectedCodes": ["invalid-metadata-json"],
+    "encoding": "binary"
+  },
+  {
+    "file": "invalid-duplicate-root.json",
+    "valid": false,
+    "expectedCodes": ["invalid-metadata-duplicate-json-property"]
+  },
+  {
+    "file": "invalid-duplicate-nested.json",
+    "valid": false,
+    "expectedCodes": ["invalid-metadata-duplicate-json-property"]
+  },
+  {
+    "file": "invalid-unicode-root-nul.json",
+    "valid": false,
+    "expectedCodes": ["invalid-metadata-unicode"]
+  },
+  {
+    "file": "invalid-token-single-overflow.json",
+    "valid": false,
+    "expectedCodes": ["invalid-metadata-token-out-of-range"]
   }
 ]

@@ -18,6 +18,8 @@ import {
   UNKNOWN_POSITION,
   type SchemaNode,
 } from '../state-v2/shared-safe-path.js';
+import { parseProviderRunMetadata } from './parse.js';
+import metadataSchema from '../../protocol/schemas/provider-run-metadata.v1.json' with { type: 'json' };
 
 const EMPTY_SCHEMA: SchemaNode = {};
 
@@ -72,40 +74,90 @@ describe('shared conformance vector G4 -- NUL in property name at top level', ()
 });
 
 describe('shared conformance vector G5 -- empty property name at top level', () => {
-  it('shared traversal treats empty key as a valid schema position; only downstream schema stage flags it', () => {
-    // Stage 6 has no violation for an empty-name key that carries safe content.
+  it('shared traversal accepts empty-name key at stage 6 (no violation)', () => {
     const value: Record<string, unknown> = { '': 'ok' };
     const violation = scanStringSafety(value, EMPTY_SCHEMA);
     expect(violation).toBeUndefined();
   });
-});
-
-describe('shared conformance vector G6 -- schema-known ancestor chain with descendant lone-surrogate value', () => {
-  it('preserves the schema-known ancestor names verbatim (RFC 6901-escaped)', () => {
-    // Minimal schema: root object with a known property `stateKey` -> object
-    // with a known property `workflowIdentity` -> string.
-    const schema: SchemaNode = {
-      type: 'object',
-      properties: {
-        stateKey: {
-          type: 'object',
-          properties: { workflowIdentity: { type: 'string' } },
-          additionalProperties: false,
+  it('metadata parser rejects at stage 7 with invalid-metadata-additional-property and marker <empty-name>', () => {
+    const shape: Record<string, unknown> = {
+      schemaVersion: 1,
+      selectedProviderId: 'a',
+      observedProviderId: 'a',
+      resolvedModelId: 'm',
+      adapterId: 'a'.repeat(64),
+      logicalPrefixSha256: 'a'.repeat(64),
+      prefixSha256: 'a'.repeat(64),
+      capability: { mode: 'standard', aggregate: 'unknown', statelessProof: null },
+      cacheStatus: 'unknown',
+      normalizedUsage: {
+        attempts: [],
+        requests: [],
+        aggregate: {
+          totalInputTokens: null,
+          uncachedInputTokens: null,
+          cacheWriteInputTokens: null,
+          cacheReadInputTokens: null,
+          outputTokens: null,
+          requestCount: 0,
+          attemptCount: 0,
         },
       },
-      additionalProperties: false,
+      retryObservations: {
+        requests: [],
+        aggregate: {
+          requestCount: 0,
+          attemptCount: 0,
+          succeededCount: 0,
+          failedCount: 0,
+          cancelledCount: 0,
+        },
+      },
+      errorCodes: [],
+      telemetryCompleteness: {
+        usage: 'missing',
+        cache: 'missing',
+        statelessProof: 'notApplicable',
+        aggregate: 'missing',
+      },
+      producingRunId: '1',
+      runAttempt: 1,
+      interactionId: 'a'.repeat(64),
+      consumedInputSha256: 'a'.repeat(64),
+      resultSha256: 'a'.repeat(64),
+      traceSha256: 'a'.repeat(64),
+      predecessorLedgerSha256: 'bootstrap',
+      candidateLedgerSha256: 'a'.repeat(64),
     };
-    const value = { stateKey: { workflowIdentity: '\uD83D' } };
-    const violation = scanStringSafety(value, schema);
+    shape[''] = 'unknown';
+    const r = parseProviderRunMetadata(new TextEncoder().encode(JSON.stringify(shape)));
+    expect(r.valid).toBe(false);
+    if (r.valid) return;
+    const emptyErr = r.errors.find(
+      (e) => e.code === 'invalid-metadata-additional-property' && e.path === '/<empty-name>',
+    );
+    expect(emptyErr).toBeDefined();
+  });
+});
+
+describe('shared conformance vector G6 -- schema-known ancestor chain with descendant lone-surrogate value (metadata driver)', () => {
+  it('preserves the schema-known metadata ancestor names verbatim', () => {
+    // Use the actual metadata schema. Take a valid document, then inject a
+    // lone surrogate into a schema-valid string field. The stage-6 traversal
+    // must produce the exact schema-known safe path for that field.
+    const rawMetaSchema: SchemaNode = metadataSchema as unknown as SchemaNode;
+    const value = { selectedProviderId: 'a\uD83Db', unrelated: 1 };
+    const violation = scanStringSafety(value, rawMetaSchema);
     expect(violation).toBeDefined();
-    expect(safePath(violation!.segments)).toBe('/stateKey/workflowIdentity');
+    expect(safePath(violation!.segments)).toBe('/selectedProviderId');
   });
 });
 
 describe('shared conformance vector G7 -- well-formed surrogate pair in a schema-valid string field is accepted', () => {
-  it('no violation for U+1F600 grinning face', () => {
-    const value = { greeting: '\uD83D\uDE00' };
-    const violation = scanStringSafety(value, EMPTY_SCHEMA);
+  it('no stage-6 violation for U+1F600 grinning face inside a schema-known identity field', () => {
+    const rawMetaSchema: SchemaNode = metadataSchema as unknown as SchemaNode;
+    const value = { selectedProviderId: '\uD83D\uDE00', otherField: 1 };
+    const violation = scanStringSafety(value, rawMetaSchema);
     expect(violation).toBeUndefined();
   });
 });
@@ -140,12 +192,19 @@ describe('shared conformance vector V2 -- terminal <invalid-utf16> in an unknown
 });
 
 describe('shared conformance vector V3 -- resolver union child position (oneOf, per-branch assertions)', () => {
-  it('per-branch: branchA.payload.beta is unknown; branchB.payload.beta is known; aggregate is known', () => {
-    // Hypothetical schema from the shared subsection. Two oneOf branches share
-    // a `payload.beta` position but only branch B declares it.
+  it('per-branch: branchA payload.beta unknown; branchB payload.beta known; aggregate payload.beta known; extraneous unknown', () => {
+    // Hypothetical schema from the shared subsection. Branch A declares only
+    // alpha under payload; branch B declares only beta under payload. Neither
+    // branch declares 'extraneous'.
     const branchA: SchemaNode = {
       type: 'object',
-      properties: { payload: { type: 'object', properties: { alpha: { type: 'string' } } } },
+      properties: {
+        payload: {
+          type: 'object',
+          properties: { alpha: { type: 'string' } },
+          additionalProperties: false,
+        },
+      },
       additionalProperties: false,
     };
     const branchB: SchemaNode = {
@@ -153,7 +212,7 @@ describe('shared conformance vector V3 -- resolver union child position (oneOf, 
       properties: {
         payload: {
           type: 'object',
-          properties: { alpha: { type: 'string' }, beta: { type: 'string' } },
+          properties: { beta: { type: 'string' } },
           additionalProperties: false,
         },
       },
@@ -161,22 +220,32 @@ describe('shared conformance vector V3 -- resolver union child position (oneOf, 
     };
     const rootSchema: SchemaNode = { oneOf: [branchA, branchB] };
 
-    // Per-branch checks: normalize each branch separately.
     const posA = normalizePosition(branchA, new Set(), rootSchema);
     const posB = normalizePosition(branchB, new Set(), rootSchema);
     const posPayloadA = resolveProperty(posA, 'payload').childSchemaPosition;
     const posPayloadB = resolveProperty(posB, 'payload').childSchemaPosition;
-    const resolveA = resolveProperty(posPayloadA, 'beta');
-    const resolveB = resolveProperty(posPayloadB, 'beta');
-    expect(resolveA.schemaKnown).toBe(false);
-    expect(resolveB.schemaKnown).toBe(true);
 
-    // Aggregate: normalized root sees `payload.beta` as schema-known through
-    // the union of oneOf branches.
+    expect(resolveProperty(posPayloadA, 'beta').schemaKnown).toBe(false);
+    expect(resolveProperty(posPayloadB, 'beta').schemaKnown).toBe(true);
+    expect(resolveProperty(posPayloadA, 'alpha').schemaKnown).toBe(true);
+    expect(resolveProperty(posPayloadB, 'alpha').schemaKnown).toBe(false);
+
+    // Aggregate: root sees payload.beta as schema-known via union of branches.
     const posRoot = normalizePosition(rootSchema, new Set(), rootSchema);
     const posPayloadRoot = resolveProperty(posRoot, 'payload').childSchemaPosition;
-    const resolveRoot = resolveProperty(posPayloadRoot, 'beta');
-    expect(resolveRoot.schemaKnown).toBe(true);
+    expect(resolveProperty(posPayloadRoot, 'beta').schemaKnown).toBe(true);
+    expect(resolveProperty(posPayloadRoot, 'alpha').schemaKnown).toBe(true);
+
+    // Extraneous property is unknown in every position.
+    expect(resolveProperty(posPayloadA, 'extraneous').schemaKnown).toBe(false);
+    expect(resolveProperty(posPayloadB, 'extraneous').schemaKnown).toBe(false);
+    expect(resolveProperty(posPayloadRoot, 'extraneous').schemaKnown).toBe(false);
+
+    // Terminal NUL traversal: scanStringSafety on { payload: { beta: '\u0000' } }
+    // yields /payload/beta because beta is schema-known at the aggregate root.
+    const violation = scanStringSafety({ payload: { beta: '\u0000' } }, rootSchema);
+    expect(violation).toBeDefined();
+    expect(safePath(violation!.segments)).toBe('/payload/beta');
   });
 });
 

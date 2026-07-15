@@ -115,3 +115,33 @@ describe('parse pipeline: fail-closed valid input', () => {
     }
   });
 });
+
+describe('stage 4/6 iterative safety on deeply-nested JSON within METADATA_MAX_BYTES', () => {
+  it('does not throw a RangeError for ~16000 nested arrays containing 0', () => {
+    // ~32 KiB ASCII: 16000 '[' + '0' + 16000 ']'. Well within METADATA_MAX_BYTES.
+    const depth = 16000;
+    const text = '['.repeat(depth) + '0' + ']'.repeat(depth);
+    // Must complete without throwing. Result will fail at stage 7 (schema)
+    // because it's not a metadata object, but that's a normal validation
+    // failure -- what matters is the absence of stack overflow.
+    expect(() => parseProviderRunMetadata(new TextEncoder().encode(text))).not.toThrow();
+  });
+  it('does not throw a RangeError for ~8000 nested objects with a schema-valid trailing structure', () => {
+    // 8000 '{"a":' + '1' + 8000 '}' -> ~24 KiB.
+    const depth = 8000;
+    const opens = '{"a":'.repeat(depth);
+    const closes = '}'.repeat(depth);
+    const text = opens + '1' + closes;
+    expect(() => parseProviderRunMetadata(new TextEncoder().encode(text))).not.toThrow();
+  });
+});
+
+describe('stage-4 precedes stage-5 (malformed JSON wins over duplicate detection)', () => {
+  it('duplicate root property followed by a trailing comma returns invalid-metadata-json', () => {
+    const r = parseProviderRunMetadata(new TextEncoder().encode('{"a": 1, "a": 2,}'));
+    expect(r.valid).toBe(false);
+    if (!r.valid) {
+      expect(r.errors[0]!.code).toBe('invalid-metadata-json');
+    }
+  });
+});

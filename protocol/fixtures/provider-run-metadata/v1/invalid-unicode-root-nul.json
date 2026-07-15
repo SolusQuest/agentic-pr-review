@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "selectedProviderId": "bad\u0000char",
+  "observedProviderId": "a",
+  "resolvedModelId": "m",
+  "adapterId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "logicalPrefixSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "prefixSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "capability": {
+    "mode": "standard",
+    "aggregate": "unknown",
+    "statelessProof": null
+  },
+  "cacheStatus": "unknown",
+  "normalizedUsage": {
+    "attempts": [],
+    "requests": [],
+    "aggregate": {
+      "totalInputTokens": null,
+      "uncachedInputTokens": null,
+      "cacheWriteInputTokens": null,
+      "cacheReadInputTokens": null,
+      "outputTokens": null,
+      "requestCount": 0,
+      "attemptCount": 0
+    }
+  },
+  "retryObservations": {
+    "requests": [],
+    "aggregate": {
+      "requestCount": 0,
+      "attemptCount": 0,
+      "succeededCount": 0,
+      "failedCount": 0,
+      "cancelledCount": 0
+    }
+  },
+  "errorCodes": [],
+  "telemetryCompleteness": {
+    "usage": "missing",
+    "cache": "missing",
+    "statelessProof": "notApplicable",
+    "aggregate": "missing"
+  },
+  "producingRunId": "1",
+  "runAttempt": 1,
+  "interactionId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "consumedInputSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "resultSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "traceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "predecessorLedgerSha256": "bootstrap",
+  "candidateLedgerSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

@@ -20,7 +20,7 @@ describe('stage 7 ordered-exception mapping produces per-Ajv-error codes', () =>
     // Build a minimal shape violating two schema keywords at different paths:
     //  - `cacheStatus`: unknown enum value.
     //  - `producingRunId`: fails the ^[1-9][0-9]{0,18}$ pattern.
-    // The pattern failure is neither additionalProperties, enum, nor a
+    // The maxLength failure is neither additionalProperties, enum, nor a
     // token-field maximum, so it maps to `invalid-metadata-schema`. The enum
     // failure maps to `invalid-metadata-unknown-enum`. Both must be present in
     // the returned MetadataError[] after deterministic sorting.
@@ -28,7 +28,7 @@ describe('stage 7 ordered-exception mapping produces per-Ajv-error codes', () =>
       schemaVersion: 1,
       selectedProviderId: 'a',
       observedProviderId: 'a',
-      resolvedModelId: 'm',
+      resolvedModelId: 'x'.repeat(300),
       adapterId: 'a'.repeat(64),
       logicalPrefixSha256: 'a'.repeat(64),
       prefixSha256: 'a'.repeat(64),
@@ -64,7 +64,7 @@ describe('stage 7 ordered-exception mapping produces per-Ajv-error codes', () =>
         statelessProof: 'notApplicable',
         aggregate: 'missing',
       },
-      producingRunId: 'not-a-number', // fails pattern
+      producingRunId: '1',
       runAttempt: 1,
       interactionId: 'a'.repeat(64),
       consumedInputSha256: 'a'.repeat(64),
@@ -83,8 +83,8 @@ describe('stage 7 ordered-exception mapping produces per-Ajv-error codes', () =>
     const enumErr = r.errors.find((e) => e.code === 'invalid-metadata-unknown-enum')!;
     const schemaErr = r.errors.find((e) => e.code === 'invalid-metadata-schema')!;
     expect(enumErr.path).toBe('/cacheStatus');
-    expect(schemaErr.path).toBe('/producingRunId');
-    // /cacheStatus < /producingRunId in byte order.
+    expect(schemaErr.path).toBe('/resolvedModelId');
+    // /cacheStatus < /resolvedModelId in byte order.
     expect(r.errors.findIndex((e) => e === enumErr)).toBeLessThan(
       r.errors.findIndex((e) => e === schemaErr),
     );
