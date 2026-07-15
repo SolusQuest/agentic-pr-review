@@ -536,35 +536,9 @@ Algorithm (deterministic; produces the same bytes on every implementation):
 
 `<path-truncated>` never appears in an untruncated path. Sibling test suites include **two deep-path** golden vectors per sidecar (a no-truncation vector verifying the pre-check branch, and a truncation vector verifying the greedy-truncation branch), defined by a specific nested chain of `<untrusted-property>` segments long enough to force truncation. Each sidecar's deep-path expected output is byte-exact and includes the code prefix (or, for #51, the exact `MetadataError.path`). Deep-path expected outputs for the three sidecars follow (schema-known ancestors elided as `...`):
 
-**Diagnostic-text counting unit and dual-cap discipline.** All
-`length` values in the truncation formula are UTF-16 code-unit
-counts, matching TypeScript's `String.length` and C#'s
-`String.Length`. UTF-8 byte length is computed separately. The
-bounded diagnostic text field — `message` for #48/#49 and `path`
-for #51 — is capped at 256 UTF-16 code units AND 1024 UTF-8
-bytes, whichever binds first. For every well-formed UTF-16
-string, `utf8Length(s) <= 3 * s.length` (a single non-surrogate
-BMP code unit encodes to at most 3 UTF-8 bytes; a surrogate pair
-is 2 UTF-16 code units and encodes to 4 UTF-8 bytes, still
-`<= 3 * 2`). So 256 UTF-16 code units yield at most 768 UTF-8
-bytes, well below 1024, and the character cap therefore always
-binds first under the current caps. The safe-path contract
-further ensures that only schema-known ASCII property names pass
-through the sanitizer (every other name becomes one of a small
-set of ASCII markers). All property names declared by the current
-three sidecar schemas are ASCII, so the emitted bounded
-diagnostic text (the `message` for #48/#49 or the `path` for
-#51) is in practice pure ASCII and its UTF-8 byte length equals
-its UTF-16 code-unit length. Nevertheless, implementations MUST
-still compute both budgets and the emitted result MUST satisfy
-both; there is no secondary rejection. If the byte budget were
-ever to bind first, the truncation algorithm's identical
-structure (replace `char` with `byte` in the formulas below)
-produces the same shape of result.
+**Diagnostic-text counting unit and dual-cap discipline.** All `length` values in the truncation formula are UTF-16 code-unit counts, matching TypeScript's `String.length` and C#'s `String.Length`. UTF-8 byte length is computed separately. The bounded diagnostic text field — `message` for #48/#49 and `path` for #51 — is capped at 256 UTF-16 code units AND 1024 UTF-8 bytes, whichever binds first. For every well-formed UTF-16 string, `utf8Length(s) <= 3 * s.length` (a single non-surrogate BMP code unit encodes to at most 3 UTF-8 bytes; a surrogate pair is 2 UTF-16 code units and encodes to 4 UTF-8 bytes, still `<= 3 * 2`). So 256 UTF-16 code units yield at most 768 UTF-8 bytes, well below 1024, and the character cap therefore always binds first under the current caps. The safe-path contract further ensures that only schema-known ASCII property names pass through the sanitizer (every other name becomes one of a small set of ASCII markers). All property names declared by the current three sidecar schemas are ASCII, so the emitted bounded diagnostic text (the `message` for #48/#49 or the `path` for #51) is in practice pure ASCII and its UTF-8 byte length equals its UTF-16 code-unit length. Nevertheless, implementations MUST still compute both budgets and the emitted result MUST satisfy both; there is no secondary rejection. If the byte budget were ever to bind first, the truncation algorithm's identical structure (replace `char` with `byte` in the formulas below) produces the same shape of result.
 
-**Parametric truncation formulas (final-segment-aware).** The
-`reserved` budget depends on the actual final segment (never
-hard-code `38`):
+**Parametric truncation formulas (final-segment-aware).** The `reserved` budget depends on the actual final segment (never hard-code `38`):
 
 ```
 reserved_chars  = length("/<path-truncated>") + length("/" + finalSegment)
@@ -577,22 +551,9 @@ total_chars     = codePrefixChars
                 + length("/" + finalSegment)
 ```
 
-The `leadingCount = floor(...)` closed form applies only when
-every leading segment has the same length (the case exercised by
-the deep-path oracle below, where every unknown ancestor is
-sanitized to `<untrusted-property>`). For paths mixing different
-sanitized ancestor lengths (schema-known names, `<empty-name>`,
-`<invalid-control>`, etc.), the general truncation algorithm
-above continues to be the authoritative behavior: iterate over
-segments, accumulate greedily, stop when adding the next one
-would exceed `charBudget - reserved_chars` or its byte
-counterpart.
+The `leadingCount = floor(...)` closed form applies only when every leading segment has the same length (the case exercised by the deep-path oracle below, where every unknown ancestor is sanitized to `<untrusted-property>`). For paths mixing different sanitized ancestor lengths (schema-known names, `<empty-name>`, `<invalid-control>`, etc.), the general truncation algorithm above continues to be the authoritative behavior: iterate over segments, accumulate greedily, stop when adding the next one would exceed `charBudget - reserved_chars` or its byte counterpart.
 
-For the `x_invalid_unicode:` producer (`codePrefixChars = 18`,
-`charBudget = 256 - 18 = 238`), with `leadingSegment =
-"<untrusted-property>"` (marker length 20, slash-plus-marker
-length 21), the reference table below shows how the formula
-depends on the final segment (all values in UTF-16 code units):
+For the `x_invalid_unicode:` producer (`codePrefixChars = 18`, `charBudget = 256 - 18 = 238`), with `leadingSegment = "<untrusted-property>"` (marker length 20, slash-plus-marker length 21), the reference table below shows how the formula depends on the final segment (all values in UTF-16 code units):
 
 | finalSegment           | marker_chars | slash_plus_marker_chars | reserved_chars | allowance_chars | leadingCount | total_chars |
 | ---------------------- | ------------ | ----------------------- | -------------- | --------------- | ------------ | ----------- |
@@ -602,140 +563,70 @@ depends on the final segment (all values in UTF-16 code units):
 | `<invalid-control>`    | 17           | 18                      | 35             | 203             | 9            | 242         |
 | `<empty-name>`         | 12           | 13                      | 30             | 208             | 9            | 237         |
 
-The same formulas apply for `ledger_invalid_unicode:`
-(`codePrefixChars = 23`) and for #51's independent `path` field
-(`fieldPrefixChars = 0` because #51 emits `path` and `code` as
-separate fields; `path` alone gets the full 256-code-unit budget).
+The same formulas apply for `ledger_invalid_unicode:` (`codePrefixChars = 23`) and for #51's independent `path` field (`fieldPrefixChars = 0` because #51 emits `path` and `code` as separate fields; `path` alone gets the full 256-code-unit budget).
 
-**Concrete deep-path golden vectors — frozen oracle.** Each
-sidecar has TWO named vectors (a no-truncation case for the
-pre-check branch and a truncation case for the greedy-truncation
-branch). All input shapes and expected outputs below are frozen
-literals; producer implementations MUST reproduce these exact
-bytes.
+**Concrete deep-path golden vectors — frozen oracle.** Each sidecar has TWO named vectors (a no-truncation case for the pre-check branch and a truncation case for the greedy-truncation branch). All input shapes and expected outputs below are frozen literals; producer implementations MUST reproduce these exact bytes.
 
-Each vector is characterized by `fullSanitizedSegmentCount` — the
-number of `<untrusted-property>` segments in the fully sanitized
-path BEFORE any truncation is applied. For a no-truncation vector,
-this equals the number of segments in the emitted path. For a
-truncation vector, this equals the number of segments in the
-notional pre-truncation path (unknown ancestors + terminal leaf
-property), which the truncation algorithm then trims to
-`leadingCount + 2` emitted segments.
+Each vector is characterized by `fullSanitizedSegmentCount` — the number of `<untrusted-property>` segments in the fully sanitized path BEFORE any truncation is applied. For a no-truncation vector, this equals the number of segments in the emitted path. For a truncation vector, this equals the number of segments in the notional pre-truncation path (unknown ancestors + terminal leaf property), which the truncation algorithm then trims to `leadingCount + 2` emitted segments.
 
 All six vectors share the following input shape rules:
 
 - The parsed root JSON value is an object whose UTF-16-sorted keys
-  contain exactly one unknown top-level key that begins the
-  diagnostic path; every other required top-level field for the
-  sidecar's schema is present and valid so the unknown key is the
-  first violation the traversal reaches.
+  contain exactly one unknown top-level key that begins the diagnostic path; every other required top-level field for the sidecar's schema is present and valid so the unknown key is the first violation the traversal reaches.
 - The unknown chain is a nested chain of objects, each with a
-  single property whose name is a well-formed ASCII string not
-  declared in the sidecar's schema at that depth (so every
-  sanitized segment is `<untrusted-property>` under the six-rule
-  table).
+  single property whose name is a well-formed ASCII string not declared in the sidecar's schema at that depth (so every sanitized segment is `<untrusted-property>` under the six-rule table).
 - The terminal value is a single-code-unit string containing the
-  unpaired UTF-16 high surrogate `U+D800`; the string-safety
-  stage rejects it as a value-level violation and emits the safe
-  path pointing at the leaf value's location.
+  unpaired UTF-16 high surrogate `U+D800`; the string-safety stage rejects it as a value-level violation and emits the safe path pointing at the leaf value's location.
 - No earlier UTF-16-sorted property, and no earlier sibling under
-  any ancestor, contains a violation that would fire before the
-  unknown chain.
+  any ancestor, contains a violation that would fire before the unknown chain.
 
-The `code`/`path` shape below is: `<code>:<path>` in a single
-`message` string for #48 and #49; separate `code` and `path`
-fields on `MetadataError` for #51 (the `code` value is
-`invalid-metadata-unicode`; the diagnostic-text column below is
-the full value of `path`).
+The `code`/`path` shape below is: `<code>:<path>` in a single `message` string for #48 and #49; separate `code` and `path` fields on `MetadataError` for #51 (the `code` value is `invalid-metadata-unicode`; the diagnostic-text column below is the full value of `path`).
 
 - `manifest-deep-path-no-truncation` — `fullSanitizedSegmentCount
-= 9` (8 unknown ancestors above the terminal `U+D800` value,
-  plus the terminal leaf property; the entire chain is top-level
-  in a v2 manifest object). `codePrefixChars = 18`,
-  `charBudget = 238`, no truncation, `total_chars = 207`.
-  Expected `message`:
+= 9` (8 unknown ancestors above the terminal `U+D800` value, plus the terminal leaf property; the entire chain is top-level in a v2 manifest object). `codePrefixChars = 18`, `charBudget = 238`, no truncation, `total_chars = 207`. Expected `message`:
 
   ```
   x_invalid_unicode:/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>
   ```
 
 - `manifest-deep-path-truncation` — `fullSanitizedSegmentCount =
-13` (12 unknown ancestors above the terminal `U+D800` value,
-  plus the terminal leaf property; top-level in a v2 manifest
-  object). `codePrefixChars = 18`, `charBudget = 238`,
-  `finalSegment = <untrusted-property>`, `reserved_chars = 38`,
-  `allowance_chars = 200`, `leadingCount = 9`,
-  `total_chars = 245`. Expected `message`:
+13` (12 unknown ancestors above the terminal `U+D800` value, plus the terminal leaf property; top-level in a v2 manifest object). `codePrefixChars = 18`, `charBudget = 238`, `finalSegment = <untrusted-property>`, `reserved_chars = 38`, `allowance_chars = 200`, `leadingCount = 9`, `total_chars = 245`. Expected `message`:
 
   ```
   x_invalid_unicode:/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<path-truncated>/<untrusted-property>
   ```
 
 - `ledger-deep-path-no-truncation` — `fullSanitizedSegmentCount
-= 9` (8 unknown ancestors above the terminal `U+D800` value,
-  plus the terminal leaf property; the entire chain is top-level
-  in a ledger object; the unknown chain starts at the ledger root,
-  so no `review_context / changedFiles / patch` prefix appears in
-  the path). `codePrefixChars = 23`, `charBudget = 233`, no
-  truncation, `total_chars = 212`. Expected `message`:
+= 9` (8 unknown ancestors above the terminal `U+D800` value, plus the terminal leaf property; the entire chain is top-level in a ledger object; the unknown chain starts at the ledger root, so no `review_context / changedFiles / patch` prefix appears in the path). `codePrefixChars = 23`, `charBudget = 233`, no truncation, `total_chars = 212`. Expected `message`:
 
   ```
   ledger_invalid_unicode:/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>
   ```
 
 - `ledger-deep-path-truncation` — `fullSanitizedSegmentCount = 13`
-  (12 unknown ancestors above the terminal `U+D800` value, plus
-  the terminal leaf property; top-level in a ledger object).
-  `codePrefixChars = 23`, `charBudget = 233`,
-  `finalSegment = <untrusted-property>`, `reserved_chars = 38`,
-  `allowance_chars = 195`, `leadingCount = 9`,
-  `total_chars = 250`. Expected `message`:
+  (12 unknown ancestors above the terminal `U+D800` value, plus the terminal leaf property; top-level in a ledger object). `codePrefixChars = 23`, `charBudget = 233`, `finalSegment = <untrusted-property>`, `reserved_chars = 38`, `allowance_chars = 195`, `leadingCount = 9`, `total_chars = 250`. Expected `message`:
 
   ```
   ledger_invalid_unicode:/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<path-truncated>/<untrusted-property>
   ```
 
 - `metadata-deep-path-no-truncation` — `fullSanitizedSegmentCount
-= 10` (9 unknown ancestors above the terminal `U+D800` value,
-  plus the terminal leaf property; top-level in a metadata
-  object). `codePrefixChars = 0` (path field only),
-  `charBudget = 256`, no truncation, `total_chars = 210`.
-  Expected `path`:
+= 10` (9 unknown ancestors above the terminal `U+D800` value, plus the terminal leaf property; top-level in a metadata object). `codePrefixChars = 0` (path field only), `charBudget = 256`, no truncation, `total_chars = 210`. Expected `path`:
 
   ```
   /<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>
   ```
 
 - `metadata-deep-path-truncation` — `fullSanitizedSegmentCount =
-14` (13 unknown ancestors above the terminal `U+D800` value,
-  plus the terminal leaf property; top-level in a metadata
-  object). `codePrefixChars = 0`, `charBudget = 256`,
-  `finalSegment = <untrusted-property>`, `reserved_chars = 38`,
-  `allowance_chars = 218`, `leadingCount = 10`,
-  `total_chars = 248`. Expected `path`:
+14` (13 unknown ancestors above the terminal `U+D800` value, plus the terminal leaf property; top-level in a metadata object). `codePrefixChars = 0`, `charBudget = 256`, `finalSegment = <untrusted-property>`, `reserved_chars = 38`, `allowance_chars = 218`, `leadingCount = 10`, `total_chars = 248`. Expected `path`:
 
   ```
   /<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<path-truncated>/<untrusted-property>
   ```
 
-All expected diagnostic-text strings are ASCII (byte length equals
-UTF-16 code-unit length; the six lengths are 207 / 245 / 212 /
-250 / 210 / 248 respectively). The code-fenced expected text is
-the entire single-line ASCII string between the opening and
-closing fences; neither the fence delimiters nor a trailing LF is
-part of the literal.
+All expected diagnostic-text strings are ASCII (byte length equals UTF-16 code-unit length; the six lengths are 207 / 245 / 212 / 250 / 210 / 248 respectively). The code-fenced expected text is the entire single-line ASCII string between the opening and closing fences; neither the fence delimiters nor a trailing LF is part of the literal.
 
-Producer-side tests assert the full expected `message` / `path`
-byte-exact against these frozen literals (test-lookup by vector
-ID). `<code>:` prefixes and delimiter characters are counted per
-the parametric formulas above. Neither branch's expected output
-is re-derived from the production implementation; both are
-computed once and stored as constants in the test source. These
-six byte-exact strings are owned by this section (single
-normative source, see "Single normative source"); workstream
-issues MUST reference them by vector ID and MUST NOT re-state
-them.
+Producer-side tests assert the full expected `message` / `path` byte-exact against these frozen literals (test-lookup by vector ID). `<code>:` prefixes and delimiter characters are counted per the parametric formulas above. Neither branch's expected output is re-derived from the production implementation; both are computed once and stored as constants in the test source. These six byte-exact strings are owned by this section (single normative source, see "Single normative source"); workstream issues MUST reference them by vector ID and MUST NOT re-state them.
 
 **No untrusted content is ever placed in the diagnostic message.** Every sidecar's Acceptance Criteria includes the following **shared golden vectors** (each sidecar realises them with sidecar-specific code prefix and MetadataError / BundleClassification / LedgerDiagnostic shape):
 
@@ -764,14 +655,7 @@ Each sibling test suite implements these seven vectors with the workstream-appro
 
 ### Schema-position resolver
 
-The safe diagnostic path stage (see "Safe diagnostic path for
-Unicode / additional-property rejections") and the shared
-traversal below both depend on a deterministic way to decide, at
-every position in the parsed sidecar value, whether a property or
-array item is declared by the sidecar's closed JSON Schema. That
-decision MUST be identical across languages so the emitted safe
-paths byte-equal each other. This subsection defines that
-resolver.
+The safe diagnostic path stage (see "Safe diagnostic path for Unicode / additional-property rejections") and the shared traversal below both depend on a deterministic way to decide, at every position in the parsed sidecar value, whether a property or array item is declared by the sidecar's closed JSON Schema. That decision MUST be identical across languages so the emitted safe paths byte-equal each other. This subsection defines that resolver.
 
 **Types.**
 
@@ -780,21 +664,13 @@ resolver.
   - `UnknownPosition` — a sentinel; the resolver treats every key
     or item on this position as not schema-known.
   - `ObjectPosition(node, activeSchemaNodes)` — an object-shape
-    position carrying the immutable per-call-chain
-    `activeSchemaNodes` snapshot from the `normalizePosition`
-    invocation that produced it.
+    position carrying the immutable per-call-chain `activeSchemaNodes` snapshot from the `normalizePosition` invocation that produced it.
   - `ArrayPosition(node, activeSchemaNodes)` — an array-shape
-    position carrying the same kind of snapshot; `node.items`
-    is required to be a single JSON Schema (M4 sidecar schemas
-    MUST NOT use tuple-form `items` or `additionalItems`; a
-    build-time schema-conformance test rejects both).
+    position carrying the same kind of snapshot; `node.items` is required to be a single JSON Schema (M4 sidecar schemas MUST NOT use tuple-form `items` or `additionalItems`; a build-time schema-conformance test rejects both).
   - `CompositePosition(children)` — a structural representation
-    for positions produced by schema composition; recursive
-    resolution semantics below.
+    for positions produced by schema composition; recursive resolution semantics below.
 
-`resolveProperty(UnknownPosition, _)` and
-`resolveArrayItem(UnknownPosition)` always return
-`{ schemaKnown: false, childSchemaPosition: UnknownPosition }`.
+`resolveProperty(UnknownPosition, _)` and `resolveArrayItem(UnknownPosition)` always return `{ schemaKnown: false, childSchemaPosition: UnknownPosition }`.
 
 **Ordinary object position.**
 
@@ -862,17 +738,7 @@ resolveArrayItem(CompositePosition(children)):
              CompositePosition(deduplicate(matches)) }
 ```
 
-`deduplicate` treats two positions as identical only when their
-source schema node, their `activeSchemaNodes` snapshot, AND their
-recursive composite shape all match. Positions produced from the
-same schema node under different `activeSchemaNodes` snapshots are
-NOT merged (their cycle behavior may differ). When a
-`CompositePosition` reduces to a single child (after deduplication),
-implementations MAY replace it with that single child; observable
-behavior on the conformance vectors below is unchanged either way.
-The internal data structure used by any language binding may
-differ; its externally observable resolution behavior on the
-conformance vectors below MUST match byte-exactly.
+`deduplicate` treats two positions as identical only when their source schema node, their `activeSchemaNodes` snapshot, AND their recursive composite shape all match. Positions produced from the same schema node under different `activeSchemaNodes` snapshots are NOT merged (their cycle behavior may differ). When a `CompositePosition` reduces to a single child (after deduplication), implementations MAY replace it with that single child; observable behavior on the conformance vectors below is unchanged either way. The internal data structure used by any language binding may differ; its externally observable resolution behavior on the conformance vectors below MUST match byte-exactly.
 
 **Normalization.**
 
@@ -911,180 +777,48 @@ normalizePosition(node, activeSchemaNodes = empty set):
   return CompositePosition(positions)
 ```
 
-`activeSchemaNodes` is the set of schema-node identities currently
-on the normalization call stack (root, inline object/array
-schemas, composition branch subschemas, and `$ref` targets alike).
-It is a per-call chain, not a global visited-set. A schema that
-legitimately visits the same target twice from two independent
-branches (each with its own descent) is normalized correctly:
-only when a schema node reappears in its own descent chain is it
-treated as a cycle and returned as `UnknownPosition`. This closes
-both `$ref`-driven cycles and cycles that arise via inline
-structural back-edges (e.g. a child's `$ref` pointing to an
-ancestor object that was itself entered without a `$ref`). The
-three sidecar schemas MUST form an acyclic `$ref` graph; a
-build-time conformance test (owned by whichever workstream ships
-the schema file) rejects every direct or indirect cycle. The
-runtime cycle guard above is defense-in-depth so a cycle
-introduced by a future schema change or a test regression
-degrades to `UnknownPosition` rather than infinite recursion.
-Implementations MUST NOT rely on an implementation-defined
-recursion or depth limit.
+`activeSchemaNodes` is the set of schema-node identities currently on the normalization call stack (root, inline object/array schemas, composition branch subschemas, and `$ref` targets alike). It is a per-call chain, not a global visited-set. A schema that legitimately visits the same target twice from two independent branches (each with its own descent) is normalized correctly: only when a schema node reappears in its own descent chain is it treated as a cycle and returned as `UnknownPosition`. This closes both `$ref`-driven cycles and cycles that arise via inline structural back-edges (e.g. a child's `$ref` pointing to an ancestor object that was itself entered without a `$ref`). The three sidecar schemas MUST form an acyclic `$ref` graph; a build-time conformance test (owned by whichever workstream ships the schema file) rejects every direct or indirect cycle. The runtime cycle guard above is defense-in-depth so a cycle introduced by a future schema change or a test regression degrades to `UnknownPosition` rather than infinite recursion. Implementations MUST NOT rely on an implementation-defined recursion or depth limit.
 
-`canonicalSchemaNodeIdentity(node)` is a stable identity of the
-schema node itself (e.g. its canonical URI + JSON Pointer within
-its schema document, or an equivalent normalized form). When the
-resolver dereferences a `$ref`, the identity added to
-`activeSchemaNodes` is the identity of the dereferenced target
-node, not the literal `$ref` string, so two syntactically
-different references to the same target share one identity.
+`canonicalSchemaNodeIdentity(node)` is a stable identity of the schema node itself (e.g. its canonical URI + JSON Pointer within its schema document, or an equivalent normalized form). When the resolver dereferences a `$ref`, the identity added to `activeSchemaNodes` is the identity of the dereferenced target node, not the literal `$ref` string, so two syntactically different references to the same target share one identity.
 
-**Union / composition summary.** `oneOf` / `anyOf` / `allOf`
-compositions are handled by `normalizePosition` above: each branch
-normalizes recursively (with the current descent chain) and the
-whole node becomes a `CompositePosition` whose children include
-any direct object/array declaration on the same node plus each
-branch's normalization. `oneOf` and `anyOf` behave identically for
-safe-path purposes (a key is `schemaKnown` iff any branch declares
-it); `allOf` behaves like a union of declared-property maps at
-the safe-path level (runtime schema validation may impose a
-stricter intersection, but that is a schema-stage concern and not
-a safe-path concern). Discriminated header variants are treated
-as `oneOf`; the resolver does NOT pre-select a branch by
-discriminator, because pre-selection would give the discriminator
-field's own value a schema-driving role before its Unicode/string
-safety is verified.
+**Union / composition summary.** `oneOf` / `anyOf` / `allOf` compositions are handled by `normalizePosition` above: each branch normalizes recursively (with the current descent chain) and the whole node becomes a `CompositePosition` whose children include any direct object/array declaration on the same node plus each branch's normalization. `oneOf` and `anyOf` behave identically for safe-path purposes (a key is `schemaKnown` iff any branch declares it); `allOf` behaves like a union of declared-property maps at the safe-path level (runtime schema validation may impose a stricter intersection, but that is a schema-stage concern and not a safe-path concern). Discriminated header variants are treated as `oneOf`; the resolver does NOT pre-select a branch by discriminator, because pre-selection would give the discriminator field's own value a schema-driving role before its Unicode/string safety is verified.
 
-**Undeclared-property behavior.** A position that either permits
-arbitrary property names (open positions with
-`additionalProperties: true` or an omitted `properties` list) or
-forbids property names outside the declared list (closed positions
-with `additionalProperties: false` and the requested key not in
-the `properties` list) yields `schemaKnown = false` for the
-requested key with `childSchemaPosition = UnknownPosition`. Only
-keys explicitly declared under `properties` at that position
-produce `schemaKnown = true`. This applies to `ObjectPosition`,
-`ArrayPosition`, and every `CompositePosition` whose recursion
-base cases hit `UnknownPosition`.
+**Undeclared-property behavior.** A position that either permits arbitrary property names (open positions with `additionalProperties: true` or an omitted `properties` list) or forbids property names outside the declared list (closed positions with `additionalProperties: false` and the requested key not in the `properties` list) yields `schemaKnown = false` for the requested key with `childSchemaPosition = UnknownPosition`. Only keys explicitly declared under `properties` at that position produce `schemaKnown = true`. This applies to `ObjectPosition`, `ArrayPosition`, and every `CompositePosition` whose recursion base cases hit `UnknownPosition`.
 
-**Unsupported schema keywords.** Keywords other than the ones
-supported above (in particular `if` / `then` / `else`, `not`,
-`dependencies`, `patternProperties`, tuple-form `items`,
-`additionalItems`) contribute no schema-known keys, but their
-presence at a node does NOT erase knowledge produced by supported
-siblings at the same node. Concretely, if a node declares both
-`properties.known` (supported) and `patternProperties.^x`
-(unsupported), a caller that has an
-`ObjectPosition(node, activeSchemaNodes)` for that node observes
-`resolveProperty(objectPos, "known")` return `schemaKnown = true`
-with the declared child's normalized position, and
-`resolveProperty(objectPos, "other")` return `schemaKnown = false`
-with `UnknownPosition`.
+**Unsupported schema keywords.** Keywords other than the ones supported above (in particular `if` / `then` / `else`, `not`, `dependencies`, `patternProperties`, tuple-form `items`, `additionalItems`) contribute no schema-known keys, but their presence at a node does NOT erase knowledge produced by supported siblings at the same node. Concretely, if a node declares both `properties.known` (supported) and `patternProperties.^x` (unsupported), a caller that has an `ObjectPosition(node, activeSchemaNodes)` for that node observes `resolveProperty(objectPos, "known")` return `schemaKnown = true` with the declared child's normalized position, and `resolveProperty(objectPos, "other")` return `schemaKnown = false` with `UnknownPosition`.
 
-**Root-call convention.** The traversal is invoked as
-`scan(rootValue, "", rootSchemaPosition, /*trustedChain=*/ true)`
-where `rootSchemaPosition = normalizePosition(rootSidecarSchema, {})`.
+**Root-call convention.** The traversal is invoked as `scan(rootValue, "", rootSchemaPosition, /*trustedChain=*/ true)` where `rootSchemaPosition = normalizePosition(rootSidecarSchema, {})`.
 
 **Fail-closed rule.** There are two distinct failure surfaces:
 
 - `normalizePosition` failures (missing schema node, malformed
-  supported-keyword shape, malformed `$ref`, prohibited `$ref`
-  sibling, dereference failure, or schema-node cycle detected by
-  the `activeSchemaNodes` guard) return `UnknownPosition`.
+  supported-keyword shape, malformed `$ref`, prohibited `$ref` sibling, dereference failure, or schema-node cycle detected by the `activeSchemaNodes` guard) return `UnknownPosition`.
 - `resolveProperty` / `resolveArrayItem` return
-  `{ schemaKnown: false, childSchemaPosition: UnknownPosition }`
-  only when the requested key/item is not explicitly declared at
-  the current position, or when the current position itself
-  cannot be inspected sufficiently to determine that declaration.
+  `{ schemaKnown: false, childSchemaPosition: UnknownPosition }` only when the requested key/item is not explicitly declared at the current position, or when the current position itself cannot be inspected sufficiently to determine that declaration.
 
-Once a property is confirmed as explicitly declared at an
-`ObjectPosition`, `resolveProperty` returns `schemaKnown = true`
-even if `normalizePosition` of that property's schema returns
-`UnknownPosition` (for example because the child triggers the
-`activeSchemaNodes` cycle guard); the returned
-`childSchemaPosition` is that `UnknownPosition`, and subsequent
-descent stops being schema-known from that point. The same
-applies to `resolveArrayItem` on an `ArrayPosition` whose `items`
-schema normalizes to `UnknownPosition`. A child-side normalization
-failure never retroactively downgrades the parent's `schemaKnown`
-verdict for an explicitly declared key/item.
+Once a property is confirmed as explicitly declared at an `ObjectPosition`, `resolveProperty` returns `schemaKnown = true` even if `normalizePosition` of that property's schema returns `UnknownPosition` (for example because the child triggers the `activeSchemaNodes` cycle guard); the returned `childSchemaPosition` is that `UnknownPosition`, and subsequent descent stops being schema-known from that point. The same applies to `resolveArrayItem` on an `ArrayPosition` whose `items` schema normalizes to `UnknownPosition`. A child-side normalization failure never retroactively downgrades the parent's `schemaKnown` verdict for an explicitly declared key/item.
 
-For nodes that do NOT contain `$ref`, mere presence of an
-unsupported schema keyword does NOT trigger fail-closed on the
-whole node; the unsupported keyword simply contributes no
-schema-known keys. Nodes that DO contain `$ref` follow the
-exclusive-`$ref` rule above: any sibling keyword at all
-(supported or unsupported) causes `normalizePosition` to return
-`UnknownPosition`.
+For nodes that do NOT contain `$ref`, mere presence of an unsupported schema keyword does NOT trigger fail-closed on the whole node; the unsupported keyword simply contributes no schema-known keys. Nodes that DO contain `$ref` follow the exclusive-`$ref` rule above: any sibling keyword at all (supported or unsupported) causes `normalizePosition` to return `UnknownPosition`.
 
-**Concrete observable consequences** (any conformant implementation
-MUST produce these results):
+**Concrete observable consequences** (any conformant implementation MUST produce these results):
 
 - **Root back-edge via `$ref`.** Given a root schema
-  `{"type":"object","properties":{"next":{"$ref":"#"}}}`, let
-  `rootPos = normalizePosition(root, {})`. Then
-  `resolveProperty(rootPos, "next")` returns
-  `schemaKnown = true` with a `childSchemaPosition`
-  observationally equivalent to `UnknownPosition` (the `next`
-  child normalizes into a cycle at the first back-edge hop, so
-  the declared key stays `schemaKnown = true` but no further
-  schema-known descent follows).
+  `{"type":"object","properties":{"next":{"$ref":"#"}}}`, let `rootPos = normalizePosition(root, {})`. Then `resolveProperty(rootPos, "next")` returns `schemaKnown = true` with a `childSchemaPosition` observationally equivalent to `UnknownPosition` (the `next` child normalizes into a cycle at the first back-edge hop, so the declared key stays `schemaKnown = true` but no further schema-known descent follows).
 
 - **Inline ancestor back-edge via `$ref`.** Given a root schema
-  `{"type":"object","properties":{"payload":{"type":"object","properties":{"next":{"$ref":"#/properties/payload"}}}}}`,
-  let `rootPos = normalizePosition(root, {})` and
-  `P_payload = resolveProperty(rootPos, "payload").childSchemaPosition`.
-  Then `resolveProperty(P_payload, "next")` returns
-  `schemaKnown = true` with a `childSchemaPosition`
-  observationally equivalent to `UnknownPosition` (the `next`
-  child's `$ref` back-edge to `#/properties/payload` is detected
-  because `activeSchemaNodes` includes the ancestor `payload`
-  schema node from the surrounding descent chain).
+  `{"type":"object","properties":{"payload":{"type":"object","properties":{"next":{"$ref":"#/properties/payload"}}}}}`, let `rootPos = normalizePosition(root, {})` and `P_payload = resolveProperty(rootPos, "payload").childSchemaPosition`. Then `resolveProperty(P_payload, "next")` returns `schemaKnown = true` with a `childSchemaPosition` observationally equivalent to `UnknownPosition` (the `next` child's `$ref` back-edge to `#/properties/payload` is detected because `activeSchemaNodes` includes the ancestor `payload` schema node from the surrounding descent chain).
 
 - **Independent multi-branch reference is not a cycle.** Given a
-  root schema whose two `oneOf` branches each declare a property
-  `payload` whose value is `{"$ref":"#/$defs/leaf"}` where the
-  shared target `#/$defs/leaf` is
-  `{"type":"object","properties":{"value":{"type":"string"}}}`,
-  let `rootPos = normalizePosition(root, {})`,
-  `rootBranchAPos` and `rootBranchBPos` denote the normalized
-  positions of branch A's and branch B's roots respectively,
-  `P_A_payload = resolveProperty(rootBranchAPos, "payload").childSchemaPosition`,
-  `P_B_payload = resolveProperty(rootBranchBPos, "payload").childSchemaPosition`,
-  and
-  `P_payload = resolveProperty(rootPos, "payload").childSchemaPosition`.
-  Then BOTH of the following per-branch assertions MUST hold in
-  addition to the aggregate assertion:
+  root schema whose two `oneOf` branches each declare a property `payload` whose value is `{"$ref":"#/$defs/leaf"}` where the shared target `#/$defs/leaf` is `{"type":"object","properties":{"value":{"type":"string"}}}`, let `rootPos = normalizePosition(root, {})`, `rootBranchAPos` and `rootBranchBPos` denote the normalized positions of branch A's and branch B's roots respectively, `P_A_payload = resolveProperty(rootBranchAPos, "payload").childSchemaPosition`, `P_B_payload = resolveProperty(rootBranchBPos, "payload").childSchemaPosition`, and `P_payload = resolveProperty(rootPos, "payload").childSchemaPosition`. Then BOTH of the following per-branch assertions MUST hold in addition to the aggregate assertion:
 
   - `resolveProperty(P_A_payload, "value")` returns
-    `schemaKnown = true` with a `childSchemaPosition`
-    observationally equivalent to `UnknownPosition` (branch A
-    normalizes `leaf` successfully; the `value` scalar has no
-    supported structural keywords).
+    `schemaKnown = true` with a `childSchemaPosition` observationally equivalent to `UnknownPosition` (branch A normalizes `leaf` successfully; the `value` scalar has no supported structural keywords).
   - `resolveProperty(P_B_payload, "value")` returns
-    `schemaKnown = true` with a `childSchemaPosition`
-    observationally equivalent to `UnknownPosition` (branch B
-    independently normalizes the SAME shared `leaf` target;
-    since neither branch's descent chain contains the leaf node
-    when the other branch is being normalized, the per-call
-    `activeSchemaNodes` guard does NOT treat this as a cycle).
+    `schemaKnown = true` with a `childSchemaPosition` observationally equivalent to `UnknownPosition` (branch B independently normalizes the SAME shared `leaf` target; since neither branch's descent chain contains the leaf node when the other branch is being normalized, the per-call `activeSchemaNodes` guard does NOT treat this as a cycle).
   - `resolveProperty(P_payload, "value")` returns
-    `schemaKnown = true` with a `childSchemaPosition`
-    observationally equivalent to `UnknownPosition` (aggregate;
-    follows from either per-branch match under the composite
-    union rule).
+    `schemaKnown = true` with a `childSchemaPosition` observationally equivalent to `UnknownPosition` (aggregate; follows from either per-branch match under the composite union rule).
 
-  The two per-branch assertions are what distinguish a correct
-  per-call `activeSchemaNodes` implementation from an incorrect
-  global visited-set implementation: under a global visited-set,
-  branch B's second visit of `leaf` would degrade to
-  `UnknownPosition` at the `leaf` normalization step, so
-  `resolveProperty(P_B_payload, "value")` would return
-  `schemaKnown = false` (since `P_B_payload` would itself be
-  `UnknownPosition`). The aggregate assertion alone does NOT
-  distinguish the two implementations because a still-correct
-  branch A would keep the aggregate `schemaKnown = true` under
-  the composite union rule.
+  The two per-branch assertions are what distinguish a correct per-call `activeSchemaNodes` implementation from an incorrect global visited-set implementation: under a global visited-set, branch B's second visit of `leaf` would degrade to `UnknownPosition` at the `leaf` normalization step, so `resolveProperty(P_B_payload, "value")` would return `schemaKnown = false` (since `P_B_payload` would itself be `UnknownPosition`). The aggregate assertion alone does NOT distinguish the two implementations because a still-correct branch A would keep the aggregate `schemaKnown = true` under the composite union rule.
 
 ### Shared traversal order and stage precedence
 
@@ -1166,48 +900,24 @@ function scan(node, path, schemaPosition, trustedChain):
   return null    // primitive node with no string content
 ```
 
-**Terminal-safety invariant.** Unknown ancestry (`trustedChain
-== false` at or above the current node) disables schema-known
-passthrough (rule 2 of the six-rule sanitizer table) below the
-first unknown property. It does NOT replace every ancestor label
-with `<untrusted-property>` and it does NOT suppress
-property-name safety checks. Every ancestor segment is still
-sanitized independently through the six-rule table on the way
-down:
+**Terminal-safety invariant.** Unknown ancestry (`trustedChain == false` at or above the current node) disables schema-known passthrough (rule 2 of the six-rule sanitizer table) below the first unknown property. It does NOT replace every ancestor label with `<untrusted-property>` and it does NOT suppress property-name safety checks. Every ancestor segment is still sanitized independently through the six-rule table on the way down:
 
 - schema-known-and-trusted ancestors above the first unknown
   property retain their RFC 6901-escaped schema names;
 - an unknown ancestor whose property name contains an unpaired
-  UTF-16 surrogate terminates the scan with `<invalid-utf16>`
-  as the final segment;
+  UTF-16 surrogate terminates the scan with `<invalid-utf16>` as the final segment;
 - an unknown ancestor whose property name contains `U+0000`
-  (NUL) terminates the scan with `<invalid-nul>` as the final
-  segment;
+  (NUL) terminates the scan with `<invalid-nul>` as the final segment;
 - an unknown ancestor whose property name contains only non-NUL
-  C0/DEL control characters is emitted as `<invalid-control>`
-  (baseline vector G2 relies on this);
+  C0/DEL control characters is emitted as `<invalid-control>` (baseline vector G2 relies on this);
 - an unknown ancestor whose property name is the empty string
   is emitted as `<empty-name>`;
 - every other unknown ancestor is emitted as
   `<untrusted-property>`.
 
-A descendant property name containing an unpaired UTF-16
-surrogate or NUL still terminates the scan with the corresponding
-terminal marker (`<invalid-utf16>` / `<invalid-nul>`) regardless
-of the trust of its ancestors.
+A descendant property name containing an unpaired UTF-16 surrogate or NUL still terminates the scan with the corresponding terminal marker (`<invalid-utf16>` / `<invalid-nul>`) regardless of the trust of its ancestors.
 
-`<invalid-control>` is NOT a terminal string-safety marker. Its
-two permitted uses remain exactly those defined by the sanitizer
-table: (a) as an ancestor segment on a descendant's diagnostic
-path when the ancestor property name contains a non-NUL C0/DEL
-control character (see baseline G2); (b) as the final segment of
-a schema-stage additional-property / unknown-field diagnostic
-when the offending property name itself contains such a character.
-Property names containing only non-NUL C0/DEL control characters
-do NOT terminate the string-safety stage on their own.
-`<invalid-utf16>` and `<invalid-nul>` are the ONLY two markers
-described as terminal string-safety markers anywhere in this
-section.
+`<invalid-control>` is NOT a terminal string-safety marker. Its two permitted uses remain exactly those defined by the sanitizer table: (a) as an ancestor segment on a descendant's diagnostic path when the ancestor property name contains a non-NUL C0/DEL control character (see baseline G2); (b) as the final segment of a schema-stage additional-property / unknown-field diagnostic when the offending property name itself contains such a character. Property names containing only non-NUL C0/DEL control characters do NOT terminate the string-safety stage on their own. `<invalid-utf16>` and `<invalid-nul>` are the ONLY two markers described as terminal string-safety markers anywhere in this section.
 
 **Property-name marker precedence** (when a property name contains more than one violating character) is:
 
@@ -1222,16 +932,7 @@ The initial invocation is `scan(rootValue, "", normalizePosition(rootSidecarSche
 
 ### Shared conformance vectors
 
-The three language-agnostic vectors below cover the traversal /
-resolver / safe-path machinery. Each vector states input JSON,
-expected sanitized segment list, expected untruncated safe path,
-and owning stage. No byte-exact per-sidecar diagnostic literal,
-no code prefix, and no cap-truncation appears next to any vector
-— those live in "Concrete deep-path golden vectors — frozen
-oracle" above. Each `\uXXXX` in the vector inputs appears as a
-literal 6-character ASCII escape in the Markdown source, not as
-an actual UTF-16 surrogate; producers process the parsed JSON
-value whose corresponding string is a single UTF-16 code unit.
+The three language-agnostic vectors below cover the traversal / resolver / safe-path machinery. Each vector states input JSON, expected sanitized segment list, expected untruncated safe path, and owning stage. No byte-exact per-sidecar diagnostic literal, no code prefix, and no cap-truncation appears next to any vector — those live in "Concrete deep-path golden vectors — frozen oracle" above. Each `\uXXXX` in the vector inputs appears as a literal 6-character ASCII escape in the Markdown source, not as an actual UTF-16 surrogate; producers process the parsed JSON value whose corresponding string is a single UTF-16 code unit.
 
 **Vector V1 — `shared-unknown-ancestor-with-value-level-surrogate`.**
 
@@ -1241,9 +942,7 @@ value whose corresponding string is a single UTF-16 code unit.
 - Expected sanitized segment list: `[<untrusted-property>,
 <untrusted-property>, <untrusted-property>]`.
 - Expected untruncated safe path:
-  `/<untrusted-property>/<untrusted-property>/<untrusted-property>`
-  (value-level violation; safe path points at the leaf; no
-  terminal marker segment).
+  `/<untrusted-property>/<untrusted-property>/<untrusted-property>` (value-level violation; safe path points at the leaf; no terminal marker segment).
 - Owning stage: `string-safety`.
 
 **Vector V2 — `shared-terminal-invalid-utf16-in-unknown-property-name`.**
@@ -1257,80 +956,40 @@ value whose corresponding string is a single UTF-16 code unit.
   `/<untrusted-property>/<invalid-utf16>`.
 - Owning stage: `string-safety`.
 
-**Vector V3 — `shared-resolver-union-child-position`.** This
-vector fails if a resolver picks only the first matching branch,
-if it collapses composites to `UnknownPosition`, if it fails to
-recurse into composite children, or if it returns
-`schemaKnown = true` for a key that no branch declares.
+**Vector V3 — `shared-resolver-union-child-position`.** This vector fails if a resolver picks only the first matching branch, if it collapses composites to `UnknownPosition`, if it fails to recurse into composite children, or if it returns `schemaKnown = true` for a key that no branch declares.
 
 - Hypothetical schema at root: `oneOf` with two branches.
   - Branch A: `{ properties: { payload: { properties:
 { alpha: { type: "string" } } } } }`.
   - Branch B: `{ properties: { payload: { properties:
-{ beta: { type: "string" } } } } }`.
-    Both branches declare `payload`; branch A declares only `alpha`
-    under `payload`; branch B declares only `beta` under `payload`.
+{ beta: { type: "string" } } } } }`. Both branches declare `payload`; branch A declares only `alpha` under `payload`; branch B declares only `beta` under `payload`.
 - Input JSON: `{"payload": {"beta": "\u0000"}}` (value-level NUL
   at `beta`).
 - Notation: let
-  `rootPos = normalizePosition(root, {})`. Let
-  `rootBranchAPos` and `rootBranchBPos` denote the normalized
-  positions of branch A's and branch B's roots respectively (each
-  is an object with a single declared property `payload`). Let
-  `P_A_payload = resolveProperty(rootBranchAPos, "payload").childSchemaPosition`
-  and
-  `P_B_payload = resolveProperty(rootBranchBPos, "payload").childSchemaPosition`.
-  These are the payload-level positions of each branch.
+  `rootPos = normalizePosition(root, {})`. Let `rootBranchAPos` and `rootBranchBPos` denote the normalized positions of branch A's and branch B's roots respectively (each is an object with a single declared property `payload`). Let `P_A_payload = resolveProperty(rootBranchAPos, "payload").childSchemaPosition` and `P_B_payload = resolveProperty(rootBranchBPos, "payload").childSchemaPosition`. These are the payload-level positions of each branch.
 - Expected resolver behavior (all assertions are observational;
-  the internal representation of intermediate positions is not
-  fixed):
+  the internal representation of intermediate positions is not fixed):
   - `resolveProperty(rootBranchAPos, "payload")` returns
     `{ schemaKnown: true, childSchemaPosition: P_A_payload }`.
   - `resolveProperty(rootBranchBPos, "payload")` returns
     `{ schemaKnown: true, childSchemaPosition: P_B_payload }`.
   - `resolveProperty(rootPos, "payload")` returns
-    `{ schemaKnown: true, childSchemaPosition: P_payload }` for
-    some `P_payload` whose observable behavior is "union of
-    `P_A_payload` and `P_B_payload`" (formalized below).
+    `{ schemaKnown: true, childSchemaPosition: P_payload }` for some `P_payload` whose observable behavior is "union of `P_A_payload` and `P_B_payload`" (formalized below).
   - `resolveProperty(P_A_payload, "beta")` returns
-    `schemaKnown = false` with a `childSchemaPosition`
-    observationally equivalent to `UnknownPosition` (branch A's
-    payload declares `alpha` only).
+    `schemaKnown = false` with a `childSchemaPosition` observationally equivalent to `UnknownPosition` (branch A's payload declares `alpha` only).
   - `resolveProperty(P_B_payload, "beta")` returns
-    `schemaKnown = true` with a `childSchemaPosition`
-    observationally equivalent to `UnknownPosition` (branch B's
-    payload declares `beta`; its scalar schema has no supported
-    structural keywords, so `normalizePosition` yields
-    `UnknownPosition` for the child).
+    `schemaKnown = true` with a `childSchemaPosition` observationally equivalent to `UnknownPosition` (branch B's payload declares `beta`; its scalar schema has no supported structural keywords, so `normalizePosition` yields `UnknownPosition` for the child).
   - `resolveProperty(P_payload, "beta")` returns
-    `schemaKnown = true` with a `childSchemaPosition`
-    observationally equivalent to `UnknownPosition`
-    (`P_B_payload`'s contribution has `schemaKnown = true` with
-    an `UnknownPosition`-equivalent child; `P_A_payload`'s
-    contribution has `schemaKnown = false` and is discarded).
+    `schemaKnown = true` with a `childSchemaPosition` observationally equivalent to `UnknownPosition` (`P_B_payload`'s contribution has `schemaKnown = true` with an `UnknownPosition`-equivalent child; `P_A_payload`'s contribution has `schemaKnown = false` and is discarded).
   - `resolveProperty(P_payload, "extraneous")` returns
-    `schemaKnown = false` with a `childSchemaPosition`
-    observationally equivalent to `UnknownPosition` (neither
-    `P_A_payload` nor `P_B_payload` declares `extraneous`).
+    `schemaKnown = false` with a `childSchemaPosition` observationally equivalent to `UnknownPosition` (neither `P_A_payload` nor `P_B_payload` declares `extraneous`).
 - Expected sanitized segment list on the terminal NUL scan:
-  `[payload, beta]` (both segments retain their schema-known
-  names because the ancestor chain is fully trusted through the
-  union + branch descent; the terminal NUL is at a value, so the
-  safe path points at that leaf value).
+  `[payload, beta]` (both segments retain their schema-known names because the ancestor chain is fully trusted through the union + branch descent; the terminal NUL is at a value, so the safe path points at that leaf value).
 - Expected untruncated safe path: `/payload/beta` (value-level
-  NUL violation; safe path points at the leaf; no terminal marker
-  segment).
+  NUL violation; safe path points at the leaf; no terminal marker segment).
 - Owning stage: `string-safety`.
 
-For the purposes of V3, "observationally equivalent to
-`UnknownPosition`" means: all subsequent `resolveProperty` and
-`resolveArrayItem` calls on that position return
-`schemaKnown = false` and a child position that is itself
-observationally equivalent to `UnknownPosition`. This
-representation-agnostic wording lets both
-`CompositePosition([UnknownPosition])` and the collapsed
-`UnknownPosition` satisfy the assertion, as long as their
-external behavior matches.
+For the purposes of V3, "observationally equivalent to `UnknownPosition`" means: all subsequent `resolveProperty` and `resolveArrayItem` calls on that position return `schemaKnown = false` and a child position that is itself observationally equivalent to `UnknownPosition`. This representation-agnostic wording lets both `CompositePosition([UnknownPosition])` and the collapsed `UnknownPosition` satisfy the assertion, as long as their external behavior matches.
 
 ### Aggregate token overflow
 
