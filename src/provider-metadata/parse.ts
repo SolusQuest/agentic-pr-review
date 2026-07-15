@@ -23,7 +23,15 @@
  */
 
 import schema from '../../protocol/schemas/provider-run-metadata.v1.json' with { type: 'json' };
-import { type SchemaNode } from '../state-v2/shared-safe-path.js';
+import {
+  normalizePosition,
+  resolveArrayItem,
+  resolveProperty,
+  sanitizeSegment,
+  UNKNOWN_POSITION,
+  type SchemaNode,
+  type SchemaPosition,
+} from '../state-v2/shared-safe-path.js';
 import { scanStringSafetyIterative } from './string-safety.js';
 import { finalizeErrors } from './error-list.js';
 import { finalizePath } from './safe-path-helpers.js';
@@ -118,10 +126,22 @@ interface ObjectFrame {
   kind: 'object';
   names: Set<string>;
   expect: 'key-or-close' | 'colon' | 'value' | 'comma-or-close';
+  schemaPosition: SchemaPosition;
+  trustedChain: boolean;
+  pathSegments: string[];
+  pendingChildPosition: SchemaPosition;
+  pendingChildTrusted: boolean;
+  pendingChildSegment: string;
 }
 interface ArrayFrame {
   kind: 'array';
   expect: 'value-or-close' | 'comma-or-close';
+  schemaPosition: SchemaPosition;
+  trustedChain: boolean;
+  pathSegments: string[];
+  index: number;
+  itemPosition: SchemaPosition;
+  itemTrusted: boolean;
 }
 type Frame = ObjectFrame | ArrayFrame;
 
@@ -131,6 +151,15 @@ function strictJsonParseIterative(text: string): StrictResult {
   let firstDuplicate: MetadataError | null = null;
   let expectingRootValue = true;
   let rootValueSeen = false;
+  const rootPos = normalizePosition(rootSchema, new Set<SchemaNode>(), rootSchema);
+  // The "next container" position is the schema position that will be adopted
+  // by the next opened object/array. For the root it is the normalized root
+  // schema; when descending into a property value inside an object frame it is
+  // that frame's `pendingChildPosition`; when descending into an array element
+  // it is the array frame's `itemPosition`.
+  let nextPosition: SchemaPosition = rootPos;
+  let nextTrusted = true;
+  let nextPathSegments: string[] = [];
 
   const jsonErr = (): StrictErr => ({ ok: false, error: JSON_ERR });
 
@@ -264,12 +293,33 @@ function strictJsonParseIterative(text: string): StrictResult {
     const c = text.charCodeAt(pos);
     if (c === 0x7b) {
       pos += 1;
-      stack.push({ kind: 'object', names: new Set(), expect: 'key-or-close' });
+      stack.push({
+        kind: 'object',
+        names: new Set(),
+        expect: 'key-or-close',
+        schemaPosition: nextPosition,
+        trustedChain: nextTrusted,
+        pathSegments: nextPathSegments,
+        pendingChildPosition: UNKNOWN_POSITION,
+        pendingChildTrusted: false,
+        pendingChildSegment: '',
+      });
       return 'container';
     }
     if (c === 0x5b) {
       pos += 1;
-      stack.push({ kind: 'array', expect: 'value-or-close' });
+      const itemR = resolveArrayItem(nextPosition);
+      const itemTrusted = nextTrusted && itemR.schemaKnown;
+      stack.push({
+        kind: 'array',
+        expect: 'value-or-close',
+        schemaPosition: nextPosition,
+        trustedChain: nextTrusted,
+        pathSegments: nextPathSegments,
+        index: 0,
+        itemPosition: itemTrusted ? itemR.childSchemaPosition : UNKNOWN_POSITION,
+        itemTrusted,
+      });
       return 'container';
     }
     if (c === 0x22) {
@@ -322,10 +372,16 @@ function strictJsonParseIterative(text: string): StrictResult {
           if (c !== 0x22) return jsonErr();
           const r = scanString();
           if (!r.ok) return jsonErr();
+          const propR = resolveProperty(frame.schemaPosition, r.value);
+          const childKnown = frame.trustedChain && propR.schemaKnown;
+          const segment = sanitizeSegment(r.value, childKnown);
+          frame.pendingChildSegment = segment;
+          frame.pendingChildTrusted = childKnown;
+          frame.pendingChildPosition = childKnown ? propR.childSchemaPosition : UNKNOWN_POSITION;
           if (frame.names.has(r.value) && firstDuplicate === null) {
             firstDuplicate = {
               code: 'invalid-metadata-duplicate-json-property',
-              path: parentPath(stack),
+              path: finalizePath(frame.pathSegments),
             };
           } else {
             frame.names.add(r.value);
@@ -340,12 +396,13 @@ function strictJsonParseIterative(text: string): StrictResult {
           continue;
         }
         case 'value': {
+          nextPosition = frame.pendingChildPosition;
+          nextTrusted = frame.pendingChildTrusted;
+          nextPathSegments = [...frame.pathSegments, frame.pendingChildSegment];
           const r = scanPrimitiveOrOpenContainer();
           if (r === 'error') return jsonErr();
           if (r === 'primitive') {
             frame.expect = 'comma-or-close';
-          } else {
-            // container opened; new frame handles its state
           }
           continue;
         }
@@ -377,6 +434,9 @@ function strictJsonParseIterative(text: string): StrictResult {
             afterValueOrClose(stack);
             continue;
           }
+          nextPosition = frame.itemPosition;
+          nextTrusted = frame.itemTrusted;
+          nextPathSegments = [...frame.pathSegments, String(frame.index)];
           const r = scanPrimitiveOrOpenContainer();
           if (r === 'error') return jsonErr();
           if (r === 'primitive') {
@@ -388,6 +448,7 @@ function strictJsonParseIterative(text: string): StrictResult {
           const c = text.charCodeAt(pos);
           if (c === 0x2c) {
             pos += 1;
+            frame.index += 1;
             frame.expect = 'value-or-close';
             skipWs();
             if (pos < text.length && text.charCodeAt(pos) === 0x5d) return jsonErr(); // trailing comma
@@ -420,21 +481,6 @@ function afterValueOrClose(stack: Frame[]): void {
   const parent = stack[stack.length - 1];
   if (!parent) return;
   parent.expect = 'comma-or-close';
-}
-
-function parentPath(stack: readonly Frame[]): string {
-  // Every level above the current inner-most object contributes an
-  // <untrusted-property> or `<i>` segment. Since caller-controlled property
-  // names cannot appear verbatim, we use <untrusted-property> at every object
-  // depth and String(0) as a conservative array-index proxy. This is a stable
-  // safe path that never leaks caller-controlled key text.
-  const segments: string[] = [];
-  for (let i = 0; i < stack.length - 1; i += 1) {
-    const f = stack[i]!;
-    if (f.kind === 'object') segments.push('<untrusted-property>');
-    else segments.push('0');
-  }
-  return finalizePath(segments);
 }
 
 function isHexDigit(c: number): boolean {

@@ -1,0 +1,8 @@
+{
+  "errors": [
+    {
+      "code": "invalid-metadata-token-out-of-range",
+      "path": "/normalizedUsage/requests/0/outputTokens"
+    }
+  ]
+}

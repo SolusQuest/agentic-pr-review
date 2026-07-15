@@ -267,5 +267,27 @@
     "file": "invalid-token-single-overflow.json",
     "valid": false,
     "expectedCodes": ["invalid-metadata-token-out-of-range"]
+  },
+  {
+    "file": "invalid-duplicate-schema-known.json",
+    "valid": false,
+    "expectedCodes": ["invalid-metadata-duplicate-json-property"]
+  },
+  {
+    "file": "invalid-unicode-root-scalar-nul.bin",
+    "valid": false,
+    "expectedCodes": ["invalid-metadata-unicode"],
+    "encoding": "binary"
+  },
+  {
+    "file": "invalid-unicode-root-scalar-lone-surrogate.bin",
+    "valid": false,
+    "expectedCodes": ["invalid-metadata-unicode"],
+    "encoding": "binary"
+  },
+  {
+    "file": "invalid-aggregate-token-overflow.json",
+    "valid": false,
+    "expectedCodes": ["invalid-metadata-token-out-of-range"]
   }
 ]
