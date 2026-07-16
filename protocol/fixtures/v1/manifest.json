@@ -201,56 +201,63 @@
     "type": "ledger-restore",
     "file": "provider-session-ledger/bootstrap-minimal.json",
     "expectation": {
-      "valid": true
+      "valid": true,
+      "contentSha256": "5b217e2c4c245b8e40ef82c6d5ed7a14c65580b4300a8dd421840b547a283eb3"
     },
-    "contentSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03"
+    "contentSha256": "5b217e2c4c245b8e40ef82c6d5ed7a14c65580b4300a8dd421840b547a283eb3"
   },
   {
     "type": "ledger-restore",
     "file": "provider-session-ledger/continuation-one-append.json",
     "expectation": {
-      "valid": true
+      "valid": true,
+      "contentSha256": "cacac0976476c660b93c1af362c2911d1c5c2d38514f1a15268aa89ae1e7d4ca"
     },
-    "contentSha256": "a8de0836cb7624316c84b0f770276e5b4d6c3f470de52a57801ff1c18d22a26f"
+    "contentSha256": "cacac0976476c660b93c1af362c2911d1c5c2d38514f1a15268aa89ae1e7d4ca"
   },
   {
     "type": "ledger-restore",
     "file": "provider-session-ledger/reset-cache-contract-change.json",
     "expectation": {
-      "valid": true
+      "valid": true,
+      "contentSha256": "31da767e501822d851975cb0b79ba160e4cad829c180162e28184149a570075c"
     },
-    "contentSha256": "a441171c02715d7b742e811fbac3c49cacfbb1fa9969a6e29a0985ff88a75e63"
+    "contentSha256": "31da767e501822d851975cb0b79ba160e4cad829c180162e28184149a570075c"
   },
   {
     "type": "ledger-restore",
     "file": "provider-session-ledger/reset-base-change.json",
     "expectation": {
-      "valid": true
+      "valid": true,
+      "contentSha256": "9141e11ff409d7516decfc78522ed26c621e4bcc623117ce124cbb12f97aa224"
     },
-    "contentSha256": "0c943aabbf0c6deb6fa944d1cee24bbb598272410f0ca98a048fbf7e584ee9ce"
+    "contentSha256": "9141e11ff409d7516decfc78522ed26c621e4bcc623117ce124cbb12f97aa224"
   },
   {
     "type": "ledger-restore",
     "file": "provider-session-ledger/recovery-root-unavailable-accepted-artifact.json",
     "expectation": {
-      "valid": true
+      "valid": true,
+      "contentSha256": "b15ce0e103fc33b164c71563bd7ce073ed935778582e547127d38ced71253f60"
     },
-    "contentSha256": "dcb108009cf6495742eece3441d43469fac83e69e3b181c92a2c01354bbf2838"
+    "contentSha256": "b15ce0e103fc33b164c71563bd7ce073ed935778582e547127d38ced71253f60"
   },
   {
     "type": "ledger-restore",
     "file": "provider-session-ledger/continuation-max-interactions.json",
     "expectation": {
-      "valid": true
+      "valid": true,
+      "contentSha256": "d9760dea9ebba1952ffd162c95d82a68c6a36da9e336dc3ffdc6636a8de66f93"
     },
-    "contentSha256": "6501429aa6847f675508365e3b62ec25f3a4e96a59fcf885e0d5db5970bfc172"
+    "contentSha256": "d9760dea9ebba1952ffd162c95d82a68c6a36da9e336dc3ffdc6636a8de66f93"
   },
   {
     "type": "ledger-restore",
     "file": "provider-session-ledger/raw-oversize.bin",
     "expectation": {
       "valid": false,
-      "code": "ledger_raw_byte_limit_exceeded"
+      "code": "ledger_raw_byte_limit_exceeded",
+      "contentSha256": "d26dced8b532e1fb6fa1f8033a63ec4c362c378c49a72c4661787b7b6f076f20"
     }
   },
   {
@@ -258,7 +265,8 @@
     "file": "provider-session-ledger/invalid-utf8.bin",
     "expectation": {
       "valid": false,
-      "code": "ledger_invalid_utf8"
+      "code": "ledger_invalid_utf8",
+      "contentSha256": "eddf68639913a3cb8331cdfe7f87559e0beccf2c289c0d90ac4d89b3204004f8"
     }
   },
   {
@@ -266,7 +274,8 @@
     "file": "provider-session-ledger/invalid-json.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_invalid_json"
+      "code": "ledger_invalid_json",
+      "contentSha256": "a3440e834206d0cf785d21db0e767da79a8cc2d76103c8d8f209771c9adbf630"
     }
   },
   {
@@ -274,7 +283,8 @@
     "file": "provider-session-ledger/duplicate-json-property.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_duplicate_json_property"
+      "code": "ledger_duplicate_json_property",
+      "contentSha256": "d57ffaf1eddeed1320c7f469ae4a3ff961649776fed1542bb6f3df7c03c46407"
     }
   },
   {
@@ -282,7 +292,8 @@
     "file": "provider-session-ledger/depth-exceeded.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_json_depth_exceeded"
+      "code": "ledger_json_depth_exceeded",
+      "contentSha256": "82710e51eac97023bcbe420a2fa05701406b154ea1dc8411a9d406c3f64139de"
     }
   },
   {
@@ -290,7 +301,8 @@
     "file": "provider-session-ledger/array-length-exceeded.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_json_array_length_exceeded"
+      "code": "ledger_json_array_length_exceeded",
+      "contentSha256": "ff22d3419d292ef8241bb1a1d9d9a80427ba2a80afa713516d398bd81e87877b"
     }
   },
   {
@@ -298,7 +310,8 @@
     "file": "provider-session-ledger/property-count-exceeded.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_json_property_count_exceeded"
+      "code": "ledger_json_property_count_exceeded",
+      "contentSha256": "5edf75fee728d27fe9f673c1538ad30e94ab37a2e4fdc6a24fd9c06c146b4e52"
     }
   },
   {
@@ -306,7 +319,8 @@
     "file": "provider-session-ledger/raw-multi-defect.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_duplicate_json_property"
+      "code": "ledger_duplicate_json_property",
+      "contentSha256": "d3d9762bcb41a754f31eb9eb8284c4b52613a53913f55603d0d0b669ae3110bb"
     }
   },
   {
@@ -314,7 +328,8 @@
     "file": "provider-session-ledger/nul-in-summary.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_invalid_unicode"
+      "code": "ledger_invalid_unicode",
+      "contentSha256": "ec4df64de56f0f021464d91f013112da233f95974ce768049b709f43ba53cc94"
     }
   },
   {
@@ -322,7 +337,8 @@
     "file": "provider-session-ledger/lone-surrogate-in-string.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_invalid_unicode"
+      "code": "ledger_invalid_unicode",
+      "contentSha256": "e023bbda60ef82beb3712322fa230236198a855233582e206a375a75f383662c"
     }
   },
   {
@@ -330,7 +346,8 @@
     "file": "provider-session-ledger/lone-surrogate-in-property-name.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_invalid_unicode"
+      "code": "ledger_invalid_unicode",
+      "contentSha256": "746f47b27b3ed82b2d2ce35ed13048cdee109721db13ba3fd3942e743ebe7d0f"
     }
   },
   {
@@ -338,7 +355,8 @@
     "file": "provider-session-ledger/nul-in-property-name.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_invalid_unicode"
+      "code": "ledger_invalid_unicode",
+      "contentSha256": "84d9f7a1c1442e006e2150f509a26ec87840ffe6a70cdb3c93d6d02df0b0b2e2"
     }
   },
   {
@@ -346,7 +364,8 @@
     "file": "provider-session-ledger/root-scalar-lone-surrogate.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_invalid_unicode"
+      "code": "ledger_invalid_unicode",
+      "contentSha256": "e2abb8b90faadf0e98d5e6382fa5f354e814aaa72ce1155de80231de88c7724d"
     }
   },
   {
@@ -354,7 +373,8 @@
     "file": "provider-session-ledger/root-scalar-nul.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_invalid_unicode"
+      "code": "ledger_invalid_unicode",
+      "contentSha256": "700174b26850d224c7a156cb6a45cea08031eab640fcfc1eaf7f770ab9aeaa66"
     }
   },
   {
@@ -362,7 +382,8 @@
     "file": "provider-session-ledger/unsupported-schema-version.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_unsupported_schema_version"
+      "code": "ledger_unsupported_schema_version",
+      "contentSha256": "1ba05feac90addc90078c78512da42dd64a7de7a4fe560be609580f95d1e0209"
     }
   },
   {
@@ -370,7 +391,8 @@
     "file": "provider-session-ledger/missing-schema-version.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_schema_violation"
+      "code": "ledger_schema_violation",
+      "contentSha256": "d4ea441d4afa1a077b755686cfb1586d9ffb531c788dc3ab0b98e2ce3840866d"
     }
   },
   {
@@ -378,7 +400,8 @@
     "file": "provider-session-ledger/wrong-type-schema-version.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_schema_violation"
+      "code": "ledger_schema_violation",
+      "contentSha256": "56e74ef4229f7e2a536cb321b8920e4bd1289af7b69800a388b0f054c0809f01"
     }
   },
   {
@@ -386,7 +409,8 @@
     "file": "provider-session-ledger/unsupported-prefix-contract-version.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_unsupported_prefix_contract_version"
+      "code": "ledger_unsupported_prefix_contract_version",
+      "contentSha256": "3751366d9632df447de719b42d8d65438be30f9caf97f39bf0955fe141585f57"
     }
   },
   {
@@ -394,7 +418,8 @@
     "file": "provider-session-ledger/missing-prefix-contract-version.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_schema_violation"
+      "code": "ledger_schema_violation",
+      "contentSha256": "a4f23b84d8e5537d3bf2e1f436ae01c629a3c2a3d995923841e59ef4d1a623e0"
     }
   },
   {
@@ -402,7 +427,8 @@
     "file": "provider-session-ledger/wrong-type-prefix-contract-version.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_schema_violation"
+      "code": "ledger_schema_violation",
+      "contentSha256": "7244c0073a6c2b4f5e0e758400d11cc429166c31a09417488d32995f65e44534"
     }
   },
   {
@@ -410,7 +436,8 @@
     "file": "provider-session-ledger/unknown-top-level-field.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_unknown_field"
+      "code": "ledger_unknown_field",
+      "contentSha256": "c008cc5f7af0d4b199d9d8dc5a35cc276c89d32b217a8936dab4d427f65b1218"
     }
   },
   {
@@ -418,7 +445,8 @@
     "file": "provider-session-ledger/unknown-header-field.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_unknown_field"
+      "code": "ledger_unknown_field",
+      "contentSha256": "815eec19fc5b472b1b28560c0392aceae61256cd00508ab61da106d998e90f98"
     }
   },
   {
@@ -426,7 +454,8 @@
     "file": "provider-session-ledger/unknown-header-kind.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_schema_violation"
+      "code": "ledger_schema_violation",
+      "contentSha256": "fdc2098461be7a0e850bc3b6769ea79f918b049de822b37259c355596d32c92f"
     }
   },
   {
@@ -434,7 +463,8 @@
     "file": "provider-session-ledger/overlong-summary.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_overlong_value"
+      "code": "ledger_overlong_value",
+      "contentSha256": "f665e469ec440b2a4460a0a149f983c13c0cdc209a4e3319b18affe64aa9e6db"
     }
   },
   {
@@ -442,7 +472,8 @@
     "file": "provider-session-ledger/whitespace-summary.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_schema_violation"
+      "code": "ledger_schema_violation",
+      "contentSha256": "300aa6098d85af5240312aae73f6669aec57ee5b1d32c2bad4c4f1c6c2fafe05"
     }
   },
   {
@@ -450,7 +481,8 @@
     "file": "provider-session-ledger/absolute-path-in-finding.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_schema_violation"
+      "code": "ledger_schema_violation",
+      "contentSha256": "2957d2c692d30b2c69097ec8f1109d863452a59ce1dab1dc2b008e8d2a686cdd"
     }
   },
   {
@@ -458,7 +490,8 @@
     "file": "provider-session-ledger/unsupported-change-status.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_unsupported_change_status"
+      "code": "ledger_unsupported_change_status",
+      "contentSha256": "c3c7952321b1add4b9bcfe59c2a582473ed9eb020c37f1d45c5bb7a33a89a324"
     }
   },
   {
@@ -466,7 +499,8 @@
     "file": "provider-session-ledger/identity-byte-length-exceeded.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_identity_byte_length_exceeded"
+      "code": "ledger_identity_byte_length_exceeded",
+      "contentSha256": "b45195b114daa9b310dfd4eddb96e6ce2b9262815e9ab1d4610ee56cbfe13ae3"
     }
   },
   {
@@ -474,7 +508,8 @@
     "file": "provider-session-ledger/control-character-in-identity.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_control_character_in_identity"
+      "code": "ledger_control_character_in_identity",
+      "contentSha256": "bbec754a73e099f6065022b57bfe017d78678c61738b1f3365368a57ca5b8724"
     }
   },
   {
@@ -482,7 +517,8 @@
     "file": "provider-session-ledger/pair-order-swapped.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_pair_order_mismatch"
+      "code": "ledger_pair_order_mismatch",
+      "contentSha256": "c25ceb584bc422393a151d09c72e25ca3ac5c39b99f926065c3d53e34d05cf19"
     }
   },
   {
@@ -490,7 +526,8 @@
     "file": "provider-session-ledger/records-odd-length.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_records_length_not_even"
+      "code": "ledger_records_length_not_even",
+      "contentSha256": "0d33ca5e750ab267bd0abd24aee2908bfea4f19c94ff3269c9a769661fff3779"
     }
   },
   {
@@ -498,7 +535,8 @@
     "file": "provider-session-ledger/records-empty.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_records_empty"
+      "code": "ledger_records_empty",
+      "contentSha256": "9bf0d5fbef8f931d8d02ce7be8038608e043bb93146a59cca0d6b95ca4bc0f59"
     }
   },
   {
@@ -506,7 +544,8 @@
     "file": "provider-session-ledger/model-alias-latest.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_model_alias_literal"
+      "code": "ledger_model_alias_literal",
+      "contentSha256": "697afe1db55c1a1b6bbc30368150e5662c7f547ab73e6dc56cf5f5697ff0d618"
     }
   },
   {
@@ -514,7 +553,8 @@
     "file": "provider-session-ledger/non-canonical-key-order.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_schema_violation"
+      "code": "ledger_schema_violation",
+      "contentSha256": "9e493193537a05379a69f1fdc6d091041a163a38150349d036f8e0efcb7332cb"
     }
   },
   {
@@ -522,7 +562,8 @@
     "file": "provider-session-ledger/non-canonical-string-escape.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_non_canonical"
+      "code": "ledger_non_canonical",
+      "contentSha256": "951d7737077f476f5dede3053902f2e964394a4f4def9f6ab4780c9ebf7b8088"
     }
   },
   {
@@ -530,7 +571,8 @@
     "file": "provider-session-ledger/bootstrap-shape-violation.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_bootstrap_shape_violation"
+      "code": "ledger_bootstrap_shape_violation",
+      "contentSha256": "dfc7ebe86bfcbe9f1f9600a252884d034f27e64ee397025eb2863a053b310463"
     }
   },
   {
@@ -538,7 +580,8 @@
     "file": "provider-session-ledger/changed-file-limit-exceeded.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_changed_file_limit_exceeded"
+      "code": "ledger_changed_file_limit_exceeded",
+      "contentSha256": "e2cda5bc90fe7b0d5f949961162b7c6c52dd484653d57564286a92e3ca87f278"
     }
   },
   {
@@ -546,7 +589,8 @@
     "file": "provider-session-ledger/finding-limit-exceeded.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_finding_limit_exceeded"
+      "code": "ledger_finding_limit_exceeded",
+      "contentSha256": "c1c9c9b37c6372b6be9b65ce2856b8057401cbb1dabd8ac14807c673dc419a12"
     }
   },
   {
@@ -554,7 +598,8 @@
     "file": "provider-session-ledger/limitations-limit-exceeded.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_limitations_limit_exceeded"
+      "code": "ledger_limitations_limit_exceeded",
+      "contentSha256": "ad87588140e7ed5d1b55bc0ba52aa6e9b32b6d9bb1de08de03c6a769e6bec432"
     }
   },
   {
@@ -562,7 +607,8 @@
     "file": "provider-session-ledger/record-role-mismatch.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_record_role_mismatch"
+      "code": "ledger_record_role_mismatch",
+      "contentSha256": "7c88b302ce5d0a651da74d949a6e259455cb51bea8082bd7906d60e30ac3253a"
     }
   },
   {
@@ -570,7 +616,8 @@
     "file": "provider-session-ledger/pair-interaction-id-mismatch.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_pair_interaction_id_mismatch"
+      "code": "ledger_pair_interaction_id_mismatch",
+      "contentSha256": "456dd31f73c9b1fbe2a3bc0b0a8d1078eee906059b4204584cbb4614bab8f960"
     }
   },
   {
@@ -578,7 +625,8 @@
     "file": "provider-session-ledger/finding-line-range-invalid.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_finding_line_range_invalid"
+      "code": "ledger_finding_line_range_invalid",
+      "contentSha256": "4bc9722626a564ac2d100433cb76faf81807184884b634d6f2b703ed357fd5bc"
     }
   },
   {
@@ -586,7 +634,8 @@
     "file": "provider-session-ledger/finding-location-mismatch.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_finding_location_mismatch"
+      "code": "ledger_finding_location_mismatch",
+      "contentSha256": "f38fae0e01e39659365784420b7ac85ac1c6b0dc0a8f4688a332c03e54b62808"
     }
   },
   {
@@ -594,7 +643,8 @@
     "file": "provider-session-ledger/finding-location-missing-path.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_finding_location_missing_path"
+      "code": "ledger_finding_location_missing_path",
+      "contentSha256": "965c0d042451cbf97d0260415083476e6d263d249106ce872905a64eacd23ebc"
     }
   },
   {
@@ -602,7 +652,8 @@
     "file": "provider-session-ledger/digest-mismatch.json",
     "expectation": {
       "valid": false,
-      "code": "ledger_digest_mismatch"
+      "code": "ledger_digest_mismatch",
+      "contentSha256": "04bb009cb98420c662d29beded6931f1e4dbf5cd08c6ee39a25ad74615a0e13d"
     }
   },
   {
@@ -635,7 +686,7 @@
     },
     "transitionExpectation": {
       "valid": true,
-      "candidateContentSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03"
+      "candidateContentSha256": "5b217e2c4c245b8e40ef82c6d5ed7a14c65580b4300a8dd421840b547a283eb3"
     }
   },
   {
@@ -660,7 +711,7 @@
           "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         },
         "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
-        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorLedgerSha256": "5b217e2c4c245b8e40ef82c6d5ed7a14c65580b4300a8dd421840b547a283eb3",
         "predecessorStateGeneration": 0,
         "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
         "stateGeneration": 1,
@@ -672,7 +723,7 @@
     },
     "transitionExpectation": {
       "valid": true,
-      "candidateContentSha256": "a8de0836cb7624316c84b0f770276e5b4d6c3f470de52a57801ff1c18d22a26f"
+      "candidateContentSha256": "cacac0976476c660b93c1af362c2911d1c5c2d38514f1a15268aa89ae1e7d4ca"
     }
   },
   {
@@ -697,7 +748,7 @@
           "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         },
         "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
-        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorLedgerSha256": "5b217e2c4c245b8e40ef82c6d5ed7a14c65580b4300a8dd421840b547a283eb3",
         "predecessorManifestSha256": "7777777777777777777777777777777777777777777777777777777777777777",
         "predecessorStateGeneration": 0,
         "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
@@ -711,7 +762,7 @@
     },
     "transitionExpectation": {
       "valid": true,
-      "candidateContentSha256": "a441171c02715d7b742e811fbac3c49cacfbb1fa9969a6e29a0985ff88a75e63"
+      "candidateContentSha256": "31da767e501822d851975cb0b79ba160e4cad829c180162e28184149a570075c"
     }
   },
   {
@@ -744,7 +795,7 @@
     },
     "transitionExpectation": {
       "valid": true,
-      "candidateContentSha256": "dcb108009cf6495742eece3441d43469fac83e69e3b181c92a2c01354bbf2838"
+      "candidateContentSha256": "b15ce0e103fc33b164c71563bd7ce073ed935778582e547127d38ced71253f60"
     }
   },
   {
@@ -769,7 +820,7 @@
           "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         },
         "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
-        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorLedgerSha256": "5b217e2c4c245b8e40ef82c6d5ed7a14c65580b4300a8dd421840b547a283eb3",
         "predecessorStateGeneration": 0,
         "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
         "stateGeneration": 1,
@@ -843,7 +894,7 @@
           "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         },
         "sessionEpoch": "EEEEEEEEEEEEEEEEEEEEEE",
-        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorLedgerSha256": "5b217e2c4c245b8e40ef82c6d5ed7a14c65580b4300a8dd421840b547a283eb3",
         "predecessorStateGeneration": 0,
         "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
         "stateGeneration": 1,
@@ -880,7 +931,7 @@
           "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         },
         "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
-        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorLedgerSha256": "5b217e2c4c245b8e40ef82c6d5ed7a14c65580b4300a8dd421840b547a283eb3",
         "predecessorStateGeneration": 0,
         "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
         "stateGeneration": 1,
@@ -917,7 +968,7 @@
           "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         },
         "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
-        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorLedgerSha256": "5b217e2c4c245b8e40ef82c6d5ed7a14c65580b4300a8dd421840b547a283eb3",
         "predecessorStateGeneration": 999,
         "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
         "stateGeneration": 1,
@@ -954,7 +1005,7 @@
           "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         },
         "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
-        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorLedgerSha256": "5b217e2c4c245b8e40ef82c6d5ed7a14c65580b4300a8dd421840b547a283eb3",
         "predecessorStateGeneration": 0,
         "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
         "stateGeneration": 1,
@@ -991,7 +1042,7 @@
           "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         },
         "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
-        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorLedgerSha256": "5b217e2c4c245b8e40ef82c6d5ed7a14c65580b4300a8dd421840b547a283eb3",
         "predecessorStateGeneration": 0,
         "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
         "stateGeneration": 999,
@@ -1028,7 +1079,7 @@
           "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         },
         "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
-        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorLedgerSha256": "5b217e2c4c245b8e40ef82c6d5ed7a14c65580b4300a8dd421840b547a283eb3",
         "predecessorStateGeneration": 0,
         "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
         "stateGeneration": 1,
@@ -1065,7 +1116,7 @@
           "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         },
         "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
-        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorLedgerSha256": "5b217e2c4c245b8e40ef82c6d5ed7a14c65580b4300a8dd421840b547a283eb3",
         "predecessorManifestSha256": "8888888888888888888888888888888888888888888888888888888888888888",
         "predecessorStateGeneration": 0,
         "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
@@ -1104,7 +1155,7 @@
           "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         },
         "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
-        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorLedgerSha256": "5b217e2c4c245b8e40ef82c6d5ed7a14c65580b4300a8dd421840b547a283eb3",
         "predecessorManifestSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "predecessorStateGeneration": 0,
         "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
@@ -1143,7 +1194,7 @@
           "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         },
         "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
-        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorLedgerSha256": "5b217e2c4c245b8e40ef82c6d5ed7a14c65580b4300a8dd421840b547a283eb3",
         "predecessorManifestSha256": "7777777777777777777777777777777777777777777777777777777777777777",
         "predecessorStateGeneration": 0,
         "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",

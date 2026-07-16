@@ -48,14 +48,14 @@ internal static class LedgerSafePath
     /// is responsible for supplying an already-sanitized set of schema-known
     /// segments when applicable (see <see cref="EncodeSegments"/>).
     /// </summary>
-    public static string Encode(IReadOnlyList<string> rawSegments)
+    public static string Encode(IReadOnlyList<string> rawSegments, string codePrefix = "")
     {
         var sanitized = new List<string>(rawSegments.Count);
         foreach (var raw in rawSegments)
         {
             sanitized.Add(SanitizePropertyOrIndex(raw, schemaKnown: false));
         }
-        return EncodeSegments(sanitized, codePrefixChars: 0);
+        return EncodeSegments(sanitized, codePrefix);
     }
 
     /// <summary>
@@ -63,12 +63,17 @@ internal static class LedgerSafePath
     /// resolved schema-known names) into a JSON Pointer, applying dual caps
     /// and the greedy truncation algorithm.
     /// </summary>
-    public static string EncodeSegments(IReadOnlyList<string> sanitizedSegments, int codePrefixChars = 0)
+    public static string EncodeSegments(IReadOnlyList<string> sanitizedSegments, string codePrefix = "")
     {
-        // Pre-check: fully-sanitized untruncated path.
+        // Pre-check: fully-sanitized untruncated path. The dual caps apply to
+        // the WHOLE diagnostic message `<codePrefix><path>`; we subtract the
+        // exact UTF-16 code-unit count and the exact UTF-8 byte count of the
+        // caller-provided codePrefix (typically "<code>:") from each budget.
         var untruncated = BuildPointer(sanitizedSegments);
+        var codePrefixChars = codePrefix.Length;
+        var codePrefixBytes = Utf8ByteCount(codePrefix);
         var charBudget = MessageMaxChars - codePrefixChars;
-        var byteBudget = MessageMaxUtf8Bytes - codePrefixChars;
+        var byteBudget = MessageMaxUtf8Bytes - codePrefixBytes;
         if (untruncated.Length <= charBudget && Utf8ByteCount(untruncated) <= byteBudget)
             return untruncated;
 

@@ -6,15 +6,18 @@ namespace AgenticPrReview.Runtime.Ledger;
 /// Ledger-computed digests. subjectDigest is host-supplied pass-through
 /// per the M4 Batch #1 shared contract; only cacheContractDigest is derived
 /// inside the runtime.
+///
+/// Issue #49 section 6 freezes cacheContractDigest as:
+///   Sha256Hex(LedgerCanonicalizer.SerializeCacheContractIdentity(identities))
+/// i.e. SHA-256 directly over the canonical bytes of the cache-contract
+/// identity envelope. No domain tag, no NUL separator.
 /// </summary>
 internal static class LedgerDigests
 {
-    public const string CacheContractDomainTag = "agentic-pr-review/ledger-cache-contract/v1";
-
     public static string ComputeCacheContractDigest(ExpectedIdentities identities)
     {
         var envelope = LedgerCanonicalizer.SerializeCacheContractIdentity(identities).ToArray();
-        return ComputeTaggedDigest(CacheContractDomainTag, envelope);
+        return LedgerCanonicalizer.ComputeSha256Hex(envelope);
     }
 
     public static string ComputeCacheContractDigestFromHeader(LedgerHeader header)
@@ -32,16 +35,6 @@ internal static class LedgerDigests
             PolicyId: header.PolicyId,
             ToolDefinitionId: header.ToolDefinitionId,
             CacheConfigId: header.CacheConfigId)).ToArray();
-        return ComputeTaggedDigest(CacheContractDomainTag, envelope);
-    }
-
-    private static string ComputeTaggedDigest(string tag, byte[] envelope)
-    {
-        var tagBytes = Encoding.UTF8.GetBytes(tag);
-        var preimage = new byte[tagBytes.Length + 1 + envelope.Length];
-        Buffer.BlockCopy(tagBytes, 0, preimage, 0, tagBytes.Length);
-        preimage[tagBytes.Length] = 0x00;
-        Buffer.BlockCopy(envelope, 0, preimage, tagBytes.Length + 1, envelope.Length);
-        return LedgerCanonicalizer.ComputeSha256Hex(preimage);
+        return LedgerCanonicalizer.ComputeSha256Hex(envelope);
     }
 }

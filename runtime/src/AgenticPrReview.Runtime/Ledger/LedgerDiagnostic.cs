@@ -124,7 +124,12 @@ public static class LedgerDiagnosticMessages
     public static LedgerDiagnostic Of(string code, string safePath, string? causeCode = null) => new()
     {
         Code = code,
-        Message = TemplateFor(code) + " " + safePath,
+        // Wire shape frozen by Issue #49 section 5 and the shared safe-path
+        // contract: `<code>:<safe-path>`. The safePath was already produced by
+        // LedgerSafePath.Encode / EncodeSegments with codePrefixChars set to
+        // <code>.Length + 1 (for the colon), so both dual caps count the code
+        // prefix and the colon.
+        Message = code + ":" + safePath,
         CauseCode = causeCode,
     };
 

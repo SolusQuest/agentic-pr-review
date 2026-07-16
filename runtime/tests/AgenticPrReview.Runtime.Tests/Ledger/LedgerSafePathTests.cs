@@ -15,7 +15,6 @@ public sealed class LedgerSafePathTests
     // codePrefixChars for the ledger_invalid_unicode: producer is 23.
     // Full producer output = "ledger_invalid_unicode:" + safe-path.
     private const string CodePrefix = "ledger_invalid_unicode:";
-    private const int CodePrefixChars = 23;
 
     [Fact]
     public void LedgerDeepPathNoTruncation_MatchesFrozenLiteral()
@@ -24,7 +23,7 @@ public sealed class LedgerSafePathTests
         // charBudget = 256 - 23 = 233; total_chars = 212, no truncation.
         var segments = new List<string>();
         for (var i = 0; i < 9; i++) segments.Add(LedgerSafePath.MarkerUntrustedProperty);
-        var encoded = LedgerSafePath.EncodeSegments(segments, CodePrefixChars);
+        var encoded = LedgerSafePath.EncodeSegments(segments, CodePrefix);
         var full = CodePrefix + encoded;
         var expected = "ledger_invalid_unicode:/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>";
         Assert.Equal(expected, full);
@@ -38,7 +37,7 @@ public sealed class LedgerSafePathTests
         // reserved_chars = 38, allowance_chars = 195, leadingCount = 9, total_chars = 250.
         var segments = new List<string>();
         for (var i = 0; i < 13; i++) segments.Add(LedgerSafePath.MarkerUntrustedProperty);
-        var encoded = LedgerSafePath.EncodeSegments(segments, CodePrefixChars);
+        var encoded = LedgerSafePath.EncodeSegments(segments, CodePrefix);
         var full = CodePrefix + encoded;
         var expected = "ledger_invalid_unicode:/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<untrusted-property>/<path-truncated>/<untrusted-property>";
         Assert.Equal(expected, full);

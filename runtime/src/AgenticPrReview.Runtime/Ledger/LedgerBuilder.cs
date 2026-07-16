@@ -389,12 +389,12 @@ public static class LedgerBuilder
             if (value is null || HasInvalidUnicode(value))
                 return LedgerDiagnosticMessages.Of(
                     LedgerDiagnosticCodes.InvalidUnicode,
-                    LedgerSafePath.Encode(new[] { "header", name }));
+                    LedgerSafePath.Encode(new[] { "header", name }, "ledger_invalid_unicode:"));
         }
         if (interaction.InteractionId is null || HasInvalidUnicode(interaction.InteractionId))
             return LedgerDiagnosticMessages.Of(
                 LedgerDiagnosticCodes.InvalidUnicode,
-                LedgerSafePath.Encode(new[] { "records", (2 * interaction.InteractionOrdinal).ToString(System.Globalization.CultureInfo.InvariantCulture), "interactionId" }));
+                LedgerSafePath.Encode(new[] { "records", (2 * interaction.InteractionOrdinal).ToString(System.Globalization.CultureInfo.InvariantCulture), "interactionId" }, "ledger_invalid_unicode:"));
 
         // Context-source strings
         if (source.SubjectDigest is null || HasInvalidUnicode(source.SubjectDigest))

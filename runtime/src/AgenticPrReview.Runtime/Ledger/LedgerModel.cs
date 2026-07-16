@@ -239,12 +239,36 @@ public sealed class ValidatedLedger
     private readonly byte[] canonicalBytes;
     private readonly LedgerModel privateModel;
 
+    /// <summary>
+    /// Deep-immutable snapshot. The constructor takes ownership of a fresh
+    /// canonical byte buffer, then rebuilds the model from those bytes so
+    /// the internally stored <see cref="Model"/> reference is entirely
+    /// derived from the private byte buffer. The caller's <paramref name="model"/>
+    /// argument is used only as a schema-typed skeleton; any mutation of
+    /// caller-supplied collections after construction cannot alter the
+    /// snapshot exposed through <see cref="Model"/> or <see cref="CanonicalBytes"/>.
+    /// </summary>
     internal ValidatedLedger(LedgerModel model, byte[] canonicalBytes, string contentSha256)
     {
         this.canonicalBytes = new byte[canonicalBytes.Length];
         Buffer.BlockCopy(canonicalBytes, 0, this.canonicalBytes, 0, canonicalBytes.Length);
-        this.privateModel = model;
-        Model = model;
+        // Blocker #8 fix: derive the private/public Model from the private
+        // canonical byte buffer, not from the caller-supplied `model`
+        // parameter. This makes the immutability structural (not conventional)
+        // and closes the door on any accidental aliasing of caller-supplied
+        // sub-collections into the ledger's stable snapshot.
+        //
+        // The re-parse is a strict RFC 8785 canonical form re-read of the
+        // exact bytes we just deep-copied; no external state, no schema
+        // validation (the parser has already validated the bytes before
+        // handing them to us). The caller's `model` is ignored for storage
+        // purposes but retained in the signature to keep the parser/builder
+        // call sites unchanged for callers that only mint after full parse.
+        _ = model;
+        using var doc = System.Text.Json.JsonDocument.Parse(this.canonicalBytes);
+        var rebuilt = LedgerDeserializer.Deserialize(doc.RootElement);
+        this.privateModel = rebuilt;
+        Model = rebuilt;
         ContentSha256 = contentSha256;
         ByteLength = canonicalBytes.Length;
     }

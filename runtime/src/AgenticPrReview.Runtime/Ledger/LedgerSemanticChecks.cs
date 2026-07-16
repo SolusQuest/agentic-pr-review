@@ -132,6 +132,14 @@ internal static class LedgerSemanticChecks
 
     private static IEnumerable<(string Name, string Value)> EnumerateIdentityStrings(LedgerHeader h)
     {
+        // Blocker #9 fix: repository and headRepository are host-authoritative
+        // identity strings and are subject to the same shared UTF-8 byte-cap
+        // and control-character rejection as the rest of the header identity
+        // vocabulary. The character-length cap is enforced by the schema; the
+        // UTF-8 byte cap runs here so a multibyte value cannot slip past the
+        // character cap while violating the byte cap.
+        yield return ("repository", h.Repository);
+        yield return ("headRepository", h.HeadRepository);
         yield return ("workflowIdentity", h.WorkflowIdentity);
         yield return ("trustedExecutionDomain", h.TrustedExecutionDomain);
         yield return ("sessionEpoch", h.SessionEpoch);

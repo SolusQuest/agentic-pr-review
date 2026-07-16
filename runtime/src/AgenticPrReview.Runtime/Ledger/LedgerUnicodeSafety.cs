@@ -23,31 +23,75 @@ internal static class LedgerUnicodeSafety
         {
             case JsonValueKind.String:
             {
-                var s = element.GetString();
+                // System.Text.Json's JsonElement.GetString() throws
+                // InvalidOperationException when the JSON string decodes to
+                // a lone UTF-16 surrogate. That is precisely the condition
+                // ledger_invalid_unicode is supposed to catch, so treat any
+                // such throw as an invalid-Unicode finding.
+                string? s;
+                try
+                {
+                    s = element.GetString();
+                }
+                catch (InvalidOperationException)
+                {
+                    var safePath = LedgerSafePath.Encode(pathStack, "ledger_invalid_unicode:");
+                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode, safePath);
+                }
                 if (s is not null && ContainsInvalidUnicode(s))
                 {
-                    var safePath = LedgerSafePath.Encode(pathStack);
+                    var safePath = LedgerSafePath.Encode(pathStack, "ledger_invalid_unicode:");
                     return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode, safePath);
                 }
                 return null;
             }
             case JsonValueKind.Object:
             {
-                // Property names first: a property name with invalid Unicode terminates the scan.
+                // Property names first: a property name with invalid Unicode
+                // terminates the scan. Access via prop.Name may throw when
+                // the underlying JSON contained a lone surrogate; treat any
+                // such throw as ledger_invalid_unicode at the enclosing
+                // position (we cannot include the offending name in the
+                // safe path because it is not a valid string).
                 foreach (var prop in element.EnumerateObject())
                 {
-                    var name = prop.Name;
+                    string name;
+                    try
+                    {
+                        name = prop.Name;
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        pathStack.Add(LedgerSafePath.MarkerInvalidUtf16);
+                        var safePath = LedgerSafePath.Encode(pathStack, "ledger_invalid_unicode:");
+                        pathStack.RemoveAt(pathStack.Count - 1);
+                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode, safePath);
+                    }
                     if (ContainsInvalidUnicode(name))
                     {
                         pathStack.Add(name);
-                        var safePath = LedgerSafePath.Encode(pathStack);
+                        var safePath = LedgerSafePath.Encode(pathStack, "ledger_invalid_unicode:");
                         pathStack.RemoveAt(pathStack.Count - 1);
                         return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode, safePath);
                     }
                 }
                 foreach (var prop in element.EnumerateObject())
                 {
-                    pathStack.Add(prop.Name);
+                    string name;
+                    try
+                    {
+                        name = prop.Name;
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // Already handled above; but guard against a race in
+                        // case enumeration order changes: emit as before.
+                        pathStack.Add(LedgerSafePath.MarkerInvalidUtf16);
+                        var safePath = LedgerSafePath.Encode(pathStack, "ledger_invalid_unicode:");
+                        pathStack.RemoveAt(pathStack.Count - 1);
+                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode, safePath);
+                    }
+                    pathStack.Add(name);
                     var childFailure = ScanRecursive(prop.Value, pathStack);
                     pathStack.RemoveAt(pathStack.Count - 1);
                     if (childFailure is not null) return childFailure;

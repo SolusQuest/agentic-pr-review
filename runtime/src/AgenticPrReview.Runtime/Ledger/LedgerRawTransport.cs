@@ -4,9 +4,21 @@ using System.Text.Json;
 namespace AgenticPrReview.Runtime.Ledger;
 
 /// <summary>
-/// Raw-transport stage: enforces raw byte cap, UTF-8 validity, JSON validity,
-/// structural caps (depth/array-length/property-count), duplicate JSON
-/// property names, and invalid Unicode code points (NUL, lone surrogates).
+/// Raw-transport stage per Issue #49 section 9. Sub-stages run in order,
+/// each with its own fail-fast rule:
+///   1a. byte cap                        -> ledger_raw_byte_limit_exceeded
+///   1b. UTF-8 decode                    -> ledger_invalid_utf8
+///   1c. Complete JSON syntax validation -> ledger_invalid_json
+///   1d. Structural scan (only on a syntactically valid document); returns
+///       the first hit under the FIXED priority
+///       (1) ledger_duplicate_json_property
+///       (2) ledger_json_depth_exceeded
+///       (3) ledger_json_array_length_exceeded
+///       (4) ledger_json_property_count_exceeded
+///       even if a lower-priority defect appears earlier in the token stream.
+///
+/// Unicode-safety (lone surrogates, NUL) is stage 2 and lives in
+/// <see cref="LedgerUnicodeSafety"/>; it is NOT emitted from the raw stage.
 /// </summary>
 internal static class LedgerRawTransport
 {
@@ -14,11 +26,11 @@ internal static class LedgerRawTransport
     {
         document = null;
 
+        // 1a: raw byte cap.
         if (bytes.Length > LedgerLimits.MaxRawBytes)
             return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.RawByteLimitExceeded);
 
-        // Validate UTF-8 by decoding without replacements. We use Encoding.UTF8 with strict
-        // fallbacks so invalid sequences throw a DecoderFallbackException.
+        // 1b: strict UTF-8 decode (no replacements).
         string text;
         try
         {
@@ -30,59 +42,76 @@ internal static class LedgerRawTransport
             return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUtf8);
         }
 
-        // Structural / duplicate-key scan (System.Text.Json permits duplicate names by default;
-        // structural caps must be enforced before its recursion could blow through them).
-        var scan = LedgerJsonScanner.Scan(text);
-        if (scan is LedgerDiagnostic scanFailure)
-            return scanFailure;
-
+        // 1c: complete JSON syntax gate. We parse with a MaxDepth well above
+        // the ledger structural cap so that STJ never returns a depth error
+        // masquerading as a syntax error: any thrown JsonException at this
+        // stage is genuinely a grammar error, not a structural-cap violation.
+        JsonDocument parsed;
         try
         {
             var options = new JsonDocumentOptions
             {
                 AllowTrailingCommas = false,
                 CommentHandling = JsonCommentHandling.Disallow,
-                MaxDepth = LedgerLimits.MaxJsonDepth,
+                MaxDepth = 1024,
             };
-            document = JsonDocument.Parse(text, options);
+            parsed = JsonDocument.Parse(bytes.ToArray(), options);
         }
-        catch (JsonException ex)
+        catch (JsonException)
         {
-            if (ex.Message.Contains("depth", StringComparison.OrdinalIgnoreCase))
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.JsonDepthExceeded);
             return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidJson);
         }
 
+        // 1d: structural scan on the syntactically valid document. Collects
+        // ALL candidate structural defects and returns the highest-priority
+        // one under the frozen order (dup > depth > array-length > property-count).
+        var structuralFailure = LedgerJsonStructuralScanner.Scan(text);
+        if (structuralFailure is not null)
+        {
+            parsed.Dispose();
+            return structuralFailure;
+        }
+
+        document = parsed;
         return null;
     }
 }
 
 /// <summary>
-/// Single-pass structural JSON scanner. Enforces depth, per-array length,
-/// total property count, duplicate-property, and Unicode invariants on the
-/// caller-supplied text. Uses an explicit container stack so that array
-/// elements — including nested objects and arrays — are counted correctly
-/// and no O(n^2) backscan is required.
+/// Structural JSON scanner: on a syntactically valid JSON text, scans for
+/// duplicate properties, depth overflow, over-cap arrays, and over-cap total
+/// property count. Collects EVERY candidate defect and then applies the
+/// frozen intra-stage priority.
+///
+/// This scanner assumes valid syntax; syntax errors are the caller's
+/// responsibility (see <see cref="LedgerRawTransport.Validate"/> stage 1c).
+/// Unicode-safety (NUL, lone surrogate) is out of scope and belongs to
+/// <see cref="LedgerUnicodeSafety"/>.
 /// </summary>
-internal static class LedgerJsonScanner
+internal static class LedgerJsonStructuralScanner
 {
     private enum Container { Object, Array }
 
     private struct Frame
     {
         public Container Kind;
-        public int ArrayLength;      // Only meaningful for arrays.
-        public HashSet<string>? Keys; // Only allocated for objects.
-        public bool AwaitingValue;   // Object: true after ':'; Array: true after '[' / ','.
-        public bool AwaitingKey;     // Object: true after '{' or ','.
+        public int ArrayLength;
+        public HashSet<string>? Keys;
+        public bool AwaitingValue;
+        public bool AwaitingKey;
     }
 
     public static LedgerDiagnostic? Scan(string text)
     {
         var stack = new Stack<Frame>();
         var totalProperties = 0;
+
+        bool hasDuplicate = false;
+        bool hasDepth = false;
+        bool hasArrayLength = false;
+        bool hasPropertyCount = false;
+
         var i = 0;
-        var sawRoot = false;
         while (i < text.Length)
         {
             var ch = text[i];
@@ -90,191 +119,137 @@ internal static class LedgerJsonScanner
             switch (ch)
             {
                 case '{':
-                {
-                    var failure = OnValueStart(stack);
-                    if (failure is not null) return failure;
-                    if (stack.Count + 1 > LedgerLimits.MaxJsonDepth)
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.JsonDepthExceeded);
+                    OnValueStart(stack, ref hasArrayLength);
+                    if (stack.Count + 1 > LedgerLimits.MaxJsonDepth) hasDepth = true;
                     stack.Push(new Frame
                     {
                         Kind = Container.Object,
                         Keys = new HashSet<string>(StringComparer.Ordinal),
                         AwaitingKey = true,
                     });
-                    sawRoot = true;
                     i++;
                     break;
-                }
                 case '[':
-                {
-                    var failure = OnValueStart(stack);
-                    if (failure is not null) return failure;
-                    if (stack.Count + 1 > LedgerLimits.MaxJsonDepth)
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.JsonDepthExceeded);
+                    OnValueStart(stack, ref hasArrayLength);
+                    if (stack.Count + 1 > LedgerLimits.MaxJsonDepth) hasDepth = true;
                     stack.Push(new Frame
                     {
                         Kind = Container.Array,
                         ArrayLength = 0,
                         AwaitingValue = true,
                     });
-                    sawRoot = true;
                     i++;
                     break;
-                }
                 case '}':
-                    if (stack.Count == 0 || stack.Peek().Kind != Container.Object)
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidJson);
-                    stack.Pop();
-                    i++;
-                    break;
                 case ']':
-                    if (stack.Count == 0 || stack.Peek().Kind != Container.Array)
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidJson);
-                    stack.Pop();
+                    if (stack.Count > 0) stack.Pop();
                     i++;
                     break;
                 case ',':
-                {
-                    if (stack.Count == 0)
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidJson);
-                    // Update the top frame in place.
-                    var top = stack.Pop();
-                    if (top.Kind == Container.Object)
+                    if (stack.Count > 0)
                     {
-                        top.AwaitingKey = true;
-                        top.AwaitingValue = false;
+                        var top = stack.Pop();
+                        if (top.Kind == Container.Object)
+                        {
+                            top.AwaitingKey = true;
+                            top.AwaitingValue = false;
+                        }
+                        else
+                        {
+                            top.AwaitingValue = true;
+                        }
+                        stack.Push(top);
                     }
-                    else
-                    {
-                        top.AwaitingValue = true;
-                    }
-                    stack.Push(top);
                     i++;
                     break;
-                }
                 case ':':
-                {
-                    if (stack.Count == 0 || stack.Peek().Kind != Container.Object)
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidJson);
-                    var top = stack.Pop();
-                    top.AwaitingKey = false;
-                    top.AwaitingValue = true;
-                    stack.Push(top);
+                    if (stack.Count > 0)
+                    {
+                        var top = stack.Pop();
+                        top.AwaitingKey = false;
+                        top.AwaitingValue = true;
+                        stack.Push(top);
+                    }
                     i++;
                     break;
-                }
                 case '"':
                 {
                     var stringEnd = FindStringEnd(text, i);
-                    if (stringEnd < 0) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidJson);
-                    var rawKey = text.Substring(i + 1, stringEnd - i - 1);
-                    var unescaped = TryUnescape(rawKey, out var unicodeError);
-                    if (unicodeError)
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
-                    if (unescaped is null)
+                    if (stringEnd < 0)
+                    {
+                        // Syntax gate is supposed to have caught this; if it
+                        // still happens, abort the structural pass and let
+                        // the caller treat the input as invalid JSON.
                         return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidJson);
-                    if (unescaped.Contains('\0'))
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
-                    if (HasLoneSurrogate(unescaped))
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+                    }
+                    var rawKey = text.Substring(i + 1, stringEnd - i - 1);
+                    var unescaped = TryUnescape(rawKey);
                     if (stack.Count > 0)
                     {
                         var top = stack.Pop();
                         if (top.Kind == Container.Object && top.AwaitingKey)
                         {
-                            if (!top.Keys!.Add(unescaped))
+                            if (unescaped is not null && !top.Keys!.Add(unescaped))
                             {
-                                stack.Push(top);
-                                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.DuplicateJsonProperty);
+                                hasDuplicate = true;
                             }
                             totalProperties++;
                             if (totalProperties > LedgerLimits.MaxTotalProperties)
-                            {
-                                stack.Push(top);
-                                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.JsonPropertyCountExceeded);
-                            }
+                                hasPropertyCount = true;
                             top.AwaitingKey = false;
-                            // We expect ':' next; that transition sets AwaitingValue=true.
+                            stack.Push(top);
+                        }
+                        else if (top.Kind == Container.Object && top.AwaitingValue)
+                        {
+                            top.AwaitingValue = false;
                             stack.Push(top);
                         }
                         else if (top.Kind == Container.Array && top.AwaitingValue)
                         {
                             top.ArrayLength++;
-                            if (top.ArrayLength > LedgerLimits.MaxArrayLength)
-                            {
-                                stack.Push(top);
-                                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.JsonArrayLengthExceeded);
-                            }
-                            top.AwaitingValue = false;
-                            stack.Push(top);
-                        }
-                        else if (top.Kind == Container.Object && top.AwaitingValue)
-                        {
-                            // Object property value that happens to be a string.
+                            if (top.ArrayLength > LedgerLimits.MaxArrayLength) hasArrayLength = true;
                             top.AwaitingValue = false;
                             stack.Push(top);
                         }
                         else
                         {
                             stack.Push(top);
-                            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidJson);
                         }
                     }
-                    sawRoot = true;
                     i = stringEnd + 1;
                     break;
                 }
                 default:
-                {
-                    // Value tokens: numbers, true, false, null.
-                    var failure = OnValueStart(stack);
-                    if (failure is not null) return failure;
-                    sawRoot = true;
+                    OnValueStart(stack, ref hasArrayLength);
                     while (i < text.Length && !",}]".Contains(text[i]) && !char.IsWhiteSpace(text[i]))
                         i++;
                     break;
-                }
             }
         }
-        if (!sawRoot)
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidJson);
-        if (stack.Count != 0)
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidJson);
+
+        // Frozen priority: duplicate > depth > array-length > property-count.
+        if (hasDuplicate) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.DuplicateJsonProperty);
+        if (hasDepth) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.JsonDepthExceeded);
+        if (hasArrayLength) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.JsonArrayLengthExceeded);
+        if (hasPropertyCount) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.JsonPropertyCountExceeded);
         return null;
     }
 
-    /// <summary>
-    /// Applies "a value is starting here" bookkeeping to the current top
-    /// frame: counts array elements, clears AwaitingValue on objects.
-    /// </summary>
-    private static LedgerDiagnostic? OnValueStart(Stack<Frame> stack)
+    private static void OnValueStart(Stack<Frame> stack, ref bool hasArrayLength)
     {
-        if (stack.Count == 0) return null;
+        if (stack.Count == 0) return;
         var top = stack.Pop();
-        if (top.Kind == Container.Array)
+        if (top.Kind == Container.Array && top.AwaitingValue)
         {
-            if (top.AwaitingValue)
-            {
-                top.ArrayLength++;
-                if (top.ArrayLength > LedgerLimits.MaxArrayLength)
-                {
-                    stack.Push(top);
-                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.JsonArrayLengthExceeded);
-                }
-                top.AwaitingValue = false;
-            }
+            top.ArrayLength++;
+            if (top.ArrayLength > LedgerLimits.MaxArrayLength) hasArrayLength = true;
+            top.AwaitingValue = false;
         }
-        else if (top.Kind == Container.Object)
+        else if (top.Kind == Container.Object && top.AwaitingValue)
         {
-            if (!top.AwaitingValue)
-            {
-                stack.Push(top);
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidJson);
-            }
             top.AwaitingValue = false;
         }
         stack.Push(top);
-        return null;
     }
 
     private static int FindStringEnd(string text, int startQuote)
@@ -294,9 +269,8 @@ internal static class LedgerJsonScanner
         return -1;
     }
 
-    private static string? TryUnescape(string raw, out bool unicodeError)
+    private static string? TryUnescape(string raw)
     {
-        unicodeError = false;
         var sb = new StringBuilder(raw.Length);
         var i = 0;
         while (i < raw.Length)
@@ -324,7 +298,6 @@ internal static class LedgerJsonScanner
                     if (i + 6 > raw.Length) return null;
                     if (!ushort.TryParse(raw.AsSpan(i + 2, 4), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out var codeUnit))
                         return null;
-                    if (codeUnit == 0) { unicodeError = true; return null; }
                     sb.Append((char)codeUnit);
                     i += 6;
                     break;
@@ -332,19 +305,5 @@ internal static class LedgerJsonScanner
             }
         }
         return sb.ToString();
-    }
-
-    private static bool HasLoneSurrogate(string s)
-    {
-        for (var i = 0; i < s.Length; i++)
-        {
-            if (char.IsHighSurrogate(s[i]))
-            {
-                if (i + 1 >= s.Length || !char.IsLowSurrogate(s[i + 1])) return true;
-                i++;
-            }
-            else if (char.IsLowSurrogate(s[i])) return true;
-        }
-        return false;
     }
 }
