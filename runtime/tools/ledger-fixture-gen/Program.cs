@@ -18,7 +18,7 @@ internal static partial class Program
         root = args[0];
         Directory.CreateDirectory(root);
 
-        // Valid ledger fixtures (canonical bytes on disk).
+        // Positive baselines (canonical ledger bytes).
         var bootstrap = BuildBootstrap();
         Write("bootstrap-minimal.json", bootstrap);
 
@@ -37,16 +37,59 @@ internal static partial class Program
         var maxInter = BuildMaxInteractions();
         Write("continuation-max-interactions.json", maxInter);
 
-        // TODO: negative fixtures (raw-transport, schema, semantic, transition)
-        // are regenerated in the follow-up rewrite of Mutations.cs against the
-        // new frozen contract. This entry point currently emits only the
-        // valid-fixture baseline; the negative matrix is added incrementally
-        // as tests are rewritten.
+        // ---------- Raw-transport stage ----------
+        WriteRaw("raw-oversize.bin", MakeRawOversize());
+        WriteRaw("invalid-utf8.bin", MakeInvalidUtf8());
+        WriteRaw("invalid-json.json", MakeInvalidJson());
+        WriteRaw("duplicate-json-property.json", MakeDuplicateJsonProperty(bootstrap));
+        WriteRaw("depth-exceeded.json", MakeDepthExceeded());
+        WriteRaw("array-length-exceeded.json", MakeArrayLengthExceeded());
+        WriteRaw("property-count-exceeded.json", MakePropertyCountExceeded());
+        WriteRaw("raw-multi-defect.json", MakeRawMultiDefect());
+
+        // ---------- Unicode-safety stage ----------
+        WriteRaw("nul-in-summary.json", MakeNulInSummary(bootstrap));
+        WriteRaw("lone-surrogate-in-string.json", MakeLoneSurrogateInString(bootstrap));
+        WriteRaw("lone-surrogate-in-property-name.json", MakeLoneSurrogateInPropertyName(bootstrap));
+        WriteRaw("nul-in-property-name.json", MakeNulInPropertyName(bootstrap));
+        WriteRaw("root-scalar-lone-surrogate.json", MakeRootScalarLoneSurrogate());
+        WriteRaw("root-scalar-nul.json", MakeRootScalarNul());
+
+        // ---------- Version routing ----------
+        WriteRaw("unsupported-schema-version.json", MakeUnsupportedSchemaVersion(bootstrap));
+        WriteRaw("missing-schema-version.json", MakeMissingSchemaVersion(bootstrap));
+        WriteRaw("wrong-type-schema-version.json", MakeWrongTypeSchemaVersion(bootstrap));
+        WriteRaw("unsupported-prefix-contract-version.json", MakeUnsupportedPrefixContractVersion(bootstrap));
+        WriteRaw("missing-prefix-contract-version.json", MakeMissingPrefixContractVersion(bootstrap));
+        WriteRaw("wrong-type-prefix-contract-version.json", MakeWrongTypePrefixContractVersion(bootstrap));
+
+        // ---------- Schema-stage negatives ----------
+        WriteRaw("unknown-top-level-field.json", MakeUnknownTopLevel(bootstrap));
+        WriteRaw("unknown-header-field.json", MakeUnknownHeaderField(bootstrap));
+        WriteRaw("unknown-header-kind.json", MakeUnknownHeaderKind(bootstrap));
+        WriteRaw("overlong-summary.json", MakeOverlongSummary(bootstrap));
+        WriteRaw("whitespace-summary.json", MakeWhitespaceSummary(bootstrap));
+        WriteRaw("absolute-path-in-finding.json", MakeAbsolutePathInFinding(bootstrap));
+        WriteRaw("unsupported-change-status.json", MakeUnsupportedChangeStatus(bootstrap));
+
+        // ---------- Structural bounds (identity) ----------
+        WriteRaw("identity-byte-length-exceeded.json", MakeIdentityByteLengthExceeded(bootstrap));
+        WriteRaw("control-character-in-identity.json", MakeControlCharInIdentity(bootstrap));
+
+        // ---------- Semantic invariants ----------
+        WriteRaw("pair-order-swapped.json", MakePairOrderSwapped(bootstrap));
+        WriteRaw("records-odd-length.json", MakeRecordsOddLength(bootstrap));
+        WriteRaw("records-empty.json", MakeRecordsEmpty(bootstrap));
+        WriteRaw("model-alias-latest.json", MakeModelAliasLatest(bootstrap));
+
+        // ---------- Canonical form ----------
+        WriteRaw("non-canonical-key-order.json", MakeNonCanonicalKeyOrder());
+        WriteRaw("non-canonical-string-escape.json", MakeNonCanonicalStringEscape(bootstrap));
 
         return 0;
     }
 
-    private static void Write(string name, ValidatedLedger v)
+    internal static void Write(string name, ValidatedLedger v)
     {
         var path = Path.Combine(root, name);
         File.WriteAllBytes(path, v.ToCanonicalByteArray());

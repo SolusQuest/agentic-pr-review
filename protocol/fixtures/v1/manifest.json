@@ -244,5 +244,285 @@
       "valid": true
     },
     "contentSha256": "6501429aa6847f675508365e3b62ec25f3a4e96a59fcf885e0d5db5970bfc172"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/raw-oversize.bin",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_raw_byte_limit_exceeded"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/invalid-utf8.bin",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_invalid_utf8"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/invalid-json.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_invalid_json"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/duplicate-json-property.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_duplicate_json_property"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/depth-exceeded.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_json_depth_exceeded"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/array-length-exceeded.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_json_array_length_exceeded"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/property-count-exceeded.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_json_property_count_exceeded"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/raw-multi-defect.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_duplicate_json_property"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/nul-in-summary.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_invalid_unicode"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/lone-surrogate-in-string.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_invalid_unicode"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/lone-surrogate-in-property-name.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_invalid_unicode"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/nul-in-property-name.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_invalid_unicode"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/root-scalar-lone-surrogate.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_invalid_unicode"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/root-scalar-nul.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_invalid_unicode"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/unsupported-schema-version.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_unsupported_schema_version"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/missing-schema-version.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_schema_violation"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/wrong-type-schema-version.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_schema_violation"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/unsupported-prefix-contract-version.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_unsupported_prefix_contract_version"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/missing-prefix-contract-version.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_schema_violation"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/wrong-type-prefix-contract-version.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_schema_violation"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/unknown-top-level-field.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_unknown_field"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/unknown-header-field.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_unknown_field"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/unknown-header-kind.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_schema_violation"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/overlong-summary.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_overlong_value"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/whitespace-summary.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_schema_violation"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/absolute-path-in-finding.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_schema_violation"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/unsupported-change-status.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_unsupported_change_status"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/identity-byte-length-exceeded.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_identity_byte_length_exceeded"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/control-character-in-identity.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_control_character_in_identity"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/pair-order-swapped.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_pair_order_mismatch"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/records-odd-length.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_records_length_not_even"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/records-empty.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_records_empty"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/model-alias-latest.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_model_alias_literal"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/non-canonical-key-order.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_schema_violation"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/non-canonical-string-escape.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_non_canonical"
+    }
   }
 ]

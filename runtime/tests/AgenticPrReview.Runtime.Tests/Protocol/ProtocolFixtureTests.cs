@@ -46,7 +46,8 @@ public sealed class ProtocolFixtureTests
             }
         }
 
-        var actualFiles = Directory.EnumerateFiles(root, "*.json", SearchOption.AllDirectories)
+        var actualFiles = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+            .Where(path => Path.GetExtension(path) is ".json" or ".bin")
             .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/'))
             .Where(path => path != "manifest.json")
             .ToHashSet(StringComparer.OrdinalIgnoreCase);

@@ -14,3 +14,22 @@ protocol/fixtures/state-manifest-v2-compat/**
 
 # Ledger fixtures: byte-stable golden artifacts, must not be re-formatted.
 protocol/fixtures/v1/provider-session-ledger/
+
+# Agent-local branch scratch (worktree-only)
+.phase*
+.patch-*
+.pr-inline.json
+.fixture-shas.txt
+.gen-property-count.py
+.regen-fixtures.py
+.write-refined.py
+.write-schema.py
+.section10-part1.txt
+.spec-section*.md
+.update-manifest.py
+.pr60-body*.md
+.commit-msg*.txt
+.relay-*.md
+.relay-*.txt
+.relay-*.json
+.gen-build.log

@@ -11,7 +11,7 @@ internal static partial class Program
     private const string LedgerEpoch2  = "CCCCCCCCCCCCCCCCCCCCCC";
     private const string LedgerEpoch3  = "DDDDDDDDDDDDDDDDDDDDDD";
 
-    private static readonly ExpectedIdentities Ident = new(
+    internal static readonly ExpectedIdentities Ident = new(
         Repository: "acme/example",
         HeadRepository: "acme/example",
         PullRequest: 123,
@@ -25,7 +25,7 @@ internal static partial class Program
         ToolDefinitionId: new string('d', 64),
         CacheConfigId: new string('e', 64));
 
-    private static readonly ExpectedIdentities IdentAltCache = Ident with { AdapterId = new string('f', 64) };
+    internal static readonly ExpectedIdentities IdentAltCache = Ident with { AdapterId = new string('f', 64) };
 
     private const string HeadShaA = "1111111111111111111111111111111111111111";
     private const string HeadShaB = "3333333333333333333333333333333333333333";
