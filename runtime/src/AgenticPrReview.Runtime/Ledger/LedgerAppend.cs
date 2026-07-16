@@ -3,144 +3,242 @@ using System.Collections.Immutable;
 namespace AgenticPrReview.Runtime.Ledger;
 
 /// <summary>
-/// Validates a candidate ledger against a predecessor (when applicable) and a
-/// caller-supplied <see cref="ExpectedTransition"/>. The candidate is always a
-/// pre-parsed <see cref="ValidatedLedger"/>, so it has already passed schema,
-/// bounds, semantic, and canonical checks. This method enforces the
-/// cross-check matrix between predecessor, candidate, and expected values.
+/// Transition validator. Every entry point starts with a kind guard: if the
+/// candidate header's <c>kind</c> does not match the wire value expected by the
+/// entry point, the validator emits a single <c>ledger_transition_kind_mismatch</c>
+/// and skips every other check.
+/// After the guard, the validator accumulates diagnostics one per category
+/// under the fixed category order documented in Issue #49 section 10 (kind,
+/// identities, session epoch, ledger epoch, state generation, predecessor
+/// fields, kind-specific expected fields, transition structure). Diagnostics
+/// are appended in that deterministic order.
 /// </summary>
 public static class LedgerAppend
 {
-    public static TransitionOutcome ValidateBootstrap(ValidatedLedger candidate, BootstrapTransition expected)
+    public static TransitionOutcome ValidateBootstrap(BootstrapTransition expected, ValidatedLedger candidate)
     {
-        if (candidate is null || expected is null || expected.Identities is null)
-            return new TransitionOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+        if (expected is null) throw new ArgumentNullException(nameof(expected));
+        if (candidate is null) throw new ArgumentNullException(nameof(candidate));
+
+        var diags = ImmutableArray.CreateBuilder<LedgerDiagnostic>();
+
+        // (1) Kind guard.
         if (candidate.PrivateModel.Header.Kind != "bootstrap")
-            return Fail(LedgerDiagnosticCodes.TransitionKindMismatch);
-
-        var common = CommonCrossChecks(candidate, expected);
-        if (common is not null) return new TransitionOutcome(null, common);
-
-        // Records: exactly one pair, ordinal 0.
-        if (candidate.PrivateModel.Records.Length != 2)
-            return Fail(LedgerDiagnosticCodes.BootstrapShapeViolation);
-        if (candidate.PrivateModel.Records[0].InteractionOrdinal != 0)
-            return Fail(LedgerDiagnosticCodes.BootstrapShapeViolation);
-        return new TransitionOutcome(candidate, null);
-    }
-
-    public static TransitionOutcome ValidateRecovery(ValidatedLedger candidate, RecoveryTransition expected)
-    {
-        if (candidate is null || expected is null || expected.Identities is null)
-            return new TransitionOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
-        if (candidate.PrivateModel.Header.Kind != "recovery")
-            return Fail(LedgerDiagnosticCodes.TransitionKindMismatch);
-
-        var common = CommonCrossChecks(candidate, expected);
-        if (common is not null) return new TransitionOutcome(null, common);
-
-        if (candidate.PrivateModel.Header.RecoveryReason != expected.RecoveryReason)
-            return Fail(LedgerDiagnosticCodes.RecoveryReasonMismatch);
-        if (candidate.PrivateModel.Records.Length != 2)
-            return Fail(LedgerDiagnosticCodes.RecoveryShapeViolation);
-        if (candidate.PrivateModel.Records[0].InteractionOrdinal != 0)
-            return Fail(LedgerDiagnosticCodes.RecoveryShapeViolation);
-        return new TransitionOutcome(candidate, null);
-    }
-
-    public static TransitionOutcome ValidateContinuation(ValidatedLedger predecessor, ValidatedLedger candidate, ContinuationTransition expected)
-    {
-        if (predecessor is null || candidate is null || expected is null || expected.Identities is null)
-            return new TransitionOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
-        if (candidate.PrivateModel.Header.Kind != "continuation")
-            return Fail(LedgerDiagnosticCodes.TransitionKindMismatch);
-
-        // Predecessor identities match expected.
-        if (!IdentitiesEqual(predecessor.PrivateModel.Header, expected.Identities))
-            return Fail(LedgerDiagnosticCodes.IdentityMismatch);
-
-        var common = CommonCrossChecks(candidate, expected);
-        if (common is not null) return new TransitionOutcome(null, common);
-
-        if (expected.PredecessorLedgerSha256 != predecessor.ContentSha256)
-            return Fail(LedgerDiagnosticCodes.PredecessorHashMismatch);
-        if (candidate.PrivateModel.Header.PredecessorLedgerSha256 != predecessor.ContentSha256)
-            return Fail(LedgerDiagnosticCodes.PredecessorHashMismatch);
-        if (expected.PredecessorStateGeneration != predecessor.PrivateModel.Header.StateGeneration)
-            return Fail(LedgerDiagnosticCodes.PredecessorGenerationMismatch);
-        if (candidate.PrivateModel.Header.PredecessorStateGeneration != predecessor.PrivateModel.Header.StateGeneration)
-            return Fail(LedgerDiagnosticCodes.PredecessorGenerationMismatch);
-        if (candidate.PrivateModel.Header.LedgerEpoch != predecessor.PrivateModel.Header.LedgerEpoch)
-            return Fail(LedgerDiagnosticCodes.LedgerEpochMismatch);
-
-        // Records prefix element-for-element (structural).
-        var predRecs = predecessor.PrivateModel.Records;
-        var candRecs = candidate.PrivateModel.Records;
-        if (candRecs.Length != predRecs.Length + 2)
-            return Fail(LedgerDiagnosticCodes.ContinuationPrefixMismatch);
-        for (var i = 0; i < predRecs.Length; i++)
         {
-            if (!RecordEquals(predRecs[i], candRecs[i]))
-                return Fail(LedgerDiagnosticCodes.ContinuationPrefixMismatch);
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.TransitionKindMismatch));
+            return new TransitionOutcome(diags.ToImmutable());
         }
-        // Tail pair ordinal continuity.
-        var lastOrdinal = predRecs.Length == 0 ? -1 : predRecs[^1].InteractionOrdinal;
-        var tailOrdinal = candRecs[^1].InteractionOrdinal;
-        if (tailOrdinal != lastOrdinal + 1)
-            return Fail(LedgerDiagnosticCodes.OrdinalGap);
-        return new TransitionOutcome(candidate, null);
+
+        var h = candidate.PrivateModel.Header;
+
+        // (2) Identities (common two-way; no three-way replacement for bootstrap).
+        if (!IdentitiesEqual(h, expected.Identities))
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.IdentityMismatch));
+
+        // (3) Session epoch.
+        if (h.SessionEpoch != expected.SessionEpoch)
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SessionEpochMismatch));
+
+        // (4) Ledger epoch.
+        if (h.LedgerEpoch != expected.LedgerEpoch)
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.LedgerEpochMismatch));
+
+        // (5) State generation.
+        if (h.StateGeneration != expected.StateGeneration)
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.StateGenerationMismatch));
+
+        // (6) Predecessor fields: bootstrap has none; schema pins predecessorLedgerSha256 == "bootstrap".
+
+        // (7) Kind-specific expected fields: none for bootstrap.
+
+        // (8) Transition structure: records shape.
+        if (!RootRecordsShape(candidate.PrivateModel.Records))
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.RootRecordsShapeMismatch));
+
+        return new TransitionOutcome(diags.ToImmutable());
     }
 
-    public static TransitionOutcome ValidateReset(ValidatedLedger predecessor, ValidatedLedger candidate, ResetTransition expected)
+    public static TransitionOutcome ValidateRecoveryRoot(RecoveryRootTransition expected, ValidatedLedger candidate)
     {
-        if (predecessor is null || candidate is null || expected is null || expected.Identities is null)
-            return new TransitionOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+        if (expected is null) throw new ArgumentNullException(nameof(expected));
+        if (candidate is null) throw new ArgumentNullException(nameof(candidate));
+
+        var diags = ImmutableArray.CreateBuilder<LedgerDiagnostic>();
+
+        if (candidate.PrivateModel.Header.Kind != "recovery_root")
+        {
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.TransitionKindMismatch));
+            return new TransitionOutcome(diags.ToImmutable());
+        }
+
+        var h = candidate.PrivateModel.Header;
+
+        // (2) Identities.
+        if (!IdentitiesEqual(h, expected.Identities))
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.IdentityMismatch));
+
+        // (3) Session epoch.
+        if (h.SessionEpoch != expected.SessionEpoch)
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SessionEpochMismatch));
+
+        // (4) Ledger epoch.
+        if (h.LedgerEpoch != expected.LedgerEpoch)
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.LedgerEpochMismatch));
+
+        // (5) State generation: recovery-root pins stateGeneration == 0 at schema; still cross-check with expected.
+        if (h.StateGeneration != 0L)
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.StateGenerationMismatch));
+
+        // (6) Predecessor fields: none.
+
+        // (7) Kind-specific: recoveryReason.
+        if (h.RecoveryReason != expected.RecoveryReason)
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.RecoveryRootReasonMismatch));
+
+        // (8) Structure.
+        if (!RootRecordsShape(candidate.PrivateModel.Records))
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.RootRecordsShapeMismatch));
+
+        return new TransitionOutcome(diags.ToImmutable());
+    }
+
+    public static TransitionOutcome ValidateContinuation(ContinuationTransition expected, ValidatedLedger predecessor, ValidatedLedger candidate)
+    {
+        if (expected is null) throw new ArgumentNullException(nameof(expected));
+        if (predecessor is null) throw new ArgumentNullException(nameof(predecessor));
+        if (candidate is null) throw new ArgumentNullException(nameof(candidate));
+
+        var diags = ImmutableArray.CreateBuilder<LedgerDiagnostic>();
+
+        if (candidate.PrivateModel.Header.Kind != "continuation")
+        {
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.TransitionKindMismatch));
+            return new TransitionOutcome(diags.ToImmutable());
+        }
+
+        var ch = candidate.PrivateModel.Header;
+        var ph = predecessor.PrivateModel.Header;
+        var predSha = predecessor.ContentSha256;
+
+        // (2) Identities: three-way agreement across expected, candidate, predecessor.
+        if (!IdentitiesEqual(ch, expected.Identities) || !IdentitiesEqual(ph, expected.Identities))
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.IdentityMismatch));
+
+        // (3) Session epoch three-way.
+        if (!(expected.SessionEpoch == ch.SessionEpoch && ch.SessionEpoch == ph.SessionEpoch))
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SessionEpochMismatch));
+
+        // (4) Ledger epoch reuse three-way.
+        if (!(expected.LedgerEpoch == ch.LedgerEpoch && ch.LedgerEpoch == ph.LedgerEpoch))
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.LedgerEpochMismatch));
+
+        // (5) Successor state generation.
+        if (ch.StateGeneration != ph.StateGeneration + 1 || ch.StateGeneration != expected.StateGeneration)
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.StateGenerationMismatch));
+
+        // (6) Predecessor fields: fail-fast within the category.
+        //     6a: predecessor ledger sha256.
+        //     6c: predecessor ledger epoch.
+        //     6d: predecessor state generation.
+        if (!(expected.PredecessorLedgerSha256 == ch.PredecessorLedgerSha256 && ch.PredecessorLedgerSha256 == predSha))
+        {
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.PredecessorHashMismatch));
+        }
+        else if (!(expected.PredecessorLedgerEpoch == ch.PredecessorLedgerEpoch && ch.PredecessorLedgerEpoch == ph.LedgerEpoch))
+        {
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.PredecessorLedgerEpochMismatch));
+        }
+        else if (!(expected.PredecessorStateGeneration == ch.PredecessorStateGeneration && ch.PredecessorStateGeneration == ph.StateGeneration))
+        {
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.PredecessorGenerationMismatch));
+        }
+
+        // (7) Kind-specific expected fields: none for continuation.
+
+        // (8) Transition structure: prefix invariant + length + tail pair ordinal.
+        if (!ContinuationPrefixOk(predecessor.PrivateModel.Records, candidate.PrivateModel.Records))
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.ContinuationPrefixMismatch));
+
+        return new TransitionOutcome(diags.ToImmutable());
+    }
+
+    public static TransitionOutcome ValidateReset(ResetTransition expected, ValidatedLedger predecessor, ValidatedLedger candidate)
+    {
+        if (expected is null) throw new ArgumentNullException(nameof(expected));
+        if (predecessor is null) throw new ArgumentNullException(nameof(predecessor));
+        if (candidate is null) throw new ArgumentNullException(nameof(candidate));
+
+        var diags = ImmutableArray.CreateBuilder<LedgerDiagnostic>();
+
         if (candidate.PrivateModel.Header.Kind != "reset")
-            return Fail(LedgerDiagnosticCodes.TransitionKindMismatch);
+        {
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.TransitionKindMismatch));
+            return new TransitionOutcome(diags.ToImmutable());
+        }
 
-        // Predecessor session-scope must match expected/current.
-        if (!SessionScopeEqual(predecessor.PrivateModel.Header, expected.Identities))
-            return Fail(LedgerDiagnosticCodes.IdentityMismatch);
-        // Candidate identities must equal expected.
-        if (!IdentitiesEqual(candidate.PrivateModel.Header, expected.Identities))
-            return Fail(LedgerDiagnosticCodes.IdentityMismatch);
-        if (candidate.PrivateModel.Header.StateGeneration != expected.StateGeneration)
-            return Fail(LedgerDiagnosticCodes.StateGenerationMismatch);
-        if (candidate.PrivateModel.Header.LedgerEpoch != expected.LedgerEpoch)
-            return Fail(LedgerDiagnosticCodes.LedgerEpochMismatch);
+        var ch = candidate.PrivateModel.Header;
+        var ph = predecessor.PrivateModel.Header;
+        var predSha = predecessor.ContentSha256;
 
-        if (expected.PredecessorLedgerSha256 != predecessor.ContentSha256 ||
-            candidate.PrivateModel.Header.PredecessorLedgerSha256 != predecessor.ContentSha256)
-            return Fail(LedgerDiagnosticCodes.PredecessorHashMismatch);
-        if (expected.PredecessorStateGeneration != predecessor.PrivateModel.Header.StateGeneration ||
-            candidate.PrivateModel.Header.PredecessorStateGeneration != predecessor.PrivateModel.Header.StateGeneration)
-            return Fail(LedgerDiagnosticCodes.PredecessorGenerationMismatch);
-        if (candidate.PrivateModel.Header.PredecessorManifestSha256 != expected.PredecessorManifestSha256)
-            return Fail(LedgerDiagnosticCodes.PredecessorManifestHashMismatch);
-        if (candidate.PrivateModel.Header.LedgerEpoch == predecessor.PrivateModel.Header.LedgerEpoch)
-            return Fail(LedgerDiagnosticCodes.ResetEpochNotFresh);
-        if (candidate.PrivateModel.Header.ResetReason != expected.ResetReason)
-            return Fail(LedgerDiagnosticCodes.ResetReasonMismatch);
-        if (candidate.PrivateModel.Records.Length != 2)
-            return Fail(LedgerDiagnosticCodes.ResetRecordsShapeMismatch);
-        if (candidate.PrivateModel.Records[0].InteractionOrdinal != 0)
-            return Fail(LedgerDiagnosticCodes.ResetRecordsShapeMismatch);
-        return new TransitionOutcome(candidate, null);
+        // (2) Identities: split into session-scope (three-way) and cache-contract (two-way OR three-way).
+        var sessionOk = SessionScopeEqual(ch, expected.Identities) && SessionScopeEqual(ph, expected.Identities);
+        var cacheOk = CacheContractIdentityMatchesForReset(expected, ch, ph);
+        if (!sessionOk || !cacheOk)
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.IdentityMismatch));
+
+        // (3) Session epoch three-way.
+        if (!(expected.SessionEpoch == ch.SessionEpoch && ch.SessionEpoch == ph.SessionEpoch))
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SessionEpochMismatch));
+
+        // (4) Ledger epoch: two-leg precedence.
+        if (ch.LedgerEpoch != expected.LedgerEpoch)
+        {
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.LedgerEpochMismatch));
+        }
+        else if (ch.LedgerEpoch == ph.LedgerEpoch)
+        {
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.ResetEpochNotFresh));
+        }
+
+        // (5) Successor state generation.
+        if (ch.StateGeneration != ph.StateGeneration + 1 || ch.StateGeneration != expected.StateGeneration)
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.StateGenerationMismatch));
+
+        // (6) Predecessor fields: fail-fast within category.
+        //     6a: predecessor ledger sha256.
+        //     6b: predecessor manifest sha256.
+        //     6c: predecessor ledger epoch.
+        //     6d: predecessor state generation.
+        if (!(expected.PredecessorLedgerSha256 == ch.PredecessorLedgerSha256 && ch.PredecessorLedgerSha256 == predSha))
+        {
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.PredecessorHashMismatch));
+        }
+        else if (ch.PredecessorManifestSha256 != expected.PredecessorManifestSha256)
+        {
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.PredecessorManifestHashMismatch));
+        }
+        else if (!(expected.PredecessorLedgerEpoch == ch.PredecessorLedgerEpoch && ch.PredecessorLedgerEpoch == ph.LedgerEpoch))
+        {
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.PredecessorLedgerEpochMismatch));
+        }
+        else if (!(expected.PredecessorStateGeneration == ch.PredecessorStateGeneration && ch.PredecessorStateGeneration == ph.StateGeneration))
+        {
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.PredecessorGenerationMismatch));
+        }
+
+        // (7) Kind-specific: resetReason.
+        if (ch.ResetReason != expected.ResetReason)
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.ResetReasonMismatch));
+
+        // (8) Structure: reset records shape.
+        if (!ResetRecordsShape(candidate.PrivateModel.Records))
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.ResetRecordsShapeMismatch));
+
+        return new TransitionOutcome(diags.ToImmutable());
     }
 
     // -----------------------------------------------------------------
-    // Common cross-check for candidate.header vs expected
-
-    private static LedgerDiagnostic? CommonCrossChecks(ValidatedLedger candidate, ExpectedTransition expected)
-    {
-        if (!IdentitiesEqual(candidate.PrivateModel.Header, expected.Identities))
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.IdentityMismatch);
-        if (candidate.PrivateModel.Header.StateGeneration != expected.GetStateGeneration())
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.StateGenerationMismatch);
-        if (candidate.PrivateModel.Header.LedgerEpoch != expected.GetLedgerEpoch())
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.LedgerEpochMismatch);
-        return null;
-    }
+    // Helpers
 
     private static bool IdentitiesEqual(LedgerHeader h, ExpectedIdentities e)
     {
@@ -149,7 +247,6 @@ public static class LedgerAppend
                h.PullRequest == e.PullRequest &&
                h.WorkflowIdentity == e.WorkflowIdentity &&
                h.TrustedExecutionDomain == e.TrustedExecutionDomain &&
-               h.SessionEpoch == e.SessionEpoch &&
                h.ProviderId == e.ProviderId &&
                h.ModelId == e.ModelId &&
                h.AdapterId == e.AdapterId &&
@@ -165,52 +262,66 @@ public static class LedgerAppend
                h.HeadRepository == e.HeadRepository &&
                h.PullRequest == e.PullRequest &&
                h.WorkflowIdentity == e.WorkflowIdentity &&
-               h.TrustedExecutionDomain == e.TrustedExecutionDomain &&
-               h.SessionEpoch == e.SessionEpoch;
+               h.TrustedExecutionDomain == e.TrustedExecutionDomain;
     }
 
-    private static bool RecordEquals(LedgerRecord a, LedgerRecord b)
+    private static bool CacheContractIdentityMatchesForReset(ResetTransition expected, LedgerHeader ch, LedgerHeader ph)
     {
-        if (a.Role != b.Role) return false;
-        if (a.InteractionId != b.InteractionId || a.InteractionOrdinal != b.InteractionOrdinal) return false;
-        if (a.Context is not null) return ContextEquals(a.Context, b.Context!);
-        return OutcomeEquals(a.Outcome!, b.Outcome!);
-    }
+        // Every field of ExpectedIdentities cache-contract portion must match candidate.
+        var expectedMatchesCandidate =
+            ch.ProviderId == expected.Identities.ProviderId &&
+            ch.ModelId == expected.Identities.ModelId &&
+            ch.AdapterId == expected.Identities.AdapterId &&
+            ch.TemplateId == expected.Identities.TemplateId &&
+            ch.PolicyId == expected.Identities.PolicyId &&
+            ch.ToolDefinitionId == expected.Identities.ToolDefinitionId &&
+            ch.CacheConfigId == expected.Identities.CacheConfigId;
+        if (!expectedMatchesCandidate) return false;
 
-    private static bool ContextEquals(ReviewContextRecord a, ReviewContextRecord b)
-    {
-        if (a.ReviewedHeadSha != b.ReviewedHeadSha) return false;
-        if (a.ReviewedBaseSha != b.ReviewedBaseSha) return false;
-        if (a.SubjectDigest != b.SubjectDigest) return false;
-        if (a.CacheContractDigest != b.CacheContractDigest) return false;
-        if (a.ChangedFiles.Length != b.ChangedFiles.Length) return false;
-        for (var i = 0; i < a.ChangedFiles.Length; i++)
+        // When resetReason != "cache_contract_change", cache-contract identity must
+        // additionally agree with predecessor's cache-contract identity.
+        if (expected.ResetReason != "cache_contract_change")
         {
-            var fa = a.ChangedFiles[i];
-            var fb = b.ChangedFiles[i];
-            if (fa != fb) return false; // record structural equality (ChangedFileEntry has no collections)
+            if (!(ch.ProviderId == ph.ProviderId &&
+                  ch.ModelId == ph.ModelId &&
+                  ch.AdapterId == ph.AdapterId &&
+                  ch.TemplateId == ph.TemplateId &&
+                  ch.PolicyId == ph.PolicyId &&
+                  ch.ToolDefinitionId == ph.ToolDefinitionId &&
+                  ch.CacheConfigId == ph.CacheConfigId))
+                return false;
         }
         return true;
     }
 
-    private static bool OutcomeEquals(ReviewOutcomeRecord a, ReviewOutcomeRecord b)
+    private static bool RootRecordsShape(ImmutableArray<LedgerRecord> records)
     {
-        if (a.Summary != b.Summary) return false;
-        if (a.Findings.Length != b.Findings.Length) return false;
-        for (var i = 0; i < a.Findings.Length; i++)
-        {
-            if (a.Findings[i] != b.Findings[i]) return false;
-        }
-        if (a.Limitations.Length != b.Limitations.Length) return false;
-        for (var i = 0; i < a.Limitations.Length; i++)
-        {
-            if (a.Limitations[i] != b.Limitations[i]) return false;
-        }
+        if (records.Length != 2) return false;
+        if (records[0].InteractionOrdinal != 0L) return false;
+        if (records[1].InteractionOrdinal != 0L) return false;
+        if (records[0].Role != "review_context") return false;
+        if (records[1].Role != "review_outcome") return false;
         return true;
     }
 
-    private static TransitionOutcome Fail(string code)
-        => new TransitionOutcome(null, LedgerDiagnosticMessages.Of(code));
+    private static bool ResetRecordsShape(ImmutableArray<LedgerRecord> records) => RootRecordsShape(records);
+
+    private static bool ContinuationPrefixOk(ImmutableArray<LedgerRecord> pred, ImmutableArray<LedgerRecord> cand)
+    {
+        if (cand.Length != pred.Length + 2) return false;
+        for (var i = 0; i < pred.Length; i++)
+        {
+            var predBytes = LedgerCanonicalizer.SerializeRecord(pred[i]);
+            var candBytes = LedgerCanonicalizer.SerializeRecord(cand[i]);
+            if (!predBytes.AsSpan().SequenceEqual(candBytes.AsSpan())) return false;
+        }
+        // Tail pair ordinal continuity: new ordinal == pred.length / 2.
+        var lastOrdinal = pred.Length == 0 ? -1L : pred[^1].InteractionOrdinal;
+        var expectedOrdinal = lastOrdinal + 1;
+        if (cand[pred.Length].InteractionOrdinal != expectedOrdinal) return false;
+        if (cand[pred.Length + 1].InteractionOrdinal != expectedOrdinal) return false;
+        if (cand[pred.Length].Role != "review_context") return false;
+        if (cand[pred.Length + 1].Role != "review_outcome") return false;
+        return true;
+    }
 }
-
-

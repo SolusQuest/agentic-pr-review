@@ -1,23 +1,30 @@
-using System.Collections.Immutable;
 using System.Text;
 
 namespace AgenticPrReview.Runtime.Ledger;
 
+/// <summary>
+/// Structural-bounds (semantic) checks post-schema and semantic-invariant
+/// checks. Both are fail-fast under the fixed order documented in Issue #49
+/// section 9.
+/// </summary>
 internal static class LedgerSemanticChecks
 {
+    /// <summary>
+    /// Structural-bounds subset that runs after the canonical serializer:
+    /// (2) identity UTF-8 byte-length cap, (3) control character in identity.
+    /// The canonical-byte cap (1) is enforced by the parser directly.
+    /// </summary>
     public static LedgerDiagnostic? CheckIdentityBounds(LedgerModel model)
     {
-        var h = model.Header;
-        var identityStrings = new[]
+        // Order: identityByteLength before controlCharacter, per section 9.
+        foreach (var (name, value) in EnumerateIdentityStrings(model.Header))
         {
-            h.WorkflowIdentity, h.TrustedExecutionDomain, h.SessionEpoch,
-            h.ProviderId, h.ModelId,
-        };
-        foreach (var s in identityStrings)
-        {
-            if (Encoding.UTF8.GetByteCount(s) > LedgerLimits.MaxIdentityUtf8Bytes)
+            if (Encoding.UTF8.GetByteCount(value) > LedgerLimits.MaxIdentityUtf8Bytes)
                 return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.IdentityByteLengthExceeded);
-            foreach (var ch in s)
+        }
+        foreach (var (name, value) in EnumerateIdentityStrings(model.Header))
+        {
+            foreach (var ch in value)
             {
                 if (ch < 0x20 || ch == 0x7F)
                     return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.ControlCharacterInIdentity);
@@ -26,62 +33,83 @@ internal static class LedgerSemanticChecks
         return null;
     }
 
+    /// <summary>
+    /// Semantic invariants under the numbered order:
+    ///   (1) ledger_records_length_not_even
+    ///   (2) ledger_pair_order_mismatch
+    ///   (3) ledger_pair_interaction_id_mismatch
+    ///   (4) ledger_ordinal_gap
+    ///   (5) ledger_duplicate_interaction
+    ///   (6) ledger_finding_location_mismatch
+    ///   (7) ledger_finding_location_missing_path
+    ///   (8) ledger_finding_line_range_invalid
+    ///   (9) ledger_digest_mismatch (cacheContractDigest only; subjectDigest is host-supplied)
+    ///  (10) ledger_model_alias_literal
+    /// </summary>
     public static LedgerDiagnostic? CheckSemanticInvariants(LedgerModel model)
     {
-        // records length must be even and at least 2.
         var recs = model.Records;
         if (recs.Length == 0) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.RecordsEmpty);
+
+        // (1) length parity.
         if (recs.Length % 2 != 0) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.RecordsLengthNotEven);
 
-        // Pair order: each pair must be (context, outcome) with matching interactionId and ordinal.
+        // (2) pair order: each even index must be a context and the following odd index must be an outcome.
         for (var i = 0; i < recs.Length; i += 2)
         {
-            var a = recs[i];
-            var b = i + 1 < recs.Length ? recs[i + 1] : null;
-            if (a.Context is null || b is null || b.Outcome is null)
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.PairOrderMismatch);
-            if (a.InteractionId != b.InteractionId)
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.PairOrderMismatch);
-            if (a.InteractionOrdinal != b.InteractionOrdinal)
+            if (recs[i] is not ReviewContextRecord || recs[i + 1] is not ReviewOutcomeRecord)
                 return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.PairOrderMismatch);
         }
 
-        // Ordinal continuity: pair 0 has ordinal 0, then +1 each pair.
-        var expected = 0;
-        var seenIds = new HashSet<string>(StringComparer.Ordinal);
+        // (3) pair interaction id: within each pair, both records must share interactionId.
         for (var i = 0; i < recs.Length; i += 2)
         {
-            if (recs[i].InteractionOrdinal != expected)
+            if (recs[i].InteractionId != recs[i + 1].InteractionId)
+                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.PairInteractionIdMismatch);
+        }
+
+        // (4) ordinal continuity: expected == 0, +1 per pair; also both records in a pair share ordinal.
+        long expected = 0;
+        for (var i = 0; i < recs.Length; i += 2)
+        {
+            if (recs[i].InteractionOrdinal != expected || recs[i + 1].InteractionOrdinal != expected)
                 return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OrdinalGap);
-            if (!seenIds.Add(recs[i].InteractionId))
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.DuplicateInteraction);
             expected++;
         }
 
-        // Digest recomputation on each context record.
-        var cacheContractDigest = LedgerDigests.ComputeCacheContractDigestFromHeader(model.Header);
+        // (5) duplicate interaction: each interactionId may appear at most once across pairs.
+        var seenIds = new HashSet<string>(StringComparer.Ordinal);
         for (var i = 0; i < recs.Length; i += 2)
         {
-            var ctx = recs[i].Context!;
-            var subject = LedgerDigests.ComputeSubjectDigest(
-                model.Header.Repository, model.Header.HeadRepository, model.Header.PullRequest,
-                ctx.ReviewedHeadSha, ctx.ReviewedBaseSha);
-            if (!string.Equals(subject, ctx.SubjectDigest, StringComparison.Ordinal))
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.DigestMismatch);
-            if (!string.Equals(cacheContractDigest, ctx.CacheContractDigest, StringComparison.Ordinal))
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.DigestMismatch);
+            if (!seenIds.Add(recs[i].InteractionId))
+                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.DuplicateInteraction);
         }
 
-        // Finding location invariants.
+        // (6)-(8) finding location invariants.
         for (var i = 1; i < recs.Length; i += 2)
         {
-            var oc = recs[i].Outcome!;
+            var oc = (ReviewOutcomeRecord)recs[i];
             foreach (var f in oc.Findings)
             {
                 var locFailure = ValidateFindingLocation(f);
                 if (locFailure is not null) return locFailure;
             }
         }
+
+        // (9) digest recomputation on each context record.
+        //     subjectDigest is host-supplied pass-through per the M4 Batch #1 shared contract;
+        //     only cacheContractDigest is ledger-computed and verified.
+        var cacheContractDigest = LedgerDigests.ComputeCacheContractDigestFromHeader(model.Header);
+        for (var i = 0; i < recs.Length; i += 2)
+        {
+            var ctx = (ReviewContextRecord)recs[i];
+            if (!string.Equals(cacheContractDigest, ctx.CacheContractDigest, StringComparison.Ordinal))
+                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.DigestMismatch);
+        }
+
+        // (10) model-alias literal rejection: `header.modelId == "latest"` is a floating alias.
+        if (model.Header.ModelId == "latest")
+            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.ModelAliasLiteral);
 
         return null;
     }
@@ -100,5 +128,20 @@ internal static class LedgerSemanticChecks
                 return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.FindingLineRangeInvalid);
         }
         return null;
+    }
+
+    private static IEnumerable<(string Name, string Value)> EnumerateIdentityStrings(LedgerHeader h)
+    {
+        yield return ("workflowIdentity", h.WorkflowIdentity);
+        yield return ("trustedExecutionDomain", h.TrustedExecutionDomain);
+        yield return ("sessionEpoch", h.SessionEpoch);
+        yield return ("ledgerEpoch", h.LedgerEpoch);
+        yield return ("providerId", h.ProviderId);
+        yield return ("modelId", h.ModelId);
+        yield return ("adapterId", h.AdapterId);
+        yield return ("templateId", h.TemplateId);
+        yield return ("policyId", h.PolicyId);
+        yield return ("toolDefinitionId", h.ToolDefinitionId);
+        yield return ("cacheConfigId", h.CacheConfigId);
     }
 }

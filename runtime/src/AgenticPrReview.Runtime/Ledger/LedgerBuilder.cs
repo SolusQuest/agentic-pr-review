@@ -1,5 +1,7 @@
 using System.Collections.Immutable;
 using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace AgenticPrReview.Runtime.Ledger;
 
@@ -7,967 +9,551 @@ namespace AgenticPrReview.Runtime.Ledger;
 /// Pure projection and candidate assembly. Consumes already-validated
 /// <see cref="ValidatedContextSource"/> / <see cref="ValidatedOutcomeSource"/>
 /// DTOs and produces immutable ledger records or full validated ledger
-/// candidates.
+/// candidates. Every entry point emits diagnostics from exactly one stage
+/// under the 5-step pipeline documented in Issue #49 section 10:
+///   (1) Unicode pre-scan
+///   (2) Schema replay (accumulates)
+///   (3) Structural bounds replay (3a interaction, 3b canonical-byte,
+///       3c identity UTF-8, 3d identity control-char)
+///   (4) Semantic-invariants replay
+///   (5) Full-ledger reparse (defensive)
+/// Only <c>ledger_interaction_limit_exceeded</c> and
+/// <c>ledger_canonical_byte_limit_exceeded</c> may surface as composite
+/// <c>ledger_over_bound_append</c> causes; per-record schema limits remain
+/// schema-stage codes.
 /// </summary>
 public static class LedgerBuilder
 {
-    public static ProjectionOutcome<ReviewContextRecord> BuildReviewContext(
+    private const int SchemaVersion = 1;
+    private const int PrefixContractVersion = 1;
+    private static readonly Regex Sha256HexRegex = new(@"^[a-f0-9]{64}$", RegexOptions.Compiled);
+    private static readonly Regex GitShaRegex = new(@"^([a-f0-9]{40}|[a-f0-9]{64})$", RegexOptions.Compiled);
+    private static readonly Regex EpochIdRegex = new(@"^[A-Za-z0-9_-]{22}$", RegexOptions.Compiled);
+    private static readonly HashSet<string> AllowedFileStatus = new(StringComparer.Ordinal)
+    {
+        "added", "removed", "modified", "renamed", "copied", "changed", "unchanged",
+    };
+
+    // -----------------------------------------------------------------
+    // Public: BuildReviewContext
+
+    public static BuildOutcome<ReviewContextRecord> BuildReviewContext(
         ValidatedContextSource source, ExpectedIdentities identities, InteractionIdentity interaction)
     {
-        // Guard top-level null arguments: the public contract for #49 is that
-        // every failure returns a typed outcome + non-null Failure, never a
-        // NullReferenceException. Non-nullable reference parameters can still
-        // be forwarded as `null!` by callers; classify as ledger_schema_violation.
         if (source is null || identities is null || interaction is null)
-            return new ProjectionOutcome<ReviewContextRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
-
-        // Guard default(ImmutableArray<T>) inputs: a default-initialized
-        // ImmutableArray throws on Length / iteration. Normalize by returning
-        // ledger_schema_violation so no public path exits through an
-        // unclassified exception.
+            return NewBuildFail<ReviewContextRecord>(LedgerDiagnosticCodes.SchemaViolation);
         if (source.ChangedFiles.IsDefault)
-            return new ProjectionOutcome<ReviewContextRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+            return NewBuildFail<ReviewContextRecord>(LedgerDiagnosticCodes.SchemaViolation);
 
-        // Preflight (null and lone-surrogate on every caller-supplied string)
-        // runs before any pattern / length / enum helper touches the values.
-        var contextUnicode = PreflightContextSourceUnicode(source, identities, interaction);
-        if (contextUnicode is not null)
-            return new ProjectionOutcome<ReviewContextRecord>(null, contextUnicode);
+        // Step 1: Unicode pre-scan over identity strings + interactionId + source strings.
+        var unicodeFailure = UnicodeScanContextSource(source, identities, interaction);
+        if (unicodeFailure is not null) return NewBuildFail<ReviewContextRecord>(unicodeFailure);
 
-        // Identity constraints
-        var idFailure = ValidateIdentities(identities);
-        if (idFailure is not null) return new ProjectionOutcome<ReviewContextRecord>(null, idFailure);
+        // Step 2: Schema replay (accumulates on the provisional record).
+        var schemaDiags = ValidateContextSourceSchema(source, identities, interaction);
+        if (!schemaDiags.IsEmpty) return new BuildOutcome<ReviewContextRecord>(null, schemaDiags);
 
-        // Reviewed SHAs
-        if (!IsSha1(source.ReviewedHeadSha) || !IsSha1(source.ReviewedBaseSha))
-            return new ProjectionOutcome<ReviewContextRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+        // Step 4: Semantic invariants specific to the built record (finding-location subset skipped;
+        //         the outcome record path exercises those).
+        // Step 3: Structural bounds specific to a single record — no candidate-level cap applies here
+        //         because a single record can't exceed the ledger-wide canonical-byte cap on its own.
 
-        // Changed files
-        if (source.ChangedFiles.Length > LedgerLimits.MaxChangedFilesPerContext)
-            return new ProjectionOutcome<ReviewContextRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.ChangedFileLimitExceeded));
-
-        var files = ImmutableArray.CreateBuilder<ChangedFileEntry>();
-        foreach (var f in source.ChangedFiles)
+        var cacheContractDigest = LedgerDigests.ComputeCacheContractDigest(identities);
+        var record = new ReviewContextRecord
         {
-            if (HasInvalidUnicode(f.Path) || (f.PreviousPath is not null && HasInvalidUnicode(f.PreviousPath)) ||
-                HasInvalidUnicode(f.Status))
-                return new ProjectionOutcome<ReviewContextRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode));
-            // schema maxLength (500 text elements) for safeRelativePath, before
-            // pattern/segment shape (mapper precedence 6 before 7).
-            if (LedgerLimits.SchemaStringLength(f.Path) > LedgerLimits.MaxSafeRelativePathChars ||
-                (f.PreviousPath is not null && LedgerLimits.SchemaStringLength(f.PreviousPath) > LedgerLimits.MaxSafeRelativePathChars))
-                return new ProjectionOutcome<ReviewContextRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue));
-            if (!IsSafeRelativePath(f.Path) || (f.PreviousPath is not null && !IsSafeRelativePath(f.PreviousPath)))
-                return new ProjectionOutcome<ReviewContextRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
-            if (!IsSupportedStatus(f.Status))
-                return new ProjectionOutcome<ReviewContextRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.UnsupportedChangeStatus));
-            if (f.Additions < 0 || f.Deletions < 0 || f.Changes < 0)
-                return new ProjectionOutcome<ReviewContextRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
-            ChangedFilePatch? patch = null;
-            if (f.Patch is ValidatedPatchSource ps)
-            {
-                if (!IsHex64(ps.Sha256))
-                    return new ProjectionOutcome<ReviewContextRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
-                patch = new ChangedFilePatch(ps.Sha256, ps.Truncated, ps.MaxChars);
-            }
-            files.Add(new ChangedFileEntry(f.Path, f.PreviousPath, f.Status, f.Additions, f.Deletions, f.Changes, patch));
-        }
-
-        // Interaction identity
-        if (!IsHex64(interaction.InteractionId) || interaction.InteractionOrdinal < 0)
-            return new ProjectionOutcome<ReviewContextRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
-
-        // Digests
-        var subject = LedgerDigests.ComputeSubjectDigest(
-            identities.Repository, identities.HeadRepository, identities.PullRequest,
-            source.ReviewedHeadSha, source.ReviewedBaseSha);
-        var cacheContract = LedgerDigests.ComputeCacheContractDigest(identities);
-
-        var record = new ReviewContextRecord(
-            InteractionId: interaction.InteractionId,
-            InteractionOrdinal: interaction.InteractionOrdinal,
-            ReviewedHeadSha: source.ReviewedHeadSha,
-            ReviewedBaseSha: source.ReviewedBaseSha,
-            SubjectDigest: subject,
-            CacheContractDigest: cacheContract,
-            ChangedFiles: files.ToImmutable());
-
-        return new ProjectionOutcome<ReviewContextRecord>(record, null);
+            Role = "review_context",
+            InteractionId = interaction.InteractionId,
+            InteractionOrdinal = interaction.InteractionOrdinal,
+            SubjectDigest = source.SubjectDigest,
+            CacheContractDigest = cacheContractDigest,
+            ReviewedHeadSha = source.ReviewedHeadSha,
+            ReviewedBaseSha = source.ReviewedBaseSha,
+            ChangedFiles = source.ChangedFiles,
+        };
+        return new BuildOutcome<ReviewContextRecord>(record, ImmutableArray<LedgerDiagnostic>.Empty);
     }
 
-    public static ProjectionOutcome<ReviewOutcomeRecord> BuildReviewOutcome(
+    // -----------------------------------------------------------------
+    // Public: BuildReviewOutcome
+
+    public static BuildOutcome<ReviewOutcomeRecord> BuildReviewOutcome(
         ValidatedOutcomeSource source, InteractionIdentity interaction)
     {
         if (source is null || interaction is null)
-            return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+            return NewBuildFail<ReviewOutcomeRecord>(LedgerDiagnosticCodes.SchemaViolation);
         if (source.Findings.IsDefault || source.Limitations.IsDefault)
-            return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+            return NewBuildFail<ReviewOutcomeRecord>(LedgerDiagnosticCodes.SchemaViolation);
 
-        // Preflight null/lone-surrogate on every caller-supplied string first.
-        var unicode = PreflightOutcomeSourceUnicode(source, interaction);
-        if (unicode is not null)
-            return new ProjectionOutcome<ReviewOutcomeRecord>(null, unicode);
+        // Step 1: Unicode pre-scan.
+        var unicodeFailure = UnicodeScanOutcomeSource(source, interaction);
+        if (unicodeFailure is not null) return NewBuildFail<ReviewOutcomeRecord>(unicodeFailure);
 
-        // Interaction identity
-        if (!IsHex64(interaction.InteractionId) || interaction.InteractionOrdinal < 0)
-            return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+        // Step 2: Schema replay.
+        var schemaDiags = ValidateOutcomeSourceSchema(source, interaction);
+        if (!schemaDiags.IsEmpty) return new BuildOutcome<ReviewOutcomeRecord>(null, schemaDiags);
 
-        // schema maxLength before \S pattern (mapper precedence 6 before 7).
-        if (LedgerLimits.SchemaStringLength(source.Summary) > LedgerLimits.MaxSummaryChars)
-            return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue));
-        if (HasInvalidUnicode(source.Summary))
-            return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode));
-        if (!ContainsNonWhitespace(source.Summary))
-            return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
-
-        if (source.Findings.Length > LedgerLimits.MaxFindingsPerOutcome)
-            return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.FindingLimitExceeded));
-        if (source.Limitations.Length > LedgerLimits.MaxLimitationsPerOutcome)
-            return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.LimitationsLimitExceeded));
-
-        var findings = ImmutableArray.CreateBuilder<LedgerFinding>();
+        // Step 4: Semantic finding-location invariants.
         foreach (var f in source.Findings)
         {
-            if (f is null)
-                return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
-            var f2 = new LedgerFinding(
-                f.Severity, f.Confidence, f.Category, f.Title, f.Body,
-                f.Path, f.StartLine, f.EndLine,
-                f.Evidence, f.SuggestedAction, f.InlinePreference);
-            if (HasInvalidUnicode(f2.Title) || HasInvalidUnicode(f2.Body) ||
-                (f2.Evidence is not null && HasInvalidUnicode(f2.Evidence)) ||
-                (f2.SuggestedAction is not null && HasInvalidUnicode(f2.SuggestedAction)) ||
-                (f2.Path is not null && HasInvalidUnicode(f2.Path)) ||
-                HasInvalidUnicode(f2.Severity) || HasInvalidUnicode(f2.Confidence) ||
-                HasInvalidUnicode(f2.Category) ||
-                (f2.InlinePreference is not null && HasInvalidUnicode(f2.InlinePreference)))
-                return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode));
-            // schema string maxLength (mapper precedence 6) before \S pattern
-            if (LedgerLimits.SchemaStringLength(f2.Body) > LedgerLimits.MaxFindingBodyChars ||
-                LedgerLimits.SchemaStringLength(f2.Title) > LedgerLimits.MaxFindingTitleChars ||
-                (f2.Evidence is not null && LedgerLimits.SchemaStringLength(f2.Evidence) > LedgerLimits.MaxFindingEvidenceChars) ||
-                (f2.SuggestedAction is not null && LedgerLimits.SchemaStringLength(f2.SuggestedAction) > LedgerLimits.MaxFindingSuggestedActionChars) ||
-                (f2.Path is not null && LedgerLimits.SchemaStringLength(f2.Path) > LedgerLimits.MaxSafeRelativePathChars))
-                return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue));
-            // schema enums
-            if (f2.Severity is not ("low" or "medium" or "high") ||
-                f2.Confidence is not ("medium" or "high") ||
-                f2.Category is not ("correctness" or "security" or "requirements" or "test_coverage" or "build" or "performance" or "maintainability" or "documentation") ||
-                (f2.InlinePreference is not null && f2.InlinePreference is not ("allowed" or "preferred" or "avoid")))
-                return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
-            // schema \S pattern
-            if (!ContainsNonWhitespace(f2.Title) || !ContainsNonWhitespace(f2.Body) ||
-                (f2.Evidence is not null && !ContainsNonWhitespace(f2.Evidence)) ||
-                (f2.SuggestedAction is not null && !ContainsNonWhitespace(f2.SuggestedAction)))
-                return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
-            // safe-relative-path
-            if (f2.Path is not null && !IsSafeRelativePath(f2.Path))
-                return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
-            // Line minimum (schema)
-            if ((f2.StartLine is int sl && sl < 1) || (f2.EndLine is int el && el < 1))
-                return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
-            var locFailure = LedgerSemanticChecks.ValidateFindingLocation(f2);
-            if (locFailure is not null) return new ProjectionOutcome<ReviewOutcomeRecord>(null, locFailure);
-            findings.Add(f2);
+            var loc = LedgerSemanticChecks.ValidateFindingLocation(f);
+            if (loc is not null) return NewBuildFail<ReviewOutcomeRecord>(loc);
         }
 
-        var lims = ImmutableArray.CreateBuilder<string>();
-        foreach (var l in source.Limitations)
+        var record = new ReviewOutcomeRecord
         {
-            if (l is null)
-                return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
-            if (HasInvalidUnicode(l))
-                return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode));
-            // schema maxLength before \S pattern.
-            if (LedgerLimits.SchemaStringLength(l) > LedgerLimits.MaxLimitationsItemChars)
-                return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue));
-            if (!ContainsNonWhitespace(l))
-                return new ProjectionOutcome<ReviewOutcomeRecord>(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
-            lims.Add(l);
-        }
-
-        var record = new ReviewOutcomeRecord(
-            interaction.InteractionId,
-            interaction.InteractionOrdinal,
-            source.Summary,
-            findings.ToImmutable(),
-            lims.ToImmutable());
-        return new ProjectionOutcome<ReviewOutcomeRecord>(record, null);
-    }
-
-    // -----------------------------------------------------------------
-    // Candidate assembly
-
-    public static BuildOutcome CreateBootstrap(BootstrapTransition expected, ReviewContextRecord context, ReviewOutcomeRecord outcome)
-    {
-        // Top-level null argument guard (see BuildReviewContext for rationale).
-        // Null context or outcome would otherwise reach PreflightCandidate as
-        // a schema-shape mismatch classified as pair_order — issue #49 pins
-        // schema-shape errors to ledger_schema_violation, so we normalize here.
-        if (expected is null || context is null || outcome is null || expected.Identities is null)
-            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
-        // Identity unicode preflight is performed later by PreflightCandidate,
-        // but ExpectedTransition string fields must be checked before the
-        // schema/const enum path below can access them.
-        if (expected.StateGeneration != 0)
-            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.BootstrapShapeViolation));
-        var header = BuildHeader(expected.Identities, "bootstrap",
-            stateGeneration: 0, ledgerEpoch: expected.LedgerEpoch, predecessor: "bootstrap");
-        return AssembleAndValidate(header, ImmutableArray.Create(
-            new LedgerRecord(context, null), new LedgerRecord(null, outcome)),
-            candidate => LedgerAppend.ValidateBootstrap(candidate, expected));
-    }
-
-    public static BuildOutcome CreateRecovery(RecoveryTransition expected, ReviewContextRecord context, ReviewOutcomeRecord outcome)
-    {
-        if (expected is null || context is null || outcome is null || expected.Identities is null)
-            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
-        if (HasInvalidUnicode(expected.RecoveryReason))
-            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode));
-        if (expected.StateGeneration != 0)
-            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.RecoveryShapeViolation));
-        if (!IsValidRecoveryReason(expected.RecoveryReason))
-            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.RecoveryReasonMissing));
-        var header = BuildHeader(expected.Identities, "recovery",
-            stateGeneration: 0, ledgerEpoch: expected.LedgerEpoch, predecessor: "bootstrap",
-            recoveryReason: expected.RecoveryReason);
-        return AssembleAndValidate(header, ImmutableArray.Create(
-            new LedgerRecord(context, null), new LedgerRecord(null, outcome)),
-            candidate => LedgerAppend.ValidateRecovery(candidate, expected));
-    }
-
-    public static BuildOutcome AppendContinuation(ValidatedLedger predecessor, ContinuationTransition expected, ReviewContextRecord context, ReviewOutcomeRecord outcome)
-    {
-        if (predecessor is null || expected is null || context is null || outcome is null || expected.Identities is null)
-            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
-        if (HasInvalidUnicode(expected.PredecessorLedgerSha256))
-            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode));
-        var header = BuildHeader(expected.Identities, "continuation",
-            stateGeneration: expected.StateGeneration,
-            ledgerEpoch: expected.LedgerEpoch,
-            predecessor: expected.PredecessorLedgerSha256,
-            predecessorStateGeneration: expected.PredecessorStateGeneration);
-
-        var records = ImmutableArray.CreateBuilder<LedgerRecord>();
-        foreach (var r in predecessor.PrivateModel.Records) records.Add(r);
-        records.Add(new LedgerRecord(context, null));
-        records.Add(new LedgerRecord(null, outcome));
-        return AssembleAndValidate(header, records.ToImmutable(),
-            candidate => LedgerAppend.ValidateContinuation(predecessor, candidate, expected));
-    }
-
-    public static BuildOutcome CreateReset(ValidatedLedger predecessor, ResetTransition expected, ReviewContextRecord context, ReviewOutcomeRecord outcome)
-    {
-        if (predecessor is null || expected is null || context is null || outcome is null || expected.Identities is null)
-            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
-        if (HasInvalidUnicode(expected.ResetReason) ||
-            HasInvalidUnicode(expected.PredecessorLedgerSha256) ||
-            HasInvalidUnicode(expected.PredecessorManifestSha256))
-            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode));
-        if (!IsValidResetReason(expected.ResetReason))
-            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.ResetReasonMissing));
-        var header = BuildHeader(expected.Identities, "reset",
-            stateGeneration: expected.StateGeneration,
-            ledgerEpoch: expected.LedgerEpoch,
-            predecessor: expected.PredecessorLedgerSha256,
-            predecessorStateGeneration: expected.PredecessorStateGeneration,
-            predecessorManifestSha256: expected.PredecessorManifestSha256,
-            resetReason: expected.ResetReason);
-        return AssembleAndValidate(header, ImmutableArray.Create(
-            new LedgerRecord(context, null), new LedgerRecord(null, outcome)),
-            candidate => LedgerAppend.ValidateReset(predecessor, candidate, expected));
-    }
-
-    // -----------------------------------------------------------------
-    // Helpers
-
-    private static LedgerHeader BuildHeader(
-        ExpectedIdentities i, string kind,
-        long stateGeneration, long ledgerEpoch, string predecessor,
-        long? predecessorStateGeneration = null,
-        string? predecessorManifestSha256 = null,
-        string? resetReason = null,
-        string? recoveryReason = null)
-    {
-        return new LedgerHeader(
-            Kind: kind,
-            Repository: i.Repository,
-            HeadRepository: i.HeadRepository,
-            PullRequest: i.PullRequest,
-            WorkflowIdentity: i.WorkflowIdentity,
-            TrustedExecutionDomain: i.TrustedExecutionDomain,
-            SessionEpoch: i.SessionEpoch,
-            ProviderId: i.ProviderId,
-            ModelId: i.ModelId,
-            AdapterId: i.AdapterId,
-            TemplateId: i.TemplateId,
-            PolicyId: i.PolicyId,
-            ToolDefinitionId: i.ToolDefinitionId,
-            CacheConfigId: i.CacheConfigId,
-            StateGeneration: stateGeneration,
-            LedgerEpoch: ledgerEpoch,
-            PredecessorLedgerSha256: predecessor,
-            PredecessorStateGeneration: predecessorStateGeneration,
-            PredecessorManifestSha256: predecessorManifestSha256,
-            ResetReason: resetReason,
-            RecoveryReason: recoveryReason);
-    }
-
-    private static LedgerDiagnostic? PreflightCandidate(LedgerHeader header, ImmutableArray<LedgerRecord> records)
-    {
-        // Header identity strings
-        var identityStrings = new[]
-        {
-            header.Kind,
-            header.Repository, header.HeadRepository,
-            header.WorkflowIdentity, header.TrustedExecutionDomain, header.SessionEpoch,
-            header.ProviderId, header.ModelId,
-            header.AdapterId, header.TemplateId, header.PolicyId, header.ToolDefinitionId, header.CacheConfigId,
-            header.PredecessorLedgerSha256,
+            Role = "review_outcome",
+            InteractionId = interaction.InteractionId,
+            InteractionOrdinal = interaction.InteractionOrdinal,
+            Summary = source.Summary,
+            Findings = source.Findings,
+            Limitations = source.Limitations,
         };
-        foreach (var s in identityStrings)
-        {
-            if (HasInvalidUnicode(s)) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
-        }
-        if (header.PredecessorManifestSha256 is not null && HasInvalidUnicode(header.PredecessorManifestSha256))
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
-        if (header.ResetReason is not null && HasInvalidUnicode(header.ResetReason))
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
-        if (header.RecoveryReason is not null && HasInvalidUnicode(header.RecoveryReason))
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
-
-        // Records: verify every user-visible string.
-        foreach (var rec in records)
-        {
-            if (rec.Context is ReviewContextRecord ctx)
-            {
-                if (ctx.ChangedFiles.IsDefault)
-                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                if (HasInvalidUnicode(ctx.InteractionId) ||
-                    HasInvalidUnicode(ctx.ReviewedHeadSha) ||
-                    HasInvalidUnicode(ctx.ReviewedBaseSha) ||
-                    HasInvalidUnicode(ctx.SubjectDigest) ||
-                    HasInvalidUnicode(ctx.CacheContractDigest))
-                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
-                foreach (var f in ctx.ChangedFiles)
-                {
-                    if (f is null)
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                    if (HasInvalidUnicode(f.Path) || HasInvalidUnicode(f.Status) ||
-                        (f.PreviousPath is not null && HasInvalidUnicode(f.PreviousPath)))
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
-                    if (f.Patch is not null && HasInvalidUnicode(f.Patch.Sha256))
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
-                }
-            }
-            if (rec.Outcome is ReviewOutcomeRecord oc)
-            {
-                if (oc.Findings.IsDefault || oc.Limitations.IsDefault)
-                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                if (HasInvalidUnicode(oc.InteractionId) || HasInvalidUnicode(oc.Summary))
-                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
-                foreach (var f in oc.Findings)
-                {
-                    if (f is null)
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                    if (HasInvalidUnicode(f.Severity) || HasInvalidUnicode(f.Confidence) ||
-                        HasInvalidUnicode(f.Category) || HasInvalidUnicode(f.Title) ||
-                        HasInvalidUnicode(f.Body) ||
-                        (f.Path is not null && HasInvalidUnicode(f.Path)) ||
-                        (f.Evidence is not null && HasInvalidUnicode(f.Evidence)) ||
-                        (f.SuggestedAction is not null && HasInvalidUnicode(f.SuggestedAction)) ||
-                        (f.InlinePreference is not null && HasInvalidUnicode(f.InlinePreference)))
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
-                }
-                foreach (var l in oc.Limitations)
-                {
-                    if (l is null)
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                    if (HasInvalidUnicode(l)) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
-                }
-            }
-        }
-        return null;
+        return new BuildOutcome<ReviewOutcomeRecord>(record, ImmutableArray<LedgerDiagnostic>.Empty);
     }
 
-    private static LedgerDiagnostic? ValidateModelSchemaAndSemantics(LedgerModel model)
+    // -----------------------------------------------------------------
+    // Public: Create* / AppendContinuation
+
+    public static CandidateOutcome CreateBootstrap(
+        BootstrapTransition expected,
+        ValidatedContextSource contextSource,
+        InteractionIdentity contextInteraction,
+        ValidatedOutcomeSource outcomeSource,
+        InteractionIdentity outcomeInteraction)
     {
-        // Schema-first: every schema-owned constraint (patterns, enums,
-        // numeric ranges, maxItems, maxLength, safe-path) fires BEFORE any
-        // semantic check that could mask them (identity byte-length,
-        // control-character-in-identity, digest recomputation, pair order).
-
-        // Header shape.
-        var h = model.Header;
-        // schema maxLength before pattern.
-        if (LedgerLimits.SchemaStringLength(h.Repository) > 200 ||
-            LedgerLimits.SchemaStringLength(h.HeadRepository) > 200)
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
-        if (!IsRepositorySlug(h.Repository) || !IsRepositorySlug(h.HeadRepository))
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-        foreach (var s in new[] { h.AdapterId, h.TemplateId, h.PolicyId, h.ToolDefinitionId, h.CacheConfigId })
-        {
-            if (!IsHex64(s)) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-        }
-        // Minimum-length on the free-form identity strings.
-        foreach (var s in new[] { h.WorkflowIdentity, h.TrustedExecutionDomain, h.SessionEpoch, h.ProviderId, h.ModelId })
-        {
-            if (s.Length == 0) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-            // maxLength: 256 characters (before UTF-8 byte-length check).
-            if (LedgerLimits.SchemaStringLength(s) > 256) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
-        }
-        if (h.PullRequest < 1) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-        if (h.StateGeneration < 0 || h.StateGeneration > 1_000_000)
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-        if (h.LedgerEpoch < 0 || h.LedgerEpoch > 1_000_000)
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-        if (h.PredecessorStateGeneration is long psg && (psg < 0 || psg > 1_000_000))
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-        // Predecessor hashes must be 64-hex except the bootstrap sentinel.
-        if (h.Kind is "continuation" or "reset")
-        {
-            if (!IsHex64(h.PredecessorLedgerSha256))
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-        }
-        else if (h.PredecessorLedgerSha256 != "bootstrap")
-        {
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-        }
-        if (h.PredecessorManifestSha256 is string pms && !IsHex64(pms))
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-
-        // Per-record aggregate limits (schema-level maxItems).
-        foreach (var rec in model.Records)
-        {
-            if (rec.Context is ReviewContextRecord ctxA)
-            {
-                if (ctxA.ChangedFiles.IsDefault ||
-                    ctxA.ChangedFiles.Length > LedgerLimits.MaxChangedFilesPerContext)
-                {
-                    return ctxA.ChangedFiles.IsDefault
-                        ? LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation)
-                        : LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.ChangedFileLimitExceeded);
-                }
-            }
-            if (rec.Outcome is ReviewOutcomeRecord ocA)
-            {
-                if (ocA.Findings.IsDefault || ocA.Limitations.IsDefault)
-                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                if (ocA.Findings.Length > LedgerLimits.MaxFindingsPerOutcome)
-                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.FindingLimitExceeded);
-                if (ocA.Limitations.Length > LedgerLimits.MaxLimitationsPerOutcome)
-                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.LimitationsLimitExceeded);
-            }
-        }
-
-        // Per-record schema-shape validation on the manually-constructed
-        // records — the same overlong / path / patch / finding checks that
-        // BuildReviewContext / BuildReviewOutcome apply when a caller uses
-        // the projection helpers. Runs BEFORE identity-bounds and semantic
-        // invariants so schema errors are not masked by a
-        // control_character_in_identity or digest_mismatch diagnostic.
-        foreach (var rec in model.Records)
-        {
-            if (rec.Context is ReviewContextRecord ctx)
-            {
-                if (ctx.ChangedFiles.Length > LedgerLimits.MaxChangedFilesPerContext)
-                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.ChangedFileLimitExceeded);
-                if (!IsSha1(ctx.ReviewedHeadSha) || !IsSha1(ctx.ReviewedBaseSha) ||
-                    !IsHex64(ctx.SubjectDigest) || !IsHex64(ctx.CacheContractDigest) ||
-                    !IsHex64(ctx.InteractionId))
-                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                if (ctx.InteractionOrdinal < 0 || ctx.InteractionOrdinal > 1_000_000)
-                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                foreach (var f in ctx.ChangedFiles)
-                {
-                    if (!IsSupportedStatus(f.Status))
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.UnsupportedChangeStatus);
-                    // schema maxLength (500 text elements) before safeRelativePath
-                    // pattern (mapper precedence 6 before 7).
-                    if (LedgerLimits.SchemaStringLength(f.Path) > LedgerLimits.MaxSafeRelativePathChars ||
-                        (f.PreviousPath is not null && LedgerLimits.SchemaStringLength(f.PreviousPath) > LedgerLimits.MaxSafeRelativePathChars))
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
-                    if (!IsSafeRelativePath(f.Path) ||
-                        (f.PreviousPath is not null && !IsSafeRelativePath(f.PreviousPath)))
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                    if (f.Additions < 0 || f.Additions > 1_000_000 ||
-                        f.Deletions < 0 || f.Deletions > 1_000_000 ||
-                        f.Changes < 0 || f.Changes > 1_000_000)
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                    if (f.Patch is not null)
-                    {
-                        if (!IsHex64(f.Patch.Sha256))
-                            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                        if (f.Patch.MaxChars < 0 || f.Patch.MaxChars > 10_000_000)
-                            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                    }
-                }
-            }
-            if (rec.Outcome is ReviewOutcomeRecord oc)
-            {
-                if (!IsHex64(oc.InteractionId))
-                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                if (oc.InteractionOrdinal < 0 || oc.InteractionOrdinal > 1_000_000)
-                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                // Order matches authoritative parser: string maxLength before
-                // \S pattern (schema-first, section 6 precedence).
-                if (LedgerLimits.SchemaStringLength(oc.Summary) > LedgerLimits.MaxSummaryChars)
-                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
-                if (!ContainsNonWhitespace(oc.Summary))
-                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                if (oc.Findings.Length > LedgerLimits.MaxFindingsPerOutcome)
-                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.FindingLimitExceeded);
-                if (oc.Limitations.Length > LedgerLimits.MaxLimitationsPerOutcome)
-                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.LimitationsLimitExceeded);
-                foreach (var f in oc.Findings)
-                {
-                    // Length caps (schema maxLength).
-                    if (LedgerLimits.SchemaStringLength(f.Body) > LedgerLimits.MaxFindingBodyChars ||
-                        LedgerLimits.SchemaStringLength(f.Title) > LedgerLimits.MaxFindingTitleChars ||
-                        (f.Evidence is not null && LedgerLimits.SchemaStringLength(f.Evidence) > LedgerLimits.MaxFindingEvidenceChars) ||
-                        (f.SuggestedAction is not null && LedgerLimits.SchemaStringLength(f.SuggestedAction) > LedgerLimits.MaxFindingSuggestedActionChars) ||
-                        (f.Path is not null && LedgerLimits.SchemaStringLength(f.Path) > LedgerLimits.MaxSafeRelativePathChars))
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
-                    // Enum constraints (authoritative ledger schema).
-                    if (f.Severity is not ("low" or "medium" or "high"))
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                    if (f.Confidence is not ("medium" or "high"))
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                    if (f.Category is not ("correctness" or "security" or "requirements"
-                        or "test_coverage" or "build" or "performance"
-                        or "maintainability" or "documentation"))
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                    if (f.InlinePreference is not null &&
-                        f.InlinePreference is not ("allowed" or "preferred" or "avoid"))
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                    // \S pattern: non-empty and contains at least one non-whitespace.
-                    if (!ContainsNonWhitespace(f.Title) || !ContainsNonWhitespace(f.Body) ||
-                        (f.Evidence is not null && !ContainsNonWhitespace(f.Evidence)) ||
-                        (f.SuggestedAction is not null && !ContainsNonWhitespace(f.SuggestedAction)))
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                    // Safe-relative-path for finding.path.
-                    if (f.Path is not null && !IsSafeRelativePath(f.Path))
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                    // Line minimum.
-                    if ((f.StartLine is int sl && sl < 1) || (f.EndLine is int el && el < 1))
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                    // Finding location invariants (path / range consistency).
-                    var locFailure = LedgerSemanticChecks.ValidateFindingLocation(f);
-                    if (locFailure is not null) return locFailure;
-                }
-                foreach (var l in oc.Limitations)
-                {
-                    // maxLength before \S (mapper precedence 6 before 7).
-                    if (LedgerLimits.SchemaStringLength(l) > LedgerLimits.MaxLimitationsItemChars)
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
-                    if (!ContainsNonWhitespace(l))
-                        return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-                }
-            }
-        }
-
-        // Identity byte-length caps and control-character rejection on
-        // header identities. Runs AFTER schema-owned pattern/enum/numeric
-        // checks so an invalid reviewed SHA is not preceded by an unrelated
-        // control_character_in_identity diagnostic when both are present.
-        var bounds = LedgerSemanticChecks.CheckIdentityBounds(model);
-        if (bounds is not null) return bounds;
-
-        // Structural / cross-record semantic invariants (pair order, ordinal
-        // continuity, digest recomputation).
-        var semantic = LedgerSemanticChecks.CheckSemanticInvariants(model);
-        if (semantic is not null) return semantic;
-
-        return null;
+        return AssembleRoot(expected, "bootstrap", predecessorLedgerSha256: "bootstrap",
+            contextSource, contextInteraction, outcomeSource, outcomeInteraction,
+            recoveryReason: null);
     }
 
-    private static (int TotalProperties, int MaxArrayLength) CountStructural(LedgerHeader header, ImmutableArray<LedgerRecord> records)
+    public static CandidateOutcome CreateRecoveryRoot(
+        RecoveryRootTransition expected,
+        ValidatedContextSource contextSource,
+        InteractionIdentity contextInteraction,
+        ValidatedOutcomeSource outcomeSource,
+        InteractionIdentity outcomeInteraction)
     {
-        // These counts must equal the exact number of "key":value pairs emitted
-        // by LedgerCanonicalizer.WriteLedger. Any drift breaks the builder-level
-        // composite cause precedence.
-
-        // Top-level: schemaVersion, prefixContractVersion, header, records.
-        var total = 4;
-
-        // Header canonical writer always emits 17 base properties (see LedgerCanonicalizer.WriteHeader).
-        var headerProps = 17;
-        if (header.PredecessorStateGeneration is not null) headerProps++;
-        if (header.PredecessorManifestSha256 is not null) headerProps++;
-        if (header.ResetReason is not null) headerProps++;
-        if (header.RecoveryReason is not null) headerProps++;
-        total += headerProps;
-
-        // Track the maximum array length across the ledger. records itself is
-        // the top-level array.
-        var maxArrayLen = records.Length;
-
-        foreach (var rec in records)
-        {
-            if (rec.Context is ReviewContextRecord ctx)
-            {
-                // Context canonical writer emits 8 base properties:
-                // role, interactionId, interactionOrdinal,
-                // reviewedHeadSha, reviewedBaseSha, subjectDigest,
-                // cacheContractDigest, changedFiles.
-                total += 8;
-                maxArrayLen = Math.Max(maxArrayLen, ctx.ChangedFiles.Length);
-                foreach (var f in ctx.ChangedFiles)
-                {
-                    // Changed-file canonical writer emits 5 base properties:
-                    // path, status, additions, deletions, changes.
-                    var fProps = 5;
-                    if (f.PreviousPath is not null) fProps++;
-                    if (f.Patch is not null)
-                    {
-                        fProps++;
-                        // Patch envelope: sha256, truncated, maxChars.
-                        total += 3;
-                    }
-                    total += fProps;
-                }
-            }
-            if (rec.Outcome is ReviewOutcomeRecord oc)
-            {
-                // Outcome canonical writer emits 6 base properties:
-                // role, interactionId, interactionOrdinal, summary,
-                // findings, limitations.
-                total += 6;
-                maxArrayLen = Math.Max(maxArrayLen, oc.Findings.Length);
-                maxArrayLen = Math.Max(maxArrayLen, oc.Limitations.Length);
-                foreach (var f in oc.Findings)
-                {
-                    // Finding canonical writer emits 5 base properties (severity,
-                    // confidence, category, title, body) plus path / startLine /
-                    // endLine which are always serialized (null-explicit) and
-                    // evidence / suggestedAction / inlinePreference which are
-                    // omitted when null.
-                    var fProps = 5 + 3;
-                    if (f.Evidence is not null) fProps++;
-                    if (f.SuggestedAction is not null) fProps++;
-                    if (f.InlinePreference is not null) fProps++;
-                    total += fProps;
-                }
-            }
-        }
-        return (total, maxArrayLen);
+        return AssembleRoot(expected, "recovery_root", predecessorLedgerSha256: "bootstrap",
+            contextSource, contextInteraction, outcomeSource, outcomeInteraction,
+            recoveryReason: expected.RecoveryReason);
     }
 
-    private static BuildOutcome AssembleAndValidate(
+    public static CandidateOutcome CreateReset(
+        ResetTransition expected,
+        ValidatedLedger predecessor,
+        ValidatedContextSource contextSource,
+        InteractionIdentity contextInteraction,
+        ValidatedOutcomeSource outcomeSource,
+        InteractionIdentity outcomeInteraction)
+    {
+        if (expected is null || predecessor is null || contextSource is null || outcomeSource is null
+            || contextInteraction is null || outcomeInteraction is null)
+            return NewCandidateFail(LedgerDiagnosticCodes.SchemaViolation);
+
+        var header = BuildHeader(expected, "reset",
+            predecessorLedgerSha256: predecessor.ContentSha256,
+            predecessorLedgerEpoch: predecessor.PrivateModel.Header.LedgerEpoch,
+            predecessorStateGeneration: predecessor.PrivateModel.Header.StateGeneration,
+            predecessorManifestSha256: expected.PredecessorManifestSha256,
+            resetReason: expected.ResetReason,
+            recoveryReason: null);
+        return AssembleCandidate(header, ImmutableArray<LedgerRecord>.Empty,
+            contextSource, contextInteraction, outcomeSource, outcomeInteraction);
+    }
+
+    public static CandidateOutcome AppendContinuation(
+        ContinuationTransition expected,
+        ValidatedLedger predecessor,
+        ValidatedContextSource contextSource,
+        InteractionIdentity contextInteraction,
+        ValidatedOutcomeSource outcomeSource,
+        InteractionIdentity outcomeInteraction)
+    {
+        if (expected is null || predecessor is null || contextSource is null || outcomeSource is null
+            || contextInteraction is null || outcomeInteraction is null)
+            return NewCandidateFail(LedgerDiagnosticCodes.SchemaViolation);
+
+        var header = BuildHeader(expected, "continuation",
+            predecessorLedgerSha256: predecessor.ContentSha256,
+            predecessorLedgerEpoch: predecessor.PrivateModel.Header.LedgerEpoch,
+            predecessorStateGeneration: predecessor.PrivateModel.Header.StateGeneration,
+            predecessorManifestSha256: null,
+            resetReason: null,
+            recoveryReason: null);
+        return AssembleCandidate(header, predecessor.PrivateModel.Records,
+            contextSource, contextInteraction, outcomeSource, outcomeInteraction);
+    }
+
+    // -----------------------------------------------------------------
+    // Root assembly (bootstrap / recovery_root)
+
+    private static CandidateOutcome AssembleRoot(
+        ExpectedTransition expected, string kind, string predecessorLedgerSha256,
+        ValidatedContextSource contextSource, InteractionIdentity contextInteraction,
+        ValidatedOutcomeSource outcomeSource, InteractionIdentity outcomeInteraction,
+        string? recoveryReason)
+    {
+        if (expected is null || contextSource is null || outcomeSource is null
+            || contextInteraction is null || outcomeInteraction is null)
+            return NewCandidateFail(LedgerDiagnosticCodes.SchemaViolation);
+
+        var header = BuildHeader(expected, kind,
+            predecessorLedgerSha256: predecessorLedgerSha256,
+            predecessorLedgerEpoch: null,
+            predecessorStateGeneration: null,
+            predecessorManifestSha256: null,
+            resetReason: null,
+            recoveryReason: recoveryReason);
+        return AssembleCandidate(header, ImmutableArray<LedgerRecord>.Empty,
+            contextSource, contextInteraction, outcomeSource, outcomeInteraction);
+    }
+
+    private static LedgerHeader BuildHeader(ExpectedTransition expected, string kind,
+        string predecessorLedgerSha256,
+        string? predecessorLedgerEpoch,
+        long? predecessorStateGeneration,
+        string? predecessorManifestSha256,
+        string? resetReason,
+        string? recoveryReason)
+    {
+        return new LedgerHeader
+        {
+            Kind = kind,
+            SessionEpoch = expected.SessionEpoch,
+            LedgerEpoch = expected.GetLedgerEpoch(),
+            StateGeneration = expected.GetStateGeneration(),
+            PredecessorLedgerSha256 = predecessorLedgerSha256,
+            PredecessorLedgerEpoch = predecessorLedgerEpoch,
+            PredecessorStateGeneration = predecessorStateGeneration,
+            PredecessorManifestSha256 = predecessorManifestSha256,
+            ResetReason = resetReason,
+            RecoveryReason = recoveryReason,
+            Repository = expected.Identities.Repository,
+            HeadRepository = expected.Identities.HeadRepository,
+            PullRequest = expected.Identities.PullRequest,
+            WorkflowIdentity = expected.Identities.WorkflowIdentity,
+            TrustedExecutionDomain = expected.Identities.TrustedExecutionDomain,
+            ProviderId = expected.Identities.ProviderId,
+            ModelId = expected.Identities.ModelId,
+            AdapterId = expected.Identities.AdapterId,
+            TemplateId = expected.Identities.TemplateId,
+            PolicyId = expected.Identities.PolicyId,
+            ToolDefinitionId = expected.Identities.ToolDefinitionId,
+            CacheConfigId = expected.Identities.CacheConfigId,
+        };
+    }
+
+    /// <summary>
+    /// Common assembly path shared by root, reset, and continuation. Runs the
+    /// 5-step pipeline in order and mints a <see cref="ValidatedLedger"/> only
+    /// after step 5 succeeds.
+    /// </summary>
+    private static CandidateOutcome AssembleCandidate(
         LedgerHeader header,
-        ImmutableArray<LedgerRecord> records,
-        Func<ValidatedLedger, TransitionOutcome> transitionValidator)
+        ImmutableArray<LedgerRecord> predecessorRecords,
+        ValidatedContextSource contextSource, InteractionIdentity contextInteraction,
+        ValidatedOutcomeSource outcomeSource, InteractionIdentity outcomeInteraction)
     {
-        // Builder pipeline (frozen precedence):
-        //   1. ledger_interaction_limit_exceeded  (composite cause)
-        //   2. Unicode preflight (null / NUL / lone-surrogate)
-        //   3. Model-level schema-first validation:
-        //        - per-record aggregate limits (changed_file / finding /
-        //          limitations); these fire BEFORE the JSON property /
-        //          array aggregate counts so a caller who bypasses the
-        //          projection helpers still receives the specific
-        //          per-record diagnostic.
-        //        - schema shape (patterns, enums, hex64, safe path,
-        //          numeric ranges, overlong values).
-        //        - semantic invariants (pair order, ordinal continuity,
-        //          identity byte-length, digest recomputation).
-        //   4. ledger_json_property_count_exceeded  (composite cause;
-        //      currently unreachable through legal per-record limits but
-        //      retained for closed-set completeness).
-        //   5. ledger_json_array_length_exceeded  (composite cause; same
-        //      caveat as property count).
-        //   6. ledger_canonical_byte_limit_exceeded  (composite cause).
-        //   7. Authoritative parser round-trip on the canonical bytes.
-        //   8. Transition cross-check via LedgerAppend.Validate*.
-        //
-        // Step 1: interaction limit.
+        // Step 1: Unicode pre-scan over the full source graph (identities via header, records via sources).
+        var identitiesFromHeader = new ExpectedIdentities(
+            Repository: header.Repository,
+            HeadRepository: header.HeadRepository,
+            PullRequest: header.PullRequest,
+            WorkflowIdentity: header.WorkflowIdentity,
+            TrustedExecutionDomain: header.TrustedExecutionDomain,
+            ProviderId: header.ProviderId,
+            ModelId: header.ModelId,
+            AdapterId: header.AdapterId,
+            TemplateId: header.TemplateId,
+            PolicyId: header.PolicyId,
+            ToolDefinitionId: header.ToolDefinitionId,
+            CacheConfigId: header.CacheConfigId);
+
+        var ctxUnicode = UnicodeScanContextSource(contextSource, identitiesFromHeader, contextInteraction);
+        if (ctxUnicode is not null) return NewCandidateFail(ctxUnicode);
+        var ocUnicode = UnicodeScanOutcomeSource(outcomeSource, outcomeInteraction);
+        if (ocUnicode is not null) return NewCandidateFail(ocUnicode);
+
+        // Step 2: Schema replay on header + each record.
+        var schemaDiags = ImmutableArray.CreateBuilder<LedgerDiagnostic>();
+        // Header validation is delegated to BuildHeader-shape guarantees, plus a light identity check.
+        var idDiag = ValidateIdentitiesShape(identitiesFromHeader, header);
+        if (idDiag is not null) schemaDiags.Add(idDiag);
+        schemaDiags.AddRange(ValidateContextSourceSchema(contextSource, identitiesFromHeader, contextInteraction));
+        schemaDiags.AddRange(ValidateOutcomeSourceSchema(outcomeSource, outcomeInteraction));
+        if (schemaDiags.Count > 0) return new CandidateOutcome(null, schemaDiags.ToImmutable());
+
+        // Build the new pair of records.
+        var cacheContractDigest = LedgerDigests.ComputeCacheContractDigest(identitiesFromHeader);
+        var newContext = new ReviewContextRecord
+        {
+            Role = "review_context",
+            InteractionId = contextInteraction.InteractionId,
+            InteractionOrdinal = contextInteraction.InteractionOrdinal,
+            SubjectDigest = contextSource.SubjectDigest,
+            CacheContractDigest = cacheContractDigest,
+            ReviewedHeadSha = contextSource.ReviewedHeadSha,
+            ReviewedBaseSha = contextSource.ReviewedBaseSha,
+            ChangedFiles = contextSource.ChangedFiles,
+        };
+        var newOutcome = new ReviewOutcomeRecord
+        {
+            Role = "review_outcome",
+            InteractionId = outcomeInteraction.InteractionId,
+            InteractionOrdinal = outcomeInteraction.InteractionOrdinal,
+            Summary = outcomeSource.Summary,
+            Findings = outcomeSource.Findings,
+            Limitations = outcomeSource.Limitations,
+        };
+
+        var recordsBuilder = ImmutableArray.CreateBuilder<LedgerRecord>(predecessorRecords.Length + 2);
+        recordsBuilder.AddRange(predecessorRecords);
+        recordsBuilder.Add(newContext);
+        recordsBuilder.Add(newOutcome);
+        var records = recordsBuilder.ToImmutable();
+
+        var model = new LedgerModel
+        {
+            SchemaVersion = SchemaVersion,
+            PrefixContractVersion = PrefixContractVersion,
+            Header = header,
+            Records = records,
+        };
+
+        // Step 3: Structural-bounds replay (candidate-level).
+        //   3a interaction limit  -> composite ledger_over_bound_append (ledger_interaction_limit_exceeded)
+        //   3b canonical-byte cap -> composite ledger_over_bound_append (ledger_canonical_byte_limit_exceeded)
+        //   3c identity byte cap  -> direct code ledger_identity_byte_length_exceeded
+        //   3d identity control   -> direct code ledger_control_character_in_identity
         if (records.Length / 2 > LedgerLimits.MaxInteractionPairs)
         {
-            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(
-                LedgerDiagnosticCodes.OverBoundAppend, LedgerDiagnosticCodes.InteractionLimitExceeded));
+            return new CandidateOutcome(null, ImmutableArray.Create(
+                new LedgerDiagnostic
+                {
+                    Code = LedgerDiagnosticCodes.OverBoundAppend,
+                    Message = LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverBoundAppend).Message,
+                    CauseCode = LedgerDiagnosticCodes.InteractionLimitExceeded,
+                }));
         }
 
-        // Step 2: Unicode / null preflight.
-        var preflight = PreflightCandidate(header, records);
-        if (preflight is not null) return new BuildOutcome(null, preflight);
-
-        // Step 3: model-level schema-first validation. Runs the per-record
-        // aggregate limits first so a caller bypassing BuildReviewContext /
-        // BuildReviewOutcome receives the correct per-record diagnostic
-        // instead of the more generic property/array/byte causes.
-        var model = new LedgerModel(1, 1, header, records);
-        var modelValidationFailure = ValidateModelSchemaAndSemantics(model);
-        if (modelValidationFailure is not null)
-            return new BuildOutcome(null, modelValidationFailure);
-
-        // Steps 4-5: aggregate property-count and array-length.
-        var (totalProperties, maxArrayLength) = CountStructural(header, records);
-        if (totalProperties > LedgerLimits.MaxTotalProperties)
+        var canonicalIm = LedgerCanonicalizer.SerializeCanonical(model);
+        var canonicalBytes = canonicalIm.ToArray();
+        if (canonicalBytes.Length > LedgerLimits.MaxCanonicalBytes)
         {
-            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(
-                LedgerDiagnosticCodes.OverBoundAppend, LedgerDiagnosticCodes.JsonPropertyCountExceeded));
-        }
-        if (maxArrayLength > LedgerLimits.MaxArrayLength)
-        {
-            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(
-                LedgerDiagnosticCodes.OverBoundAppend, LedgerDiagnosticCodes.JsonArrayLengthExceeded));
-        }
-
-        // Serialize to canonical bytes so we can produce a ValidatedLedger.
-        var canonical = LedgerCanonicalizer.SerializeCanonical(model);
-
-        // Full-pipeline re-validation via ParseAndValidate to catch any
-        // manually-constructed records that bypass Build{Context,Outcome}
-        // invariants. This must run before the canonical byte cap so that
-        // property-count / array-length failures raised deep inside the
-        // ledger surface as their specific causeCode rather than being
-        // masked by a byte-limit rejection.
-        // Step 4 explicit: canonical byte cap (256 KiB) is checked BEFORE the
-        // raw byte cap (512 KiB) that ParseAndValidate would report first.
-        // Otherwise a 512+ KiB candidate would surface as raw_byte_limit_exceeded,
-        // which is not one of the four allowed causes.
-        if (canonical.Length > LedgerLimits.MaxCanonicalBytes)
-        {
-            return new BuildOutcome(null, LedgerDiagnosticMessages.Of(
-                LedgerDiagnosticCodes.OverBoundAppend, LedgerDiagnosticCodes.CanonicalByteLimitExceeded));
+            return new CandidateOutcome(null, ImmutableArray.Create(
+                new LedgerDiagnostic
+                {
+                    Code = LedgerDiagnosticCodes.OverBoundAppend,
+                    Message = LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverBoundAppend).Message,
+                    CauseCode = LedgerDiagnosticCodes.CanonicalByteLimitExceeded,
+                }));
         }
 
-        var parseResult = LedgerParser.ParseAndValidate(canonical);
-        if (parseResult.Failure is not null)
-        {
-            var fail = parseResult.Failure;
-            // Only the four frozen causes may be wrapped as over-bound-append.
-            if (fail.Code == LedgerDiagnosticCodes.InteractionLimitExceeded ||
-                fail.Code == LedgerDiagnosticCodes.JsonPropertyCountExceeded ||
-                fail.Code == LedgerDiagnosticCodes.JsonArrayLengthExceeded ||
-                fail.Code == LedgerDiagnosticCodes.CanonicalByteLimitExceeded)
-            {
-                return new BuildOutcome(null, LedgerDiagnosticMessages.Of(
-                    LedgerDiagnosticCodes.OverBoundAppend, fail.Code));
-            }
-            return new BuildOutcome(null, fail);
-        }
+        var identityBoundsFailure = LedgerSemanticChecks.CheckIdentityBounds(model);
+        if (identityBoundsFailure is not null) return new CandidateOutcome(null, ImmutableArray.Create(identityBoundsFailure));
 
-        // Re-run the transition cross-check matrix so caller-supplied
-        // ExpectedTransition disagreements surface as build failures rather
-        // than being deferred to a later Validate* call.
-        var transitionOutcome = transitionValidator(parseResult.Ledger!);
-        if (transitionOutcome.Candidate is null)
-        {
-            return new BuildOutcome(null, transitionOutcome.Failure);
-        }
-        return new BuildOutcome(transitionOutcome.Candidate, null);
+        // Step 4: Semantic-invariants replay.
+        var semanticFailure = LedgerSemanticChecks.CheckSemanticInvariants(model);
+        if (semanticFailure is not null) return new CandidateOutcome(null, ImmutableArray.Create(semanticFailure));
+
+        // Step 5: Defensive full-ledger reparse through the same LedgerParser pipeline.
+        var reparseOutcome = LedgerParser.ParseAndValidate(canonicalBytes);
+        if (reparseOutcome.Ledger is null)
+            return new CandidateOutcome(null, reparseOutcome.Diagnostics);
+
+        return new CandidateOutcome(reparseOutcome.Ledger, ImmutableArray<LedgerDiagnostic>.Empty);
     }
 
-    private static LedgerDiagnostic? PreflightContextSourceUnicode(
+    // -----------------------------------------------------------------
+    // Step 1 helpers: Unicode pre-scan
+
+    private static LedgerDiagnostic? UnicodeScanContextSource(
         ValidatedContextSource source, ExpectedIdentities identities, InteractionIdentity interaction)
     {
-        foreach (var s in new[]
+        var identityStrings = new (string Name, string Value)[]
         {
-            identities.Repository, identities.HeadRepository,
-            identities.WorkflowIdentity, identities.TrustedExecutionDomain, identities.SessionEpoch,
-            identities.ProviderId, identities.ModelId,
-            identities.AdapterId, identities.TemplateId, identities.PolicyId,
-            identities.ToolDefinitionId, identities.CacheConfigId,
-            source.ReviewedHeadSha, source.ReviewedBaseSha,
-            interaction.InteractionId,
-        })
+            ("workflowIdentity", identities.WorkflowIdentity),
+            ("trustedExecutionDomain", identities.TrustedExecutionDomain),
+            ("providerId", identities.ProviderId),
+            ("modelId", identities.ModelId),
+            ("adapterId", identities.AdapterId),
+            ("templateId", identities.TemplateId),
+            ("policyId", identities.PolicyId),
+            ("toolDefinitionId", identities.ToolDefinitionId),
+            ("cacheConfigId", identities.CacheConfigId),
+            ("repository", identities.Repository),
+            ("headRepository", identities.HeadRepository),
+        };
+        foreach (var (name, value) in identityStrings)
         {
-            if (HasInvalidUnicode(s)) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+            if (value is null || HasInvalidUnicode(value))
+                return LedgerDiagnosticMessages.Of(
+                    LedgerDiagnosticCodes.InvalidUnicode,
+                    LedgerSafePath.Encode(new[] { "header", name }));
         }
-        foreach (var f in source.ChangedFiles)
+        if (interaction.InteractionId is null || HasInvalidUnicode(interaction.InteractionId))
+            return LedgerDiagnosticMessages.Of(
+                LedgerDiagnosticCodes.InvalidUnicode,
+                LedgerSafePath.Encode(new[] { "records", (2 * interaction.InteractionOrdinal).ToString(System.Globalization.CultureInfo.InvariantCulture), "interactionId" }));
+
+        // Context-source strings
+        if (source.SubjectDigest is null || HasInvalidUnicode(source.SubjectDigest))
+            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode, "/records/subjectDigest");
+        if (source.ReviewedHeadSha is null || HasInvalidUnicode(source.ReviewedHeadSha))
+            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode, "/records/reviewedHeadSha");
+        if (source.ReviewedBaseSha is null || HasInvalidUnicode(source.ReviewedBaseSha))
+            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode, "/records/reviewedBaseSha");
+        foreach (var cf in source.ChangedFiles)
         {
-            if (f is null)
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-            if (HasInvalidUnicode(f.Path) || HasInvalidUnicode(f.Status))
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
-            if (f.PreviousPath is not null && HasInvalidUnicode(f.PreviousPath))
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
-            if (f.Patch is ValidatedPatchSource ps && HasInvalidUnicode(ps.Sha256))
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+            if (cf.Path is null || HasInvalidUnicode(cf.Path))
+                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode, "/records/changedFiles/path");
+            if (cf.PreviousPath is not null && HasInvalidUnicode(cf.PreviousPath))
+                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode, "/records/changedFiles/previousPath");
+            if (cf.Status is null || HasInvalidUnicode(cf.Status))
+                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode, "/records/changedFiles/status");
+            if (cf.Patch is not null && (cf.Patch.Sha256 is null || HasInvalidUnicode(cf.Patch.Sha256)))
+                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode, "/records/changedFiles/patch/sha256");
         }
         return null;
     }
 
-    private static LedgerDiagnostic? PreflightOutcomeSourceUnicode(
+    private static LedgerDiagnostic? UnicodeScanOutcomeSource(
         ValidatedOutcomeSource source, InteractionIdentity interaction)
     {
-        if (HasInvalidUnicode(interaction.InteractionId))
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
-        if (HasInvalidUnicode(source.Summary))
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+        if (interaction.InteractionId is null || HasInvalidUnicode(interaction.InteractionId))
+            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode, "/records/interactionId");
+        if (source.Summary is null || HasInvalidUnicode(source.Summary))
+            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode, "/records/summary");
+        foreach (var lim in source.Limitations)
+        {
+            if (lim is null || HasInvalidUnicode(lim))
+                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode, "/records/limitations");
+        }
         foreach (var f in source.Findings)
         {
-            if (f is null)
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-            if (HasInvalidUnicode(f.Severity) || HasInvalidUnicode(f.Confidence) ||
-                HasInvalidUnicode(f.Category) || HasInvalidUnicode(f.Title) ||
-                HasInvalidUnicode(f.Body))
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
-            if (f.Path is not null && HasInvalidUnicode(f.Path))
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
-            if (f.Evidence is not null && HasInvalidUnicode(f.Evidence))
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
-            if (f.SuggestedAction is not null && HasInvalidUnicode(f.SuggestedAction))
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
-            if (f.InlinePreference is not null && HasInvalidUnicode(f.InlinePreference))
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
-        }
-        foreach (var l in source.Limitations)
-        {
-            if (l is null)
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-            if (HasInvalidUnicode(l)) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
+            if (f.Severity is null || HasInvalidUnicode(f.Severity)) return U("severity");
+            if (f.Confidence is null || HasInvalidUnicode(f.Confidence)) return U("confidence");
+            if (f.Category is null || HasInvalidUnicode(f.Category)) return U("category");
+            if (f.Title is null || HasInvalidUnicode(f.Title)) return U("title");
+            if (f.Body is null || HasInvalidUnicode(f.Body)) return U("body");
+            if (f.Path is not null && HasInvalidUnicode(f.Path)) return U("path");
+            if (f.Evidence is not null && HasInvalidUnicode(f.Evidence)) return U("evidence");
+            if (f.SuggestedAction is not null && HasInvalidUnicode(f.SuggestedAction)) return U("suggestedAction");
+            if (f.InlinePreference is not null && HasInvalidUnicode(f.InlinePreference)) return U("inlinePreference");
         }
         return null;
+
+        static LedgerDiagnostic U(string field)
+            => LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode, "/records/findings/" + field);
     }
 
-    private static LedgerDiagnostic? ValidateIdentities(ExpectedIdentities i)
+    private static bool HasInvalidUnicode(string s)
     {
-        // Every caller-supplied identity string must be free of NUL and lone
-        // surrogates before any downstream encoder can see it. Canonicalization
-        // otherwise throws on lone surrogates.
-        var allIdentityStrings = new[]
-        {
-            i.Repository, i.HeadRepository,
-            i.WorkflowIdentity, i.TrustedExecutionDomain, i.SessionEpoch,
-            i.ProviderId, i.ModelId,
-            i.AdapterId, i.TemplateId, i.PolicyId, i.ToolDefinitionId, i.CacheConfigId,
-        };
-        foreach (var s in allIdentityStrings)
-        {
-            if (HasInvalidUnicode(s))
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.InvalidUnicode);
-        }
-        // Schema-first: character maxLength (256) is mapped to ledger_overlong_value
-        // by the authoritative parser, so the projection path must do the same
-        // before running semantic byte-length or control-character checks. This
-        // keeps candidate/projection/parser classification identical.
-        var identityStrings = new[] { i.WorkflowIdentity, i.TrustedExecutionDomain, i.SessionEpoch, i.ProviderId, i.ModelId };
-        foreach (var s in identityStrings)
-        {
-            if (s.Length == 0)
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-            if (LedgerLimits.SchemaStringLength(s) > 256) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
-        }
-        foreach (var s in identityStrings)
-        {
-            if (Encoding.UTF8.GetByteCount(s) > LedgerLimits.MaxIdentityUtf8Bytes)
-                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.IdentityByteLengthExceeded);
-            foreach (var ch in s)
-            {
-                if (ch < 0x20 || ch == 0x7F)
-                    return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.ControlCharacterInIdentity);
-            }
-        }
-        // Hex64 identity fields
-        foreach (var s in new[] { i.AdapterId, i.TemplateId, i.PolicyId, i.ToolDefinitionId, i.CacheConfigId })
-        {
-            if (!IsHex64(s)) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-        }
-        // Repository / HeadRepository: schema maxLength (200 text elements)
-        // before pattern (mapper precedence).
-        if (LedgerLimits.SchemaStringLength(i.Repository) > 200 ||
-            LedgerLimits.SchemaStringLength(i.HeadRepository) > 200)
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue);
-        if (!IsRepositorySlug(i.Repository) || !IsRepositorySlug(i.HeadRepository))
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-        if (i.PullRequest < 1)
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
-        return null;
-    }
-
-    private static bool IsHex64(string s) => s.Length == 64 && s.All(ch => (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f'));
-    private static bool IsSha1(string s) => s.Length == 40 && s.All(ch => (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f'));
-    private static bool IsSupportedStatus(string s) => s is "added" or "modified" or "removed" or "renamed" or "copied";
-    private static bool IsValidResetReason(string s) => s is "base_changed" or "force_push" or "cache_contract_changed";
-    private static bool IsValidRecoveryReason(string s) => s is
-        "predecessor_unavailable" or "predecessor_integrity_failure" or
-        "predecessor_unsafe_provenance" or "predecessor_expired" or
-        "predecessor_over_bound" or "predecessor_incompatible_contract";
-
-    // Pattern / shape only. Length maxLength (200 text elements) is enforced
-    // separately so the mapper "maxLength before pattern" precedence surfaces
-    // as ledger_overlong_value rather than being absorbed into the pattern
-    // fallback.
-    private static bool IsRepositorySlug(string s)
-    {
-        if (s.Length < 3) return false;
-        var slash = s.IndexOf('/');
-        if (slash <= 0 || slash == s.Length - 1) return false;
-        if (s.IndexOf('/', slash + 1) >= 0) return false;
-        static bool valid(char c) => char.IsAsciiLetterOrDigit(c) || c == '.' || c == '_' || c == '-' || c == '/';
-        return s.All(valid);
-    }
-
-    // Pattern / shape only. Length maxLength (500 text elements) is enforced
-    // by callers before invoking this helper, so overlong safeRelativePath
-    // strings are classified as ledger_overlong_value, not the pattern
-    // fallback ledger_schema_violation.
-    private static bool IsSafeRelativePath(string p)
-    {
-        if (p.Length < 1) return false;
-        // Schema \S pattern: whitespace-only paths are rejected before any
-        // segment / scheme rule can pass by structural accident.
-        if (!ContainsNonWhitespace(p)) return false;
-        if (p[0] == '/') return false;
-        if (p.Contains('\\')) return false;
-        // Reject absolute URI schemes like "http:" or "file:". Schema pattern
-        // is ^[A-Za-z][A-Za-z0-9+.-]*: — the FIRST scheme character must be an
-        // ASCII letter. Paths whose first character is a digit / "+" / "." /
-        // "-" contain a colon in a non-scheme context and are legal (e.g.
-        // "1:a", ".foo:bar").
-        var colon = p.IndexOf(':');
-        if (colon > 0 && char.IsAsciiLetter(p[0]))
-        {
-            var isScheme = true;
-            for (var i = 1; i < colon; i++)
-            {
-                var c = p[i];
-                if (!char.IsAsciiLetterOrDigit(c) && c is not '+' and not '.' and not '-')
-                {
-                    isScheme = false;
-                    break;
-                }
-            }
-            if (isScheme) return false;
-        }
-        // Reject . and .. segments
-        foreach (var seg in p.Split('/'))
-        {
-            if (seg == "." || seg == "..") return false;
-        }
-        return true;
-    }
-
-    private static bool ContainsNonWhitespace(string s)
-    {
-        for (var i = 0; i < s.Length; i++)
-        {
-            if (!char.IsWhiteSpace(s[i])) return true;
-        }
-        return false;
-    }
-
-    private static bool HasInvalidUnicode(string? s)
-    {
-        if (s is null) return true;
         for (var i = 0; i < s.Length; i++)
         {
             var ch = s[i];
-            if (ch == '\0') return true;
+            if (ch == '\u0000') return true;
             if (char.IsHighSurrogate(ch))
             {
                 if (i + 1 >= s.Length || !char.IsLowSurrogate(s[i + 1])) return true;
                 i++;
+                continue;
             }
-            else if (char.IsLowSurrogate(ch)) return true;
+            if (char.IsLowSurrogate(ch)) return true;
         }
         return false;
     }
+
+    // -----------------------------------------------------------------
+    // Step 2 helpers: schema-shape validation (accumulates)
+
+    private static ImmutableArray<LedgerDiagnostic> ValidateContextSourceSchema(
+        ValidatedContextSource source, ExpectedIdentities identities, InteractionIdentity interaction)
+    {
+        var diags = ImmutableArray.CreateBuilder<LedgerDiagnostic>();
+
+        if (source.SubjectDigest is null || !Sha256HexRegex.IsMatch(source.SubjectDigest))
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+        if (source.ReviewedHeadSha is null || !GitShaRegex.IsMatch(source.ReviewedHeadSha))
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+        if (source.ReviewedBaseSha is null || !GitShaRegex.IsMatch(source.ReviewedBaseSha))
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+        if (interaction.InteractionId is null || !Sha256HexRegex.IsMatch(interaction.InteractionId))
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+        if (interaction.InteractionOrdinal < 0)
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+        if (source.ChangedFiles.Length > LedgerLimits.MaxChangedFilesPerContext)
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.ChangedFileLimitExceeded));
+
+        foreach (var cf in source.ChangedFiles)
+        {
+            if (!AllowedFileStatus.Contains(cf.Status))
+                diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.UnsupportedChangeStatus));
+            if (cf.Additions < 0 || cf.Additions > LedgerLimits.MaxIntegerValue)
+                diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+            if (cf.Deletions < 0 || cf.Deletions > LedgerLimits.MaxIntegerValue)
+                diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+            if (cf.Changes < 0 || cf.Changes > LedgerLimits.MaxIntegerValue)
+                diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+            if (cf.Patch is not null)
+            {
+                if (cf.Patch.Sha256 is null || !Sha256HexRegex.IsMatch(cf.Patch.Sha256))
+                    diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+                if (cf.Patch.MaxChars < 0 || cf.Patch.MaxChars > LedgerLimits.MaxIntegerValue)
+                    diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+            }
+        }
+        return diags.ToImmutable();
+    }
+
+    private static ImmutableArray<LedgerDiagnostic> ValidateOutcomeSourceSchema(
+        ValidatedOutcomeSource source, InteractionIdentity interaction)
+    {
+        var diags = ImmutableArray.CreateBuilder<LedgerDiagnostic>();
+        if (interaction.InteractionId is null || !Sha256HexRegex.IsMatch(interaction.InteractionId))
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+        if (interaction.InteractionOrdinal < 0)
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+        if (source.Summary is null)
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+        else if (LedgerLimits.SchemaStringLength(source.Summary) > LedgerLimits.MaxSummaryChars)
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.OverlongValue));
+        if (source.Findings.Length > LedgerLimits.MaxFindingsPerOutcome)
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.FindingLimitExceeded));
+        if (source.Limitations.Length > LedgerLimits.MaxLimitationsPerOutcome)
+            diags.Add(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.LimitationsLimitExceeded));
+        return diags.ToImmutable();
+    }
+
+    private static LedgerDiagnostic? ValidateIdentitiesShape(ExpectedIdentities identities, LedgerHeader header)
+    {
+        // sessionEpoch / ledgerEpoch validated as EpochId strings.
+        if (header.SessionEpoch is null || !EpochIdRegex.IsMatch(header.SessionEpoch))
+            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
+        if (header.LedgerEpoch is null || !EpochIdRegex.IsMatch(header.LedgerEpoch))
+            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
+        // Cache-contract IDs are Sha256Hex.
+        if (!Sha256HexRegex.IsMatch(identities.AdapterId)
+            || !Sha256HexRegex.IsMatch(identities.TemplateId)
+            || !Sha256HexRegex.IsMatch(identities.PolicyId)
+            || !Sha256HexRegex.IsMatch(identities.ToolDefinitionId)
+            || !Sha256HexRegex.IsMatch(identities.CacheConfigId))
+            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
+        return null;
+    }
+
+    // -----------------------------------------------------------------
+    // Failure helpers
+
+    private static BuildOutcome<T> NewBuildFail<T>(LedgerDiagnostic d) where T : class
+        => new(null, ImmutableArray.Create(d));
+
+    private static BuildOutcome<T> NewBuildFail<T>(string code) where T : class
+        => new(null, ImmutableArray.Create(LedgerDiagnosticMessages.Of(code)));
+
+    private static CandidateOutcome NewCandidateFail(LedgerDiagnostic d)
+        => new(null, ImmutableArray.Create(d));
+
+    private static CandidateOutcome NewCandidateFail(string code)
+        => new(null, ImmutableArray.Create(LedgerDiagnosticMessages.Of(code)));
 }
-
-
-
-
-

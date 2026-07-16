@@ -52,21 +52,21 @@ internal static class LedgerSchemaMapper
         // Precedence step 3: oneOf variant discriminator (header.kind).
         // Bootstrap/recovery must have stateGeneration == 0 and
         // predecessorLedgerSha256 == "bootstrap"; violation is a shape-violation.
-        if (kind is "bootstrap" or "recovery")
+        if (kind is "bootstrap" or "recovery_root")
         {
             if (headerElement.TryGetProperty("stateGeneration", out var sg) &&
                 sg.ValueKind == JsonValueKind.Number && sg.TryGetInt32(out var sgVal) && sgVal != 0)
             {
                 return LedgerDiagnosticMessages.Of(kind == "bootstrap"
                     ? LedgerDiagnosticCodes.BootstrapShapeViolation
-                    : LedgerDiagnosticCodes.RecoveryShapeViolation);
+                    : LedgerDiagnosticCodes.RecoveryRootShapeViolation);
             }
             if (headerElement.TryGetProperty("predecessorLedgerSha256", out var pls) &&
                 pls.ValueKind == JsonValueKind.String && pls.GetString() != "bootstrap")
             {
                 return LedgerDiagnosticMessages.Of(kind == "bootstrap"
                     ? LedgerDiagnosticCodes.BootstrapShapeViolation
-                    : LedgerDiagnosticCodes.RecoveryShapeViolation);
+                    : LedgerDiagnosticCodes.RecoveryRootShapeViolation);
             }
         }
 
@@ -167,7 +167,7 @@ internal static class LedgerSchemaMapper
             "stateGeneration","ledgerEpoch","predecessorLedgerSha256","predecessorStateGeneration",
             "predecessorManifestSha256","resetReason",
         },
-        ["recovery"] = new(StringComparer.Ordinal)
+        ["recovery_root"] = new(StringComparer.Ordinal)
         {
             "kind","repository","headRepository","pullRequest","workflowIdentity","trustedExecutionDomain","sessionEpoch",
             "providerId","modelId","adapterId","templateId","policyId","toolDefinitionId","cacheConfigId",
@@ -186,7 +186,7 @@ internal static class LedgerSchemaMapper
                 {
                     "bootstrap" => LedgerDiagnosticCodes.BootstrapShapeViolation,
                     "reset" => LedgerDiagnosticCodes.ResetShapeViolation,
-                    "recovery" => LedgerDiagnosticCodes.RecoveryShapeViolation,
+                    "recovery_root" => LedgerDiagnosticCodes.RecoveryRootShapeViolation,
                     "continuation" => LedgerDiagnosticCodes.ContinuationShapeViolation,
                     _ => null,
                 };
@@ -315,7 +315,7 @@ internal static class LedgerSchemaMapper
             "bootstrap" => new[] { "stateGeneration","ledgerEpoch","predecessorLedgerSha256" },
             "continuation" => new[] { "stateGeneration","ledgerEpoch","predecessorLedgerSha256","predecessorStateGeneration" },
             "reset" => new[] { "stateGeneration","ledgerEpoch","predecessorLedgerSha256","predecessorStateGeneration","predecessorManifestSha256","resetReason" },
-            "recovery" => new[] { "stateGeneration","ledgerEpoch","predecessorLedgerSha256","recoveryReason" },
+            "recovery_root" => new[] { "stateGeneration","ledgerEpoch","predecessorLedgerSha256","recoveryReason" },
             _ => Array.Empty<string>(),
         };
         foreach (var name in mustHave)
@@ -325,12 +325,12 @@ internal static class LedgerSchemaMapper
                 return name switch
                 {
                     "resetReason" => LedgerDiagnosticCodes.ResetReasonMissing,
-                    "recoveryReason" => LedgerDiagnosticCodes.RecoveryReasonMissing,
+                    "recoveryReason" => LedgerDiagnosticCodes.RecoveryRootReasonMissing,
                     _ => kind switch
                     {
                         "bootstrap" => LedgerDiagnosticCodes.BootstrapShapeViolation,
                         "reset" => LedgerDiagnosticCodes.ResetShapeViolation,
-                        "recovery" => LedgerDiagnosticCodes.RecoveryShapeViolation,
+                        "recovery_root" => LedgerDiagnosticCodes.RecoveryRootShapeViolation,
                         "continuation" => LedgerDiagnosticCodes.ContinuationShapeViolation,
                         _ => LedgerDiagnosticCodes.SchemaViolation,
                     },

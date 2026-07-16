@@ -5,7 +5,12 @@
   "description": "Provider-neutral bounded session ledger for the M4 live-provider path. Runtime-owned; host authoritative for identities. See docs/20_architecture/session-ledger-and-prefix-contract.md and issue #49.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "prefixContractVersion", "header", "records"],
+  "required": [
+    "schemaVersion",
+    "prefixContractVersion",
+    "header",
+    "records"
+  ],
   "properties": {
     "schemaVersion": {
       "type": "integer",
@@ -27,7 +32,7 @@
           "$ref": "#/definitions/resetHeader"
         },
         {
-          "$ref": "#/definitions/recoveryHeader"
+          "$ref": "#/definitions/recoveryRootHeader"
         }
       ]
     },
@@ -130,8 +135,7 @@
         },
         "sessionEpoch": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "pattern": "^[A-Za-z0-9_-]{22}$"
         },
         "providerId": {
           "type": "string",
@@ -168,9 +172,8 @@
           "const": 0
         },
         "ledgerEpoch": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 1000000
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{22}$"
         },
         "predecessorLedgerSha256": {
           "type": "string",
@@ -199,7 +202,8 @@
         "stateGeneration",
         "ledgerEpoch",
         "predecessorLedgerSha256",
-        "predecessorStateGeneration"
+        "predecessorStateGeneration",
+        "predecessorLedgerEpoch"
       ],
       "properties": {
         "kind": {
@@ -235,8 +239,7 @@
         },
         "sessionEpoch": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "pattern": "^[A-Za-z0-9_-]{22}$"
         },
         "providerId": {
           "type": "string",
@@ -274,9 +277,8 @@
           "maximum": 1000000
         },
         "ledgerEpoch": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 1000000
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{22}$"
         },
         "predecessorLedgerSha256": {
           "type": "string",
@@ -286,6 +288,10 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 1000000
+        },
+        "predecessorLedgerEpoch": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{22}$"
         }
       }
     },
@@ -312,7 +318,8 @@
         "predecessorLedgerSha256",
         "predecessorStateGeneration",
         "predecessorManifestSha256",
-        "resetReason"
+        "resetReason",
+        "predecessorLedgerEpoch"
       ],
       "properties": {
         "kind": {
@@ -348,8 +355,7 @@
         },
         "sessionEpoch": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "pattern": "^[A-Za-z0-9_-]{22}$"
         },
         "providerId": {
           "type": "string",
@@ -387,9 +393,8 @@
           "maximum": 1000000
         },
         "ledgerEpoch": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 1000000
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{22}$"
         },
         "predecessorLedgerSha256": {
           "type": "string",
@@ -406,11 +411,19 @@
         },
         "resetReason": {
           "type": "string",
-          "enum": ["base_changed", "force_push", "cache_contract_changed"]
+          "enum": [
+            "base_change",
+            "head_history_discontinuity",
+            "cache_contract_change"
+          ]
+        },
+        "predecessorLedgerEpoch": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{22}$"
         }
       }
     },
-    "recoveryHeader": {
+    "recoveryRootHeader": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -436,7 +449,7 @@
       "properties": {
         "kind": {
           "type": "string",
-          "const": "recovery"
+          "const": "recovery_root"
         },
         "repository": {
           "type": "string",
@@ -467,8 +480,7 @@
         },
         "sessionEpoch": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          "pattern": "^[A-Za-z0-9_-]{22}$"
         },
         "providerId": {
           "type": "string",
@@ -505,9 +517,8 @@
           "const": 0
         },
         "ledgerEpoch": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 1000000
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{22}$"
         },
         "predecessorLedgerSha256": {
           "type": "string",
@@ -516,12 +527,13 @@
         "recoveryReason": {
           "type": "string",
           "enum": [
-            "predecessor_unavailable",
-            "predecessor_integrity_failure",
-            "predecessor_unsafe_provenance",
-            "predecessor_expired",
-            "predecessor_over_bound",
-            "predecessor_incompatible_contract"
+            "unavailable_accepted_artifact",
+            "integrity_mismatch",
+            "unsafe_provenance",
+            "contract_version_incompatible",
+            "over_bound_ledger",
+            "corrupt_accepted_artifact",
+            "state_key_mismatch"
           ]
         }
       }
@@ -555,11 +567,11 @@
         },
         "reviewedHeadSha": {
           "type": "string",
-          "pattern": "^[0-9a-f]{40}$"
+          "pattern": "^([a-f0-9]{40}|[a-f0-9]{64})$"
         },
         "reviewedBaseSha": {
           "type": "string",
-          "pattern": "^[0-9a-f]{40}$"
+          "pattern": "^([a-f0-9]{40}|[a-f0-9]{64})$"
         },
         "subjectDigest": {
           "type": "string",
@@ -576,7 +588,13 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["path", "status", "additions", "deletions", "changes"],
+            "required": [
+              "path",
+              "status",
+              "additions",
+              "deletions",
+              "changes"
+            ],
             "properties": {
               "path": {
                 "$ref": "#/definitions/safeRelativePath"
@@ -586,7 +604,15 @@
               },
               "status": {
                 "type": "string",
-                "enum": ["added", "modified", "removed", "renamed", "copied"]
+                "enum": [
+                  "added",
+                  "modified",
+                  "removed",
+                  "renamed",
+                  "copied",
+                  "changed",
+                  "unchanged"
+                ]
               },
               "additions": {
                 "type": "integer",
@@ -606,7 +632,11 @@
               "patch": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["sha256", "truncated", "maxChars"],
+                "required": [
+                  "sha256",
+                  "truncated",
+                  "maxChars"
+                ],
                 "properties": {
                   "sha256": {
                     "type": "string",
@@ -618,7 +648,7 @@
                   "maxChars": {
                     "type": "integer",
                     "minimum": 0,
-                    "maximum": 10000000
+                    "maximum": 1000000
                   }
                 }
               }
@@ -692,10 +722,17 @@
       ],
       "properties": {
         "severity": {
-          "enum": ["low", "medium", "high"]
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
         },
         "confidence": {
-          "enum": ["medium", "high"]
+          "enum": [
+            "medium",
+            "high"
+          ]
         },
         "category": {
           "enum": [
@@ -735,11 +772,17 @@
           ]
         },
         "startLine": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 1
         },
         "endLine": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 1
         },
         "suggestedAction": {
@@ -748,7 +791,11 @@
           "pattern": "\\S"
         },
         "inlinePreference": {
-          "enum": ["allowed", "preferred", "avoid"]
+          "enum": [
+            "allowed",
+            "preferred",
+            "avoid"
+          ]
         }
       }
     }

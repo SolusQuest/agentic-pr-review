@@ -2,44 +2,66 @@ using System.Buffers;
 using System.Collections.Immutable;
 using System.Globalization;
 using System.Security.Cryptography;
-using System.Text;
-using System.Text.Encodings.Web;
-using System.Text.Json;
 
 namespace AgenticPrReview.Runtime.Ledger;
 
 /// <summary>
-/// Ledger-schema RFC 8785 canonical writer. This is not a general
-/// arbitrary-JSON API; it serializes only the closed shapes of
-/// ProviderSessionLedgerV1 and its two digest envelopes.
+/// Ledger-scoped RFC 8785 canonical writer. Not a general arbitrary-JSON API;
+/// only serializes the closed shapes owned by <see cref="LedgerModel"/>,
+/// <see cref="LedgerRecord"/> subtypes, and the cache-contract identity object.
 /// </summary>
-public static class LedgerCanonicalizer
+internal static class LedgerCanonicalizer
 {
-    public static byte[] SerializeCanonical(LedgerModel model)
+    /// <summary>
+    /// Full-ledger canonical bytes used by parser round-trip verification and
+    /// by builder assembly.
+    /// </summary>
+    internal static ImmutableArray<byte> SerializeCanonical(LedgerModel model)
     {
         using var buffer = new PooledMemoryStream();
         WriteLedger(buffer, model);
-        return buffer.ToArray();
+        return ImmutableArray.Create(buffer.ToArray());
     }
 
     /// <summary>
-    /// Canonicalize a small envelope for digest preimages. Only handles the
-    /// shapes used by <see cref="LedgerDigests"/>: objects whose values are
-    /// strings, non-negative integers, or nested envelope objects. Property
-    /// order is derived from the input dictionary insertion order after being
-    /// sorted by unsigned UTF-16 code-unit ordering.
+    /// Canonical bytes of the cache-contract identity envelope
+    /// <c>{adapterId, cacheConfigId, modelId, policyId, providerId, templateId, toolDefinitionId}</c>,
+    /// used to compute <c>cacheContractDigest</c> during builder assembly.
     /// </summary>
-    internal static byte[] SerializeEnvelope(IReadOnlyDictionary<string, object> envelope)
+    internal static ImmutableArray<byte> SerializeCacheContractIdentity(ExpectedIdentities identities)
     {
         using var buffer = new PooledMemoryStream();
-        WriteEnvelope(buffer, envelope);
-        return buffer.ToArray();
+        var props = new SortedDictionary<string, Action>(LedgerPropertyNameComparer.Instance)
+        {
+            ["adapterId"] = () => WriteString(buffer, identities.AdapterId),
+            ["cacheConfigId"] = () => WriteString(buffer, identities.CacheConfigId),
+            ["modelId"] = () => WriteString(buffer, identities.ModelId),
+            ["policyId"] = () => WriteString(buffer, identities.PolicyId),
+            ["providerId"] = () => WriteString(buffer, identities.ProviderId),
+            ["templateId"] = () => WriteString(buffer, identities.TemplateId),
+            ["toolDefinitionId"] = () => WriteString(buffer, identities.ToolDefinitionId),
+        };
+        WriteObject(buffer, props);
+        return ImmutableArray.Create(buffer.ToArray());
     }
 
     /// <summary>
-    /// Compute the lowercase-hex SHA-256 of a byte sequence.
+    /// Canonical bytes of a single record. Used by the continuation prefix
+    /// invariant (same-index canonical-byte equality between predecessor and
+    /// candidate records).
     /// </summary>
-    public static string ComputeSha256Hex(ReadOnlySpan<byte> bytes)
+    internal static ImmutableArray<byte> SerializeRecord(LedgerRecord record)
+    {
+        using var buffer = new PooledMemoryStream();
+        WriteRecord(buffer, record);
+        return ImmutableArray.Create(buffer.ToArray());
+    }
+
+    /// <summary>
+    /// Lowercase-hex SHA-256 over an arbitrary byte sequence, in the shared
+    /// <c>Sha256Hex</c> format.
+    /// </summary>
+    internal static string ComputeSha256Hex(ReadOnlySpan<byte> bytes)
     {
         Span<byte> hash = stackalloc byte[32];
         SHA256.HashData(bytes, hash);
@@ -51,37 +73,34 @@ public static class LedgerCanonicalizer
 
     private static void WriteLedger(PooledMemoryStream buffer, LedgerModel model)
     {
-        // Top-level order (canonical UTF-16 lex): header, prefixContractVersion, records, schemaVersion
-        buffer.WriteByte((byte)'{');
-        WriteProperty(buffer, "header", () => WriteHeader(buffer, model.Header));
-        buffer.WriteByte((byte)',');
-        WriteProperty(buffer, "prefixContractVersion", () => WriteInt(buffer, model.PrefixContractVersion));
-        buffer.WriteByte((byte)',');
-        WriteProperty(buffer, "records", () =>
+        var props = new SortedDictionary<string, Action>(LedgerPropertyNameComparer.Instance)
         {
-            buffer.WriteByte((byte)'[');
-            for (var i = 0; i < model.Records.Length; i++)
+            ["header"] = () => WriteHeader(buffer, model.Header),
+            ["prefixContractVersion"] = () => WriteInt(buffer, model.PrefixContractVersion),
+            ["records"] = () =>
             {
-                if (i > 0) buffer.WriteByte((byte)',');
-                WriteRecord(buffer, model.Records[i]);
-            }
-            buffer.WriteByte((byte)']');
-        });
-        buffer.WriteByte((byte)',');
-        WriteProperty(buffer, "schemaVersion", () => WriteInt(buffer, model.SchemaVersion));
-        buffer.WriteByte((byte)'}');
+                buffer.WriteByte((byte)'[');
+                for (var i = 0; i < model.Records.Length; i++)
+                {
+                    if (i > 0) buffer.WriteByte((byte)',');
+                    WriteRecord(buffer, model.Records[i]);
+                }
+                buffer.WriteByte((byte)']');
+            },
+            ["schemaVersion"] = () => WriteInt(buffer, model.SchemaVersion),
+        };
+        WriteObject(buffer, props);
     }
 
     private static void WriteHeader(PooledMemoryStream buffer, LedgerHeader h)
     {
-        // Collect present properties. Ordering will be applied by CanonicalPropertyList.
         var props = new SortedDictionary<string, Action>(LedgerPropertyNameComparer.Instance)
         {
             ["adapterId"] = () => WriteString(buffer, h.AdapterId),
             ["cacheConfigId"] = () => WriteString(buffer, h.CacheConfigId),
             ["headRepository"] = () => WriteString(buffer, h.HeadRepository),
             ["kind"] = () => WriteString(buffer, h.Kind),
-            ["ledgerEpoch"] = () => WriteLong(buffer, h.LedgerEpoch),
+            ["ledgerEpoch"] = () => WriteString(buffer, h.LedgerEpoch),
             ["modelId"] = () => WriteString(buffer, h.ModelId),
             ["policyId"] = () => WriteString(buffer, h.PolicyId),
             ["predecessorLedgerSha256"] = () => WriteString(buffer, h.PredecessorLedgerSha256),
@@ -95,6 +114,9 @@ public static class LedgerCanonicalizer
             ["trustedExecutionDomain"] = () => WriteString(buffer, h.TrustedExecutionDomain),
             ["workflowIdentity"] = () => WriteString(buffer, h.WorkflowIdentity),
         };
+
+        if (h.PredecessorLedgerEpoch is string ple)
+            props["predecessorLedgerEpoch"] = () => WriteString(buffer, ple);
         if (h.PredecessorStateGeneration is long psg)
             props["predecessorStateGeneration"] = () => WriteLong(buffer, psg);
         if (h.PredecessorManifestSha256 is string pms)
@@ -109,17 +131,16 @@ public static class LedgerCanonicalizer
 
     private static void WriteRecord(PooledMemoryStream buffer, LedgerRecord record)
     {
-        if (record.Context is ReviewContextRecord ctx)
+        switch (record)
         {
-            WriteReviewContext(buffer, ctx);
-        }
-        else if (record.Outcome is ReviewOutcomeRecord oc)
-        {
-            WriteReviewOutcome(buffer, oc);
-        }
-        else
-        {
-            throw new InvalidOperationException("LedgerRecord must carry Context or Outcome.");
+            case ReviewContextRecord ctx:
+                WriteReviewContext(buffer, ctx);
+                return;
+            case ReviewOutcomeRecord oc:
+                WriteReviewOutcome(buffer, oc);
+                return;
+            default:
+                throw new InvalidOperationException("LedgerRecord must be ReviewContextRecord or ReviewOutcomeRecord.");
         }
     }
 
@@ -139,7 +160,7 @@ public static class LedgerCanonicalizer
                 buffer.WriteByte((byte)']');
             },
             ["interactionId"] = () => WriteString(buffer, ctx.InteractionId),
-            ["interactionOrdinal"] = () => WriteInt(buffer, ctx.InteractionOrdinal),
+            ["interactionOrdinal"] = () => WriteLong(buffer, ctx.InteractionOrdinal),
             ["reviewedBaseSha"] = () => WriteString(buffer, ctx.ReviewedBaseSha),
             ["reviewedHeadSha"] = () => WriteString(buffer, ctx.ReviewedHeadSha),
             ["role"] = () => WriteString(buffer, "review_context"),
@@ -148,29 +169,31 @@ public static class LedgerCanonicalizer
         WriteObject(buffer, props);
     }
 
-    private static void WriteChangedFile(PooledMemoryStream buffer, ChangedFileEntry cf)
+    private static void WriteChangedFile(PooledMemoryStream buffer, LedgerChangedFile cf)
     {
         var props = new SortedDictionary<string, Action>(LedgerPropertyNameComparer.Instance)
         {
-            ["additions"] = () => WriteInt(buffer, cf.Additions),
-            ["changes"] = () => WriteInt(buffer, cf.Changes),
-            ["deletions"] = () => WriteInt(buffer, cf.Deletions),
+            ["additions"] = () => WriteLong(buffer, cf.Additions),
+            ["changes"] = () => WriteLong(buffer, cf.Changes),
+            ["deletions"] = () => WriteLong(buffer, cf.Deletions),
             ["path"] = () => WriteString(buffer, cf.Path),
             ["status"] = () => WriteString(buffer, cf.Status),
         };
         if (cf.PreviousPath is string pp)
             props["previousPath"] = () => WriteString(buffer, pp);
-        if (cf.Patch is ChangedFilePatch patch)
+        if (cf.Patch is LedgerBoundedPatch patch)
+        {
             props["patch"] = () =>
             {
                 var patchProps = new SortedDictionary<string, Action>(LedgerPropertyNameComparer.Instance)
                 {
-                    ["maxChars"] = () => WriteInt(buffer, patch.MaxChars),
+                    ["maxChars"] = () => WriteLong(buffer, patch.MaxChars),
                     ["sha256"] = () => WriteString(buffer, patch.Sha256),
                     ["truncated"] = () => WriteBool(buffer, patch.Truncated),
                 };
                 WriteObject(buffer, patchProps);
             };
+        }
         WriteObject(buffer, props);
     }
 
@@ -189,7 +212,7 @@ public static class LedgerCanonicalizer
                 buffer.WriteByte((byte)']');
             },
             ["interactionId"] = () => WriteString(buffer, oc.InteractionId),
-            ["interactionOrdinal"] = () => WriteInt(buffer, oc.InteractionOrdinal),
+            ["interactionOrdinal"] = () => WriteLong(buffer, oc.InteractionOrdinal),
             ["limitations"] = () =>
             {
                 buffer.WriteByte((byte)'[');
@@ -213,43 +236,16 @@ public static class LedgerCanonicalizer
             ["body"] = () => WriteString(buffer, f.Body),
             ["category"] = () => WriteString(buffer, f.Category),
             ["confidence"] = () => WriteString(buffer, f.Confidence),
-            ["endLine"] = () => WriteNullableInt(buffer, f.EndLine),
+            ["endLine"] = () => WriteNullableLong(buffer, f.EndLine),
             ["path"] = () => WriteNullableString(buffer, f.Path),
             ["severity"] = () => WriteString(buffer, f.Severity),
-            ["startLine"] = () => WriteNullableInt(buffer, f.StartLine),
+            ["startLine"] = () => WriteNullableLong(buffer, f.StartLine),
             ["title"] = () => WriteString(buffer, f.Title),
         };
         if (f.Evidence is string e) props["evidence"] = () => WriteString(buffer, e);
         if (f.SuggestedAction is string sa) props["suggestedAction"] = () => WriteString(buffer, sa);
         if (f.InlinePreference is string ip) props["inlinePreference"] = () => WriteString(buffer, ip);
         WriteObject(buffer, props);
-    }
-
-    // -----------------------------------------------------------------
-    // Envelope writer (for digest preimages)
-
-    private static void WriteEnvelope(PooledMemoryStream buffer, IReadOnlyDictionary<string, object> envelope)
-    {
-        var props = new SortedDictionary<string, Action>(LedgerPropertyNameComparer.Instance);
-        foreach (var kv in envelope)
-        {
-            var value = kv.Value;
-            props[kv.Key] = () => WriteEnvelopeValue(buffer, value);
-        }
-        WriteObject(buffer, props);
-    }
-
-    private static void WriteEnvelopeValue(PooledMemoryStream buffer, object value)
-    {
-        switch (value)
-        {
-            case string s: WriteString(buffer, s); break;
-            case int i: WriteInt(buffer, i); break;
-            case long l: WriteLong(buffer, l); break;
-            case bool b: WriteBool(buffer, b); break;
-            case IReadOnlyDictionary<string, object> nested: WriteEnvelope(buffer, nested); break;
-            default: throw new InvalidOperationException("Unsupported envelope value type: " + value.GetType());
-        }
     }
 
     // -----------------------------------------------------------------
@@ -270,17 +266,9 @@ public static class LedgerCanonicalizer
         buffer.WriteByte((byte)'}');
     }
 
-    private static void WriteProperty(PooledMemoryStream buffer, string name, Action writeValue)
-    {
-        WriteString(buffer, name);
-        buffer.WriteByte((byte)':');
-        writeValue();
-    }
-
     private static void WriteString(PooledMemoryStream buffer, string s)
     {
         buffer.WriteByte((byte)'"');
-        // Escape per RFC 8785: only ", \, and code points below 0x20.
         var i = 0;
         while (i < s.Length)
         {
@@ -302,7 +290,6 @@ public static class LedgerCanonicalizer
                 continue;
             }
 
-            // Handle surrogate pair or single BMP char, encoded as UTF-8.
             int codepoint;
             int consumed;
             if (char.IsHighSurrogate(ch) && i + 1 < s.Length && char.IsLowSurrogate(s[i + 1]))
@@ -328,41 +315,27 @@ public static class LedgerCanonicalizer
 
     private static void WriteNullableString(PooledMemoryStream buffer, string? s)
     {
-        if (s is null)
-        {
-            buffer.WriteAscii("null");
-        }
-        else
-        {
-            WriteString(buffer, s);
-        }
+        if (s is null) buffer.WriteAscii("null");
+        else WriteString(buffer, s);
     }
 
     private static void WriteInt(PooledMemoryStream buffer, int value)
-    {
-        buffer.WriteAscii(value.ToString(CultureInfo.InvariantCulture));
-    }
+        => buffer.WriteAscii(value.ToString(CultureInfo.InvariantCulture));
 
     private static void WriteLong(PooledMemoryStream buffer, long value)
-    {
-        buffer.WriteAscii(value.ToString(CultureInfo.InvariantCulture));
-    }
+        => buffer.WriteAscii(value.ToString(CultureInfo.InvariantCulture));
 
-    private static void WriteNullableInt(PooledMemoryStream buffer, int? value)
+    private static void WriteNullableLong(PooledMemoryStream buffer, long? value)
     {
-        if (value is int v) WriteInt(buffer, v);
+        if (value is long v) WriteLong(buffer, v);
         else buffer.WriteAscii("null");
     }
 
     private static void WriteBool(PooledMemoryStream buffer, bool value)
-    {
-        buffer.WriteAscii(value ? "true" : "false");
-    }
+        => buffer.WriteAscii(value ? "true" : "false");
 
     private static void AppendUtf8CodePoint(PooledMemoryStream buffer, int cp)
     {
-        // RFC 8785 requires literal UTF-8 emission for characters >= 0x20 (except the
-        // two escaped characters " and \). Encode inline to avoid string allocations.
         if (cp <= 0x7F)
         {
             buffer.WriteByte((byte)cp);
@@ -390,8 +363,7 @@ public static class LedgerCanonicalizer
 
 /// <summary>
 /// RFC 8785 property-name ordering: sort by unsigned UTF-16 code-unit
-/// lexicographic order. Not the same as ordinal / codepoint order for
-/// supplementary-plane characters.
+/// lexicographic order.
 /// </summary>
 internal sealed class LedgerPropertyNameComparer : IComparer<string>
 {

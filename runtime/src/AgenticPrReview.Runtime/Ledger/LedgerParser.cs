@@ -1,53 +1,55 @@
 using System.Collections.Immutable;
 using System.Text.Json;
-using Json.Schema;
 
 namespace AgenticPrReview.Runtime.Ledger;
 
 /// <summary>
-/// Parses a candidate ledger byte sequence and runs the full validation pipeline:
-/// raw transport, version routing, schema (via mapper), structural bounds,
-/// semantic invariants, and canonical form. Returns a <see cref="ValidatedLedger"/>
-/// only on complete success.
+/// Parses a candidate ledger byte sequence and runs the full validation
+/// pipeline (raw transport → Unicode-safety → version routing → schema →
+/// structural bounds → semantic invariants → canonical form). Each stage is
+/// fail-fast under a fixed intra-stage precedence. A <see cref="ValidatedLedger"/>
+/// is minted only on complete success.
 /// </summary>
 public static class LedgerParser
 {
     public static ParseOutcome ParseAndValidate(ReadOnlySpan<byte> bytes)
     {
-        // Copy input span into a persistent byte buffer to detach from caller-owned memory.
         var rawCopy = new byte[bytes.Length];
         bytes.CopyTo(rawCopy);
 
         // ------ Raw transport
         JsonDocument? document = null;
         var rawFailure = LedgerRawTransport.Validate(rawCopy, out document);
-        if (rawFailure is not null) return new ParseOutcome(null, rawFailure);
+        if (rawFailure is not null) return SingleFailure(rawFailure);
         using var doc = document!;
-
         var root = doc.RootElement;
+
+        // ------ Unicode-safety pre-scan (property names + string values).
+        var unicodeFailure = LedgerUnicodeSafety.Scan(root);
+        if (unicodeFailure is not null) return SingleFailure(unicodeFailure);
 
         // ------ Version routing
         var routingFailure = CheckVersionRouting(root);
-        if (routingFailure is not null) return new ParseOutcome(null, routingFailure);
+        if (routingFailure is not null) return SingleFailure(routingFailure);
 
         // ------ Schema evaluation via mapper
         var schemas = SchemaContracts.Load(typeof(LedgerParser).Assembly);
         var evalResults = schemas.Evaluate(SchemaKind.Ledger, root);
         if (!evalResults.IsValid)
         {
-            LedgerDiagnostic mapped;
+            ImmutableArray<LedgerDiagnostic> mapped;
             try
             {
-                mapped = LedgerSchemaMapper.Map(root, evalResults);
+                mapped = ImmutableArray.Create(LedgerSchemaMapper.Map(root, evalResults));
             }
             catch (Exception)
             {
-                mapped = LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation);
+                mapped = ImmutableArray.Create(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
             }
             return new ParseOutcome(null, mapped);
         }
 
-        // ------ Deserialize into strongly-typed model
+        // ------ Deserialize
         LedgerModel model;
         try
         {
@@ -55,76 +57,49 @@ public static class LedgerParser
         }
         catch (LedgerDeserializationException ex)
         {
-            return new ParseOutcome(null, LedgerDiagnosticMessages.Of(ex.Code));
+            return SingleFailure(LedgerDiagnosticMessages.Of(ex.Code));
         }
-        catch (System.Text.Json.JsonException)
+        catch (Exception)
         {
-            return new ParseOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
-        }
-        catch (FormatException)
-        {
-            return new ParseOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
-        }
-        catch (OverflowException)
-        {
-            return new ParseOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
-        }
-        catch (InvalidOperationException)
-        {
-            return new ParseOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
+            // JSON reader / conversion errors post-schema map to schema violation.
+            return SingleFailure(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.SchemaViolation));
         }
 
-        // ------ Structural bounds (post-schema; identity byte lengths / control chars in identities)
-        var boundsFailure = LedgerSemanticChecks.CheckIdentityBounds(model);
-        if (boundsFailure is not null) return new ParseOutcome(null, boundsFailure);
+        // ------ Structural bounds (semantic): canonical byte cap, identity byte length, control chars in identity.
+        var canonicalIm = LedgerCanonicalizer.SerializeCanonical(model);
+        if (canonicalIm.Length > LedgerLimits.MaxCanonicalBytes)
+            return SingleFailure(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.CanonicalByteLimitExceeded));
 
-        // ------ Semantic invariants
+        var identityBoundsFailure = LedgerSemanticChecks.CheckIdentityBounds(model);
+        if (identityBoundsFailure is not null) return SingleFailure(identityBoundsFailure);
+
+        // ------ Semantic invariants (fixed order; see Issue #49 section 9).
         var semanticFailure = LedgerSemanticChecks.CheckSemanticInvariants(model);
-        if (semanticFailure is not null) return new ParseOutcome(null, semanticFailure);
+        if (semanticFailure is not null) return SingleFailure(semanticFailure);
 
-        // ------ Canonical form
-        var canonical = LedgerCanonicalizer.SerializeCanonical(model);
-        if (canonical.Length > LedgerLimits.MaxCanonicalBytes)
-        {
-            return new ParseOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.CanonicalByteLimitExceeded));
-        }
-        if (!canonical.AsSpan().SequenceEqual(rawCopy))
-        {
-            return new ParseOutcome(null, LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.NonCanonical));
-        }
+        // ------ Canonical form: bytes must equal SerializeCanonical(Parse(bytes)).
+        var canonicalBytes = canonicalIm.ToArray();
+        if (!canonicalBytes.AsSpan().SequenceEqual(rawCopy))
+            return SingleFailure(LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.NonCanonical));
 
-        // ------ Success: hand back a defensive-copied ValidatedLedger
-        var contentSha = LedgerCanonicalizer.ComputeSha256Hex(canonical);
-        return new ParseOutcome(new ValidatedLedger(model, canonical, contentSha), null);
+        var contentSha = LedgerCanonicalizer.ComputeSha256Hex(canonicalBytes);
+        return new ParseOutcome(new ValidatedLedger(model, canonicalBytes, contentSha), ImmutableArray<LedgerDiagnostic>.Empty);
     }
+
+    private static ParseOutcome SingleFailure(LedgerDiagnostic d)
+        => new(null, ImmutableArray.Create(d));
 
     private static LedgerDiagnostic? CheckVersionRouting(JsonElement root)
     {
-        if (!root.TryGetProperty("schemaVersion", out var sv) || sv.ValueKind != JsonValueKind.Number)
+        if (root.TryGetProperty("schemaVersion", out var sv) && sv.ValueKind == JsonValueKind.Number)
         {
-            // Missing/invalid handled by schema stage.
-            return null;
+            if (!sv.TryGetInt32(out var svv) || svv != 1)
+                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.UnsupportedSchemaVersion);
         }
-        if (sv.TryGetInt32(out var svv))
+        if (root.TryGetProperty("prefixContractVersion", out var pcv) && pcv.ValueKind == JsonValueKind.Number)
         {
-            if (svv != 1) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.UnsupportedSchemaVersion);
-        }
-        else
-        {
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.UnsupportedSchemaVersion);
-        }
-
-        if (!root.TryGetProperty("prefixContractVersion", out var pcv) || pcv.ValueKind != JsonValueKind.Number)
-        {
-            return null;
-        }
-        if (pcv.TryGetInt32(out var pcvv))
-        {
-            if (pcvv != 1) return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.UnsupportedPrefixContractVersion);
-        }
-        else
-        {
-            return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.UnsupportedPrefixContractVersion);
+            if (!pcv.TryGetInt32(out var pcvv) || pcvv != 1)
+                return LedgerDiagnosticMessages.Of(LedgerDiagnosticCodes.UnsupportedPrefixContractVersion);
         }
         return null;
     }
@@ -143,90 +118,109 @@ internal static class LedgerDeserializer
         var schemaVersion = root.GetProperty("schemaVersion").GetInt32();
         var prefixContractVersion = root.GetProperty("prefixContractVersion").GetInt32();
         var header = DeserializeHeader(root.GetProperty("header"));
-        var records = ImmutableArray.CreateBuilder<LedgerRecord>();
+        var recordsBuilder = ImmutableArray.CreateBuilder<LedgerRecord>();
         foreach (var el in root.GetProperty("records").EnumerateArray())
         {
-            records.Add(DeserializeRecord(el));
+            recordsBuilder.Add(DeserializeRecord(el));
         }
-        return new LedgerModel(schemaVersion, prefixContractVersion, header, records.ToImmutable());
+        return new LedgerModel
+        {
+            SchemaVersion = schemaVersion,
+            PrefixContractVersion = prefixContractVersion,
+            Header = header,
+            Records = recordsBuilder.ToImmutable(),
+        };
     }
 
     private static LedgerHeader DeserializeHeader(JsonElement e)
     {
-        string? getOpt(string name) => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
-        int? getOptInt(string name)
+        string? getStr(string name) => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+        long? getLong(string name)
         {
-            return e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : (int?)null;
+            if (!e.TryGetProperty(name, out var v)) return null;
+            if (v.ValueKind != JsonValueKind.Number) return null;
+            if (v.TryGetInt64(out var vv)) return vv;
+            return null;
         }
 
-        return new LedgerHeader(
-            Kind: e.GetProperty("kind").GetString()!,
-            Repository: e.GetProperty("repository").GetString()!,
-            HeadRepository: e.GetProperty("headRepository").GetString()!,
-            PullRequest: e.GetProperty("pullRequest").GetInt32(),
-            WorkflowIdentity: e.GetProperty("workflowIdentity").GetString()!,
-            TrustedExecutionDomain: e.GetProperty("trustedExecutionDomain").GetString()!,
-            SessionEpoch: e.GetProperty("sessionEpoch").GetString()!,
-            ProviderId: e.GetProperty("providerId").GetString()!,
-            ModelId: e.GetProperty("modelId").GetString()!,
-            AdapterId: e.GetProperty("adapterId").GetString()!,
-            TemplateId: e.GetProperty("templateId").GetString()!,
-            PolicyId: e.GetProperty("policyId").GetString()!,
-            ToolDefinitionId: e.GetProperty("toolDefinitionId").GetString()!,
-            CacheConfigId: e.GetProperty("cacheConfigId").GetString()!,
-            StateGeneration: e.GetProperty("stateGeneration").GetInt32(),
-            LedgerEpoch: e.GetProperty("ledgerEpoch").GetInt32(),
-            PredecessorLedgerSha256: e.GetProperty("predecessorLedgerSha256").GetString()!,
-            PredecessorStateGeneration: getOptInt("predecessorStateGeneration"),
-            PredecessorManifestSha256: getOpt("predecessorManifestSha256"),
-            ResetReason: getOpt("resetReason"),
-            RecoveryReason: getOpt("recoveryReason"));
+        return new LedgerHeader
+        {
+            Kind = e.GetProperty("kind").GetString()!,
+            SessionEpoch = e.GetProperty("sessionEpoch").GetString()!,
+            LedgerEpoch = e.GetProperty("ledgerEpoch").GetString()!,
+            StateGeneration = e.GetProperty("stateGeneration").GetInt64(),
+            PredecessorLedgerSha256 = e.GetProperty("predecessorLedgerSha256").GetString()!,
+            PredecessorLedgerEpoch = getStr("predecessorLedgerEpoch"),
+            PredecessorStateGeneration = getLong("predecessorStateGeneration"),
+            PredecessorManifestSha256 = getStr("predecessorManifestSha256"),
+            ResetReason = getStr("resetReason"),
+            RecoveryReason = getStr("recoveryReason"),
+            Repository = e.GetProperty("repository").GetString()!,
+            HeadRepository = e.GetProperty("headRepository").GetString()!,
+            PullRequest = e.GetProperty("pullRequest").GetInt32(),
+            WorkflowIdentity = e.GetProperty("workflowIdentity").GetString()!,
+            TrustedExecutionDomain = e.GetProperty("trustedExecutionDomain").GetString()!,
+            ProviderId = e.GetProperty("providerId").GetString()!,
+            ModelId = e.GetProperty("modelId").GetString()!,
+            AdapterId = e.GetProperty("adapterId").GetString()!,
+            TemplateId = e.GetProperty("templateId").GetString()!,
+            PolicyId = e.GetProperty("policyId").GetString()!,
+            ToolDefinitionId = e.GetProperty("toolDefinitionId").GetString()!,
+            CacheConfigId = e.GetProperty("cacheConfigId").GetString()!,
+        };
     }
 
     private static LedgerRecord DeserializeRecord(JsonElement e)
     {
         var role = e.GetProperty("role").GetString();
-        if (role == "review_context") return new LedgerRecord(DeserializeContext(e), null);
-        if (role == "review_outcome") return new LedgerRecord(null, DeserializeOutcome(e));
+        if (role == "review_context") return DeserializeContext(e);
+        if (role == "review_outcome") return DeserializeOutcome(e);
         throw new LedgerDeserializationException(LedgerDiagnosticCodes.RecordRoleMismatch);
     }
 
     private static ReviewContextRecord DeserializeContext(JsonElement e)
     {
-        var files = ImmutableArray.CreateBuilder<ChangedFileEntry>();
+        var files = ImmutableArray.CreateBuilder<LedgerChangedFile>();
         foreach (var f in e.GetProperty("changedFiles").EnumerateArray())
         {
             files.Add(DeserializeChangedFile(f));
         }
-        return new ReviewContextRecord(
-            InteractionId: e.GetProperty("interactionId").GetString()!,
-            InteractionOrdinal: e.GetProperty("interactionOrdinal").GetInt32(),
-            ReviewedHeadSha: e.GetProperty("reviewedHeadSha").GetString()!,
-            ReviewedBaseSha: e.GetProperty("reviewedBaseSha").GetString()!,
-            SubjectDigest: e.GetProperty("subjectDigest").GetString()!,
-            CacheContractDigest: e.GetProperty("cacheContractDigest").GetString()!,
-            ChangedFiles: files.ToImmutable());
+        return new ReviewContextRecord
+        {
+            Role = "review_context",
+            InteractionId = e.GetProperty("interactionId").GetString()!,
+            InteractionOrdinal = e.GetProperty("interactionOrdinal").GetInt64(),
+            SubjectDigest = e.GetProperty("subjectDigest").GetString()!,
+            CacheContractDigest = e.GetProperty("cacheContractDigest").GetString()!,
+            ReviewedHeadSha = e.GetProperty("reviewedHeadSha").GetString()!,
+            ReviewedBaseSha = e.GetProperty("reviewedBaseSha").GetString()!,
+            ChangedFiles = files.ToImmutable(),
+        };
     }
 
-    private static ChangedFileEntry DeserializeChangedFile(JsonElement e)
+    private static LedgerChangedFile DeserializeChangedFile(JsonElement e)
     {
         string? prev = e.TryGetProperty("previousPath", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
-        ChangedFilePatch? patch = null;
+        LedgerBoundedPatch? patch = null;
         if (e.TryGetProperty("patch", out var pe) && pe.ValueKind == JsonValueKind.Object)
         {
-            patch = new ChangedFilePatch(
-                Sha256: pe.GetProperty("sha256").GetString()!,
-                Truncated: pe.GetProperty("truncated").GetBoolean(),
-                MaxChars: pe.GetProperty("maxChars").GetInt32());
+            patch = new LedgerBoundedPatch
+            {
+                Sha256 = pe.GetProperty("sha256").GetString()!,
+                Truncated = pe.GetProperty("truncated").GetBoolean(),
+                MaxChars = pe.GetProperty("maxChars").GetInt64(),
+            };
         }
-        return new ChangedFileEntry(
-            Path: e.GetProperty("path").GetString()!,
-            PreviousPath: prev,
-            Status: e.GetProperty("status").GetString()!,
-            Additions: e.GetProperty("additions").GetInt32(),
-            Deletions: e.GetProperty("deletions").GetInt32(),
-            Changes: e.GetProperty("changes").GetInt32(),
-            Patch: patch);
+        return new LedgerChangedFile
+        {
+            Path = e.GetProperty("path").GetString()!,
+            PreviousPath = prev,
+            Status = e.GetProperty("status").GetString()!,
+            Additions = e.GetProperty("additions").GetInt64(),
+            Deletions = e.GetProperty("deletions").GetInt64(),
+            Changes = e.GetProperty("changes").GetInt64(),
+            Patch = patch,
+        };
     }
 
     private static ReviewOutcomeRecord DeserializeOutcome(JsonElement e)
@@ -241,33 +235,41 @@ internal static class LedgerDeserializer
         {
             lims.Add(l.GetString()!);
         }
-        return new ReviewOutcomeRecord(
-            InteractionId: e.GetProperty("interactionId").GetString()!,
-            InteractionOrdinal: e.GetProperty("interactionOrdinal").GetInt32(),
-            Summary: e.GetProperty("summary").GetString()!,
-            Findings: findings.ToImmutable(),
-            Limitations: lims.ToImmutable());
+        return new ReviewOutcomeRecord
+        {
+            Role = "review_outcome",
+            InteractionId = e.GetProperty("interactionId").GetString()!,
+            InteractionOrdinal = e.GetProperty("interactionOrdinal").GetInt64(),
+            Summary = e.GetProperty("summary").GetString()!,
+            Findings = findings.ToImmutable(),
+            Limitations = lims.ToImmutable(),
+        };
     }
 
     private static LedgerFinding DeserializeFinding(JsonElement e)
     {
         string? optStr(string n) => e.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
         string? nullableStr(string n) => e.TryGetProperty(n, out var v) ? (v.ValueKind == JsonValueKind.String ? v.GetString() : null) : null;
-        int? nullableInt(string n) => e.TryGetProperty(n, out var v) ? (v.ValueKind == JsonValueKind.Number ? v.GetInt32() : (int?)null) : null;
+        long? nullableLong(string n)
+        {
+            if (!e.TryGetProperty(n, out var v)) return null;
+            if (v.ValueKind != JsonValueKind.Number) return null;
+            return v.TryGetInt64(out var vv) ? vv : null;
+        }
 
-        return new LedgerFinding(
-            Severity: e.GetProperty("severity").GetString()!,
-            Confidence: e.GetProperty("confidence").GetString()!,
-            Category: e.GetProperty("category").GetString()!,
-            Title: e.GetProperty("title").GetString()!,
-            Body: e.GetProperty("body").GetString()!,
-            Path: nullableStr("path"),
-            StartLine: nullableInt("startLine"),
-            EndLine: nullableInt("endLine"),
-            Evidence: optStr("evidence"),
-            SuggestedAction: optStr("suggestedAction"),
-            InlinePreference: optStr("inlinePreference"));
+        return new LedgerFinding
+        {
+            Severity = e.GetProperty("severity").GetString()!,
+            Confidence = e.GetProperty("confidence").GetString()!,
+            Category = e.GetProperty("category").GetString()!,
+            Title = e.GetProperty("title").GetString()!,
+            Body = e.GetProperty("body").GetString()!,
+            Path = nullableStr("path"),
+            StartLine = nullableLong("startLine"),
+            EndLine = nullableLong("endLine"),
+            Evidence = optStr("evidence"),
+            SuggestedAction = optStr("suggestedAction"),
+            InlinePreference = optStr("inlinePreference"),
+        };
     }
 }
-
-
