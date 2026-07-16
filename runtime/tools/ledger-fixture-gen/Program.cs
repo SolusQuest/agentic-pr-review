@@ -71,6 +71,11 @@ internal static partial class Program
         WriteRaw("whitespace-summary.json", MakeWhitespaceSummary(bootstrap));
         WriteRaw("absolute-path-in-finding.json", MakeAbsolutePathInFinding(bootstrap));
         WriteRaw("unsupported-change-status.json", MakeUnsupportedChangeStatus(bootstrap));
+        WriteRaw("bootstrap-shape-violation.json", MakeBootstrapShapeViolation(bootstrap));
+        WriteRaw("changed-file-limit-exceeded.json", MakeChangedFileLimitExceeded());
+        WriteRaw("finding-limit-exceeded.json", MakeFindingLimitExceeded());
+        WriteRaw("limitations-limit-exceeded.json", MakeLimitationsLimitExceeded());
+        WriteRaw("record-role-mismatch.json", MakeRecordRoleMismatch(bootstrap));
 
         // ---------- Structural bounds (identity) ----------
         WriteRaw("identity-byte-length-exceeded.json", MakeIdentityByteLengthExceeded(bootstrap));
@@ -81,6 +86,12 @@ internal static partial class Program
         WriteRaw("records-odd-length.json", MakeRecordsOddLength(bootstrap));
         WriteRaw("records-empty.json", MakeRecordsEmpty(bootstrap));
         WriteRaw("model-alias-latest.json", MakeModelAliasLatest(bootstrap));
+
+        WriteRaw("pair-interaction-id-mismatch.json", MakePairInteractionIdMismatch(bootstrap));
+        WriteRaw("finding-line-range-invalid.json", MakeFindingLineRangeInvalid());
+        WriteRaw("finding-location-mismatch.json", MakeFindingLocationMismatch());
+        WriteRaw("finding-location-missing-path.json", MakeFindingLocationMissingPath());
+        WriteRaw("digest-mismatch.json", MakeDigestMismatch(bootstrap));
 
         // ---------- Canonical form ----------
         WriteRaw("non-canonical-key-order.json", MakeNonCanonicalKeyOrder());
@@ -104,6 +115,8 @@ internal static partial class Program
         _ = EmitResetWrongReason(resetBase, bootstrap, "provider-session-ledger/bootstrap-minimal.json");
         _ = EmitResetWrongManifestHash(resetCache, bootstrap, "provider-session-ledger/bootstrap-minimal.json");
         _ = EmitRecoveryRootWrongReason(recoveryRoot);
+        _ = EmitContinuationPredecessorLedgerEpochMismatch(continuation, bootstrap, "provider-session-ledger/bootstrap-minimal.json");
+        _ = EmitResetSameEpoch(resetCache, bootstrap, "provider-session-ledger/bootstrap-minimal.json");
 
         return 0;
     }

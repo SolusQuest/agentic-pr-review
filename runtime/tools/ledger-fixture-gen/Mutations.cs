@@ -122,7 +122,7 @@ internal static partial class Program
     {
         // Inject a finding with an absolute-style path.
         var text = Utf8(seed);
-        var findings = "\"findings\":[{\"body\":\"bad\",\"category\":\"style\",\"confidence\":\"low\",\"endLine\":null,\"path\":\"/etc/passwd\",\"severity\":\"info\",\"startLine\":null,\"title\":\"t\"}]";
+        var findings = "\"findings\":[{\"body\":\"bad\",\"category\":\"maintainability\",\"confidence\":\"medium\",\"endLine\":null,\"path\":\"/etc/passwd\",\"severity\":\"low\",\"startLine\":null,\"title\":\"t\"}]";
         text = Regex.Replace(text, "\"findings\":\\[\\]", findings);
         return Encoding.UTF8.GetBytes(text);
     }
@@ -399,6 +399,142 @@ internal static partial class Program
         // Empty records array.
         var text = Utf8(seed);
         text = Regex.Replace(text, "\"records\":\\[.*\\]", "\"records\":[]");
+        return Encoding.UTF8.GetBytes(text);
+    }
+
+    // -----------------------------------------------------------------
+    // Schema-stage shape violations
+
+    internal static byte[] MakeBootstrapShapeViolation(ValidatedLedger seed)
+    {
+        // A bootstrap header MUST NOT carry predecessorStateGeneration.
+        var text = Utf8(seed);
+        text = text.Replace("\"kind\":\"bootstrap\"",
+            "\"kind\":\"bootstrap\",\"predecessorStateGeneration\":0");
+        return Encoding.UTF8.GetBytes(text);
+    }
+
+    internal static byte[] MakeChangedFileLimitExceeded()
+    {
+        var seed = BuildBootstrap();
+        var text = Utf8(seed);
+        var sb = new StringBuilder();
+        sb.Append("[");
+        var count = LedgerLimits.MaxChangedFilesPerContext + 1;
+        for (var i = 0; i < count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            sb.Append("{\"additions\":0,\"changes\":0,\"deletions\":0,\"path\":\"src/f");
+            sb.Append(i);
+            sb.Append(".cs\",\"status\":\"modified\"}");
+        }
+        sb.Append("]");
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"""changedFiles"":\[[^\]]*\]",
+            "\"changedFiles\":" + sb.ToString().Replace("$", "$$"));
+        return Encoding.UTF8.GetBytes(text);
+    }
+
+    internal static byte[] MakeFindingLimitExceeded()
+    {
+        var seed = BuildBootstrap();
+        var text = Utf8(seed);
+        var count = LedgerLimits.MaxFindingsPerOutcome + 1;
+        var sb = new StringBuilder();
+        sb.Append("[");
+        for (var i = 0; i < count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            sb.Append("{\"body\":\"b\",\"category\":\"maintainability\",\"confidence\":\"medium\",\"endLine\":null,\"path\":null,\"severity\":\"low\",\"startLine\":null,\"title\":\"t\"}");
+        }
+        sb.Append("]");
+        text = text.Replace("\"findings\":[]", "\"findings\":" + sb.ToString());
+        return Encoding.UTF8.GetBytes(text);
+    }
+
+    internal static byte[] MakeLimitationsLimitExceeded()
+    {
+        var seed = BuildBootstrap();
+        var text = Utf8(seed);
+        var count = LedgerLimits.MaxLimitationsPerOutcome + 1;
+        var sb = new StringBuilder();
+        sb.Append("[");
+        for (var i = 0; i < count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            sb.Append("\"limitation-");
+            sb.Append(i);
+            sb.Append("\"");
+        }
+        sb.Append("]");
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"""limitations"":\[[^\]]*\]",
+            "\"limitations\":" + sb.ToString().Replace("$", "$$"));
+        return Encoding.UTF8.GetBytes(text);
+    }
+
+    internal static byte[] MakeRecordRoleMismatch(ValidatedLedger seed)
+    {
+        var text = Utf8(seed);
+        text = text.Replace("\"role\":\"review_context\"", "\"role\":\"tool\"");
+        return Encoding.UTF8.GetBytes(text);
+    }
+
+    // -----------------------------------------------------------------
+    // Semantic invariant violations (post-schema)
+
+    internal static byte[] MakePairInteractionIdMismatch(ValidatedLedger seed)
+    {
+        var text = Utf8(seed);
+        var alt = "1" + new string('0', 63);
+        var idx = text.IndexOf("\"role\":\"review_outcome\"", StringComparison.Ordinal);
+        if (idx < 0) throw new InvalidOperationException("outcome record not found");
+        var recStart = text.LastIndexOf('{', idx);
+        var interactionIdKey = "\"interactionId\":\"";
+        var interactionIdAt = text.IndexOf(interactionIdKey, recStart);
+        if (interactionIdAt < 0) throw new InvalidOperationException("interactionId not in outcome record");
+        var valueStart = interactionIdAt + interactionIdKey.Length;
+        var valueEnd = text.IndexOf('"', valueStart);
+        var newText = text.Substring(0, valueStart) + alt + text.Substring(valueEnd);
+        return Encoding.UTF8.GetBytes(newText);
+    }
+
+    internal static byte[] MakeFindingLineRangeInvalid()
+    {
+        var seed = BuildBootstrap();
+        var text = Utf8(seed);
+        var finding = "{\"body\":\"b\",\"category\":\"maintainability\",\"confidence\":\"medium\",\"endLine\":1,\"path\":\"src/main.cs\",\"severity\":\"low\",\"startLine\":10,\"title\":\"t\"}";
+        text = text.Replace("\"findings\":[]", "\"findings\":[" + finding + "]");
+        return Encoding.UTF8.GetBytes(text);
+    }
+
+    internal static byte[] MakeFindingLocationMismatch()
+    {
+        var seed = BuildBootstrap();
+        var text = Utf8(seed);
+        var finding = "{\"body\":\"b\",\"category\":\"maintainability\",\"confidence\":\"medium\",\"endLine\":null,\"path\":\"src/main.cs\",\"severity\":\"low\",\"startLine\":10,\"title\":\"t\"}";
+        text = text.Replace("\"findings\":[]", "\"findings\":[" + finding + "]");
+        return Encoding.UTF8.GetBytes(text);
+    }
+
+    internal static byte[] MakeFindingLocationMissingPath()
+    {
+        var seed = BuildBootstrap();
+        var text = Utf8(seed);
+        var finding = "{\"body\":\"b\",\"category\":\"maintainability\",\"confidence\":\"medium\",\"endLine\":10,\"path\":null,\"severity\":\"low\",\"startLine\":5,\"title\":\"t\"}";
+        text = text.Replace("\"findings\":[]", "\"findings\":[" + finding + "]");
+        return Encoding.UTF8.GetBytes(text);
+    }
+
+    internal static byte[] MakeDigestMismatch(ValidatedLedger seed)
+    {
+        var text = Utf8(seed);
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text,
+            "\"cacheContractDigest\":\"[a-f0-9]{64}\"",
+            "\"cacheContractDigest\":\"" + new string('9', 64) + "\"");
         return Encoding.UTF8.GetBytes(text);
     }
 

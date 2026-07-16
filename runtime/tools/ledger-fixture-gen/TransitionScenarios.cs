@@ -275,7 +275,60 @@ internal static partial class Program
         return (name, "recovery_root", expected, null, "ledger_recovery_root_reason_mismatch", true);
     }
 
-    // ---------------- Build scenarios ----------------
+
+    // Candidate mutations that produce transition-time invalid fixtures whose
+    // primary code depends on candidate-side content.
+
+    /// <summary>
+    /// continuation-predecessor-ledger-epoch-mismatch: continuation candidate
+    /// whose header.predecessorLedgerEpoch does NOT match the predecessor's
+    /// ledgerEpoch. Requires post-serialize text mutation so the header field
+    /// carries a distinct EpochId while remaining schema-valid.
+    /// </summary>
+    internal static (string file, string kind, object expected, string? predecessor, string code, bool parseValid)
+        EmitContinuationPredecessorLedgerEpochMismatch(ValidatedLedger continuation, ValidatedLedger predecessor, string predecessorFile)
+    {
+        var name = "continuation-predecessor-ledger-epoch-mismatch.json";
+        var text = System.Text.Encoding.UTF8.GetString(continuation.ToCanonicalByteArray());
+        // Mutate the candidate's predecessorLedgerEpoch to a distinct EpochId.
+        var altEpoch = "GGGGGGGGGGGGGGGGGGGGGG";
+        text = text.Replace(
+            "\"predecessorLedgerEpoch\":\"" + continuation.Model.Header.PredecessorLedgerEpoch + "\"",
+            "\"predecessorLedgerEpoch\":\"" + altEpoch + "\"");
+        File.WriteAllBytes(Path.Combine(root, name), Encoding.UTF8.GetBytes(text));
+        var expected = ExpectedForContinuation(
+            SessionEpochA, continuation.Model.Header.LedgerEpoch,
+            predecessor.ContentSha256, predecessor.Model.Header.LedgerEpoch,
+            predecessor.Model.Header.StateGeneration, continuation.Model.Header.StateGeneration);
+        return (name, "continuation", expected, predecessorFile, "ledger_predecessor_ledger_epoch_mismatch", true);
+    }
+
+    /// <summary>
+    /// reset-same-epoch: reset candidate whose ledgerEpoch equals the
+    /// predecessor's ledgerEpoch. Category-once: ledger_reset_epoch_not_fresh
+    /// fires only if the ledger-epoch two-way match succeeds first, so
+    /// expected.LedgerEpoch must equal candidate.LedgerEpoch.
+    /// </summary>
+    internal static (string file, string kind, object expected, string? predecessor, string code, bool parseValid)
+        EmitResetSameEpoch(ValidatedLedger reset, ValidatedLedger predecessor, string predecessorFile)
+    {
+        var name = "reset-same-epoch.json";
+        var text = System.Text.Encoding.UTF8.GetString(reset.ToCanonicalByteArray());
+        // Rewrite the candidate's ledgerEpoch to match the predecessor.
+        text = text.Replace(
+            "\"ledgerEpoch\":\"" + reset.Model.Header.LedgerEpoch + "\"",
+            "\"ledgerEpoch\":\"" + predecessor.Model.Header.LedgerEpoch + "\"");
+        File.WriteAllBytes(Path.Combine(root, name), Encoding.UTF8.GetBytes(text));
+        var expected = ExpectedForReset(
+            SessionEpochA, predecessor.Model.Header.LedgerEpoch,
+            predecessor.ContentSha256, reset.Model.Header.PredecessorManifestSha256!,
+            predecessor.Model.Header.LedgerEpoch, predecessor.Model.Header.StateGeneration,
+            reset.Model.Header.StateGeneration, reset.Model.Header.ResetReason!,
+            id: IdentAltCache);
+        return (name, "reset", expected, predecessorFile, "ledger_reset_epoch_not_fresh", true);
+    }
+
+        // ---------------- Build scenarios ----------------
 
     internal static object BuildValidBootstrapScenario(ValidatedLedger bootstrap, string expectedCandidateFile)
     {

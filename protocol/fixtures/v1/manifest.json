@@ -526,6 +526,86 @@
     }
   },
   {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/bootstrap-shape-violation.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_bootstrap_shape_violation"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/changed-file-limit-exceeded.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_changed_file_limit_exceeded"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/finding-limit-exceeded.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_finding_limit_exceeded"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/limitations-limit-exceeded.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_limitations_limit_exceeded"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/record-role-mismatch.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_record_role_mismatch"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/pair-interaction-id-mismatch.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_pair_interaction_id_mismatch"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/finding-line-range-invalid.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_finding_line_range_invalid"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/finding-location-mismatch.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_finding_location_mismatch"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/finding-location-missing-path.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_finding_location_missing_path"
+    }
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/digest-mismatch.json",
+    "expectation": {
+      "valid": false,
+      "code": "ledger_digest_mismatch"
+    }
+  },
+  {
     "type": "ledger-transition",
     "file": "provider-session-ledger/valid-bootstrap.json",
     "transition": {
@@ -854,6 +934,43 @@
   },
   {
     "type": "ledger-transition",
+    "file": "provider-session-ledger/continuation-predecessor-ledger-epoch-mismatch.json",
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "acme/example",
+          "headRepository": "acme/example",
+          "pullRequest": 123,
+          "workflowIdentity": "acme/example/.github/workflows/ci.yml",
+          "trustedExecutionDomain": "github-actions",
+          "providerId": "provider.reference",
+          "modelId": "model-2026-01",
+          "adapterId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "templateId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "policyId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "toolDefinitionId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
+        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorStateGeneration": 0,
+        "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
+        "stateGeneration": 1,
+        "ledgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB"
+      }
+    },
+    "parseExpectation": {
+      "valid": true
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_predecessor_ledger_epoch_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
     "file": "provider-session-ledger/continuation-state-generation-mismatch.json",
     "predecessor": "provider-session-ledger/bootstrap-minimal.json",
     "transition": {
@@ -1002,6 +1119,45 @@
     "transitionExpectation": {
       "valid": false,
       "code": "ledger_predecessor_manifest_hash_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/reset-same-epoch.json",
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "transition": {
+      "kind": "reset",
+      "expected": {
+        "identities": {
+          "repository": "acme/example",
+          "headRepository": "acme/example",
+          "pullRequest": 123,
+          "workflowIdentity": "acme/example/.github/workflows/ci.yml",
+          "trustedExecutionDomain": "github-actions",
+          "providerId": "provider.reference",
+          "modelId": "model-2026-01",
+          "adapterId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "templateId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "policyId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "toolDefinitionId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
+        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorManifestSha256": "7777777777777777777777777777777777777777777777777777777777777777",
+        "predecessorStateGeneration": 0,
+        "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
+        "stateGeneration": 1,
+        "ledgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
+        "resetReason": "cache_contract_change"
+      }
+    },
+    "parseExpectation": {
+      "valid": true
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_reset_epoch_not_fresh"
     }
   },
   {
