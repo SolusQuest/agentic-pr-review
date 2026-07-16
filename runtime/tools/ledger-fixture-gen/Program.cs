@@ -86,6 +86,25 @@ internal static partial class Program
         WriteRaw("non-canonical-key-order.json", MakeNonCanonicalKeyOrder());
         WriteRaw("non-canonical-string-escape.json", MakeNonCanonicalStringEscape(bootstrap));
 
+        // ---------- Transition-level fixtures ----------
+        // Valid transitions (parseExpectation=true, transitionExpectation=true).
+        var vBootstrap = EmitValidBootstrap();
+        var vContinuation = EmitValidContinuation(bootstrap, "provider-session-ledger/bootstrap-minimal.json");
+        var vReset = EmitValidResetCacheContract(bootstrap, "provider-session-ledger/bootstrap-minimal.json");
+        var vRecoveryRoot = EmitValidRecoveryRoot();
+
+        // Transition-invalid fixtures.
+        _ = EmitBootstrapWithExpectedContinuation(bootstrap, "provider-session-ledger/bootstrap-minimal.json");
+        _ = EmitContinuationWrongPredecessorHash(continuation, bootstrap, "provider-session-ledger/bootstrap-minimal.json");
+        _ = EmitContinuationSessionEpochChanged(continuation, bootstrap, "provider-session-ledger/bootstrap-minimal.json");
+        _ = EmitContinuationLedgerEpochChanged(continuation, bootstrap, "provider-session-ledger/bootstrap-minimal.json");
+        _ = EmitContinuationPredecessorGenerationMismatch(continuation, bootstrap, "provider-session-ledger/bootstrap-minimal.json");
+        _ = EmitContinuationStateGenerationMismatch(continuation, bootstrap, "provider-session-ledger/bootstrap-minimal.json");
+        _ = EmitContinuationIdentityDrift(continuation, bootstrap, "provider-session-ledger/bootstrap-minimal.json");
+        _ = EmitResetWrongReason(resetBase, bootstrap, "provider-session-ledger/bootstrap-minimal.json");
+        _ = EmitResetWrongManifestHash(resetCache, bootstrap, "provider-session-ledger/bootstrap-minimal.json");
+        _ = EmitRecoveryRootWrongReason(recoveryRoot);
+
         return 0;
     }
 

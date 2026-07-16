@@ -524,5 +524,517 @@
       "valid": false,
       "code": "ledger_non_canonical"
     }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/valid-bootstrap.json",
+    "transition": {
+      "kind": "bootstrap",
+      "expected": {
+        "identities": {
+          "repository": "acme/example",
+          "headRepository": "acme/example",
+          "pullRequest": 123,
+          "workflowIdentity": "acme/example/.github/workflows/ci.yml",
+          "trustedExecutionDomain": "github-actions",
+          "providerId": "provider.reference",
+          "modelId": "model-2026-01",
+          "adapterId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "templateId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "policyId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "toolDefinitionId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
+        "stateGeneration": 0,
+        "ledgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB"
+      }
+    },
+    "parseExpectation": {
+      "valid": true
+    },
+    "transitionExpectation": {
+      "valid": true,
+      "candidateContentSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/valid-continuation.json",
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "acme/example",
+          "headRepository": "acme/example",
+          "pullRequest": 123,
+          "workflowIdentity": "acme/example/.github/workflows/ci.yml",
+          "trustedExecutionDomain": "github-actions",
+          "providerId": "provider.reference",
+          "modelId": "model-2026-01",
+          "adapterId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "templateId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "policyId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "toolDefinitionId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
+        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorStateGeneration": 0,
+        "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
+        "stateGeneration": 1,
+        "ledgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB"
+      }
+    },
+    "parseExpectation": {
+      "valid": true
+    },
+    "transitionExpectation": {
+      "valid": true,
+      "candidateContentSha256": "a8de0836cb7624316c84b0f770276e5b4d6c3f470de52a57801ff1c18d22a26f"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/valid-reset-cache-contract-change.json",
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "transition": {
+      "kind": "reset",
+      "expected": {
+        "identities": {
+          "repository": "acme/example",
+          "headRepository": "acme/example",
+          "pullRequest": 123,
+          "workflowIdentity": "acme/example/.github/workflows/ci.yml",
+          "trustedExecutionDomain": "github-actions",
+          "providerId": "provider.reference",
+          "modelId": "model-2026-01",
+          "adapterId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "templateId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "policyId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "toolDefinitionId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
+        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorManifestSha256": "7777777777777777777777777777777777777777777777777777777777777777",
+        "predecessorStateGeneration": 0,
+        "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
+        "stateGeneration": 1,
+        "ledgerEpoch": "CCCCCCCCCCCCCCCCCCCCCC",
+        "resetReason": "cache_contract_change"
+      }
+    },
+    "parseExpectation": {
+      "valid": true
+    },
+    "transitionExpectation": {
+      "valid": true,
+      "candidateContentSha256": "a441171c02715d7b742e811fbac3c49cacfbb1fa9969a6e29a0985ff88a75e63"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/valid-recovery-root-unavailable-accepted-artifact.json",
+    "transition": {
+      "kind": "recovery_root",
+      "expected": {
+        "identities": {
+          "repository": "acme/example",
+          "headRepository": "acme/example",
+          "pullRequest": 123,
+          "workflowIdentity": "acme/example/.github/workflows/ci.yml",
+          "trustedExecutionDomain": "github-actions",
+          "providerId": "provider.reference",
+          "modelId": "model-2026-01",
+          "adapterId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "templateId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "policyId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "toolDefinitionId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
+        "ledgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
+        "recoveryReason": "unavailable_accepted_artifact"
+      }
+    },
+    "parseExpectation": {
+      "valid": true
+    },
+    "transitionExpectation": {
+      "valid": true,
+      "candidateContentSha256": "dcb108009cf6495742eece3441d43469fac83e69e3b181c92a2c01354bbf2838"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/bootstrap-minimal.json",
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "acme/example",
+          "headRepository": "acme/example",
+          "pullRequest": 123,
+          "workflowIdentity": "acme/example/.github/workflows/ci.yml",
+          "trustedExecutionDomain": "github-actions",
+          "providerId": "provider.reference",
+          "modelId": "model-2026-01",
+          "adapterId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "templateId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "policyId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "toolDefinitionId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
+        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorStateGeneration": 0,
+        "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
+        "stateGeneration": 1,
+        "ledgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB"
+      }
+    },
+    "parseExpectation": {
+      "valid": true
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_transition_kind_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/continuation-wrong-predecessor-hash.json",
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "acme/example",
+          "headRepository": "acme/example",
+          "pullRequest": 123,
+          "workflowIdentity": "acme/example/.github/workflows/ci.yml",
+          "trustedExecutionDomain": "github-actions",
+          "providerId": "provider.reference",
+          "modelId": "model-2026-01",
+          "adapterId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "templateId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "policyId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "toolDefinitionId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
+        "predecessorLedgerSha256": "9999999999999999999999999999999999999999999999999999999999999999",
+        "predecessorStateGeneration": 0,
+        "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
+        "stateGeneration": 1,
+        "ledgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB"
+      }
+    },
+    "parseExpectation": {
+      "valid": true
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_predecessor_hash_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/continuation-session-epoch-changed.json",
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "acme/example",
+          "headRepository": "acme/example",
+          "pullRequest": 123,
+          "workflowIdentity": "acme/example/.github/workflows/ci.yml",
+          "trustedExecutionDomain": "github-actions",
+          "providerId": "provider.reference",
+          "modelId": "model-2026-01",
+          "adapterId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "templateId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "policyId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "toolDefinitionId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "sessionEpoch": "EEEEEEEEEEEEEEEEEEEEEE",
+        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorStateGeneration": 0,
+        "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
+        "stateGeneration": 1,
+        "ledgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB"
+      }
+    },
+    "parseExpectation": {
+      "valid": true
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_session_epoch_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/continuation-ledger-epoch-changed.json",
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "acme/example",
+          "headRepository": "acme/example",
+          "pullRequest": 123,
+          "workflowIdentity": "acme/example/.github/workflows/ci.yml",
+          "trustedExecutionDomain": "github-actions",
+          "providerId": "provider.reference",
+          "modelId": "model-2026-01",
+          "adapterId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "templateId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "policyId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "toolDefinitionId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
+        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorStateGeneration": 0,
+        "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
+        "stateGeneration": 1,
+        "ledgerEpoch": "EEEEEEEEEEEEEEEEEEEEEE"
+      }
+    },
+    "parseExpectation": {
+      "valid": true
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_ledger_epoch_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/continuation-predecessor-generation-mismatch.json",
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "acme/example",
+          "headRepository": "acme/example",
+          "pullRequest": 123,
+          "workflowIdentity": "acme/example/.github/workflows/ci.yml",
+          "trustedExecutionDomain": "github-actions",
+          "providerId": "provider.reference",
+          "modelId": "model-2026-01",
+          "adapterId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "templateId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "policyId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "toolDefinitionId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
+        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorStateGeneration": 999,
+        "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
+        "stateGeneration": 1,
+        "ledgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB"
+      }
+    },
+    "parseExpectation": {
+      "valid": true
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_predecessor_generation_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/continuation-state-generation-mismatch.json",
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "acme/example",
+          "headRepository": "acme/example",
+          "pullRequest": 123,
+          "workflowIdentity": "acme/example/.github/workflows/ci.yml",
+          "trustedExecutionDomain": "github-actions",
+          "providerId": "provider.reference",
+          "modelId": "model-2026-01",
+          "adapterId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "templateId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "policyId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "toolDefinitionId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
+        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorStateGeneration": 0,
+        "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
+        "stateGeneration": 999,
+        "ledgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB"
+      }
+    },
+    "parseExpectation": {
+      "valid": true
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_state_generation_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/continuation-cache-contract-changed.json",
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "acme/example",
+          "headRepository": "acme/example",
+          "pullRequest": 123,
+          "workflowIdentity": "acme/example/.github/workflows/ci.yml",
+          "trustedExecutionDomain": "github-actions",
+          "providerId": "provider.reference",
+          "modelId": "model-2026-01",
+          "adapterId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "templateId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "policyId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "toolDefinitionId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
+        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorStateGeneration": 0,
+        "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
+        "stateGeneration": 1,
+        "ledgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB"
+      }
+    },
+    "parseExpectation": {
+      "valid": true
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_identity_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/reset-wrong-reason.json",
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "transition": {
+      "kind": "reset",
+      "expected": {
+        "identities": {
+          "repository": "acme/example",
+          "headRepository": "acme/example",
+          "pullRequest": 123,
+          "workflowIdentity": "acme/example/.github/workflows/ci.yml",
+          "trustedExecutionDomain": "github-actions",
+          "providerId": "provider.reference",
+          "modelId": "model-2026-01",
+          "adapterId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "templateId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "policyId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "toolDefinitionId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
+        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorManifestSha256": "8888888888888888888888888888888888888888888888888888888888888888",
+        "predecessorStateGeneration": 0,
+        "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
+        "stateGeneration": 1,
+        "ledgerEpoch": "DDDDDDDDDDDDDDDDDDDDDD",
+        "resetReason": "head_history_discontinuity"
+      }
+    },
+    "parseExpectation": {
+      "valid": true
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_reset_reason_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/reset-wrong-manifest-hash.json",
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "transition": {
+      "kind": "reset",
+      "expected": {
+        "identities": {
+          "repository": "acme/example",
+          "headRepository": "acme/example",
+          "pullRequest": 123,
+          "workflowIdentity": "acme/example/.github/workflows/ci.yml",
+          "trustedExecutionDomain": "github-actions",
+          "providerId": "provider.reference",
+          "modelId": "model-2026-01",
+          "adapterId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "templateId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "policyId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "toolDefinitionId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
+        "predecessorLedgerSha256": "07be5b3d00bf51cf90b5da4f1c1c0e0421edccbb7c7f0650ab51d396e48f8a03",
+        "predecessorManifestSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "predecessorStateGeneration": 0,
+        "predecessorLedgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
+        "stateGeneration": 1,
+        "ledgerEpoch": "CCCCCCCCCCCCCCCCCCCCCC",
+        "resetReason": "cache_contract_change"
+      }
+    },
+    "parseExpectation": {
+      "valid": true
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_predecessor_manifest_hash_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/recovery-root-wrong-reason.json",
+    "transition": {
+      "kind": "recovery_root",
+      "expected": {
+        "identities": {
+          "repository": "acme/example",
+          "headRepository": "acme/example",
+          "pullRequest": 123,
+          "workflowIdentity": "acme/example/.github/workflows/ci.yml",
+          "trustedExecutionDomain": "github-actions",
+          "providerId": "provider.reference",
+          "modelId": "model-2026-01",
+          "adapterId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "templateId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "policyId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "toolDefinitionId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cacheConfigId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "sessionEpoch": "AAAAAAAAAAAAAAAAAAAAAA",
+        "ledgerEpoch": "BBBBBBBBBBBBBBBBBBBBBB",
+        "recoveryReason": "corrupt_accepted_artifact"
+      }
+    },
+    "parseExpectation": {
+      "valid": true
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_recovery_root_reason_mismatch"
+    }
   }
 ]
