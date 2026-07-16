@@ -1,0 +1,265 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentic-pr-review/protocol/schemas/provider-run-metadata.v1.json",
+  "title": "ProviderRunMetadataV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "selectedProviderId",
+    "observedProviderId",
+    "resolvedModelId",
+    "adapterId",
+    "logicalPrefixSha256",
+    "prefixSha256",
+    "capability",
+    "cacheStatus",
+    "normalizedUsage",
+    "retryObservations",
+    "errorCodes",
+    "telemetryCompleteness",
+    "producingRunId",
+    "runAttempt",
+    "interactionId",
+    "consumedInputSha256",
+    "resultSha256",
+    "traceSha256",
+    "predecessorLedgerSha256",
+    "candidateLedgerSha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "selectedProviderId": { "$ref": "#/definitions/id" },
+    "observedProviderId": { "$ref": "#/definitions/id" },
+    "resolvedModelId": { "$ref": "#/definitions/id" },
+    "adapterId": { "$ref": "#/definitions/hash" },
+    "logicalPrefixSha256": { "$ref": "#/definitions/hash" },
+    "prefixSha256": { "$ref": "#/definitions/hash" },
+    "capability": { "$ref": "#/definitions/capability" },
+    "cacheStatus": { "$ref": "#/definitions/cache" },
+    "normalizedUsage": { "$ref": "#/definitions/usage" },
+    "retryObservations": { "$ref": "#/definitions/retries" },
+    "errorCodes": { "$ref": "#/definitions/errors" },
+    "telemetryCompleteness": { "$ref": "#/definitions/telemetry" },
+    "producingRunId": { "type": "string", "pattern": "^[1-9][0-9]{0,18}$" },
+    "runAttempt": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+    "interactionId": { "$ref": "#/definitions/hash" },
+    "consumedInputSha256": { "$ref": "#/definitions/hash" },
+    "resultSha256": { "$ref": "#/definitions/hash" },
+    "traceSha256": { "$ref": "#/definitions/hash" },
+    "predecessorLedgerSha256": {
+      "anyOf": [{ "$ref": "#/definitions/hash" }, { "const": "bootstrap" }]
+    },
+    "candidateLedgerSha256": { "$ref": "#/definitions/hash" }
+  },
+  "definitions": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "capabilityValue": {
+      "enum": ["eligible", "ineligible", "unsupported", "telemetryUnavailable", "unknown"]
+    },
+    "aggregateCapability": { "enum": ["eligible", "unsupported", "unknown"] },
+    "cache": { "enum": ["hit", "partial", "miss", "unsupported", "unknown"] },
+    "proof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "verified"],
+      "properties": {
+        "kind": { "enum": ["providerAdvertised", "synthetic"] },
+        "verified": { "type": "boolean" }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "aggregate", "statelessProof"],
+      "properties": {
+        "mode": { "enum": ["standard", "stateless"] },
+        "aggregate": { "$ref": "#/definitions/aggregateCapability" },
+        "statelessProof": { "anyOf": [{ "type": "null" }, { "$ref": "#/definitions/proof" }] }
+      }
+    },
+    "token": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+      ]
+    },
+    "usageCompleteness": { "enum": ["complete", "partial", "missing"] },
+    "outcome": { "enum": ["succeeded", "failed", "cancelled"] },
+    "errorCode": {
+      "enum": [
+        "provider_timeout",
+        "provider_4xx",
+        "provider_5xx",
+        "provider_rate_limited",
+        "provider_cancelled",
+        "capability_unsupported",
+        "cache_marker_mismatch",
+        "stateless_proof_missing"
+      ]
+    },
+    "errors": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 32,
+      "items": { "$ref": "#/definitions/errorCode" }
+    },
+    "attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestOrdinal",
+        "attemptOrdinal",
+        "outcome",
+        "capability",
+        "cacheStatus",
+        "usageCompleteness",
+        "totalInputTokens",
+        "uncachedInputTokens",
+        "cacheWriteInputTokens",
+        "cacheReadInputTokens",
+        "outputTokens",
+        "attemptErrorCodes"
+      ],
+      "properties": {
+        "requestOrdinal": { "type": "integer", "minimum": 0, "maximum": 31 },
+        "attemptOrdinal": { "type": "integer", "minimum": 0, "maximum": 31 },
+        "outcome": { "$ref": "#/definitions/outcome" },
+        "capability": { "$ref": "#/definitions/capabilityValue" },
+        "cacheStatus": { "$ref": "#/definitions/cache" },
+        "usageCompleteness": { "$ref": "#/definitions/usageCompleteness" },
+        "totalInputTokens": { "$ref": "#/definitions/token" },
+        "uncachedInputTokens": { "$ref": "#/definitions/token" },
+        "cacheWriteInputTokens": { "$ref": "#/definitions/token" },
+        "cacheReadInputTokens": { "$ref": "#/definitions/token" },
+        "outputTokens": { "$ref": "#/definitions/token" },
+        "attemptErrorCodes": { "$ref": "#/definitions/errors" }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestOrdinal",
+        "capability",
+        "cacheStatus",
+        "usageCompleteness",
+        "totalInputTokens",
+        "uncachedInputTokens",
+        "cacheWriteInputTokens",
+        "cacheReadInputTokens",
+        "outputTokens"
+      ],
+      "properties": {
+        "requestOrdinal": { "type": "integer", "minimum": 0, "maximum": 31 },
+        "capability": { "$ref": "#/definitions/capabilityValue" },
+        "cacheStatus": { "$ref": "#/definitions/cache" },
+        "usageCompleteness": { "$ref": "#/definitions/usageCompleteness" },
+        "totalInputTokens": { "$ref": "#/definitions/token" },
+        "uncachedInputTokens": { "$ref": "#/definitions/token" },
+        "cacheWriteInputTokens": { "$ref": "#/definitions/token" },
+        "cacheReadInputTokens": { "$ref": "#/definitions/token" },
+        "outputTokens": { "$ref": "#/definitions/token" }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempts", "requests", "aggregate"],
+      "properties": {
+        "attempts": {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "$ref": "#/definitions/attempt" }
+        },
+        "requests": {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "$ref": "#/definitions/request" }
+        },
+        "aggregate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "totalInputTokens",
+            "uncachedInputTokens",
+            "cacheWriteInputTokens",
+            "cacheReadInputTokens",
+            "outputTokens",
+            "requestCount",
+            "attemptCount"
+          ],
+          "properties": {
+            "totalInputTokens": { "$ref": "#/definitions/token" },
+            "uncachedInputTokens": { "$ref": "#/definitions/token" },
+            "cacheWriteInputTokens": { "$ref": "#/definitions/token" },
+            "cacheReadInputTokens": { "$ref": "#/definitions/token" },
+            "outputTokens": { "$ref": "#/definitions/token" },
+            "requestCount": { "type": "integer", "minimum": 0, "maximum": 32 },
+            "attemptCount": { "type": "integer", "minimum": 0, "maximum": 32 }
+          }
+        }
+      }
+    },
+    "retryRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestOrdinal",
+        "attemptCount",
+        "succeededCount",
+        "failedCount",
+        "cancelledCount"
+      ],
+      "properties": {
+        "requestOrdinal": { "type": "integer", "minimum": 0, "maximum": 31 },
+        "attemptCount": { "type": "integer", "minimum": 0, "maximum": 32 },
+        "succeededCount": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "failedCount": { "type": "integer", "minimum": 0, "maximum": 32 },
+        "cancelledCount": { "type": "integer", "minimum": 0, "maximum": 32 }
+      }
+    },
+    "retries": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requests", "aggregate"],
+      "properties": {
+        "requests": {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "$ref": "#/definitions/retryRequest" }
+        },
+        "aggregate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "requestCount",
+            "attemptCount",
+            "succeededCount",
+            "failedCount",
+            "cancelledCount"
+          ],
+          "properties": {
+            "requestCount": { "type": "integer", "minimum": 0, "maximum": 32 },
+            "attemptCount": { "type": "integer", "minimum": 0, "maximum": 32 },
+            "succeededCount": { "type": "integer", "minimum": 0, "maximum": 32 },
+            "failedCount": { "type": "integer", "minimum": 0, "maximum": 32 },
+            "cancelledCount": { "type": "integer", "minimum": 0, "maximum": 32 }
+          }
+        }
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["usage", "cache", "statelessProof", "aggregate"],
+      "properties": {
+        "usage": { "enum": ["complete", "partial", "missing"] },
+        "cache": { "enum": ["complete", "partial", "missing", "unknown"] },
+        "statelessProof": { "enum": ["notApplicable", "complete", "missing"] },
+        "aggregate": { "enum": ["complete", "partial", "missing", "unknown"] }
+      }
+    }
+  }
+}

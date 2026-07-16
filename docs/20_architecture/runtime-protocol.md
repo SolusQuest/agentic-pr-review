@@ -201,3 +201,5 @@ The protocol will also need to partition stable context (system instructions, po
 The existing `Review*V1` schemas remain unchanged. The ledger artifact, provider-run metadata sidecar, and stable/volatile partitioning are designed by issue #29; implementation follow-ups own the concrete process flags and file names.
 
 The implementation-level `StateManifestV2` contract library (issue #48) is documented in [`state-manifest-v2.md`](state-manifest-v2.md); it owns the manifest schema, byte-stable serializer, closed-shape validator, pure builder, pure classifier, and host-compatibility comparator. Filesystem I/O and manifest-last commit are owned by workstream 8 (#55).
+
+Provider-run metadata is the bounded telemetry sidecar described in [`provider-run-metadata-v1.md`](provider-run-metadata-v1.md); its shared vocabulary and safe diagnostics remain governed by [`session-ledger-and-prefix-contract.md`](session-ledger-and-prefix-contract.md).

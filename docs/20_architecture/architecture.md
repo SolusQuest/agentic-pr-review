@@ -112,3 +112,5 @@ Do not build these in the initial architecture:
 - runtime-owned GitHub comment posting.
 
 The non-goal of not becoming a general coding agent or IDE-coding-agent replacement refers to product scope. It does not mean `claude-code-cli` is permanent; `claude-code-cli` is the transitional live provider that the project-owned runtime is intended to replace as the long-term default (see Runtime Replacement Direction above).
+
+The TypeScript ProviderRunMetadataV1 sidecar surface is documented in [`provider-run-metadata-v1.md`](provider-run-metadata-v1.md) and follows the shared [session ledger and prefix contract](session-ledger-and-prefix-contract.md).
