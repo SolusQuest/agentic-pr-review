@@ -150,7 +150,6 @@ function strictJsonParseIterative(text: string): StrictResult {
   const stack: Frame[] = [];
   let firstDuplicate: MetadataError | null = null;
   let expectingRootValue = true;
-  let rootValueSeen = false;
   const rootPos = normalizePosition(rootSchema, new Set<SchemaNode>(), rootSchema);
   // Single mutable path stack. Segments are pushed when entering a property
   // value (in an object frame) or an array element (in an array frame) and
@@ -341,16 +340,12 @@ function strictJsonParseIterative(text: string): StrictResult {
       const r = scanPrimitiveOrOpenContainer();
       if (r === 'error') return jsonErr();
       expectingRootValue = false;
-      if (r === 'primitive') {
-        rootValueSeen = true;
-      }
     }
 
     if (stack.length === 0) {
       // Root value complete. Verify trailing whitespace only.
       skipWs();
       if (pos !== text.length) return jsonErr();
-      if (!rootValueSeen && !expectingRootValue) rootValueSeen = true;
       break;
     }
 
