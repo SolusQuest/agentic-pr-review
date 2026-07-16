@@ -159,6 +159,13 @@
       "runner": "raw"
     },
     {
+      "name": "raw-request-run-overflow.json",
+      "valid": false,
+      "expectedCodes": ["invalid-metadata-token-out-of-range"],
+      "expectedPaths": ["/normalizedUsage/requests/1/outputTokens"],
+      "runner": "raw"
+    },
+    {
       "name": "raw-error-list-truncated.json",
       "valid": false,
       "expectedCodes": [
