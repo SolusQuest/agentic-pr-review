@@ -5,13 +5,18 @@ namespace AgenticPrReview.Runtime.LedgerFixtureGen;
 
 internal static partial class Program
 {
+    // Frozen 22-char base64url EpochId literals used by fixtures.
+    private const string SessionEpochA = "AAAAAAAAAAAAAAAAAAAAAA";
+    private const string LedgerEpoch1  = "BBBBBBBBBBBBBBBBBBBBBB";
+    private const string LedgerEpoch2  = "CCCCCCCCCCCCCCCCCCCCCC";
+    private const string LedgerEpoch3  = "DDDDDDDDDDDDDDDDDDDDDD";
+
     private static readonly ExpectedIdentities Ident = new(
         Repository: "acme/example",
         HeadRepository: "acme/example",
         PullRequest: 123,
         WorkflowIdentity: "acme/example/.github/workflows/ci.yml",
         TrustedExecutionDomain: "github-actions",
-        SessionEpoch: "epoch-0",
         ProviderId: "provider.reference",
         ModelId: "model-2026-01",
         AdapterId: new string('a', 64),
@@ -22,156 +27,217 @@ internal static partial class Program
 
     private static readonly ExpectedIdentities IdentAltCache = Ident with { AdapterId = new string('f', 64) };
 
+    private const string HeadShaA = "1111111111111111111111111111111111111111";
+    private const string HeadShaB = "3333333333333333333333333333333333333333";
+    private const string HeadShaC = "4444444444444444444444444444444444444444";
+    private const string HeadShaD = "5555555555555555555555555555555555555555";
+    private const string HeadShaE = "7777777777777777777777777777777777777777";
+    private const string BaseShaA = "2222222222222222222222222222222222222222";
+    private const string BaseShaB = "6666666666666666666666666666666666666666";
+
     private static ReviewContextRecord Ctx(int ordinal, string headSha, string baseSha, ExpectedIdentities identities)
     {
         var interactionId = MakeInteractionId(ordinal);
-        var source = new ValidatedContextSource(
-            ReviewedHeadSha: headSha,
-            ReviewedBaseSha: baseSha,
-            ChangedFiles: ImmutableArray.Create(
-                new ValidatedChangedFileSource(
-                    Path: "src/main.cs",
-                    PreviousPath: null,
-                    Status: "modified",
-                    Additions: 1,
-                    Deletions: 0,
-                    Changes: 1,
-                    Patch: new ValidatedPatchSource(new string('9', 64), false, 4000))));
+        // Deterministic subjectDigest (host-supplied pass-through): SHA-256 of the ordinal-tagged label.
+        var subjectDigest = LedgerCanonicalizer.ComputeSha256Hex(
+            System.Text.Encoding.UTF8.GetBytes("fixture-subject/" + interactionId));
+        var source = new ValidatedContextSource
+        {
+            SubjectDigest = subjectDigest,
+            ReviewedHeadSha = headSha,
+            ReviewedBaseSha = baseSha,
+            ChangedFiles = ImmutableArray.Create(new LedgerChangedFile
+            {
+                Path = "src/main.cs",
+                PreviousPath = null,
+                Status = "modified",
+                Additions = 1,
+                Deletions = 0,
+                Changes = 1,
+                Patch = new LedgerBoundedPatch
+                {
+                    Sha256 = new string('9', 64),
+                    Truncated = false,
+                    MaxChars = 4000,
+                },
+            }),
+        };
         var outcome = LedgerBuilder.BuildReviewContext(source, identities, new InteractionIdentity(interactionId, ordinal));
-        return outcome.Record ?? throw new InvalidOperationException("context build failed: " + outcome.Failure?.Code);
+        return outcome.Record ?? throw new InvalidOperationException("context build failed: " + FirstCode(outcome.Diagnostics));
     }
 
     private static ReviewOutcomeRecord Outcome(int ordinal, string summary)
     {
         var interactionId = MakeInteractionId(ordinal);
-        var source = new ValidatedOutcomeSource(
-            Summary: summary,
-            Findings: ImmutableArray<ValidatedFindingSource>.Empty,
-            Limitations: ImmutableArray.Create("No live provider was invoked."));
+        var source = new ValidatedOutcomeSource
+        {
+            Summary = summary,
+            Findings = ImmutableArray<LedgerFinding>.Empty,
+            Limitations = ImmutableArray.Create("No live provider was invoked."),
+        };
         var built = LedgerBuilder.BuildReviewOutcome(source, new InteractionIdentity(interactionId, ordinal));
-        return built.Record ?? throw new InvalidOperationException("outcome build failed: " + built.Failure?.Code);
+        return built.Record ?? throw new InvalidOperationException("outcome build failed: " + FirstCode(built.Diagnostics));
     }
 
-    private static char IdChar(int ordinal)
-    {
-        var hexChars = new[] { '0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f' };
-        return hexChars[ordinal % 16];
-    }
-
-    // Produce a deterministic 64-hex interaction id unique per ordinal (up to millions).
+    // Produce a deterministic 64-hex interaction id unique per ordinal (up to 4B).
     private static string MakeInteractionId(int ordinal)
     {
-        // Use the ordinal as an 8-hex-digit prefix; pad the rest with '0'.
         var prefix = ordinal.ToString("x8");
         return prefix + new string('0', 64 - prefix.Length);
     }
 
+    private static string FirstCode(ImmutableArray<LedgerDiagnostic> diags)
+        => diags.IsDefaultOrEmpty ? "unknown" : diags[0].Code;
+
     private static ValidatedLedger BuildBootstrap()
     {
-        var ctx = Ctx(0, "1111111111111111111111111111111111111111", "2222222222222222222222222222222222222222", Ident);
-        var oc = Outcome(0, "Bootstrap review complete.");
-        var built = LedgerBuilder.CreateBootstrap(new BootstrapTransition(Ident, 0, 1), ctx, oc);
-        return built.Ledger ?? throw new InvalidOperationException(built.Failure!.Code);
+        var ctx = SourceContext(0, HeadShaA, BaseShaA, Ident);
+        var oc = SourceOutcome(0, "Bootstrap review complete.");
+        var transition = new BootstrapTransition(Ident, SessionEpochA, StateGeneration: 0, LedgerEpoch: LedgerEpoch1);
+        var built = LedgerBuilder.CreateBootstrap(
+            transition,
+            ctx, new InteractionIdentity(MakeInteractionId(0), 0),
+            oc, new InteractionIdentity(MakeInteractionId(0), 0));
+        return built.Candidate ?? throw new InvalidOperationException(FirstCode(built.Diagnostics));
     }
 
     private static ValidatedLedger BuildContinuation(ValidatedLedger predecessor)
     {
-        var ctx = Ctx(1, "3333333333333333333333333333333333333333", "2222222222222222222222222222222222222222", Ident);
-        var oc = Outcome(1, "Continuation review complete.");
-        var expected = new ContinuationTransition(Ident, predecessor.ContentSha256, 0, 1, 1);
-        var built = LedgerBuilder.AppendContinuation(predecessor, expected, ctx, oc);
-        return built.Ledger ?? throw new InvalidOperationException(built.Failure!.Code);
+        var ctx = SourceContext(1, HeadShaB, BaseShaA, Ident);
+        var oc = SourceOutcome(1, "Continuation review complete.");
+        var expected = new ContinuationTransition(
+            Identities: Ident,
+            SessionEpoch: SessionEpochA,
+            PredecessorLedgerSha256: predecessor.ContentSha256,
+            PredecessorStateGeneration: predecessor.Model.Header.StateGeneration,
+            PredecessorLedgerEpoch: predecessor.Model.Header.LedgerEpoch,
+            StateGeneration: predecessor.Model.Header.StateGeneration + 1,
+            LedgerEpoch: predecessor.Model.Header.LedgerEpoch);
+        var built = LedgerBuilder.AppendContinuation(
+            expected, predecessor,
+            ctx, new InteractionIdentity(MakeInteractionId(1), 1),
+            oc, new InteractionIdentity(MakeInteractionId(1), 1));
+        return built.Candidate ?? throw new InvalidOperationException(FirstCode(built.Diagnostics));
     }
 
     private static ValidatedLedger BuildResetCacheContract(ValidatedLedger predecessor)
     {
-        var ctx = Ctx(0, "4444444444444444444444444444444444444444", "2222222222222222222222222222222222222222", IdentAltCache);
-        var oc = Outcome(0, "Reset after cache-contract change.");
+        var ctx = SourceContext(0, HeadShaC, BaseShaA, IdentAltCache);
+        var oc = SourceOutcome(0, "Reset after cache-contract change.");
         var expected = new ResetTransition(
             Identities: IdentAltCache,
+            SessionEpoch: SessionEpochA,
             PredecessorLedgerSha256: predecessor.ContentSha256,
             PredecessorManifestSha256: new string('7', 64),
-            PredecessorStateGeneration: 0,
-            StateGeneration: 1,
-            LedgerEpoch: 2,
-            ResetReason: "cache_contract_changed");
-        var built = LedgerBuilder.CreateReset(predecessor, expected, ctx, oc);
-        return built.Ledger ?? throw new InvalidOperationException(built.Failure!.Code);
+            PredecessorStateGeneration: predecessor.Model.Header.StateGeneration,
+            PredecessorLedgerEpoch: predecessor.Model.Header.LedgerEpoch,
+            StateGeneration: predecessor.Model.Header.StateGeneration + 1,
+            LedgerEpoch: LedgerEpoch2,
+            ResetReason: "cache_contract_change");
+        var built = LedgerBuilder.CreateReset(
+            expected, predecessor,
+            ctx, new InteractionIdentity(MakeInteractionId(0), 0),
+            oc, new InteractionIdentity(MakeInteractionId(0), 0));
+        return built.Candidate ?? throw new InvalidOperationException(FirstCode(built.Diagnostics));
     }
 
     private static ValidatedLedger BuildResetBase(ValidatedLedger predecessor)
     {
-        var ctx = Ctx(0, "5555555555555555555555555555555555555555", "6666666666666666666666666666666666666666", Ident);
-        var oc = Outcome(0, "Reset after base change.");
+        var ctx = SourceContext(0, HeadShaD, BaseShaB, Ident);
+        var oc = SourceOutcome(0, "Reset after base change.");
         var expected = new ResetTransition(
             Identities: Ident,
+            SessionEpoch: SessionEpochA,
             PredecessorLedgerSha256: predecessor.ContentSha256,
             PredecessorManifestSha256: new string('8', 64),
-            PredecessorStateGeneration: 0,
-            StateGeneration: 1,
-            LedgerEpoch: 2,
-            ResetReason: "base_changed");
-        var built = LedgerBuilder.CreateReset(predecessor, expected, ctx, oc);
-        return built.Ledger ?? throw new InvalidOperationException(built.Failure!.Code);
+            PredecessorStateGeneration: predecessor.Model.Header.StateGeneration,
+            PredecessorLedgerEpoch: predecessor.Model.Header.LedgerEpoch,
+            StateGeneration: predecessor.Model.Header.StateGeneration + 1,
+            LedgerEpoch: LedgerEpoch3,
+            ResetReason: "base_change");
+        var built = LedgerBuilder.CreateReset(
+            expected, predecessor,
+            ctx, new InteractionIdentity(MakeInteractionId(0), 0),
+            oc, new InteractionIdentity(MakeInteractionId(0), 0));
+        return built.Candidate ?? throw new InvalidOperationException(FirstCode(built.Diagnostics));
     }
 
-    private static ValidatedLedger BuildRecovery()
+    private static ValidatedLedger BuildRecoveryRoot()
     {
-        var ctx = Ctx(0, "7777777777777777777777777777777777777777", "2222222222222222222222222222222222222222", Ident);
-        var oc = Outcome(0, "Recovery review complete.");
-        var expected = new RecoveryTransition(Ident, 0, 1, "predecessor_unavailable");
-        var built = LedgerBuilder.CreateRecovery(expected, ctx, oc);
-        return built.Ledger ?? throw new InvalidOperationException(built.Failure!.Code);
+        var ctx = SourceContext(0, HeadShaE, BaseShaA, Ident);
+        var oc = SourceOutcome(0, "Recovery root complete.");
+        var expected = new RecoveryRootTransition(
+            Identities: Ident,
+            SessionEpoch: SessionEpochA,
+            LedgerEpoch: LedgerEpoch1,
+            RecoveryReason: "unavailable_accepted_artifact");
+        var built = LedgerBuilder.CreateRecoveryRoot(
+            expected,
+            ctx, new InteractionIdentity(MakeInteractionId(0), 0),
+            oc, new InteractionIdentity(MakeInteractionId(0), 0));
+        return built.Candidate ?? throw new InvalidOperationException(FirstCode(built.Diagnostics));
     }
 
     private static ValidatedLedger BuildMaxInteractions()
     {
         var ledger = BuildBootstrap();
-        for (var i = 1; i < 32; i++)
+        for (var i = 1; i < LedgerLimits.MaxInteractionPairs; i++)
         {
-            var ctx = Ctx(i, "3333333333333333333333333333333333333333", "2222222222222222222222222222222222222222", Ident);
-            var oc = Outcome(i, "Continuation " + i);
-            var expected = new ContinuationTransition(Ident, ledger.ContentSha256, i - 1, i, 1);
-            var built = LedgerBuilder.AppendContinuation(ledger, expected, ctx, oc);
-            ledger = built.Ledger ?? throw new InvalidOperationException(built.Failure!.Code);
+            var ctx = SourceContext(i, HeadShaB, BaseShaA, Ident);
+            var oc = SourceOutcome(i, "Continuation " + i);
+            var expected = new ContinuationTransition(
+                Identities: Ident,
+                SessionEpoch: SessionEpochA,
+                PredecessorLedgerSha256: ledger.ContentSha256,
+                PredecessorStateGeneration: ledger.Model.Header.StateGeneration,
+                PredecessorLedgerEpoch: ledger.Model.Header.LedgerEpoch,
+                StateGeneration: ledger.Model.Header.StateGeneration + 1,
+                LedgerEpoch: ledger.Model.Header.LedgerEpoch);
+            var built = LedgerBuilder.AppendContinuation(
+                expected, ledger,
+                ctx, new InteractionIdentity(MakeInteractionId(i), i),
+                oc, new InteractionIdentity(MakeInteractionId(i), i));
+            ledger = built.Candidate ?? throw new InvalidOperationException(FirstCode(built.Diagnostics));
         }
         return ledger;
     }
 
-    private static ValidatedLedger BuildNearByteLimit()
-    {
-        var ledger = BuildLargePairsBootstrap();
-        for (var i = 1; i < 31; i++)
-        {
-            var ctx = Ctx(i, "3333333333333333333333333333333333333333", "2222222222222222222222222222222222222222", Ident);
-            var oc = LargeOutcome(i);
-            var expected = new ContinuationTransition(Ident, ledger.ContentSha256, i - 1, i, 1);
-            var built = LedgerBuilder.AppendContinuation(ledger, expected, ctx, oc);
-            ledger = built.Ledger ?? throw new InvalidOperationException(built.Failure!.Code);
-        }
-        return ledger;
-    }
+    // -----------------------------------------------------------------
+    // Source-DTO constructors (used by tests/mutations that want raw sources)
 
-    private static ValidatedLedger BuildLargePairsBootstrap()
+    private static ValidatedContextSource SourceContext(int ordinal, string headSha, string baseSha, ExpectedIdentities identities)
     {
-        var ctx = Ctx(0, "1111111111111111111111111111111111111111", "2222222222222222222222222222222222222222", Ident);
-        var oc = LargeOutcome(0);
-        var built = LedgerBuilder.CreateBootstrap(new BootstrapTransition(Ident, 0, 1), ctx, oc);
-        return built.Ledger ?? throw new InvalidOperationException(built.Failure!.Code);
-    }
-
-    private static ReviewOutcomeRecord LargeOutcome(int ordinal)
-    {
-        var summary = new string('x', LedgerLimits.MaxSummaryChars);
         var interactionId = MakeInteractionId(ordinal);
-        var source = new ValidatedOutcomeSource(
-            Summary: summary,
-            Findings: ImmutableArray<ValidatedFindingSource>.Empty,
-            Limitations: ImmutableArray<string>.Empty);
-        var built = LedgerBuilder.BuildReviewOutcome(source, new InteractionIdentity(interactionId, ordinal));
-        return built.Record!;
+        var subjectDigest = LedgerCanonicalizer.ComputeSha256Hex(
+            System.Text.Encoding.UTF8.GetBytes("fixture-subject/" + interactionId));
+        return new ValidatedContextSource
+        {
+            SubjectDigest = subjectDigest,
+            ReviewedHeadSha = headSha,
+            ReviewedBaseSha = baseSha,
+            ChangedFiles = ImmutableArray.Create(new LedgerChangedFile
+            {
+                Path = "src/main.cs",
+                PreviousPath = null,
+                Status = "modified",
+                Additions = 1,
+                Deletions = 0,
+                Changes = 1,
+                Patch = new LedgerBoundedPatch
+                {
+                    Sha256 = new string('9', 64),
+                    Truncated = false,
+                    MaxChars = 4000,
+                },
+            }),
+        };
     }
+
+    private static ValidatedOutcomeSource SourceOutcome(int ordinal, string summary)
+        => new()
+        {
+            Summary = summary,
+            Findings = ImmutableArray<LedgerFinding>.Empty,
+            Limitations = ImmutableArray.Create("No live provider was invoked."),
+        };
 }
-
-
-

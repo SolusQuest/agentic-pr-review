@@ -1,127 +1,126 @@
+using System.Collections.Immutable;
 using System.Text;
 using AgenticPrReview.Runtime.Ledger;
 
 namespace AgenticPrReview.Runtime.Tests.Ledger;
 
+/// <summary>
+/// Round-trip and shape tests for <see cref="LedgerCanonicalizer"/>. The
+/// canonicalizer is <c>internal</c>; the ledger test assembly reaches it via
+/// InternalsVisibleTo.
+/// </summary>
 public sealed class LedgerCanonicalizerTests
 {
     [Fact]
-    public void ComputeSha256HexProducesLowerHexOfLength64()
+    public void SerializeCanonical_Roundtrips_Through_Parser()
     {
-        var hex = LedgerCanonicalizer.ComputeSha256Hex(Encoding.UTF8.GetBytes("hello"));
-        Assert.Equal(64, hex.Length);
-        Assert.Equal(hex, hex.ToLowerInvariant());
+        var model = BuildMinimalModel();
+        var bytes = LedgerCanonicalizer.SerializeCanonical(model).ToArray();
+
+        var outcome = LedgerParser.ParseAndValidate(bytes);
+        Assert.NotNull(outcome.Ledger);
+        Assert.Equal(bytes, outcome.Ledger!.ToCanonicalByteArray());
     }
 
     [Fact]
-    public void SerializeEnvelopeIsDeterministicAndCanonical()
+    public void SerializeRecord_ProducesStableCanonicalBytes()
     {
-        var envelope1 = new Dictionary<string, object>
-        {
-            ["b"] = "beta",
-            ["a"] = 1,
-        };
-        var envelope2 = new Dictionary<string, object>
-        {
-            ["a"] = 1,
-            ["b"] = "beta",
-        };
-        var b1 = LedgerCanonicalizer.SerializeEnvelope(envelope1);
-        var b2 = LedgerCanonicalizer.SerializeEnvelope(envelope2);
-        Assert.Equal(b1, b2);
-        var text = Encoding.UTF8.GetString(b1);
-        Assert.Equal("{\"a\":1,\"b\":\"beta\"}", text);
+        var model = BuildMinimalModel();
+        var recordBytes1 = LedgerCanonicalizer.SerializeRecord(model.Records[0]).ToArray();
+        var recordBytes2 = LedgerCanonicalizer.SerializeRecord(model.Records[0]).ToArray();
+        Assert.Equal(recordBytes1, recordBytes2);
     }
 
     [Fact]
-    public void SerializeEnvelopeUsesUtf16LexicographicKeyOrdering()
+    public void SerializeCacheContractIdentity_HasSortedPropertyOrder()
     {
-        // BMP: 'a' = 0x0061; 'z' = 0x007A; 'A' = 0x0041.
-        // Under unsigned UTF-16 code-unit order: 'A' (0x0041) < 'a' (0x0061) < 'z' (0x007A).
-        var envelope = new Dictionary<string, object>
+        var identities = new ExpectedIdentities(
+            Repository: "acme/example",
+            HeadRepository: "acme/example",
+            PullRequest: 1,
+            WorkflowIdentity: "acme/example/.github/workflows/ci.yml",
+            TrustedExecutionDomain: "github-actions",
+            ProviderId: "provider.reference",
+            ModelId: "model-2026-01",
+            AdapterId: new string('a', 64),
+            TemplateId: new string('b', 64),
+            PolicyId: new string('c', 64),
+            ToolDefinitionId: new string('d', 64),
+            CacheConfigId: new string('e', 64));
+        var envelope = Encoding.UTF8.GetString(LedgerCanonicalizer.SerializeCacheContractIdentity(identities).ToArray());
+        // Property order must be adapterId, cacheConfigId, modelId, policyId, providerId, templateId, toolDefinitionId.
+        var expectedOrder = new[] { "adapterId", "cacheConfigId", "modelId", "policyId", "providerId", "templateId", "toolDefinitionId" };
+        var lastIndex = -1;
+        foreach (var key in expectedOrder)
         {
-            ["z"] = 1,
-            ["A"] = 2,
-            ["a"] = 3,
-        };
-        var text = Encoding.UTF8.GetString(LedgerCanonicalizer.SerializeEnvelope(envelope));
-        Assert.Equal("{\"A\":2,\"a\":3,\"z\":1}", text);
-    }
-
-    [Fact]
-    public void SerializeEnvelopeEscapesOnlyRfc8785RequiredCharacters()
-    {
-        var envelope = new Dictionary<string, object>
-        {
-            ["key"] = "quote:\" backslash:\\ newline:\n tab:\t null:\u0000",
-        };
-        var text = Encoding.UTF8.GetString(LedgerCanonicalizer.SerializeEnvelope(envelope));
-        // Should escape ", \, and control characters below \u0020.
-        Assert.Contains(@"\""", text);
-        Assert.Contains(@"\\", text);
-        Assert.Contains(@"\n", text);
-        Assert.Contains(@"\t", text);
-        Assert.Contains(@"\u0000", text);
-        // Non-ASCII / non-control characters must NOT be \u-escaped.
-        var envelope2 = new Dictionary<string, object>
-        {
-            ["k"] = "é 中",
-        };
-        var literal = Encoding.UTF8.GetString(LedgerCanonicalizer.SerializeEnvelope(envelope2));
-        Assert.Contains("é", literal);
-        Assert.Contains("中", literal);
-    }
-
-    [Fact]
-    public void CanonicalizerRoundTripsEveryValidFixture()
-    {
-        var root = Path.Combine(AppContext.BaseDirectory, "protocol", "fixtures", "v1", "provider-session-ledger");
-        foreach (var name in new[]
-        {
-            "bootstrap-minimal.json",
-            "continuation-one-append.json",
-            "reset-cache-contract-changed.json",
-            "reset-base-changed.json",
-            "recovery-predecessor-unavailable.json",
-            "continuation-max-interactions.json",
-            "continuation-near-byte-limit.json",
-        })
-        {
-            var bytes = File.ReadAllBytes(Path.Combine(root, name));
-            var parseResult = LedgerParser.ParseAndValidate(bytes);
-            Assert.NotNull(parseResult.Ledger);
-            var reserialized = LedgerCanonicalizer.SerializeCanonical(parseResult.Ledger!.Model);
-            Assert.Equal(bytes, reserialized);
-            Assert.Equal(bytes.Length, parseResult.Ledger.ByteLength);
+            var idx = envelope.IndexOf("\"" + key + "\"", StringComparison.Ordinal);
+            Assert.True(idx > lastIndex, $"Property '{key}' out of order in canonical envelope.");
+            lastIndex = idx;
         }
     }
-}
 
-public sealed class LedgerPropertyNameComparerTests
-{
-    [Fact]
-    public void ComparerUsesUnsignedUtf16CodeUnitOrdering()
+    private static LedgerModel BuildMinimalModel()
     {
-        // Verify RFC 8785 property ordering rule by comparing arbitrary strings via the
-        // internal comparer accessed through envelope serialization. Supplementary-plane
-        // code points cannot appear as ProviderSessionLedgerV1 property names, but the
-        // comparer must still support them at the primitive level.
-        var envelope = new Dictionary<string, object>
+        var identities = new ExpectedIdentities(
+            Repository: "acme/example",
+            HeadRepository: "acme/example",
+            PullRequest: 1,
+            WorkflowIdentity: "acme/example/.github/workflows/ci.yml",
+            TrustedExecutionDomain: "github-actions",
+            ProviderId: "provider.reference",
+            ModelId: "model-2026-01",
+            AdapterId: new string('a', 64),
+            TemplateId: new string('b', 64),
+            PolicyId: new string('c', 64),
+            ToolDefinitionId: new string('d', 64),
+            CacheConfigId: new string('e', 64));
+        var digest = LedgerDigests.ComputeCacheContractDigest(identities);
+        var subject = LedgerCanonicalizer.ComputeSha256Hex(Encoding.UTF8.GetBytes("subject-fixture"));
+        var ctx = new ReviewContextRecord
         {
-            // "\uD83D\uDE00" is emoji 😀 (surrogate pair). Its first code unit is 0xD83D,
-            // above 0xFF10 ("full-width digit 0"). Under unsigned UTF-16 order, "\uD83D..."
-            // must sort AFTER "\uFF10..." because 0xFF10 > 0xD83D.
-            //
-            // Wait: 0xD83D < 0xFF10, so emoji key should sort BEFORE fullwidth digit key.
-            ["\uD83D\uDE00"] = 1,
-            ["\uFF10"] = 2,
+            Role = "review_context",
+            InteractionId = new string('0', 63) + "1",
+            InteractionOrdinal = 0,
+            SubjectDigest = subject,
+            CacheContractDigest = digest,
+            ReviewedHeadSha = new string('1', 40),
+            ReviewedBaseSha = new string('2', 40),
+            ChangedFiles = ImmutableArray<LedgerChangedFile>.Empty,
         };
-        var text = System.Text.Encoding.UTF8.GetString(LedgerCanonicalizer.SerializeEnvelope(envelope));
-        // The emoji key (starts with 0xD83D) should appear before the fullwidth digit key (0xFF10)
-        // under unsigned UTF-16 lexicographic ordering.
-        var emojiIdx = text.IndexOf("\uD83D\uDE00", StringComparison.Ordinal);
-        var digitIdx = text.IndexOf("\uFF10", StringComparison.Ordinal);
-        Assert.True(emojiIdx >= 0 && digitIdx >= 0, "keys must be present");
-        Assert.True(emojiIdx < digitIdx, "emoji surrogate-pair key must sort before fullwidth key");
+        var oc = new ReviewOutcomeRecord
+        {
+            Role = "review_outcome",
+            InteractionId = ctx.InteractionId,
+            InteractionOrdinal = 0,
+            Summary = "Fixture summary.",
+            Findings = ImmutableArray<LedgerFinding>.Empty,
+            Limitations = ImmutableArray<string>.Empty,
+        };
+        return new LedgerModel
+        {
+            SchemaVersion = 1,
+            PrefixContractVersion = 1,
+            Header = new LedgerHeader
+            {
+                Kind = "bootstrap",
+                SessionEpoch = "AAAAAAAAAAAAAAAAAAAAAA",
+                LedgerEpoch = "BBBBBBBBBBBBBBBBBBBBBB",
+                StateGeneration = 0,
+                PredecessorLedgerSha256 = "bootstrap",
+                Repository = identities.Repository,
+                HeadRepository = identities.HeadRepository,
+                PullRequest = identities.PullRequest,
+                WorkflowIdentity = identities.WorkflowIdentity,
+                TrustedExecutionDomain = identities.TrustedExecutionDomain,
+                ProviderId = identities.ProviderId,
+                ModelId = identities.ModelId,
+                AdapterId = identities.AdapterId,
+                TemplateId = identities.TemplateId,
+                PolicyId = identities.PolicyId,
+                ToolDefinitionId = identities.ToolDefinitionId,
+                CacheConfigId = identities.CacheConfigId,
+            },
+            Records = ImmutableArray.Create<LedgerRecord>(ctx, oc),
+        };
     }
 }

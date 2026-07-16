@@ -5,12 +5,7 @@
   "description": "Provider-neutral bounded session ledger for the M4 live-provider path. Runtime-owned; host authoritative for identities. See docs/20_architecture/session-ledger-and-prefix-contract.md and issue #49.",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "schemaVersion",
-    "prefixContractVersion",
-    "header",
-    "records"
-  ],
+  "required": ["schemaVersion", "prefixContractVersion", "header", "records"],
   "properties": {
     "schemaVersion": {
       "type": "integer",
@@ -411,11 +406,7 @@
         },
         "resetReason": {
           "type": "string",
-          "enum": [
-            "base_change",
-            "head_history_discontinuity",
-            "cache_contract_change"
-          ]
+          "enum": ["base_change", "head_history_discontinuity", "cache_contract_change"]
         },
         "predecessorLedgerEpoch": {
           "type": "string",
@@ -588,13 +579,7 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": [
-              "path",
-              "status",
-              "additions",
-              "deletions",
-              "changes"
-            ],
+            "required": ["path", "status", "additions", "deletions", "changes"],
             "properties": {
               "path": {
                 "$ref": "#/definitions/safeRelativePath"
@@ -632,11 +617,7 @@
               "patch": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": [
-                  "sha256",
-                  "truncated",
-                  "maxChars"
-                ],
+                "required": ["sha256", "truncated", "maxChars"],
                 "properties": {
                   "sha256": {
                     "type": "string",
@@ -722,17 +703,10 @@
       ],
       "properties": {
         "severity": {
-          "enum": [
-            "low",
-            "medium",
-            "high"
-          ]
+          "enum": ["low", "medium", "high"]
         },
         "confidence": {
-          "enum": [
-            "medium",
-            "high"
-          ]
+          "enum": ["medium", "high"]
         },
         "category": {
           "enum": [
@@ -772,17 +746,11 @@
           ]
         },
         "startLine": {
-          "type": [
-            "integer",
-            "null"
-          ],
+          "type": ["integer", "null"],
           "minimum": 1
         },
         "endLine": {
-          "type": [
-            "integer",
-            "null"
-          ],
+          "type": ["integer", "null"],
           "minimum": 1
         },
         "suggestedAction": {
@@ -791,11 +759,7 @@
           "pattern": "\\S"
         },
         "inlinePreference": {
-          "enum": [
-            "allowed",
-            "preferred",
-            "avoid"
-          ]
+          "enum": ["allowed", "preferred", "avoid"]
         }
       }
     }

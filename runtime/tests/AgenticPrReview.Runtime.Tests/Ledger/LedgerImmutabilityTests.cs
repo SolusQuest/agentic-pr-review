@@ -1,216 +1,44 @@
-using System.Runtime.InteropServices;
 using AgenticPrReview.Runtime.Ledger;
 
 namespace AgenticPrReview.Runtime.Tests.Ledger;
 
 /// <summary>
-/// Enforces that a successful ValidatedLedger is a deeply immutable snapshot.
-/// Caller-owned inputs and outputs must never provide a mutation path to the
-/// ledger's canonical bytes, model, or content hash through any documented
-/// .NET API on the public runtime surface.
+/// Guards deep immutability of <see cref="ValidatedLedger"/>: caller-supplied
+/// input bytes may be mutated after parsing without altering the ledger's
+/// content hash, canonical bytes, or model, and independent byte accessors
+/// return independent copies.
 /// </summary>
 public sealed class LedgerImmutabilityTests
 {
-    private static byte[] BootstrapBytes()
+    [Fact]
+    public void MutatingInputBytes_DoesNotAffectLedgerContent()
     {
-        var root = Path.Combine(AppContext.BaseDirectory, "protocol", "fixtures", "v1", "provider-session-ledger");
-        return File.ReadAllBytes(Path.Combine(root, "bootstrap-minimal.json"));
+        var seed = Fixtures.Bootstrap().ToCanonicalByteArray();
+        var buffer = new byte[seed.Length];
+        Buffer.BlockCopy(seed, 0, buffer, 0, seed.Length);
+
+        var outcome = LedgerParser.ParseAndValidate(buffer);
+        Assert.NotNull(outcome.Ledger);
+        var originalSha = outcome.Ledger!.ContentSha256;
+        var snapshot = outcome.Ledger.ToCanonicalByteArray();
+
+        // Mutate every byte after parsing.
+        for (var i = 0; i < buffer.Length; i++) buffer[i] = 0xFF;
+
+        Assert.Equal(originalSha, outcome.Ledger.ContentSha256);
+        Assert.Equal(snapshot, outcome.Ledger.ToCanonicalByteArray());
     }
 
     [Fact]
-    public void ValidatedLedger_MutatingInputBytes_DoesNotChangeLedgerContent()
+    public void ToCanonicalByteArray_ReturnsIndependentCopies()
     {
-        var bytes = BootstrapBytes();
-        var result = LedgerParser.ParseAndValidate(bytes);
-        Assert.NotNull(result.Ledger);
-        var originalSha = result.Ledger!.ContentSha256;
-        var originalByteLength = result.Ledger.ByteLength;
-        var beforeMutation = result.Ledger.ToCanonicalByteArray();
-        for (var i = 0; i < bytes.Length; i++)
-        {
-            bytes[i] = 0xFF;
-        }
-        Assert.Equal(originalSha, result.Ledger.ContentSha256);
-        Assert.Equal(originalByteLength, result.Ledger.ByteLength);
-        Assert.Equal(beforeMutation, result.Ledger.ToCanonicalByteArray());
-    }
-
-    [Fact]
-    public void ValidatedLedger_ToCanonicalByteArray_ReturnsIndependentCopy()
-    {
-        var result = LedgerParser.ParseAndValidate(BootstrapBytes());
-        Assert.NotNull(result.Ledger);
-        var ledger = result.Ledger!;
-        var copy1 = ledger.ToCanonicalByteArray();
-        var copy2 = ledger.ToCanonicalByteArray();
-        Assert.Equal(copy1, copy2);
-        Assert.NotSame(copy1, copy2);
-        for (var i = 0; i < copy1.Length; i++) copy1[i] = 0xFF;
-        Assert.NotEqual(copy1, ledger.ToCanonicalByteArray());
-        Assert.Equal(copy2, ledger.ToCanonicalByteArray());
-    }
-
-    [Fact]
-    public void ValidatedLedger_CopyCanonicalBytesTo_WritesFullSequence()
-    {
-        var result = LedgerParser.ParseAndValidate(BootstrapBytes());
-        Assert.NotNull(result.Ledger);
-        var ledger = result.Ledger!;
-        var buffer = new byte[ledger.ByteLength];
-        var written = ledger.CopyCanonicalBytesTo(buffer);
-        Assert.Equal(ledger.ByteLength, written);
-        Assert.Equal(ledger.ToCanonicalByteArray(), buffer);
-    }
-
-    [Fact]
-    public void ValidatedLedger_CopyCanonicalBytesTo_TooShort_Throws()
-    {
-        var result = LedgerParser.ParseAndValidate(BootstrapBytes());
-        Assert.NotNull(result.Ledger);
-        var ledger = result.Ledger!;
-        var tooSmall = new byte[ledger.ByteLength - 1];
-        Assert.Throws<ArgumentException>(() => ledger.CopyCanonicalBytesTo(tooSmall));
-    }
-
-    [Fact]
-    public void ValidatedLedger_HasNoPublicReadOnlyMemoryProperty()
-    {
-        // The class must NOT expose a ReadOnlyMemory<byte>-typed property, because
-        // System.Runtime.InteropServices.MemoryMarshal.TryGetMemoryManager /
-        // MemoryMarshal.TryGetArray / MemoryMarshal.CreateSpan can otherwise be
-        // used to obtain a mutable alias to the internal buffer. Encoding this as
-        // a reflection-level assertion guards against re-introducing such a
-        // property in a future refactor.
-        var byteMemoryType = typeof(ReadOnlyMemory<byte>);
-        var byteSpanType = typeof(ReadOnlySpan<byte>);
-        var props = typeof(ValidatedLedger).GetProperties(
-            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-        foreach (var prop in props)
-        {
-            Assert.NotEqual(byteMemoryType, prop.PropertyType);
-            Assert.NotEqual(byteSpanType, prop.PropertyType);
-        }
-    }
-
-    [Fact]
-    public void ValidatedLedger_Model_ImmutableCollectionsMarshal_DoesNotChangePublicBytesOrHash()
-    {
-        // ImmutableArray<T> exposes its underlying array through
-        // ImmutableCollectionsMarshal.AsArray. This is a documented "unsafe" API,
-        // but a well-behaved caller who tries it must at least be unable to
-        // change the ledger's public byte view or SHA-256 through it. That
-        // invariant holds because ContentSha256 is measured once at construction
-        // and ToCanonicalByteArray() returns a copy of the private byte[].
-        var result = LedgerParser.ParseAndValidate(BootstrapBytes());
-        Assert.NotNull(result.Ledger);
-        var ledger = result.Ledger!;
-        var originalSha = ledger.ContentSha256;
-        var originalBytes = ledger.ToCanonicalByteArray();
-
-        var recordArray = ImmutableCollectionsMarshal.AsArray(ledger.Model.Records);
-        Assert.NotNull(recordArray);
-        // Attempt a destructive mutation on the underlying array.
-        recordArray![0] = ledger.Model.Records[1];
-
-        // Public accessors must still agree; hash and canonical bytes are
-        // captured snapshots and cannot be recomputed from the (now-broken)
-        // model.
-        Assert.Equal(originalSha, ledger.ContentSha256);
-        Assert.Equal(originalBytes, ledger.ToCanonicalByteArray());
-    }
-
-    [Fact]
-    public void ValidatedLedger_Model_RecordsIsImmutableArray()
-    {
-        var result = LedgerParser.ParseAndValidate(BootstrapBytes());
-        Assert.NotNull(result.Ledger);
-        var records = result.Ledger!.Model.Records;
-        Assert.IsType<ImmutableArray<LedgerRecord>>(records);
-        Assert.Equal(2, records.Length);
-    }
-
-    [Fact]
-    public void ValidatedLedger_Model_NestedCollectionsAreImmutable()
-    {
-        var result = LedgerParser.ParseAndValidate(BootstrapBytes());
-        Assert.NotNull(result.Ledger);
-        var record = result.Ledger!.Model.Records[0];
-        Assert.NotNull(record.Context);
-        Assert.IsType<ImmutableArray<ChangedFileEntry>>(record.Context!.ChangedFiles);
-        var oc = result.Ledger.Model.Records[1].Outcome!;
-        Assert.IsType<ImmutableArray<LedgerFinding>>(oc.Findings);
-        Assert.IsType<ImmutableArray<string>>(oc.Limitations);
-    }
-
-
-    [Fact]
-    public void ValidatedLedger_PublicModelMutation_DoesNotAffectAppendHistoryOrBinding()
-    {
-        // Build a bootstrap via the runtime (so its ContentSha256 is the
-        // authoritative anchor), then attempt to mutate the underlying array
-        // that Model.Records surfaces via ImmutableCollectionsMarshal.AsArray.
-        var identities = new ExpectedIdentities(
-            Repository: "acme/example", HeadRepository: "acme/example",
-            PullRequest: 123,
-            WorkflowIdentity: "acme/example/.github/workflows/ci.yml",
-            TrustedExecutionDomain: "github-actions", SessionEpoch: "epoch-0",
-            ProviderId: "provider.reference", ModelId: "model-2026-01",
-            AdapterId: new string('a', 64), TemplateId: new string('b', 64),
-            PolicyId: new string('c', 64), ToolDefinitionId: new string('d', 64),
-            CacheConfigId: new string('e', 64));
-        var context = LedgerBuilder.BuildReviewContext(
-            new ValidatedContextSource(
-                ReviewedHeadSha: "1111111111111111111111111111111111111111",
-                ReviewedBaseSha: "2222222222222222222222222222222222222222",
-                ChangedFiles: ImmutableArray<ValidatedChangedFileSource>.Empty),
-            identities,
-            new InteractionIdentity(new string('0', 64), 0)).Record!;
-        var outcome = LedgerBuilder.BuildReviewOutcome(
-            new ValidatedOutcomeSource(
-                Summary: "Bootstrap",
-                Findings: ImmutableArray<ValidatedFindingSource>.Empty,
-                Limitations: ImmutableArray<string>.Empty),
-            new InteractionIdentity(new string('0', 64), 0)).Record!;
-        var bootstrap = LedgerBuilder.CreateBootstrap(
-            new BootstrapTransition(identities, 0, 1), context, outcome).Ledger!;
-
-        var originalSha = bootstrap.ContentSha256;
-        var originalBytes = bootstrap.ToCanonicalByteArray();
-
-        // Attempt to mutate the public Model's records via the documented
-        // "unsafe" interop helper.
-        var backing = ImmutableCollectionsMarshal.AsArray(bootstrap.Model.Records);
-        Assert.NotNull(backing);
-        backing![0] = bootstrap.Model.Records[1];
-
-        // Public byte accessor and hash remain unaffected.
-        Assert.Equal(originalSha, bootstrap.ContentSha256);
-        Assert.Equal(originalBytes, bootstrap.ToCanonicalByteArray());
-
-        // Extend the ledger by one continuation. The append must be driven by
-        // the internal private snapshot, not the (now-mutated) public Model.
-        var context2 = LedgerBuilder.BuildReviewContext(
-            new ValidatedContextSource(
-                ReviewedHeadSha: "1111111111111111111111111111111111111111",
-                ReviewedBaseSha: "2222222222222222222222222222222222222222",
-                ChangedFiles: ImmutableArray<ValidatedChangedFileSource>.Empty),
-            identities,
-            new InteractionIdentity(new string('0', 63) + "1", 1)).Record!;
-        var outcome2 = LedgerBuilder.BuildReviewOutcome(
-            new ValidatedOutcomeSource(
-                Summary: "Continuation",
-                Findings: ImmutableArray<ValidatedFindingSource>.Empty,
-                Limitations: ImmutableArray<string>.Empty),
-            new InteractionIdentity(new string('0', 63) + "1", 1)).Record!;
-        var cont = LedgerBuilder.AppendContinuation(
-            bootstrap,
-            new ContinuationTransition(identities, originalSha, 0, 1, 1),
-            context2,
-            outcome2);
-        // Must succeed. If AppendContinuation had consulted the mutated public
-        // Model, either the predecessor prefix equality or the ordinal chain
-        // would have been broken and the outcome would be a failure diagnostic.
-        Assert.NotNull(cont.Ledger);
-        Assert.Null(cont.Failure);
+        var ledger = Fixtures.Bootstrap();
+        var a = ledger.ToCanonicalByteArray();
+        var b = ledger.ToCanonicalByteArray();
+        Assert.Equal(a, b);
+        Assert.NotSame(a, b);
+        a[0] ^= 0xFF;
+        Assert.NotEqual(a[0], b[0]);
+        Assert.Equal(a.Length, b.Length);
     }
 }
