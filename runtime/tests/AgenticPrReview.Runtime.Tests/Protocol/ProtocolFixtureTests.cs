@@ -34,6 +34,13 @@ public sealed class ProtocolFixtureTests
                 continue;
             }
 
+            if (entry.GetProperty("type").GetString() is "ledger-restore" or "ledger-transition" or "ledger-build")
+            {
+                // Ledger fixtures are owned by LedgerFixtureTests.
+                registeredFiles.Add(entry.GetProperty("file").GetString()!);
+                continue;
+            }
+
             throw new InvalidOperationException("Unknown manifest entry type.");
         }
 

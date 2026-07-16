@@ -8,6 +8,9 @@ runtime/tests/fixtures/deterministic/**
 protocol/fixtures/state-manifest-v2/**
 protocol/fixtures/state-manifest-v2-compat/**
 
+# Ledger fixtures are byte-stable golden artifacts and must not be re-formatted.
+protocol/fixtures/v1/provider-session-ledger/**
+
 # Agent-local scratch (never committed)
 .scratch/
 

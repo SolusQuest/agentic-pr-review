@@ -196,5 +196,41 @@
     },
     "valid": true,
     "verifyHashChain": ["result.inputSha256", "trace.inputSha256", "result.trace.sha256"]
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/bootstrap-minimal.json",
+    "valid": true,
+    "contentSha256": "300ea24b61a17ffc465a935c0a725758ec47a3cf114886fa672c066bb44f1036"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/continuation-one-append.json",
+    "valid": true,
+    "contentSha256": "48b105d65e9e87e1e28bf724e0de95f49ebf7c86fba95469c123757c177e2be8"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/reset-base-change.json",
+    "valid": true,
+    "contentSha256": "f2b5983b487d9b9c528ada45276ab194f36cb1094dee9b0668f2cd6532a618b7"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/recovery-root-integrity-mismatch.json",
+    "valid": true,
+    "contentSha256": "799ddd388d11891330661d96ced3509f7168419392b8241b72f01cdf52f45fd4"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/invalid-json.json",
+    "valid": false,
+    "code": "ledger_invalid_json"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/model-alias-latest.json",
+    "valid": false,
+    "code": "ledger_model_alias_literal"
   }
 ]

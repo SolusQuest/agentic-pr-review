@@ -1,0 +1,515 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentic-pr-review/protocol/schemas/provider-session-ledger.v1.json",
+  "title": "ProviderSessionLedgerV1",
+  "description": "Provider-neutral bounded session ledger for the M4 live-provider path. Owned by issue #49.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "prefixContractVersion", "header", "records"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Ledger schema version. M4 uses version 1."
+    },
+    "prefixContractVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Ledger/prefix contract version. M4 uses version 1."
+    },
+    "header": {
+      "$ref": "#/$defs/header"
+    },
+    "records": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/record"
+      }
+    }
+  },
+  "$defs": {
+    "epochId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{22}$"
+    },
+    "sha256Hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "gitSha": {
+      "type": "string",
+      "pattern": "^([a-f0-9]{40}|[a-f0-9]{64})$"
+    },
+    "identityString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[\u0020-\u007e\u0080-\uffff]+$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000,
+      "pattern": "\\S"
+    },
+    "safeRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "pattern": "\\S",
+      "description": "Normalized POSIX relative path. Rejects absolute, drive-qualified, protocol-looking, current-dir-only, backslash-containing, and parent-dir (..) paths.",
+      "allOf": [
+        { "pattern": "^[^/]" },
+        { "not": { "pattern": "\\\\" } },
+        { "not": { "pattern": "^[A-Za-z][A-Za-z0-9+.-]*:" } },
+        { "not": { "pattern": "(^|/)\\.\\.?(/|$)" } }
+      ]
+    },
+    "stateGeneration": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    "interactionOrdinal": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    "pullRequest": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "severity",
+        "confidence",
+        "category",
+        "title",
+        "body",
+        "path",
+        "startLine",
+        "endLine"
+      ],
+      "properties": {
+        "severity": {
+          "enum": ["low", "medium", "high"]
+        },
+        "confidence": {
+          "enum": ["medium", "high"]
+        },
+        "category": {
+          "enum": [
+            "correctness",
+            "security",
+            "requirements",
+            "test_coverage",
+            "build",
+            "performance",
+            "maintainability",
+            "documentation"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 240,
+          "pattern": "\\S"
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "evidence": {
+          "type": ["string", "null"],
+          "maxLength": 2000,
+          "pattern": "\\S"
+        },
+        "path": {
+          "oneOf": [{ "$ref": "#/$defs/safeRelativePath" }, { "type": "null" }]
+        },
+        "startLine": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "endLine": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "suggestedAction": {
+          "type": ["string", "null"],
+          "maxLength": 1600,
+          "pattern": "\\S"
+        },
+        "inlinePreference": {
+          "enum": ["allowed", "preferred", "avoid"]
+        }
+      }
+    },
+    "header": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "enum": ["bootstrap", "continuation", "reset", "recovery_root"]
+        }
+      },
+      "oneOf": [
+        { "$ref": "#/$defs/bootstrapHeader" },
+        { "$ref": "#/$defs/continuationHeader" },
+        { "$ref": "#/$defs/resetHeader" },
+        { "$ref": "#/$defs/recoveryRootHeader" }
+      ]
+    },
+    "identityGroup": {
+      "type": "object",
+      "properties": {
+        "repository": { "$ref": "#/$defs/identityString" },
+        "headRepository": { "$ref": "#/$defs/identityString" },
+        "pullRequest": { "$ref": "#/$defs/pullRequest" },
+        "workflowIdentity": { "$ref": "#/$defs/identityString" },
+        "trustedExecutionDomain": { "$ref": "#/$defs/identityString" },
+        "providerId": { "$ref": "#/$defs/identityString" },
+        "modelId": { "$ref": "#/$defs/identityString" },
+        "adapterId": { "$ref": "#/$defs/identityString" },
+        "templateId": { "$ref": "#/$defs/identityString" },
+        "policyId": { "$ref": "#/$defs/identityString" },
+        "toolDefinitionId": { "$ref": "#/$defs/identityString" },
+        "cacheConfigId": { "$ref": "#/$defs/identityString" }
+      },
+      "required": [
+        "repository",
+        "headRepository",
+        "pullRequest",
+        "workflowIdentity",
+        "trustedExecutionDomain",
+        "providerId",
+        "modelId",
+        "adapterId",
+        "templateId",
+        "policyId",
+        "toolDefinitionId",
+        "cacheConfigId"
+      ]
+    },
+    "bootstrapHeader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "sessionEpoch",
+        "ledgerEpoch",
+        "stateGeneration",
+        "predecessorLedgerSha256",
+        "repository",
+        "headRepository",
+        "pullRequest",
+        "workflowIdentity",
+        "trustedExecutionDomain",
+        "providerId",
+        "modelId",
+        "adapterId",
+        "templateId",
+        "policyId",
+        "toolDefinitionId",
+        "cacheConfigId"
+      ],
+      "properties": {
+        "kind": { "const": "bootstrap" },
+        "sessionEpoch": { "$ref": "#/$defs/epochId" },
+        "ledgerEpoch": { "$ref": "#/$defs/epochId" },
+        "stateGeneration": { "const": 0 },
+        "predecessorLedgerSha256": { "const": "bootstrap" },
+        "repository": { "$ref": "#/$defs/identityString" },
+        "headRepository": { "$ref": "#/$defs/identityString" },
+        "pullRequest": { "$ref": "#/$defs/pullRequest" },
+        "workflowIdentity": { "$ref": "#/$defs/identityString" },
+        "trustedExecutionDomain": { "$ref": "#/$defs/identityString" },
+        "providerId": { "$ref": "#/$defs/identityString" },
+        "modelId": { "$ref": "#/$defs/identityString" },
+        "adapterId": { "$ref": "#/$defs/identityString" },
+        "templateId": { "$ref": "#/$defs/identityString" },
+        "policyId": { "$ref": "#/$defs/identityString" },
+        "toolDefinitionId": { "$ref": "#/$defs/identityString" },
+        "cacheConfigId": { "$ref": "#/$defs/identityString" }
+      }
+    },
+    "continuationHeader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "sessionEpoch",
+        "ledgerEpoch",
+        "stateGeneration",
+        "predecessorLedgerSha256",
+        "predecessorLedgerEpoch",
+        "predecessorStateGeneration",
+        "repository",
+        "headRepository",
+        "pullRequest",
+        "workflowIdentity",
+        "trustedExecutionDomain",
+        "providerId",
+        "modelId",
+        "adapterId",
+        "templateId",
+        "policyId",
+        "toolDefinitionId",
+        "cacheConfigId"
+      ],
+      "properties": {
+        "kind": { "const": "continuation" },
+        "sessionEpoch": { "$ref": "#/$defs/epochId" },
+        "ledgerEpoch": { "$ref": "#/$defs/epochId" },
+        "stateGeneration": { "$ref": "#/$defs/stateGeneration" },
+        "predecessorLedgerSha256": { "$ref": "#/$defs/sha256Hex" },
+        "predecessorLedgerEpoch": { "$ref": "#/$defs/epochId" },
+        "predecessorStateGeneration": { "$ref": "#/$defs/stateGeneration" },
+        "repository": { "$ref": "#/$defs/identityString" },
+        "headRepository": { "$ref": "#/$defs/identityString" },
+        "pullRequest": { "$ref": "#/$defs/pullRequest" },
+        "workflowIdentity": { "$ref": "#/$defs/identityString" },
+        "trustedExecutionDomain": { "$ref": "#/$defs/identityString" },
+        "providerId": { "$ref": "#/$defs/identityString" },
+        "modelId": { "$ref": "#/$defs/identityString" },
+        "adapterId": { "$ref": "#/$defs/identityString" },
+        "templateId": { "$ref": "#/$defs/identityString" },
+        "policyId": { "$ref": "#/$defs/identityString" },
+        "toolDefinitionId": { "$ref": "#/$defs/identityString" },
+        "cacheConfigId": { "$ref": "#/$defs/identityString" }
+      }
+    },
+    "resetHeader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "sessionEpoch",
+        "ledgerEpoch",
+        "stateGeneration",
+        "predecessorLedgerSha256",
+        "predecessorManifestSha256",
+        "predecessorLedgerEpoch",
+        "predecessorStateGeneration",
+        "resetReason",
+        "repository",
+        "headRepository",
+        "pullRequest",
+        "workflowIdentity",
+        "trustedExecutionDomain",
+        "providerId",
+        "modelId",
+        "adapterId",
+        "templateId",
+        "policyId",
+        "toolDefinitionId",
+        "cacheConfigId"
+      ],
+      "properties": {
+        "kind": { "const": "reset" },
+        "sessionEpoch": { "$ref": "#/$defs/epochId" },
+        "ledgerEpoch": { "$ref": "#/$defs/epochId" },
+        "stateGeneration": { "$ref": "#/$defs/stateGeneration" },
+        "predecessorLedgerSha256": { "$ref": "#/$defs/sha256Hex" },
+        "predecessorManifestSha256": { "$ref": "#/$defs/sha256Hex" },
+        "predecessorLedgerEpoch": { "$ref": "#/$defs/epochId" },
+        "predecessorStateGeneration": { "$ref": "#/$defs/stateGeneration" },
+        "resetReason": {
+          "enum": ["base_change", "head_history_discontinuity", "cache_contract_change"]
+        },
+        "repository": { "$ref": "#/$defs/identityString" },
+        "headRepository": { "$ref": "#/$defs/identityString" },
+        "pullRequest": { "$ref": "#/$defs/pullRequest" },
+        "workflowIdentity": { "$ref": "#/$defs/identityString" },
+        "trustedExecutionDomain": { "$ref": "#/$defs/identityString" },
+        "providerId": { "$ref": "#/$defs/identityString" },
+        "modelId": { "$ref": "#/$defs/identityString" },
+        "adapterId": { "$ref": "#/$defs/identityString" },
+        "templateId": { "$ref": "#/$defs/identityString" },
+        "policyId": { "$ref": "#/$defs/identityString" },
+        "toolDefinitionId": { "$ref": "#/$defs/identityString" },
+        "cacheConfigId": { "$ref": "#/$defs/identityString" }
+      }
+    },
+    "recoveryRootHeader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "sessionEpoch",
+        "ledgerEpoch",
+        "stateGeneration",
+        "predecessorLedgerSha256",
+        "recoveryReason",
+        "repository",
+        "headRepository",
+        "pullRequest",
+        "workflowIdentity",
+        "trustedExecutionDomain",
+        "providerId",
+        "modelId",
+        "adapterId",
+        "templateId",
+        "policyId",
+        "toolDefinitionId",
+        "cacheConfigId"
+      ],
+      "properties": {
+        "kind": { "const": "recovery_root" },
+        "sessionEpoch": { "$ref": "#/$defs/epochId" },
+        "ledgerEpoch": { "$ref": "#/$defs/epochId" },
+        "stateGeneration": { "const": 0 },
+        "predecessorLedgerSha256": { "const": "bootstrap" },
+        "recoveryReason": {
+          "enum": [
+            "unavailable_accepted_artifact",
+            "contract_version_incompatible",
+            "corrupt_accepted_artifact",
+            "integrity_mismatch",
+            "unsafe_provenance",
+            "state_key_mismatch",
+            "over_bound_ledger"
+          ]
+        },
+        "repository": { "$ref": "#/$defs/identityString" },
+        "headRepository": { "$ref": "#/$defs/identityString" },
+        "pullRequest": { "$ref": "#/$defs/pullRequest" },
+        "workflowIdentity": { "$ref": "#/$defs/identityString" },
+        "trustedExecutionDomain": { "$ref": "#/$defs/identityString" },
+        "providerId": { "$ref": "#/$defs/identityString" },
+        "modelId": { "$ref": "#/$defs/identityString" },
+        "adapterId": { "$ref": "#/$defs/identityString" },
+        "templateId": { "$ref": "#/$defs/identityString" },
+        "policyId": { "$ref": "#/$defs/identityString" },
+        "toolDefinitionId": { "$ref": "#/$defs/identityString" },
+        "cacheConfigId": { "$ref": "#/$defs/identityString" }
+      }
+    },
+    "record": {
+      "type": "object",
+      "required": ["role", "interactionId", "interactionOrdinal"],
+      "properties": {
+        "role": {
+          "enum": ["review_context", "review_outcome"]
+        },
+        "interactionId": { "$ref": "#/$defs/sha256Hex" },
+        "interactionOrdinal": { "$ref": "#/$defs/interactionOrdinal" }
+      },
+      "oneOf": [
+        { "$ref": "#/$defs/reviewContextRecord" },
+        { "$ref": "#/$defs/reviewOutcomeRecord" }
+      ]
+    },
+    "reviewContextRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "interactionId",
+        "interactionOrdinal",
+        "subjectDigest",
+        "cacheContractDigest",
+        "reviewedHeadSha",
+        "reviewedBaseSha",
+        "changedFiles"
+      ],
+      "properties": {
+        "role": { "const": "review_context" },
+        "interactionId": { "$ref": "#/$defs/sha256Hex" },
+        "interactionOrdinal": { "$ref": "#/$defs/interactionOrdinal" },
+        "subjectDigest": { "$ref": "#/$defs/sha256Hex" },
+        "cacheContractDigest": { "$ref": "#/$defs/sha256Hex" },
+        "reviewedHeadSha": { "$ref": "#/$defs/gitSha" },
+        "reviewedBaseSha": { "$ref": "#/$defs/gitSha" },
+        "changedFiles": {
+          "type": "array",
+          "maxItems": 200,
+          "items": { "$ref": "#/$defs/changedFile" }
+        }
+      }
+    },
+    "changedFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "status", "additions", "deletions", "changes"],
+      "properties": {
+        "path": { "$ref": "#/$defs/safeRelativePath" },
+        "previousPath": {
+          "oneOf": [{ "$ref": "#/$defs/safeRelativePath" }, { "type": "null" }]
+        },
+        "status": {
+          "enum": ["added", "removed", "modified", "renamed", "copied", "changed", "unchanged"]
+        },
+        "additions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "deletions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "changes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "patch": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["sha256", "truncated", "maxChars"],
+          "properties": {
+            "sha256": { "$ref": "#/$defs/sha256Hex" },
+            "truncated": { "type": "boolean" },
+            "maxChars": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            }
+          }
+        }
+      }
+    },
+    "reviewOutcomeRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "interactionId",
+        "interactionOrdinal",
+        "summary",
+        "findings",
+        "limitations"
+      ],
+      "properties": {
+        "role": { "const": "review_outcome" },
+        "interactionId": { "$ref": "#/$defs/sha256Hex" },
+        "interactionOrdinal": { "$ref": "#/$defs/interactionOrdinal" },
+        "summary": { "$ref": "#/$defs/nonEmptyString" },
+        "findings": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "$ref": "#/$defs/finding" }
+        },
+        "limitations": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1200,
+            "pattern": "\\S"
+          }
+        }
+      }
+    }
+  }
+}
