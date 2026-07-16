@@ -1,0 +1,432 @@
+{
+  "schemaVersion": 1,
+  "expectedCodes": [
+    "invalid-metadata-bounds",
+    "invalid-metadata-bom",
+    "invalid-metadata-utf8",
+    "invalid-metadata-json",
+    "invalid-metadata-duplicate-json-property",
+    "invalid-metadata-unicode",
+    "invalid-metadata-schema",
+    "invalid-metadata-additional-property",
+    "invalid-metadata-unknown-enum",
+    "invalid-metadata-token-out-of-range",
+    "invalid-metadata-identity-syntax",
+    "invalid-metadata-model-alias-literal",
+    "invalid-metadata-provider-identity-cross-mismatch",
+    "invalid-metadata-attempt-uniqueness",
+    "invalid-metadata-attempt-ordering",
+    "invalid-metadata-attempt-contiguity",
+    "invalid-metadata-request-ordering",
+    "invalid-metadata-multiple-succeeded-attempts",
+    "invalid-metadata-attempt-usage-inconsistent",
+    "invalid-metadata-attempt-outcome-error-consistency",
+    "invalid-metadata-stateless-proof",
+    "invalid-metadata-error-code-order",
+    "invalid-metadata-aggregate-mismatch",
+    "invalid-metadata-error-list-truncated"
+  ],
+  "semanticCases": [
+    "model-alias-literal",
+    "provider-identity-cross-mismatch",
+    "identity-syntax",
+    "attempt-uniqueness",
+    "attempt-ordering",
+    "attempt-contiguity",
+    "request-ordering",
+    "multiple-succeeded-attempts",
+    "attempt-usage-inconsistent",
+    "attempt-outcome-error-consistency",
+    "failed-only-provider-cancelled",
+    "failed-provider-failure-plus-cancelled",
+    "cancelled-with-provider-failure",
+    "stateless-proof",
+    "error-code-order",
+    "aggregate-mismatch",
+    "verified-proof-with-missing-marker",
+    "eligible-with-capability-unsupported",
+    "unknown-with-capability-unsupported",
+    "ineligible-with-capability-unsupported",
+    "telemetry-unavailable-with-capability-unsupported",
+    "proof-marker-on-nonfirst-attempt",
+    "duplicate-proof-marker"
+  ],
+  "fixtures": [
+    {
+      "name": "valid-standard-zero-attempt.json",
+      "valid": true,
+      "expectedCodes": []
+    },
+    {
+      "name": "valid-standard-resumed.json",
+      "valid": true,
+      "expectedCodes": []
+    },
+    {
+      "name": "hash-vectors.json",
+      "valid": true,
+      "expectedCodes": [],
+      "runner": "hash"
+    },
+    {
+      "name": "valid-standard-partial-cache.json",
+      "valid": true,
+      "expectedCodes": []
+    },
+    {
+      "name": "positive-matrix.json",
+      "valid": true,
+      "expectedCodes": [],
+      "runner": "positive"
+    },
+    {
+      "name": "invalid-schema-version.json",
+      "valid": false,
+      "expectedCodes": ["invalid-metadata-schema", "invalid-metadata-schema"],
+      "expectedPaths": ["", "/schemaVersion"]
+    },
+    {
+      "name": "raw-bounds.json",
+      "valid": false,
+      "expectedCodes": ["invalid-metadata-bounds"],
+      "expectedPaths": [""],
+      "runner": "raw"
+    },
+    {
+      "name": "raw-bom.json",
+      "valid": false,
+      "expectedCodes": ["invalid-metadata-bom"],
+      "expectedPaths": [""],
+      "runner": "raw"
+    },
+    {
+      "name": "raw-utf8.json",
+      "valid": false,
+      "expectedCodes": ["invalid-metadata-utf8"],
+      "expectedPaths": [""],
+      "runner": "raw"
+    },
+    {
+      "name": "raw-json.json",
+      "valid": false,
+      "expectedCodes": ["invalid-metadata-json"],
+      "expectedPaths": [""],
+      "runner": "raw"
+    },
+    {
+      "name": "raw-duplicate.json",
+      "valid": false,
+      "expectedCodes": ["invalid-metadata-duplicate-json-property"],
+      "expectedPaths": [""],
+      "runner": "raw"
+    },
+    {
+      "name": "raw-unicode.json",
+      "valid": false,
+      "expectedCodes": ["invalid-metadata-unicode"],
+      "expectedPaths": ["/<untrusted-property>"],
+      "runner": "raw"
+    },
+    {
+      "name": "raw-schema.json",
+      "valid": false,
+      "expectedCodes": ["invalid-metadata-schema", "invalid-metadata-schema"],
+      "expectedPaths": ["", "/schemaVersion"],
+      "runner": "raw"
+    },
+    {
+      "name": "raw-additional.json",
+      "valid": false,
+      "expectedCodes": ["invalid-metadata-additional-property"],
+      "expectedPaths": ["/<untrusted-property>"],
+      "runner": "raw"
+    },
+    {
+      "name": "raw-unknown-enum.json",
+      "valid": false,
+      "expectedCodes": ["invalid-metadata-unknown-enum"],
+      "expectedPaths": ["/capability/aggregate"],
+      "runner": "raw"
+    },
+    {
+      "name": "raw-token-maximum.json",
+      "valid": false,
+      "expectedCodes": ["invalid-metadata-schema", "invalid-metadata-token-out-of-range"],
+      "expectedPaths": [
+        "/normalizedUsage/attempts/0/outputTokens",
+        "/normalizedUsage/attempts/0/outputTokens"
+      ],
+      "runner": "raw"
+    },
+    {
+      "name": "raw-error-list-truncated.json",
+      "valid": false,
+      "expectedCodes": [
+        "invalid-metadata-aggregate-mismatch",
+        "invalid-metadata-attempt-outcome-error-consistency",
+        "invalid-metadata-attempt-ordering",
+        "invalid-metadata-attempt-uniqueness",
+        "invalid-metadata-attempt-outcome-error-consistency",
+        "invalid-metadata-attempt-contiguity",
+        "invalid-metadata-attempt-uniqueness",
+        "invalid-metadata-attempt-ordering",
+        "invalid-metadata-attempt-uniqueness",
+        "invalid-metadata-attempt-outcome-error-consistency",
+        "invalid-metadata-attempt-contiguity",
+        "invalid-metadata-attempt-uniqueness",
+        "invalid-metadata-attempt-ordering",
+        "invalid-metadata-attempt-uniqueness",
+        "invalid-metadata-attempt-outcome-error-consistency",
+        "invalid-metadata-attempt-contiguity",
+        "invalid-metadata-attempt-uniqueness",
+        "invalid-metadata-attempt-ordering",
+        "invalid-metadata-attempt-uniqueness",
+        "invalid-metadata-attempt-outcome-error-consistency",
+        "invalid-metadata-attempt-contiguity",
+        "invalid-metadata-attempt-uniqueness",
+        "invalid-metadata-attempt-ordering",
+        "invalid-metadata-attempt-uniqueness",
+        "invalid-metadata-attempt-outcome-error-consistency",
+        "invalid-metadata-attempt-contiguity",
+        "invalid-metadata-attempt-uniqueness",
+        "invalid-metadata-attempt-ordering",
+        "invalid-metadata-attempt-uniqueness",
+        "invalid-metadata-attempt-outcome-error-consistency",
+        "invalid-metadata-attempt-contiguity",
+        "invalid-metadata-error-list-truncated"
+      ],
+      "runner": "raw"
+    },
+    {
+      "name": "semantic-model-alias.json",
+      "valid": false,
+      "expectedCodes": ["invalid-metadata-model-alias-literal"],
+      "expectedPaths": ["/resolvedModelId"],
+      "runner": "semantic"
+    },
+    {
+      "name": "semantic-provider-identity.json",
+      "valid": false,
+      "expectedCodes": ["invalid-metadata-provider-identity-cross-mismatch"],
+      "expectedPaths": ["/observedProviderId"],
+      "runner": "semantic"
+    },
+    {
+      "name": "semantic-identity-syntax.json",
+      "valid": false,
+      "expectedCodes": ["invalid-metadata-identity-syntax", "invalid-metadata-identity-syntax"],
+      "expectedPaths": ["/observedProviderId", "/selectedProviderId"],
+      "runner": "semantic"
+    },
+    {
+      "name": "semantic-attempt-uniqueness.json",
+      "valid": false,
+      "expectedCodes": [
+        "invalid-metadata-aggregate-mismatch",
+        "invalid-metadata-multiple-succeeded-attempts",
+        "invalid-metadata-attempt-ordering",
+        "invalid-metadata-attempt-uniqueness",
+        "invalid-metadata-attempt-contiguity",
+        "invalid-metadata-attempt-uniqueness"
+      ],
+      "expectedPaths": [
+        "",
+        "/normalizedUsage/attempts",
+        "/normalizedUsage/attempts/1",
+        "/normalizedUsage/attempts/1",
+        "/normalizedUsage/attempts/1/attemptOrdinal",
+        "/normalizedUsage/attempts/1/attemptOrdinal"
+      ],
+      "runner": "semantic"
+    },
+    {
+      "name": "semantic-attempt-ordering.json",
+      "valid": false,
+      "expectedCodes": [
+        "invalid-metadata-aggregate-mismatch",
+        "invalid-metadata-attempt-ordering",
+        "invalid-metadata-attempt-uniqueness",
+        "invalid-metadata-attempt-contiguity",
+        "invalid-metadata-attempt-uniqueness"
+      ],
+      "expectedPaths": [
+        "",
+        "/normalizedUsage/attempts/1",
+        "/normalizedUsage/attempts/1",
+        "/normalizedUsage/attempts/1/attemptOrdinal",
+        "/normalizedUsage/attempts/1/attemptOrdinal"
+      ],
+      "runner": "semantic"
+    },
+    {
+      "name": "semantic-attempt-contiguity.json",
+      "valid": false,
+      "expectedCodes": [
+        "invalid-metadata-aggregate-mismatch",
+        "invalid-metadata-attempt-contiguity"
+      ],
+      "expectedPaths": ["", "/normalizedUsage/attempts/1/attemptOrdinal"],
+      "runner": "semantic"
+    },
+    {
+      "name": "semantic-request-ordering.json",
+      "valid": false,
+      "expectedCodes": ["invalid-metadata-aggregate-mismatch", "invalid-metadata-request-ordering"],
+      "expectedPaths": ["", "/normalizedUsage/requests/0/requestOrdinal"],
+      "runner": "semantic"
+    },
+    {
+      "name": "semantic-multiple-succeeded.json",
+      "valid": false,
+      "expectedCodes": [
+        "invalid-metadata-aggregate-mismatch",
+        "invalid-metadata-multiple-succeeded-attempts"
+      ],
+      "expectedPaths": ["", "/normalizedUsage/attempts"],
+      "runner": "semantic"
+    },
+    {
+      "name": "semantic-attempt-usage.json",
+      "valid": false,
+      "expectedCodes": ["invalid-metadata-attempt-usage-inconsistent"],
+      "expectedPaths": ["/normalizedUsage/attempts/0/usageCompleteness"],
+      "runner": "semantic"
+    },
+    {
+      "name": "semantic-attempt-outcome.json",
+      "valid": false,
+      "expectedCodes": [
+        "invalid-metadata-aggregate-mismatch",
+        "invalid-metadata-attempt-outcome-error-consistency"
+      ],
+      "expectedPaths": ["", "/normalizedUsage/attempts/0/attemptErrorCodes"],
+      "runner": "semantic"
+    },
+    {
+      "name": "semantic-failed-only-cancelled.json",
+      "valid": false,
+      "expectedCodes": [
+        "invalid-metadata-aggregate-mismatch",
+        "invalid-metadata-attempt-outcome-error-consistency",
+        "invalid-metadata-attempt-outcome-error-consistency"
+      ],
+      "expectedPaths": [
+        "",
+        "/normalizedUsage/attempts/0/attemptErrorCodes",
+        "/normalizedUsage/attempts/0/outcome"
+      ],
+      "runner": "semantic"
+    },
+    {
+      "name": "semantic-failed-failure-plus-cancelled.json",
+      "valid": false,
+      "expectedCodes": [
+        "invalid-metadata-aggregate-mismatch",
+        "invalid-metadata-attempt-outcome-error-consistency"
+      ],
+      "expectedPaths": ["", "/normalizedUsage/attempts/0/attemptErrorCodes"],
+      "runner": "semantic"
+    },
+    {
+      "name": "semantic-cancelled-provider-failure.json",
+      "valid": false,
+      "expectedCodes": [
+        "invalid-metadata-aggregate-mismatch",
+        "invalid-metadata-attempt-outcome-error-consistency"
+      ],
+      "expectedPaths": ["", "/normalizedUsage/attempts/0/attemptErrorCodes"],
+      "runner": "semantic"
+    },
+    {
+      "name": "semantic-stateless-proof.json",
+      "valid": false,
+      "expectedCodes": ["invalid-metadata-aggregate-mismatch", "invalid-metadata-stateless-proof"],
+      "expectedPaths": ["", "/normalizedUsage/attempts"],
+      "runner": "semantic"
+    },
+    {
+      "name": "semantic-error-order.json",
+      "valid": false,
+      "expectedCodes": [
+        "invalid-metadata-aggregate-mismatch",
+        "invalid-metadata-error-code-order",
+        "invalid-metadata-error-code-order"
+      ],
+      "expectedPaths": ["", "/errorCodes", "/normalizedUsage/attempts/0/attemptErrorCodes"],
+      "runner": "semantic"
+    },
+    {
+      "name": "semantic-aggregate-mismatch.json",
+      "valid": false,
+      "expectedCodes": ["invalid-metadata-aggregate-mismatch"],
+      "expectedPaths": [""],
+      "runner": "semantic"
+    },
+    {
+      "name": "semantic-verified-proof-with-missing-marker.json",
+      "valid": false,
+      "expectedCodes": ["invalid-metadata-aggregate-mismatch", "invalid-metadata-stateless-proof"],
+      "expectedPaths": ["", "/normalizedUsage/attempts"],
+      "runner": "semantic"
+    },
+    {
+      "name": "semantic-eligible-with-capability-unsupported.json",
+      "valid": false,
+      "expectedCodes": ["invalid-metadata-attempt-outcome-error-consistency"],
+      "expectedPaths": ["/normalizedUsage/attempts/0/attemptErrorCodes"],
+      "runner": "semantic"
+    },
+    {
+      "name": "semantic-unknown-with-capability-unsupported.json",
+      "valid": false,
+      "expectedCodes": [
+        "invalid-metadata-aggregate-mismatch",
+        "invalid-metadata-attempt-outcome-error-consistency"
+      ],
+      "expectedPaths": ["", "/normalizedUsage/attempts/0/attemptErrorCodes"],
+      "runner": "semantic"
+    },
+    {
+      "name": "semantic-ineligible-with-capability-unsupported.json",
+      "valid": false,
+      "expectedCodes": [
+        "invalid-metadata-aggregate-mismatch",
+        "invalid-metadata-attempt-outcome-error-consistency"
+      ],
+      "expectedPaths": ["", "/normalizedUsage/attempts/0/attemptErrorCodes"],
+      "runner": "semantic"
+    },
+    {
+      "name": "semantic-telemetry-unavailable-with-capability-unsupported.json",
+      "valid": false,
+      "expectedCodes": [
+        "invalid-metadata-aggregate-mismatch",
+        "invalid-metadata-attempt-outcome-error-consistency"
+      ],
+      "expectedPaths": ["", "/normalizedUsage/attempts/0/attemptErrorCodes"],
+      "runner": "semantic"
+    },
+    {
+      "name": "semantic-proof-marker-on-nonfirst-attempt.json",
+      "valid": false,
+      "expectedCodes": ["invalid-metadata-aggregate-mismatch", "invalid-metadata-stateless-proof"],
+      "expectedPaths": ["", "/normalizedUsage/attempts"],
+      "runner": "semantic"
+    },
+    {
+      "name": "semantic-duplicate-proof-marker.json",
+      "valid": false,
+      "expectedCodes": [
+        "invalid-metadata-aggregate-mismatch",
+        "invalid-metadata-stateless-proof",
+        "invalid-metadata-error-code-order"
+      ],
+      "expectedPaths": [
+        "",
+        "/normalizedUsage/attempts",
+        "/normalizedUsage/attempts/0/attemptErrorCodes"
+      ],
+      "runner": "semantic"
+    }
+  ]
+}

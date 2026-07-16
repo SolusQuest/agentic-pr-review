@@ -23,6 +23,8 @@ export {
   MAX_DIAGNOSTIC_ERRORS,
   MAX_DIAGNOSTIC_MESSAGE_CHARS,
   MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES,
+  MAX_METADATA_PATH_CHARS,
+  MAX_METADATA_PATH_UTF8_BYTES,
   METADATA_MAX_BYTES,
   PREFIX_CONTRACT_VERSION,
   PROVIDER_RUN_METADATA_FILENAME,
@@ -96,3 +98,38 @@ export {
   type HeadRelationship,
   type IncompatibilityCode,
 } from './compatibility.js';
+
+export {
+  buildSemanticEnvelope,
+  computeMetadataSemanticSha256,
+  deriveAggregate,
+  identityAgrees,
+  MAX_METADATA_ERRORS,
+  METADATA_ERROR_CODES,
+  parseProviderRunMetadata,
+} from '../provider-metadata/index.js';
+
+export type {
+  AggregateCapability,
+  Attempt,
+  CacheStatus,
+  DeriveAggregateInput,
+  DeriveAggregateResult,
+  DerivedProviderRunMetadataAggregate,
+  HostMetadataIdentity,
+  MetadataError,
+  MetadataErrorCode,
+  NormalizedUsage,
+  ParseProviderRunMetadataResult,
+  ProviderErrorCode,
+  ProviderRunMetadataV1,
+  ObservedCapability,
+  RequestUsage,
+  RetryObservations,
+  SemanticEnvelope,
+  StatelessProof,
+  TelemetryCompleteness,
+  UsageCompleteness,
+  ValidatedAttempt,
+  ValidatedProviderRunMetadataV1,
+} from '../provider-metadata/types.js';

@@ -1,0 +1,84 @@
+{
+  "adapterId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "cacheStatus": "hit",
+  "candidateLedgerSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "capability": { "aggregate": "eligible", "mode": "standard", "statelessProof": null },
+  "consumedInputSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "errorCodes": [],
+  "interactionId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "logicalPrefixSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "normalizedUsage": {
+    "aggregate": {
+      "attemptCount": 1,
+      "cacheReadInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 2,
+      "requestCount": 1,
+      "totalInputTokens": 4,
+      "uncachedInputTokens": 4
+    },
+    "attempts": [
+      {
+        "attemptErrorCodes": [],
+        "attemptOrdinal": 0,
+        "cacheReadInputTokens": 0,
+        "cacheStatus": "hit",
+        "cacheWriteInputTokens": 0,
+        "capability": "eligible",
+        "outcome": "succeeded",
+        "outputTokens": 2,
+        "requestOrdinal": 0,
+        "totalInputTokens": 4,
+        "uncachedInputTokens": 4,
+        "usageCompleteness": "complete"
+      }
+    ],
+    "requests": [
+      {
+        "cacheReadInputTokens": 0,
+        "cacheStatus": "hit",
+        "cacheWriteInputTokens": 0,
+        "capability": "eligible",
+        "outputTokens": 2,
+        "requestOrdinal": 0,
+        "totalInputTokens": 4,
+        "uncachedInputTokens": 4,
+        "usageCompleteness": "complete"
+      }
+    ]
+  },
+  "observedProviderId": "synthetic",
+  "prefixSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "predecessorLedgerSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "producingRunId": "2",
+  "resultSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "resolvedModelId": "model-1",
+  "retryObservations": {
+    "aggregate": {
+      "attemptCount": 1,
+      "cancelledCount": 0,
+      "failedCount": 0,
+      "requestCount": 1,
+      "succeededCount": 1
+    },
+    "requests": [
+      {
+        "attemptCount": 1,
+        "cancelledCount": 0,
+        "failedCount": 0,
+        "requestOrdinal": 0,
+        "succeededCount": 1
+      }
+    ]
+  },
+  "runAttempt": 1,
+  "schemaVersion": 1,
+  "selectedProviderId": "synthetic",
+  "telemetryCompleteness": {
+    "aggregate": "complete",
+    "cache": "complete",
+    "statelessProof": "notApplicable",
+    "usage": "complete"
+  },
+  "traceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

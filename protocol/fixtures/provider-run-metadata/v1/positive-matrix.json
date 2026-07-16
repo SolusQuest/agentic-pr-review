@@ -1,0 +1,21 @@
+{
+  "kind": "positive-matrix",
+  "cases": [
+    "cache-hit",
+    "cache-miss",
+    "cache-partial",
+    "cache-unsupported",
+    "cache-unknown",
+    "capability-eligible",
+    "capability-ineligible",
+    "capability-unsupported",
+    "capability-telemetry-unavailable",
+    "capability-unknown",
+    "usage-complete",
+    "usage-missing",
+    "usage-partial-output-only",
+    "multi-request-retry",
+    "stateless-verified",
+    "stateless-unverified"
+  ]
+}

@@ -275,51 +275,76 @@ export function scanStringSafety(
   rootSchema: SchemaNode | undefined,
 ): StringSafetyViolation | undefined {
   const rootPosition = normalizePosition(rootSchema, new Set<SchemaNode>(), rootSchema);
-  return scanInternal(value, [], rootPosition, true);
-}
+  type Frame =
+    | {
+        readonly kind: 'value';
+        readonly value: unknown;
+        readonly path: readonly string[];
+        readonly schemaPosition: SchemaPosition;
+        readonly trustedChain: boolean;
+      }
+    | {
+        readonly kind: 'property';
+        readonly object: Record<string, unknown>;
+        readonly key: string;
+        readonly path: readonly string[];
+        readonly schemaPosition: SchemaPosition;
+        readonly trustedChain: boolean;
+      };
+  const stack: Frame[] = [
+    { kind: 'value', value, path: [], schemaPosition: rootPosition, trustedChain: true },
+  ];
 
-function scanInternal(
-  value: unknown,
-  path: readonly string[],
-  schemaPosition: SchemaPosition,
-  trustedChain: boolean,
-): StringSafetyViolation | undefined {
-  if (typeof value === 'string') {
-    if (violatesStringSafety(value)) {
-      return { segments: [...path] };
-    }
-    return undefined;
-  }
-  if (Array.isArray(value)) {
-    const arrResult = resolveArrayItem(schemaPosition);
-    const itemTrusted = trustedChain && arrResult.schemaKnown;
-    const itemPosition = itemTrusted ? arrResult.childSchemaPosition : UNKNOWN_POSITION;
-    for (let i = 0; i < value.length; i += 1) {
-      const child = value[i];
-      const res = scanInternal(child, [...path, String(i)], itemPosition, itemTrusted);
-      if (res) return res;
-    }
-    return undefined;
-  }
-  if (isObject(value)) {
-    const keys = Object.keys(value as Record<string, unknown>).sort(utf16CodeUnitCompare);
-    for (const key of keys) {
-      if (containsLoneSurrogate(key)) {
-        return { segments: [...path, '<invalid-utf16>'] };
-      }
-      if (key.includes('\u0000')) {
-        return { segments: [...path, '<invalid-nul>'] };
-      }
+  while (stack.length > 0) {
+    const frame = stack.pop()!;
+    if (frame.kind === 'property') {
+      const { object, key, path, schemaPosition, trustedChain } = frame;
+      if (containsLoneSurrogate(key)) return { segments: [...path, '<invalid-utf16>'] };
+      if (key.includes('\u0000')) return { segments: [...path, '<invalid-nul>'] };
       const propResult = resolveProperty(schemaPosition, key);
       const keyIsSchemaKnown = trustedChain && propResult.schemaKnown;
-      const segment = sanitizeSegment(key, keyIsSchemaKnown);
-      const childTrusted = keyIsSchemaKnown;
-      const childPosition = childTrusted ? propResult.childSchemaPosition : UNKNOWN_POSITION;
-      const child = (value as Record<string, unknown>)[key];
-      const res = scanInternal(child, [...path, segment], childPosition, childTrusted);
-      if (res) return res;
+      stack.push({
+        kind: 'value',
+        value: object[key],
+        path: [...path, sanitizeSegment(key, keyIsSchemaKnown)],
+        schemaPosition: keyIsSchemaKnown ? propResult.childSchemaPosition : UNKNOWN_POSITION,
+        trustedChain: keyIsSchemaKnown,
+      });
+      continue;
     }
-    return undefined;
+    const { value: current, path, schemaPosition, trustedChain } = frame;
+    if (typeof current === 'string') {
+      if (violatesStringSafety(current)) return { segments: [...path] };
+      continue;
+    }
+    if (Array.isArray(current)) {
+      const arrResult = resolveArrayItem(schemaPosition);
+      const itemTrusted = trustedChain && arrResult.schemaKnown;
+      const itemPosition = itemTrusted ? arrResult.childSchemaPosition : UNKNOWN_POSITION;
+      for (let i = current.length - 1; i >= 0; i -= 1) {
+        stack.push({
+          kind: 'value',
+          value: current[i],
+          path: [...path, String(i)],
+          schemaPosition: itemPosition,
+          trustedChain: itemTrusted,
+        });
+      }
+      continue;
+    }
+    if (!isObject(current)) continue;
+    const keys = Object.keys(current as Record<string, unknown>).sort(utf16CodeUnitCompare);
+    for (let i = keys.length - 1; i >= 0; i -= 1) {
+      const key = keys[i]!;
+      stack.push({
+        kind: 'property',
+        object: current as Record<string, unknown>,
+        key,
+        path,
+        schemaPosition,
+        trustedChain,
+      });
+    }
   }
   return undefined;
 }

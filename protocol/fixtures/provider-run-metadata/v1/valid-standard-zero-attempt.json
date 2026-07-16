@@ -1,0 +1,49 @@
+{
+  "adapterId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "cacheStatus": "unknown",
+  "candidateLedgerSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "capability": { "aggregate": "unknown", "mode": "standard", "statelessProof": null },
+  "consumedInputSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "errorCodes": [],
+  "interactionId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "logicalPrefixSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "normalizedUsage": {
+    "aggregate": {
+      "attemptCount": 0,
+      "cacheReadInputTokens": null,
+      "cacheWriteInputTokens": null,
+      "outputTokens": null,
+      "requestCount": 0,
+      "totalInputTokens": null,
+      "uncachedInputTokens": null
+    },
+    "attempts": [],
+    "requests": []
+  },
+  "observedProviderId": "synthetic",
+  "prefixSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "predecessorLedgerSha256": "bootstrap",
+  "producingRunId": "1",
+  "resultSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "resolvedModelId": "model-1",
+  "retryObservations": {
+    "aggregate": {
+      "attemptCount": 0,
+      "cancelledCount": 0,
+      "failedCount": 0,
+      "requestCount": 0,
+      "succeededCount": 0
+    },
+    "requests": []
+  },
+  "runAttempt": 1,
+  "schemaVersion": 1,
+  "selectedProviderId": "synthetic",
+  "telemetryCompleteness": {
+    "aggregate": "missing",
+    "cache": "missing",
+    "statelessProof": "notApplicable",
+    "usage": "missing"
+  },
+  "traceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

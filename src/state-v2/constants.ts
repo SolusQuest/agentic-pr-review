@@ -27,6 +27,8 @@ export const GIT_SHA_REGEX = /^([a-f0-9]{40}|[a-f0-9]{64})$/;
 export const MAX_DIAGNOSTIC_ERRORS = 8 as const;
 export const MAX_DIAGNOSTIC_MESSAGE_CHARS = 256 as const;
 export const MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES = 1024 as const;
+export const MAX_METADATA_PATH_CHARS = 256 as const;
+export const MAX_METADATA_PATH_UTF8_BYTES = 1024 as const;
 
 export const EXPECTED_BUNDLE_FILENAMES = [
   MANIFEST_FILENAME,

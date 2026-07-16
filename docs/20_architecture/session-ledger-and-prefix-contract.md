@@ -1002,6 +1002,8 @@ For the purposes of V3, "observationally equivalent to `UnknownPosition`" means:
 
 ### Aggregate token overflow
 
+The TypeScript ProviderRunMetadataV1 realization is documented in [`provider-run-metadata-v1.md`](provider-run-metadata-v1.md); this link is non-normative and does not duplicate the shared algorithms below.
+
 `invalid-metadata-token-out-of-range` is produced by two distinct stages:
 
 - **Stage 3 (JSON Schema)** rejects any single-value token count that exceeds `2^53 - 1`.
