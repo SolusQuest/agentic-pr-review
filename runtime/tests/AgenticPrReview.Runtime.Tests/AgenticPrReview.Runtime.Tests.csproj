@@ -16,5 +16,7 @@
     <ProjectReference Include="..\..\src\AgenticPrReview.Runtime\AgenticPrReview.Runtime.csproj" />
     <None Include="..\..\..\protocol\fixtures\v1\**\*" Link="protocol\fixtures\v1\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\fixtures\deterministic\**\*" Link="fixtures\deterministic\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Scratch corpus for #50 formatter validation; removed once protocol vectors land. -->
+    <None Include="..\..\..\.local\num-corpus.json" Link="num-corpus.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
