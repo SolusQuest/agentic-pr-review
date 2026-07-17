@@ -427,11 +427,11 @@ public static class LedgerParser
     // Materializes a schema-valid integer slot. JsonElement.TryGetInt64 only accepts
     // integer-form tokens, but JSON Schema draft-07 numeric equality also accepts
     // mathematical integers written with a fraction or exponent (1.0, 1e0, 0e0); those
-    // are read via double with an exactness/range check. Every ledger integer slot is
-    // range-bounded by the schema (const 0/1, 0..1_000_000, or 1..2_147_483_647), far
-    // inside double's exact-integer domain, so a schema-valid value always converts
-    // exactly; the non-integer-form raw bytes then fail the canonical byte comparison
-    // as ledger_non_canonical.
+    // are read via decimal, whose equality/truncation semantics are exact (no binary
+    // floating-point rounding). Every ledger integer slot is range-bounded by the
+    // schema (const 0/1, 0..1_000_000, or 1..2_147_483_647), far inside decimal's
+    // range, so a schema-valid value always converts exactly; the non-integer-form raw
+    // bytes then fail the canonical byte comparison as ledger_non_canonical.
     private static long GetInteger(JsonElement element)
     {
         if (element.TryGetInt64(out var value))
@@ -439,9 +439,8 @@ public static class LedgerParser
             return value;
         }
 
-        var asDouble = element.GetDouble();
-        if (!double.IsFinite(asDouble) || asDouble != Math.Truncate(asDouble) ||
-            asDouble < -9223372036854775808.0 || asDouble >= 9223372036854775808.0)
+        if (!element.TryGetDecimal(out var asDecimal) || asDecimal != Math.Truncate(asDecimal) ||
+            asDecimal < long.MinValue || asDecimal > long.MaxValue)
         {
             // Unreachable for schema-valid input (all integer slots are bounded);
             // the ParseAndValidate top-level catch converts this to a fail-closed
@@ -449,7 +448,7 @@ public static class LedgerParser
             throw new InvalidOperationException("Schema-valid integer is not exactly representable as Int64.");
         }
 
-        return (long)asDouble;
+        return (long)asDecimal;
     }
 
     private static LedgerModel BuildModel(JsonElement root)
