@@ -27,9 +27,7 @@ export function isValidIdentity(value: unknown): value is string {
 }
 
 export function validateIdentity(value: unknown): PrefixResult<string> {
-  return isValidIdentity(value)
-    ? ok(value)
-    : fail(PREFIX_CODES.identityInvalid);
+  return isValidIdentity(value) ? ok(value) : fail(PREFIX_CODES.identityInvalid);
 }
 
 export function validateModelSnapshot(modelId: unknown): PrefixResult<string> {

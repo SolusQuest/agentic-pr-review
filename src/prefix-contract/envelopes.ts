@@ -27,7 +27,13 @@ const REQUIRED_KEYS: Record<EnvelopeKind, readonly string[]> = {
   template: ['definition', 'schemaVersion', 'templateVersion'],
   policy: ['constraints', 'instructions', 'policyVersion', 'schemaVersion'],
   tools: ['definitions', 'schemaVersion', 'toolsetVersion'],
-  cacheConfig: ['cacheConfigVersion', 'eligibility', 'markerPolicy', 'schemaVersion', 'statelessMode'],
+  cacheConfig: [
+    'cacheConfigVersion',
+    'eligibility',
+    'markerPolicy',
+    'schemaVersion',
+    'statelessMode',
+  ],
   adapter: ['adapterBuildVersion', 'capabilityProfileVersion', 'schemaVersion'],
 };
 
@@ -170,7 +176,12 @@ function checkToolDefinitions(definitions: unknown): PrefixResult<ValidatedEnvel
 
     const record = tool as Record<string, unknown>;
     for (const key of Object.keys(record)) {
-      if (key !== 'description' && key !== 'inputSchema' && key !== 'name' && key !== 'policyMetadata') {
+      if (
+        key !== 'description' &&
+        key !== 'inputSchema' &&
+        key !== 'name' &&
+        key !== 'policyMetadata'
+      ) {
         return fail(PREFIX_CODES.envelopeInvalid, path + '/' + key);
       }
     }
@@ -193,7 +204,11 @@ function checkToolDefinitions(definitions: unknown): PrefixResult<ValidatedEnvel
     if (typeof record.description !== 'string') {
       return fail(PREFIX_CODES.envelopeInvalid, path + '/description');
     }
-    if (typeof record.inputSchema !== 'object' || record.inputSchema === null || Array.isArray(record.inputSchema)) {
+    if (
+      typeof record.inputSchema !== 'object' ||
+      record.inputSchema === null ||
+      Array.isArray(record.inputSchema)
+    ) {
       return fail(PREFIX_CODES.envelopeInvalid, path + '/inputSchema');
     }
   }
@@ -202,7 +217,9 @@ function checkToolDefinitions(definitions: unknown): PrefixResult<ValidatedEnvel
 }
 
 /** Structural bounds over the whole envelope value tree (D11). */
-function checkStructuralBounds(root: Record<string, unknown>): PrefixResult<ValidatedEnvelope> | null {
+function checkStructuralBounds(
+  root: Record<string, unknown>,
+): PrefixResult<ValidatedEnvelope> | null {
   interface Frame {
     readonly value: unknown;
     readonly depth: number;

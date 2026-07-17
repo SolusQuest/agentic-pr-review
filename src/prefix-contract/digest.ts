@@ -33,25 +33,35 @@ function digestId(tag: string, canonicalBytes: Uint8Array): string {
 
 export function computeTemplateId(envelope: unknown): PrefixResult<string> {
   const validated = validateTemplateEnvelope(envelope);
-  return validated.ok ? { ok: true, value: digestId(TAGS.template, validated.value.canonicalBytes) } : validated;
+  return validated.ok
+    ? { ok: true, value: digestId(TAGS.template, validated.value.canonicalBytes) }
+    : validated;
 }
 
 export function computePolicyId(envelope: unknown): PrefixResult<string> {
   const validated = validatePolicyEnvelope(envelope);
-  return validated.ok ? { ok: true, value: digestId(TAGS.policy, validated.value.canonicalBytes) } : validated;
+  return validated.ok
+    ? { ok: true, value: digestId(TAGS.policy, validated.value.canonicalBytes) }
+    : validated;
 }
 
 export function computeToolDefinitionId(envelope: unknown): PrefixResult<string> {
   const validated = validateToolsEnvelope(envelope);
-  return validated.ok ? { ok: true, value: digestId(TAGS.tools, validated.value.canonicalBytes) } : validated;
+  return validated.ok
+    ? { ok: true, value: digestId(TAGS.tools, validated.value.canonicalBytes) }
+    : validated;
 }
 
 export function computeCacheConfigId(envelope: unknown): PrefixResult<string> {
   const validated = validateCacheConfigEnvelope(envelope);
-  return validated.ok ? { ok: true, value: digestId(TAGS.config, validated.value.canonicalBytes) } : validated;
+  return validated.ok
+    ? { ok: true, value: digestId(TAGS.config, validated.value.canonicalBytes) }
+    : validated;
 }
 
 export function computeAdapterId(envelope: unknown): PrefixResult<string> {
   const validated = validateAdapterEnvelope(envelope);
-  return validated.ok ? { ok: true, value: digestId(TAGS.adapter, validated.value.canonicalBytes) } : validated;
+  return validated.ok
+    ? { ok: true, value: digestId(TAGS.adapter, validated.value.canonicalBytes) }
+    : validated;
 }

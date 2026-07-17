@@ -151,7 +151,13 @@ function computeDigestIds(envelopes: {
   tools: unknown;
   cacheConfig: unknown;
   adapter: unknown;
-}): { templateId: string; policyId: string; toolDefinitionId: string; cacheConfigId: string; adapterId: string } {
+}): {
+  templateId: string;
+  policyId: string;
+  toolDefinitionId: string;
+  cacheConfigId: string;
+  adapterId: string;
+} {
   const template = validateTemplateEnvelope(envelopes.template);
   const policy = validatePolicyEnvelope(envelopes.policy);
   const tools = validateToolsEnvelope(envelopes.tools);
@@ -508,10 +514,9 @@ function oracleMaterialize(input: MaterializeInput): MaterializeExpected {
   ];
 
   if (input.history.kind === 'continuation') {
-    const ledger = JSON.parse(new TextDecoder().decode(Buffer.from(input.history.ledgerHex, 'hex'))) as Record<
-      string,
-      unknown
-    >;
+    const ledger = JSON.parse(
+      new TextDecoder().decode(Buffer.from(input.history.ledgerHex, 'hex')),
+    ) as Record<string, unknown>;
     const records = ledger.records as Array<Record<string, unknown>>;
     for (const record of records) {
       if (record.role === 'review_context') {
@@ -550,8 +555,12 @@ function oracleMaterialize(input: MaterializeInput): MaterializeExpected {
 
   const stableLogical = concat(...stableSegments.map((segment) => frameSegment(segment.bytes)));
   const dynamicLogical = concat(...dynamicSegments.map((segment) => frameSegment(segment.bytes)));
-  const stableProvider = concat(...stableSegments.map((segment) => frameSegment(mapBlock(segment))));
-  const dynamicProvider = concat(...dynamicSegments.map((segment) => frameSegment(mapBlock(segment))));
+  const stableProvider = concat(
+    ...stableSegments.map((segment) => frameSegment(mapBlock(segment))),
+  );
+  const dynamicProvider = concat(
+    ...dynamicSegments.map((segment) => frameSegment(mapBlock(segment))),
+  );
 
   const logicalPrefixSha256 = sha256Hex(
     concat(
@@ -654,16 +663,22 @@ const INTERACTION_ALPHA_ID = 'a1'.repeat(32);
 const INTERACTION_BETA_ID = 'b2'.repeat(32);
 
 function continuationLedgerTwoPairsHex(identities: ExpectedIdentities): string {
-  return hex(Buffer.from(canonicalJsonBytes(continuationLedger(identities, [
-    ledgerContextRecord(CONTEXT_ALPHA, identities, INTERACTION_ALPHA_ID, 0),
-    ledgerOutcomeRecord(OUTCOME_ALPHA, INTERACTION_ALPHA_ID, 0),
-    ledgerContextRecord(CONTEXT_BETA, identities, INTERACTION_BETA_ID, 1),
-    ledgerOutcomeRecord(
-      { summary: 'No findings.', findings: [], limitations: [] },
-      INTERACTION_BETA_ID,
-      1,
+  return hex(
+    Buffer.from(
+      canonicalJsonBytes(
+        continuationLedger(identities, [
+          ledgerContextRecord(CONTEXT_ALPHA, identities, INTERACTION_ALPHA_ID, 0),
+          ledgerOutcomeRecord(OUTCOME_ALPHA, INTERACTION_ALPHA_ID, 0),
+          ledgerContextRecord(CONTEXT_BETA, identities, INTERACTION_BETA_ID, 1),
+          ledgerOutcomeRecord(
+            { summary: 'No findings.', findings: [], limitations: [] },
+            INTERACTION_BETA_ID,
+            1,
+          ),
+        ]),
+      ),
     ),
-  ]))));
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -710,12 +725,17 @@ function buildMaterializationVectors(): void {
     sessionEpoch: SESSION_EPOCH,
     envelopes: baseEnvelopes,
   };
-  add('materialization-continuation', 'materialization-vector', 'materialization/continuation.json', {
-    id: 'materialization-continuation',
-    kind: 'materialization-vector',
-    input: continuationInput,
-    expected: oracleMaterialize(continuationInput),
-  });
+  add(
+    'materialization-continuation',
+    'materialization-vector',
+    'materialization/continuation.json',
+    {
+      id: 'materialization-continuation',
+      kind: 'materialization-vector',
+      input: continuationInput,
+      expected: oracleMaterialize(continuationInput),
+    },
+  );
 
   const resetInput: MaterializeInput = {
     history: { kind: 'reset', ledgerHex: continuationLedgerTwoPairsHex(identities) },
@@ -748,7 +768,10 @@ function buildDigestVectors(): void {
       kind: 'digest-vector',
       tag,
       envelope,
-      expected: { preimageHex: hex(concat(tagBytes(tag), canonical)), digestHex: digestId(tag, canonical) },
+      expected: {
+        preimageHex: hex(concat(tagBytes(tag), canonical)),
+        digestHex: digestId(tag, canonical),
+      },
     });
   }
 
@@ -843,15 +866,20 @@ function buildFramingVectors(): void {
       new Uint8Array(0),
     ),
   );
-  add('framing-empty-stream-logical-hash', 'framing-vector', 'framing/empty-stream-logical-hash.json', {
-    id: 'framing-empty-stream-logical-hash',
-    kind: 'framing-vector',
-    input: {
-      ledgerSchemaVersion: LEDGER_SCHEMA_VERSION,
-      prefixContractVersion: PREFIX_CONTRACT_VERSION,
+  add(
+    'framing-empty-stream-logical-hash',
+    'framing-vector',
+    'framing/empty-stream-logical-hash.json',
+    {
+      id: 'framing-empty-stream-logical-hash',
+      kind: 'framing-vector',
+      input: {
+        ledgerSchemaVersion: LEDGER_SCHEMA_VERSION,
+        prefixContractVersion: PREFIX_CONTRACT_VERSION,
+      },
+      expected: { logicalPrefixSha256: emptyLogicalHash },
     },
-    expected: { logicalPrefixSha256: emptyLogicalHash },
-  });
+  );
 }
 
 function buildInteractionVectors(): void {
@@ -871,7 +899,12 @@ function buildInteractionVectors(): void {
       ordinal: 0,
       head: headSha,
     },
-    { id: 'interaction-continuation', predecessor: { ledgerSha256: 'f'.repeat(64) }, ordinal: 7, head: headSha },
+    {
+      id: 'interaction-continuation',
+      predecessor: { ledgerSha256: 'f'.repeat(64) },
+      ordinal: 7,
+      head: headSha,
+    },
     {
       id: 'interaction-head-sha-64',
       predecessor: { bootstrap: true },
@@ -890,15 +923,20 @@ function buildInteractionVectors(): void {
       encodeIdentity(testCase.head),
       encodeIdentity(String(testCase.ordinal)),
     );
-    add(testCase.id, 'interaction-vector', `interaction/${testCase.id.replace('interaction-', '')}.json`, {
-      id: testCase.id,
-      kind: 'interaction-vector',
-      predecessor: testCase.predecessor,
-      consumedInputSha256: consumedInput,
-      currentHeadSha: testCase.head,
-      interactionOrdinal: testCase.ordinal,
-      expected: { preimageHex: hex(preimage), interactionId: sha256Hex(preimage) },
-    });
+    add(
+      testCase.id,
+      'interaction-vector',
+      `interaction/${testCase.id.replace('interaction-', '')}.json`,
+      {
+        id: testCase.id,
+        kind: 'interaction-vector',
+        predecessor: testCase.predecessor,
+        consumedInputSha256: consumedInput,
+        currentHeadSha: testCase.head,
+        interactionOrdinal: testCase.ordinal,
+        expected: { preimageHex: hex(preimage), interactionId: sha256Hex(preimage) },
+      },
+    );
   }
 }
 
