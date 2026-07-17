@@ -142,6 +142,54 @@ public sealed class LedgerManifestContractTests
     }
 
     [Fact]
+    public void TransitionExpectedAndIdentitiesHaveExactKeySets()
+    {
+        var identityKeys = new[]
+        {
+            "repository", "headRepository", "pullRequest", "workflowIdentity", "trustedExecutionDomain",
+            "providerId", "modelId", "adapterId", "templateId", "policyId", "toolDefinitionId", "cacheConfigId"
+        };
+
+        foreach (var entry in LedgerEntries())
+        {
+            var type = entry.GetProperty("type").GetString()!;
+            if (type is not ("ledger-transition" or "ledger-build"))
+            {
+                continue;
+            }
+
+            var context = Context(entry);
+            var transition = entry.GetProperty("transition");
+            var kind = transition.GetProperty("kind").GetString()!;
+            var expected = transition.GetProperty("expected");
+
+            switch (kind)
+            {
+                case "bootstrap":
+                    AssertKeys(expected, context + ".transition.expected", "identities", "sessionEpoch", "ledgerEpoch", "stateGeneration");
+                    break;
+                case "continuation":
+                    AssertKeys(expected, context + ".transition.expected", "identities", "sessionEpoch", "ledgerEpoch",
+                        "stateGeneration", "predecessorLedgerSha256", "predecessorLedgerEpoch", "predecessorStateGeneration");
+                    break;
+                case "reset":
+                    AssertKeys(expected, context + ".transition.expected", "identities", "sessionEpoch", "ledgerEpoch",
+                        "stateGeneration", "predecessorLedgerSha256", "predecessorManifestSha256",
+                        "predecessorLedgerEpoch", "predecessorStateGeneration", "resetReason");
+                    break;
+                case "recovery_root":
+                    AssertKeys(expected, context + ".transition.expected", "identities", "sessionEpoch", "ledgerEpoch",
+                        "stateGeneration", "recoveryReason");
+                    break;
+                default:
+                    throw new InvalidOperationException($"{context}: unknown transition kind '{kind}'.");
+            }
+
+            AssertKeys(expected.GetProperty("identities"), context + ".transition.expected.identities", identityKeys);
+        }
+    }
+
+    [Fact]
     public void LedgerFilesAreGloballyUnique()
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);

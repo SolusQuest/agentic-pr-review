@@ -14,9 +14,9 @@ build options. `--manifest-fragment` is optional; when given, the 35 ledger-tran
 ledger-build manifest entries are written there as a JSON array for splicing into
 `protocol/fixtures/v1/manifest.json`.
 
-The tool writes 109 artifacts:
+The tool writes 112 artifacts:
 
-- 15 valid restores and 59 invalid restores, the latter built as minimal mutations of
+- 16 valid restores and 61 invalid restores, the latter built as minimal mutations of
   the canonical bytes (each self-checked: `LedgerParser` must reject it with exactly the
   expected `Diagnostics[0].Code`; the two deep-path fixtures also assert the frozen
   byte-exact message);
@@ -27,7 +27,8 @@ The tool writes 109 artifacts:
   they must reproduce.
 
 Every written ledger file is re-read and verified before its oracle is printed.
-`invalid-json.json` is maintained by hand and is never written by this tool.
+`invalid-json.json` is maintained by hand and is never written by this tool (113 ledger
+manifest entries in total counting it).
 
 Output is deterministic; rerun and `cmp` against the committed fixtures to confirm the
 oracles.
