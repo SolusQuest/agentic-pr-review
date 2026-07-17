@@ -170,6 +170,47 @@ internal static class RestoreScenarios
         return Valid("sha-256-head-sha.json", ledger);
     }
 
+    internal static FixtureArtifact BootstrapWithPatch()
+    {
+        // Hardening beyond the §13 matrix: a valid ledger whose changedFile carries a
+        // bounded patch, locking the RFC 8785 "patch" < "path" key order into a restore
+        // oracle (every other scenario uses an empty changedFiles array).
+        var source = new ValidatedContextSource
+        {
+            SubjectDigest = LedgerFixtureBaseline.SubjectDigest,
+            ReviewedHeadSha = LedgerFixtureBaseline.ReviewedHeadSha,
+            ReviewedBaseSha = LedgerFixtureBaseline.ReviewedBaseSha,
+            ChangedFiles = ImmutableArray.Create(new LedgerChangedFile
+            {
+                Path = "src/new.cs",
+                PreviousPath = "src/old.cs",
+                Status = "renamed",
+                Additions = 10,
+                Deletions = 2,
+                Changes = 12,
+                Patch = new LedgerBoundedPatch
+                {
+                    Sha256 = new string('c', 64),
+                    Truncated = false,
+                    MaxChars = 4000
+                }
+            })
+        };
+        var context = RequireValue(
+            LedgerBuilder.BuildReviewContext(
+                source, LedgerFixtureBaseline.Identities, new InteractionIdentity(LedgerFixtureBaseline.InteractionId, 0)),
+            "bootstrap-with-patch context");
+        var outcome = BuildOutcome(LedgerFixtureBaseline.InteractionId, 0);
+        var expected = new BootstrapTransition(
+            LedgerFixtureBaseline.Identities,
+            LedgerFixtureBaseline.SessionEpoch,
+            LedgerFixtureBaseline.LedgerEpoch,
+            StateGeneration: 0);
+
+        var ledger = RequireCandidate(LedgerBuilder.CreateBootstrap(expected, context, outcome), "bootstrap-with-patch");
+        return Valid("bootstrap-with-patch.json", ledger);
+    }
+
     internal static FixtureArtifact ModelAliasLatest(ValidatedLedger bootstrap)
     {
         // ledger_model_alias_literal is a semantic-stage defect: the bytes must clear

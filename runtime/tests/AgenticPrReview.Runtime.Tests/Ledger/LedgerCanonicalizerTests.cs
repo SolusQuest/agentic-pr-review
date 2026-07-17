@@ -85,4 +85,39 @@ public sealed class LedgerCanonicalizerTests
 
         Assert.Equal("""{"adapterId":"adapter","cacheConfigId":"cacheconfig","modelId":"model","policyId":"policy","providerId":"provider","templateId":"template","toolDefinitionId":"tools"}""", json);
     }
+
+    [Fact]
+    public void ChangedFileWithPatchAndPreviousPathUsesUtf16OrdinalKeyOrder()
+    {
+        // Byte-exact golden: unsigned UTF-16 ordinal sorts "patch" before "path"
+        // (shared "pat" prefix, then 'c' U+0063 < 'h' U+0068), so the writer must emit
+        // patch, then path, then previousPath.
+        var record = new ReviewContextRecord
+        {
+            Role = "review_context",
+            InteractionId = "interaction",
+            InteractionOrdinal = 0,
+            SubjectDigest = "subject",
+            CacheContractDigest = "digest",
+            ReviewedHeadSha = "head",
+            ReviewedBaseSha = "base",
+            ChangedFiles = ImmutableArray.Create(new LedgerChangedFile
+            {
+                Path = "src/new.cs",
+                PreviousPath = "src/old.cs",
+                Status = "renamed",
+                Additions = 10,
+                Deletions = 2,
+                Changes = 12,
+                Patch = new LedgerBoundedPatch { Sha256 = "patchhash", Truncated = false, MaxChars = 4000 }
+            })
+        };
+
+        var bytes = LedgerCanonicalizer.SerializeRecord(record);
+        var json = Encoding.UTF8.GetString(bytes.AsSpan());
+
+        Assert.Equal(
+            """{"cacheContractDigest":"digest","changedFiles":[{"additions":10,"changes":12,"deletions":2,"patch":{"maxChars":4000,"sha256":"patchhash","truncated":false},"path":"src/new.cs","previousPath":"src/old.cs","status":"renamed"}],"interactionId":"interaction","interactionOrdinal":0,"reviewedBaseSha":"base","reviewedHeadSha":"head","role":"review_context","subjectDigest":"subject"}""",
+            json);
+    }
 }

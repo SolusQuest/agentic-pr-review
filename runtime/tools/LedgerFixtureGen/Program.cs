@@ -5,7 +5,7 @@
 //   dotnet run --project runtime/tools/LedgerFixtureGen -- --artifacts-path <output-dir> [--manifest-fragment <file>]
 //   (the -- separator keeps dotnet run from consuming the options itself)
 //
-// The tool writes 109 generated fixtures (15 valid restores, 59 invalid restores, 25
+// The tool writes 112 generated fixtures (16 valid restores, 61 invalid restores, 25
 // transition candidates, 10 build scenarios), verifies each one (restore re-read,
 // transition validator self-check, builder pipeline self-check), and prints the
 // contentSha256 / code oracles that protocol/fixtures/v1/manifest.json must declare.
@@ -48,7 +48,8 @@ var artifacts = new List<FixtureArtifact>
     RestoreScenarios.RecoveryRootOverBoundLedger(),
     continuationMaxInteractions,
     continuationNearByteLimit,
-    RestoreScenarios.Sha256HeadSha()
+    RestoreScenarios.Sha256HeadSha(),
+    RestoreScenarios.BootstrapWithPatch()
 };
 
 var bootstrapBytes = bootstrap.Content;
@@ -70,6 +71,8 @@ artifacts.Add(InvalidRestoreScenarios.RawMultiDefect());
 artifacts.Add(InvalidRestoreScenarios.NulInSummary(bootstrapText));
 artifacts.Add(InvalidRestoreScenarios.LoneSurrogateInString(bootstrapText));
 artifacts.Add(InvalidRestoreScenarios.LoneSurrogateInPropertyName(bootstrapText));
+artifacts.Add(InvalidRestoreScenarios.DuplicateEscapedSurrogateProperty());
+artifacts.Add(InvalidRestoreScenarios.UnicodeSurrogateKeySortPrecedence());
 artifacts.Add(InvalidRestoreScenarios.RootScalarLoneSurrogate());
 artifacts.Add(InvalidRestoreScenarios.RootScalarNul());
 artifacts.Add(InvalidRestoreScenarios.NulInPropertyName(bootstrapText));

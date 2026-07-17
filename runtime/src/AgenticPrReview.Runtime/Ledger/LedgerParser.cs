@@ -16,10 +16,39 @@ public static class LedgerParser
 
     public static ParseOutcome ParseAndValidate(ReadOnlySpan<byte> bytes)
     {
+        // Fail-closed guard: the public parser must never surface an unhandled
+        // exception for any JSON input. Every stage below classifies its own
+        // failures; this catch converts anything that escaped that analysis into the
+        // generic schema-stage fallback code (the mapper's own fallback bucket)
+        // instead of crashing the caller. The message is a fixed literal so no
+        // exception detail (which may echo untrusted input) leaks into diagnostics.
+        try
+        {
+            return ParseAndValidateCore(bytes);
+        }
+        catch (Exception)
+        {
+            return new ParseOutcome(null, ImmutableArray.Create(
+                CreateDiagnostic(LedgerDiagnosticCodes.SchemaViolation, "Ledger validation failed unexpectedly.")));
+        }
+    }
+
+    private static ParseOutcome ParseAndValidateCore(ReadOnlySpan<byte> bytes)
+    {
         var rawDiagnostic = RunRawTransportChecks(bytes);
         if (rawDiagnostic is not null)
         {
             return new ParseOutcome(null, ImmutableArray.Create(rawDiagnostic));
+        }
+
+        // The Unicode-safety stage runs over the lenient tree built from the raw
+        // bytes: JsonDocument/JsonElement cannot materialize property names that
+        // contain unpaired UTF-16 surrogate escapes, and the traversal must sort
+        // every key (valid or not) at its exact unsigned UTF-16 ordinal position.
+        var unicodeDiagnostic = LedgerSafePath.ScanForUnicodeViolation(bytes);
+        if (unicodeDiagnostic is not null)
+        {
+            return new ParseOutcome(null, ImmutableArray.Create(unicodeDiagnostic));
         }
 
         JsonDocument document;
@@ -34,12 +63,6 @@ public static class LedgerParser
 
         using (document)
         {
-            var unicodeDiagnostic = LedgerSafePath.ScanForUnicodeViolation(document.RootElement);
-            if (unicodeDiagnostic is not null)
-            {
-                return new ParseOutcome(null, ImmutableArray.Create(unicodeDiagnostic));
-            }
-
             var versionDiagnostic = RunVersionRouting(document.RootElement);
             if (versionDiagnostic is not null)
             {
@@ -137,26 +160,21 @@ public static class LedgerParser
                     }
 
                     var obj = stack.Peek();
-                    if (!TryGetPropertyName(ref reader, out var name, out var rawName))
-                    {
-                        // The name contains an unpaired UTF-16 surrogate escape and cannot
-                        // be materialized by System.Text.Json; the Unicode-safety stage
-                        // owns its classification (<invalid-utf16>). Duplicate detection
-                        // falls back to raw-span byte equality, which is sound (identical
-                        // raw bytes are identical names) though it may miss escape-case
-                        // variants of the same name; those documents are still rejected
-                        // at the Unicode stage.
-                        if (!obj.AddRawPropertyName(rawName))
-                        {
-                            duplicateDiagnostic ??= CreateDiagnostic(LedgerDiagnosticCodes.DuplicateJsonProperty, "Duplicate JSON property.");
-                        }
-                    }
-                    else if (!obj.PropertyNames.Add(name))
+                    // Decode the name into its exact UTF-16 code-unit sequence
+                    // (unpaired surrogates preserved) and deduplicate under Ordinal
+                    // equality. Raw-span byte equality would miss escape-case variants
+                    // of the same name (e.g. D800 vs d800), and System.Text.Json
+                    // materialization throws on lone-surrogate names; the decoded
+                    // sequence handles both. Names with invalid Unicode still reach
+                    // the Unicode-safety stage for <invalid-utf16>/<invalid-nul>
+                    // classification when they are not duplicates.
+                    var name = LedgerRawJsonDecoder.DecodeStringTokenContent(PropertyNameContent(ref reader));
+                    if (!obj.PropertyNames.Add(name))
                     {
                         duplicateDiagnostic ??= CreateDiagnostic(LedgerDiagnosticCodes.DuplicateJsonProperty, "Duplicate JSON property.");
                     }
 
-                    if (obj.PropertyNames.Count + obj.RawPropertyNameCount > LedgerJsonMaxPropertyCount)
+                    if (obj.PropertyNames.Count > LedgerJsonMaxPropertyCount)
                     {
                         propertyCountDiagnostic ??= CreateDiagnostic(LedgerDiagnosticCodes.JsonPropertyCountExceeded, $"Object property count exceeds {LedgerJsonMaxPropertyCount}.");
                     }
@@ -235,24 +253,12 @@ public static class LedgerParser
         return null;
     }
 
-    // Materializes a property name. System.Text.Json refuses to unescape a name
-    // containing an unpaired UTF-16 surrogate (InvalidOperationException); in that case
-    // the raw name bytes are returned for span-based duplicate detection and the name is
-    // left to the Unicode-safety stage, which classifies it as <invalid-utf16>.
-    private static bool TryGetPropertyName(ref Utf8JsonReader reader, out string name, out byte[] rawName)
+    // Returns the raw content span of the current property-name token (the bytes
+    // between the surrounding quotes, escapes intact). The reader is span-based, so
+    // ValueSpan is always available; the sequence branch is defensive only.
+    private static ReadOnlySpan<byte> PropertyNameContent(ref Utf8JsonReader reader)
     {
-        try
-        {
-            name = reader.GetString()!;
-            rawName = Array.Empty<byte>();
-            return true;
-        }
-        catch (InvalidOperationException)
-        {
-            name = string.Empty;
-            rawName = reader.HasValueSequence ? reader.ValueSequence.ToArray() : reader.ValueSpan.ToArray();
-            return false;
-        }
+        return reader.HasValueSequence ? reader.ValueSequence.ToArray() : reader.ValueSpan;
     }
 
     private static LedgerDiagnostic? RunStructuralBounds(LedgerModel model, ImmutableArray<byte> canonicalBytes)
@@ -418,12 +424,40 @@ public static class LedgerParser
         return ImmutableArray<LedgerDiagnostic>.Empty;
     }
 
+    // Materializes a schema-valid integer slot. JsonElement.TryGetInt64 only accepts
+    // integer-form tokens, but JSON Schema draft-07 numeric equality also accepts
+    // mathematical integers written with a fraction or exponent (1.0, 1e0, 0e0); those
+    // are read via double with an exactness/range check. Every ledger integer slot is
+    // range-bounded by the schema (const 0/1, 0..1_000_000, or 1..2_147_483_647), far
+    // inside double's exact-integer domain, so a schema-valid value always converts
+    // exactly; the non-integer-form raw bytes then fail the canonical byte comparison
+    // as ledger_non_canonical.
+    private static long GetInteger(JsonElement element)
+    {
+        if (element.TryGetInt64(out var value))
+        {
+            return value;
+        }
+
+        var asDouble = element.GetDouble();
+        if (!double.IsFinite(asDouble) || asDouble != Math.Truncate(asDouble) ||
+            asDouble < -9223372036854775808.0 || asDouble >= 9223372036854775808.0)
+        {
+            // Unreachable for schema-valid input (all integer slots are bounded);
+            // the ParseAndValidate top-level catch converts this to a fail-closed
+            // diagnostic instead of an unhandled exception.
+            throw new InvalidOperationException("Schema-valid integer is not exactly representable as Int64.");
+        }
+
+        return (long)asDouble;
+    }
+
     private static LedgerModel BuildModel(JsonElement root)
     {
         return new LedgerModel
         {
-            SchemaVersion = root.GetProperty("schemaVersion").GetInt32(),
-            PrefixContractVersion = root.GetProperty("prefixContractVersion").GetInt32(),
+            SchemaVersion = (int)GetInteger(root.GetProperty("schemaVersion")),
+            PrefixContractVersion = (int)GetInteger(root.GetProperty("prefixContractVersion")),
             Header = BuildHeader(root.GetProperty("header")),
             Records = BuildRecords(root.GetProperty("records"))
         };
@@ -436,11 +470,11 @@ public static class LedgerParser
             Kind = element.GetProperty("kind").GetString()!,
             SessionEpoch = element.GetProperty("sessionEpoch").GetString()!,
             LedgerEpoch = element.GetProperty("ledgerEpoch").GetString()!,
-            StateGeneration = element.GetProperty("stateGeneration").GetInt64(),
+            StateGeneration = GetInteger(element.GetProperty("stateGeneration")),
             PredecessorLedgerSha256 = element.GetProperty("predecessorLedgerSha256").GetString()!,
             Repository = element.GetProperty("repository").GetString()!,
             HeadRepository = element.GetProperty("headRepository").GetString()!,
-            PullRequest = element.GetProperty("pullRequest").GetInt32(),
+            PullRequest = (int)GetInteger(element.GetProperty("pullRequest")),
             WorkflowIdentity = element.GetProperty("workflowIdentity").GetString()!,
             TrustedExecutionDomain = element.GetProperty("trustedExecutionDomain").GetString()!,
             ProviderId = element.GetProperty("providerId").GetString()!,
@@ -472,7 +506,7 @@ public static class LedgerParser
     {
         if (element.TryGetProperty(propertyName, out var property) && property.ValueKind != JsonValueKind.Null)
         {
-            return property.GetInt64();
+            return GetInteger(property);
         }
 
         return null;
@@ -498,7 +532,7 @@ public static class LedgerParser
             {
                 Role = role,
                 InteractionId = element.GetProperty("interactionId").GetString()!,
-                InteractionOrdinal = element.GetProperty("interactionOrdinal").GetInt64(),
+                InteractionOrdinal = GetInteger(element.GetProperty("interactionOrdinal")),
                 SubjectDigest = element.GetProperty("subjectDigest").GetString()!,
                 CacheContractDigest = element.GetProperty("cacheContractDigest").GetString()!,
                 ReviewedHeadSha = element.GetProperty("reviewedHeadSha").GetString()!,
@@ -511,7 +545,7 @@ public static class LedgerParser
         {
             Role = role,
             InteractionId = element.GetProperty("interactionId").GetString()!,
-            InteractionOrdinal = element.GetProperty("interactionOrdinal").GetInt64(),
+            InteractionOrdinal = GetInteger(element.GetProperty("interactionOrdinal")),
             Summary = element.GetProperty("summary").GetString()!,
             Findings = BuildFindings(element.GetProperty("findings")),
             Limitations = BuildLimitations(element.GetProperty("limitations"))
@@ -527,9 +561,9 @@ public static class LedgerParser
             {
                 Path = item.GetProperty("path").GetString()!,
                 Status = item.GetProperty("status").GetString()!,
-                Additions = item.GetProperty("additions").GetInt64(),
-                Deletions = item.GetProperty("deletions").GetInt64(),
-                Changes = item.GetProperty("changes").GetInt64(),
+                Additions = GetInteger(item.GetProperty("additions")),
+                Deletions = GetInteger(item.GetProperty("deletions")),
+                Changes = GetInteger(item.GetProperty("changes")),
                 PreviousPath = GetOptionalString(item, "previousPath"),
                 Patch = TryBuildPatch(item)
             };
@@ -553,8 +587,8 @@ public static class LedgerParser
                 Title = item.GetProperty("title").GetString()!,
                 Body = item.GetProperty("body").GetString()!,
                 Path = item.GetProperty("path").ValueKind == JsonValueKind.Null ? null : item.GetProperty("path").GetString(),
-                StartLine = item.GetProperty("startLine").ValueKind == JsonValueKind.Null ? null : item.GetProperty("startLine").GetInt64(),
-                EndLine = item.GetProperty("endLine").ValueKind == JsonValueKind.Null ? null : item.GetProperty("endLine").GetInt64(),
+                StartLine = item.GetProperty("startLine").ValueKind == JsonValueKind.Null ? null : GetInteger(item.GetProperty("startLine")),
+                EndLine = item.GetProperty("endLine").ValueKind == JsonValueKind.Null ? null : GetInteger(item.GetProperty("endLine")),
                 Evidence = GetOptionalString(item, "evidence"),
                 SuggestedAction = GetOptionalString(item, "suggestedAction"),
                 InlinePreference = GetOptionalString(item, "inlinePreference")
@@ -577,7 +611,7 @@ public static class LedgerParser
         {
             Sha256 = patch.GetProperty("sha256").GetString()!,
             Truncated = patch.GetProperty("truncated").GetBoolean(),
-            MaxChars = patch.GetProperty("maxChars").GetInt64()
+            MaxChars = GetInteger(patch.GetProperty("maxChars"))
         };
     }
 
@@ -601,32 +635,14 @@ public static class LedgerParser
 
     private sealed class Container
     {
-        private readonly List<byte[]> _rawPropertyNames = new();
-
         public Container(ContainerKind kind)
         {
             Kind = kind;
-            PropertyNames = new HashSet<string>();
+            PropertyNames = new HashSet<string>(StringComparer.Ordinal);
         }
 
         public ContainerKind Kind { get; }
         public HashSet<string> PropertyNames { get; }
-        public int RawPropertyNameCount => _rawPropertyNames.Count;
         public int ArrayCount { get; set; }
-
-        // Raw-byte duplicate detection for property names that cannot be materialized.
-        public bool AddRawPropertyName(byte[] rawName)
-        {
-            foreach (var existing in _rawPropertyNames)
-            {
-                if (existing.AsSpan().SequenceEqual(rawName))
-                {
-                    return false;
-                }
-            }
-
-            _rawPropertyNames.Add(rawName);
-            return true;
-        }
     }
 }

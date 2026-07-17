@@ -123,4 +123,116 @@ public sealed class LedgerParserTests
         Assert.Single(outcome.Diagnostics);
         Assert.Equal(LedgerDiagnosticCodes.InvalidUnicode, outcome.Diagnostics[0].Code);
     }
+
+    // ---- Mathematical-integer number forms (schema draft-07 numeric equality) ----
+    // JsonSchema.Net accepts 1.0 / 1e0 / 0e0 / 0.0 for {"type":"integer","const":1}
+    // (verified empirically on 9.2.2), so those tokens must materialize without a
+    // FormatException and then fail the canonical byte comparison; 2e0 fails const.
+
+    [Fact]
+    public void SchemaVersionDecimalFormMaterializesAndFailsCanonicalStage()
+    {
+        var json = MinimalBootstrapLedger.Replace("\"schemaVersion\":1", "\"schemaVersion\":1.0");
+        var bytes = Encoding.UTF8.GetBytes(json);
+        var outcome = LedgerParser.ParseAndValidate(bytes);
+
+        Assert.Null(outcome.Ledger);
+        Assert.Single(outcome.Diagnostics);
+        Assert.Equal(LedgerDiagnosticCodes.NonCanonical, outcome.Diagnostics[0].Code);
+    }
+
+    [Fact]
+    public void SchemaVersionExponentFormMaterializesAndFailsCanonicalStage()
+    {
+        var json = MinimalBootstrapLedger.Replace("\"schemaVersion\":1", "\"schemaVersion\":1e0");
+        var bytes = Encoding.UTF8.GetBytes(json);
+        var outcome = LedgerParser.ParseAndValidate(bytes);
+
+        Assert.Null(outcome.Ledger);
+        Assert.Single(outcome.Diagnostics);
+        Assert.Equal(LedgerDiagnosticCodes.NonCanonical, outcome.Diagnostics[0].Code);
+    }
+
+    [Fact]
+    public void SchemaVersionTwoExponentFormFailsSchemaStage()
+    {
+        // 2e0 is mathematically integral, so TryGetInt64-based version routing does not
+        // fire; the schema's const 1 rejects it as ledger_schema_violation.
+        var json = MinimalBootstrapLedger.Replace("\"schemaVersion\":1", "\"schemaVersion\":2e0");
+        var bytes = Encoding.UTF8.GetBytes(json);
+        var outcome = LedgerParser.ParseAndValidate(bytes);
+
+        Assert.Null(outcome.Ledger);
+        Assert.Single(outcome.Diagnostics);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, outcome.Diagnostics[0].Code);
+    }
+
+    [Fact]
+    public void StateGenerationZeroExponentFormMaterializesAndFailsCanonicalStage()
+    {
+        var json = MinimalBootstrapLedger.Replace("\"stateGeneration\":0", "\"stateGeneration\":0e0");
+        var bytes = Encoding.UTF8.GetBytes(json);
+        var outcome = LedgerParser.ParseAndValidate(bytes);
+
+        Assert.Null(outcome.Ledger);
+        Assert.Single(outcome.Diagnostics);
+        Assert.Equal(LedgerDiagnosticCodes.NonCanonical, outcome.Diagnostics[0].Code);
+    }
+
+    [Fact]
+    public void InteractionOrdinalDecimalFormMaterializesAndFailsCanonicalStage()
+    {
+        var json = MinimalBootstrapLedger.Replace("\"interactionOrdinal\":0", "\"interactionOrdinal\":0.0");
+        var bytes = Encoding.UTF8.GetBytes(json);
+        var outcome = LedgerParser.ParseAndValidate(bytes);
+
+        Assert.Null(outcome.Ledger);
+        Assert.Single(outcome.Diagnostics);
+        Assert.Equal(LedgerDiagnosticCodes.NonCanonical, outcome.Diagnostics[0].Code);
+    }
+
+    [Fact]
+    public void BoundedFieldExponentFormMaterializesAndFailsCanonicalStage()
+    {
+        // pullRequest is schema-bounded to 1..2147483647; 1e0 passes the schema and
+        // materializes to 1, then the raw-vs-canonical byte comparison rejects it.
+        var json = MinimalBootstrapLedger.Replace("\"pullRequest\":1", "\"pullRequest\":1e0");
+        var bytes = Encoding.UTF8.GetBytes(json);
+        var outcome = LedgerParser.ParseAndValidate(bytes);
+
+        Assert.Null(outcome.Ledger);
+        Assert.Single(outcome.Diagnostics);
+        Assert.Equal(LedgerDiagnosticCodes.NonCanonical, outcome.Diagnostics[0].Code);
+    }
+
+    // ---- Duplicate detection over decoded property names ----
+
+    [Fact]
+    public void DuplicateEscapedSurrogatePropertyNamesFailAsDuplicates()
+    {
+        // Both escapes decode to the same lone-surrogate UTF-16 code unit; duplicate
+        // detection runs on the decoded sequence at the raw stage, before the Unicode
+        // stage could classify the name.
+        var bytes = Encoding.UTF8.GetBytes("{\"\\uD800\":1,\"\\ud800\":2}");
+        var outcome = LedgerParser.ParseAndValidate(bytes);
+
+        Assert.Null(outcome.Ledger);
+        Assert.Single(outcome.Diagnostics);
+        Assert.Equal(LedgerDiagnosticCodes.DuplicateJsonProperty, outcome.Diagnostics[0].Code);
+    }
+
+    [Fact]
+    public void InvalidUtf16KeySortsBeforeHigherSiblingAtUnicodeStage()
+    {
+        // Multi-defect object: key  has a lone-surrogate VALUE, key \uD800 is a
+        // lone-surrogate NAME. Unsigned UTF-16 ordinal sorts D800 before E000, so the
+        // terminal property-name check on \uD800 fires before the value scan of .
+        var bytes = Encoding.UTF8.GetBytes("{\"\\uE000\":\"\\uD800\",\"\\uD800\":1}");
+        var outcome = LedgerParser.ParseAndValidate(bytes);
+
+        Assert.Null(outcome.Ledger);
+        Assert.Single(outcome.Diagnostics);
+        Assert.Equal(LedgerDiagnosticCodes.InvalidUnicode, outcome.Diagnostics[0].Code);
+        Assert.Equal("ledger_invalid_unicode:/<invalid-utf16>", outcome.Diagnostics[0].Message);
+    }
 }

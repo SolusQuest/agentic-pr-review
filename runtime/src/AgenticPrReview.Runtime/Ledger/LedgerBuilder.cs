@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
@@ -14,6 +15,12 @@ public static class LedgerBuilder
     public static BuildOutcome<ReviewContextRecord> BuildReviewContext(
         ValidatedContextSource source, ExpectedIdentities identities, InteractionIdentity interaction)
     {
+        // Null argument objects are caller bugs; null *fields* inside fabricated DTOs are
+        // tolerated and surface as schema diagnostics instead.
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(identities);
+        ArgumentNullException.ThrowIfNull(interaction);
+
         var unicodeDiagnostic = ScanContextSource(identities, source, interaction);
         if (unicodeDiagnostic is not null)
         {
@@ -65,6 +72,9 @@ public static class LedgerBuilder
     public static BuildOutcome<ReviewOutcomeRecord> BuildReviewOutcome(
         ValidatedOutcomeSource source, InteractionIdentity interaction)
     {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(interaction);
+
         var unicodeDiagnostic = ScanOutcomeSource(source, interaction);
         if (unicodeDiagnostic is not null)
         {
@@ -111,6 +121,10 @@ public static class LedgerBuilder
     public static CandidateOutcome CreateBootstrap(
         BootstrapTransition expected, ReviewContextRecord context, ReviewOutcomeRecord outcome)
     {
+        ArgumentNullException.ThrowIfNull(expected);
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(outcome);
+
         var header = new LedgerHeader
         {
             Kind = "bootstrap",
@@ -139,6 +153,11 @@ public static class LedgerBuilder
         ContinuationTransition expected, ValidatedLedger predecessor,
         ReviewContextRecord context, ReviewOutcomeRecord outcome)
     {
+        ArgumentNullException.ThrowIfNull(expected);
+        ArgumentNullException.ThrowIfNull(predecessor);
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(outcome);
+
         var header = new LedgerHeader
         {
             Kind = "continuation",
@@ -170,6 +189,11 @@ public static class LedgerBuilder
         ResetTransition expected, ValidatedLedger predecessor,
         ReviewContextRecord context, ReviewOutcomeRecord outcome)
     {
+        ArgumentNullException.ThrowIfNull(expected);
+        ArgumentNullException.ThrowIfNull(predecessor);
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(outcome);
+
         var header = new LedgerHeader
         {
             Kind = "reset",
@@ -201,6 +225,10 @@ public static class LedgerBuilder
     public static CandidateOutcome CreateRecoveryRoot(
         RecoveryRootTransition expected, ReviewContextRecord context, ReviewOutcomeRecord outcome)
     {
+        ArgumentNullException.ThrowIfNull(expected);
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(outcome);
+
         var header = new LedgerHeader
         {
             Kind = "recovery_root",
@@ -399,21 +427,15 @@ public static class LedgerBuilder
 
     private static ImmutableArray<LedgerDiagnostic> EvaluateModelSchema(LedgerModel model)
     {
-        ImmutableArray<byte> canonicalBytes;
-        try
-        {
-            canonicalBytes = LedgerCanonicalizer.SerializeCanonical(model);
-        }
-        catch (LedgerCanonicalizationException ex)
-        {
-            return ImmutableArray.Create(new LedgerDiagnostic
-            {
-                Code = LedgerDiagnosticCodes.InvalidUnicode,
-                Message = ex.Message
-            });
-        }
+        // The schema replay is driven by the tolerant projection, not by the canonical
+        // writer: the projection mirrors the wire names and null/absence semantics of
+        // "Record shape and normalization" but never throws on malformed caller-fabricated
+        // DTO content (runtime-null values surface as JSON null, so the schema's type
+        // checks own the diagnostic). Canonical serialization stays downstream of the
+        // replay and still only runs once every earlier stage has passed.
+        var projectedBytes = ProjectModelForSchema(model);
 
-        using var document = JsonDocument.Parse(canonicalBytes.AsSpan().ToArray());
+        using var document = JsonDocument.Parse(projectedBytes);
         var results = SchemaContracts.Load(typeof(LedgerBuilder).Assembly).GetSchema(SchemaKind.Ledger).Evaluate(document.RootElement, new EvaluationOptions { OutputFormat = OutputFormat.List });
         if (!results.IsValid)
         {
@@ -421,6 +443,266 @@ public static class LedgerBuilder
         }
 
         return ImmutableArray<LedgerDiagnostic>.Empty;
+    }
+
+    // Tolerant schema projection: writes the schema-evaluable JSON shape of a model
+    // without requiring canonical properties (no key ordering, no escape rules beyond
+    // well-formed JSON) and without throwing on malformed DTO content.
+    private static byte[] ProjectModelForSchema(LedgerModel model)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("schemaVersion", model.SchemaVersion);
+            writer.WriteNumber("prefixContractVersion", model.PrefixContractVersion);
+            writer.WritePropertyName("header");
+            WriteHeaderProjection(writer, model.Header);
+            writer.WritePropertyName("records");
+            WriteRecordsProjection(writer, model.Records);
+            writer.WriteEndObject();
+        }
+
+        return buffer.WrittenSpan.ToArray();
+    }
+
+    private static void WriteHeaderProjection(Utf8JsonWriter writer, LedgerHeader? header)
+    {
+        if (header is null)
+        {
+            writer.WriteNullValue();
+            return;
+        }
+
+        writer.WriteStartObject();
+        writer.WriteString("kind", header.Kind);
+        writer.WriteString("sessionEpoch", header.SessionEpoch);
+        writer.WriteString("ledgerEpoch", header.LedgerEpoch);
+        writer.WriteNumber("stateGeneration", header.StateGeneration);
+        writer.WriteString("predecessorLedgerSha256", header.PredecessorLedgerSha256);
+        if (header.PredecessorLedgerEpoch is not null)
+        {
+            writer.WriteString("predecessorLedgerEpoch", header.PredecessorLedgerEpoch);
+        }
+
+        if (header.PredecessorStateGeneration.HasValue)
+        {
+            writer.WriteNumber("predecessorStateGeneration", header.PredecessorStateGeneration.Value);
+        }
+
+        if (header.PredecessorManifestSha256 is not null)
+        {
+            writer.WriteString("predecessorManifestSha256", header.PredecessorManifestSha256);
+        }
+
+        if (header.ResetReason is not null)
+        {
+            writer.WriteString("resetReason", header.ResetReason);
+        }
+
+        if (header.RecoveryReason is not null)
+        {
+            writer.WriteString("recoveryReason", header.RecoveryReason);
+        }
+
+        writer.WriteString("repository", header.Repository);
+        writer.WriteString("headRepository", header.HeadRepository);
+        writer.WriteNumber("pullRequest", header.PullRequest);
+        writer.WriteString("workflowIdentity", header.WorkflowIdentity);
+        writer.WriteString("trustedExecutionDomain", header.TrustedExecutionDomain);
+        writer.WriteString("providerId", header.ProviderId);
+        writer.WriteString("modelId", header.ModelId);
+        writer.WriteString("adapterId", header.AdapterId);
+        writer.WriteString("templateId", header.TemplateId);
+        writer.WriteString("policyId", header.PolicyId);
+        writer.WriteString("toolDefinitionId", header.ToolDefinitionId);
+        writer.WriteString("cacheConfigId", header.CacheConfigId);
+        writer.WriteEndObject();
+    }
+
+    private static void WriteRecordsProjection(Utf8JsonWriter writer, ImmutableArray<LedgerRecord> records)
+    {
+        if (records.IsDefault)
+        {
+            writer.WriteNullValue();
+            return;
+        }
+
+        writer.WriteStartArray();
+        foreach (var record in records)
+        {
+            WriteRecordProjection(writer, record);
+        }
+
+        writer.WriteEndArray();
+    }
+
+    private static void WriteRecordProjection(Utf8JsonWriter writer, LedgerRecord? record)
+    {
+        if (record is null)
+        {
+            writer.WriteNullValue();
+            return;
+        }
+
+        writer.WriteStartObject();
+        writer.WriteString("role", record.Role);
+        writer.WriteString("interactionId", record.InteractionId);
+        writer.WriteNumber("interactionOrdinal", record.InteractionOrdinal);
+
+        if (record is ReviewContextRecord context)
+        {
+            writer.WriteString("subjectDigest", context.SubjectDigest);
+            writer.WriteString("cacheContractDigest", context.CacheContractDigest);
+            writer.WriteString("reviewedHeadSha", context.ReviewedHeadSha);
+            writer.WriteString("reviewedBaseSha", context.ReviewedBaseSha);
+            writer.WritePropertyName("changedFiles");
+            WriteChangedFilesProjection(writer, context.ChangedFiles);
+        }
+        else if (record is ReviewOutcomeRecord outcome)
+        {
+            writer.WriteString("summary", outcome.Summary);
+            writer.WritePropertyName("findings");
+            WriteFindingsProjection(writer, outcome.Findings);
+            writer.WritePropertyName("limitations");
+            WriteLimitationsProjection(writer, outcome.Limitations);
+        }
+
+        writer.WriteEndObject();
+    }
+
+    private static void WriteChangedFilesProjection(Utf8JsonWriter writer, ImmutableArray<LedgerChangedFile> files)
+    {
+        if (files.IsDefault)
+        {
+            writer.WriteNullValue();
+            return;
+        }
+
+        writer.WriteStartArray();
+        foreach (var file in files)
+        {
+            if (file is null)
+            {
+                writer.WriteNullValue();
+                continue;
+            }
+
+            writer.WriteStartObject();
+            writer.WriteString("path", file.Path);
+            if (file.PreviousPath is not null)
+            {
+                writer.WriteString("previousPath", file.PreviousPath);
+            }
+
+            writer.WriteString("status", file.Status);
+            writer.WriteNumber("additions", file.Additions);
+            writer.WriteNumber("deletions", file.Deletions);
+            writer.WriteNumber("changes", file.Changes);
+            if (file.Patch is not null)
+            {
+                writer.WritePropertyName("patch");
+                writer.WriteStartObject();
+                writer.WriteString("sha256", file.Patch.Sha256);
+                writer.WriteBoolean("truncated", file.Patch.Truncated);
+                writer.WriteNumber("maxChars", file.Patch.MaxChars);
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+    }
+
+    private static void WriteFindingsProjection(Utf8JsonWriter writer, ImmutableArray<LedgerFinding> findings)
+    {
+        if (findings.IsDefault)
+        {
+            writer.WriteNullValue();
+            return;
+        }
+
+        writer.WriteStartArray();
+        foreach (var finding in findings)
+        {
+            if (finding is null)
+            {
+                writer.WriteNullValue();
+                continue;
+            }
+
+            writer.WriteStartObject();
+            writer.WriteString("severity", finding.Severity);
+            writer.WriteString("confidence", finding.Confidence);
+            writer.WriteString("category", finding.Category);
+            writer.WriteString("title", finding.Title);
+            writer.WriteString("body", finding.Body);
+
+            // Path/StartLine/EndLine are always serialized; explicit null is preserved.
+            if (finding.Path is not null)
+            {
+                writer.WriteString("path", finding.Path);
+            }
+            else
+            {
+                writer.WriteNull("path");
+            }
+
+            if (finding.StartLine.HasValue)
+            {
+                writer.WriteNumber("startLine", finding.StartLine.Value);
+            }
+            else
+            {
+                writer.WriteNull("startLine");
+            }
+
+            if (finding.EndLine.HasValue)
+            {
+                writer.WriteNumber("endLine", finding.EndLine.Value);
+            }
+            else
+            {
+                writer.WriteNull("endLine");
+            }
+
+            if (finding.Evidence is not null)
+            {
+                writer.WriteString("evidence", finding.Evidence);
+            }
+
+            if (finding.SuggestedAction is not null)
+            {
+                writer.WriteString("suggestedAction", finding.SuggestedAction);
+            }
+
+            if (finding.InlinePreference is not null)
+            {
+                writer.WriteString("inlinePreference", finding.InlinePreference);
+            }
+
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+    }
+
+    private static void WriteLimitationsProjection(Utf8JsonWriter writer, ImmutableArray<string> limitations)
+    {
+        if (limitations.IsDefault)
+        {
+            writer.WriteNullValue();
+            return;
+        }
+
+        writer.WriteStartArray();
+        foreach (var limitation in limitations)
+        {
+            writer.WriteStringValue(limitation);
+        }
+
+        writer.WriteEndArray();
     }
 
     private static LedgerDiagnostic? CheckIdentityStrings(ExpectedIdentities identities)
@@ -532,8 +814,13 @@ public static class LedgerBuilder
             return new LedgerDiagnostic { Code = LedgerDiagnosticCodes.InvalidUnicode, Message = "Context source contains invalid Unicode." };
         }
 
-        foreach (var file in source.ChangedFiles)
+        foreach (var file in source.ChangedFiles.IsDefault ? ImmutableArray<LedgerChangedFile>.Empty : source.ChangedFiles)
         {
+            if (file is null)
+            {
+                continue;
+            }
+
             if (ContainsInvalidUnicode(file.Path) ||
                 ContainsInvalidUnicode(file.Status) ||
                 (file.PreviousPath is not null && ContainsInvalidUnicode(file.PreviousPath)) ||
@@ -558,7 +845,7 @@ public static class LedgerBuilder
             return new LedgerDiagnostic { Code = LedgerDiagnosticCodes.InvalidUnicode, Message = "summary contains invalid Unicode." };
         }
 
-        foreach (var limitation in source.Limitations)
+        foreach (var limitation in source.Limitations.IsDefault ? ImmutableArray<string>.Empty : source.Limitations)
         {
             if (ContainsInvalidUnicode(limitation))
             {
@@ -566,8 +853,13 @@ public static class LedgerBuilder
             }
         }
 
-        foreach (var finding in source.Findings)
+        foreach (var finding in source.Findings.IsDefault ? ImmutableArray<LedgerFinding>.Empty : source.Findings)
         {
+            if (finding is null)
+            {
+                continue;
+            }
+
             if (ContainsInvalidUnicode(finding.Severity) ||
                 ContainsInvalidUnicode(finding.Confidence) ||
                 ContainsInvalidUnicode(finding.Category) ||
@@ -605,8 +897,13 @@ public static class LedgerBuilder
             }
         }
 
-        foreach (var record in model.Records)
+        foreach (var record in model.Records.IsDefault ? ImmutableArray<LedgerRecord>.Empty : model.Records)
         {
+            if (record is null)
+            {
+                continue;
+            }
+
             if (ContainsInvalidUnicode(record.Role) || ContainsInvalidUnicode(record.InteractionId))
             {
                 return new LedgerDiagnostic { Code = LedgerDiagnosticCodes.InvalidUnicode, Message = "Candidate record contains invalid Unicode." };
@@ -622,8 +919,13 @@ public static class LedgerBuilder
                     return new LedgerDiagnostic { Code = LedgerDiagnosticCodes.InvalidUnicode, Message = "Candidate context record contains invalid Unicode." };
                 }
 
-                foreach (var file in context.ChangedFiles)
+                foreach (var file in context.ChangedFiles.IsDefault ? ImmutableArray<LedgerChangedFile>.Empty : context.ChangedFiles)
                 {
+                    if (file is null)
+                    {
+                        continue;
+                    }
+
                     if (ContainsInvalidUnicode(file.Path) ||
                         ContainsInvalidUnicode(file.Status) ||
                         (file.PreviousPath is not null && ContainsInvalidUnicode(file.PreviousPath)) ||
@@ -640,7 +942,7 @@ public static class LedgerBuilder
                     return new LedgerDiagnostic { Code = LedgerDiagnosticCodes.InvalidUnicode, Message = "Candidate outcome summary contains invalid Unicode." };
                 }
 
-                foreach (var limitation in outcome.Limitations)
+                foreach (var limitation in outcome.Limitations.IsDefault ? ImmutableArray<string>.Empty : outcome.Limitations)
                 {
                     if (ContainsInvalidUnicode(limitation))
                     {
@@ -648,8 +950,13 @@ public static class LedgerBuilder
                     }
                 }
 
-                foreach (var finding in outcome.Findings)
+                foreach (var finding in outcome.Findings.IsDefault ? ImmutableArray<LedgerFinding>.Empty : outcome.Findings)
                 {
+                    if (finding is null)
+                    {
+                        continue;
+                    }
+
                     if (ContainsInvalidUnicode(finding.Severity) ||
                         ContainsInvalidUnicode(finding.Confidence) ||
                         ContainsInvalidUnicode(finding.Category) ||
@@ -669,8 +976,16 @@ public static class LedgerBuilder
         return null;
     }
 
-    private static bool ContainsInvalidUnicode(string value)
+    // Runtime-null strings are tolerated (treated as Unicode-safe) so that malformed
+    // caller-fabricated DTOs flow into the schema stage, where the tolerant projection
+    // writes them as JSON null and the schema's type checks own the diagnostic.
+    private static bool ContainsInvalidUnicode(string? value)
     {
+        if (value is null)
+        {
+            return false;
+        }
+
         if (value.Contains('\0'))
         {
             return true;

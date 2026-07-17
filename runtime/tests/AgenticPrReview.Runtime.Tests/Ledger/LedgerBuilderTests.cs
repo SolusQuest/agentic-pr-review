@@ -104,6 +104,198 @@ public sealed class LedgerBuilderTests
         Assert.Equal(LedgerDiagnosticCodes.InvalidUnicode, candidateOutcome.Diagnostics[0].Code);
     }
 
+    // Null-field strategy (review-confirmed): malformed caller-fabricated DTO content —
+    // runtime-null strings, null collection elements, default (null) ImmutableArrays —
+    // never escapes as an unhandled exception and never reaches the canonical writer.
+    // The Unicode scans tolerate nulls, the tolerant schema projection writes them as
+    // JSON null, and the schema's type checks own the resulting ledger_schema_violation
+    // diagnostic. Null argument objects themselves are caller bugs and fail fast with
+    // ArgumentNullException.
+
+    [Fact]
+    public void BuildReviewOutcomeRejectsNullSummary()
+    {
+        var source = new ValidatedOutcomeSource
+        {
+            Summary = null!,
+            Findings = ImmutableArray<LedgerFinding>.Empty,
+            Limitations = ImmutableArray<string>.Empty
+        };
+        var interaction = new InteractionIdentity("0000000000000000000000000000000000000000000000000000000000000000", 0);
+
+        var outcome = LedgerBuilder.BuildReviewOutcome(source, interaction);
+
+        Assert.Null(outcome.Value);
+        Assert.Single(outcome.Diagnostics);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, outcome.Diagnostics[0].Code);
+    }
+
+    [Fact]
+    public void BuildReviewContextRejectsNullChangedFilePath()
+    {
+        var source = new ValidatedContextSource
+        {
+            SubjectDigest = "1111111111111111111111111111111111111111111111111111111111111111",
+            ReviewedHeadSha = "0000000000000000000000000000000000000000",
+            ReviewedBaseSha = "1111111111111111111111111111111111111111",
+            ChangedFiles = ImmutableArray.Create(new LedgerChangedFile
+            {
+                Path = null!,
+                Status = "modified",
+                Additions = 1,
+                Deletions = 2,
+                Changes = 3
+            })
+        };
+        var interaction = new InteractionIdentity("0000000000000000000000000000000000000000000000000000000000000000", 0);
+
+        var outcome = LedgerBuilder.BuildReviewContext(source, Identities, interaction);
+
+        Assert.Null(outcome.Value);
+        Assert.Single(outcome.Diagnostics);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, outcome.Diagnostics[0].Code);
+    }
+
+    [Fact]
+    public void BuildReviewOutcomeRejectsNullFindingTitle()
+    {
+        var source = new ValidatedOutcomeSource
+        {
+            Summary = "Summary text.",
+            Findings = ImmutableArray.Create(new LedgerFinding
+            {
+                Severity = "high",
+                Confidence = "high",
+                Category = "correctness",
+                Title = null!,
+                Body = "Finding body."
+            }),
+            Limitations = ImmutableArray<string>.Empty
+        };
+        var interaction = new InteractionIdentity("0000000000000000000000000000000000000000000000000000000000000000", 0);
+
+        var outcome = LedgerBuilder.BuildReviewOutcome(source, interaction);
+
+        Assert.Null(outcome.Value);
+        Assert.Single(outcome.Diagnostics);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, outcome.Diagnostics[0].Code);
+    }
+
+    [Fact]
+    public void CreateBootstrapRejectsFabricatedOutcomeWithNullSummary()
+    {
+        // The component schema replay must classify the malformed record instead of
+        // crashing inside the canonical writer.
+        var context = BuildContextRecord(0, "0000000000000000000000000000000000000000000000000000000000000000");
+        var outcome = new ReviewOutcomeRecord
+        {
+            Role = "review_outcome",
+            InteractionId = "0000000000000000000000000000000000000000000000000000000000000000",
+            InteractionOrdinal = 0,
+            Summary = null!,
+            Findings = ImmutableArray<LedgerFinding>.Empty,
+            Limitations = ImmutableArray<string>.Empty
+        };
+        var expected = new BootstrapTransition(Identities, "aaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbb", 0);
+
+        var candidateOutcome = LedgerBuilder.CreateBootstrap(expected, context, outcome);
+
+        Assert.Null(candidateOutcome.Candidate);
+        Assert.Single(candidateOutcome.Diagnostics);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, candidateOutcome.Diagnostics[0].Code);
+    }
+
+    [Fact]
+    public void CreateRecoveryRootRejectsFabricatedFindingWithNullTitle()
+    {
+        var context = BuildContextRecord(0, "0000000000000000000000000000000000000000000000000000000000000000");
+        var outcome = new ReviewOutcomeRecord
+        {
+            Role = "review_outcome",
+            InteractionId = "0000000000000000000000000000000000000000000000000000000000000000",
+            InteractionOrdinal = 0,
+            Summary = "Summary text.",
+            Findings = ImmutableArray.Create(new LedgerFinding
+            {
+                Severity = "high",
+                Confidence = "high",
+                Category = "correctness",
+                Title = null!,
+                Body = "Finding body."
+            }),
+            Limitations = ImmutableArray<string>.Empty
+        };
+        var expected = new RecoveryRootTransition(Identities, "dddddddddddddddddddddd", "eeeeeeeeeeeeeeeeeeeeee", 0, "integrity_mismatch");
+
+        var candidateOutcome = LedgerBuilder.CreateRecoveryRoot(expected, context, outcome);
+
+        Assert.Null(candidateOutcome.Candidate);
+        Assert.Single(candidateOutcome.Diagnostics);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, candidateOutcome.Diagnostics[0].Code);
+    }
+
+    [Fact]
+    public void CreateBootstrapRejectsFabricatedChangedFileWithNullPath()
+    {
+        var context = new ReviewContextRecord
+        {
+            Role = "review_context",
+            InteractionId = "0000000000000000000000000000000000000000000000000000000000000000",
+            InteractionOrdinal = 0,
+            SubjectDigest = "1111111111111111111111111111111111111111111111111111111111111111",
+            CacheContractDigest = LedgerCanonicalizer.ComputeCacheContractDigest(Identities),
+            ReviewedHeadSha = "0000000000000000000000000000000000000000",
+            ReviewedBaseSha = "1111111111111111111111111111111111111111",
+            ChangedFiles = ImmutableArray.Create(new LedgerChangedFile
+            {
+                Path = null!,
+                Status = "modified",
+                Additions = 1,
+                Deletions = 2,
+                Changes = 3
+            })
+        };
+        var outcome = BuildOutcomeRecord(0, "0000000000000000000000000000000000000000000000000000000000000000");
+        var expected = new BootstrapTransition(Identities, "aaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbb", 0);
+
+        var candidateOutcome = LedgerBuilder.CreateBootstrap(expected, context, outcome);
+
+        Assert.Null(candidateOutcome.Candidate);
+        Assert.Single(candidateOutcome.Diagnostics);
+        Assert.Equal(LedgerDiagnosticCodes.SchemaViolation, candidateOutcome.Diagnostics[0].Code);
+    }
+
+    [Fact]
+    public void NullArgumentObjectsThrowArgumentNullException()
+    {
+        var interaction = new InteractionIdentity("0000000000000000000000000000000000000000000000000000000000000000", 0);
+        var contextSource = new ValidatedContextSource
+        {
+            SubjectDigest = "1111111111111111111111111111111111111111111111111111111111111111",
+            ReviewedHeadSha = "0000000000000000000000000000000000000000",
+            ReviewedBaseSha = "1111111111111111111111111111111111111111",
+            ChangedFiles = ImmutableArray<LedgerChangedFile>.Empty
+        };
+        var outcomeSource = new ValidatedOutcomeSource
+        {
+            Summary = "Summary text.",
+            Findings = ImmutableArray<LedgerFinding>.Empty,
+            Limitations = ImmutableArray<string>.Empty
+        };
+        var context = BuildContextRecord(0, "0000000000000000000000000000000000000000000000000000000000000000");
+        var outcome = BuildOutcomeRecord(0, "0000000000000000000000000000000000000000000000000000000000000000");
+        var expected = new BootstrapTransition(Identities, "aaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbb", 0);
+
+        Assert.Throws<ArgumentNullException>(() => LedgerBuilder.BuildReviewContext(null!, Identities, interaction));
+        Assert.Throws<ArgumentNullException>(() => LedgerBuilder.BuildReviewContext(contextSource, null!, interaction));
+        Assert.Throws<ArgumentNullException>(() => LedgerBuilder.BuildReviewContext(contextSource, Identities, null!));
+        Assert.Throws<ArgumentNullException>(() => LedgerBuilder.BuildReviewOutcome(null!, interaction));
+        Assert.Throws<ArgumentNullException>(() => LedgerBuilder.BuildReviewOutcome(outcomeSource, null!));
+        Assert.Throws<ArgumentNullException>(() => LedgerBuilder.CreateBootstrap(null!, context, outcome));
+        Assert.Throws<ArgumentNullException>(() => LedgerBuilder.CreateBootstrap(expected, null!, outcome));
+        Assert.Throws<ArgumentNullException>(() => LedgerBuilder.CreateBootstrap(expected, context, null!));
+    }
+
     private static BuildOutcome<ReviewContextRecord> BuildContext(long interactionOrdinal)
     {
         var source = new ValidatedContextSource

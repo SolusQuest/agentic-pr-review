@@ -109,6 +109,26 @@ internal static class InvalidRestoreScenarios
         return InvalidJson("lone-surrogate-in-property-name.json", text, LedgerDiagnosticCodes.InvalidUnicode);
     }
 
+    internal static FixtureArtifact DuplicateEscapedSurrogateProperty()
+    {
+        // Both names decode to the same UTF-16 sequence (lone surrogate U+D800); escape
+        // casing must not hide the duplicate from the raw stage.
+        const string text = "{\"\\uD800\":1,\"\\ud800\":2}";
+        return InvalidJson("duplicate-escaped-surrogate-property.json", text, LedgerDiagnosticCodes.DuplicateJsonProperty);
+    }
+
+    internal static FixtureArtifact UnicodeSurrogateKeySortPrecedence()
+    {
+        // Unsigned UTF-16 ordinal sorts U+D800 before U+E000, so the unpaired-surrogate
+        // property name terminates the traversal before the sibling's value-level scan.
+        const string text = "{\"\\uE000\":\"\\uD800\",\"\\uD800\":1}";
+        return InvalidJson(
+            "unicode-surrogate-key-sort-precedence.json",
+            text,
+            LedgerDiagnosticCodes.InvalidUnicode,
+            "ledger_invalid_unicode:/<invalid-utf16>");
+    }
+
     internal static FixtureArtifact RootScalarLoneSurrogate()
     {
         return InvalidJson("root-scalar-lone-surrogate.json", "\"\\uD800\"", LedgerDiagnosticCodes.InvalidUnicode);

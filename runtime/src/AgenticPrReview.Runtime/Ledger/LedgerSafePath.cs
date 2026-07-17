@@ -16,7 +16,23 @@ internal static class LedgerSafePath
 
     public static LedgerDiagnostic? ScanForUnicodeViolation(JsonElement root)
     {
-        var location = Scan(root, ImmutableArray<string>.Empty, RootSchemaPosition, true);
+        // JsonElement cannot materialize a property name containing an unpaired
+        // UTF-16 surrogate escape (JsonProperty.Name throws InvalidOperationException),
+        // so the scan runs over the lenient tree built from the raw text. Re-encoding
+        // is byte-exact because the source was valid UTF-8.
+        return ScanForUnicodeViolation(Encoding.UTF8.GetBytes(root.GetRawText()));
+    }
+
+    public static LedgerDiagnostic? ScanForUnicodeViolation(ReadOnlySpan<byte> bytes)
+    {
+        var tree = LedgerJsonTree.Build(bytes);
+        if (tree is null)
+        {
+            // Not well-formed JSON; the JSON-syntax stage owns that classification.
+            return null;
+        }
+
+        var location = Scan(tree, ImmutableArray<string>.Empty, RootSchemaPosition, true);
         if (!location.HasValue)
         {
             return null;
@@ -170,12 +186,13 @@ internal static class LedgerSafePath
         };
     }
 
-    private static UnsafeLocation? Scan(JsonElement element, ImmutableArray<string> segments, SchemaPosition position, bool trustedChain)
+    private static UnsafeLocation? Scan(LedgerJsonNode node, ImmutableArray<string> segments, SchemaPosition position, bool trustedChain)
     {
-        if (element.ValueKind == JsonValueKind.String)
+        if (node.Kind == JsonValueKind.String)
         {
-            var rawText = element.GetRawText();
-            if (IsInvalidRawJsonString(rawText))
+            // Value-level scan over the exact decoded UTF-16 code-unit sequence:
+            // first violating code unit (NUL or unpaired surrogate) terminates.
+            if (ContainsInvalidStringValue(node.StringValue!))
             {
                 return new UnsafeLocation
                 {
@@ -188,13 +205,13 @@ internal static class LedgerSafePath
             return null;
         }
 
-        if (element.ValueKind == JsonValueKind.Array)
+        if (node.Kind == JsonValueKind.Array)
         {
             var resolved = ResolveArrayItem(position);
             var itemTrusted = trustedChain && resolved.SchemaKnown;
             var itemPosition = itemTrusted ? resolved.ChildSchemaPosition : SchemaPosition.Unknown;
             var index = 0;
-            foreach (var item in element.EnumerateArray())
+            foreach (var item in node.Items!)
             {
                 var result = Scan(item, segments.Add(index.ToStringInvariant()), itemPosition, itemTrusted);
                 if (result.HasValue)
@@ -208,32 +225,15 @@ internal static class LedgerSafePath
             return null;
         }
 
-        if (element.ValueKind == JsonValueKind.Object)
+        if (node.Kind == JsonValueKind.Object)
         {
-            // System.Text.Json throws InvalidOperationException when materializing a
-            // property name that contains an unpaired UTF-16 surrogate escape. Such a
-            // name is a terminal property-name violation (<invalid-utf16>) and is
-            // deferred until every well-formed sibling subtree has scanned clean: the
-            // exact UTF-16 sort position of a name that cannot be materialized is not
-            // knowable, and well-formed names are always ordered among themselves.
-            var properties = new List<JsonProperty>();
-            var hasUnmaterializableName = false;
-            foreach (var property in element.EnumerateObject())
-            {
-                try
-                {
-                    _ = property.Name;
-                }
-                catch (InvalidOperationException)
-                {
-                    hasUnmaterializableName = true;
-                    continue;
-                }
-
-                properties.Add(property);
-            }
-
-            properties.Sort((a, b) => string.CompareOrdinal(a.Name, b.Name));
+            // RFC 8785 canonical order over ALL keys, including names that contain
+            // unpaired UTF-16 surrogates (preserved by the lenient decoder): every
+            // key takes its exact unsigned UTF-16 ordinal position, and the
+            // property-name terminal-safety check runs per key in that order, before
+            // any resolver call or subtree scan.
+            var properties = new List<LedgerJsonProperty>(node.Properties!);
+            properties.Sort(static (a, b) => string.CompareOrdinal(a.Name, b.Name));
 
             foreach (var property in properties)
             {
@@ -268,16 +268,6 @@ internal static class LedgerSafePath
                 {
                     return result.Value;
                 }
-            }
-
-            if (hasUnmaterializableName)
-            {
-                return new UnsafeLocation
-                {
-                    Segments = segments.Add("<invalid-utf16>"),
-                    IsPropertyNameViolation = true,
-                    IsRootScalar = false
-                };
             }
 
             return null;
@@ -418,86 +408,29 @@ internal static class LedgerSafePath
         return Encoding.UTF8.GetByteCount(path) <= byteBudget;
     }
 
-    private static bool IsInvalidRawJsonString(string rawText)
+    private static bool ContainsInvalidStringValue(string value)
     {
-        // rawText includes surrounding quotes.
-        var i = 1;
-        while (i < rawText.Length - 1)
+        for (var i = 0; i < value.Length; i++)
         {
-            var c = rawText[i];
-            if (c == '\\')
-            {
-                if (i + 1 >= rawText.Length - 1)
-                {
-                    return true;
-                }
-
-                var next = rawText[i + 1];
-                if (next == 'u')
-                {
-                    if (i + 6 >= rawText.Length)
-                    {
-                        return true;
-                    }
-
-                    var hex = rawText.Substring(i + 2, 4);
-                    if (!int.TryParse(hex, System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out var codepoint))
-                    {
-                        return true;
-                    }
-
-                    if (codepoint == 0)
-                    {
-                        return true;
-                    }
-
-                    if (codepoint >= 0xD800 && codepoint <= 0xDBFF)
-                    {
-                        // High surrogate; expect a following low-surrogate escape.
-                        if (i + 12 < rawText.Length &&
-                            rawText[i + 6] == '\\' &&
-                            rawText[i + 7] == 'u' &&
-                            int.TryParse(rawText.Substring(i + 8, 4), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out var low) &&
-                            low >= 0xDC00 && low <= 0xDFFF)
-                        {
-                            i += 12;
-                            continue;
-                        }
-
-                        return true;
-                    }
-
-                    if (codepoint >= 0xDC00 && codepoint <= 0xDFFF)
-                    {
-                        return true;
-                    }
-
-                    i += 6;
-                    continue;
-                }
-
-                // Other two-character escape; skip both.
-                i += 2;
-                continue;
-            }
-
-            if (c == '\0' || char.IsLowSurrogate(c))
+            var c = value[i];
+            if (c == '\0')
             {
                 return true;
             }
 
             if (char.IsHighSurrogate(c))
             {
-                if (i + 1 < rawText.Length - 1 && char.IsLowSurrogate(rawText[i + 1]))
+                if (i + 1 >= value.Length || !char.IsLowSurrogate(value[i + 1]))
                 {
-                    i += 2;
-                    continue;
+                    return true;
                 }
 
+                i++;
+            }
+            else if (char.IsLowSurrogate(c))
+            {
                 return true;
             }
-
-            i++;
         }
 
         return false;

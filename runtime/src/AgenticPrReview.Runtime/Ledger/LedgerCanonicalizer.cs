@@ -254,14 +254,16 @@ internal static class LedgerCanonicalizer
         writer.WriteProperty("deletions");
         writer.WriteNumber(file.Deletions);
 
-        writer.WriteProperty("path");
-        writer.WriteString(file.Path);
-
+        // RFC 8785 unsigned UTF-16 key order: "patch" sorts before "path"
+        // ("pat" + 'c' U+0063 < "pat" + 'h' U+0068).
         if (file.Patch is not null)
         {
             writer.WriteProperty("patch");
             WritePatch(ref writer, file.Patch);
         }
+
+        writer.WriteProperty("path");
+        writer.WriteString(file.Path);
 
         if (file.PreviousPath is not null)
         {

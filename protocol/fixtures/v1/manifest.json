@@ -648,6 +648,24 @@
     "code": "ledger_invalid_unicode"
   },
   {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/bootstrap-with-patch.json",
+    "valid": true,
+    "contentSha256": "d6441eeb4a6118aa12336e9118d6c4908705e91a46885a6adc37b57666638cc1"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/duplicate-escaped-surrogate-property.json",
+    "valid": false,
+    "code": "ledger_duplicate_json_property"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/unicode-surrogate-key-sort-precedence.json",
+    "valid": false,
+    "code": "ledger_invalid_unicode"
+  },
+  {
     "type": "ledger-transition",
     "file": "provider-session-ledger/valid-bootstrap.json",
     "transition": {
