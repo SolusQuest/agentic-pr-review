@@ -2,6 +2,7 @@ node_modules/
 dist/
 .github/actions/agentic-pr-review/dist/
 runtime/tests/fixtures/deterministic/**
+runtime/tests/fixtures/prefix-contract/**
 .codex/
 
 # State v2 fixtures are byte-stable golden artifacts and must not be re-formatted.

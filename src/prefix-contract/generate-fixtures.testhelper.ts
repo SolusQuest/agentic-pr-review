@@ -1013,7 +1013,11 @@ function cloneInput(input: MaterializeInput): MaterializeInput {
   return JSON.parse(JSON.stringify(input)) as MaterializeInput;
 }
 
-function withEnvelope(input: MaterializeInput, name: keyof typeof ENVELOPES, value: unknown): MaterializeInput {
+function withEnvelope(
+  input: MaterializeInput,
+  name: keyof typeof ENVELOPES,
+  value: unknown,
+): MaterializeInput {
   const next = cloneInput(input);
   (next.envelopes as Record<string, unknown>)[name] = value;
   const recomputed = baseIdentities(next.envelopes);
@@ -1033,8 +1037,18 @@ function pickDigests(ids: ExpectedIdentities): Partial<ExpectedIdentities> {
 
 function buildInvalidationVectors(): void {
   const base = bootstrapMaterializeInput();
-  const allTrue = { logicalStreamChanged: true, providerStreamChanged: true, logicalHashChanged: true, prefixHashChanged: true };
-  const prefixOnly = { logicalStreamChanged: false, providerStreamChanged: false, logicalHashChanged: false, prefixHashChanged: true };
+  const allTrue = {
+    logicalStreamChanged: true,
+    providerStreamChanged: true,
+    logicalHashChanged: true,
+    prefixHashChanged: true,
+  };
+  const prefixOnly = {
+    logicalStreamChanged: false,
+    providerStreamChanged: false,
+    logicalHashChanged: false,
+    prefixHashChanged: true,
+  };
 
   const specs: MutationSpec[] = [
     {
@@ -1061,7 +1075,10 @@ function buildInvalidationVectors(): void {
       id: 'invalidation-adapter-envelope',
       mutation: 'adapter envelope content/version',
       mutate: (input) =>
-        withEnvelope(input, 'adapter', { ...ENVELOPES.adapter, adapterBuildVersion: '0.0.1-fixture' }),
+        withEnvelope(input, 'adapter', {
+          ...ENVELOPES.adapter,
+          adapterBuildVersion: '0.0.1-fixture',
+        }),
       expected: prefixOnly,
     },
     {
@@ -1084,7 +1101,8 @@ function buildInvalidationVectors(): void {
     {
       id: 'invalidation-template-version',
       mutation: 'template envelope content/version',
-      mutate: (input) => withEnvelope(input, 'template', { ...ENVELOPES.template, templateVersion: 4 }),
+      mutate: (input) =>
+        withEnvelope(input, 'template', { ...ENVELOPES.template, templateVersion: 4 }),
       expected: allTrue,
     },
     {
@@ -1122,7 +1140,8 @@ function buildInvalidationVectors(): void {
     {
       id: 'invalidation-schema-version',
       mutation: 'any envelope schemaVersion',
-      mutate: (input) => withEnvelope(input, 'template', { ...ENVELOPES.template, schemaVersion: 2 }),
+      mutate: (input) =>
+        withEnvelope(input, 'template', { ...ENVELOPES.template, schemaVersion: 2 }),
       expected: prefixOnly,
     },
     {
@@ -1133,28 +1152,43 @@ function buildInvalidationVectors(): void {
         next.interaction = { ...next.interaction, interactionId: 'ff'.repeat(32) };
         return next;
       },
-      expected: { logicalStreamChanged: false, providerStreamChanged: false, logicalHashChanged: false, prefixHashChanged: false },
+      expected: {
+        logicalStreamChanged: false,
+        providerStreamChanged: false,
+        logicalHashChanged: false,
+        prefixHashChanged: false,
+      },
     },
   ];
 
   for (const spec of specs) {
     const successorInput = spec.mutate(base);
     const successorId = `materialization-${spec.id.replace('invalidation-', '')}`;
-    add(successorId, 'materialization-vector', `materialization/${spec.id.replace('invalidation-', '')}.json`, {
-      id: successorId,
-      kind: 'materialization-vector',
-      input: successorInput,
-      expected: oracleMaterialize(successorInput),
-    });
-    add(spec.id, 'invalidation-vector', `invalidation/${spec.id.replace('invalidation-', '')}.json`, {
-      id: spec.id,
-      kind: 'invalidation-vector',
-      mode: 'materializer',
-      baseVectorId: 'materialization-bootstrap',
-      successorVectorId: successorId,
-      mutation: spec.mutation,
-      expected: spec.expected,
-    });
+    add(
+      successorId,
+      'materialization-vector',
+      `materialization/${spec.id.replace('invalidation-', '')}.json`,
+      {
+        id: successorId,
+        kind: 'materialization-vector',
+        input: successorInput,
+        expected: oracleMaterialize(successorInput),
+      },
+    );
+    add(
+      spec.id,
+      'invalidation-vector',
+      `invalidation/${spec.id.replace('invalidation-', '')}.json`,
+      {
+        id: spec.id,
+        kind: 'invalidation-vector',
+        mode: 'materializer',
+        baseVectorId: 'materialization-bootstrap',
+        successorVectorId: successorId,
+        mutation: spec.mutation,
+        expected: spec.expected,
+      },
+    );
   }
 
   // Hash-framing mode: version-seam mutations on the bootstrap stable streams.
@@ -1197,8 +1231,16 @@ function buildInvalidationVectors(): void {
       kind: 'invalidation-vector',
       mode: 'hash-framing',
       mutation,
-      baseInput: { ...baseVersions, logicalStreamHex: bootstrapExpected.logicalStreamHex, providerStreamHex: bootstrapExpected.providerStreamHex },
-      mutatedInput: { ...mutated, logicalStreamHex: bootstrapExpected.logicalStreamHex, providerStreamHex: bootstrapExpected.providerStreamHex },
+      baseInput: {
+        ...baseVersions,
+        logicalStreamHex: bootstrapExpected.logicalStreamHex,
+        providerStreamHex: bootstrapExpected.providerStreamHex,
+      },
+      mutatedInput: {
+        ...mutated,
+        logicalStreamHex: bootstrapExpected.logicalStreamHex,
+        providerStreamHex: bootstrapExpected.providerStreamHex,
+      },
       expected: {
         baseLogicalPrefixSha256: logicalHashOf(baseVersions),
         mutatedLogicalPrefixSha256: logicalHashOf(mutated),
@@ -1211,14 +1253,24 @@ function buildInvalidationVectors(): void {
       },
     });
   };
-  hashCase('invalidation-ledger-schema-version', 'ledger schema version', { ledgerSchemaVersion: 2, prefixContractVersion: 1 });
-  hashCase('invalidation-prefix-contract-version', 'prefix contract version', { ledgerSchemaVersion: 1, prefixContractVersion: 2 });
+  hashCase('invalidation-ledger-schema-version', 'ledger schema version', {
+    ledgerSchemaVersion: 2,
+    prefixContractVersion: 1,
+  });
+  hashCase('invalidation-prefix-contract-version', 'prefix contract version', {
+    ledgerSchemaVersion: 1,
+    prefixContractVersion: 2,
+  });
 }
 
 const TOOL_ALPHA = {
   name: 'submit_review',
   description: 'Submit the structured review.',
-  inputSchema: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] },
+  inputSchema: {
+    type: 'object',
+    properties: { summary: { type: 'string' } },
+    required: ['summary'],
+  },
   policyMetadata: { risk: 'low' },
 };
 
@@ -1294,31 +1346,67 @@ function buildInvalidVectors(): void {
     { envelope: { schemaVersion: 1, templateVersion: 3 } },
     both(C.envelopeInvalid, { path: '/definition' }),
   );
-  invalidVector('invalid-template-version-zero', 'template-id',
+  invalidVector(
+    'invalid-template-version-zero',
+    'template-id',
     { envelope: { ...ENVELOPES.template, templateVersion: 0 } },
-    both(C.envelopeInvalid, { path: '/templateVersion' }));
-  invalidVector('invalid-template-version-fraction', 'template-id',
+    both(C.envelopeInvalid, { path: '/templateVersion' }),
+  );
+  invalidVector(
+    'invalid-template-version-fraction',
+    'template-id',
     { envelope: { ...ENVELOPES.template, templateVersion: 1.5 } },
-    both(C.envelopeInvalid, { path: '/templateVersion' }));
-  invalidVector('invalid-template-version-string', 'template-id',
+    both(C.envelopeInvalid, { path: '/templateVersion' }),
+  );
+  invalidVector(
+    'invalid-template-version-string',
+    'template-id',
     { envelope: { ...ENVELOPES.template, templateVersion: '3' } },
-    both(C.envelopeInvalid, { path: '/templateVersion' }));
-  invalidVector('invalid-policy-instructions-type', 'policy-id',
+    both(C.envelopeInvalid, { path: '/templateVersion' }),
+  );
+  invalidVector(
+    'invalid-policy-instructions-type',
+    'policy-id',
     { envelope: { ...ENVELOPES.policy, instructions: 42 } },
-    both(C.envelopeInvalid, { path: '/instructions' }));
-  invalidVector('invalid-tools-duplicate-name', 'tools-id',
+    both(C.envelopeInvalid, { path: '/instructions' }),
+  );
+  invalidVector(
+    'invalid-tools-duplicate-name',
+    'tools-id',
     { envelope: { schemaVersion: 1, toolsetVersion: 1, definitions: [TOOL_ALPHA, TOOL_ALPHA] } },
-    both(C.envelopeInvalid, { path: '/definitions/1/name' }));
-  invalidVector('invalid-tools-empty-name', 'tools-id',
-    { envelope: { schemaVersion: 1, toolsetVersion: 1, definitions: [{ ...TOOL_ALPHA, name: '' }] } },
-    both(C.identityInvalid, { path: '/definitions/0/name' }));
-  invalidVector('invalid-tools-unknown-wrapper-field', 'tools-id',
-    { envelope: { schemaVersion: 1, toolsetVersion: 1, definitions: [{ ...TOOL_ALPHA, bogus: 1 }] } },
-    both(C.envelopeInvalid, { path: '/definitions/0/bogus' }));
-  invalidVector('invalid-tools-inputschema-not-object', 'tools-id',
-    { envelope: { schemaVersion: 1, toolsetVersion: 1, definitions: [{ ...TOOL_ALPHA, inputSchema: [] }] } },
-    both(C.envelopeInvalid, { path: '/definitions/0/inputSchema' }));
-  invalidVector('invalid-tools-too-many', 'tools-id',
+    both(C.envelopeInvalid, { path: '/definitions/1/name' }),
+  );
+  invalidVector(
+    'invalid-tools-empty-name',
+    'tools-id',
+    {
+      envelope: { schemaVersion: 1, toolsetVersion: 1, definitions: [{ ...TOOL_ALPHA, name: '' }] },
+    },
+    both(C.identityInvalid, { path: '/definitions/0/name' }),
+  );
+  invalidVector(
+    'invalid-tools-unknown-wrapper-field',
+    'tools-id',
+    {
+      envelope: { schemaVersion: 1, toolsetVersion: 1, definitions: [{ ...TOOL_ALPHA, bogus: 1 }] },
+    },
+    both(C.envelopeInvalid, { path: '/definitions/0/bogus' }),
+  );
+  invalidVector(
+    'invalid-tools-inputschema-not-object',
+    'tools-id',
+    {
+      envelope: {
+        schemaVersion: 1,
+        toolsetVersion: 1,
+        definitions: [{ ...TOOL_ALPHA, inputSchema: [] }],
+      },
+    },
+    both(C.envelopeInvalid, { path: '/definitions/0/inputSchema' }),
+  );
+  invalidVector(
+    'invalid-tools-too-many',
+    'tools-id',
     {
       envelope: {
         schemaVersion: 1,
@@ -1326,16 +1414,26 @@ function buildInvalidVectors(): void {
         definitions: Array.from({ length: 65 }, (_, i) => ({ ...TOOL_ALPHA, name: `tool-${i}` })),
       },
     },
-    both(C.envelopeInvalid, { path: '/definitions' }));
-  invalidVector('invalid-config-stateless-type', 'config-id',
+    both(C.envelopeInvalid, { path: '/definitions' }),
+  );
+  invalidVector(
+    'invalid-config-stateless-type',
+    'config-id',
     { envelope: { ...ENVELOPES.cacheConfig, statelessMode: 'yes' } },
-    both(C.envelopeInvalid, { path: '/statelessMode' }));
-  invalidVector('invalid-adapter-build-version-control', 'adapter-id',
+    both(C.envelopeInvalid, { path: '/statelessMode' }),
+  );
+  invalidVector(
+    'invalid-adapter-build-version-control',
+    'adapter-id',
     { envelope: { ...ENVELOPES.adapter, adapterBuildVersion: 'v1 x' } },
-    both(C.identityInvalid, { path: '/adapterBuildVersion' }));
-  invalidVector('invalid-envelope-too-large', 'template-id',
+    both(C.identityInvalid, { path: '/adapterBuildVersion' }),
+  );
+  invalidVector(
+    'invalid-envelope-too-large',
+    'template-id',
     { envelope: { schemaVersion: 1, templateVersion: 1, definition: 'x'.repeat(262144) } },
-    both(C.envelopeTooLarge));
+    both(C.envelopeTooLarge),
+  );
 
   // --- duplicate properties (C# raw boundary only) ---
   invalidVector(
@@ -1356,7 +1454,10 @@ function buildInvalidVectors(): void {
   invalidVector(
     'invalid-canonical-duplicate-open-json',
     'canonical-json',
-    { envelopeKind: 'template', envelopeJson: '{"schemaVersion":1,"templateVersion":1,"definition":{"a":1,"a":2}}' },
+    {
+      envelopeKind: 'template',
+      envelopeJson: '{"schemaVersion":1,"templateVersion":1,"definition":{"a":1,"a":2}}',
+    },
     csOnly(C.canonicalRejected),
   );
 
@@ -1364,38 +1465,89 @@ function buildInvalidVectors(): void {
   invalidVector(
     'invalid-canonical-lone-surrogate',
     'canonical-json',
-    { envelopeKind: 'template', envelope: { schemaVersion: 1, templateVersion: 1, definition: 'bad\ud800' } },
+    {
+      envelopeKind: 'template',
+      envelope: { schemaVersion: 1, templateVersion: 1, definition: 'bad\ud800' },
+    },
     both(C.canonicalRejected),
   );
   invalidVector(
     'invalid-canonical-non-finite',
     'canonical-json',
-    { envelopeKind: 'template', envelopeJson: '{"schemaVersion":1,"templateVersion":1,"definition":1e999}' },
+    {
+      envelopeKind: 'template',
+      envelopeJson: '{"schemaVersion":1,"templateVersion":1,"definition":1e999}',
+    },
     both(C.canonicalRejected),
   );
 
   // --- interaction-id target (both) ---
   const validPredecessor = { ledgerSha256: 'f'.repeat(64) };
-  invalidVector('invalid-interaction-predecessor-uppercase', 'interaction-id',
-    { predecessor: { ledgerSha256: 'F'.repeat(64) }, consumedInputSha256: 'e5'.repeat(32), currentHeadSha: '7'.repeat(40), interactionOrdinal: 0 },
-    both(C.digestInvalid, { path: '/predecessor' }));
-  invalidVector('invalid-interaction-bootstrap-as-hash', 'interaction-id',
-    { predecessor: { ledgerSha256: 'bootstrap' }, consumedInputSha256: 'e5'.repeat(32), currentHeadSha: '7'.repeat(40), interactionOrdinal: 0 },
-    both(C.digestInvalid, { path: '/predecessor' }));
-  invalidVector('invalid-interaction-consumed-short', 'interaction-id',
-    { predecessor: validPredecessor, consumedInputSha256: 'e5'.repeat(31), currentHeadSha: '7'.repeat(40), interactionOrdinal: 0 },
-    both(C.digestInvalid, { path: '/consumedInputSha256' }));
-  invalidVector('invalid-interaction-head-39', 'interaction-id',
-    { predecessor: validPredecessor, consumedInputSha256: 'e5'.repeat(32), currentHeadSha: '7'.repeat(39), interactionOrdinal: 0 },
-    both(C.gitShaInvalid, { path: '/currentHeadSha' }));
-  invalidVector('invalid-interaction-ordinal-negative', 'interaction-id',
-    { predecessor: validPredecessor, consumedInputSha256: 'e5'.repeat(32), currentHeadSha: '7'.repeat(40), interactionOrdinal: -1 },
-    both(C.ordinalInvalid, { path: '/interactionOrdinal' }));
+  invalidVector(
+    'invalid-interaction-predecessor-uppercase',
+    'interaction-id',
+    {
+      predecessor: { ledgerSha256: 'F'.repeat(64) },
+      consumedInputSha256: 'e5'.repeat(32),
+      currentHeadSha: '7'.repeat(40),
+      interactionOrdinal: 0,
+    },
+    both(C.digestInvalid, { path: '/predecessor' }),
+  );
+  invalidVector(
+    'invalid-interaction-bootstrap-as-hash',
+    'interaction-id',
+    {
+      predecessor: { ledgerSha256: 'bootstrap' },
+      consumedInputSha256: 'e5'.repeat(32),
+      currentHeadSha: '7'.repeat(40),
+      interactionOrdinal: 0,
+    },
+    both(C.digestInvalid, { path: '/predecessor' }),
+  );
+  invalidVector(
+    'invalid-interaction-consumed-short',
+    'interaction-id',
+    {
+      predecessor: validPredecessor,
+      consumedInputSha256: 'e5'.repeat(31),
+      currentHeadSha: '7'.repeat(40),
+      interactionOrdinal: 0,
+    },
+    both(C.digestInvalid, { path: '/consumedInputSha256' }),
+  );
+  invalidVector(
+    'invalid-interaction-head-39',
+    'interaction-id',
+    {
+      predecessor: validPredecessor,
+      consumedInputSha256: 'e5'.repeat(32),
+      currentHeadSha: '7'.repeat(39),
+      interactionOrdinal: 0,
+    },
+    both(C.gitShaInvalid, { path: '/currentHeadSha' }),
+  );
+  invalidVector(
+    'invalid-interaction-ordinal-negative',
+    'interaction-id',
+    {
+      predecessor: validPredecessor,
+      consumedInputSha256: 'e5'.repeat(32),
+      currentHeadSha: '7'.repeat(40),
+      interactionOrdinal: -1,
+    },
+    both(C.ordinalInvalid, { path: '/interactionOrdinal' }),
+  );
 
   // --- identity / model-snapshot (TS-only public helpers) ---
   invalidVector('invalid-identity-empty', 'identity', { value: '' }, tsOnly(C.identityInvalid));
   invalidVector('invalid-identity-control', 'identity', { value: 'ab' }, tsOnly(C.identityInvalid));
-  invalidVector('invalid-identity-too-long', 'identity', { value: 'x'.repeat(257) }, tsOnly(C.identityInvalid));
+  invalidVector(
+    'invalid-identity-too-long',
+    'identity',
+    { value: 'x'.repeat(257) },
+    tsOnly(C.identityInvalid),
+  );
   invalidVector('invalid-model-alias', 'model-snapshot', { value: 'latest' }, tsOnly(C.modelAlias));
 
   // --- materialize target (C# only) ---
@@ -1411,46 +1563,104 @@ function buildInvalidVectors(): void {
   invalidVector('invalid-materialize-epoch', 'materialize', epochInput, csOnly(C.epochInvalid));
 
   const digestCaseInput = cloneInput(base);
-  digestCaseInput.expectedIdentities = { ...digestCaseInput.expectedIdentities, templateId: 'A'.repeat(64) };
-  invalidVector('invalid-materialize-digest-invalid', 'materialize', digestCaseInput, csOnly(C.digestInvalid));
+  digestCaseInput.expectedIdentities = {
+    ...digestCaseInput.expectedIdentities,
+    templateId: 'A'.repeat(64),
+  };
+  invalidVector(
+    'invalid-materialize-digest-invalid',
+    'materialize',
+    digestCaseInput,
+    csOnly(C.digestInvalid),
+  );
 
   const mismatchInput = cloneInput(base);
-  mismatchInput.expectedIdentities = { ...mismatchInput.expectedIdentities, templateId: '0'.repeat(64) };
-  invalidVector('invalid-materialize-cache-mismatch', 'materialize', mismatchInput, csOnly(C.cacheMismatch));
+  mismatchInput.expectedIdentities = {
+    ...mismatchInput.expectedIdentities,
+    templateId: '0'.repeat(64),
+  };
+  invalidVector(
+    'invalid-materialize-cache-mismatch',
+    'materialize',
+    mismatchInput,
+    csOnly(C.cacheMismatch),
+  );
 
   const continuationMismatch = cloneInput(base);
-  continuationMismatch.history = { kind: 'continuation', ledgerHex: continuationLedgerTwoPairsHex(identities) };
-  continuationMismatch.expectedIdentities = { ...continuationMismatch.expectedIdentities, providerId: 'other-provider' };
-  invalidVector('invalid-materialize-continuation-mismatch', 'materialize', continuationMismatch, csOnly(C.identityMismatch));
+  continuationMismatch.history = {
+    kind: 'continuation',
+    ledgerHex: continuationLedgerTwoPairsHex(identities),
+  };
+  continuationMismatch.expectedIdentities = {
+    ...continuationMismatch.expectedIdentities,
+    providerId: 'other-provider',
+  };
+  invalidVector(
+    'invalid-materialize-continuation-mismatch',
+    'materialize',
+    continuationMismatch,
+    csOnly(C.identityMismatch),
+  );
 
   const resetMismatch = cloneInput(base);
   resetMismatch.history = { kind: 'reset', ledgerHex: continuationLedgerTwoPairsHex(identities) };
-  resetMismatch.expectedIdentities = { ...resetMismatch.expectedIdentities, repository: 'other/repo' };
-  invalidVector('invalid-materialize-reset-scope-mismatch', 'materialize', resetMismatch, csOnly(C.identityMismatch));
+  resetMismatch.expectedIdentities = {
+    ...resetMismatch.expectedIdentities,
+    repository: 'other/repo',
+  };
+  invalidVector(
+    'invalid-materialize-reset-scope-mismatch',
+    'materialize',
+    resetMismatch,
+    csOnly(C.identityMismatch),
+  );
 
   const contextBad = cloneInput(base);
   contextBad.currentContext = { ...contextBad.currentContext, subjectDigest: 'not-a-digest' };
-  invalidVector('invalid-materialize-current-context', 'materialize', contextBad, csOnly(C.currentContextInvalid));
+  invalidVector(
+    'invalid-materialize-current-context',
+    'materialize',
+    contextBad,
+    csOnly(C.currentContextInvalid),
+  );
 
   // --- stream/length guard seams (C# only) ---
-  invalidVector('invalid-stream-logical-stable', 'stream-guard',
+  invalidVector(
+    'invalid-stream-logical-stable',
+    'stream-guard',
     { stream: 'logical-stable', totalBytes: 1_048_577 },
-    csOnly(C.streamTooLarge, { causeCode: 'logical-stable' }));
-  invalidVector('invalid-stream-logical-dynamic', 'stream-guard',
+    csOnly(C.streamTooLarge, { causeCode: 'logical-stable' }),
+  );
+  invalidVector(
+    'invalid-stream-logical-dynamic',
+    'stream-guard',
     { stream: 'logical-dynamic', totalBytes: 262_145 },
-    csOnly(C.streamTooLarge, { causeCode: 'logical-dynamic' }));
-  invalidVector('invalid-stream-provider-stable', 'stream-guard',
+    csOnly(C.streamTooLarge, { causeCode: 'logical-dynamic' }),
+  );
+  invalidVector(
+    'invalid-stream-provider-stable',
+    'stream-guard',
     { stream: 'provider-stable', totalBytes: 2_101_709 },
-    csOnly(C.streamTooLarge, { causeCode: 'provider-stable' }));
-  invalidVector('invalid-stream-provider-dynamic', 'stream-guard',
+    csOnly(C.streamTooLarge, { causeCode: 'provider-stable' }),
+  );
+  invalidVector(
+    'invalid-stream-provider-dynamic',
+    'stream-guard',
     { stream: 'provider-dynamic', totalBytes: 524_357 },
-    csOnly(C.streamTooLarge, { causeCode: 'provider-dynamic' }));
-  invalidVector('invalid-segment-payload', 'stream-guard',
+    csOnly(C.streamTooLarge, { causeCode: 'provider-dynamic' }),
+  );
+  invalidVector(
+    'invalid-segment-payload',
+    'stream-guard',
     { stream: 'logical-segment', totalBytes: 262_145 },
-    csOnly(C.segmentTooLarge));
-  invalidVector('invalid-length-overflow', 'length-guard',
+    csOnly(C.segmentTooLarge),
+  );
+  invalidVector(
+    'invalid-length-overflow',
+    'length-guard',
     { a: '9223372036854775807', b: 4 },
-    csOnly(C.lengthOverflow));
+    csOnly(C.lengthOverflow),
+  );
 
   void clone;
 }

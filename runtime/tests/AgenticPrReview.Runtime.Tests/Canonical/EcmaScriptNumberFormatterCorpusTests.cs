@@ -6,12 +6,12 @@ using Xunit;
 
 namespace AgenticPrReview.Runtime.Tests.Canonical;
 
-public sealed class EcmaScriptNumberFormatterScratchTests
+public sealed class EcmaScriptNumberFormatterCorpusTests
 {
     [Fact]
     public void MatchesNodeCorpus()
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "num-corpus.json");
+        var path = Path.Combine(AppContext.BaseDirectory, "fixtures", "prefix-contract", "num-corpus.json");
         var json = File.ReadAllText(path);
         using var doc = JsonDocument.Parse(json);
         var failures = 0;
