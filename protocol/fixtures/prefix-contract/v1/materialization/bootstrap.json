@@ -83,7 +83,9 @@
                   "type": "string"
                 }
               },
-              "required": ["summary"]
+              "required": [
+                "summary"
+              ]
             },
             "policyMetadata": {
               "risk": "low"
