@@ -57,7 +57,6 @@ internal static class LedgerSchemaMapper
         }
 
         var hasErrors = result.Errors is not null && result.Errors.Count > 0;
-        var hasInvalidChildren = result.Details is not null && result.Details.Any(d => !d.IsValid);
 
         if (hasErrors)
         {
@@ -88,7 +87,6 @@ internal static class LedgerSchemaMapper
             : null;
 
         var instancePointer = result.InstanceLocation.ToString();
-        var schemaPointer = result.SchemaLocation.ToString();
 
         // Resolve pointer to actual offending location for additionalProperties / required.
         if (keyword == "additionalProperties")
