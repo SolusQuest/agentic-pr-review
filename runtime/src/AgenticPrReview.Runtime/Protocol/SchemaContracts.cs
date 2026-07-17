@@ -4,7 +4,7 @@ using Json.Schema;
 
 namespace AgenticPrReview.Runtime;
 
-public enum SchemaKind { Input, Result, Trace }
+public enum SchemaKind { Input, Result, Trace, Ledger }
 
 public sealed class SchemaContracts
 {
@@ -12,12 +12,14 @@ public sealed class SchemaContracts
     private readonly JsonSchema input;
     private readonly JsonSchema result;
     private readonly JsonSchema trace;
+    private readonly JsonSchema ledger;
 
-    private SchemaContracts(JsonSchema input, JsonSchema result, JsonSchema trace)
+    private SchemaContracts(JsonSchema input, JsonSchema result, JsonSchema trace, JsonSchema ledger)
     {
         this.input = input;
         this.result = result;
         this.trace = trace;
+        this.ledger = ledger;
     }
 
     public static SchemaContracts Load(Assembly assembly)
@@ -33,16 +35,21 @@ public sealed class SchemaContracts
     private static SchemaContracts LoadCore(Assembly assembly) => new(
         ReadSchema(assembly, "AgenticPrReview.Protocol.review-input.v1.json"),
         ReadSchema(assembly, "AgenticPrReview.Protocol.review-result.v1.json"),
-        ReadSchema(assembly, "AgenticPrReview.Protocol.review-trace.v1.json"));
+        ReadSchema(assembly, "AgenticPrReview.Protocol.review-trace.v1.json"),
+        ReadSchema(assembly, "AgenticPrReview.Protocol.provider-session-ledger.v1.json"));
 
     public bool IsValid(SchemaKind kind, JsonElement instance) =>
-        (kind switch
+        GetSchema(kind).Evaluate(instance, new EvaluationOptions { OutputFormat = OutputFormat.List }).IsValid;
+
+    internal JsonSchema GetSchema(SchemaKind kind) =>
+        kind switch
         {
             SchemaKind.Input => input,
             SchemaKind.Result => result,
             SchemaKind.Trace => trace,
+            SchemaKind.Ledger => ledger,
             _ => throw new ArgumentOutOfRangeException(nameof(kind)),
-        }).Evaluate(instance, new EvaluationOptions { OutputFormat = OutputFormat.List }).IsValid;
+        };
 
     private static JsonSchema ReadSchema(Assembly assembly, string resourceName)
     {

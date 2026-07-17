@@ -1,0 +1,21 @@
+{
+  "context": {
+    "interaction": {
+      "interactionId": "000000000000000000000000000000000000000000000000000000000000000f",
+      "interactionOrdinal": 15
+    },
+    "subjectDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+    "reviewedHeadSha": "0000000000000000000000000000000000000000",
+    "reviewedBaseSha": "1111111111111111111111111111111111111111",
+    "changedFiles": []
+  },
+  "outcome": {
+    "interaction": {
+      "interactionId": "000000000000000000000000000000000000000000000000000000000000000f",
+      "interactionOrdinal": 15
+    },
+    "summary": "Summary text.",
+    "findings": [],
+    "limitations": []
+  }
+}

@@ -34,10 +34,19 @@ public sealed class ProtocolFixtureTests
                 continue;
             }
 
+            if (entry.GetProperty("type").GetString() is "ledger-restore" or "ledger-transition" or "ledger-build")
+            {
+                // Ledger fixtures are owned by LedgerFixtureTests.
+                registeredFiles.Add(entry.GetProperty("file").GetString()!);
+                continue;
+            }
+
             throw new InvalidOperationException("Unknown manifest entry type.");
         }
 
-        var actualFiles = Directory.EnumerateFiles(root, "*.json", SearchOption.AllDirectories)
+        // Ledger restore fixtures include non-JSON byte oracles (raw-oversize.bin,
+        // invalid-utf8.bin), so the directory sweep is not limited to *.json.
+        var actualFiles = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
             .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/'))
             .Where(path => path != "manifest.json")
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
