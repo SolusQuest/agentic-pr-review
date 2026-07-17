@@ -1,7 +1,12 @@
 import { canonicalJsonBytes, CanonicalJsonInputError } from '../canonical-json/index.js';
 import { isValidIdentity } from './identity.js';
 import { PREFIX_CODES, fail, ok, type PrefixResult } from './result.js';
-import { encodePrefixPath, parseCanonicalHelperPath, type EnvelopeKind } from './safe-path.js';
+import {
+  encodePrefixPath,
+  findCanonicalDomainViolation,
+  type EnvelopeKind,
+  type PrefixPathSegment,
+} from './safe-path.js';
 
 /**
  * Closed cache-contract envelope validation and canonicalization (issue #50,
@@ -85,10 +90,16 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
   for (const name of Object.getOwnPropertyNames(raw)) {
     const descriptor = Object.getOwnPropertyDescriptor(raw, name)!;
     if ('get' in descriptor || 'set' in descriptor) {
-      return fail(PREFIX_CODES.envelopeInvalid, encodePrefixPath([name], kind));
+      return fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath([{ name: name }], kind, PREFIX_CODES.envelopeInvalid),
+      );
     }
     if (!descriptor.enumerable) {
-      return fail(PREFIX_CODES.envelopeInvalid, encodePrefixPath([name], kind));
+      return fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath([{ name: name }], kind, PREFIX_CODES.envelopeInvalid),
+      );
     }
     record[name] = descriptor.value;
   }
@@ -96,12 +107,18 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
   const allowed = new Set(REQUIRED_KEYS[kind]);
   for (const key of Object.keys(record)) {
     if (!allowed.has(key)) {
-      return fail(PREFIX_CODES.envelopeInvalid, encodePrefixPath([key], kind));
+      return fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath([{ name: key }], kind, PREFIX_CODES.envelopeInvalid),
+      );
     }
   }
   for (const required of REQUIRED_KEYS[kind]) {
     if (!(required in record)) {
-      return fail(PREFIX_CODES.envelopeInvalid, encodePrefixPath([required], kind));
+      return fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath([{ name: required }], kind, PREFIX_CODES.envelopeInvalid),
+      );
     }
   }
 
@@ -113,7 +130,10 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
       value < 1 ||
       value > 2_147_483_647
     ) {
-      return fail(PREFIX_CODES.envelopeInvalid, encodePrefixPath([versionField], kind));
+      return fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath([{ name: versionField }], kind, PREFIX_CODES.envelopeInvalid),
+      );
     }
   }
 
@@ -122,9 +142,22 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
     return fieldError;
   }
 
+  const identityError = checkEmbeddedIdentities(kind, record);
+  if (identityError !== null) {
+    return identityError;
+  }
+
   const boundsError = checkStructuralBounds(kind, record);
   if (boundsError !== null) {
     return boundsError;
+  }
+
+  const violation = findCanonicalDomainViolation(record);
+  if (violation !== null) {
+    return fail(
+      PREFIX_CODES.canonicalInputRejected,
+      encodePrefixPath(violation.segments, kind, PREFIX_CODES.canonicalInputRejected),
+    );
   }
 
   let canonical: Uint8Array;
@@ -132,10 +165,8 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
     canonical = canonicalJsonBytes(record);
   } catch (error) {
     if (error instanceof CanonicalJsonInputError) {
-      return fail(
-        PREFIX_CODES.canonicalInputRejected,
-        encodePrefixPath(parseCanonicalHelperPath(error.path), kind),
-      );
+      // Unreachable after the structured pre-scan; defensive mapping.
+      return fail(PREFIX_CODES.canonicalInputRejected);
     }
     throw error;
   }
@@ -155,28 +186,41 @@ function checkKindFields(
     case 'policy':
       return typeof record.instructions === 'string'
         ? null
-        : fail(PREFIX_CODES.envelopeInvalid, encodePrefixPath(['instructions'], kind));
+        : fail(
+            PREFIX_CODES.envelopeInvalid,
+            encodePrefixPath([{ name: 'instructions' }], kind, PREFIX_CODES.envelopeInvalid),
+          );
     case 'tools':
       return checkToolDefinitions(kind, record.definitions);
     case 'cacheConfig': {
       if (typeof record.markerPolicy !== 'string') {
-        return fail(PREFIX_CODES.envelopeInvalid, encodePrefixPath(['markerPolicy'], kind));
+        return fail(
+          PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath([{ name: 'markerPolicy' }], kind, PREFIX_CODES.envelopeInvalid),
+        );
       }
       if (typeof record.eligibility !== 'string') {
-        return fail(PREFIX_CODES.envelopeInvalid, encodePrefixPath(['eligibility'], kind));
+        return fail(
+          PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath([{ name: 'eligibility' }], kind, PREFIX_CODES.envelopeInvalid),
+        );
       }
       return typeof record.statelessMode === 'boolean'
         ? null
-        : fail(PREFIX_CODES.envelopeInvalid, encodePrefixPath(['statelessMode'], kind));
+        : fail(
+            PREFIX_CODES.envelopeInvalid,
+            encodePrefixPath([{ name: 'statelessMode' }], kind, PREFIX_CODES.envelopeInvalid),
+          );
     }
     case 'adapter': {
       const buildVersion = record.adapterBuildVersion;
       if (typeof buildVersion !== 'string') {
-        return fail(PREFIX_CODES.envelopeInvalid, encodePrefixPath(['adapterBuildVersion'], kind));
+        return fail(
+          PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath([{ name: 'adapterBuildVersion' }], kind, PREFIX_CODES.envelopeInvalid),
+        );
       }
-      return isValidIdentity(buildVersion)
-        ? null
-        : fail(PREFIX_CODES.identityInvalid, encodePrefixPath(['adapterBuildVersion'], kind));
+      return null;
     }
     case 'template':
       return null;
@@ -188,10 +232,16 @@ function checkToolDefinitions(
   definitions: unknown,
 ): PrefixResult<ValidatedEnvelope> | null {
   if (!Array.isArray(definitions)) {
-    return fail(PREFIX_CODES.envelopeInvalid, encodePrefixPath(['definitions'], kind));
+    return fail(
+      PREFIX_CODES.envelopeInvalid,
+      encodePrefixPath([{ name: 'definitions' }], kind, PREFIX_CODES.envelopeInvalid),
+    );
   }
   if (definitions.length > MAX_TOOL_DEFINITIONS) {
-    return fail(PREFIX_CODES.envelopeInvalid, encodePrefixPath(['definitions'], kind));
+    return fail(
+      PREFIX_CODES.envelopeInvalid,
+      encodePrefixPath([{ name: 'definitions' }], kind, PREFIX_CODES.envelopeInvalid),
+    );
   }
 
   const names = new Set<string>();
@@ -199,7 +249,14 @@ function checkToolDefinitions(
     const indexText = String(index);
     const tool = definitions[index] as unknown;
     if (typeof tool !== 'object' || tool === null || Array.isArray(tool)) {
-      return fail(PREFIX_CODES.envelopeInvalid, encodePrefixPath(['definitions', indexText], kind));
+      return fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath(
+          [{ name: 'definitions' }, { name: indexText, isIndex: true }],
+          kind,
+          PREFIX_CODES.envelopeInvalid,
+        ),
+      );
     }
 
     const record = tool as Record<string, unknown>;
@@ -212,31 +269,44 @@ function checkToolDefinitions(
       ) {
         return fail(
           PREFIX_CODES.envelopeInvalid,
-          encodePrefixPath(['definitions', indexText, key], kind),
+          encodePrefixPath(
+            [{ name: 'definitions' }, { name: indexText, isIndex: true }, { name: key }],
+            kind,
+            PREFIX_CODES.envelopeInvalid,
+          ),
         );
       }
     }
     if (!('name' in record) || !('description' in record) || !('inputSchema' in record)) {
-      return fail(PREFIX_CODES.envelopeInvalid, encodePrefixPath(['definitions', indexText], kind));
+      return fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath(
+          [{ name: 'definitions' }, { name: indexText, isIndex: true }],
+          kind,
+          PREFIX_CODES.envelopeInvalid,
+        ),
+      );
     }
 
     const name = record.name;
     if (typeof name !== 'string') {
       return fail(
         PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath(['definitions', indexText, 'name'], kind),
-      );
-    }
-    if (!isValidIdentity(name)) {
-      return fail(
-        PREFIX_CODES.identityInvalid,
-        encodePrefixPath(['definitions', indexText, 'name'], kind),
+        encodePrefixPath(
+          [{ name: 'definitions' }, { name: indexText, isIndex: true }, { name: 'name' }],
+          kind,
+          PREFIX_CODES.envelopeInvalid,
+        ),
       );
     }
     if (names.has(name)) {
       return fail(
         PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath(['definitions', indexText, 'name'], kind),
+        encodePrefixPath(
+          [{ name: 'definitions' }, { name: indexText, isIndex: true }, { name: 'name' }],
+          kind,
+          PREFIX_CODES.envelopeInvalid,
+        ),
       );
     }
     names.add(name);
@@ -244,7 +314,11 @@ function checkToolDefinitions(
     if (typeof record.description !== 'string') {
       return fail(
         PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath(['definitions', indexText, 'description'], kind),
+        encodePrefixPath(
+          [{ name: 'definitions' }, { name: indexText, isIndex: true }, { name: 'description' }],
+          kind,
+          PREFIX_CODES.envelopeInvalid,
+        ),
       );
     }
     if (
@@ -254,11 +328,52 @@ function checkToolDefinitions(
     ) {
       return fail(
         PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath(['definitions', indexText, 'inputSchema'], kind),
+        encodePrefixPath(
+          [{ name: 'definitions' }, { name: indexText, isIndex: true }, { name: 'inputSchema' }],
+          kind,
+          PREFIX_CODES.envelopeInvalid,
+        ),
       );
     }
   }
 
+  return null;
+}
+
+/** Stage: embedded identity semantics (tool names, adapterBuildVersion). */
+function checkEmbeddedIdentities(
+  kind: EnvelopeKind,
+  record: Record<string, unknown>,
+): PrefixResult<ValidatedEnvelope> | null {
+  if (kind === 'tools') {
+    const definitions = record.definitions;
+    if (!Array.isArray(definitions)) {
+      return null;
+    }
+    for (let index = 0; index < definitions.length; index++) {
+      const tool = definitions[index] as Record<string, unknown>;
+      if (typeof tool?.name === 'string' && !isValidIdentity(tool.name)) {
+        return fail(
+          PREFIX_CODES.identityInvalid,
+          encodePrefixPath(
+            [{ name: 'definitions' }, { name: String(index), isIndex: true }, { name: 'name' }],
+            kind,
+            PREFIX_CODES.identityInvalid,
+          ),
+        );
+      }
+    }
+    return null;
+  }
+  if (kind === 'adapter') {
+    const buildVersion = record.adapterBuildVersion;
+    if (typeof buildVersion === 'string' && !isValidIdentity(buildVersion)) {
+      return fail(
+        PREFIX_CODES.identityInvalid,
+        encodePrefixPath([{ name: 'adapterBuildVersion' }], kind, PREFIX_CODES.identityInvalid),
+      );
+    }
+  }
   return null;
 }
 
@@ -270,31 +385,47 @@ function checkStructuralBounds(
   interface Frame {
     readonly value: unknown;
     readonly depth: number;
-    readonly segments: readonly string[];
+    readonly segments: readonly PrefixPathSegment[];
   }
-  const stack: Frame[] = [{ value: root, depth: 0, segments: [] as string[] }];
+  const stack: Frame[] = [{ value: root, depth: 0, segments: [] as PrefixPathSegment[] }];
   while (stack.length > 0) {
     const { value, depth, segments } = stack.pop()!;
     if (Array.isArray(value)) {
       if (depth > MAX_JSON_DEPTH) {
-        return fail(PREFIX_CODES.envelopeInvalid, encodePrefixPath(segments, kind));
+        return fail(
+          PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath(segments, kind, PREFIX_CODES.envelopeInvalid),
+        );
       }
       if (value.length > MAX_ARRAY_ITEMS) {
-        return fail(PREFIX_CODES.envelopeInvalid, encodePrefixPath(segments, kind));
+        return fail(
+          PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath(segments, kind, PREFIX_CODES.envelopeInvalid),
+        );
       }
       for (let i = 0; i < value.length; i++) {
-        stack.push({ value: value[i], depth: depth + 1, segments: [...segments, String(i)] });
+        stack.push({
+          value: value[i],
+          depth: depth + 1,
+          segments: [...segments, { name: String(i), isIndex: true }],
+        });
       }
     } else if (typeof value === 'object' && value !== null) {
       if (depth > MAX_JSON_DEPTH) {
-        return fail(PREFIX_CODES.envelopeInvalid, encodePrefixPath(segments, kind));
+        return fail(
+          PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath(segments, kind, PREFIX_CODES.envelopeInvalid),
+        );
       }
       const entries = Object.entries(value as Record<string, unknown>);
       if (entries.length > MAX_OBJECT_PROPERTIES) {
-        return fail(PREFIX_CODES.envelopeInvalid, encodePrefixPath(segments, kind));
+        return fail(
+          PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath(segments, kind, PREFIX_CODES.envelopeInvalid),
+        );
       }
       for (const [key, child] of entries) {
-        stack.push({ value: child, depth: depth + 1, segments: [...segments, key] });
+        stack.push({ value: child, depth: depth + 1, segments: [...segments, { name: key }] });
       }
     }
   }

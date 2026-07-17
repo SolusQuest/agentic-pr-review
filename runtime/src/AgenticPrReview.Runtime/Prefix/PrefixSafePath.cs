@@ -1,4 +1,5 @@
 using System.Text;
+using AgenticPrReview.Runtime.Canonical;
 
 namespace AgenticPrReview.Runtime.Prefix;
 
@@ -41,80 +42,80 @@ internal static class PrefixSafePath
     };
 
     /// <summary>
-    /// Encodes raw path segments (property names or ASCII-decimal array
-    /// indices, root first) into a sanitized RFC 6901 path for the given
-    /// envelope kind, applying the six-rule sanitizer table and the greedy
-    /// truncation algorithm with final-segment preservation.
+    /// Encodes structured path segments into a sanitized RFC 6901 path for the
+    /// given envelope kind, applying the six-rule sanitizer table and the
+    /// greedy truncation algorithm with final-segment preservation. The path
+    /// budget derives from the actual diagnostic code, and the empty segment
+    /// list yields the root path "".
     /// </summary>
-    internal static string Encode(IReadOnlyList<string> rawSegments, PrefixEnvelopeValidator.EnvelopeKind kind)
+    internal static string Encode(IReadOnlyList<CanonicalPathSegment> rawSegments, PrefixEnvelopeValidator.EnvelopeKind kind, string code)
     {
+        if (rawSegments.Count == 0)
+        {
+            return string.Empty;
+        }
+
         var sanitized = new List<string>(rawSegments.Count);
         var belowOpenJson = false;
         for (var i = 0; i < rawSegments.Count; i++)
         {
             var segment = rawSegments[i];
-            if (IsArrayIndex(segment))
+            if (segment.IsIndex)
             {
-                sanitized.Add(segment);
+                sanitized.Add(segment.Name);
                 continue;
             }
 
             if (belowOpenJson)
             {
-                sanitized.Add(SanitizeUnknownName(segment));
+                sanitized.Add(SanitizeUnknownName(segment.Name));
                 continue;
             }
 
             if (i == 0)
             {
-                if (EnvelopeRootKeys[kind].Contains(segment))
+                if (EnvelopeRootKeys[kind].Contains(segment.Name))
                 {
-                    sanitized.Add(EscapeRfc6901(segment));
-                    belowOpenJson = OpenJsonRoots.Contains(segment);
+                    sanitized.Add(EscapeRfc6901(segment.Name));
+                    belowOpenJson = OpenJsonRoots.Contains(segment.Name);
                 }
                 else
                 {
-                    sanitized.Add(SanitizeUnknownName(segment));
+                    sanitized.Add(SanitizeUnknownName(segment.Name));
                     belowOpenJson = true;
                 }
 
                 continue;
             }
 
-            // i == 1 here means the parent was "definitions" (array of tool
-            // wrappers); wrapper keys are schema-known, everything below an
-            // unknown or open-JSON parent is unknown.
-            if (i == 2 && rawSegments[0] == "definitions" && EnvelopeRootKeys[kind].Contains("definitions"))
+            if (i == 2 && rawSegments[0].Name == "definitions" && EnvelopeRootKeys[kind].Contains("definitions"))
             {
-                if (ToolWrapperKeys.Contains(segment))
+                if (ToolWrapperKeys.Contains(segment.Name))
                 {
-                    sanitized.Add(EscapeRfc6901(segment));
-                    belowOpenJson = OpenJsonRoots.Contains(segment);
+                    sanitized.Add(EscapeRfc6901(segment.Name));
+                    belowOpenJson = OpenJsonRoots.Contains(segment.Name);
                 }
                 else
                 {
-                    sanitized.Add(SanitizeUnknownName(segment));
+                    sanitized.Add(SanitizeUnknownName(segment.Name));
                     belowOpenJson = true;
                 }
 
                 continue;
             }
 
-            sanitized.Add(SanitizeUnknownName(segment));
+            sanitized.Add(SanitizeUnknownName(segment.Name));
             belowOpenJson = true;
         }
 
-        return Truncate(sanitized, kind);
+        return Truncate(sanitized, code);
     }
 
-    /// <summary>Truncates a sanitized path so code + ":" + path fits the dual caps.</summary>
-    private static string Truncate(List<string> segments, PrefixEnvelopeValidator.EnvelopeKind kind)
+    /// <summary>Truncates a sanitized path so code + ":" + path fits the dual caps for the actual code.</summary>
+    private static string Truncate(List<string> segments, string code)
     {
-        _ = kind;
-        // The path budget is evaluated against the longest producer code.
-        const int codePrefixChars = 31; // prefix_canonical_input_rejected
-        var charBudget = MaxDiagnosticMessageChars - codePrefixChars - 1;
-        var byteBudget = MaxDiagnosticMessageUtf8Bytes - codePrefixChars - 1;
+        var charBudget = MaxDiagnosticMessageChars - code.Length - 1;
+        var byteBudget = MaxDiagnosticMessageUtf8Bytes - Encoding.UTF8.GetByteCount(code) - 1;
 
         var joined = "/" + string.Join('/', segments);
         if (joined.Length <= charBudget && Encoding.UTF8.GetByteCount(joined) <= byteBudget)
@@ -192,24 +193,6 @@ internal static class PrefixSafePath
         }
 
         return false;
-    }
-
-    private static bool IsArrayIndex(string segment)
-    {
-        if (segment.Length == 0)
-        {
-            return false;
-        }
-
-        foreach (var c in segment)
-        {
-            if (c < '0' || c > '9')
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private static string EscapeRfc6901(string name) =>

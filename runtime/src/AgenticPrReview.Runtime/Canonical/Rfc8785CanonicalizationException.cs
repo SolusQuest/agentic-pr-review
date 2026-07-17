@@ -16,7 +16,7 @@ internal enum Rfc8785RejectionReason
 /// </summary>
 internal sealed class Rfc8785CanonicalizationException : Exception
 {
-    internal Rfc8785CanonicalizationException(Rfc8785RejectionReason reason, string message, IReadOnlyList<string>? segments = null)
+    internal Rfc8785CanonicalizationException(Rfc8785RejectionReason reason, string message, IReadOnlyList<CanonicalPathSegment>? segments = null)
         : base(message)
     {
         Reason = reason;
@@ -26,5 +26,5 @@ internal sealed class Rfc8785CanonicalizationException : Exception
     internal Rfc8785RejectionReason Reason { get; }
 
     /// <summary>Raw path segments (property names / array indices) of the offending value, when known.</summary>
-    internal IReadOnlyList<string>? Segments { get; }
+    internal IReadOnlyList<CanonicalPathSegment>? Segments { get; }
 }

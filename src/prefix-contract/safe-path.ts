@@ -15,6 +15,15 @@ export const MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES = 1024;
 
 export type EnvelopeKind = 'template' | 'policy' | 'tools' | 'cacheConfig' | 'adapter';
 
+/**
+ * A structured path segment. Only segments produced at an actual array
+ * position may set isIndex; a numeric property name is still a name.
+ */
+export interface PrefixPathSegment {
+  readonly name: string;
+  readonly isIndex?: boolean;
+}
+
 const ENVELOPE_ROOT_KEYS: Record<EnvelopeKind, ReadonlySet<string>> = {
   template: new Set(['definition', 'schemaVersion', 'templateVersion']),
   policy: new Set(['constraints', 'instructions', 'policyVersion', 'schemaVersion']),
@@ -31,10 +40,6 @@ const ENVELOPE_ROOT_KEYS: Record<EnvelopeKind, ReadonlySet<string>> = {
 
 const TOOL_WRAPPER_KEYS = new Set(['description', 'inputSchema', 'name', 'policyMetadata']);
 const OPEN_JSON_ROOTS = new Set(['constraints', 'definition', 'inputSchema', 'policyMetadata']);
-
-function isArrayIndex(segment: string): boolean {
-  return segment.length > 0 && /^[0-9]+$/.test(segment);
-}
 
 function hasUnpairedSurrogate(value: string): boolean {
   for (let i = 0; i < value.length; i++) {
@@ -83,32 +88,41 @@ function utf8Length(value: string): number {
 }
 
 /**
- * Encodes raw path segments (property names or ASCII-decimal array indices,
- * root first) into a sanitized RFC 6901 path, applying the six-rule sanitizer
- * table and the greedy truncation algorithm with final-segment preservation.
+ * Encodes structured path segments into a sanitized RFC 6901 path, applying
+ * the six-rule sanitizer table and the greedy truncation algorithm with
+ * final-segment preservation. The budget derives from the actual diagnostic
+ * code; the empty segment list yields the root path "".
  */
-export function encodePrefixPath(rawSegments: readonly string[], kind: EnvelopeKind): string {
+export function encodePrefixPath(
+  rawSegments: readonly PrefixPathSegment[],
+  kind: EnvelopeKind,
+  code: string,
+): string {
+  if (rawSegments.length === 0) {
+    return '';
+  }
+
   const sanitized: string[] = [];
   let belowOpenJson = false;
 
   for (let i = 0; i < rawSegments.length; i++) {
     const segment = rawSegments[i];
-    if (isArrayIndex(segment)) {
-      sanitized.push(segment);
+    if (segment.isIndex === true) {
+      sanitized.push(segment.name);
       continue;
     }
 
     if (belowOpenJson) {
-      sanitized.push(sanitizeUnknownName(segment));
+      sanitized.push(sanitizeUnknownName(segment.name));
       continue;
     }
 
     if (i === 0) {
-      if (ENVELOPE_ROOT_KEYS[kind].has(segment)) {
-        sanitized.push(escapeRfc6901(segment));
-        belowOpenJson = OPEN_JSON_ROOTS.has(segment);
+      if (ENVELOPE_ROOT_KEYS[kind].has(segment.name)) {
+        sanitized.push(escapeRfc6901(segment.name));
+        belowOpenJson = OPEN_JSON_ROOTS.has(segment.name);
       } else {
-        sanitized.push(sanitizeUnknownName(segment));
+        sanitized.push(sanitizeUnknownName(segment.name));
         belowOpenJson = true;
       }
       continue;
@@ -116,32 +130,30 @@ export function encodePrefixPath(rawSegments: readonly string[], kind: EnvelopeK
 
     if (
       i === 2 &&
-      rawSegments[0] === 'definitions' &&
+      rawSegments[0].name === 'definitions' &&
       ENVELOPE_ROOT_KEYS[kind].has('definitions')
     ) {
-      if (TOOL_WRAPPER_KEYS.has(segment)) {
-        sanitized.push(escapeRfc6901(segment));
-        belowOpenJson = OPEN_JSON_ROOTS.has(segment);
+      if (TOOL_WRAPPER_KEYS.has(segment.name)) {
+        sanitized.push(escapeRfc6901(segment.name));
+        belowOpenJson = OPEN_JSON_ROOTS.has(segment.name);
       } else {
-        sanitized.push(sanitizeUnknownName(segment));
+        sanitized.push(sanitizeUnknownName(segment.name));
         belowOpenJson = true;
       }
       continue;
     }
 
-    sanitized.push(sanitizeUnknownName(segment));
+    sanitized.push(sanitizeUnknownName(segment.name));
     belowOpenJson = true;
   }
 
-  return truncate(sanitized);
+  return truncate(sanitized, code);
 }
 
-/** Truncates a sanitized path so code + ":" + path fits the dual caps. */
-function truncate(segments: readonly string[]): string {
-  // Evaluate against the longest producer code (prefix-canonical-input-rejected, 31 chars).
-  const codePrefixChars = 31;
-  const charBudget = MAX_DIAGNOSTIC_MESSAGE_CHARS - codePrefixChars - 1;
-  const byteBudget = MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES - codePrefixChars - 1;
+/** Truncates a sanitized path so code + ":" + path fits the dual caps for the actual code. */
+function truncate(segments: readonly string[], code: string): string {
+  const charBudget = MAX_DIAGNOSTIC_MESSAGE_CHARS - code.length - 1;
+  const byteBudget = MAX_DIAGNOSTIC_MESSAGE_UTF8_BYTES - utf8Length(code) - 1;
 
   const joined = '/' + segments.join('/');
   if (joined.length <= charBudget && utf8Length(joined) <= byteBudget) {
@@ -167,17 +179,70 @@ function truncate(segments: readonly string[]): string {
   return prefix + '/' + PATH_TRUNCATED + '/' + finalSegment;
 }
 
-/** Parses a #48 canonical-json helper path (`$.a.b[0].c`) into raw segments. */
-export function parseCanonicalHelperPath(path: string): string[] {
-  if (path === '$' || path === '') {
-    return [];
+/**
+ * Structured canonical-domain pre-scan: detects lone surrogates (string
+ * values and property names), non-finite numbers, and cycles, returning the
+ * offending location as structured segments. Returns null when clean.
+ */
+export function findCanonicalDomainViolation(
+  root: unknown,
+): { segments: PrefixPathSegment[]; reason: 'lone-surrogate' | 'non-finite' | 'cyclic' } | null {
+  const seen = new Set<object>();
+  interface Frame {
+    readonly value: unknown;
+    readonly segments: readonly PrefixPathSegment[];
   }
-  const body = path.startsWith('$.') ? path.slice(2) : path.replace(/^\$/, '');
-  const segments: string[] = [];
-  const re = /([^.[\]]+)|\[(\d+)\]/g;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(body)) !== null) {
-    segments.push(match[1] ?? match[2]);
+  const stack: Frame[] = [{ value: root, segments: [] }];
+  while (stack.length > 0) {
+    const { value, segments } = stack.pop()!;
+    if (typeof value === 'string') {
+      if (hasUnpairedSurrogate(value)) {
+        return { segments: [...segments], reason: 'lone-surrogate' };
+      }
+      continue;
+    }
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value)) {
+        return { segments: [...segments], reason: 'non-finite' };
+      }
+      continue;
+    }
+    if (typeof value !== 'object' || value === null) {
+      continue;
+    }
+    if (seen.has(value)) {
+      return { segments: [...segments], reason: 'cyclic' };
+    }
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i++) {
+        stack.push({
+          value: value[i],
+          segments: [...segments, { name: String(i), isIndex: true }],
+        });
+      }
+      continue;
+    }
+
+    for (const name of Object.getOwnPropertyNames(value)) {
+      if (hasUnpairedSurrogate(name)) {
+        return { segments: [...segments, { name }], reason: 'lone-surrogate' };
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(value, name);
+      if (
+        descriptor === undefined ||
+        'get' in descriptor ||
+        'set' in descriptor ||
+        !descriptor.enumerable
+      ) {
+        continue;
+      }
+      stack.push({
+        value: (value as Record<string, unknown>)[name],
+        segments: [...segments, { name }],
+      });
+    }
   }
-  return segments;
+  return null;
 }

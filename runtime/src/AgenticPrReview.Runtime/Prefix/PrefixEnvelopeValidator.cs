@@ -47,13 +47,9 @@ internal static class PrefixEnvelopeValidator
         }
     }
 
-    private static PrefixDiagnostic? ValidateCore(
-        EnvelopeKind kind,
-        JsonElement envelope,
-        out ValidatedEnvelope? validated)
+    /// <summary>Stage 2: envelope structure (root shape, key sets, required fields, field types).</summary>
+    internal static PrefixDiagnostic? ValidateStructure(EnvelopeKind kind, JsonElement envelope)
     {
-        validated = null;
-
         if (envelope.ValueKind != JsonValueKind.Object)
         {
             return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid);
@@ -65,11 +61,74 @@ internal static class PrefixEnvelopeValidator
             return keyError;
         }
 
-        var fieldError = CheckFields(kind, envelope);
-        if (fieldError is not null)
+        return CheckFields(kind, envelope);
+    }
+
+    /// <summary>Stage 3: embedded identity semantics (tool names, adapterBuildVersion).</summary>
+    internal static PrefixDiagnostic? ValidateEmbeddedIdentity(EnvelopeKind kind, JsonElement envelope)
+    {
+        switch (kind)
         {
-            return fieldError;
+            case EnvelopeKind.Tools:
+            {
+                var definitions = envelope.GetProperty("definitions");
+                if (definitions.ValueKind != JsonValueKind.Array)
+                {
+                    return null;
+                }
+
+                var index = 0;
+                foreach (var tool in definitions.EnumerateArray())
+                {
+                    if (tool.ValueKind != JsonValueKind.Object
+                        || !tool.TryGetProperty("name", out var name)
+                        || name.ValueKind != JsonValueKind.String)
+                    {
+                        index++;
+                        continue;
+                    }
+
+                    if (!PrefixIdentityValidation.IsValidIdentity(name.GetString()))
+                    {
+                        return PrefixDiagnostic.Create(
+                            PrefixDiagnosticCodes.IdentityInvalid,
+                            path: EncodePath(kind, PrefixDiagnosticCodes.IdentityInvalid,
+                                new[] { CanonicalPathSegment.Property("definitions"), CanonicalPathSegment.Index(index), CanonicalPathSegment.Property("name") }));
+                    }
+
+                    index++;
+                }
+
+                return null;
+            }
+
+            case EnvelopeKind.Adapter:
+            {
+                var buildVersion = envelope.GetProperty("adapterBuildVersion");
+                if (buildVersion.ValueKind == JsonValueKind.String
+                    && !PrefixIdentityValidation.IsValidIdentity(buildVersion.GetString()))
+                {
+                    return PrefixDiagnostic.Create(
+                        PrefixDiagnosticCodes.IdentityInvalid,
+                        path: EncodePath(kind, PrefixDiagnosticCodes.IdentityInvalid,
+                            new[] { CanonicalPathSegment.Property("adapterBuildVersion") }));
+                }
+
+                return null;
+            }
+
+            default:
+                return null;
         }
+    }
+
+    /// <summary>Stages 4–5: canonical JSON, structural bounds, canonical byte cap, digest.</summary>
+    internal static PrefixDiagnostic? CanonicalizeAndCap(
+        EnvelopeKind kind,
+        JsonElement envelope,
+        out ValidatedEnvelope? validated)
+    {
+        validated = null;
 
         ImmutableArray<byte> canonicalBytes;
         try
@@ -85,12 +144,12 @@ internal static class PrefixEnvelopeValidator
             return ex.Reason switch
             {
                 Rfc8785RejectionReason.DuplicateProperty
-                    => PrefixDiagnostic.Create(PrefixDiagnosticCodes.CanonicalInputRejected, path: EncodePath(kind, ex.Segments)),
+                    => PrefixDiagnostic.Create(PrefixDiagnosticCodes.CanonicalInputRejected, path: EncodePath(kind, PrefixDiagnosticCodes.CanonicalInputRejected, ex.Segments)),
                 Rfc8785RejectionReason.DepthLimitExceeded
                     or Rfc8785RejectionReason.PropertyCountExceeded
                     or Rfc8785RejectionReason.ArrayLengthExceeded
-                    => PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, ex.Segments)),
-                _ => PrefixDiagnostic.Create(PrefixDiagnosticCodes.CanonicalInputRejected, path: EncodePath(kind, ex.Segments)),
+                    => PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, ex.Segments)),
+                _ => PrefixDiagnostic.Create(PrefixDiagnosticCodes.CanonicalInputRejected, path: EncodePath(kind, PrefixDiagnosticCodes.CanonicalInputRejected, ex.Segments)),
             };
         }
 
@@ -104,8 +163,33 @@ internal static class PrefixEnvelopeValidator
         return null;
     }
 
-    private static string EncodePath(EnvelopeKind kind, System.Collections.Generic.IReadOnlyList<string>? segments) =>
-        PrefixSafePath.Encode(segments ?? System.Array.Empty<string>(), kind);
+    private static PrefixDiagnostic? ValidateCore(
+        EnvelopeKind kind,
+        JsonElement envelope,
+        out ValidatedEnvelope? validated)
+    {
+        var structureError = ValidateStructure(kind, envelope);
+        if (structureError is not null)
+        {
+            validated = null;
+            return structureError;
+        }
+
+        var identityError = ValidateEmbeddedIdentity(kind, envelope);
+        if (identityError is not null)
+        {
+            validated = null;
+            return identityError;
+        }
+
+        return CanonicalizeAndCap(kind, envelope, out validated);
+    }
+
+    private static string EncodePath(EnvelopeKind kind, string code, System.Collections.Generic.IReadOnlyList<CanonicalPathSegment>? segments) =>
+        PrefixSafePath.Encode(segments ?? System.Array.Empty<CanonicalPathSegment>(), kind, code);
+
+    private static PrefixDiagnostic Diag(EnvelopeKind kind, string code, params CanonicalPathSegment[] segments) =>
+        PrefixDiagnostic.Create(code, path: EncodePath(kind, code, segments));
 
     internal static byte[] TagFor(EnvelopeKind kind) => kind switch
     {
@@ -135,12 +219,12 @@ internal static class PrefixEnvelopeValidator
         {
             if (!seen.Add(property.Name))
             {
-                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, new[] { property.Name }));
+                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property(property.Name) }));
             }
 
             if (!allowedSet.Contains(property.Name))
             {
-                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, new[] { property.Name }));
+                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property(property.Name) }));
             }
         }
 
@@ -148,7 +232,7 @@ internal static class PrefixEnvelopeValidator
         {
             if (!seen.Contains(required))
             {
-                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, new[] { required }));
+                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property(required) }));
             }
         }
 
@@ -207,7 +291,7 @@ internal static class PrefixEnvelopeValidator
                 var stateless = envelope.GetProperty("statelessMode");
                 if (stateless.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
                 {
-                    return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, new[] { "statelessMode" }));
+                    return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("statelessMode") }));
                 }
 
                 return null;
@@ -224,12 +308,7 @@ internal static class PrefixEnvelopeValidator
                 var buildVersion = envelope.GetProperty("adapterBuildVersion");
                 if (buildVersion.ValueKind != JsonValueKind.String)
                 {
-                    return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, new[] { "adapterBuildVersion" }));
-                }
-
-                if (!PrefixIdentityValidation.IsValidIdentity(buildVersion.GetString()))
-                {
-                    return PrefixDiagnostic.Create(PrefixDiagnosticCodes.IdentityInvalid, path: EncodePath(kind, new[] { "adapterBuildVersion" }));
+                    return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("adapterBuildVersion") }));
                 }
 
                 return null;
@@ -252,7 +331,7 @@ internal static class PrefixEnvelopeValidator
             || number < 1
             || number > 2_147_483_647)
         {
-            return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, new[] { name }));
+            return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property(name) }));
         }
 
         return null;
@@ -262,7 +341,7 @@ internal static class PrefixEnvelopeValidator
     {
         if (envelope.GetProperty(name).ValueKind != JsonValueKind.String)
         {
-            return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, new[] { name }));
+            return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property(name) }));
         }
 
         return null;
@@ -272,13 +351,13 @@ internal static class PrefixEnvelopeValidator
     {
         if (definitions.ValueKind != JsonValueKind.Array)
         {
-            return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, new[] { "definitions" }));
+            return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions") }));
         }
 
         var count = definitions.GetArrayLength();
         if (count > PrefixBounds.MaxToolDefinitions)
         {
-            return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, new[] { "definitions" }));
+            return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions") }));
         }
 
         var names = new HashSet<string>(StringComparer.Ordinal);
@@ -288,7 +367,7 @@ internal static class PrefixEnvelopeValidator
             var indexText = index.ToString(System.Globalization.CultureInfo.InvariantCulture);
             if (tool.ValueKind != JsonValueKind.Object)
             {
-                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, new[] { "definitions", indexText }));
+                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions"), CanonicalPathSegment.Index(indexText) }));
             }
 
             var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -296,44 +375,39 @@ internal static class PrefixEnvelopeValidator
             {
                 if (!seen.Add(property.Name))
                 {
-                    return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, new[] { "definitions", indexText, property.Name }));
+                    return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions"), CanonicalPathSegment.Index(indexText), CanonicalPathSegment.Property(property.Name) }));
                 }
 
                 if (property.Name is not ("description" or "inputSchema" or "name" or "policyMetadata"))
                 {
-                    return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, new[] { "definitions", indexText, property.Name }));
+                    return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions"), CanonicalPathSegment.Index(indexText), CanonicalPathSegment.Property(property.Name) }));
                 }
             }
 
             if (!seen.Contains("name") || !seen.Contains("description") || !seen.Contains("inputSchema"))
             {
-                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, new[] { "definitions", indexText }));
+                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions"), CanonicalPathSegment.Index(indexText) }));
             }
 
             var name = tool.GetProperty("name");
             if (name.ValueKind != JsonValueKind.String)
             {
-                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, new[] { "definitions", indexText, "name" }));
-            }
-
-            if (!PrefixIdentityValidation.IsValidIdentity(name.GetString()))
-            {
-                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.IdentityInvalid, path: EncodePath(kind, new[] { "definitions", indexText, "name" }));
+                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions"), CanonicalPathSegment.Index(indexText), CanonicalPathSegment.Property("name") }));
             }
 
             if (!names.Add(name.GetString()!))
             {
-                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, new[] { "definitions", indexText, "name" }));
+                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions"), CanonicalPathSegment.Index(indexText), CanonicalPathSegment.Property("name") }));
             }
 
             if (tool.GetProperty("description").ValueKind != JsonValueKind.String)
             {
-                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, new[] { "definitions", indexText, "description" }));
+                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions"), CanonicalPathSegment.Index(indexText), CanonicalPathSegment.Property("description") }));
             }
 
             if (tool.GetProperty("inputSchema").ValueKind != JsonValueKind.Object)
             {
-                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, new[] { "definitions", indexText, "inputSchema" }));
+                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions"), CanonicalPathSegment.Index(indexText), CanonicalPathSegment.Property("inputSchema") }));
             }
 
             index++;

@@ -1295,12 +1295,14 @@ function invalidVector(
   target: string,
   input: unknown,
   expected: Record<string, unknown>,
+  scope?: 'csharp-only',
 ): void {
   add(id, 'invalid-vector', `invalid/${id.replace('invalid-', '')}.json`, {
     id,
     kind: 'invalid-vector',
     target,
     input,
+    ...(scope === undefined ? {} : { scope }),
     expected,
   });
 }
@@ -1448,6 +1450,7 @@ function buildInvalidVectors(): void {
     'template-id',
     { envelopeJson: '{"schemaVersion":1,"schemaVersion":1,"templateVersion":3,"definition":{}}' },
     csOnly(C.envelopeInvalid, { path: '/schemaVersion' }),
+    'csharp-only',
   );
   invalidVector(
     'invalid-tools-duplicate-wrapper-property',
@@ -1457,6 +1460,7 @@ function buildInvalidVectors(): void {
         '{"schemaVersion":1,"toolsetVersion":1,"definitions":[{"name":"a","name":"a","description":"d","inputSchema":{}}]}',
     },
     csOnly(C.envelopeInvalid, { path: '/definitions/0/name' }),
+    'csharp-only',
   );
   invalidVector(
     'invalid-canonical-duplicate-open-json',
@@ -1466,6 +1470,7 @@ function buildInvalidVectors(): void {
       envelopeJson: '{"schemaVersion":1,"templateVersion":1,"definition":{"a":1,"a":2}}',
     },
     csOnly(C.canonicalRejected),
+    'csharp-only',
   );
 
   // --- canonical-json seam (both where expressible) ---
@@ -1499,7 +1504,11 @@ function buildInvalidVectors(): void {
       envelope: { schemaVersion: 1, templateVersion: 1, definition: ancestorChain },
     },
     both(C.canonicalRejected, {
-      path: encodePrefixPath(['definition', 'secretToken', 'x'], 'template'),
+      path: encodePrefixPath(
+        [{ name: 'definition' }, { name: 'secretToken' }, { name: 'x' }],
+        'template',
+        C.canonicalRejected,
+      ),
     }),
   );
 
@@ -1516,7 +1525,49 @@ function buildInvalidVectors(): void {
       envelope: { schemaVersion: 1, templateVersion: 1, definition: deepValue },
     },
     both(C.canonicalRejected, {
-      path: encodePrefixPath(['definition', ...deepKeys], 'template'),
+      path: encodePrefixPath(
+        [{ name: 'definition' }, ...deepKeys.map((key) => ({ name: key }))],
+        'template',
+        C.canonicalRejected,
+      ),
+    }),
+  );
+
+  // A numeric unknown property name must be sanitized, not treated as an index.
+  invalidVector(
+    'invalid-canonical-numeric-property-name',
+    'canonical-json',
+    {
+      envelopeKind: 'template',
+      envelope: { schemaVersion: 1, templateVersion: 1, definition: { '123': 'bad' + surrogate } },
+    },
+    both(C.canonicalRejected, {
+      path: encodePrefixPath(
+        [{ name: 'definition' }, { name: '123' }],
+        'template',
+        C.canonicalRejected,
+      ),
+    }),
+  );
+
+  // An unknown property name containing dots/brackets stays a single segment.
+  invalidVector(
+    'invalid-canonical-dotted-property-name',
+    'canonical-json',
+    {
+      envelopeKind: 'template',
+      envelope: {
+        schemaVersion: 1,
+        templateVersion: 1,
+        definition: { 'a.b[0]': 'bad' + surrogate },
+      },
+    },
+    both(C.canonicalRejected, {
+      path: encodePrefixPath(
+        [{ name: 'definition' }, { name: 'a.b[0]' }],
+        'template',
+        C.canonicalRejected,
+      ),
     }),
   );
 

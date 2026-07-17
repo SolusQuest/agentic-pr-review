@@ -147,6 +147,7 @@ internal static class PrefixFixtureLoader
                 break;
             case "invalid-vector":
                 Require("target", "input", "expected");
+                allowed.Add("scope");
                 var expected = vector.GetProperty("expected");
                 Assert.True(
                     expected.TryGetProperty("csharpCode", out _) || expected.TryGetProperty("typescriptCode", out _),

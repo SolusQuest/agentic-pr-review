@@ -12,7 +12,7 @@ public sealed class PrefixDiagnostic
 
     internal static PrefixDiagnostic Create(string code, string? causeCode = null, string? path = null)
     {
-        var message = path is null ? code : code + ":" + path;
+        var message = string.IsNullOrEmpty(path) ? code : code + ":" + path;
         return new PrefixDiagnostic { Code = code, Message = message, CauseCode = causeCode };
     }
 }

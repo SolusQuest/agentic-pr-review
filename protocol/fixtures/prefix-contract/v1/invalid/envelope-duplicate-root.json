@@ -5,6 +5,7 @@
   "input": {
     "envelopeJson": "{\"schemaVersion\":1,\"schemaVersion\":1,\"templateVersion\":3,\"definition\":{}}"
   },
+  "scope": "csharp-only",
   "expected": {
     "csharpCode": "prefix_envelope_invalid",
     "path": "/schemaVersion"

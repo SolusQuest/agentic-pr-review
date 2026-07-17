@@ -24,7 +24,9 @@ public static class PrefixMaterializer
             || input.CurrentContext is null
             || input.Interaction is null
             || input.Envelopes is null
-            || input.SessionEpoch is null)
+            || input.SessionEpoch is null
+            || input.History is MaterializationHistory.ContinuationHistory { Prior: null }
+            || input.History is MaterializationHistory.ResetHistory { AcceptedPredecessor: null })
         {
             return Fail(PrefixDiagnostic.Create(PrefixDiagnosticCodes.IdentityInvalid));
         }
@@ -36,40 +38,29 @@ public static class PrefixMaterializer
             return Fail(identityError);
         }
 
-        // Stage: envelope validation (template → policy → tools → cache config → adapter).
-        var envelopeError = PrefixEnvelopeValidator.Validate(
-            PrefixEnvelopeValidator.EnvelopeKind.Template, input.Envelopes.Template, out var template);
-        if (envelopeError is not null)
+        // Stage: envelope validation in the frozen global order (structure for
+        // all five → embedded identities for all five → canonical/digest for
+        // all five, each in template → policy → tools → config → adapter order).
+        ValidatedEnvelope? template = null;
+        ValidatedEnvelope? policy = null;
+        ValidatedEnvelope? tools = null;
+        ValidatedEnvelope? cacheConfig = null;
+        ValidatedEnvelope? adapter = null;
+        try
         {
-            return Fail(envelopeError);
+            var envelopeError = ValidateEnvelopesPhased(input, ref template, ref policy, ref tools, ref cacheConfig, ref adapter);
+            if (envelopeError is not null)
+            {
+                return Fail(envelopeError);
+            }
         }
-
-        envelopeError = PrefixEnvelopeValidator.Validate(
-            PrefixEnvelopeValidator.EnvelopeKind.Policy, input.Envelopes.Policy, out var policy);
-        if (envelopeError is not null)
+        catch (ObjectDisposedException)
         {
-            return Fail(envelopeError);
+            return Fail(PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid));
         }
-
-        envelopeError = PrefixEnvelopeValidator.Validate(
-            PrefixEnvelopeValidator.EnvelopeKind.Tools, input.Envelopes.Tools, out var tools);
-        if (envelopeError is not null)
+        catch (InvalidOperationException)
         {
-            return Fail(envelopeError);
-        }
-
-        envelopeError = PrefixEnvelopeValidator.Validate(
-            PrefixEnvelopeValidator.EnvelopeKind.CacheConfig, input.Envelopes.CacheConfig, out var cacheConfig);
-        if (envelopeError is not null)
-        {
-            return Fail(envelopeError);
-        }
-
-        envelopeError = PrefixEnvelopeValidator.Validate(
-            PrefixEnvelopeValidator.EnvelopeKind.Adapter, input.Envelopes.Adapter, out var adapter);
-        if (envelopeError is not null)
-        {
-            return Fail(envelopeError);
+            return Fail(PrefixDiagnostic.Create(PrefixDiagnosticCodes.CanonicalInputRejected));
         }
 
         // Stage: digest equality against host-declared identities.
@@ -204,6 +195,43 @@ public static class PrefixMaterializer
         PrefixHashPrimitives.WriteIdentity(preimage, cacheConfigId);
         preimage.Write(stableProviderStream);
         return PrefixHashPrimitives.Sha256Hex(preimage.WrittenSpan);
+    }
+
+    private static PrefixDiagnostic? ValidateEnvelopesPhased(
+        PrefixMaterializationInput input,
+        ref ValidatedEnvelope? template,
+        ref ValidatedEnvelope? policy,
+        ref ValidatedEnvelope? tools,
+        ref ValidatedEnvelope? cacheConfig,
+        ref ValidatedEnvelope? adapter)
+    {
+        var structureError =
+            PrefixEnvelopeValidator.ValidateStructure(PrefixEnvelopeValidator.EnvelopeKind.Template, input.Envelopes.Template)
+            ?? PrefixEnvelopeValidator.ValidateStructure(PrefixEnvelopeValidator.EnvelopeKind.Policy, input.Envelopes.Policy)
+            ?? PrefixEnvelopeValidator.ValidateStructure(PrefixEnvelopeValidator.EnvelopeKind.Tools, input.Envelopes.Tools)
+            ?? PrefixEnvelopeValidator.ValidateStructure(PrefixEnvelopeValidator.EnvelopeKind.CacheConfig, input.Envelopes.CacheConfig)
+            ?? PrefixEnvelopeValidator.ValidateStructure(PrefixEnvelopeValidator.EnvelopeKind.Adapter, input.Envelopes.Adapter);
+        if (structureError is not null)
+        {
+            return structureError;
+        }
+
+        var embeddedError =
+            PrefixEnvelopeValidator.ValidateEmbeddedIdentity(PrefixEnvelopeValidator.EnvelopeKind.Template, input.Envelopes.Template)
+            ?? PrefixEnvelopeValidator.ValidateEmbeddedIdentity(PrefixEnvelopeValidator.EnvelopeKind.Policy, input.Envelopes.Policy)
+            ?? PrefixEnvelopeValidator.ValidateEmbeddedIdentity(PrefixEnvelopeValidator.EnvelopeKind.Tools, input.Envelopes.Tools)
+            ?? PrefixEnvelopeValidator.ValidateEmbeddedIdentity(PrefixEnvelopeValidator.EnvelopeKind.CacheConfig, input.Envelopes.CacheConfig)
+            ?? PrefixEnvelopeValidator.ValidateEmbeddedIdentity(PrefixEnvelopeValidator.EnvelopeKind.Adapter, input.Envelopes.Adapter);
+        if (embeddedError is not null)
+        {
+            return embeddedError;
+        }
+
+        return PrefixEnvelopeValidator.CanonicalizeAndCap(PrefixEnvelopeValidator.EnvelopeKind.Template, input.Envelopes.Template, out template)
+            ?? PrefixEnvelopeValidator.CanonicalizeAndCap(PrefixEnvelopeValidator.EnvelopeKind.Policy, input.Envelopes.Policy, out policy)
+            ?? PrefixEnvelopeValidator.CanonicalizeAndCap(PrefixEnvelopeValidator.EnvelopeKind.Tools, input.Envelopes.Tools, out tools)
+            ?? PrefixEnvelopeValidator.CanonicalizeAndCap(PrefixEnvelopeValidator.EnvelopeKind.CacheConfig, input.Envelopes.CacheConfig, out cacheConfig)
+            ?? PrefixEnvelopeValidator.CanonicalizeAndCap(PrefixEnvelopeValidator.EnvelopeKind.Adapter, input.Envelopes.Adapter, out adapter);
     }
 
     private static PrefixDiagnostic? ValidateHostIdentities(PrefixMaterializationInput input)

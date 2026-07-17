@@ -144,8 +144,95 @@ function validateCorpus(root: string): string[] {
         violations.push(`wrong-reference-kind:${entry.id}:${referenced}`);
       }
     }
+
+    // Materializer-mode invalidation: base/successor inputs may differ only by
+    // the named mutation.
+    if (
+      entry.kind === 'invalidation-vector' &&
+      vector.mode === 'materializer' &&
+      typeof vector.baseVectorId === 'string' &&
+      typeof vector.successorVectorId === 'string' &&
+      byId.has(vector.baseVectorId as string) &&
+      byId.has(vector.successorVectorId as string)
+    ) {
+      const baseVector = JSON.parse(
+        readFileSync(path.join(root, byId.get(vector.baseVectorId as string)!.file), 'utf8'),
+      ) as Record<string, unknown>;
+      const successorVector = JSON.parse(
+        readFileSync(path.join(root, byId.get(vector.successorVectorId as string)!.file), 'utf8'),
+      ) as Record<string, unknown>;
+      const diffs = jsonDiffPaths(baseVector.input, successorVector.input);
+      violations.push(...validateMutationDiffs(entry.id, vector.mutation, diffs));
+    }
   }
 
+  return violations;
+}
+
+/** Deep-diff two JSON values; returns the set of differing dotted paths. */
+function jsonDiffPaths(a: unknown, b: unknown, prefix = ''): string[] {
+  if (typeof a !== 'object' || a === null || typeof b !== 'object' || b === null) {
+    return Object.is(a, b) ? [] : [prefix || '$'];
+  }
+  if (Array.isArray(a) !== Array.isArray(b)) {
+    return [prefix || '$'];
+  }
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) {
+      return [prefix || '$'];
+    }
+    const out: string[] = [];
+    for (let i = 0; i < a.length; i++) {
+      out.push(...jsonDiffPaths(a[i], b[i], `${prefix}[${i}]`));
+    }
+    return out;
+  }
+  const aObj = a as Record<string, unknown>;
+  const bObj = b as Record<string, unknown>;
+  const keys = new Set([...Object.keys(aObj), ...Object.keys(bObj)]);
+  const out: string[] = [];
+  for (const key of keys) {
+    if (!(key in aObj) || !(key in bObj)) {
+      out.push(prefix === '' ? key : prefix + '.' + key);
+      continue;
+    }
+    out.push(...jsonDiffPaths(aObj[key], bObj[key], prefix === '' ? key : prefix + '.' + key));
+  }
+  return out;
+}
+
+const MUTATION_ALLOWED_PREFIXES: Record<string, string[]> = {
+  providerId: ['expectedIdentities.providerId'],
+  modelId: ['expectedIdentities.modelId'],
+  'adapter envelope content/version': ['envelopes.adapter', 'expectedIdentities.adapterId'],
+  'cache-config envelope content/version': [
+    'envelopes.cacheConfig',
+    'expectedIdentities.cacheConfigId',
+  ],
+  'template envelope content/version': ['envelopes.template', 'expectedIdentities.templateId'],
+  'policy envelope content/version': ['envelopes.policy', 'expectedIdentities.policyId'],
+  'tools envelope content/version/order': [
+    'envelopes.tools',
+    'expectedIdentities.toolDefinitionId',
+  ],
+  'any envelope schemaVersion': ['envelopes.', 'expectedIdentities.'],
+  'run/provenance metadata': ['interaction.interactionId'],
+};
+
+function validateMutationDiffs(id: string, mutation: unknown, diffs: string[]): string[] {
+  if (typeof mutation !== 'string' || !(mutation in MUTATION_ALLOWED_PREFIXES)) {
+    return [`unknown-mutation:${id}:${String(mutation)}`];
+  }
+  const allowed = MUTATION_ALLOWED_PREFIXES[mutation];
+  const violations: string[] = [];
+  for (const diff of diffs) {
+    if (!allowed.some((prefix) => diff.startsWith(prefix))) {
+      violations.push(`mutation-diff:${id}:${diff}`);
+    }
+  }
+  if (diffs.length === 0) {
+    violations.push(`mutation-diff:${id}:no-diff`);
+  }
   return violations;
 }
 
@@ -170,6 +257,22 @@ function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknow
       violations.push(`bad-sha256:${entry.id}:${key}`);
     }
   };
+  const requireExpected = (expected: unknown, keys: string[]) => {
+    if (typeof expected !== 'object' || expected === null) {
+      violations.push(`expected-shape:${entry.id}`);
+      return;
+    }
+    for (const key of keys) {
+      if (!(key in (expected as Record<string, unknown>))) {
+        violations.push(`missing-field:${entry.id}:expected.${key}`);
+      }
+    }
+    for (const key of Object.keys(expected as Record<string, unknown>)) {
+      if (!keys.includes(key)) {
+        violations.push(`unknown-expected-field:${entry.id}:${key}`);
+      }
+    }
+  };
 
   switch (entry.kind) {
     case 'framing-vector':
@@ -177,7 +280,10 @@ function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknow
       break;
     case 'digest-vector':
       require(['tag', 'envelope', 'expected']);
-      shaField(vector.expected, 'digestHex');
+      if (typeof vector.expected === 'object' && vector.expected !== null) {
+        requireExpected(vector.expected, ['preimageHex', 'digestHex']);
+        shaField(vector.expected, 'digestHex');
+      }
       break;
     case 'interaction-vector':
       require([
@@ -188,12 +294,15 @@ function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknow
         'expected',
       ]);
       shaField(vector, 'consumedInputSha256');
-      shaField(vector.expected, 'interactionId');
+      if (typeof vector.expected === 'object' && vector.expected !== null) {
+        requireExpected(vector.expected, ['preimageHex', 'interactionId']);
+        shaField(vector.expected, 'interactionId');
+      }
       break;
     case 'materialization-vector': {
       require(['input', 'expected']);
-      const expected = vector.expected as Record<string, unknown> | undefined;
-      for (const key of [
+      const expected = vector.expected;
+      requireExpected(expected, [
         'logicalStreamHex',
         'providerStreamHex',
         'logicalPrefixSha256',
@@ -201,11 +310,7 @@ function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknow
         'digests',
         'stableBoundary',
         'dynamicSuffix',
-      ]) {
-        if (expected === undefined || !(key in expected)) {
-          violations.push(`missing-field:${entry.id}:expected.${key}`);
-        }
-      }
+      ]);
       shaField(expected, 'logicalPrefixSha256');
       shaField(expected, 'prefixSha256');
       for (const digestKey of [
@@ -215,20 +320,42 @@ function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknow
         'cacheConfigId',
         'adapterId',
       ]) {
-        shaField(expected?.digests, digestKey);
+        shaField((expected as Record<string, unknown> | undefined)?.digests, digestKey);
       }
       break;
     }
     case 'append-vector':
       require(['baseVectorId', 'successorVectorId', 'expected']);
+      requireExpected(vector.expected, [
+        'logicalStrictPrefix',
+        'providerStrictPrefix',
+        'promotedContextLogicalBytesEqual',
+        'promotedContextProviderBytesEqual',
+      ]);
       break;
     case 'invalidation-vector': {
       require(['mode', 'mutation', 'expected']);
       const mode = vector.mode;
       if (mode === 'materializer') {
         require(['baseVectorId', 'successorVectorId']);
+        requireExpected(vector.expected, [
+          'logicalStreamChanged',
+          'providerStreamChanged',
+          'logicalHashChanged',
+          'prefixHashChanged',
+        ]);
       } else if (mode === 'hash-framing') {
         require(['baseInput', 'mutatedInput']);
+        requireExpected(vector.expected, [
+          'baseLogicalPrefixSha256',
+          'mutatedLogicalPrefixSha256',
+          'basePrefixSha256',
+          'mutatedPrefixSha256',
+          'logicalStreamChanged',
+          'providerStreamChanged',
+          'logicalHashChanged',
+          'prefixHashChanged',
+        ]);
         shaField(vector.expected, 'baseLogicalPrefixSha256');
         shaField(vector.expected, 'mutatedLogicalPrefixSha256');
         shaField(vector.expected, 'basePrefixSha256');
@@ -240,13 +367,25 @@ function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknow
     }
     case 'invalid-vector': {
       require(['target', 'input', 'expected']);
-      const expected = vector.expected as Record<string, unknown> | undefined;
-      if (
-        expected === undefined ||
-        (typeof expected.csharpCode !== 'string' && typeof expected.typescriptCode !== 'string')
-      ) {
+      const target = vector.target;
+      const expected = vector.expected;
+      if (typeof target !== 'string' || typeof expected !== 'object' || expected === null) {
         violations.push(`expected-union:${entry.id}`);
+        break;
       }
+      const scope = vector.scope;
+      if (scope !== undefined && scope !== 'csharp-only') {
+        violations.push(`unknown-scope:${entry.id}:${String(scope)}`);
+      }
+      violations.push(
+        ...validateInvalidExpected(
+          entry.id,
+          target,
+          expected as Record<string, unknown>,
+          scope === 'csharp-only',
+        ),
+      );
+      allowedKeys.add('scope');
       break;
     }
     default:
@@ -257,6 +396,68 @@ function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknow
     if (!allowedKeys.has(key)) {
       violations.push(`unknown-vector-field:${entry.id}:${key}`);
     }
+  }
+  return violations;
+}
+
+/** Target-sensitive expected union for invalid-vectors (frozen in the refined issue). */
+function validateInvalidExpected(
+  id: string,
+  target: string,
+  expected: Record<string, unknown>,
+  csharpOnly: boolean,
+): string[] {
+  const violations: string[] = [];
+  const has = (key: string) => typeof expected[key] === 'string';
+  for (const key of Object.keys(expected)) {
+    if (!['csharpCode', 'typescriptCode', 'causeCode', 'path'].includes(key)) {
+      violations.push(`unknown-expected-field:${id}:${key}`);
+    }
+  }
+
+  const csharpTargets = [
+    'materialize',
+    'template-id',
+    'policy-id',
+    'tools-id',
+    'config-id',
+    'adapter-id',
+    'interaction-id',
+    'canonical-json',
+    'length-guard',
+    'stream-guard',
+  ];
+  const tsTargets = [
+    'template-id',
+    'policy-id',
+    'tools-id',
+    'config-id',
+    'adapter-id',
+    'interaction-id',
+  ];
+
+  if (target === 'identity' || target === 'model-snapshot') {
+    if (!has('typescriptCode')) {
+      violations.push(`expected-union:${id}:typescriptCode`);
+    }
+    if (has('csharpCode')) {
+      violations.push(`expected-union:${id}:csharp-forbidden`);
+    }
+  } else if (csharpTargets.includes(target)) {
+    if (!has('csharpCode')) {
+      violations.push(`expected-union:${id}:csharpCode`);
+    }
+    if (tsTargets.includes(target) && !has('typescriptCode') && !csharpOnly) {
+      violations.push(`expected-union:${id}:typescriptCode`);
+    }
+    if (
+      (target === 'materialize' || target === 'length-guard' || target === 'stream-guard') &&
+      has('typescriptCode')
+    ) {
+      violations.push(`expected-union:${id}:typescript-forbidden`);
+    }
+  } else {
+    violations.push(`unknown-target:${id}:${target}`);
   }
   return violations;
 }
@@ -452,6 +653,6 @@ describe('prefix-contract fixture manifest', () => {
         expected: {},
       });
     });
-    expect(validateCorpus(root)).toContain('expected-union:invalid-x');
+    expect(validateCorpus(root)).toContain('expected-union:invalid-x:typescriptCode');
   });
 });

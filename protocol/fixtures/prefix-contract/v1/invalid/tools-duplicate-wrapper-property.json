@@ -5,6 +5,7 @@
   "input": {
     "envelopeJson": "{\"schemaVersion\":1,\"toolsetVersion\":1,\"definitions\":[{\"name\":\"a\",\"name\":\"a\",\"description\":\"d\",\"inputSchema\":{}}]}"
   },
+  "scope": "csharp-only",
   "expected": {
     "csharpCode": "prefix_envelope_invalid",
     "path": "/definitions/0/name"

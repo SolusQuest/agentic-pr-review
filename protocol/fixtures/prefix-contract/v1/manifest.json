@@ -391,6 +391,16 @@
       "file": "invalid/canonical-deep-truncation.json"
     },
     {
+      "id": "invalid-canonical-numeric-property-name",
+      "kind": "invalid-vector",
+      "file": "invalid/canonical-numeric-property-name.json"
+    },
+    {
+      "id": "invalid-canonical-dotted-property-name",
+      "kind": "invalid-vector",
+      "file": "invalid/canonical-dotted-property-name.json"
+    },
+    {
       "id": "invalid-interaction-predecessor-uppercase",
       "kind": "invalid-vector",
       "file": "invalid/interaction-predecessor-uppercase.json"

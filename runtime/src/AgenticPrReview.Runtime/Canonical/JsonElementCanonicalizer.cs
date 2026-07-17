@@ -18,7 +18,7 @@ internal static class JsonElementCanonicalizer
         int maxArrayItems)
     {
         var writer = new Rfc8785Writer(4096);
-        WriteValue(ref writer, element, depth: 0, maxDepth, maxProperties, maxArrayItems, segments: System.Array.Empty<string>());
+        WriteValue(ref writer, element, depth: 0, maxDepth, maxProperties, maxArrayItems, segments: System.Array.Empty<CanonicalPathSegment>());
         return writer.ToImmutableArray();
     }
 
@@ -29,12 +29,12 @@ internal static class JsonElementCanonicalizer
     /// </summary>
     internal static void WriteCanonicalValue(ref Rfc8785Writer writer, JsonElement element)
     {
-        WriteValue(ref writer, element, depth: 1, 64, 256, 1_024, segments: System.Array.Empty<string>());
+        WriteValue(ref writer, element, depth: 1, 64, 256, 1_024, segments: System.Array.Empty<CanonicalPathSegment>());
     }
 
-    private static string[] Append(System.Collections.Generic.IReadOnlyList<string> segments, string next)
+    private static CanonicalPathSegment[] Append(System.Collections.Generic.IReadOnlyList<CanonicalPathSegment> segments, CanonicalPathSegment next)
     {
-        var copy = new string[segments.Count + 1];
+        var copy = new CanonicalPathSegment[segments.Count + 1];
         for (var i = 0; i < segments.Count; i++)
         {
             copy[i] = segments[i];
@@ -51,7 +51,7 @@ internal static class JsonElementCanonicalizer
         int maxDepth,
         int maxProperties,
         int maxArrayItems,
-        System.Collections.Generic.IReadOnlyList<string> segments)
+        System.Collections.Generic.IReadOnlyList<CanonicalPathSegment> segments)
     {
         switch (element.ValueKind)
         {
@@ -105,7 +105,7 @@ internal static class JsonElementCanonicalizer
                         maxDepth,
                         maxProperties,
                         maxArrayItems,
-                        Append(segments, properties[i].Name));
+                        Append(segments, CanonicalPathSegment.Property(properties[i].Name)));
                 }
 
                 writer.WriteObjectEnd();
@@ -147,7 +147,7 @@ internal static class JsonElementCanonicalizer
                         maxDepth,
                         maxProperties,
                         maxArrayItems,
-                        Append(segments, index.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                        Append(segments, CanonicalPathSegment.Index(index)));
                     index++;
                 }
 
