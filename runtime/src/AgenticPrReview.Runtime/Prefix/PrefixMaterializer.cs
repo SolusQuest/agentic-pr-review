@@ -315,11 +315,12 @@ public static class PrefixMaterializer
         stableProvider = ImmutableArray<byte>.Empty;
         dynamicProvider = ImmutableArray<byte>.Empty;
 
-        foreach (var (kind, bytes) in stableSegments.Concat(dynamicSegments))
+        foreach (var (_, bytes) in stableSegments.Concat(dynamicSegments))
         {
-            if (bytes.Length > PrefixBounds.MaxLogicalSegmentPayloadBytes)
+            var segmentError = PrefixGuards.CheckSegmentPayload(bytes.Length);
+            if (segmentError is not null)
             {
-                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.SegmentTooLarge);
+                return segmentError;
             }
         }
 
@@ -329,22 +330,25 @@ public static class PrefixMaterializer
         {
             AppendFramed(stableLogicalWriter, bytes.AsSpan());
             var block = ProviderBlockMapper.MapBlock(kind, bytes.AsSpan());
-            if (block.Length > PrefixBounds.MaxProviderBlockPayloadBytes)
+            var blockError = PrefixGuards.CheckProviderBlockPayload(block.Length);
+            if (blockError is not null)
             {
-                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.SegmentTooLarge, causeCode: "provider-block");
+                return blockError;
             }
 
             AppendFramed(stableProviderWriter, block.AsSpan());
         }
 
-        if (stableLogicalWriter.WrittenCount > PrefixBounds.MaxLogicalStableStreamBytes)
+        var stableLogicalError = PrefixGuards.CheckLogicalStableTotal(stableLogicalWriter.WrittenCount);
+        if (stableLogicalError is not null)
         {
-            return PrefixDiagnostic.Create(PrefixDiagnosticCodes.StreamTooLarge, causeCode: "logical-stable");
+            return stableLogicalError;
         }
 
-        if (stableProviderWriter.WrittenCount > PrefixBounds.MaxProviderStableStreamBytes)
+        var stableProviderError = PrefixGuards.CheckProviderStableTotal(stableProviderWriter.WrittenCount);
+        if (stableProviderError is not null)
         {
-            return PrefixDiagnostic.Create(PrefixDiagnosticCodes.StreamTooLarge, causeCode: "provider-stable");
+            return stableProviderError;
         }
 
         var dynamicLogicalWriter = new ArrayBufferWriter<byte>();
@@ -353,22 +357,25 @@ public static class PrefixMaterializer
         {
             AppendFramed(dynamicLogicalWriter, bytes.AsSpan());
             var block = ProviderBlockMapper.MapBlock(kind, bytes.AsSpan());
-            if (block.Length > PrefixBounds.MaxProviderBlockPayloadBytes)
+            var blockError = PrefixGuards.CheckProviderBlockPayload(block.Length);
+            if (blockError is not null)
             {
-                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.SegmentTooLarge, causeCode: "provider-block");
+                return blockError;
             }
 
             AppendFramed(dynamicProviderWriter, block.AsSpan());
         }
 
-        if (dynamicLogicalWriter.WrittenCount > PrefixBounds.MaxLogicalDynamicStreamBytes)
+        var dynamicLogicalError = PrefixGuards.CheckLogicalDynamicTotal(dynamicLogicalWriter.WrittenCount);
+        if (dynamicLogicalError is not null)
         {
-            return PrefixDiagnostic.Create(PrefixDiagnosticCodes.StreamTooLarge, causeCode: "logical-dynamic");
+            return dynamicLogicalError;
         }
 
-        if (dynamicProviderWriter.WrittenCount > PrefixBounds.MaxProviderDynamicStreamBytes)
+        var dynamicProviderError = PrefixGuards.CheckProviderDynamicTotal(dynamicProviderWriter.WrittenCount);
+        if (dynamicProviderError is not null)
         {
-            return PrefixDiagnostic.Create(PrefixDiagnosticCodes.StreamTooLarge, causeCode: "provider-dynamic");
+            return dynamicProviderError;
         }
 
         stableLogical = stableLogicalWriter.WrittenSpan.ToArray().ToImmutableArray();

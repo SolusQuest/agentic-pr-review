@@ -1,0 +1,14 @@
+{
+  "id": "invalidation-cache-config-envelope",
+  "kind": "invalidation-vector",
+  "mode": "materializer",
+  "baseVectorId": "materialization-bootstrap",
+  "successorVectorId": "materialization-cache-config-envelope",
+  "mutation": "cache-config envelope content/version",
+  "expected": {
+    "logicalStreamChanged": false,
+    "providerStreamChanged": false,
+    "logicalHashChanged": false,
+    "prefixHashChanged": true
+  }
+}

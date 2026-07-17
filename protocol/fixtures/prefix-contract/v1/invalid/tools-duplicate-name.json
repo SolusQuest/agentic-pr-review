@@ -1,0 +1,54 @@
+{
+  "id": "invalid-tools-duplicate-name",
+  "kind": "invalid-vector",
+  "target": "tools-id",
+  "input": {
+    "envelope": {
+      "schemaVersion": 1,
+      "toolsetVersion": 1,
+      "definitions": [
+        {
+          "name": "submit_review",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "submit_review",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        }
+      ]
+    }
+  },
+  "expected": {
+    "csharpCode": "prefix_envelope_invalid",
+    "typescriptCode": "prefix-envelope-invalid",
+    "path": "/definitions/1/name"
+  }
+}

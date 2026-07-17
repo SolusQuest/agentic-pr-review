@@ -1,0 +1,12 @@
+{
+  "id": "append-bootstrap-continuation",
+  "kind": "append-vector",
+  "baseVectorId": "materialization-bootstrap",
+  "successorVectorId": "materialization-append-successor",
+  "expected": {
+    "logicalStrictPrefix": true,
+    "providerStrictPrefix": true,
+    "promotedContextLogicalBytesEqual": true,
+    "promotedContextProviderBytesEqual": true
+  }
+}

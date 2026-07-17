@@ -18,7 +18,7 @@ internal static class JsonElementCanonicalizer
         int maxArrayItems)
     {
         var writer = new Rfc8785Writer(4096);
-        WriteValue(ref writer, element, depth: 1, maxDepth, maxProperties, maxArrayItems, path: string.Empty);
+        WriteValue(ref writer, element, depth: 0, maxDepth, maxProperties, maxArrayItems, path: string.Empty);
         return writer.ToImmutableArray();
     }
 
@@ -144,8 +144,24 @@ internal static class JsonElementCanonicalizer
             }
 
             case JsonValueKind.String:
-                writer.WriteString(element.GetString()!);
+            {
+                string value;
+                try
+                {
+                    value = element.GetString()!;
+                }
+                catch (InvalidOperationException)
+                {
+                    // System.Text.Json refuses to decode incomplete UTF-16.
+                    throw new Rfc8785CanonicalizationException(
+                        Rfc8785RejectionReason.UnpairedSurrogate,
+                        "Unpaired UTF-16 surrogate in JSON string.",
+                        path);
+                }
+
+                writer.WriteString(value);
                 return;
+            }
 
             case JsonValueKind.Number:
             {

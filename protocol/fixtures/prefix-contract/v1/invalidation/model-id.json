@@ -1,0 +1,14 @@
+{
+  "id": "invalidation-model-id",
+  "kind": "invalidation-vector",
+  "mode": "materializer",
+  "baseVectorId": "materialization-bootstrap",
+  "successorVectorId": "materialization-model-id",
+  "mutation": "modelId",
+  "expected": {
+    "logicalStreamChanged": false,
+    "providerStreamChanged": false,
+    "logicalHashChanged": false,
+    "prefixHashChanged": true
+  }
+}

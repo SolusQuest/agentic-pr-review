@@ -1,0 +1,11 @@
+{
+  "id": "invalid-model-alias",
+  "kind": "invalid-vector",
+  "target": "model-snapshot",
+  "input": {
+    "value": "latest"
+  },
+  "expected": {
+    "typescriptCode": "prefix-model-alias-literal"
+  }
+}

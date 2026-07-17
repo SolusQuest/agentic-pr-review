@@ -1,0 +1,21 @@
+{
+  "id": "invalid-policy-instructions-type",
+  "kind": "invalid-vector",
+  "target": "policy-id",
+  "input": {
+    "envelope": {
+      "schemaVersion": 1,
+      "policyVersion": 2,
+      "instructions": 42,
+      "constraints": {
+        "maxFindings": 10,
+        "tone": "strict"
+      }
+    }
+  },
+  "expected": {
+    "csharpCode": "prefix_envelope_invalid",
+    "typescriptCode": "prefix-envelope-invalid",
+    "path": "/instructions"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "id": "invalidation-template-content",
+  "kind": "invalidation-vector",
+  "mode": "materializer",
+  "baseVectorId": "materialization-bootstrap",
+  "successorVectorId": "materialization-template-content",
+  "mutation": "template envelope content/version",
+  "expected": {
+    "logicalStreamChanged": true,
+    "providerStreamChanged": true,
+    "logicalHashChanged": true,
+    "prefixHashChanged": true
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "id": "invalid-template-unknown-field",
+  "kind": "invalid-vector",
+  "target": "template-id",
+  "input": {
+    "envelope": {
+      "schemaVersion": 1,
+      "templateVersion": 3,
+      "definition": {
+        "role": "system",
+        "text": "You are a precise code reviewer."
+      },
+      "bogus": 1
+    }
+  },
+  "expected": {
+    "csharpCode": "prefix_envelope_invalid",
+    "typescriptCode": "prefix-envelope-invalid",
+    "path": "/bogus"
+  }
+}

@@ -1,0 +1,114 @@
+{
+  "id": "invalid-materialize-epoch",
+  "kind": "invalid-vector",
+  "target": "materialize",
+  "input": {
+    "history": {
+      "kind": "bootstrap"
+    },
+    "currentContext": {
+      "subjectDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+      "reviewedHeadSha": "0000000000000000000000000000000000000000",
+      "reviewedBaseSha": "1111111111111111111111111111111111111111",
+      "changedFiles": [
+        {
+          "path": "src/index.ts",
+          "status": "modified",
+          "additions": 10,
+          "deletions": 2,
+          "changes": 12,
+          "patch": {
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "truncated": false,
+            "maxChars": 20000
+          }
+        },
+        {
+          "path": "docs/guide.md",
+          "previousPath": "docs/old-guide.md",
+          "status": "renamed",
+          "additions": 3,
+          "deletions": 0,
+          "changes": 3
+        }
+      ]
+    },
+    "interaction": {
+      "interactionId": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "interactionOrdinal": 0
+    },
+    "expectedIdentities": {
+      "repository": "owner/repo",
+      "headRepository": "owner/repo",
+      "pullRequest": 50,
+      "workflowIdentity": "ci",
+      "trustedExecutionDomain": "trusted",
+      "providerId": "provider",
+      "modelId": "model-2024-01-01",
+      "templateId": "d5c87b69a0d5d89d58e8c7209b0cbcc9624a3f0646fc19f3cebc7c3f93a5b6cf",
+      "policyId": "6ef8489dac852f64c567efd63a196ef4b8bbf06d9b709b8af491d24c5a2b52b3",
+      "toolDefinitionId": "e58c02b21ad200207ab6ae1e8665c2c6c7d2c1413d947b8dd26f7ef14cc1bd48",
+      "cacheConfigId": "d5d1e7d93a8fac3ec89b896c771e92301d8cae17fe39fb7e63a42ebe3b35bfe9",
+      "adapterId": "e0b738711687dd8e1d4aefea903cc395b48dc4c9e8ef4b11fedac34e67fd16c6"
+    },
+    "sessionEpoch": "short",
+    "envelopes": {
+      "template": {
+        "schemaVersion": 1,
+        "templateVersion": 3,
+        "definition": {
+          "role": "system",
+          "text": "You are a precise code reviewer."
+        }
+      },
+      "policy": {
+        "schemaVersion": 1,
+        "policyVersion": 2,
+        "instructions": "Review the delta carefully.",
+        "constraints": {
+          "maxFindings": 10,
+          "tone": "strict"
+        }
+      },
+      "tools": {
+        "schemaVersion": 1,
+        "toolsetVersion": 1,
+        "definitions": [
+          {
+            "name": "submit_review",
+            "description": "Submit the structured review.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "summary": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "summary"
+              ]
+            },
+            "policyMetadata": {
+              "risk": "low"
+            }
+          }
+        ]
+      },
+      "cacheConfig": {
+        "schemaVersion": 1,
+        "cacheConfigVersion": 1,
+        "markerPolicy": "stable-boundary",
+        "eligibility": "min-prefix-1024",
+        "statelessMode": false
+      },
+      "adapter": {
+        "schemaVersion": 1,
+        "capabilityProfileVersion": 1,
+        "adapterBuildVersion": "0.0.0-fixture"
+      }
+    }
+  },
+  "expected": {
+    "csharpCode": "prefix_epoch_invalid"
+  }
+}

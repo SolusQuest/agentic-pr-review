@@ -1,0 +1,20 @@
+{
+  "id": "invalid-template-version-fraction",
+  "kind": "invalid-vector",
+  "target": "template-id",
+  "input": {
+    "envelope": {
+      "schemaVersion": 1,
+      "templateVersion": 1.5,
+      "definition": {
+        "role": "system",
+        "text": "You are a precise code reviewer."
+      }
+    }
+  },
+  "expected": {
+    "csharpCode": "prefix_envelope_invalid",
+    "typescriptCode": "prefix-envelope-invalid",
+    "path": "/templateVersion"
+  }
+}

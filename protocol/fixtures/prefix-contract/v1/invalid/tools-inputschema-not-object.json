@@ -1,0 +1,26 @@
+{
+  "id": "invalid-tools-inputschema-not-object",
+  "kind": "invalid-vector",
+  "target": "tools-id",
+  "input": {
+    "envelope": {
+      "schemaVersion": 1,
+      "toolsetVersion": 1,
+      "definitions": [
+        {
+          "name": "submit_review",
+          "description": "Submit the structured review.",
+          "inputSchema": [],
+          "policyMetadata": {
+            "risk": "low"
+          }
+        }
+      ]
+    }
+  },
+  "expected": {
+    "csharpCode": "prefix_envelope_invalid",
+    "typescriptCode": "prefix-envelope-invalid",
+    "path": "/definitions/0/inputSchema"
+  }
+}

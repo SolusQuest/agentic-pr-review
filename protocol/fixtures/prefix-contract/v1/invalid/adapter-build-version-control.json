@@ -1,0 +1,17 @@
+{
+  "id": "invalid-adapter-build-version-control",
+  "kind": "invalid-vector",
+  "target": "adapter-id",
+  "input": {
+    "envelope": {
+      "schemaVersion": 1,
+      "capabilityProfileVersion": 1,
+      "adapterBuildVersion": "v1\u0000x"
+    }
+  },
+  "expected": {
+    "csharpCode": "prefix_identity_invalid",
+    "typescriptCode": "prefix-identity-invalid",
+    "path": "/adapterBuildVersion"
+  }
+}

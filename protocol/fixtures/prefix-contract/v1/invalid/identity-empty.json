@@ -1,0 +1,11 @@
+{
+  "id": "invalid-identity-empty",
+  "kind": "invalid-vector",
+  "target": "identity",
+  "input": {
+    "value": ""
+  },
+  "expected": {
+    "typescriptCode": "prefix-identity-invalid"
+  }
+}

@@ -28,6 +28,32 @@ internal static class PrefixEnvelopeValidator
     {
         validated = null;
 
+        try
+        {
+            return ValidateCore(kind, envelope, out validated);
+        }
+        catch (ObjectDisposedException)
+        {
+            // An element from an already-disposed JsonDocument must surface as a
+            // typed failure, never as an escaping exception.
+            validated = null;
+            return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid);
+        }
+        catch (InvalidOperationException)
+        {
+            // System.Text.Json refuses to decode incomplete UTF-16 strings.
+            validated = null;
+            return PrefixDiagnostic.Create(PrefixDiagnosticCodes.CanonicalInputRejected);
+        }
+    }
+
+    private static PrefixDiagnostic? ValidateCore(
+        EnvelopeKind kind,
+        JsonElement envelope,
+        out ValidatedEnvelope? validated)
+    {
+        validated = null;
+
         if (envelope.ValueKind != JsonValueKind.Object)
         {
             return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: string.Empty);
@@ -213,9 +239,13 @@ internal static class PrefixEnvelopeValidator
 
     private static PrefixDiagnostic? CheckVersionField(JsonElement envelope, string name)
     {
+        // Version fields accept any JSON number whose value is a mathematical
+        // integer in range (1e0 is legal and canonicalizes to 1), matching the
+        // ES Number semantics of the TypeScript validator.
         var value = envelope.GetProperty(name);
         if (value.ValueKind != JsonValueKind.Number
-            || !value.TryGetInt64(out var number)
+            || !value.TryGetDouble(out var number)
+            || number != Math.Truncate(number)
             || number < 1
             || number > 2_147_483_647)
         {

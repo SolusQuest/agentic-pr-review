@@ -702,14 +702,7 @@ const baseEnvelopes = ENVELOPES;
 const identities = baseIdentities();
 
 function buildMaterializationVectors(): void {
-  const bootstrapInput: MaterializeInput = {
-    history: { kind: 'bootstrap' },
-    currentContext: CONTEXT_ALPHA,
-    interaction: { interactionId: INTERACTION_ALPHA_ID, interactionOrdinal: 0 },
-    expectedIdentities: identities,
-    sessionEpoch: SESSION_EPOCH,
-    envelopes: baseEnvelopes,
-  };
+  const bootstrapInput = bootstrapMaterializeInput();
   add('materialization-bootstrap', 'materialization-vector', 'materialization/bootstrap.json', {
     id: 'materialization-bootstrap',
     kind: 'materialization-vector',
@@ -751,6 +744,52 @@ function buildMaterializationVectors(): void {
     input: resetInput,
     expected: oracleMaterialize(resetInput),
   });
+
+  // Append successor: continuation whose first pair is the promoted base pair.
+  const appendSuccessorInput: MaterializeInput = {
+    history: {
+      kind: 'continuation',
+      ledgerHex: hex(
+        canonicalJsonBytes(
+          continuationLedger(
+            identities,
+            [
+              ledgerContextRecord(CONTEXT_ALPHA, identities, INTERACTION_ALPHA_ID, 0),
+              ledgerOutcomeRecord(OUTCOME_ALPHA, INTERACTION_ALPHA_ID, 0),
+            ],
+            1,
+          ),
+        ),
+      ),
+    },
+    currentContext: CONTEXT_BETA,
+    interaction: { interactionId: INTERACTION_BETA_ID, interactionOrdinal: 1 },
+    expectedIdentities: identities,
+    sessionEpoch: SESSION_EPOCH,
+    envelopes: baseEnvelopes,
+  };
+  add(
+    'materialization-append-successor',
+    'materialization-vector',
+    'materialization/append-successor.json',
+    {
+      id: 'materialization-append-successor',
+      kind: 'materialization-vector',
+      input: appendSuccessorInput,
+      expected: oracleMaterialize(appendSuccessorInput),
+    },
+  );
+}
+
+function bootstrapMaterializeInput(): MaterializeInput {
+  return {
+    history: { kind: 'bootstrap' },
+    currentContext: CONTEXT_ALPHA,
+    interaction: { interactionId: INTERACTION_ALPHA_ID, interactionOrdinal: 0 },
+    expectedIdentities: identities,
+    sessionEpoch: SESSION_EPOCH,
+    envelopes: baseEnvelopes,
+  };
 }
 
 function buildDigestVectors(): void {
@@ -790,7 +829,7 @@ function buildDigestVectors(): void {
   });
 
   // NUL inside open JSON content is emitted as an RFC 8785 escape.
-  const nulTemplate = { schemaVersion: 1, templateVersion: 1, definition: 'line1 line2' };
+  const nulTemplate = { schemaVersion: 1, templateVersion: 1, definition: 'line1\u0000line2' };
   const nulCanonical = canonicalJsonBytes(nulTemplate);
   add('digest-template-nul-content', 'digest-vector', 'digest/template-nul-content.json', {
     id: 'digest-template-nul-content',
@@ -940,10 +979,489 @@ function buildInteractionVectors(): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Append / invalidation vectors
+
+function buildAppendVector(): void {
+  add('append-bootstrap-continuation', 'append-vector', 'append/bootstrap-continuation.json', {
+    id: 'append-bootstrap-continuation',
+    kind: 'append-vector',
+    baseVectorId: 'materialization-bootstrap',
+    successorVectorId: 'materialization-append-successor',
+    expected: {
+      logicalStrictPrefix: true,
+      providerStrictPrefix: true,
+      promotedContextLogicalBytesEqual: true,
+      promotedContextProviderBytesEqual: true,
+    },
+  });
+}
+
+interface MutationSpec {
+  id: string;
+  mutation: string;
+  mutate: (input: MaterializeInput) => MaterializeInput;
+  expected: {
+    logicalStreamChanged: boolean;
+    providerStreamChanged: boolean;
+    logicalHashChanged: boolean;
+    prefixHashChanged: boolean;
+  };
+}
+
+function cloneInput(input: MaterializeInput): MaterializeInput {
+  return JSON.parse(JSON.stringify(input)) as MaterializeInput;
+}
+
+function withEnvelope(input: MaterializeInput, name: keyof typeof ENVELOPES, value: unknown): MaterializeInput {
+  const next = cloneInput(input);
+  (next.envelopes as Record<string, unknown>)[name] = value;
+  const recomputed = baseIdentities(next.envelopes);
+  next.expectedIdentities = { ...next.expectedIdentities, ...pickDigests(recomputed) };
+  return next;
+}
+
+function pickDigests(ids: ExpectedIdentities): Partial<ExpectedIdentities> {
+  return {
+    adapterId: ids.adapterId,
+    templateId: ids.templateId,
+    policyId: ids.policyId,
+    toolDefinitionId: ids.toolDefinitionId,
+    cacheConfigId: ids.cacheConfigId,
+  };
+}
+
+function buildInvalidationVectors(): void {
+  const base = bootstrapMaterializeInput();
+  const allTrue = { logicalStreamChanged: true, providerStreamChanged: true, logicalHashChanged: true, prefixHashChanged: true };
+  const prefixOnly = { logicalStreamChanged: false, providerStreamChanged: false, logicalHashChanged: false, prefixHashChanged: true };
+
+  const specs: MutationSpec[] = [
+    {
+      id: 'invalidation-provider-id',
+      mutation: 'providerId',
+      mutate: (input) => {
+        const next = cloneInput(input);
+        next.expectedIdentities = { ...next.expectedIdentities, providerId: 'provider-b' };
+        return next;
+      },
+      expected: prefixOnly,
+    },
+    {
+      id: 'invalidation-model-id',
+      mutation: 'modelId',
+      mutate: (input) => {
+        const next = cloneInput(input);
+        next.expectedIdentities = { ...next.expectedIdentities, modelId: 'model-2024-02-01' };
+        return next;
+      },
+      expected: prefixOnly,
+    },
+    {
+      id: 'invalidation-adapter-envelope',
+      mutation: 'adapter envelope content/version',
+      mutate: (input) =>
+        withEnvelope(input, 'adapter', { ...ENVELOPES.adapter, adapterBuildVersion: '0.0.1-fixture' }),
+      expected: prefixOnly,
+    },
+    {
+      id: 'invalidation-cache-config-envelope',
+      mutation: 'cache-config envelope content/version',
+      mutate: (input) =>
+        withEnvelope(input, 'cacheConfig', { ...ENVELOPES.cacheConfig, statelessMode: true }),
+      expected: prefixOnly,
+    },
+    {
+      id: 'invalidation-template-content',
+      mutation: 'template envelope content/version',
+      mutate: (input) =>
+        withEnvelope(input, 'template', {
+          ...ENVELOPES.template,
+          definition: { role: 'system', text: 'You are a different reviewer.' },
+        }),
+      expected: allTrue,
+    },
+    {
+      id: 'invalidation-template-version',
+      mutation: 'template envelope content/version',
+      mutate: (input) => withEnvelope(input, 'template', { ...ENVELOPES.template, templateVersion: 4 }),
+      expected: allTrue,
+    },
+    {
+      id: 'invalidation-policy-content',
+      mutation: 'policy envelope content/version',
+      mutate: (input) =>
+        withEnvelope(input, 'policy', {
+          ...ENVELOPES.policy,
+          constraints: { maxFindings: 5, tone: 'strict' },
+        }),
+      expected: allTrue,
+    },
+    {
+      id: 'invalidation-tools-order',
+      mutation: 'tools envelope content/version/order',
+      mutate: (input) =>
+        withEnvelope(input, 'tools', {
+          schemaVersion: 1,
+          toolsetVersion: 1,
+          definitions: [TOOL_BETA, TOOL_ALPHA],
+        }),
+      expected: allTrue,
+    },
+    {
+      id: 'invalidation-tools-content',
+      mutation: 'tools envelope content/version/order',
+      mutate: (input) =>
+        withEnvelope(input, 'tools', {
+          schemaVersion: 1,
+          toolsetVersion: 1,
+          definitions: [TOOL_ALPHA, { ...TOOL_BETA, description: 'Changed description.' }],
+        }),
+      expected: allTrue,
+    },
+    {
+      id: 'invalidation-schema-version',
+      mutation: 'any envelope schemaVersion',
+      mutate: (input) => withEnvelope(input, 'template', { ...ENVELOPES.template, schemaVersion: 2 }),
+      expected: prefixOnly,
+    },
+    {
+      id: 'invalidation-run-metadata',
+      mutation: 'run/provenance metadata',
+      mutate: (input) => {
+        const next = cloneInput(input);
+        next.interaction = { ...next.interaction, interactionId: 'ff'.repeat(32) };
+        return next;
+      },
+      expected: { logicalStreamChanged: false, providerStreamChanged: false, logicalHashChanged: false, prefixHashChanged: false },
+    },
+  ];
+
+  for (const spec of specs) {
+    const successorInput = spec.mutate(base);
+    const successorId = `materialization-${spec.id.replace('invalidation-', '')}`;
+    add(successorId, 'materialization-vector', `materialization/${spec.id.replace('invalidation-', '')}.json`, {
+      id: successorId,
+      kind: 'materialization-vector',
+      input: successorInput,
+      expected: oracleMaterialize(successorInput),
+    });
+    add(spec.id, 'invalidation-vector', `invalidation/${spec.id.replace('invalidation-', '')}.json`, {
+      id: spec.id,
+      kind: 'invalidation-vector',
+      mode: 'materializer',
+      baseVectorId: 'materialization-bootstrap',
+      successorVectorId: successorId,
+      mutation: spec.mutation,
+      expected: spec.expected,
+    });
+  }
+
+  // Hash-framing mode: version-seam mutations on the bootstrap stable streams.
+  const bootstrapExpected = oracleMaterialize(base);
+  const stableLogical = Buffer.from(bootstrapExpected.logicalStreamHex, 'hex');
+  const stableProvider = Buffer.from(bootstrapExpected.providerStreamHex, 'hex');
+  const hashCase = (
+    id: string,
+    mutation: string,
+    mutated: { ledgerSchemaVersion: number; prefixContractVersion: number },
+  ) => {
+    const baseVersions = { ledgerSchemaVersion: 1, prefixContractVersion: 1 };
+    const logicalHashOf = (v: { ledgerSchemaVersion: number; prefixContractVersion: number }) =>
+      sha256Hex(
+        concat(
+          tagBytes(TAGS.logicalPrefix),
+          encodeIdentity(String(v.ledgerSchemaVersion)),
+          encodeIdentity(String(v.prefixContractVersion)),
+          stableLogical,
+        ),
+      );
+    const prefixHashOf = (v: { ledgerSchemaVersion: number; prefixContractVersion: number }) =>
+      sha256Hex(
+        concat(
+          tagBytes(TAGS.providerPrefix),
+          encodeIdentity(String(v.ledgerSchemaVersion)),
+          encodeIdentity(String(v.prefixContractVersion)),
+          encodeIdentity(identities.providerId),
+          encodeIdentity(identities.modelId),
+          encodeIdentity(identities.adapterId),
+          encodeIdentity(identities.templateId),
+          encodeIdentity(identities.policyId),
+          encodeIdentity(identities.toolDefinitionId),
+          encodeIdentity(identities.cacheConfigId),
+          stableProvider,
+        ),
+      );
+    add(id, 'invalidation-vector', `invalidation/${id.replace('invalidation-', '')}.json`, {
+      id,
+      kind: 'invalidation-vector',
+      mode: 'hash-framing',
+      mutation,
+      baseInput: { ...baseVersions, logicalStreamHex: bootstrapExpected.logicalStreamHex, providerStreamHex: bootstrapExpected.providerStreamHex },
+      mutatedInput: { ...mutated, logicalStreamHex: bootstrapExpected.logicalStreamHex, providerStreamHex: bootstrapExpected.providerStreamHex },
+      expected: {
+        baseLogicalPrefixSha256: logicalHashOf(baseVersions),
+        mutatedLogicalPrefixSha256: logicalHashOf(mutated),
+        basePrefixSha256: prefixHashOf(baseVersions),
+        mutatedPrefixSha256: prefixHashOf(mutated),
+        logicalStreamChanged: false,
+        providerStreamChanged: false,
+        logicalHashChanged: true,
+        prefixHashChanged: true,
+      },
+    });
+  };
+  hashCase('invalidation-ledger-schema-version', 'ledger schema version', { ledgerSchemaVersion: 2, prefixContractVersion: 1 });
+  hashCase('invalidation-prefix-contract-version', 'prefix contract version', { ledgerSchemaVersion: 1, prefixContractVersion: 2 });
+}
+
+const TOOL_ALPHA = {
+  name: 'submit_review',
+  description: 'Submit the structured review.',
+  inputSchema: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] },
+  policyMetadata: { risk: 'low' },
+};
+
+const TOOL_BETA = {
+  name: 'add_finding',
+  description: 'Add a single finding.',
+  inputSchema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] },
+};
+
+// ---------------------------------------------------------------------------
+// Invalid vectors (one per diagnostic code, per target)
+
+function invalidVector(
+  id: string,
+  target: string,
+  input: unknown,
+  expected: Record<string, unknown>,
+): void {
+  add(id, 'invalid-vector', `invalid/${id.replace('invalid-', '')}.json`, {
+    id,
+    kind: 'invalid-vector',
+    target,
+    input,
+    expected,
+  });
+}
+
+const C = {
+  identityInvalid: 'prefix_identity_invalid',
+  modelAlias: 'prefix_model_alias_literal',
+  digestInvalid: 'prefix_digest_invalid',
+  gitShaInvalid: 'prefix_git_sha_invalid',
+  ordinalInvalid: 'prefix_ordinal_invalid',
+  epochInvalid: 'prefix_epoch_invalid',
+  envelopeInvalid: 'prefix_envelope_invalid',
+  canonicalRejected: 'prefix_canonical_input_rejected',
+  envelopeTooLarge: 'prefix_envelope_too_large',
+  cacheMismatch: 'prefix_cache_contract_id_mismatch',
+  identityMismatch: 'prefix_identity_mismatch',
+  currentContextInvalid: 'prefix_current_context_invalid',
+  segmentTooLarge: 'prefix_segment_too_large',
+  streamTooLarge: 'prefix_stream_too_large',
+  lengthOverflow: 'prefix_length_overflow',
+} as const;
+
+function tsCode(code: string): string {
+  return code.replace(/_/g, '-');
+}
+
+function both(code: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return { csharpCode: code, typescriptCode: tsCode(code), ...extra };
+}
+
+function csOnly(code: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return { csharpCode: code, ...extra };
+}
+
+function tsOnly(code: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return { typescriptCode: tsCode(code), ...extra };
+}
+
+function buildInvalidVectors(): void {
+  // --- digest-helper targets (both languages) ---
+  invalidVector(
+    'invalid-template-unknown-field',
+    'template-id',
+    { envelope: { ...ENVELOPES.template, bogus: 1 } },
+    both(C.envelopeInvalid, { path: '/bogus' }),
+  );
+  invalidVector(
+    'invalid-template-missing-field',
+    'template-id',
+    { envelope: { schemaVersion: 1, templateVersion: 3 } },
+    both(C.envelopeInvalid, { path: '/definition' }),
+  );
+  invalidVector('invalid-template-version-zero', 'template-id',
+    { envelope: { ...ENVELOPES.template, templateVersion: 0 } },
+    both(C.envelopeInvalid, { path: '/templateVersion' }));
+  invalidVector('invalid-template-version-fraction', 'template-id',
+    { envelope: { ...ENVELOPES.template, templateVersion: 1.5 } },
+    both(C.envelopeInvalid, { path: '/templateVersion' }));
+  invalidVector('invalid-template-version-string', 'template-id',
+    { envelope: { ...ENVELOPES.template, templateVersion: '3' } },
+    both(C.envelopeInvalid, { path: '/templateVersion' }));
+  invalidVector('invalid-policy-instructions-type', 'policy-id',
+    { envelope: { ...ENVELOPES.policy, instructions: 42 } },
+    both(C.envelopeInvalid, { path: '/instructions' }));
+  invalidVector('invalid-tools-duplicate-name', 'tools-id',
+    { envelope: { schemaVersion: 1, toolsetVersion: 1, definitions: [TOOL_ALPHA, TOOL_ALPHA] } },
+    both(C.envelopeInvalid, { path: '/definitions/1/name' }));
+  invalidVector('invalid-tools-empty-name', 'tools-id',
+    { envelope: { schemaVersion: 1, toolsetVersion: 1, definitions: [{ ...TOOL_ALPHA, name: '' }] } },
+    both(C.identityInvalid, { path: '/definitions/0/name' }));
+  invalidVector('invalid-tools-unknown-wrapper-field', 'tools-id',
+    { envelope: { schemaVersion: 1, toolsetVersion: 1, definitions: [{ ...TOOL_ALPHA, bogus: 1 }] } },
+    both(C.envelopeInvalid, { path: '/definitions/0/bogus' }));
+  invalidVector('invalid-tools-inputschema-not-object', 'tools-id',
+    { envelope: { schemaVersion: 1, toolsetVersion: 1, definitions: [{ ...TOOL_ALPHA, inputSchema: [] }] } },
+    both(C.envelopeInvalid, { path: '/definitions/0/inputSchema' }));
+  invalidVector('invalid-tools-too-many', 'tools-id',
+    {
+      envelope: {
+        schemaVersion: 1,
+        toolsetVersion: 1,
+        definitions: Array.from({ length: 65 }, (_, i) => ({ ...TOOL_ALPHA, name: `tool-${i}` })),
+      },
+    },
+    both(C.envelopeInvalid, { path: '/definitions' }));
+  invalidVector('invalid-config-stateless-type', 'config-id',
+    { envelope: { ...ENVELOPES.cacheConfig, statelessMode: 'yes' } },
+    both(C.envelopeInvalid, { path: '/statelessMode' }));
+  invalidVector('invalid-adapter-build-version-control', 'adapter-id',
+    { envelope: { ...ENVELOPES.adapter, adapterBuildVersion: 'v1 x' } },
+    both(C.identityInvalid, { path: '/adapterBuildVersion' }));
+  invalidVector('invalid-envelope-too-large', 'template-id',
+    { envelope: { schemaVersion: 1, templateVersion: 1, definition: 'x'.repeat(262144) } },
+    both(C.envelopeTooLarge));
+
+  // --- duplicate properties (C# raw boundary only) ---
+  invalidVector(
+    'invalid-envelope-duplicate-root',
+    'template-id',
+    { envelopeJson: '{"schemaVersion":1,"schemaVersion":1,"templateVersion":3,"definition":{}}' },
+    csOnly(C.envelopeInvalid, { path: '/schemaVersion' }),
+  );
+  invalidVector(
+    'invalid-tools-duplicate-wrapper-property',
+    'tools-id',
+    {
+      envelopeJson:
+        '{"schemaVersion":1,"toolsetVersion":1,"definitions":[{"name":"a","name":"a","description":"d","inputSchema":{}}]}',
+    },
+    csOnly(C.envelopeInvalid, { path: '/definitions/0/name' }),
+  );
+  invalidVector(
+    'invalid-canonical-duplicate-open-json',
+    'canonical-json',
+    { envelopeKind: 'template', envelopeJson: '{"schemaVersion":1,"templateVersion":1,"definition":{"a":1,"a":2}}' },
+    csOnly(C.canonicalRejected),
+  );
+
+  // --- canonical-json seam (both where expressible) ---
+  invalidVector(
+    'invalid-canonical-lone-surrogate',
+    'canonical-json',
+    { envelopeKind: 'template', envelope: { schemaVersion: 1, templateVersion: 1, definition: 'bad\ud800' } },
+    both(C.canonicalRejected),
+  );
+  invalidVector(
+    'invalid-canonical-non-finite',
+    'canonical-json',
+    { envelopeKind: 'template', envelopeJson: '{"schemaVersion":1,"templateVersion":1,"definition":1e999}' },
+    both(C.canonicalRejected),
+  );
+
+  // --- interaction-id target (both) ---
+  const validPredecessor = { ledgerSha256: 'f'.repeat(64) };
+  invalidVector('invalid-interaction-predecessor-uppercase', 'interaction-id',
+    { predecessor: { ledgerSha256: 'F'.repeat(64) }, consumedInputSha256: 'e5'.repeat(32), currentHeadSha: '7'.repeat(40), interactionOrdinal: 0 },
+    both(C.digestInvalid, { path: '/predecessor' }));
+  invalidVector('invalid-interaction-bootstrap-as-hash', 'interaction-id',
+    { predecessor: { ledgerSha256: 'bootstrap' }, consumedInputSha256: 'e5'.repeat(32), currentHeadSha: '7'.repeat(40), interactionOrdinal: 0 },
+    both(C.digestInvalid, { path: '/predecessor' }));
+  invalidVector('invalid-interaction-consumed-short', 'interaction-id',
+    { predecessor: validPredecessor, consumedInputSha256: 'e5'.repeat(31), currentHeadSha: '7'.repeat(40), interactionOrdinal: 0 },
+    both(C.digestInvalid, { path: '/consumedInputSha256' }));
+  invalidVector('invalid-interaction-head-39', 'interaction-id',
+    { predecessor: validPredecessor, consumedInputSha256: 'e5'.repeat(32), currentHeadSha: '7'.repeat(39), interactionOrdinal: 0 },
+    both(C.gitShaInvalid, { path: '/currentHeadSha' }));
+  invalidVector('invalid-interaction-ordinal-negative', 'interaction-id',
+    { predecessor: validPredecessor, consumedInputSha256: 'e5'.repeat(32), currentHeadSha: '7'.repeat(40), interactionOrdinal: -1 },
+    both(C.ordinalInvalid, { path: '/interactionOrdinal' }));
+
+  // --- identity / model-snapshot (TS-only public helpers) ---
+  invalidVector('invalid-identity-empty', 'identity', { value: '' }, tsOnly(C.identityInvalid));
+  invalidVector('invalid-identity-control', 'identity', { value: 'ab' }, tsOnly(C.identityInvalid));
+  invalidVector('invalid-identity-too-long', 'identity', { value: 'x'.repeat(257) }, tsOnly(C.identityInvalid));
+  invalidVector('invalid-model-alias', 'model-snapshot', { value: 'latest' }, tsOnly(C.modelAlias));
+
+  // --- materialize target (C# only) ---
+  const base = bootstrapMaterializeInput();
+  const clone = cloneInput(base);
+
+  const aliasInput = cloneInput(base);
+  aliasInput.expectedIdentities = { ...aliasInput.expectedIdentities, modelId: 'latest' };
+  invalidVector('invalid-materialize-model-alias', 'materialize', aliasInput, csOnly(C.modelAlias));
+
+  const epochInput = cloneInput(base);
+  epochInput.sessionEpoch = 'short';
+  invalidVector('invalid-materialize-epoch', 'materialize', epochInput, csOnly(C.epochInvalid));
+
+  const digestCaseInput = cloneInput(base);
+  digestCaseInput.expectedIdentities = { ...digestCaseInput.expectedIdentities, templateId: 'A'.repeat(64) };
+  invalidVector('invalid-materialize-digest-invalid', 'materialize', digestCaseInput, csOnly(C.digestInvalid));
+
+  const mismatchInput = cloneInput(base);
+  mismatchInput.expectedIdentities = { ...mismatchInput.expectedIdentities, templateId: '0'.repeat(64) };
+  invalidVector('invalid-materialize-cache-mismatch', 'materialize', mismatchInput, csOnly(C.cacheMismatch));
+
+  const continuationMismatch = cloneInput(base);
+  continuationMismatch.history = { kind: 'continuation', ledgerHex: continuationLedgerTwoPairsHex(identities) };
+  continuationMismatch.expectedIdentities = { ...continuationMismatch.expectedIdentities, providerId: 'other-provider' };
+  invalidVector('invalid-materialize-continuation-mismatch', 'materialize', continuationMismatch, csOnly(C.identityMismatch));
+
+  const resetMismatch = cloneInput(base);
+  resetMismatch.history = { kind: 'reset', ledgerHex: continuationLedgerTwoPairsHex(identities) };
+  resetMismatch.expectedIdentities = { ...resetMismatch.expectedIdentities, repository: 'other/repo' };
+  invalidVector('invalid-materialize-reset-scope-mismatch', 'materialize', resetMismatch, csOnly(C.identityMismatch));
+
+  const contextBad = cloneInput(base);
+  contextBad.currentContext = { ...contextBad.currentContext, subjectDigest: 'not-a-digest' };
+  invalidVector('invalid-materialize-current-context', 'materialize', contextBad, csOnly(C.currentContextInvalid));
+
+  // --- stream/length guard seams (C# only) ---
+  invalidVector('invalid-stream-logical-stable', 'stream-guard',
+    { stream: 'logical-stable', totalBytes: 1_048_577 },
+    csOnly(C.streamTooLarge, { causeCode: 'logical-stable' }));
+  invalidVector('invalid-stream-logical-dynamic', 'stream-guard',
+    { stream: 'logical-dynamic', totalBytes: 262_145 },
+    csOnly(C.streamTooLarge, { causeCode: 'logical-dynamic' }));
+  invalidVector('invalid-stream-provider-stable', 'stream-guard',
+    { stream: 'provider-stable', totalBytes: 2_101_709 },
+    csOnly(C.streamTooLarge, { causeCode: 'provider-stable' }));
+  invalidVector('invalid-stream-provider-dynamic', 'stream-guard',
+    { stream: 'provider-dynamic', totalBytes: 524_357 },
+    csOnly(C.streamTooLarge, { causeCode: 'provider-dynamic' }));
+  invalidVector('invalid-segment-payload', 'stream-guard',
+    { stream: 'logical-segment', totalBytes: 262_145 },
+    csOnly(C.segmentTooLarge));
+  invalidVector('invalid-length-overflow', 'length-guard',
+    { a: '9223372036854775807', b: 4 },
+    csOnly(C.lengthOverflow));
+
+  void clone;
+}
+
 buildDigestVectors();
 buildFramingVectors();
 buildInteractionVectors();
 buildMaterializationVectors();
+buildAppendVector();
+buildInvalidationVectors();
+buildInvalidVectors();
 
 // ---------------------------------------------------------------------------
 // Write corpus

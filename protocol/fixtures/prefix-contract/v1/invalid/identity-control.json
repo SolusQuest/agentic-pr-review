@@ -1,0 +1,11 @@
+{
+  "id": "invalid-identity-control",
+  "kind": "invalid-vector",
+  "target": "identity",
+  "input": {
+    "value": "a\u0001b"
+  },
+  "expected": {
+    "typescriptCode": "prefix-identity-invalid"
+  }
+}

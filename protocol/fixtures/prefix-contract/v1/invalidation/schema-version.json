@@ -1,0 +1,14 @@
+{
+  "id": "invalidation-schema-version",
+  "kind": "invalidation-vector",
+  "mode": "materializer",
+  "baseVectorId": "materialization-bootstrap",
+  "successorVectorId": "materialization-schema-version",
+  "mutation": "any envelope schemaVersion",
+  "expected": {
+    "logicalStreamChanged": false,
+    "providerStreamChanged": false,
+    "logicalHashChanged": false,
+    "prefixHashChanged": true
+  }
+}

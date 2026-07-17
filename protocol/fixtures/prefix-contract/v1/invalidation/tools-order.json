@@ -1,0 +1,14 @@
+{
+  "id": "invalidation-tools-order",
+  "kind": "invalidation-vector",
+  "mode": "materializer",
+  "baseVectorId": "materialization-bootstrap",
+  "successorVectorId": "materialization-tools-order",
+  "mutation": "tools envelope content/version/order",
+  "expected": {
+    "logicalStreamChanged": true,
+    "providerStreamChanged": true,
+    "logicalHashChanged": true,
+    "prefixHashChanged": true
+  }
+}

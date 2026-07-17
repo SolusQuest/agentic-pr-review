@@ -216,7 +216,7 @@ function checkToolDefinitions(definitions: unknown): PrefixResult<ValidatedEnvel
   return null;
 }
 
-/** Structural bounds over the whole envelope value tree (D11). */
+/** Structural bounds over the whole envelope value tree (D11). Depth counts an envelope field's root value as 1. */
 function checkStructuralBounds(
   root: Record<string, unknown>,
 ): PrefixResult<ValidatedEnvelope> | null {
@@ -225,7 +225,7 @@ function checkStructuralBounds(
     readonly depth: number;
     readonly path: string;
   }
-  const stack: Frame[] = [{ value: root, depth: 1, path: '' }];
+  const stack: Frame[] = [{ value: root, depth: 0, path: '' }];
   while (stack.length > 0) {
     const { value, depth, path } = stack.pop()!;
     if (Array.isArray(value)) {

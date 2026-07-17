@@ -27,7 +27,7 @@ internal static class LogicalProjection
         writer.WriteProperty("kind");
         writer.WriteString(TemplateKind);
         writer.WriteProperty("templateVersion");
-        writer.WriteNumber(template.Raw.GetProperty("templateVersion").GetInt64());
+        writer.WriteNumber((long)template.Raw.GetProperty("templateVersion").GetDouble());
         writer.WriteObjectEnd();
         return writer.ToImmutableArray();
     }
@@ -43,7 +43,7 @@ internal static class LogicalProjection
         writer.WriteProperty("kind");
         writer.WriteString(PolicyKind);
         writer.WriteProperty("policyVersion");
-        writer.WriteNumber(policy.Raw.GetProperty("policyVersion").GetInt64());
+        writer.WriteNumber((long)policy.Raw.GetProperty("policyVersion").GetDouble());
         writer.WriteObjectEnd();
         return writer.ToImmutableArray();
     }
@@ -57,7 +57,7 @@ internal static class LogicalProjection
         writer.WriteProperty("kind");
         writer.WriteString(ToolsKind);
         writer.WriteProperty("toolsetVersion");
-        writer.WriteNumber(tools.Raw.GetProperty("toolsetVersion").GetInt64());
+        writer.WriteNumber((long)tools.Raw.GetProperty("toolsetVersion").GetDouble());
         writer.WriteObjectEnd();
         return writer.ToImmutableArray();
     }
