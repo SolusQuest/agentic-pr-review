@@ -201,25 +201,25 @@
     "type": "ledger-restore",
     "file": "provider-session-ledger/bootstrap-minimal.json",
     "valid": true,
-    "contentSha256": "300ea24b61a17ffc465a935c0a725758ec47a3cf114886fa672c066bb44f1036"
+    "contentSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7"
   },
   {
     "type": "ledger-restore",
     "file": "provider-session-ledger/continuation-one-append.json",
     "valid": true,
-    "contentSha256": "48b105d65e9e87e1e28bf724e0de95f49ebf7c86fba95469c123757c177e2be8"
+    "contentSha256": "b0a3ab402d6bd5482ccb257de6cdf234cbeb43e15a40f7b210df98cb0d430f23"
   },
   {
     "type": "ledger-restore",
     "file": "provider-session-ledger/reset-base-change.json",
     "valid": true,
-    "contentSha256": "f2b5983b487d9b9c528ada45276ab194f36cb1094dee9b0668f2cd6532a618b7"
+    "contentSha256": "516803136860512a179acc110a7327a34484fbf74e1e148b559b9e47f74d4845"
   },
   {
     "type": "ledger-restore",
     "file": "provider-session-ledger/recovery-root-integrity-mismatch.json",
     "valid": true,
-    "contentSha256": "799ddd388d11891330661d96ced3509f7168419392b8241b72f01cdf52f45fd4"
+    "contentSha256": "4ef78f6d797ae0d870aafb8578c03782cf3f76aa0c6e0616e7b3f68cf7f0809b"
   },
   {
     "type": "ledger-restore",
@@ -232,5 +232,1703 @@
     "file": "provider-session-ledger/model-alias-latest.json",
     "valid": false,
     "code": "ledger_model_alias_literal"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/reset-cache-contract-change.json",
+    "valid": true,
+    "contentSha256": "c4989c377ec3c233e0a5ecded0f6f8c311689a63b0a6946c948c52530b9504fa"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/reset-head-history-discontinuity.json",
+    "valid": true,
+    "contentSha256": "49c3807c9feb098449db5e8e91afce2f7c9b6b9638941b91d97e59ef78f51805"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/recovery-root-unavailable-accepted-artifact.json",
+    "valid": true,
+    "contentSha256": "059204e8076b7df48de635ebc461c9643024221fcdc7047616ea75a7a6440072"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/recovery-root-corrupt-accepted-artifact.json",
+    "valid": true,
+    "contentSha256": "df8789997c923a2489dcac2374d30b3f68075e866b8c4019d62da041f9764254"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/recovery-root-unsafe-provenance.json",
+    "valid": true,
+    "contentSha256": "60dd4ca34e7f09e2a584468cd9655730c49dce3656fafd24164cec6bf4683621"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/recovery-root-state-key-mismatch.json",
+    "valid": true,
+    "contentSha256": "2bff6ab9617fe4c09f2e6c7f1aaaea785c0eeb572267fff7c8e1fb9519b67b93"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/recovery-root-contract-version-incompatible.json",
+    "valid": true,
+    "contentSha256": "6ae1843e11f585607b904181711a7b6c608b52204df02daf5092f4169d34cab4"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/recovery-root-over-bound-ledger.json",
+    "valid": true,
+    "contentSha256": "195dfcf71062b92fccc5b60b379c00d42eac3a181328d1b81bec2f7f198f8cfe"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/continuation-max-interactions.json",
+    "valid": true,
+    "contentSha256": "7d6df6d90974c3baa615a330467bf5a9ce27adaad9410aabafc97d149b159d2f"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/continuation-near-byte-limit.json",
+    "valid": true,
+    "contentSha256": "800373c18dcd83d9e7fd7d5a7018122f789fd6c3ecd012a9bcdd812e47e4e094"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/sha-256-head-sha.json",
+    "valid": true,
+    "contentSha256": "7f13eb0efe5f386af9bd6da93949f156b66afdd03460f5508fd4d65f6cbcb306"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/raw-oversize.bin",
+    "valid": false,
+    "code": "ledger_raw_byte_limit_exceeded"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/invalid-utf8.bin",
+    "valid": false,
+    "code": "ledger_invalid_utf8"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/bom-leading.json",
+    "valid": false,
+    "code": "ledger_invalid_utf8"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/duplicate-json-property.json",
+    "valid": false,
+    "code": "ledger_duplicate_json_property"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/depth-exceeded.json",
+    "valid": false,
+    "code": "ledger_json_depth_exceeded"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/array-length-exceeded.json",
+    "valid": false,
+    "code": "ledger_json_array_length_exceeded"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/property-count-exceeded.json",
+    "valid": false,
+    "code": "ledger_json_property_count_exceeded"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/raw-multi-defect.json",
+    "valid": false,
+    "code": "ledger_duplicate_json_property"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/nul-in-summary.json",
+    "valid": false,
+    "code": "ledger_invalid_unicode"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/lone-surrogate-in-string.json",
+    "valid": false,
+    "code": "ledger_invalid_unicode"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/lone-surrogate-in-property-name.json",
+    "valid": false,
+    "code": "ledger_invalid_unicode"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/root-scalar-lone-surrogate.json",
+    "valid": false,
+    "code": "ledger_invalid_unicode"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/root-scalar-nul.json",
+    "valid": false,
+    "code": "ledger_invalid_unicode"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/nul-in-property-name.json",
+    "valid": false,
+    "code": "ledger_invalid_unicode"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/unsupported-schema-version.json",
+    "valid": false,
+    "code": "ledger_unsupported_schema_version"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/missing-schema-version.json",
+    "valid": false,
+    "code": "ledger_schema_violation"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/wrong-type-schema-version.json",
+    "valid": false,
+    "code": "ledger_schema_violation"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/unsupported-prefix-contract-version.json",
+    "valid": false,
+    "code": "ledger_unsupported_prefix_contract_version"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/missing-prefix-contract-version.json",
+    "valid": false,
+    "code": "ledger_schema_violation"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/wrong-type-prefix-contract-version.json",
+    "valid": false,
+    "code": "ledger_schema_violation"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/unknown-top-level-field.json",
+    "valid": false,
+    "code": "ledger_unknown_field"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/unknown-header-field.json",
+    "valid": false,
+    "code": "ledger_unknown_field"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/unknown-header-kind.json",
+    "valid": false,
+    "code": "ledger_schema_violation"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/overlong-summary.json",
+    "valid": false,
+    "code": "ledger_overlong_value"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/changed-file-stat-out-of-range.json",
+    "valid": false,
+    "code": "ledger_schema_violation"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/changed-file-negative-stat.json",
+    "valid": false,
+    "code": "ledger_schema_violation"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/whitespace-summary.json",
+    "valid": false,
+    "code": "ledger_schema_violation"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/absolute-path-in-finding.json",
+    "valid": false,
+    "code": "ledger_schema_violation"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/finding-line-over-cap.json",
+    "valid": false,
+    "code": "ledger_schema_violation"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/identity-byte-length-exceeded.json",
+    "valid": false,
+    "code": "ledger_identity_byte_length_exceeded"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/control-character-in-identity.json",
+    "valid": false,
+    "code": "ledger_control_character_in_identity"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/unsupported-change-status.json",
+    "valid": false,
+    "code": "ledger_unsupported_change_status"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/non-canonical-key-order.json",
+    "valid": false,
+    "code": "ledger_non_canonical"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/non-canonical-string-escape.json",
+    "valid": false,
+    "code": "ledger_non_canonical"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/canonical-byte-limit-exceeded.json",
+    "valid": false,
+    "code": "ledger_canonical_byte_limit_exceeded"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/records-empty.json",
+    "valid": false,
+    "code": "ledger_records_empty"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/records-odd-length.json",
+    "valid": false,
+    "code": "ledger_records_length_not_even"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/ordinal-gap.json",
+    "valid": false,
+    "code": "ledger_ordinal_gap"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/duplicate-interaction.json",
+    "valid": false,
+    "code": "ledger_duplicate_interaction"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/pair-order-swapped.json",
+    "valid": false,
+    "code": "ledger_pair_order_mismatch"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/pair-interaction-id-mismatch.json",
+    "valid": false,
+    "code": "ledger_pair_interaction_id_mismatch"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/digest-mismatch.json",
+    "valid": false,
+    "code": "ledger_digest_mismatch"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/interaction-limit-exceeded.json",
+    "valid": false,
+    "code": "ledger_interaction_limit_exceeded"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/changed-file-limit-exceeded.json",
+    "valid": false,
+    "code": "ledger_changed_file_limit_exceeded"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/finding-limit-exceeded.json",
+    "valid": false,
+    "code": "ledger_finding_limit_exceeded"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/limitations-limit-exceeded.json",
+    "valid": false,
+    "code": "ledger_limitations_limit_exceeded"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/bootstrap-nonzero-generation.json",
+    "valid": false,
+    "code": "ledger_bootstrap_shape_violation"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/recovery-root-nonzero-generation.json",
+    "valid": false,
+    "code": "ledger_recovery_root_shape_violation"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/recovery-root-missing-reason.json",
+    "valid": false,
+    "code": "ledger_recovery_root_reason_missing"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/reset-missing-reason.json",
+    "valid": false,
+    "code": "ledger_reset_reason_missing"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/reset-forbidden-field.json",
+    "valid": false,
+    "code": "ledger_reset_shape_violation"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/continuation-forbidden-field.json",
+    "valid": false,
+    "code": "ledger_continuation_shape_violation"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/record-role-mismatch.json",
+    "valid": false,
+    "code": "ledger_record_role_mismatch"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/finding-line-range-invalid.json",
+    "valid": false,
+    "code": "ledger_finding_line_range_invalid"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/finding-location-mismatch.json",
+    "valid": false,
+    "code": "ledger_finding_location_mismatch"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/finding-location-missing-path.json",
+    "valid": false,
+    "code": "ledger_finding_location_missing_path"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/ledger-deep-path-no-truncation.json",
+    "valid": false,
+    "code": "ledger_invalid_unicode"
+  },
+  {
+    "type": "ledger-restore",
+    "file": "provider-session-ledger/ledger-deep-path-truncation.json",
+    "valid": false,
+    "code": "ledger_invalid_unicode"
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/valid-bootstrap.json",
+    "transition": {
+      "kind": "bootstrap",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 0
+      }
+    },
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7"
+    },
+    "transitionExpectation": {
+      "valid": true,
+      "candidateContentSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/valid-continuation.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "b0a3ab402d6bd5482ccb257de6cdf234cbeb43e15a40f7b210df98cb0d430f23"
+    },
+    "transitionExpectation": {
+      "valid": true,
+      "candidateContentSha256": "b0a3ab402d6bd5482ccb257de6cdf234cbeb43e15a40f7b210df98cb0d430f23"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/valid-reset-cache-contract-change.json",
+    "transition": {
+      "kind": "reset",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "dddddddddddddddddddddd",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0,
+        "predecessorManifestSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "resetReason": "cache_contract_change"
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "c4989c377ec3c233e0a5ecded0f6f8c311689a63b0a6946c948c52530b9504fa"
+    },
+    "transitionExpectation": {
+      "valid": true,
+      "candidateContentSha256": "c4989c377ec3c233e0a5ecded0f6f8c311689a63b0a6946c948c52530b9504fa"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/valid-recovery-root-integrity-mismatch.json",
+    "transition": {
+      "kind": "recovery_root",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "eeeeeeeeeeeeeeeeeeeeee",
+        "ledgerEpoch": "ffffffffffffffffffffff",
+        "stateGeneration": 0,
+        "recoveryReason": "integrity_mismatch"
+      }
+    },
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "4ef78f6d797ae0d870aafb8578c03782cf3f76aa0c6e0616e7b3f68cf7f0809b"
+    },
+    "transitionExpectation": {
+      "valid": true,
+      "candidateContentSha256": "4ef78f6d797ae0d870aafb8578c03782cf3f76aa0c6e0616e7b3f68cf7f0809b"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/continuation-modified-history.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "d3394bf7db19941a5fcdda11e8d38cb622bb13060aa5e0613f8359424a048aae"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_continuation_prefix_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/continuation-wrong-predecessor-hash.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "54a83764422b4bd8e5986d640b123eb158922e1352438ecf91c174d53f28ebf6"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_predecessor_hash_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/continuation-cache-contract-changed.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "87de55173578f28b58199dbf1263e02fb461cabd20a9772a0ab100ec62ee94c0"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_identity_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/continuation-candidate-only-identity-drift.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "b1fa3321a514aed819413432b62e49ad3710473fffa6e030f868bb9e5275b2e0"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_identity_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/continuation-session-epoch-changed.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "e5e8625a9d2ae5527ddd25bcc2d987575717eade895c089d58de392bb26a6e05"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_session_epoch_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/continuation-ledger-epoch-changed.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "e1ed626dc6aa368cec1d81fc1f446539688e38f54c2d1ce049277c98bbab0410"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_ledger_epoch_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/continuation-predecessor-ledger-epoch-mismatch.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "fe121c1efd6b0adbdd3289266d2f6b4638808ce864afa2d93704b8c330067df2"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_predecessor_ledger_epoch_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/continuation-predecessor-generation-mismatch.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "5714bd6e75b12999e100bc73e103ff42865fe44f325e9ad403a20e71675f3afb"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_predecessor_generation_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/continuation-multi-predecessor-defect.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "7348263fb479278a995d042eb417e0f129fbd1b5c6476d4f508e1a99bd526742"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_predecessor_hash_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/continuation-state-generation-mismatch.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "7072063b22d23e14926e8b3fa5791804693866896693a3c9613fc5cd5b6f06ad"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_state_generation_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/reset-with-predecessor-records.json",
+    "transition": {
+      "kind": "reset",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "dddddddddddddddddddddd",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0,
+        "predecessorManifestSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "resetReason": "base_change"
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "771a7b0f12a2f0ca78388ff6cd5a24d99131c386942584a50005995d09d46525"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_reset_records_shape_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/reset-same-epoch.json",
+    "transition": {
+      "kind": "reset",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0,
+        "predecessorManifestSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "resetReason": "base_change"
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "e86b0115807ee0376448f1c99abe9ae437dbd7ac32c2d67198830433d7922e45"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_reset_epoch_not_fresh"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/reset-wrong-manifest-hash.json",
+    "transition": {
+      "kind": "reset",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "dddddddddddddddddddddd",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0,
+        "predecessorManifestSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "resetReason": "base_change"
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "8a91d89af95ada82b7ff083bfe3ea15d3b2afc0913adaf31466c2fa51e646d16"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_predecessor_manifest_hash_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/reset-wrong-reason.json",
+    "transition": {
+      "kind": "reset",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "dddddddddddddddddddddd",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0,
+        "predecessorManifestSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "resetReason": "cache_contract_change"
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "516803136860512a179acc110a7327a34484fbf74e1e148b559b9e47f74d4845"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_reset_reason_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/reset-session-scope-changed.json",
+    "transition": {
+      "kind": "reset",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "dddddddddddddddddddddd",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0,
+        "predecessorManifestSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "resetReason": "base_change"
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "caa06133a1f458fddcd294095269691177e5f15e3e871e37339b4864d2cb8faf"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_identity_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/reset-predecessor-generation-mismatch.json",
+    "transition": {
+      "kind": "reset",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "dddddddddddddddddddddd",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0,
+        "predecessorManifestSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "resetReason": "base_change"
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "9cccc4bf6967da4041f250cf7e54e7f4c0e81d1e0c78d43c2e9b0225cb218dde"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_predecessor_generation_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/reset-base-change-cache-contract-drift.json",
+    "transition": {
+      "kind": "reset",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-02-02",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "dddddddddddddddddddddd",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0,
+        "predecessorManifestSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "resetReason": "base_change"
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "f1034b7edde90deb54974c00613f4aff1550f0ab21cdff8a09da878e2fc0fbcb"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_identity_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/recovery-root-wrong-reason.json",
+    "transition": {
+      "kind": "recovery_root",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "eeeeeeeeeeeeeeeeeeeeee",
+        "ledgerEpoch": "ffffffffffffffffffffff",
+        "stateGeneration": 0,
+        "recoveryReason": "corrupt_accepted_artifact"
+      }
+    },
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "4ef78f6d797ae0d870aafb8578c03782cf3f76aa0c6e0616e7b3f68cf7f0809b"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_recovery_root_reason_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/bootstrap-multi-pair.json",
+    "transition": {
+      "kind": "bootstrap",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 0
+      }
+    },
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "92829c27c488335f2b85c64462c37ee23c5bee52fe28f2174158c31bafa4594a"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_root_records_shape_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/recovery-root-multi-pair.json",
+    "transition": {
+      "kind": "recovery_root",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "eeeeeeeeeeeeeeeeeeeeee",
+        "ledgerEpoch": "ffffffffffffffffffffff",
+        "stateGeneration": 0,
+        "recoveryReason": "integrity_mismatch"
+      }
+    },
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "88c57edaa1aa73336664cf7d2e6ec355fb65d5a3f580845320a706020b3141dd"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_root_records_shape_mismatch"
+    }
+  },
+  {
+    "type": "ledger-transition",
+    "file": "provider-session-ledger/bootstrap-with-expected-continuation.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "parseExpectation": {
+      "valid": true,
+      "contentSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7"
+    },
+    "transitionExpectation": {
+      "valid": false,
+      "code": "ledger_transition_kind_mismatch"
+    }
+  },
+  {
+    "type": "ledger-build",
+    "file": "provider-session-ledger/build-valid-bootstrap.json",
+    "transition": {
+      "kind": "bootstrap",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 0
+      }
+    },
+    "buildExpectation": {
+      "valid": true,
+      "candidateContentSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7",
+      "expectedCandidateFile": "provider-session-ledger/valid-bootstrap.json"
+    }
+  },
+  {
+    "type": "ledger-build",
+    "file": "provider-session-ledger/build-valid-continuation.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "buildExpectation": {
+      "valid": true,
+      "candidateContentSha256": "b0a3ab402d6bd5482ccb257de6cdf234cbeb43e15a40f7b210df98cb0d430f23",
+      "expectedCandidateFile": "provider-session-ledger/valid-continuation.json"
+    }
+  },
+  {
+    "type": "ledger-build",
+    "file": "provider-session-ledger/build-valid-reset.json",
+    "transition": {
+      "kind": "reset",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "dddddddddddddddddddddd",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "bba1aa84e34426830171e2a441575a041d8c650f8929fca6f06db34ae55d40d7",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0,
+        "predecessorManifestSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "resetReason": "cache_contract_change"
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "buildExpectation": {
+      "valid": true,
+      "candidateContentSha256": "c4989c377ec3c233e0a5ecded0f6f8c311689a63b0a6946c948c52530b9504fa",
+      "expectedCandidateFile": "provider-session-ledger/valid-reset-cache-contract-change.json"
+    }
+  },
+  {
+    "type": "ledger-build",
+    "file": "provider-session-ledger/build-valid-recovery-root.json",
+    "transition": {
+      "kind": "recovery_root",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "eeeeeeeeeeeeeeeeeeeeee",
+        "ledgerEpoch": "ffffffffffffffffffffff",
+        "stateGeneration": 0,
+        "recoveryReason": "integrity_mismatch"
+      }
+    },
+    "buildExpectation": {
+      "valid": true,
+      "candidateContentSha256": "4ef78f6d797ae0d870aafb8578c03782cf3f76aa0c6e0616e7b3f68cf7f0809b",
+      "expectedCandidateFile": "provider-session-ledger/valid-recovery-root-integrity-mismatch.json"
+    }
+  },
+  {
+    "type": "ledger-build",
+    "file": "provider-session-ledger/build-mismatched-interaction-ids.json",
+    "transition": {
+      "kind": "bootstrap",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 0
+      }
+    },
+    "buildExpectation": {
+      "valid": false,
+      "code": "ledger_pair_interaction_id_mismatch"
+    }
+  },
+  {
+    "type": "ledger-build",
+    "file": "provider-session-ledger/build-continuation-wrong-predecessor-hash.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 1,
+        "predecessorLedgerSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 0
+      }
+    },
+    "predecessor": "provider-session-ledger/bootstrap-minimal.json",
+    "buildExpectation": {
+      "valid": false,
+      "code": "ledger_predecessor_hash_mismatch"
+    }
+  },
+  {
+    "type": "ledger-build",
+    "file": "provider-session-ledger/over-bound-append-canonical-byte.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 15,
+        "predecessorLedgerSha256": "800373c18dcd83d9e7fd7d5a7018122f789fd6c3ecd012a9bcdd812e47e4e094",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 14
+      }
+    },
+    "predecessor": "provider-session-ledger/continuation-near-byte-limit.json",
+    "buildExpectation": {
+      "valid": false,
+      "code": "ledger_over_bound_append",
+      "causeCode": "ledger_canonical_byte_limit_exceeded"
+    }
+  },
+  {
+    "type": "ledger-build",
+    "file": "provider-session-ledger/over-bound-append-interactions.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 32,
+        "predecessorLedgerSha256": "7d6df6d90974c3baa615a330467bf5a9ce27adaad9410aabafc97d149b159d2f",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 31
+      }
+    },
+    "predecessor": "provider-session-ledger/continuation-max-interactions.json",
+    "buildExpectation": {
+      "valid": false,
+      "code": "ledger_over_bound_append",
+      "causeCode": "ledger_interaction_limit_exceeded"
+    }
+  },
+  {
+    "type": "ledger-build",
+    "file": "provider-session-ledger/over-bound-root-canonical-byte.json",
+    "transition": {
+      "kind": "bootstrap",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 0
+      }
+    },
+    "buildExpectation": {
+      "valid": false,
+      "code": "ledger_over_bound_append",
+      "causeCode": "ledger_canonical_byte_limit_exceeded"
+    }
+  },
+  {
+    "type": "ledger-build",
+    "file": "provider-session-ledger/over-bound-multi-defect.json",
+    "transition": {
+      "kind": "continuation",
+      "expected": {
+        "identities": {
+          "repository": "owner/repo",
+          "headRepository": "owner/repo",
+          "pullRequest": 1,
+          "workflowIdentity": "ci",
+          "trustedExecutionDomain": "trusted",
+          "providerId": "provider",
+          "modelId": "model-2024-01-01",
+          "adapterId": "ae1eae1d76e5b7c865c4122ce366a08025842566d2d96c75cc13e6353a73db0d",
+          "templateId": "5cde0f1298f41f7d1c8b907a36992a7a513225a2615bd6e307bf1a9149b06b40",
+          "policyId": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+          "toolDefinitionId": "f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+          "cacheConfigId": "3786c8b5fa08b53ee6c91f9a14b4324ea9018b37e738638ee7bf778ea85ec8d6"
+        },
+        "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
+        "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "stateGeneration": 32,
+        "predecessorLedgerSha256": "7d6df6d90974c3baa615a330467bf5a9ce27adaad9410aabafc97d149b159d2f",
+        "predecessorLedgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
+        "predecessorStateGeneration": 31
+      }
+    },
+    "predecessor": "provider-session-ledger/continuation-max-interactions.json",
+    "buildExpectation": {
+      "valid": false,
+      "code": "ledger_over_bound_append",
+      "causeCode": "ledger_interaction_limit_exceeded"
+    }
   }
 ]

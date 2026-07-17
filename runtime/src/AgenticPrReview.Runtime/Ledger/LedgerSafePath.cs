@@ -77,6 +77,36 @@ internal static class LedgerSafePath
         return $"{code}:{prefixBuilder}/<path-truncated>/{finalSegment}";
     }
 
+    public static string TruncateDiagnosticMessage(string message)
+    {
+        if (message.Length <= MaxDiagnosticChars && Encoding.UTF8.GetByteCount(message) <= MaxDiagnosticBytes)
+        {
+            return message;
+        }
+
+        var builder = new StringBuilder(message.Length);
+        var byteCount = 0;
+        for (var i = 0; i < message.Length; i++)
+        {
+            var c = message[i];
+            var charBytes = Encoding.UTF8.GetByteCount(new[] { c });
+            if (builder.Length + 1 > MaxDiagnosticChars || byteCount + charBytes > MaxDiagnosticBytes)
+            {
+                break;
+            }
+
+            builder.Append(c);
+            byteCount += charBytes;
+        }
+
+        if (builder.Length > 0 && char.IsHighSurrogate(builder[builder.Length - 1]))
+        {
+            builder.Length--;
+        }
+
+        return builder.ToString();
+    }
+
     public static string SanitizeInstancePointer(string pointer)
     {
         if (pointer == "")
@@ -180,9 +210,30 @@ internal static class LedgerSafePath
 
         if (element.ValueKind == JsonValueKind.Object)
         {
-            var properties = element.EnumerateObject()
-                .OrderBy(p => p.Name, StringComparer.Ordinal)
-                .ToImmutableArray();
+            // System.Text.Json throws InvalidOperationException when materializing a
+            // property name that contains an unpaired UTF-16 surrogate escape. Such a
+            // name is a terminal property-name violation (<invalid-utf16>) and is
+            // deferred until every well-formed sibling subtree has scanned clean: the
+            // exact UTF-16 sort position of a name that cannot be materialized is not
+            // knowable, and well-formed names are always ordered among themselves.
+            var properties = new List<JsonProperty>();
+            var hasUnmaterializableName = false;
+            foreach (var property in element.EnumerateObject())
+            {
+                try
+                {
+                    _ = property.Name;
+                }
+                catch (InvalidOperationException)
+                {
+                    hasUnmaterializableName = true;
+                    continue;
+                }
+
+                properties.Add(property);
+            }
+
+            properties.Sort((a, b) => string.CompareOrdinal(a.Name, b.Name));
 
             foreach (var property in properties)
             {
@@ -217,6 +268,16 @@ internal static class LedgerSafePath
                 {
                     return result.Value;
                 }
+            }
+
+            if (hasUnmaterializableName)
+            {
+                return new UnsafeLocation
+                {
+                    Segments = segments.Add("<invalid-utf16>"),
+                    IsPropertyNameViolation = true,
+                    IsRootScalar = false
+                };
             }
 
             return null;
@@ -420,8 +481,19 @@ internal static class LedgerSafePath
                 continue;
             }
 
-            if (c == '\0' || char.IsHighSurrogate(c) || char.IsLowSurrogate(c))
+            if (c == '\0' || char.IsLowSurrogate(c))
             {
+                return true;
+            }
+
+            if (char.IsHighSurrogate(c))
+            {
+                if (i + 1 < rawText.Length - 1 && char.IsLowSurrogate(rawText[i + 1]))
+                {
+                    i += 2;
+                    continue;
+                }
+
                 return true;
             }
 

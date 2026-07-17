@@ -173,15 +173,6 @@ internal static class LedgerCanonicalizer
     {
         writer.WriteObjectStart();
 
-        writer.WriteProperty("interactionId");
-        writer.WriteString(record.InteractionId);
-
-        writer.WriteProperty("interactionOrdinal");
-        writer.WriteNumber(record.InteractionOrdinal);
-
-        writer.WriteProperty("role");
-        writer.WriteString(record.Role);
-
         if (record is ReviewContextRecord ctx)
         {
             writer.WriteProperty("cacheContractDigest");
@@ -196,11 +187,20 @@ internal static class LedgerCanonicalizer
             }
             writer.WriteArrayEnd();
 
+            writer.WriteProperty("interactionId");
+            writer.WriteString(record.InteractionId);
+
+            writer.WriteProperty("interactionOrdinal");
+            writer.WriteNumber(record.InteractionOrdinal);
+
             writer.WriteProperty("reviewedBaseSha");
             writer.WriteString(ctx.ReviewedBaseSha);
 
             writer.WriteProperty("reviewedHeadSha");
             writer.WriteString(ctx.ReviewedHeadSha);
+
+            writer.WriteProperty("role");
+            writer.WriteString(record.Role);
 
             writer.WriteProperty("subjectDigest");
             writer.WriteString(ctx.SubjectDigest);
@@ -216,6 +216,12 @@ internal static class LedgerCanonicalizer
             }
             writer.WriteArrayEnd();
 
+            writer.WriteProperty("interactionId");
+            writer.WriteString(record.InteractionId);
+
+            writer.WriteProperty("interactionOrdinal");
+            writer.WriteNumber(record.InteractionOrdinal);
+
             writer.WriteProperty("limitations");
             writer.WriteArrayStart();
             for (var i = 0; i < outcome.Limitations.Length; i++)
@@ -224,6 +230,9 @@ internal static class LedgerCanonicalizer
                 writer.WriteString(outcome.Limitations[i]);
             }
             writer.WriteArrayEnd();
+
+            writer.WriteProperty("role");
+            writer.WriteString(record.Role);
 
             writer.WriteProperty("summary");
             writer.WriteString(outcome.Summary);
@@ -483,7 +492,7 @@ internal struct CanonicalJsonWriter
 
         if (c < 0x20)
         {
-            _writer.Write(Encoding.UTF8.GetBytes($"\\u{(int)c:X4}"));
+            _writer.Write(Encoding.UTF8.GetBytes($"\\u{(int)c:x4}"));
             return;
         }
 

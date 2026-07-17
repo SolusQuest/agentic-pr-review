@@ -7,6 +7,10 @@ namespace AgenticPrReview.Runtime.Ledger;
 
 public static class LedgerBuilder
 {
+    // Schema-shaped stand-in (lowercase SHA-256 hex) for the cache-contract digest in
+    // provisional records; the real digest is computed only after earlier stages pass.
+    private const string PlaceholderDigest = "0000000000000000000000000000000000000000000000000000000000000000";
+
     public static BuildOutcome<ReviewContextRecord> BuildReviewContext(
         ValidatedContextSource source, ExpectedIdentities identities, InteractionIdentity interaction)
     {
@@ -16,19 +20,22 @@ public static class LedgerBuilder
             return new BuildOutcome<ReviewContextRecord>(null, ImmutableArray.Create(unicodeDiagnostic));
         }
 
-        var record = new ReviewContextRecord
+        // Provisional record: the cache-contract digest is only computed after schema
+        // validation and structural identity checks pass, so the hash producer never runs
+        // on inputs that fail an earlier stage.
+        var provisionalRecord = new ReviewContextRecord
         {
             Role = "review_context",
             InteractionId = interaction.InteractionId,
             InteractionOrdinal = interaction.InteractionOrdinal,
             SubjectDigest = source.SubjectDigest,
-            CacheContractDigest = LedgerCanonicalizer.ComputeCacheContractDigest(identities),
+            CacheContractDigest = PlaceholderDigest,
             ReviewedHeadSha = source.ReviewedHeadSha,
             ReviewedBaseSha = source.ReviewedBaseSha,
             ChangedFiles = source.ChangedFiles
         };
 
-        var schemaDiagnostics = ValidateRecordSchema(record, identities);
+        var schemaDiagnostics = ValidateRecordSchema(provisionalRecord, identities);
         if (!schemaDiagnostics.IsEmpty)
         {
             return new BuildOutcome<ReviewContextRecord>(null, schemaDiagnostics);
@@ -39,6 +46,18 @@ public static class LedgerBuilder
         {
             return new BuildOutcome<ReviewContextRecord>(null, ImmutableArray.Create(identityDiagnostic));
         }
+
+        var record = new ReviewContextRecord
+        {
+            Role = provisionalRecord.Role,
+            InteractionId = provisionalRecord.InteractionId,
+            InteractionOrdinal = provisionalRecord.InteractionOrdinal,
+            SubjectDigest = provisionalRecord.SubjectDigest,
+            CacheContractDigest = LedgerCanonicalizer.ComputeCacheContractDigest(identities),
+            ReviewedHeadSha = provisionalRecord.ReviewedHeadSha,
+            ReviewedBaseSha = provisionalRecord.ReviewedBaseSha,
+            ChangedFiles = provisionalRecord.ChangedFiles
+        };
 
         return new BuildOutcome<ReviewContextRecord>(record, ImmutableArray<LedgerDiagnostic>.Empty);
     }
@@ -63,11 +82,16 @@ public static class LedgerBuilder
         };
 
         // Dummy identities are only used for the temporary ledger header; the outcome record does not depend on them.
+        // The cache-contract IDs must satisfy the shared Sha256Hex schema domain.
         var dummyIdentities = new ExpectedIdentities(
             "owner/repo", "owner/repo", 1,
             "ci", "trusted",
             "provider", "model",
-            "adapter", "template", "policy", "tools", "cacheconfig");
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
 
         var schemaDiagnostics = ValidateRecordSchema(record, dummyIdentities);
         if (!schemaDiagnostics.IsEmpty)
@@ -222,6 +246,26 @@ public static class LedgerBuilder
             return new CandidateOutcome(null, ImmutableArray.Create(unicodeDiagnostic));
         }
 
+        // Component schema replay (header variant + the fabricated record pair) so that
+        // schema-class diagnostics precede aggregate bounds, structural, and semantic
+        // stages. Predecessor records are already ledger-valid and are not replayed;
+        // aggregate array bounds stay with the candidate-level gate below.
+        var replayRecords = records.Length > 2
+            ? ImmutableArray.Create(records[records.Length - 2], records[records.Length - 1])
+            : records;
+        var replayModel = new LedgerModel
+        {
+            SchemaVersion = model.SchemaVersion,
+            PrefixContractVersion = model.PrefixContractVersion,
+            Header = header,
+            Records = replayRecords
+        };
+        var replayDiagnostics = EvaluateModelSchema(replayModel);
+        if (!replayDiagnostics.IsEmpty)
+        {
+            return new CandidateOutcome(null, replayDiagnostics);
+        }
+
         ImmutableArray<byte> canonicalBytes;
         try
         {
@@ -304,7 +348,6 @@ public static class LedgerBuilder
             CacheConfigId = identities.CacheConfigId
         };
 
-        var cacheContractDigest = LedgerCanonicalizer.ComputeCacheContractDigest(identities);
         ImmutableArray<LedgerRecord> records;
         if (record is ReviewContextRecord context)
         {
@@ -327,7 +370,7 @@ public static class LedgerBuilder
                 InteractionId = outcome.InteractionId,
                 InteractionOrdinal = outcome.InteractionOrdinal,
                 SubjectDigest = "0000000000000000000000000000000000000000000000000000000000000000",
-                CacheContractDigest = cacheContractDigest,
+                CacheContractDigest = PlaceholderDigest,
                 ReviewedHeadSha = "0000000000000000000000000000000000000000",
                 ReviewedBaseSha = "1111111111111111111111111111111111111111",
                 ChangedFiles = ImmutableArray<LedgerChangedFile>.Empty
@@ -351,10 +394,15 @@ public static class LedgerBuilder
             Records = records
         };
 
+        return EvaluateModelSchema(tempModel);
+    }
+
+    private static ImmutableArray<LedgerDiagnostic> EvaluateModelSchema(LedgerModel model)
+    {
         ImmutableArray<byte> canonicalBytes;
         try
         {
-            canonicalBytes = LedgerCanonicalizer.SerializeCanonical(tempModel);
+            canonicalBytes = LedgerCanonicalizer.SerializeCanonical(model);
         }
         catch (LedgerCanonicalizationException ex)
         {

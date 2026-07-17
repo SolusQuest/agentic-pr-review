@@ -5,51 +5,9 @@ namespace AgenticPrReview.Runtime.Tests.Ledger;
 
 public sealed class LedgerParserTests
 {
-    private const string MinimalBootstrapLedger = /*lang=json,strict*/ """
-{
-  "header": {
-    "adapterId": "adapter",
-    "cacheConfigId": "cacheconfig",
-    "headRepository": "owner/repo",
-    "kind": "bootstrap",
-    "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
-    "modelId": "model-2024-01-01",
-    "policyId": "policy",
-    "predecessorLedgerSha256": "bootstrap",
-    "providerId": "provider",
-    "pullRequest": 1,
-    "repository": "owner/repo",
-    "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
-    "stateGeneration": 0,
-    "templateId": "template",
-    "toolDefinitionId": "tools",
-    "trustedExecutionDomain": "trusted",
-    "workflowIdentity": "ci"
-  },
-  "prefixContractVersion": 1,
-  "records": [
-    {
-      "interactionId": "0000000000000000000000000000000000000000000000000000000000000000",
-      "interactionOrdinal": 0,
-      "role": "review_context",
-      "cacheContractDigest": "c67bf2569b74a5699f670791f30c731d728703d8ce2b6201866175526cd52a85",
-      "changedFiles": [],
-      "reviewedBaseSha": "1111111111111111111111111111111111111111",
-      "reviewedHeadSha": "0000000000000000000000000000000000000000",
-      "subjectDigest": "1111111111111111111111111111111111111111111111111111111111111111"
-    },
-    {
-      "interactionId": "0000000000000000000000000000000000000000000000000000000000000000",
-      "interactionOrdinal": 0,
-      "role": "review_outcome",
-      "findings": [],
-      "limitations": [],
-      "summary": "Summary text."
-    }
-  ],
-  "schemaVersion": 1
-}
-""";
+    // Byte-level canonical (compact, RFC 8785 key order) minimal ledger over the shared
+    // identity baseline; the parser's canonical-form stage compares raw bytes.
+    private static readonly string MinimalBootstrapLedger = $$"""{"header":{"adapterId":"{{LedgerTestBaseline.AdapterId}}","cacheConfigId":"{{LedgerTestBaseline.CacheConfigId}}","headRepository":"owner/repo","kind":"bootstrap","ledgerEpoch":"bbbbbbbbbbbbbbbbbbbbbb","modelId":"{{LedgerTestBaseline.ModelId}}","policyId":"{{LedgerTestBaseline.PolicyId}}","predecessorLedgerSha256":"bootstrap","providerId":"provider","pullRequest":1,"repository":"owner/repo","sessionEpoch":"aaaaaaaaaaaaaaaaaaaaaa","stateGeneration":0,"templateId":"{{LedgerTestBaseline.TemplateId}}","toolDefinitionId":"{{LedgerTestBaseline.ToolDefinitionId}}","trustedExecutionDomain":"trusted","workflowIdentity":"ci"},"prefixContractVersion":1,"records":[{"cacheContractDigest":"{{LedgerTestBaseline.CacheContractDigest}}","changedFiles":[],"interactionId":"0000000000000000000000000000000000000000000000000000000000000000","interactionOrdinal":0,"reviewedBaseSha":"1111111111111111111111111111111111111111","reviewedHeadSha":"0000000000000000000000000000000000000000","role":"review_context","subjectDigest":"1111111111111111111111111111111111111111111111111111111111111111"},{"findings":[],"interactionId":"0000000000000000000000000000000000000000000000000000000000000000","interactionOrdinal":0,"limitations":[],"role":"review_outcome","summary":"Summary text."}],"schemaVersion":1}""";
 
     [Fact]
     public void MinimalBootstrapLedgerParsesSuccessfully()
@@ -105,7 +63,7 @@ public sealed class LedgerParserTests
     [Fact]
     public void DuplicateJsonPropertyFails()
     {
-        var json = MinimalBootstrapLedger.Replace("\"prefixContractVersion\": 1,", "\"prefixContractVersion\": 1,\"schemaVersion\": 1,");
+        var json = MinimalBootstrapLedger.Replace("\"prefixContractVersion\":1,", "\"prefixContractVersion\":1,\"schemaVersion\":1,");
         var bytes = Encoding.UTF8.GetBytes(json);
         var outcome = LedgerParser.ParseAndValidate(bytes);
 
@@ -117,7 +75,7 @@ public sealed class LedgerParserTests
     [Fact]
     public void UnsupportedSchemaVersionFails()
     {
-        var json = MinimalBootstrapLedger.Replace("\"schemaVersion\": 1", "\"schemaVersion\": 2");
+        var json = MinimalBootstrapLedger.Replace("\"schemaVersion\":1", "\"schemaVersion\":2");
         var bytes = Encoding.UTF8.GetBytes(json);
         var outcome = LedgerParser.ParseAndValidate(bytes);
 
@@ -129,21 +87,23 @@ public sealed class LedgerParserTests
     [Fact]
     public void UnknownTopLevelFieldFailsSchemaStage()
     {
-        var json = MinimalBootstrapLedger.Replace("\"schemaVersion\": 1", "\"extraField\": 1,\"schemaVersion\": 1");
+        var json = MinimalBootstrapLedger.Replace("\"schemaVersion\":1", "\"extraField\":1,\"schemaVersion\":1");
         var bytes = Encoding.UTF8.GetBytes(json);
         var outcome = LedgerParser.ParseAndValidate(bytes);
 
         Assert.Null(outcome.Ledger);
-        Assert.NotEmpty(outcome.Diagnostics);
-        Assert.Contains(outcome.Diagnostics, d => d.Code is LedgerDiagnosticCodes.UnknownField or LedgerDiagnosticCodes.SchemaViolation);
+        Assert.Single(outcome.Diagnostics);
+        Assert.Equal(LedgerDiagnosticCodes.UnknownField, outcome.Diagnostics[0].Code);
     }
 
     [Fact]
     public void ModelAliasLatestFailsSemanticStage()
     {
         var json = MinimalBootstrapLedger
-            .Replace("\"modelId\": \"model-2024-01-01\"", "\"modelId\": \"latest\"")
-            .Replace("\"cacheContractDigest\": \"c67bf2569b74a5699f670791f30c731d728703d8ce2b6201866175526cd52a85\"", "\"cacheContractDigest\": \"ed4da62537881c0b787345f55f078e29c2068fead8a170d183d5cdc78ad8631c\"");
+            .Replace($"\"modelId\":\"{LedgerTestBaseline.ModelId}\"", "\"modelId\":\"latest\"")
+            .Replace(
+                $"\"cacheContractDigest\":\"{LedgerTestBaseline.CacheContractDigest}\"",
+                $"\"cacheContractDigest\":\"{LedgerTestBaseline.ModelAliasCacheContractDigest}\"");
         var bytes = Encoding.UTF8.GetBytes(json);
         var outcome = LedgerParser.ParseAndValidate(bytes);
 

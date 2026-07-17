@@ -77,8 +77,7 @@ public static class LedgerParser
                 return new ParseOutcome(null, semanticDiagnostics);
             }
 
-            var strippedInput = StripJsonWhitespace(bytes);
-            if (!canonicalBytes.AsSpan().SequenceEqual(strippedInput))
+            if (!canonicalBytes.AsSpan().SequenceEqual(bytes))
             {
                 return new ParseOutcome(null, ImmutableArray.Create(CreateDiagnostic(LedgerDiagnosticCodes.NonCanonical, "Ledger bytes are not in canonical form.")));
             }
@@ -113,11 +112,16 @@ public static class LedgerParser
         var reader = new Utf8JsonReader(bytes, new JsonReaderOptions
         {
             AllowTrailingCommas = false,
-            CommentHandling = JsonCommentHandling.Disallow
+            CommentHandling = JsonCommentHandling.Disallow,
+            MaxDepth = LedgerRawByteLimit
         });
 
         var stack = new Stack<Container>();
         var depth = 0;
+        LedgerDiagnostic? duplicateDiagnostic = null;
+        LedgerDiagnostic? depthDiagnostic = null;
+        LedgerDiagnostic? arrayLengthDiagnostic = null;
+        LedgerDiagnostic? propertyCountDiagnostic = null;
 
         try
         {
@@ -132,16 +136,29 @@ public static class LedgerParser
                         return CreateDiagnostic(LedgerDiagnosticCodes.InvalidJson, "Property name outside object.");
                     }
 
-                    var name = reader.GetString()!;
                     var obj = stack.Peek();
-                    if (!obj.PropertyNames.Add(name))
+                    if (!TryGetPropertyName(ref reader, out var name, out var rawName))
                     {
-                        return CreateDiagnostic(LedgerDiagnosticCodes.DuplicateJsonProperty, $"Duplicate JSON property '{name}'.");
+                        // The name contains an unpaired UTF-16 surrogate escape and cannot
+                        // be materialized by System.Text.Json; the Unicode-safety stage
+                        // owns its classification (<invalid-utf16>). Duplicate detection
+                        // falls back to raw-span byte equality, which is sound (identical
+                        // raw bytes are identical names) though it may miss escape-case
+                        // variants of the same name; those documents are still rejected
+                        // at the Unicode stage.
+                        if (!obj.AddRawPropertyName(rawName))
+                        {
+                            duplicateDiagnostic ??= CreateDiagnostic(LedgerDiagnosticCodes.DuplicateJsonProperty, "Duplicate JSON property.");
+                        }
+                    }
+                    else if (!obj.PropertyNames.Add(name))
+                    {
+                        duplicateDiagnostic ??= CreateDiagnostic(LedgerDiagnosticCodes.DuplicateJsonProperty, "Duplicate JSON property.");
                     }
 
-                    if (obj.PropertyNames.Count > LedgerJsonMaxPropertyCount)
+                    if (obj.PropertyNames.Count + obj.RawPropertyNameCount > LedgerJsonMaxPropertyCount)
                     {
-                        return CreateDiagnostic(LedgerDiagnosticCodes.JsonPropertyCountExceeded, $"Object property count exceeds {LedgerJsonMaxPropertyCount}.");
+                        propertyCountDiagnostic ??= CreateDiagnostic(LedgerDiagnosticCodes.JsonPropertyCountExceeded, $"Object property count exceeds {LedgerJsonMaxPropertyCount}.");
                     }
 
                     continue;
@@ -154,7 +171,7 @@ public static class LedgerParser
                     arr.ArrayCount++;
                     if (arr.ArrayCount > LedgerJsonMaxArrayLength)
                     {
-                        return CreateDiagnostic(LedgerDiagnosticCodes.JsonArrayLengthExceeded, $"Array length exceeds {LedgerJsonMaxArrayLength}.");
+                        arrayLengthDiagnostic ??= CreateDiagnostic(LedgerDiagnosticCodes.JsonArrayLengthExceeded, $"Array length exceeds {LedgerJsonMaxArrayLength}.");
                     }
                 }
 
@@ -165,7 +182,7 @@ public static class LedgerParser
                         depth++;
                         if (depth > LedgerJsonMaxDepth)
                         {
-                            return CreateDiagnostic(LedgerDiagnosticCodes.JsonDepthExceeded, $"JSON depth exceeds {LedgerJsonMaxDepth}.");
+                            depthDiagnostic ??= CreateDiagnostic(LedgerDiagnosticCodes.JsonDepthExceeded, $"JSON depth exceeds {LedgerJsonMaxDepth}.");
                         }
 
                         stack.Push(new Container(token == JsonTokenType.StartObject ? ContainerKind.Object : ContainerKind.Array));
@@ -194,26 +211,48 @@ public static class LedgerParser
             return CreateDiagnostic(LedgerDiagnosticCodes.InvalidJson, "Unbalanced JSON structure.");
         }
 
-        return null;
+        return duplicateDiagnostic ?? depthDiagnostic ?? arrayLengthDiagnostic ?? propertyCountDiagnostic;
     }
 
     private static LedgerDiagnostic? RunVersionRouting(JsonElement root)
     {
         if (root.TryGetProperty("schemaVersion", out var schemaVersion) &&
             schemaVersion.ValueKind == JsonValueKind.Number &&
-            schemaVersion.GetInt64() != 1)
+            schemaVersion.TryGetInt64(out var schemaVersionValue) &&
+            schemaVersionValue != 1)
         {
-            return CreateDiagnostic(LedgerDiagnosticCodes.UnsupportedSchemaVersion, $"schemaVersion {schemaVersion.GetInt64()} is not supported.");
+            return CreateDiagnostic(LedgerDiagnosticCodes.UnsupportedSchemaVersion, $"schemaVersion {schemaVersionValue} is not supported.");
         }
 
         if (root.TryGetProperty("prefixContractVersion", out var prefixVersion) &&
             prefixVersion.ValueKind == JsonValueKind.Number &&
-            prefixVersion.GetInt64() != 1)
+            prefixVersion.TryGetInt64(out var prefixVersionValue) &&
+            prefixVersionValue != 1)
         {
-            return CreateDiagnostic(LedgerDiagnosticCodes.UnsupportedPrefixContractVersion, $"prefixContractVersion {prefixVersion.GetInt64()} is not supported.");
+            return CreateDiagnostic(LedgerDiagnosticCodes.UnsupportedPrefixContractVersion, $"prefixContractVersion {prefixVersionValue} is not supported.");
         }
 
         return null;
+    }
+
+    // Materializes a property name. System.Text.Json refuses to unescape a name
+    // containing an unpaired UTF-16 surrogate (InvalidOperationException); in that case
+    // the raw name bytes are returned for span-based duplicate detection and the name is
+    // left to the Unicode-safety stage, which classifies it as <invalid-utf16>.
+    private static bool TryGetPropertyName(ref Utf8JsonReader reader, out string name, out byte[] rawName)
+    {
+        try
+        {
+            name = reader.GetString()!;
+            rawName = Array.Empty<byte>();
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            name = string.Empty;
+            rawName = reader.HasValueSequence ? reader.ValueSequence.ToArray() : reader.ValueSpan.ToArray();
+            return false;
+        }
     }
 
     private static LedgerDiagnostic? RunStructuralBounds(LedgerModel model, ImmutableArray<byte> canonicalBytes)
@@ -555,61 +594,15 @@ public static class LedgerParser
 
     private static LedgerDiagnostic CreateDiagnostic(string code, string message)
     {
-        return new LedgerDiagnostic { Code = code, Message = message };
-    }
-
-    private static byte[] StripJsonWhitespace(ReadOnlySpan<byte> bytes)
-    {
-        var result = new byte[bytes.Length];
-        var length = 0;
-        var inString = false;
-        var escape = false;
-
-        for (var i = 0; i < bytes.Length; i++)
-        {
-            var b = bytes[i];
-            if (inString)
-            {
-                result[length++] = b;
-                if (escape)
-                {
-                    escape = false;
-                }
-                else if (b == (byte)'\\')
-                {
-                    escape = true;
-                }
-                else if (b == (byte)'"')
-                {
-                    inString = false;
-                }
-
-                continue;
-            }
-
-            if (b == (byte)'"')
-            {
-                inString = true;
-                result[length++] = b;
-                continue;
-            }
-
-            if (b is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r')
-            {
-                continue;
-            }
-
-            result[length++] = b;
-        }
-
-        Array.Resize(ref result, length);
-        return result;
+        return new LedgerDiagnostic { Code = code, Message = LedgerSafePath.TruncateDiagnosticMessage(message) };
     }
 
     private enum ContainerKind { Object, Array }
 
     private sealed class Container
     {
+        private readonly List<byte[]> _rawPropertyNames = new();
+
         public Container(ContainerKind kind)
         {
             Kind = kind;
@@ -618,6 +611,22 @@ public static class LedgerParser
 
         public ContainerKind Kind { get; }
         public HashSet<string> PropertyNames { get; }
+        public int RawPropertyNameCount => _rawPropertyNames.Count;
         public int ArrayCount { get; set; }
+
+        // Raw-byte duplicate detection for property names that cannot be materialized.
+        public bool AddRawPropertyName(byte[] rawName)
+        {
+            foreach (var existing in _rawPropertyNames)
+            {
+                if (existing.AsSpan().SequenceEqual(rawName))
+                {
+                    return false;
+                }
+            }
+
+            _rawPropertyNames.Add(rawName);
+            return true;
+        }
     }
 }

@@ -46,7 +46,13 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 256,
-      "pattern": "^[\u0020-\u007e\u0080-\uffff]+$"
+      "description": "Host-owned identity string. Control characters are intentionally not excluded here; they are rejected at the structural stage with ledger_control_character_in_identity."
+    },
+    "repositoryIdentity": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 200,
+      "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
     },
     "nonEmptyString": {
       "type": "string",
@@ -154,48 +160,40 @@
     },
     "header": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["kind"],
+      "description": "Discriminated container. `properties` declares the union of every variant's fields (as `true`) so the container itself is closed; each `oneOf` branch remains the authority on its own variant shape.",
       "properties": {
         "kind": {
           "enum": ["bootstrap", "continuation", "reset", "recovery_root"]
-        }
+        },
+        "sessionEpoch": true,
+        "ledgerEpoch": true,
+        "stateGeneration": true,
+        "predecessorLedgerSha256": true,
+        "predecessorManifestSha256": true,
+        "predecessorLedgerEpoch": true,
+        "predecessorStateGeneration": true,
+        "resetReason": true,
+        "recoveryReason": true,
+        "repository": true,
+        "headRepository": true,
+        "pullRequest": true,
+        "workflowIdentity": true,
+        "trustedExecutionDomain": true,
+        "providerId": true,
+        "modelId": true,
+        "adapterId": true,
+        "templateId": true,
+        "policyId": true,
+        "toolDefinitionId": true,
+        "cacheConfigId": true
       },
       "oneOf": [
         { "$ref": "#/$defs/bootstrapHeader" },
         { "$ref": "#/$defs/continuationHeader" },
         { "$ref": "#/$defs/resetHeader" },
         { "$ref": "#/$defs/recoveryRootHeader" }
-      ]
-    },
-    "identityGroup": {
-      "type": "object",
-      "properties": {
-        "repository": { "$ref": "#/$defs/identityString" },
-        "headRepository": { "$ref": "#/$defs/identityString" },
-        "pullRequest": { "$ref": "#/$defs/pullRequest" },
-        "workflowIdentity": { "$ref": "#/$defs/identityString" },
-        "trustedExecutionDomain": { "$ref": "#/$defs/identityString" },
-        "providerId": { "$ref": "#/$defs/identityString" },
-        "modelId": { "$ref": "#/$defs/identityString" },
-        "adapterId": { "$ref": "#/$defs/identityString" },
-        "templateId": { "$ref": "#/$defs/identityString" },
-        "policyId": { "$ref": "#/$defs/identityString" },
-        "toolDefinitionId": { "$ref": "#/$defs/identityString" },
-        "cacheConfigId": { "$ref": "#/$defs/identityString" }
-      },
-      "required": [
-        "repository",
-        "headRepository",
-        "pullRequest",
-        "workflowIdentity",
-        "trustedExecutionDomain",
-        "providerId",
-        "modelId",
-        "adapterId",
-        "templateId",
-        "policyId",
-        "toolDefinitionId",
-        "cacheConfigId"
       ]
     },
     "bootstrapHeader": {
@@ -226,18 +224,18 @@
         "ledgerEpoch": { "$ref": "#/$defs/epochId" },
         "stateGeneration": { "const": 0 },
         "predecessorLedgerSha256": { "const": "bootstrap" },
-        "repository": { "$ref": "#/$defs/identityString" },
-        "headRepository": { "$ref": "#/$defs/identityString" },
+        "repository": { "$ref": "#/$defs/repositoryIdentity" },
+        "headRepository": { "$ref": "#/$defs/repositoryIdentity" },
         "pullRequest": { "$ref": "#/$defs/pullRequest" },
         "workflowIdentity": { "$ref": "#/$defs/identityString" },
         "trustedExecutionDomain": { "$ref": "#/$defs/identityString" },
         "providerId": { "$ref": "#/$defs/identityString" },
         "modelId": { "$ref": "#/$defs/identityString" },
-        "adapterId": { "$ref": "#/$defs/identityString" },
-        "templateId": { "$ref": "#/$defs/identityString" },
-        "policyId": { "$ref": "#/$defs/identityString" },
-        "toolDefinitionId": { "$ref": "#/$defs/identityString" },
-        "cacheConfigId": { "$ref": "#/$defs/identityString" }
+        "adapterId": { "$ref": "#/$defs/sha256Hex" },
+        "templateId": { "$ref": "#/$defs/sha256Hex" },
+        "policyId": { "$ref": "#/$defs/sha256Hex" },
+        "toolDefinitionId": { "$ref": "#/$defs/sha256Hex" },
+        "cacheConfigId": { "$ref": "#/$defs/sha256Hex" }
       }
     },
     "continuationHeader": {
@@ -272,18 +270,18 @@
         "predecessorLedgerSha256": { "$ref": "#/$defs/sha256Hex" },
         "predecessorLedgerEpoch": { "$ref": "#/$defs/epochId" },
         "predecessorStateGeneration": { "$ref": "#/$defs/stateGeneration" },
-        "repository": { "$ref": "#/$defs/identityString" },
-        "headRepository": { "$ref": "#/$defs/identityString" },
+        "repository": { "$ref": "#/$defs/repositoryIdentity" },
+        "headRepository": { "$ref": "#/$defs/repositoryIdentity" },
         "pullRequest": { "$ref": "#/$defs/pullRequest" },
         "workflowIdentity": { "$ref": "#/$defs/identityString" },
         "trustedExecutionDomain": { "$ref": "#/$defs/identityString" },
         "providerId": { "$ref": "#/$defs/identityString" },
         "modelId": { "$ref": "#/$defs/identityString" },
-        "adapterId": { "$ref": "#/$defs/identityString" },
-        "templateId": { "$ref": "#/$defs/identityString" },
-        "policyId": { "$ref": "#/$defs/identityString" },
-        "toolDefinitionId": { "$ref": "#/$defs/identityString" },
-        "cacheConfigId": { "$ref": "#/$defs/identityString" }
+        "adapterId": { "$ref": "#/$defs/sha256Hex" },
+        "templateId": { "$ref": "#/$defs/sha256Hex" },
+        "policyId": { "$ref": "#/$defs/sha256Hex" },
+        "toolDefinitionId": { "$ref": "#/$defs/sha256Hex" },
+        "cacheConfigId": { "$ref": "#/$defs/sha256Hex" }
       }
     },
     "resetHeader": {
@@ -324,18 +322,18 @@
         "resetReason": {
           "enum": ["base_change", "head_history_discontinuity", "cache_contract_change"]
         },
-        "repository": { "$ref": "#/$defs/identityString" },
-        "headRepository": { "$ref": "#/$defs/identityString" },
+        "repository": { "$ref": "#/$defs/repositoryIdentity" },
+        "headRepository": { "$ref": "#/$defs/repositoryIdentity" },
         "pullRequest": { "$ref": "#/$defs/pullRequest" },
         "workflowIdentity": { "$ref": "#/$defs/identityString" },
         "trustedExecutionDomain": { "$ref": "#/$defs/identityString" },
         "providerId": { "$ref": "#/$defs/identityString" },
         "modelId": { "$ref": "#/$defs/identityString" },
-        "adapterId": { "$ref": "#/$defs/identityString" },
-        "templateId": { "$ref": "#/$defs/identityString" },
-        "policyId": { "$ref": "#/$defs/identityString" },
-        "toolDefinitionId": { "$ref": "#/$defs/identityString" },
-        "cacheConfigId": { "$ref": "#/$defs/identityString" }
+        "adapterId": { "$ref": "#/$defs/sha256Hex" },
+        "templateId": { "$ref": "#/$defs/sha256Hex" },
+        "policyId": { "$ref": "#/$defs/sha256Hex" },
+        "toolDefinitionId": { "$ref": "#/$defs/sha256Hex" },
+        "cacheConfigId": { "$ref": "#/$defs/sha256Hex" }
       }
     },
     "recoveryRootHeader": {
@@ -378,29 +376,39 @@
             "over_bound_ledger"
           ]
         },
-        "repository": { "$ref": "#/$defs/identityString" },
-        "headRepository": { "$ref": "#/$defs/identityString" },
+        "repository": { "$ref": "#/$defs/repositoryIdentity" },
+        "headRepository": { "$ref": "#/$defs/repositoryIdentity" },
         "pullRequest": { "$ref": "#/$defs/pullRequest" },
         "workflowIdentity": { "$ref": "#/$defs/identityString" },
         "trustedExecutionDomain": { "$ref": "#/$defs/identityString" },
         "providerId": { "$ref": "#/$defs/identityString" },
         "modelId": { "$ref": "#/$defs/identityString" },
-        "adapterId": { "$ref": "#/$defs/identityString" },
-        "templateId": { "$ref": "#/$defs/identityString" },
-        "policyId": { "$ref": "#/$defs/identityString" },
-        "toolDefinitionId": { "$ref": "#/$defs/identityString" },
-        "cacheConfigId": { "$ref": "#/$defs/identityString" }
+        "adapterId": { "$ref": "#/$defs/sha256Hex" },
+        "templateId": { "$ref": "#/$defs/sha256Hex" },
+        "policyId": { "$ref": "#/$defs/sha256Hex" },
+        "toolDefinitionId": { "$ref": "#/$defs/sha256Hex" },
+        "cacheConfigId": { "$ref": "#/$defs/sha256Hex" }
       }
     },
     "record": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["role", "interactionId", "interactionOrdinal"],
+      "description": "Discriminated container. `properties` declares the union of both record variants' fields (variant-specific fields as `true`) so the container itself is closed; each `oneOf` branch remains the authority on its own record shape.",
       "properties": {
         "role": {
           "enum": ["review_context", "review_outcome"]
         },
         "interactionId": { "$ref": "#/$defs/sha256Hex" },
-        "interactionOrdinal": { "$ref": "#/$defs/interactionOrdinal" }
+        "interactionOrdinal": { "$ref": "#/$defs/interactionOrdinal" },
+        "subjectDigest": true,
+        "cacheContractDigest": true,
+        "reviewedHeadSha": true,
+        "reviewedBaseSha": true,
+        "changedFiles": true,
+        "summary": true,
+        "findings": true,
+        "limitations": true
       },
       "oneOf": [
         { "$ref": "#/$defs/reviewContextRecord" },

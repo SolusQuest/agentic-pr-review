@@ -13,13 +13,14 @@ internal static class LedgerSchemaMapper
         var root = instance.RootElement;
         var kind = GetString(root, "header", "kind");
         var variants = ResolveHeaderVariants(rawSchema, kind);
+        var recordVariantProperties = ResolveRecordVariantProperties(rawSchema);
         var matchingHeaderErrorPointers = variants.MatchingVariantName is not null
             ? EvaluateMatchingHeaderErrors(rawSchema, root.GetProperty("header"), variants.MatchingVariantName)
             : null;
         variants = variants with { MatchingHeaderErrorPointers = matchingHeaderErrorPointers };
 
         var candidates = ImmutableArray.CreateBuilder<DiagnosticCandidate>();
-        CollectCandidates(results, candidates, rawSchema, root, variants);
+        CollectCandidates(results, candidates, rawSchema, root, variants, recordVariantProperties);
 
         var selected = candidates.ToImmutable()
             .GroupBy(c => c.Pointer)
@@ -31,7 +32,7 @@ internal static class LedgerSchemaMapper
         return selected.Select(c => new LedgerDiagnostic
         {
             Code = c.Code,
-            Message = $"{c.Code}:{c.Pointer}"
+            Message = LedgerSafePath.TruncateDiagnosticMessage($"{c.Code}:{c.Pointer}")
         }).ToImmutableArray();
     }
 
@@ -40,7 +41,8 @@ internal static class LedgerSchemaMapper
         ImmutableArray<DiagnosticCandidate>.Builder candidates,
         JsonDocument rawSchema,
         JsonElement root,
-        HeaderVariantInfo variants)
+        HeaderVariantInfo variants,
+        ImmutableHashSet<string> recordVariantProperties)
     {
         if (result.IsValid)
         {
@@ -60,7 +62,7 @@ internal static class LedgerSchemaMapper
 
         if (hasErrors)
         {
-            var candidate = Classify(result, rawSchema, root, variants);
+            var candidate = Classify(result, rawSchema, root, variants, recordVariantProperties);
             if (candidate is not null)
             {
                 candidates.Add(candidate.Value);
@@ -71,7 +73,7 @@ internal static class LedgerSchemaMapper
         {
             foreach (var child in result.Details)
             {
-                CollectCandidates(child, candidates, rawSchema, root, variants);
+                CollectCandidates(child, candidates, rawSchema, root, variants, recordVariantProperties);
             }
         }
     }
@@ -80,34 +82,27 @@ internal static class LedgerSchemaMapper
         EvaluationResults result,
         JsonDocument rawSchema,
         JsonElement root,
-        HeaderVariantInfo variants)
+        HeaderVariantInfo variants,
+        ImmutableHashSet<string> recordVariantProperties)
     {
+        var instancePointer = result.InstanceLocation.ToString();
+
+        // additionalProperties failures are classified by instance position and union
+        // membership before any keyword-based mapping.
+        if (TryGetAdditionalPropertiesViolation(result, instancePointer, out var propertyPointer, out var propertyName))
+        {
+            return ClassifyUnknownField(propertyPointer, propertyName, variants, recordVariantProperties);
+        }
+
         var keyword = result.Errors is not null && result.Errors.Count > 0
             ? result.Errors.Keys.FirstOrDefault()
             : null;
-
-        var instancePointer = result.InstanceLocation.ToString();
-
-        // Resolve pointer to actual offending location for additionalProperties / required.
-        if (keyword == "additionalProperties")
-        {
-            var propertyName = TryExtractPropertyName(result);
-            if (propertyName is not null)
-            {
-                instancePointer = $"{instancePointer}/{LedgerSafePath.EscapeJsonPointerSegment(propertyName)}";
-            }
-        }
 
         var sanitizedPointer = LedgerSafePath.SanitizeInstancePointer(instancePointer);
 
         if (instancePointer == "")
         {
             // Root-level failure.
-            if (keyword == "additionalProperties")
-            {
-                return new DiagnosticCandidate(LedgerDiagnosticCodes.UnknownField, 4, sanitizedPointer);
-            }
-
             return new DiagnosticCandidate(LedgerDiagnosticCodes.SchemaViolation, 11, sanitizedPointer);
         }
 
@@ -124,6 +119,92 @@ internal static class LedgerSchemaMapper
         return new DiagnosticCandidate(LedgerDiagnosticCodes.SchemaViolation, 11, sanitizedPointer);
     }
 
+    // Detects an additionalProperties rejection. The observed JsonSchema.Net shape is one
+    // child node per rejected property: schema location ends in "/additionalProperties",
+    // the instance location already points at the rejected property, and the false-schema
+    // error is reported under an empty error key. Defensively also accept an explicit
+    // "additionalProperties" error key on the object node, where the property name has to
+    // be recovered from the error text.
+    private static bool TryGetAdditionalPropertiesViolation(
+        EvaluationResults result,
+        string instancePointer,
+        out string propertyPointer,
+        out string propertyName)
+    {
+        propertyPointer = instancePointer;
+        propertyName = null!;
+
+        var fragment = GetSchemaFragment(result.SchemaLocation.ToString());
+        if (fragment.EndsWith("/additionalProperties", StringComparison.Ordinal) && instancePointer.Length > 0)
+        {
+            var lastSlash = instancePointer.LastIndexOf('/');
+            propertyName = UnescapeJsonPointerSegment(instancePointer.Substring(lastSlash + 1));
+            return true;
+        }
+
+        if (result.Errors is not null && result.Errors.ContainsKey("additionalProperties"))
+        {
+            var extracted = TryExtractPropertyName(result);
+            if (extracted is not null)
+            {
+                propertyName = extracted;
+                propertyPointer = instancePointer == ""
+                    ? "/" + LedgerSafePath.EscapeJsonPointerSegment(extracted)
+                    : instancePointer + "/" + LedgerSafePath.EscapeJsonPointerSegment(extracted);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Truly undeclared properties map to ledger_unknown_field (priority 4). A property that
+    // is declared in the union of oneOf branches but forbidden in the runtime-validated
+    // branch is variant-forbidden: the matching header shape code (priority 2), or the
+    // generic fallback for records, which own no per-variant shape code.
+    private static DiagnosticCandidate ClassifyUnknownField(
+        string propertyPointer,
+        string propertyName,
+        HeaderVariantInfo variants,
+        ImmutableHashSet<string> recordVariantProperties)
+    {
+        var sanitizedPointer = LedgerSafePath.SanitizeInstancePointer(propertyPointer);
+        var segments = propertyPointer.Split('/');
+
+        if (segments.Length == 2)
+        {
+            // Single-segment pointer: truly undeclared top-level property.
+            return new DiagnosticCandidate(LedgerDiagnosticCodes.UnknownField, 4, sanitizedPointer);
+        }
+
+        if (propertyPointer.StartsWith("/header/", StringComparison.Ordinal))
+        {
+            if (IsRecognizedKind(variants.Kind) && variants.AllVariantProperties.Contains(propertyName))
+            {
+                return new DiagnosticCandidate(ShapeViolationCode(variants.Kind), 2, sanitizedPointer);
+            }
+
+            return new DiagnosticCandidate(LedgerDiagnosticCodes.UnknownField, 4, sanitizedPointer);
+        }
+
+        if (segments.Length >= 3 && segments[1] == "records")
+        {
+            if (segments.Length == 4 && recordVariantProperties.Contains(propertyName))
+            {
+                return new DiagnosticCandidate(LedgerDiagnosticCodes.SchemaViolation, 11, sanitizedPointer);
+            }
+
+            return new DiagnosticCandidate(LedgerDiagnosticCodes.UnknownField, 4, sanitizedPointer);
+        }
+
+        return new DiagnosticCandidate(LedgerDiagnosticCodes.UnknownField, 4, sanitizedPointer);
+    }
+
+    private static string UnescapeJsonPointerSegment(string segment)
+    {
+        return segment.Replace("~1", "/").Replace("~0", "~");
+    }
+
     private static DiagnosticCandidate? ClassifyHeader(
         EvaluationResults result,
         JsonDocument rawSchema,
@@ -134,22 +215,6 @@ internal static class LedgerSchemaMapper
     {
         var kind = variants.Kind;
         var isRecognizedKind = IsRecognizedKind(kind);
-        var propertyName = TryExtractPropertyName(result);
-
-        if (keyword == "additionalProperties" && propertyName is not null)
-        {
-            if (isRecognizedKind && IsUnderMatchingHeaderBranch(result.SchemaLocation.ToString(), variants))
-            {
-                if (variants.AllVariantProperties.Contains(propertyName))
-                {
-                    return new DiagnosticCandidate(ShapeViolationCode(kind), 2, sanitizedPointer);
-                }
-
-                return new DiagnosticCandidate(LedgerDiagnosticCodes.UnknownField, 4, sanitizedPointer);
-            }
-
-            return new DiagnosticCandidate(LedgerDiagnosticCodes.UnknownField, 4, sanitizedPointer);
-        }
 
         if (keyword == "required")
         {
@@ -173,6 +238,11 @@ internal static class LedgerSchemaMapper
             }
 
             return new DiagnosticCandidate(LedgerDiagnosticCodes.SchemaViolation, 11, sanitizedPointer);
+        }
+
+        if (keyword == "maxLength")
+        {
+            return new DiagnosticCandidate(LedgerDiagnosticCodes.OverlongValue, 10, sanitizedPointer);
         }
 
         if (keyword is "const" or "enum" or "type" or "minimum" or "maximum" or "minLength" or "pattern")
@@ -252,11 +322,6 @@ internal static class LedgerSchemaMapper
 
         if (instancePointer == $"/records/{index.Value}")
         {
-            if (keyword == "additionalProperties")
-            {
-                return new DiagnosticCandidate(LedgerDiagnosticCodes.SchemaViolation, 11, sanitizedPointer);
-            }
-
             if (keyword == "required" || keyword == "oneOf")
             {
                 if (role is null && matchingRecordBranch is null)
@@ -506,6 +571,27 @@ internal static class LedgerSchemaMapper
             defNamesBuilder.ToImmutable(),
             propertyNamesBuilder.ToImmutable(),
             null);
+    }
+
+    private static ImmutableHashSet<string> ResolveRecordVariantProperties(JsonDocument rawSchema)
+    {
+        var propertyNamesBuilder = ImmutableHashSet.CreateBuilder<string>();
+
+        if (rawSchema.RootElement.TryGetProperty("$defs", out var defs) &&
+            defs.TryGetProperty("record", out var recordDef) &&
+            recordDef.TryGetProperty("oneOf", out var oneOf))
+        {
+            foreach (var branch in oneOf.EnumerateArray())
+            {
+                var variantName = ResolveRefTarget(branch);
+                if (variantName is not null && defs.TryGetProperty(variantName, out var variantDef))
+                {
+                    CollectPropertyNames(variantDef, propertyNamesBuilder);
+                }
+            }
+        }
+
+        return propertyNamesBuilder.ToImmutable();
     }
 
     private static ImmutableHashSet<string> EvaluateMatchingHeaderErrors(JsonDocument rawSchema, JsonElement headerElement, string variantName)

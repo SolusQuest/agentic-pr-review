@@ -6,19 +6,7 @@ namespace AgenticPrReview.Runtime.Tests.Ledger;
 
 public sealed class LedgerBuilderTests
 {
-    private static readonly ExpectedIdentities Identities = new(
-        Repository: "owner/repo",
-        HeadRepository: "owner/repo",
-        PullRequest: 1,
-        WorkflowIdentity: "ci",
-        TrustedExecutionDomain: "trusted",
-        ProviderId: "provider",
-        ModelId: "model-2024-01-01",
-        AdapterId: "adapter",
-        TemplateId: "template",
-        PolicyId: "policy",
-        ToolDefinitionId: "tools",
-        CacheConfigId: "cacheconfig");
+    private static readonly ExpectedIdentities Identities = LedgerTestBaseline.Identities;
 
     [Fact]
     public void BuildBootstrapCandidateSucceeds()
@@ -45,6 +33,36 @@ public sealed class LedgerBuilderTests
 
         var context = BuildContextRecord(32, "0000000000000000000000000000000000000000000000000000000000000000");
         var outcome = BuildOutcomeRecord(32, "0000000000000000000000000000000000000000000000000000000000000000");
+        var candidateOutcome = LedgerBuilder.AppendContinuation(expected, predecessor, context, outcome);
+
+        Assert.Null(candidateOutcome.Candidate);
+        Assert.Single(candidateOutcome.Diagnostics);
+        Assert.Equal(LedgerDiagnosticCodes.OverBoundAppend, candidateOutcome.Diagnostics[0].Code);
+        Assert.Equal(LedgerDiagnosticCodes.InteractionLimitExceeded, candidateOutcome.Diagnostics[0].CauseCode);
+    }
+
+    [Fact]
+    public void BuildOverBoundAppendMultiDefectPrefersInteractionLimit()
+    {
+        // Multi-defect precedence: the candidate exceeds BOTH the interaction limit (66
+        // records) and the canonical byte limit (predecessor near the cap plus a padded
+        // pair). The interaction limit is the earlier bound, so it owns the CauseCode.
+        var predecessor = ParseLedger(BuildPaddedMaxedPredecessorJson());
+        Assert.True(predecessor.ByteLength <= LedgerParser.LedgerCanonicalByteLimit);
+        var expected = new ContinuationTransition(
+            Identities, "aaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbb",
+            predecessor.ContentSha256, "bbbbbbbbbbbbbbbbbbbbbb", 0, 1);
+
+        var context = BuildContextRecord(32, "0000000000000000000000000000000000000000000000000000000000000000");
+        var outcome = new ReviewOutcomeRecord
+        {
+            Role = "review_outcome",
+            InteractionId = "0000000000000000000000000000000000000000000000000000000000000000",
+            InteractionOrdinal = 32,
+            Summary = "Summary text.",
+            Findings = ImmutableArray<LedgerFinding>.Empty,
+            Limitations = PaddedLimitations(entries: 16, length: 1200)
+        };
         var candidateOutcome = LedgerBuilder.AppendContinuation(expected, predecessor, context, outcome);
 
         Assert.Null(candidateOutcome.Candidate);
@@ -148,113 +166,67 @@ public sealed class LedgerBuilderTests
 
     private static string BuildMaxedPredecessorJson()
     {
-        var sb = new StringBuilder();
-        sb.AppendLine("""
-{
-  "header": {
-    "adapterId": "adapter",
-    "cacheConfigId": "cacheconfig",
-    "headRepository": "owner/repo",
-    "kind": "bootstrap",
-    "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
-    "modelId": "model-2024-01-01",
-    "policyId": "policy",
-    "predecessorLedgerSha256": "bootstrap",
-    "providerId": "provider",
-    "pullRequest": 1,
-    "repository": "owner/repo",
-    "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
-    "stateGeneration": 0,
-    "templateId": "template",
-    "toolDefinitionId": "tools",
-    "trustedExecutionDomain": "trusted",
-    "workflowIdentity": "ci"
-  },
-  "prefixContractVersion": 1,
-  "records": [
-""");
-
+        // Byte-level canonical (compact, RFC 8785 key order): the parser's canonical-form
+        // stage compares raw bytes against the re-serialized model.
         var digest = LedgerCanonicalizer.ComputeCacheContractDigest(Identities);
+        var sb = new StringBuilder();
+        sb.Append(
+            $$"""{"header":{"adapterId":"{{LedgerTestBaseline.AdapterId}}","cacheConfigId":"{{LedgerTestBaseline.CacheConfigId}}","headRepository":"owner/repo","kind":"bootstrap","ledgerEpoch":"bbbbbbbbbbbbbbbbbbbbbb","modelId":"{{LedgerTestBaseline.ModelId}}","policyId":"{{LedgerTestBaseline.PolicyId}}","predecessorLedgerSha256":"bootstrap","providerId":"provider","pullRequest":1,"repository":"owner/repo","sessionEpoch":"aaaaaaaaaaaaaaaaaaaaaa","stateGeneration":0,"templateId":"{{LedgerTestBaseline.TemplateId}}","toolDefinitionId":"{{LedgerTestBaseline.ToolDefinitionId}}","trustedExecutionDomain":"trusted","workflowIdentity":"ci"},"prefixContractVersion":1,"records":[""");
+
         for (var i = 0; i < 32; i++)
         {
-            if (i > 0) sb.AppendLine(",");
+            if (i > 0) sb.Append(',');
             var interactionId = $"{i:x64}";
-            sb.AppendLine($$"""
-    {
-      "interactionId": "{{interactionId}}",
-      "interactionOrdinal": {{i}},
-      "role": "review_context",
-      "cacheContractDigest": "{{digest}}",
-      "changedFiles": [],
-      "reviewedBaseSha": "1111111111111111111111111111111111111111",
-      "reviewedHeadSha": "0000000000000000000000000000000000000000",
-      "subjectDigest": "1111111111111111111111111111111111111111111111111111111111111111"
-    },
-    {
-      "interactionId": "{{interactionId}}",
-      "interactionOrdinal": {{i}},
-      "role": "review_outcome",
-      "findings": [],
-      "limitations": [],
-      "summary": "Summary text."
-    }
-""");
+            sb.Append(
+                $$"""{"cacheContractDigest":"{{digest}}","changedFiles":[],"interactionId":"{{interactionId}}","interactionOrdinal":{{i}},"reviewedBaseSha":"1111111111111111111111111111111111111111","reviewedHeadSha":"0000000000000000000000000000000000000000","role":"review_context","subjectDigest":"1111111111111111111111111111111111111111111111111111111111111111"},{"findings":[],"interactionId":"{{interactionId}}","interactionOrdinal":{{i}},"limitations":[],"role":"review_outcome","summary":"Summary text."}""");
         }
 
-        sb.AppendLine("""
-  ],
-  "schemaVersion": 1
-}
-""");
+        sb.Append("],\"schemaVersion\":1}");
         return sb.ToString();
+    }
+
+    private static string BuildPaddedMaxedPredecessorJson()
+    {
+        // The 32-pair maxed predecessor with limitations padding, sized to stay under the
+        // canonical byte cap while leaving less than one padded pair of headroom.
+        var digest = LedgerCanonicalizer.ComputeCacheContractDigest(Identities);
+        var sb = new StringBuilder();
+        sb.Append(
+            $$"""{"header":{"adapterId":"{{LedgerTestBaseline.AdapterId}}","cacheConfigId":"{{LedgerTestBaseline.CacheConfigId}}","headRepository":"owner/repo","kind":"bootstrap","ledgerEpoch":"bbbbbbbbbbbbbbbbbbbbbb","modelId":"{{LedgerTestBaseline.ModelId}}","policyId":"{{LedgerTestBaseline.PolicyId}}","predecessorLedgerSha256":"bootstrap","providerId":"provider","pullRequest":1,"repository":"owner/repo","sessionEpoch":"aaaaaaaaaaaaaaaaaaaaaa","stateGeneration":0,"templateId":"{{LedgerTestBaseline.TemplateId}}","toolDefinitionId":"{{LedgerTestBaseline.ToolDefinitionId}}","trustedExecutionDomain":"trusted","workflowIdentity":"ci"},"prefixContractVersion":1,"records":[""");
+
+        for (var i = 0; i < 32; i++)
+        {
+            if (i > 0) sb.Append(',');
+            var interactionId = $"{i:x64}";
+            sb.Append(
+                $$"""{"cacheContractDigest":"{{digest}}","changedFiles":[],"interactionId":"{{interactionId}}","interactionOrdinal":{{i}},"reviewedBaseSha":"1111111111111111111111111111111111111111","reviewedHeadSha":"0000000000000000000000000000000000000000","role":"review_context","subjectDigest":"1111111111111111111111111111111111111111111111111111111111111111"},{"findings":[],"interactionId":"{{interactionId}}","interactionOrdinal":{{i}},"limitations":[""");
+            for (var j = 0; j < 6; j++)
+            {
+                if (j > 0) sb.Append(',');
+                sb.Append('"').Append(new string('x', 1200)).Append('"');
+            }
+
+            sb.Append(
+                $$"""],"role":"review_outcome","summary":"Summary text."}""");
+        }
+
+        sb.Append("],\"schemaVersion\":1}");
+        return sb.ToString();
+    }
+
+    private static ImmutableArray<string> PaddedLimitations(int entries, int length)
+    {
+        var builder = ImmutableArray.CreateBuilder<string>(entries);
+        for (var i = 0; i < entries; i++)
+        {
+            builder.Add(new string('x', length));
+        }
+
+        return builder.MoveToImmutable();
     }
 
     private static string MinimalBootstrapJson()
     {
-        return """
-{
-  "header": {
-    "adapterId": "adapter",
-    "cacheConfigId": "cacheconfig",
-    "headRepository": "owner/repo",
-    "kind": "bootstrap",
-    "ledgerEpoch": "bbbbbbbbbbbbbbbbbbbbbb",
-    "modelId": "model-2024-01-01",
-    "policyId": "policy",
-    "predecessorLedgerSha256": "bootstrap",
-    "providerId": "provider",
-    "pullRequest": 1,
-    "repository": "owner/repo",
-    "sessionEpoch": "aaaaaaaaaaaaaaaaaaaaaa",
-    "stateGeneration": 0,
-    "templateId": "template",
-    "toolDefinitionId": "tools",
-    "trustedExecutionDomain": "trusted",
-    "workflowIdentity": "ci"
-  },
-  "prefixContractVersion": 1,
-  "records": [
-    {
-      "interactionId": "0000000000000000000000000000000000000000000000000000000000000000",
-      "interactionOrdinal": 0,
-      "role": "review_context",
-      "cacheContractDigest": "c67bf2569b74a5699f670791f30c731d728703d8ce2b6201866175526cd52a85",
-      "changedFiles": [],
-      "reviewedBaseSha": "1111111111111111111111111111111111111111",
-      "reviewedHeadSha": "0000000000000000000000000000000000000000",
-      "subjectDigest": "1111111111111111111111111111111111111111111111111111111111111111"
-    },
-    {
-      "interactionId": "0000000000000000000000000000000000000000000000000000000000000000",
-      "interactionOrdinal": 0,
-      "role": "review_outcome",
-      "findings": [],
-      "limitations": [],
-      "summary": "Summary text."
-    }
-  ],
-  "schemaVersion": 1
-}
-""";
+        return $$"""{"header":{"adapterId":"{{LedgerTestBaseline.AdapterId}}","cacheConfigId":"{{LedgerTestBaseline.CacheConfigId}}","headRepository":"owner/repo","kind":"bootstrap","ledgerEpoch":"bbbbbbbbbbbbbbbbbbbbbb","modelId":"{{LedgerTestBaseline.ModelId}}","policyId":"{{LedgerTestBaseline.PolicyId}}","predecessorLedgerSha256":"bootstrap","providerId":"provider","pullRequest":1,"repository":"owner/repo","sessionEpoch":"aaaaaaaaaaaaaaaaaaaaaa","stateGeneration":0,"templateId":"{{LedgerTestBaseline.TemplateId}}","toolDefinitionId":"{{LedgerTestBaseline.ToolDefinitionId}}","trustedExecutionDomain":"trusted","workflowIdentity":"ci"},"prefixContractVersion":1,"records":[{"cacheContractDigest":"{{LedgerTestBaseline.CacheContractDigest}}","changedFiles":[],"interactionId":"0000000000000000000000000000000000000000000000000000000000000000","interactionOrdinal":0,"reviewedBaseSha":"1111111111111111111111111111111111111111","reviewedHeadSha":"0000000000000000000000000000000000000000","role":"review_context","subjectDigest":"1111111111111111111111111111111111111111111111111111111111111111"},{"findings":[],"interactionId":"0000000000000000000000000000000000000000000000000000000000000000","interactionOrdinal":0,"limitations":[],"role":"review_outcome","summary":"Summary text."}],"schemaVersion":1}""";
     }
 }
