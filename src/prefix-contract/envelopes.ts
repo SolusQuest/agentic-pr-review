@@ -1,12 +1,7 @@
 import { canonicalJsonBytes, CanonicalJsonInputError } from '../canonical-json/index.js';
 import { isValidIdentity } from './identity.js';
 import { PREFIX_CODES, fail, ok, type PrefixResult } from './result.js';
-import {
-  encodePrefixPath,
-  findCanonicalDomainViolation,
-  type EnvelopeKind,
-  type PrefixPathSegment,
-} from './safe-path.js';
+import { encodePrefixPath, scanCanonicalDomainAndBounds, type EnvelopeKind } from './safe-path.js';
 
 /**
  * Closed cache-contract envelope validation and canonicalization (issue #50,
@@ -84,6 +79,15 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
     return fail(PREFIX_CODES.envelopeInvalid);
   }
 
+  // Root domain: only plain objects without symbol keys enter the snapshot.
+  const proto = Object.getPrototypeOf(raw);
+  if (proto !== Object.prototype && proto !== null) {
+    return fail(PREFIX_CODES.envelopeInvalid);
+  }
+  if (Object.getOwnPropertySymbols(raw).length > 0) {
+    return fail(PREFIX_CODES.envelopeInvalid);
+  }
+
   // Snapshot data properties via descriptors so accessor getters are never
   // invoked; accessor or non-enumerable own properties are rejected.
   const record: Record<string, unknown> = {};
@@ -147,17 +151,19 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
     return identityError;
   }
 
-  const boundsError = checkStructuralBounds(kind, record);
-  if (boundsError !== null) {
-    return boundsError;
-  }
-
-  const violation = findCanonicalDomainViolation(record);
+  const violation = scanCanonicalDomainAndBounds(record, {
+    maxDepth: MAX_JSON_DEPTH,
+    maxProperties: MAX_OBJECT_PROPERTIES,
+    maxArrayItems: MAX_ARRAY_ITEMS,
+  });
   if (violation !== null) {
-    return fail(
-      PREFIX_CODES.canonicalInputRejected,
-      encodePrefixPath(violation.segments, kind, PREFIX_CODES.canonicalInputRejected),
-    );
+    const code =
+      violation.reason === 'depth-exceeded' ||
+      violation.reason === 'property-count-exceeded' ||
+      violation.reason === 'array-length-exceeded'
+        ? PREFIX_CODES.envelopeInvalid
+        : PREFIX_CODES.canonicalInputRejected;
+    return fail(code, encodePrefixPath(violation.segments, kind, code));
   }
 
   let canonical: Uint8Array;
@@ -372,61 +378,6 @@ function checkEmbeddedIdentities(
         PREFIX_CODES.identityInvalid,
         encodePrefixPath([{ name: 'adapterBuildVersion' }], kind, PREFIX_CODES.identityInvalid),
       );
-    }
-  }
-  return null;
-}
-
-/** Structural bounds over the whole envelope value tree (D11). Depth counts an envelope field's root value as 1. */
-function checkStructuralBounds(
-  kind: EnvelopeKind,
-  root: Record<string, unknown>,
-): PrefixResult<ValidatedEnvelope> | null {
-  interface Frame {
-    readonly value: unknown;
-    readonly depth: number;
-    readonly segments: readonly PrefixPathSegment[];
-  }
-  const stack: Frame[] = [{ value: root, depth: 0, segments: [] as PrefixPathSegment[] }];
-  while (stack.length > 0) {
-    const { value, depth, segments } = stack.pop()!;
-    if (Array.isArray(value)) {
-      if (depth > MAX_JSON_DEPTH) {
-        return fail(
-          PREFIX_CODES.envelopeInvalid,
-          encodePrefixPath(segments, kind, PREFIX_CODES.envelopeInvalid),
-        );
-      }
-      if (value.length > MAX_ARRAY_ITEMS) {
-        return fail(
-          PREFIX_CODES.envelopeInvalid,
-          encodePrefixPath(segments, kind, PREFIX_CODES.envelopeInvalid),
-        );
-      }
-      for (let i = 0; i < value.length; i++) {
-        stack.push({
-          value: value[i],
-          depth: depth + 1,
-          segments: [...segments, { name: String(i), isIndex: true }],
-        });
-      }
-    } else if (typeof value === 'object' && value !== null) {
-      if (depth > MAX_JSON_DEPTH) {
-        return fail(
-          PREFIX_CODES.envelopeInvalid,
-          encodePrefixPath(segments, kind, PREFIX_CODES.envelopeInvalid),
-        );
-      }
-      const entries = Object.entries(value as Record<string, unknown>);
-      if (entries.length > MAX_OBJECT_PROPERTIES) {
-        return fail(
-          PREFIX_CODES.envelopeInvalid,
-          encodePrefixPath(segments, kind, PREFIX_CODES.envelopeInvalid),
-        );
-      }
-      for (const [key, child] of entries) {
-        stack.push({ value: child, depth: depth + 1, segments: [...segments, { name: key }] });
-      }
     }
   }
   return null;

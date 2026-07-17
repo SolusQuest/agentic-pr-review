@@ -122,15 +122,13 @@ internal static class PrefixEnvelopeValidator
         }
     }
 
-    /// <summary>Stages 4–5: canonical JSON, structural bounds, canonical byte cap, digest.</summary>
-    internal static PrefixDiagnostic? CanonicalizeAndCap(
+    /// <summary>Stage 4: canonical JSON domain validation and canonical byte materialization.</summary>
+    internal static PrefixDiagnostic? Canonicalize(
         EnvelopeKind kind,
         JsonElement envelope,
-        out ValidatedEnvelope? validated)
+        out ImmutableArray<byte> canonicalBytes)
     {
-        validated = null;
-
-        ImmutableArray<byte> canonicalBytes;
+        canonicalBytes = ImmutableArray<byte>.Empty;
         try
         {
             canonicalBytes = JsonElementCanonicalizer.Canonicalize(
@@ -153,14 +151,26 @@ internal static class PrefixEnvelopeValidator
             };
         }
 
-        if (canonicalBytes.Length > PrefixBounds.MaxEnvelopeCanonicalBytes)
-        {
-            return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeTooLarge);
-        }
-
-        var digest = PrefixHashPrimitives.DigestId(TagFor(kind), canonicalBytes.AsSpan());
-        validated = new ValidatedEnvelope(envelope, canonicalBytes, digest);
         return null;
+    }
+
+    /// <summary>Stage 5a: canonical byte cap.</summary>
+    internal static PrefixDiagnostic? CheckCanonicalCap(EnvelopeKind kind, ImmutableArray<byte> canonicalBytes)
+    {
+        _ = kind;
+        return canonicalBytes.Length > PrefixBounds.MaxEnvelopeCanonicalBytes
+            ? PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeTooLarge)
+            : null;
+    }
+
+    /// <summary>Stage 5b: digest computation (cannot fail once earlier stages pass).</summary>
+    internal static ValidatedEnvelope SealValidatedEnvelope(
+        EnvelopeKind kind,
+        JsonElement envelope,
+        ImmutableArray<byte> canonicalBytes)
+    {
+        var digest = PrefixHashPrimitives.DigestId(TagFor(kind), canonicalBytes.AsSpan());
+        return new ValidatedEnvelope(envelope, canonicalBytes, digest);
     }
 
     private static PrefixDiagnostic? ValidateCore(
@@ -182,7 +192,22 @@ internal static class PrefixEnvelopeValidator
             return identityError;
         }
 
-        return CanonicalizeAndCap(kind, envelope, out validated);
+        var canonicalError = Canonicalize(kind, envelope, out var canonicalBytes);
+        if (canonicalError is not null)
+        {
+            validated = null;
+            return canonicalError;
+        }
+
+        var capError = CheckCanonicalCap(kind, canonicalBytes);
+        if (capError is not null)
+        {
+            validated = null;
+            return capError;
+        }
+
+        validated = SealValidatedEnvelope(kind, envelope, canonicalBytes);
+        return null;
     }
 
     private static string EncodePath(EnvelopeKind kind, string code, System.Collections.Generic.IReadOnlyList<CanonicalPathSegment>? segments) =>

@@ -180,69 +180,158 @@ function truncate(segments: readonly string[], code: string): string {
 }
 
 /**
- * Structured canonical-domain pre-scan: detects lone surrogates (string
- * values and property names), non-finite numbers, and cycles, returning the
- * offending location as structured segments. Returns null when clean.
+ * Unified canonical-domain + structural-bounds scan (issue #50): a single
+ * deterministic traversal (arrays ascending, object keys in unsigned UTF-16
+ * order) with first-defect-wins semantics and an ancestor-only cycle guard,
+ * mirroring the C# JsonElementCanonicalizer.
  */
-export function findCanonicalDomainViolation(
+export type CanonicalScanViolation = {
+  readonly segments: readonly PrefixPathSegment[];
+  readonly reason:
+    | 'lone-surrogate'
+    | 'non-finite'
+    | 'cyclic'
+    | 'non-plain-object'
+    | 'symbol-key'
+    | 'accessor-property'
+    | 'non-enumerable-property'
+    | 'depth-exceeded'
+    | 'property-count-exceeded'
+    | 'array-length-exceeded';
+};
+
+export interface CanonicalScanBounds {
+  readonly maxDepth: number;
+  readonly maxProperties: number;
+  readonly maxArrayItems: number;
+}
+
+interface ScanFrame {
+  readonly value: unknown;
+  readonly segments: readonly PrefixPathSegment[];
+  readonly depth: number;
+  readonly exit: boolean;
+}
+
+export function scanCanonicalDomainAndBounds(
   root: unknown,
-): { segments: PrefixPathSegment[]; reason: 'lone-surrogate' | 'non-finite' | 'cyclic' } | null {
-  const seen = new Set<object>();
-  interface Frame {
-    readonly value: unknown;
-    readonly segments: readonly PrefixPathSegment[];
-  }
-  const stack: Frame[] = [{ value: root, segments: [] }];
+  bounds: CanonicalScanBounds,
+): CanonicalScanViolation | null {
+  const ancestors = new Set<object>();
+  const stack: ScanFrame[] = [{ value: root, segments: [], depth: 0, exit: false }];
+
   while (stack.length > 0) {
-    const { value, segments } = stack.pop()!;
+    const frame = stack.pop()!;
+    const { value, segments, depth, exit } = frame;
+
+    if (exit) {
+      ancestors.delete(value as object);
+      continue;
+    }
+
     if (typeof value === 'string') {
       if (hasUnpairedSurrogate(value)) {
-        return { segments: [...segments], reason: 'lone-surrogate' };
+        return { segments, reason: 'lone-surrogate' };
       }
       continue;
     }
     if (typeof value === 'number') {
       if (!Number.isFinite(value)) {
-        return { segments: [...segments], reason: 'non-finite' };
+        return { segments, reason: 'non-finite' };
       }
       continue;
     }
     if (typeof value !== 'object' || value === null) {
       continue;
     }
-    if (seen.has(value)) {
-      return { segments: [...segments], reason: 'cyclic' };
+
+    if (ancestors.has(value)) {
+      return { segments, reason: 'cyclic' };
     }
-    seen.add(value);
 
     if (Array.isArray(value)) {
-      for (let i = 0; i < value.length; i++) {
+      if (depth > bounds.maxDepth) {
+        return { segments, reason: 'depth-exceeded' };
+      }
+      if (value.length > bounds.maxArrayItems) {
+        return { segments, reason: 'array-length-exceeded' };
+      }
+      ancestors.add(value);
+      stack.push({ value, segments, depth, exit: true });
+      for (let i = value.length - 1; i >= 0; i--) {
         stack.push({
           value: value[i],
           segments: [...segments, { name: String(i), isIndex: true }],
+          depth: depth + 1,
+          exit: false,
         });
       }
       continue;
     }
 
-    for (const name of Object.getOwnPropertyNames(value)) {
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) {
+      return { segments, reason: 'non-plain-object' };
+    }
+    if (Object.getOwnPropertySymbols(value).length > 0) {
+      return { segments, reason: 'symbol-key' };
+    }
+
+    if (depth > bounds.maxDepth) {
+      return { segments, reason: 'depth-exceeded' };
+    }
+    const names = Object.getOwnPropertyNames(value);
+    if (names.length > bounds.maxProperties) {
+      return { segments, reason: 'property-count-exceeded' };
+    }
+
+    // Recurse children in unsigned UTF-16 order; property-name defects are
+    // checked in that same order (first defect wins).
+    const sorted = [...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    ancestors.add(value);
+    stack.push({ value, segments, depth, exit: true });
+
+    // Exit children in reverse so they pop in UTF-16 order. A property-name
+    // violation must abort immediately, so evaluate names eagerly here and
+    // only push children when the whole key set is clean.
+    const childFrames: ScanFrame[] = [];
+    let nameViolation: CanonicalScanViolation | null = null;
+    for (const name of sorted) {
       if (hasUnpairedSurrogate(name)) {
-        return { segments: [...segments, { name }], reason: 'lone-surrogate' };
+        nameViolation = { segments: [...segments, { name }], reason: 'lone-surrogate' };
+        break;
       }
       const descriptor = Object.getOwnPropertyDescriptor(value, name);
-      if (
-        descriptor === undefined ||
-        'get' in descriptor ||
-        'set' in descriptor ||
-        !descriptor.enumerable
-      ) {
+      if (descriptor === undefined) {
         continue;
       }
-      stack.push({
+      if ('get' in descriptor || 'set' in descriptor) {
+        nameViolation = { segments: [...segments, { name }], reason: 'accessor-property' };
+        break;
+      }
+      if (!descriptor.enumerable) {
+        nameViolation = { segments: [...segments, { name }], reason: 'non-enumerable-property' };
+        break;
+      }
+      childFrames.push({
         value: (value as Record<string, unknown>)[name],
         segments: [...segments, { name }],
+        depth: depth + 1,
+        exit: false,
       });
     }
+
+    if (nameViolation !== null) {
+      ancestors.delete(value);
+      // Remove the exit frame we just pushed.
+      stack.pop();
+      return nameViolation;
+    }
+
+    for (let i = childFrames.length - 1; i >= 0; i--) {
+      stack.push(childFrames[i]);
+    }
   }
+
   return null;
 }

@@ -353,3 +353,106 @@ describe('identity validation', () => {
     expect(validateModelSnapshot('model-2024-01-01').ok).toBe(true);
   });
 });
+
+describe('canonical traversal determinism and accepted domain', () => {
+  it('reports the first violation in array-index order', () => {
+    const result = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: [Number.NaN, [Number.NaN]],
+    });
+    expect(result).toEqual({
+      ok: false,
+      errors: [{ code: PREFIX_CODES.canonicalInputRejected, path: '/definition/0' }],
+    });
+  });
+
+  it('reports the first violation in UTF-16 key order, not insertion order', () => {
+    const result = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { z: Number.NaN, a: Number.NaN },
+    });
+    expect(result).toEqual({
+      ok: false,
+      errors: [
+        { code: PREFIX_CODES.canonicalInputRejected, path: '/definition/<untrusted-property>' },
+      ],
+    });
+  });
+
+  it('accepts shared non-cyclic references across sibling fields', () => {
+    const shared = { x: 1 };
+    const result = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { a: shared, b: shared },
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects a true ancestor cycle', () => {
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    const result = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: cyclic,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors[0].code).toBe(PREFIX_CODES.canonicalInputRejected);
+    }
+  });
+
+  it('rejects class-instance roots', () => {
+    class FakeEnvelope {
+      schemaVersion = 1;
+      templateVersion = 1;
+      definition = {};
+    }
+    expect(computeTemplateId(new FakeEnvelope()).ok).toBe(false);
+  });
+
+  it('rejects symbol-keyed roots without dropping the symbol property silently', () => {
+    const result = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: {},
+      [Symbol('secret')]: 1,
+    } as never);
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects nested accessors in open JSON without invoking getters', () => {
+    let invoked = false;
+    const definition = {
+      nested: {},
+    };
+    Object.defineProperty(definition.nested, 'boom', {
+      enumerable: true,
+      get() {
+        invoked = true;
+        throw new Error('getter invoked');
+      },
+    });
+    const result = computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition });
+    expect(invoked).toBe(false);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors[0].code).toBe(PREFIX_CODES.canonicalInputRejected);
+    }
+  });
+
+  it('rejects nested non-plain objects in open JSON', () => {
+    const result = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { when: new Date(0) },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors[0].code).toBe(PREFIX_CODES.canonicalInputRejected);
+    }
+  });
+});

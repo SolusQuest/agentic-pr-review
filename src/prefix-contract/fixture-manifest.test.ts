@@ -39,11 +39,15 @@ function validateCorpus(root: string): string[] {
     }
   }
 
+  if (manifest.schemaVersion !== 1) {
+    violations.push('bad-manifest-schemaVersion');
+  }
   const generatedBy = manifest.generatedBy as Record<string, unknown> | undefined;
   if (
     generatedBy === undefined ||
     typeof generatedBy.tool !== 'string' ||
-    typeof generatedBy.version !== 'number'
+    typeof generatedBy.version !== 'number' ||
+    Object.keys(generatedBy).some((key) => key !== 'tool' && key !== 'version')
   ) {
     violations.push('bad-metadata:generatedBy');
   }
@@ -53,7 +57,10 @@ function validateCorpus(root: string): string[] {
     typeof crossCheck.tool !== 'string' ||
     typeof crossCheck.version !== 'string' ||
     typeof crossCheck.checkedAt !== 'string' ||
-    !RFC3339.test(crossCheck.checkedAt)
+    !RFC3339.test(crossCheck.checkedAt) ||
+    Object.keys(crossCheck).some(
+      (key) => key !== 'tool' && key !== 'version' && key !== 'checkedAt',
+    )
   ) {
     violations.push('bad-metadata:creationCrossCheck');
   }
@@ -201,39 +208,75 @@ function jsonDiffPaths(a: unknown, b: unknown, prefix = ''): string[] {
   return out;
 }
 
-const MUTATION_ALLOWED_PREFIXES: Record<string, string[]> = {
-  providerId: ['expectedIdentities.providerId'],
-  modelId: ['expectedIdentities.modelId'],
-  'adapter envelope content/version': ['envelopes.adapter', 'expectedIdentities.adapterId'],
-  'cache-config envelope content/version': [
-    'envelopes.cacheConfig',
-    'expectedIdentities.cacheConfigId',
-  ],
-  'template envelope content/version': ['envelopes.template', 'expectedIdentities.templateId'],
-  'policy envelope content/version': ['envelopes.policy', 'expectedIdentities.policyId'],
-  'tools envelope content/version/order': [
-    'envelopes.tools',
-    'expectedIdentities.toolDefinitionId',
-  ],
-  'any envelope schemaVersion': ['envelopes.', 'expectedIdentities.'],
-  'run/provenance metadata': ['interaction.interactionId'],
+const ENVELOPE_DIGEST_FIELD: Record<string, string> = {
+  template: 'templateId',
+  policy: 'policyId',
+  tools: 'toolDefinitionId',
+  cacheConfig: 'cacheConfigId',
+  adapter: 'adapterId',
+};
+
+/** Exact per-mutation diff predicates (no prefix wildcards). */
+const MUTATION_DIFF_PREDICATES: Record<string, (diffs: string[]) => boolean> = {
+  providerId: (d) => d.length === 1 && d[0] === 'expectedIdentities.providerId',
+  modelId: (d) => d.length === 1 && d[0] === 'expectedIdentities.modelId',
+  'adapter envelope content/version': (d) =>
+    d.length > 0 &&
+    d.every(
+      (diff) =>
+        (diff.startsWith('envelopes.adapter.') && diff !== 'envelopes.adapter.schemaVersion') ||
+        diff === 'expectedIdentities.adapterId',
+    ),
+  'cache-config envelope content/version': (d) =>
+    d.length > 0 &&
+    d.every(
+      (diff) =>
+        (diff.startsWith('envelopes.cacheConfig.') &&
+          diff !== 'envelopes.cacheConfig.schemaVersion') ||
+        diff === 'expectedIdentities.cacheConfigId',
+    ),
+  'template envelope content/version': (d) =>
+    d.length > 0 &&
+    d.every(
+      (diff) =>
+        (diff.startsWith('envelopes.template.') && diff !== 'envelopes.template.schemaVersion') ||
+        diff === 'expectedIdentities.templateId',
+    ),
+  'policy envelope content/version': (d) =>
+    d.length > 0 &&
+    d.every(
+      (diff) =>
+        (diff.startsWith('envelopes.policy.') && diff !== 'envelopes.policy.schemaVersion') ||
+        diff === 'expectedIdentities.policyId',
+    ),
+  'tools envelope content/version/order': (d) =>
+    d.length > 0 &&
+    d.every(
+      (diff) =>
+        (diff.startsWith('envelopes.tools.') && diff !== 'envelopes.tools.schemaVersion') ||
+        diff === 'expectedIdentities.toolDefinitionId',
+    ),
+  'any envelope schemaVersion': (d) => {
+    if (d.length !== 2) {
+      return false;
+    }
+    const envelopeDiff = d.find((diff) =>
+      /^envelopes\.(template|policy|tools|cacheConfig|adapter)\.schemaVersion$/.test(diff),
+    );
+    if (envelopeDiff === undefined) {
+      return false;
+    }
+    const envelopeName = envelopeDiff.split('.')[1];
+    return d.some((diff) => diff === `expectedIdentities.${ENVELOPE_DIGEST_FIELD[envelopeName]}`);
+  },
+  'run/provenance metadata': (d) => d.length === 1 && d[0] === 'interaction.interactionId',
 };
 
 function validateMutationDiffs(id: string, mutation: unknown, diffs: string[]): string[] {
-  if (typeof mutation !== 'string' || !(mutation in MUTATION_ALLOWED_PREFIXES)) {
+  if (typeof mutation !== 'string' || !(mutation in MUTATION_DIFF_PREDICATES)) {
     return [`unknown-mutation:${id}:${String(mutation)}`];
   }
-  const allowed = MUTATION_ALLOWED_PREFIXES[mutation];
-  const violations: string[] = [];
-  for (const diff of diffs) {
-    if (!allowed.some((prefix) => diff.startsWith(prefix))) {
-      violations.push(`mutation-diff:${id}:${diff}`);
-    }
-  }
-  if (diffs.length === 0) {
-    violations.push(`mutation-diff:${id}:no-diff`);
-  }
-  return violations;
+  return MUTATION_DIFF_PREDICATES[mutation](diffs) ? [] : [`mutation-diff:${id}`];
 }
 
 const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
@@ -253,8 +296,30 @@ function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknow
   };
   const shaField = (container: unknown, key: string) => {
     const value = (container as Record<string, unknown> | undefined)?.[key];
-    if (typeof value === 'string' && !SHA256_HEX.test(value)) {
+    if (typeof value !== 'string' || !SHA256_HEX.test(value)) {
       violations.push(`bad-sha256:${entry.id}:${key}`);
+    }
+  };
+  const closedObject = (
+    container: unknown,
+    label: string,
+    keys: string[],
+    valueKind: 'string' | 'number',
+  ) => {
+    if (typeof container !== 'object' || container === null) {
+      violations.push(`bad-shape:${entry.id}:${label}`);
+      return;
+    }
+    const record = container as Record<string, unknown>;
+    for (const key of keys) {
+      if (!(key in record) || typeof record[key] !== valueKind) {
+        violations.push(`bad-shape:${entry.id}:${label}.${key}`);
+      }
+    }
+    for (const key of Object.keys(record)) {
+      if (!keys.includes(key)) {
+        violations.push(`unknown-expected-field:${entry.id}:${label}.${key}`);
+      }
     }
   };
   const requireExpected = (expected: unknown, keys: string[]) => {
@@ -313,14 +378,35 @@ function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknow
       ]);
       shaField(expected, 'logicalPrefixSha256');
       shaField(expected, 'prefixSha256');
-      for (const digestKey of [
-        'templateId',
-        'policyId',
-        'toolDefinitionId',
-        'cacheConfigId',
-        'adapterId',
-      ]) {
-        shaField((expected as Record<string, unknown> | undefined)?.digests, digestKey);
+      {
+        const digests = (expected as Record<string, unknown> | undefined)?.digests;
+        closedObject(
+          digests,
+          'digests',
+          ['templateId', 'policyId', 'toolDefinitionId', 'cacheConfigId', 'adapterId'],
+          'string',
+        );
+        for (const digestKey of [
+          'templateId',
+          'policyId',
+          'toolDefinitionId',
+          'cacheConfigId',
+          'adapterId',
+        ]) {
+          shaField(digests, digestKey);
+        }
+        closedObject(
+          (expected as Record<string, unknown> | undefined)?.stableBoundary,
+          'stableBoundary',
+          ['segmentCount', 'logicalStreamBytes', 'providerStreamBytes'],
+          'number',
+        );
+        closedObject(
+          (expected as Record<string, unknown> | undefined)?.dynamicSuffix,
+          'dynamicSuffix',
+          ['logicalHex', 'providerHex'],
+          'string',
+        );
       }
       break;
     }
@@ -373,8 +459,16 @@ function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknow
         violations.push(`expected-union:${entry.id}`);
         break;
       }
+      const CSHARP_ONLY_VECTOR_IDS = new Set([
+        'invalid-envelope-duplicate-root',
+        'invalid-tools-duplicate-wrapper-property',
+        'invalid-canonical-duplicate-open-json',
+      ]);
       const scope = vector.scope;
-      if (scope !== undefined && scope !== 'csharp-only') {
+      if (
+        scope !== undefined &&
+        (scope !== 'csharp-only' || !CSHARP_ONLY_VECTOR_IDS.has(entry.id))
+      ) {
         violations.push(`unknown-scope:${entry.id}:${String(scope)}`);
       }
       violations.push(

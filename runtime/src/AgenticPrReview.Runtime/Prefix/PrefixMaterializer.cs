@@ -227,11 +227,63 @@ public static class PrefixMaterializer
             return embeddedError;
         }
 
-        return PrefixEnvelopeValidator.CanonicalizeAndCap(PrefixEnvelopeValidator.EnvelopeKind.Template, input.Envelopes.Template, out template)
-            ?? PrefixEnvelopeValidator.CanonicalizeAndCap(PrefixEnvelopeValidator.EnvelopeKind.Policy, input.Envelopes.Policy, out policy)
-            ?? PrefixEnvelopeValidator.CanonicalizeAndCap(PrefixEnvelopeValidator.EnvelopeKind.Tools, input.Envelopes.Tools, out tools)
-            ?? PrefixEnvelopeValidator.CanonicalizeAndCap(PrefixEnvelopeValidator.EnvelopeKind.CacheConfig, input.Envelopes.CacheConfig, out cacheConfig)
-            ?? PrefixEnvelopeValidator.CanonicalizeAndCap(PrefixEnvelopeValidator.EnvelopeKind.Adapter, input.Envelopes.Adapter, out adapter);
+        return
+            CanonicalizeAll(input, out var templateBytes, out var policyBytes, out var toolsBytes, out var configBytes, out var adapterBytes)
+            ?? PrefixEnvelopeValidator.CheckCanonicalCap(PrefixEnvelopeValidator.EnvelopeKind.Template, templateBytes)
+            ?? PrefixEnvelopeValidator.CheckCanonicalCap(PrefixEnvelopeValidator.EnvelopeKind.Policy, policyBytes)
+            ?? PrefixEnvelopeValidator.CheckCanonicalCap(PrefixEnvelopeValidator.EnvelopeKind.Tools, toolsBytes)
+            ?? PrefixEnvelopeValidator.CheckCanonicalCap(PrefixEnvelopeValidator.EnvelopeKind.CacheConfig, configBytes)
+            ?? PrefixEnvelopeValidator.CheckCanonicalCap(PrefixEnvelopeValidator.EnvelopeKind.Adapter, adapterBytes)
+            ?? SealAll(input, templateBytes, policyBytes, toolsBytes, configBytes, adapterBytes, ref template, ref policy, ref tools, ref cacheConfig, ref adapter);
+    }
+
+    private static PrefixDiagnostic? CanonicalizeAll(
+        PrefixMaterializationInput input,
+        out ImmutableArray<byte> templateBytes,
+        out ImmutableArray<byte> policyBytes,
+        out ImmutableArray<byte> toolsBytes,
+        out ImmutableArray<byte> configBytes,
+        out ImmutableArray<byte> adapterBytes)
+    {
+        templateBytes = ImmutableArray<byte>.Empty;
+        policyBytes = ImmutableArray<byte>.Empty;
+        toolsBytes = ImmutableArray<byte>.Empty;
+        configBytes = ImmutableArray<byte>.Empty;
+        adapterBytes = ImmutableArray<byte>.Empty;
+
+        var error = PrefixEnvelopeValidator.Canonicalize(
+            PrefixEnvelopeValidator.EnvelopeKind.Template, input.Envelopes.Template, out templateBytes)
+            ?? PrefixEnvelopeValidator.Canonicalize(PrefixEnvelopeValidator.EnvelopeKind.Policy, input.Envelopes.Policy, out policyBytes)
+            ?? PrefixEnvelopeValidator.Canonicalize(PrefixEnvelopeValidator.EnvelopeKind.Tools, input.Envelopes.Tools, out toolsBytes)
+            ?? PrefixEnvelopeValidator.Canonicalize(PrefixEnvelopeValidator.EnvelopeKind.CacheConfig, input.Envelopes.CacheConfig, out configBytes)
+            ?? PrefixEnvelopeValidator.Canonicalize(PrefixEnvelopeValidator.EnvelopeKind.Adapter, input.Envelopes.Adapter, out adapterBytes);
+        return error;
+    }
+
+    private static PrefixDiagnostic? SealAll(
+        PrefixMaterializationInput input,
+        ImmutableArray<byte> templateBytes,
+        ImmutableArray<byte> policyBytes,
+        ImmutableArray<byte> toolsBytes,
+        ImmutableArray<byte> configBytes,
+        ImmutableArray<byte> adapterBytes,
+        ref ValidatedEnvelope? template,
+        ref ValidatedEnvelope? policy,
+        ref ValidatedEnvelope? tools,
+        ref ValidatedEnvelope? cacheConfig,
+        ref ValidatedEnvelope? adapter)
+    {
+        template = PrefixEnvelopeValidator.SealValidatedEnvelope(
+            PrefixEnvelopeValidator.EnvelopeKind.Template, input.Envelopes.Template, templateBytes);
+        policy = PrefixEnvelopeValidator.SealValidatedEnvelope(
+            PrefixEnvelopeValidator.EnvelopeKind.Policy, input.Envelopes.Policy, policyBytes);
+        tools = PrefixEnvelopeValidator.SealValidatedEnvelope(
+            PrefixEnvelopeValidator.EnvelopeKind.Tools, input.Envelopes.Tools, toolsBytes);
+        cacheConfig = PrefixEnvelopeValidator.SealValidatedEnvelope(
+            PrefixEnvelopeValidator.EnvelopeKind.CacheConfig, input.Envelopes.CacheConfig, configBytes);
+        adapter = PrefixEnvelopeValidator.SealValidatedEnvelope(
+            PrefixEnvelopeValidator.EnvelopeKind.Adapter, input.Envelopes.Adapter, adapterBytes);
+        return null;
     }
 
     private static PrefixDiagnostic? ValidateHostIdentities(PrefixMaterializationInput input)

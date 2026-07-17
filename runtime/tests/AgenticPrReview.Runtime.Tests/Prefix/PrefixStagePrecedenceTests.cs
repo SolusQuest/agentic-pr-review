@@ -97,4 +97,27 @@ public sealed class PrefixStagePrecedenceTests
             "prefix_identity_invalid",
             Assert.Single(PrefixMaterializer.Materialize(withNullReset).Diagnostics).Code);
     }
+    [Fact]
+    public void CanonicalDefectBeatsEnvelopeCap()
+    {
+        // Template is legal but oversize (stage 5a cap); policy has a canonical
+        // defect (stage 4). All canonical-domain checks must complete before
+        // any cap check, so prefix_canonical_input_rejected wins.
+        var vector = PrefixFixtureLoader.LoadVector("materialization/bootstrap.json");
+        var baseInput = PrefixFixtureLoader.BuildMaterializeInput(vector.GetProperty("input"));
+        var oversizeTemplate = JsonDocument.Parse(
+            "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":\"" + new string('x', 300_000) + "\"}").RootElement;
+        var surrogatePolicy = JsonDocument.Parse(
+            "{\"schemaVersion\":1,\"policyVersion\":1,\"instructions\":\"bad\\ud800\",\"constraints\":{}}").RootElement;
+        var input = baseInput with
+        {
+            Envelopes = baseInput.Envelopes with
+            {
+                Template = oversizeTemplate,
+                Policy = surrogatePolicy,
+            },
+        };
+        var outcome = PrefixMaterializer.Materialize(input);
+        Assert.Equal("prefix_canonical_input_rejected", Assert.Single(outcome.Diagnostics).Code);
+    }
 }

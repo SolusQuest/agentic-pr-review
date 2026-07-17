@@ -146,13 +146,55 @@ internal static class PrefixFixtureLoader
 
                 break;
             case "invalid-vector":
+            {
                 Require("target", "input", "expected");
                 allowed.Add("scope");
                 var expected = vector.GetProperty("expected");
-                Assert.True(
-                    expected.TryGetProperty("csharpCode", out _) || expected.TryGetProperty("typescriptCode", out _),
-                    $"{entry.Id}: expected must carry at least one language code");
+                var target = vector.GetProperty("target").GetString()!;
+                var hasCsharp = expected.TryGetProperty("csharpCode", out _);
+                var hasTs = expected.TryGetProperty("typescriptCode", out _);
+                var csharpOnlyScope =
+                    vector.TryGetProperty("scope", out var scopeElement)
+                    && scopeElement.GetString() == "csharp-only";
+                switch (target)
+                {
+                    case "identity":
+                    case "model-snapshot":
+                        Assert.True(hasTs && !hasCsharp, $"{entry.Id}: TS-only targets must carry only typescriptCode");
+                        break;
+                    case "materialize":
+                    case "length-guard":
+                    case "stream-guard":
+                        Assert.True(hasCsharp && !hasTs, $"{entry.Id}: C#-only targets must carry only csharpCode");
+                        break;
+                    case "canonical-json":
+                        Assert.True(hasCsharp, $"{entry.Id}: canonical-json must carry csharpCode");
+                        break;
+                    case "template-id":
+                    case "policy-id":
+                    case "tools-id":
+                    case "config-id":
+                    case "adapter-id":
+                    case "interaction-id":
+                        Assert.True(hasCsharp && (hasTs || csharpOnlyScope), $"{entry.Id}: shared targets must carry both codes unless csharp-only");
+                        break;
+                    default:
+                        Assert.Fail($"{entry.Id}: unknown target {target}");
+                        break;
+                }
+
+                if (vector.TryGetProperty("scope", out _))
+                {
+                    Assert.True(
+                        csharpOnlyScope
+                        && entry.Id is "invalid-envelope-duplicate-root"
+                            or "invalid-tools-duplicate-wrapper-property"
+                            or "invalid-canonical-duplicate-open-json",
+                        $"{entry.Id}: scope is only allowed on the enumerated raw duplicate vectors");
+                }
+
                 break;
+            }
             default:
                 Assert.Fail($"{entry.Id}: unknown kind {entry.Kind}");
                 break;
