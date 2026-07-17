@@ -109,6 +109,7 @@
     }
   },
   "expected": {
-    "csharpCode": "prefix_current_context_invalid"
+    "csharpCode": "prefix_current_context_invalid",
+    "causeCode": "ledger_schema_violation"
   }
 }

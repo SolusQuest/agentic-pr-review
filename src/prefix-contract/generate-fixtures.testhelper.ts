@@ -18,6 +18,7 @@ import {
   validateTemplateEnvelope,
   validateToolsEnvelope,
 } from './envelopes.js';
+import { encodePrefixPath } from './safe-path.js';
 
 // ---------------------------------------------------------------------------
 // Shared constants (mirror of the C# primitives; frozen by the design contract)
@@ -308,27 +309,23 @@ function projectChangedFile(file: LedgerChangedFile): Record<string, unknown> {
 }
 
 function projectFinding(finding: LedgerFinding): Record<string, unknown> {
+  // #49 requires path/startLine/endLine to be present (explicit null when
+  // absent); only evidence/suggestedAction/inlinePreference are omissible.
   const out: Record<string, unknown> = {
     body: finding.body,
     category: finding.category,
     confidence: finding.confidence,
+    endLine: finding.endLine ?? null,
+    path: finding.path ?? null,
     severity: finding.severity,
+    startLine: finding.startLine ?? null,
     title: finding.title,
   };
-  if (finding.endLine !== null && finding.endLine !== undefined) {
-    out.endLine = finding.endLine;
-  }
   if (finding.evidence !== null && finding.evidence !== undefined) {
     out.evidence = finding.evidence;
   }
   if (finding.inlinePreference !== null && finding.inlinePreference !== undefined) {
     out.inlinePreference = finding.inlinePreference;
-  }
-  if (finding.path !== null && finding.path !== undefined) {
-    out.path = finding.path;
-  }
-  if (finding.startLine !== null && finding.startLine !== undefined) {
-    out.startLine = finding.startLine;
   }
   if (finding.suggestedAction !== null && finding.suggestedAction !== undefined) {
     out.suggestedAction = finding.suggestedAction;
@@ -654,6 +651,16 @@ const OUTCOME_ALPHA: OutcomeSource = {
       evidence: 'page.slice(start)',
       suggestedAction: 'Adjust the index math.',
       inlinePreference: 'preferred',
+    },
+    {
+      severity: 'low',
+      confidence: 'medium',
+      category: 'maintainability',
+      title: 'General style note',
+      body: 'Consider consistent naming.',
+      path: null,
+      startLine: null,
+      endLine: null,
     },
   ],
   limitations: ['Only static analysis was performed.'],
@@ -1338,7 +1345,7 @@ function buildInvalidVectors(): void {
     'invalid-template-unknown-field',
     'template-id',
     { envelope: { ...ENVELOPES.template, bogus: 1 } },
-    both(C.envelopeInvalid, { path: '/bogus' }),
+    both(C.envelopeInvalid, { path: '/<untrusted-property>' }),
   );
   invalidVector(
     'invalid-template-missing-field',
@@ -1390,7 +1397,7 @@ function buildInvalidVectors(): void {
     {
       envelope: { schemaVersion: 1, toolsetVersion: 1, definitions: [{ ...TOOL_ALPHA, bogus: 1 }] },
     },
-    both(C.envelopeInvalid, { path: '/definitions/0/bogus' }),
+    both(C.envelopeInvalid, { path: '/definitions/0/<untrusted-property>' }),
   );
   invalidVector(
     'invalid-tools-inputschema-not-object',
@@ -1425,7 +1432,7 @@ function buildInvalidVectors(): void {
   invalidVector(
     'invalid-adapter-build-version-control',
     'adapter-id',
-    { envelope: { ...ENVELOPES.adapter, adapterBuildVersion: 'v1 x' } },
+    { envelope: { ...ENVELOPES.adapter, adapterBuildVersion: 'v1\u0001x' } },
     both(C.identityInvalid, { path: '/adapterBuildVersion' }),
   );
   invalidVector(
@@ -1479,6 +1486,38 @@ function buildInvalidVectors(): void {
       envelopeJson: '{"schemaVersion":1,"templateVersion":1,"definition":1e999}',
     },
     both(C.canonicalRejected),
+  );
+
+  // --- safe-path golden vectors ---
+  const surrogate = String.fromCharCode(0xd800);
+  const ancestorChain: Record<string, unknown> = { secretToken: { x: 'bad' + surrogate } };
+  invalidVector(
+    'invalid-canonical-unknown-ancestor',
+    'canonical-json',
+    {
+      envelopeKind: 'template',
+      envelope: { schemaVersion: 1, templateVersion: 1, definition: ancestorChain },
+    },
+    both(C.canonicalRejected, {
+      path: encodePrefixPath(['definition', 'secretToken', 'x'], 'template'),
+    }),
+  );
+
+  const deepKeys = Array.from({ length: 40 }, (_, i) => 'k' + i);
+  let deepValue: Record<string, unknown> = { [deepKeys[39]]: 'bad' + surrogate };
+  for (let i = 38; i >= 0; i--) {
+    deepValue = { [deepKeys[i]]: deepValue };
+  }
+  invalidVector(
+    'invalid-canonical-deep-truncation',
+    'canonical-json',
+    {
+      envelopeKind: 'template',
+      envelope: { schemaVersion: 1, templateVersion: 1, definition: deepValue },
+    },
+    both(C.canonicalRejected, {
+      path: encodePrefixPath(['definition', ...deepKeys], 'template'),
+    }),
   );
 
   // --- interaction-id target (both) ---
@@ -1621,7 +1660,7 @@ function buildInvalidVectors(): void {
     'invalid-materialize-current-context',
     'materialize',
     contextBad,
-    csOnly(C.currentContextInvalid),
+    csOnly(C.currentContextInvalid, { causeCode: 'ledger_schema_violation' }),
   );
 
   // --- stream/length guard seams (C# only) ---

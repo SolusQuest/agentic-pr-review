@@ -16,6 +16,19 @@ public static class PrefixMaterializer
 
     public static PrefixMaterializationOutcome Materialize(PrefixMaterializationInput input)
     {
+        // Null input objects are caller bugs but still surface as a typed
+        // failure — no exception crosses the public boundary.
+        if (input is null
+            || input.History is null
+            || input.ExpectedIdentities is null
+            || input.CurrentContext is null
+            || input.Interaction is null
+            || input.Envelopes is null
+            || input.SessionEpoch is null)
+        {
+            return Fail(PrefixDiagnostic.Create(PrefixDiagnosticCodes.IdentityInvalid));
+        }
+
         // Stage: host-declared identities.
         var identityError = ValidateHostIdentities(input);
         if (identityError is not null)
@@ -197,7 +210,9 @@ public static class PrefixMaterializer
     {
         var identities = input.ExpectedIdentities;
         if (!PrefixIdentityValidation.IsValidIdentity(identities.ProviderId)
-            || !PrefixIdentityValidation.IsValidIdentity(identities.ModelId))
+            || !PrefixIdentityValidation.IsValidIdentity(identities.ModelId)
+            || !PrefixIdentityValidation.IsValidIdentity(identities.WorkflowIdentity)
+            || !PrefixIdentityValidation.IsValidIdentity(identities.TrustedExecutionDomain))
         {
             return PrefixDiagnostic.Create(PrefixDiagnosticCodes.IdentityInvalid);
         }

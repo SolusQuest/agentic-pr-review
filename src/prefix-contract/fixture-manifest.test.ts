@@ -39,6 +39,25 @@ function validateCorpus(root: string): string[] {
     }
   }
 
+  const generatedBy = manifest.generatedBy as Record<string, unknown> | undefined;
+  if (
+    generatedBy === undefined ||
+    typeof generatedBy.tool !== 'string' ||
+    typeof generatedBy.version !== 'number'
+  ) {
+    violations.push('bad-metadata:generatedBy');
+  }
+  const crossCheck = manifest.creationCrossCheck as Record<string, unknown> | undefined;
+  if (
+    crossCheck === undefined ||
+    typeof crossCheck.tool !== 'string' ||
+    typeof crossCheck.version !== 'string' ||
+    typeof crossCheck.checkedAt !== 'string' ||
+    !RFC3339.test(crossCheck.checkedAt)
+  ) {
+    violations.push('bad-metadata:creationCrossCheck');
+  }
+
   const entries = manifest.vectors as ManifestEntry[];
   const ids = new Set<string>();
   const files = new Set<string>();
@@ -86,6 +105,8 @@ function validateCorpus(root: string): string[] {
       violations.push(`kind-mismatch:${entry.id}`);
     }
 
+    violations.push(...validateVectorShape(entry, vector));
+
     for (const hexValue of collectHexStrings(vector)) {
       if (hexValue.length % 2 !== 0 || !HEX.test(hexValue)) {
         violations.push(`bad-hex:${entry.id}`);
@@ -125,6 +146,118 @@ function validateCorpus(root: string): string[] {
     }
   }
 
+  return violations;
+}
+
+const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+/** Per-kind closed field-set validation plus semantic SHA-256 fields. */
+function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknown>): string[] {
+  const violations: string[] = [];
+  const allowedKeys = new Set(['id', 'kind']);
+  const require = (keys: string[]) => {
+    for (const key of keys) {
+      allowedKeys.add(key);
+      if (!(key in vector)) {
+        violations.push(`missing-field:${entry.id}:${key}`);
+      }
+    }
+  };
+  const shaField = (container: unknown, key: string) => {
+    const value = (container as Record<string, unknown> | undefined)?.[key];
+    if (typeof value === 'string' && !SHA256_HEX.test(value)) {
+      violations.push(`bad-sha256:${entry.id}:${key}`);
+    }
+  };
+
+  switch (entry.kind) {
+    case 'framing-vector':
+      require(['input', 'expected']);
+      break;
+    case 'digest-vector':
+      require(['tag', 'envelope', 'expected']);
+      shaField(vector.expected, 'digestHex');
+      break;
+    case 'interaction-vector':
+      require([
+        'predecessor',
+        'consumedInputSha256',
+        'currentHeadSha',
+        'interactionOrdinal',
+        'expected',
+      ]);
+      shaField(vector, 'consumedInputSha256');
+      shaField(vector.expected, 'interactionId');
+      break;
+    case 'materialization-vector': {
+      require(['input', 'expected']);
+      const expected = vector.expected as Record<string, unknown> | undefined;
+      for (const key of [
+        'logicalStreamHex',
+        'providerStreamHex',
+        'logicalPrefixSha256',
+        'prefixSha256',
+        'digests',
+        'stableBoundary',
+        'dynamicSuffix',
+      ]) {
+        if (expected === undefined || !(key in expected)) {
+          violations.push(`missing-field:${entry.id}:expected.${key}`);
+        }
+      }
+      shaField(expected, 'logicalPrefixSha256');
+      shaField(expected, 'prefixSha256');
+      for (const digestKey of [
+        'templateId',
+        'policyId',
+        'toolDefinitionId',
+        'cacheConfigId',
+        'adapterId',
+      ]) {
+        shaField(expected?.digests, digestKey);
+      }
+      break;
+    }
+    case 'append-vector':
+      require(['baseVectorId', 'successorVectorId', 'expected']);
+      break;
+    case 'invalidation-vector': {
+      require(['mode', 'mutation', 'expected']);
+      const mode = vector.mode;
+      if (mode === 'materializer') {
+        require(['baseVectorId', 'successorVectorId']);
+      } else if (mode === 'hash-framing') {
+        require(['baseInput', 'mutatedInput']);
+        shaField(vector.expected, 'baseLogicalPrefixSha256');
+        shaField(vector.expected, 'mutatedLogicalPrefixSha256');
+        shaField(vector.expected, 'basePrefixSha256');
+        shaField(vector.expected, 'mutatedPrefixSha256');
+      } else {
+        violations.push(`unknown-mode:${entry.id}:${String(mode)}`);
+      }
+      break;
+    }
+    case 'invalid-vector': {
+      require(['target', 'input', 'expected']);
+      const expected = vector.expected as Record<string, unknown> | undefined;
+      if (
+        expected === undefined ||
+        (typeof expected.csharpCode !== 'string' && typeof expected.typescriptCode !== 'string')
+      ) {
+        violations.push(`expected-union:${entry.id}`);
+      }
+      break;
+    }
+    default:
+      violations.push(`unknown-kind:${entry.id}:${entry.kind}`);
+  }
+
+  for (const key of Object.keys(vector)) {
+    if (!allowedKeys.has(key)) {
+      violations.push(`unknown-vector-field:${entry.id}:${key}`);
+    }
+  }
   return violations;
 }
 
@@ -274,5 +407,51 @@ describe('prefix-contract fixture manifest', () => {
       vectors.set('m/z.json', { id: 'digest-z', kind: 'digest-vector' });
     });
     expect(validateCorpus(root)).toContain('wrong-reference-kind:append-y:digest-z');
+  });
+
+  it('rejects unknown vector fields', () => {
+    const root = buildCorpus(({ vectors }) => {
+      vectors.set('m/a.json', {
+        id: 'materialization-a',
+        kind: 'materialization-vector',
+        stale: true,
+      });
+    });
+    expect(validateCorpus(root)).toContain('unknown-vector-field:materialization-a:stale');
+  });
+
+  it('rejects missing per-kind required fields', () => {
+    const root = buildCorpus(({ vectors }) => {
+      vectors.set('m/a.json', { id: 'materialization-a', kind: 'materialization-vector' });
+    });
+    expect(validateCorpus(root)).toContain('missing-field:materialization-a:input');
+  });
+
+  it('rejects unknown invalidation mode', () => {
+    const root = buildCorpus(({ entries, vectors }) => {
+      entries.push({ id: 'inv-x', kind: 'invalidation-vector', file: 'm/x.json' });
+      vectors.set('m/x.json', {
+        id: 'inv-x',
+        kind: 'invalidation-vector',
+        mode: 'sideways',
+        mutation: 'm',
+        expected: {},
+      });
+    });
+    expect(validateCorpus(root)).toContain('unknown-mode:inv-x:sideways');
+  });
+
+  it('rejects invalid expected union on invalid-vectors', () => {
+    const root = buildCorpus(({ entries, vectors }) => {
+      entries.push({ id: 'invalid-x', kind: 'invalid-vector', file: 'm/x.json' });
+      vectors.set('m/x.json', {
+        id: 'invalid-x',
+        kind: 'invalid-vector',
+        target: 'identity',
+        input: {},
+        expected: {},
+      });
+    });
+    expect(validateCorpus(root)).toContain('expected-union:invalid-x');
   });
 });

@@ -169,6 +169,21 @@ public sealed class PrefixGoldenVectorTests
             var promotedProvider = successorProvider.AsSpan(baseProvider.Length, baseDynamicProvider.Length);
             Assert.True(promotedProvider.SequenceEqual(baseDynamicProvider), "promoted provider block bytes must be identical");
 
+            // Exactly one context/outcome pair is appended: decode the appended frames.
+            var appendedFrames = DecodeFrames(successorLogical.AsSpan(baseLogical.Length));
+            Assert.Equal(2, appendedFrames.Count);
+            using (var contextDoc = JsonDocument.Parse(appendedFrames[0].ToArray()))
+            {
+                Assert.Equal("review_context", contextDoc.RootElement.GetProperty("kind").GetString());
+                Assert.Equal(0, contextDoc.RootElement.GetProperty("interactionOrdinal").GetInt64());
+            }
+
+            using (var outcomeDoc = JsonDocument.Parse(appendedFrames[1].ToArray()))
+            {
+                Assert.Equal("review_outcome", outcomeDoc.RootElement.GetProperty("kind").GetString());
+                Assert.Equal(0, outcomeDoc.RootElement.GetProperty("interactionOrdinal").GetInt64());
+            }
+
             var expected = vector.GetProperty("expected");
             Assert.True(expected.GetProperty("logicalStrictPrefix").GetBoolean());
             Assert.True(expected.GetProperty("providerStrictPrefix").GetBoolean());
@@ -312,6 +327,23 @@ public sealed class PrefixGoldenVectorTests
 
     private static PrefixFixtureLoader.ManifestEntry FindById(string id) =>
         PrefixFixtureLoader.LoadManifest().Single(entry => entry.Id == id);
+
+    private static List<ReadOnlyMemory<byte>> DecodeFrames(ReadOnlySpan<byte> stream)
+    {
+        var frames = new List<ReadOnlyMemory<byte>>();
+        var offset = 0;
+        while (offset < stream.Length)
+        {
+            Assert.True(offset + 4 <= stream.Length, "truncated frame length");
+            var length = (stream[offset] << 24) | (stream[offset + 1] << 16) | (stream[offset + 2] << 8) | stream[offset + 3];
+            offset += 4;
+            Assert.True(offset + length <= stream.Length, "truncated frame payload");
+            frames.Add(stream.Slice(offset, length).ToArray());
+            offset += length;
+        }
+
+        return frames;
+    }
 
     private static void AssertChanged(JsonElement expected, string flag, string baseValue, string successorValue)
     {

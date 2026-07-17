@@ -63,6 +63,7 @@ internal static class PrefixFixtureLoader
             var vector = LoadVector(entry.File);
             Assert.Equal(entry.Id, vector.GetProperty("id").GetString());
             Assert.Equal(entry.Kind, vector.GetProperty("kind").GetString());
+            AssertVectorShape(entry, vector);
         }
 
         // Reference integrity.
@@ -91,6 +92,75 @@ internal static class PrefixFixtureLoader
     {
         var text = File.ReadAllText(Path.Combine(FixtureRoot, relative));
         return JsonDocument.Parse(text).RootElement.Clone();
+    }
+
+    private static void AssertVectorShape(ManifestEntry entry, JsonElement vector)
+    {
+        var allowed = new HashSet<string>(StringComparer.Ordinal) { "id", "kind" };
+        void Require(params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                allowed.Add(key);
+                Assert.True(vector.TryGetProperty(key, out _), $"{entry.Id}: missing field {key}");
+            }
+        }
+
+        switch (entry.Kind)
+        {
+            case "framing-vector":
+                Require("input", "expected");
+                break;
+            case "digest-vector":
+                Require("tag", "envelope", "expected");
+                break;
+            case "interaction-vector":
+                Require("predecessor", "consumedInputSha256", "currentHeadSha", "interactionOrdinal", "expected");
+                break;
+            case "materialization-vector":
+                Require("input", "expected");
+                foreach (var key in new[] { "logicalStreamHex", "providerStreamHex", "logicalPrefixSha256", "prefixSha256", "digests", "stableBoundary", "dynamicSuffix" })
+                {
+                    Assert.True(vector.GetProperty("expected").TryGetProperty(key, out _), $"{entry.Id}: missing expected.{key}");
+                }
+
+                break;
+            case "append-vector":
+                Require("baseVectorId", "successorVectorId", "expected");
+                break;
+            case "invalidation-vector":
+                Require("mode", "mutation", "expected");
+                var mode = vector.GetProperty("mode").GetString();
+                if (mode == "materializer")
+                {
+                    Require("baseVectorId", "successorVectorId");
+                }
+                else if (mode == "hash-framing")
+                {
+                    Require("baseInput", "mutatedInput");
+                }
+                else
+                {
+                    Assert.Fail($"{entry.Id}: unknown mode {mode}");
+                }
+
+                break;
+            case "invalid-vector":
+                Require("target", "input", "expected");
+                var expected = vector.GetProperty("expected");
+                Assert.True(
+                    expected.TryGetProperty("csharpCode", out _) || expected.TryGetProperty("typescriptCode", out _),
+                    $"{entry.Id}: expected must carry at least one language code");
+                break;
+            default:
+                Assert.Fail($"{entry.Id}: unknown kind {entry.Kind}");
+                break;
+        }
+
+        foreach (var property in vector.EnumerateObject())
+        {
+            Assert.True(allowed.Contains(property.Name), $"{entry.Id}: unknown vector field {property.Name}");
+        }
     }
 
     internal static void AssertSafeRelativePath(string file)

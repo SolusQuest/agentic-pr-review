@@ -18,7 +18,7 @@ internal static class JsonElementCanonicalizer
         int maxArrayItems)
     {
         var writer = new Rfc8785Writer(4096);
-        WriteValue(ref writer, element, depth: 0, maxDepth, maxProperties, maxArrayItems, path: string.Empty);
+        WriteValue(ref writer, element, depth: 0, maxDepth, maxProperties, maxArrayItems, segments: System.Array.Empty<string>());
         return writer.ToImmutableArray();
     }
 
@@ -29,7 +29,19 @@ internal static class JsonElementCanonicalizer
     /// </summary>
     internal static void WriteCanonicalValue(ref Rfc8785Writer writer, JsonElement element)
     {
-        WriteValue(ref writer, element, depth: 1, 64, 256, 1_024, path: string.Empty);
+        WriteValue(ref writer, element, depth: 1, 64, 256, 1_024, segments: System.Array.Empty<string>());
+    }
+
+    private static string[] Append(System.Collections.Generic.IReadOnlyList<string> segments, string next)
+    {
+        var copy = new string[segments.Count + 1];
+        for (var i = 0; i < segments.Count; i++)
+        {
+            copy[i] = segments[i];
+        }
+
+        copy[segments.Count] = next;
+        return copy;
     }
 
     private static void WriteValue(
@@ -39,7 +51,7 @@ internal static class JsonElementCanonicalizer
         int maxDepth,
         int maxProperties,
         int maxArrayItems,
-        string path)
+        System.Collections.Generic.IReadOnlyList<string> segments)
     {
         switch (element.ValueKind)
         {
@@ -50,7 +62,7 @@ internal static class JsonElementCanonicalizer
                     throw new Rfc8785CanonicalizationException(
                         Rfc8785RejectionReason.DepthLimitExceeded,
                         $"Object nesting exceeds the depth limit of {maxDepth}.",
-                        path);
+                        segments);
                 }
 
                 var properties = new List<(string Name, JsonElement Value)>();
@@ -62,7 +74,7 @@ internal static class JsonElementCanonicalizer
                         throw new Rfc8785CanonicalizationException(
                             Rfc8785RejectionReason.DuplicateProperty,
                             "Duplicate JSON property name.",
-                            path);
+                            segments);
                     }
 
                     properties.Add((property.Name, property.Value));
@@ -73,7 +85,7 @@ internal static class JsonElementCanonicalizer
                     throw new Rfc8785CanonicalizationException(
                         Rfc8785RejectionReason.PropertyCountExceeded,
                         $"Object property count exceeds the limit of {maxProperties}.",
-                        path);
+                        segments);
                 }
 
                 // RFC 8785 orders keys by UTF-16 code units; StringComparer.Ordinal
@@ -93,7 +105,7 @@ internal static class JsonElementCanonicalizer
                         maxDepth,
                         maxProperties,
                         maxArrayItems,
-                        path + "/" + properties[i].Name);
+                        Append(segments, properties[i].Name));
                 }
 
                 writer.WriteObjectEnd();
@@ -107,7 +119,7 @@ internal static class JsonElementCanonicalizer
                     throw new Rfc8785CanonicalizationException(
                         Rfc8785RejectionReason.DepthLimitExceeded,
                         $"Array nesting exceeds the depth limit of {maxDepth}.",
-                        path);
+                        segments);
                 }
 
                 var count = element.GetArrayLength();
@@ -116,7 +128,7 @@ internal static class JsonElementCanonicalizer
                     throw new Rfc8785CanonicalizationException(
                         Rfc8785RejectionReason.ArrayLengthExceeded,
                         $"Array length exceeds the limit of {maxArrayItems}.",
-                        path);
+                        segments);
                 }
 
                 writer.WriteArrayStart();
@@ -135,7 +147,7 @@ internal static class JsonElementCanonicalizer
                         maxDepth,
                         maxProperties,
                         maxArrayItems,
-                        path + "/" + index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                        Append(segments, index.ToString(System.Globalization.CultureInfo.InvariantCulture)));
                     index++;
                 }
 
@@ -156,7 +168,7 @@ internal static class JsonElementCanonicalizer
                     throw new Rfc8785CanonicalizationException(
                         Rfc8785RejectionReason.UnpairedSurrogate,
                         "Unpaired UTF-16 surrogate in JSON string.",
-                        path);
+                        segments);
                 }
 
                 writer.WriteString(value);
@@ -170,7 +182,7 @@ internal static class JsonElementCanonicalizer
                     throw new Rfc8785CanonicalizationException(
                         Rfc8785RejectionReason.NonFiniteNumber,
                         "Number is outside the finite IEEE-754 binary64 domain.",
-                        path);
+                        segments);
                 }
 
                 writer.WriteNumber(number);
@@ -193,7 +205,7 @@ internal static class JsonElementCanonicalizer
                 throw new Rfc8785CanonicalizationException(
                     Rfc8785RejectionReason.NonFiniteNumber,
                     $"Unsupported JSON value kind {element.ValueKind}.",
-                    path);
+                    segments);
         }
     }
 }

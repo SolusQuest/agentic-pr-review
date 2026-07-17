@@ -6,7 +6,7 @@
     "envelope": {
       "schemaVersion": 1,
       "capabilityProfileVersion": 1,
-      "adapterBuildVersion": "v1\u0000x"
+      "adapterBuildVersion": "v1\u0001x"
     }
   },
   "expected": {

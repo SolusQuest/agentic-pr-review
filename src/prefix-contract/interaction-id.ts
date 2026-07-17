@@ -33,14 +33,21 @@ export function deriveInteractionId(
   interactionOrdinal: number,
 ): PrefixResult<string> {
   let predecessorComponent: string;
-  if (predecessor.kind === 'bootstrap') {
-    predecessorComponent = 'bootstrap';
-  } else if (predecessor.kind === 'ledger') {
-    if (!isValidDigest(predecessor.sha256Hex)) {
-      return fail(PREFIX_CODES.digestInvalid, '/predecessor');
+  try {
+    if (typeof predecessor !== 'object' || predecessor === null) {
+      return fail(PREFIX_CODES.identityInvalid, '/predecessor');
     }
-    predecessorComponent = predecessor.sha256Hex;
-  } else {
+    if (predecessor.kind === 'bootstrap') {
+      predecessorComponent = 'bootstrap';
+    } else if (predecessor.kind === 'ledger') {
+      if (!isValidDigest(predecessor.sha256Hex)) {
+        return fail(PREFIX_CODES.digestInvalid, '/predecessor');
+      }
+      predecessorComponent = predecessor.sha256Hex;
+    } else {
+      return fail(PREFIX_CODES.identityInvalid, '/predecessor');
+    }
+  } catch {
     return fail(PREFIX_CODES.identityInvalid, '/predecessor');
   }
 

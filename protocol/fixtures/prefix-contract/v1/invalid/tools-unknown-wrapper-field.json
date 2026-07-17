@@ -32,6 +32,6 @@
   "expected": {
     "csharpCode": "prefix_envelope_invalid",
     "typescriptCode": "prefix-envelope-invalid",
-    "path": "/definitions/0/bogus"
+    "path": "/definitions/0/<untrusted-property>"
   }
 }

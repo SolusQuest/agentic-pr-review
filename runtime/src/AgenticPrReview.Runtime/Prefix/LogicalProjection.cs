@@ -173,6 +173,8 @@ internal static class LogicalProjection
 
     private static void WriteFinding(ref Rfc8785Writer writer, LedgerFinding finding)
     {
+        // #49 requires path/startLine/endLine to be present (explicit null when
+        // absent); only evidence/suggestedAction/inlinePreference are omissible.
         writer.WriteObjectStart();
         writer.WriteProperty("body");
         writer.WriteString(finding.Body);
@@ -180,10 +182,14 @@ internal static class LogicalProjection
         writer.WriteString(finding.Category);
         writer.WriteProperty("confidence");
         writer.WriteString(finding.Confidence);
+        writer.WriteProperty("endLine");
         if (finding.EndLine is not null)
         {
-            writer.WriteProperty("endLine");
             writer.WriteNumber(finding.EndLine.Value);
+        }
+        else
+        {
+            writer.WriteNull();
         }
 
         if (finding.Evidence is not null)
@@ -198,18 +204,26 @@ internal static class LogicalProjection
             writer.WriteString(finding.InlinePreference);
         }
 
+        writer.WriteProperty("path");
         if (finding.Path is not null)
         {
-            writer.WriteProperty("path");
             writer.WriteString(finding.Path);
+        }
+        else
+        {
+            writer.WriteNull();
         }
 
         writer.WriteProperty("severity");
         writer.WriteString(finding.Severity);
+        writer.WriteProperty("startLine");
         if (finding.StartLine is not null)
         {
-            writer.WriteProperty("startLine");
             writer.WriteNumber(finding.StartLine.Value);
+        }
+        else
+        {
+            writer.WriteNull();
         }
 
         if (finding.SuggestedAction is not null)

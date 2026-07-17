@@ -135,7 +135,7 @@ public sealed class PrefixMaterializerTests
         var outcome = PrefixMaterializer.Materialize(BootstrapInputWithEnvelopes(json));
         var diagnostic = Assert.Single(outcome.Diagnostics);
         Assert.Equal("prefix_envelope_invalid", diagnostic.Code);
-        Assert.Equal("prefix_envelope_invalid:/bogus", diagnostic.Message);
+        Assert.Equal("prefix_envelope_invalid:/<untrusted-property>", diagnostic.Message);
     }
 
     [Fact]
@@ -236,5 +236,83 @@ public sealed class PrefixMaterializerTests
         Assert.NotNull(outcome.Value);
         // Reset: no prior records in the stable stream; only the 3 static segments.
         Assert.Equal(3, outcome.Value.StableSegmentCount);
+    }
+}
+
+public sealed class PrefixMaterializerInputGuardTests
+{
+    [Fact]
+    public void NullInputYieldsTypedFailure()
+    {
+        var outcome = PrefixMaterializer.Materialize(null!);
+        Assert.Null(outcome.Value);
+        Assert.Equal("prefix_identity_invalid", Assert.Single(outcome.Diagnostics).Code);
+    }
+
+    [Fact]
+    public void NullNestedInputYieldsTypedFailure()
+    {
+        var vector = PrefixFixtureLoader.LoadVector("materialization/bootstrap.json");
+        var input = PrefixFixtureLoader.BuildMaterializeInput(vector.GetProperty("input"));
+        var outcome = PrefixMaterializer.Materialize(input with { ExpectedIdentities = null! });
+        Assert.Equal("prefix_identity_invalid", Assert.Single(outcome.Diagnostics).Code);
+
+        var outcome2 = PrefixMaterializer.Materialize(input with { Envelopes = null! });
+        Assert.Equal("prefix_identity_invalid", Assert.Single(outcome2.Diagnostics).Code);
+
+        var outcome3 = PrefixMaterializer.Materialize(input with { History = null! });
+        Assert.Equal("prefix_identity_invalid", Assert.Single(outcome3.Diagnostics).Code);
+    }
+
+    [Fact]
+    public void InvalidWorkflowIdentityLosesToNothingAndBeatsEnvelopeErrors()
+    {
+        var vector = PrefixFixtureLoader.LoadVector("materialization/bootstrap.json");
+        var input = PrefixFixtureLoader.BuildMaterializeInput(vector.GetProperty("input")) with
+        {
+            ExpectedIdentities = new AgenticPrReview.Runtime.Ledger.ExpectedIdentities(
+                "owner/repo", "owner/repo", 50, new string('w', 300), "trusted",
+                "provider", "model-2024-01-01",
+                new string('a', 64), new string('b', 64), new string('c', 64), new string('d', 64), new string('e', 64)),
+        };
+        // Identity stage (overlong workflowIdentity) must win over envelope errors.
+        var withBadEnvelope = input with
+        {
+            Envelopes = input.Envelopes with
+            {
+                Template = JsonDocument.Parse("""{"schemaVersion":1,"templateVersion":3,"definition":{},"bogus":1}""").RootElement,
+            },
+        };
+        var outcome = PrefixMaterializer.Materialize(withBadEnvelope);
+        Assert.Equal("prefix_identity_invalid", Assert.Single(outcome.Diagnostics).Code);
+    }
+
+    [Fact]
+    public void LargestReachableTemplateSegmentSucceeds()
+    {
+        // The template envelope at exactly its canonical cap yields a template
+        // segment payload at exactly the segment cap (the wrappers are the same
+        // length), which must still succeed.
+        var wrapper = "{\"schemaVersion\":1,\"templateVersion\":3,\"definition\":\"\"}".Length;
+        var pad = 262_144 - wrapper;
+        var templateJson = "{\"schemaVersion\":1,\"templateVersion\":3,\"definition\":\"" + new string('x', pad) + "\"}";
+        var template = JsonDocument.Parse(templateJson).RootElement;
+        var digest = CacheContractDigests.ComputeTemplateId(template);
+        Assert.NotNull(digest.Digest);
+
+        var vector = PrefixFixtureLoader.LoadVector("materialization/bootstrap.json");
+        var input = PrefixFixtureLoader.BuildMaterializeInput(vector.GetProperty("input")) with
+        {
+            Envelopes = PrefixFixtureLoader.BuildMaterializeInput(vector.GetProperty("input")).Envelopes with { Template = template },
+            ExpectedIdentities = PrefixFixtureLoader.BuildMaterializeInput(vector.GetProperty("input")).ExpectedIdentities with { TemplateId = digest.Digest! },
+        };
+        var outcome = PrefixMaterializer.Materialize(input);
+        Assert.NotNull(outcome.Value);
+
+        // One byte over the envelope cap must fail before segment assembly.
+        var overTemplate = JsonDocument.Parse(
+            "{\"schemaVersion\":1,\"templateVersion\":3,\"definition\":\"" + new string('x', pad + 1) + "\"}").RootElement;
+        var over = CacheContractDigests.ComputeTemplateId(overTemplate);
+        Assert.Equal("prefix_envelope_too_large", Assert.Single(over.Diagnostics).Code);
     }
 }

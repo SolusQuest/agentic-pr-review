@@ -67,7 +67,7 @@ describe('cache-contract digest helpers', () => {
     const result = computeTemplateId({ ...TEMPLATE, bogus: 1 });
     expect(result).toEqual({
       ok: false,
-      errors: [{ code: PREFIX_CODES.envelopeInvalid, path: '/bogus' }],
+      errors: [{ code: PREFIX_CODES.envelopeInvalid, path: '/<untrusted-property>' }],
     });
   });
 
@@ -161,6 +161,58 @@ describe('cache-contract digest helpers', () => {
     for (const input of inputs) {
       expect(() => computeTemplateId(input)).not.toThrow();
       expect(computeTemplateId(input).ok).toBe(false);
+    }
+  });
+
+  it('rejects an enumerable throwing getter without throwing or invoking it', () => {
+    let invoked = false;
+    const hostile = {
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: 'x',
+      get trap() {
+        invoked = true;
+        throw new Error('getter invoked');
+      },
+    };
+    const result = computeTemplateId(hostile);
+    expect(invoked).toBe(false);
+    expect(result).toEqual({
+      ok: false,
+      errors: [{ code: PREFIX_CODES.envelopeInvalid, path: '/<untrusted-property>' }],
+    });
+  });
+
+  it('rejects throwing proxies without throwing', () => {
+    const proxy = new Proxy(
+      {},
+      {
+        get() {
+          throw new Error('proxy trap');
+        },
+        ownKeys() {
+          throw new Error('proxy ownKeys');
+        },
+      },
+    );
+    const result = computeTemplateId(proxy);
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects null and malformed predecessors without throwing', () => {
+    const consumed = 'e5'.repeat(32);
+    const head = '7'.repeat(40);
+    for (const predecessor of [
+      null,
+      undefined,
+      42,
+      'bootstrap',
+      {},
+      { kind: 'sideways' },
+      { kind: 'ledger' },
+    ]) {
+      const result = deriveInteractionId(predecessor as never, consumed, head, 0);
+      expect(result.ok).toBe(false);
     }
   });
 

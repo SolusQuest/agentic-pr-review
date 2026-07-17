@@ -381,6 +381,16 @@
       "file": "invalid/canonical-non-finite.json"
     },
     {
+      "id": "invalid-canonical-unknown-ancestor",
+      "kind": "invalid-vector",
+      "file": "invalid/canonical-unknown-ancestor.json"
+    },
+    {
+      "id": "invalid-canonical-deep-truncation",
+      "kind": "invalid-vector",
+      "file": "invalid/canonical-deep-truncation.json"
+    },
+    {
       "id": "invalid-interaction-predecessor-uppercase",
       "kind": "invalid-vector",
       "file": "invalid/interaction-predecessor-uppercase.json"
