@@ -31,12 +31,10 @@ internal static class ProviderBlockMapper
         writer.WriteObjectStart();
         writer.WriteProperty("text");
         writer.WriteString(segmentText);
-        writer.WriteComma();
         writer.WriteProperty("type");
         writer.WriteString("text");
         writer.WriteObjectEnd();
         writer.WriteArrayEnd();
-        writer.WriteComma();
         writer.WriteProperty("role");
         writer.WriteString(RoleFor(segmentKind));
         writer.WriteObjectEnd();

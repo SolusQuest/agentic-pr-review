@@ -1,0 +1,10 @@
+{
+  "id": "framing-identity-multibyte",
+  "kind": "framing-vector",
+  "input": {
+    "value": "é"
+  },
+  "expected": {
+    "framedHex": "00000002c3a9"
+  }
+}

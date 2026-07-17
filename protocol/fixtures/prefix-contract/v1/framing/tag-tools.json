@@ -1,0 +1,10 @@
+{
+  "id": "framing-tag-tools",
+  "kind": "framing-vector",
+  "input": {
+    "tag": "agentic-pr-review/cache-contract/tools/v1"
+  },
+  "expected": {
+    "preimageHex": "6167656e7469632d70722d7265766965772f63616368652d636f6e74726163742f746f6f6c732f763100"
+  }
+}

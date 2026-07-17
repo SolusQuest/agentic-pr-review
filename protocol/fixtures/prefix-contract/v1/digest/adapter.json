@@ -1,0 +1,14 @@
+{
+  "id": "digest-adapter",
+  "kind": "digest-vector",
+  "tag": "agentic-pr-review/cache-contract/adapter/v1",
+  "envelope": {
+    "schemaVersion": 1,
+    "capabilityProfileVersion": 1,
+    "adapterBuildVersion": "0.0.0-fixture"
+  },
+  "expected": {
+    "preimageHex": "6167656e7469632d70722d7265766965772f63616368652d636f6e74726163742f616461707465722f7631007b22616461707465724275696c6456657273696f6e223a22302e302e302d66697874757265222c226361706162696c69747950726f66696c6556657273696f6e223a312c22736368656d6156657273696f6e223a317d",
+    "digestHex": "e0b738711687dd8e1d4aefea903cc395b48dc4c9e8ef4b11fedac34e67fd16c6"
+  }
+}

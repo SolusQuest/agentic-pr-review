@@ -1,0 +1,18 @@
+{
+  "id": "digest-policy",
+  "kind": "digest-vector",
+  "tag": "agentic-pr-review/cache-contract/policy/v1",
+  "envelope": {
+    "schemaVersion": 1,
+    "policyVersion": 2,
+    "instructions": "Review the delta carefully.",
+    "constraints": {
+      "maxFindings": 10,
+      "tone": "strict"
+    }
+  },
+  "expected": {
+    "preimageHex": "6167656e7469632d70722d7265766965772f63616368652d636f6e74726163742f706f6c6963792f7631007b22636f6e73747261696e7473223a7b226d617846696e64696e6773223a31302c22746f6e65223a22737472696374227d2c22696e737472756374696f6e73223a22526576696577207468652064656c7461206361726566756c6c792e222c22706f6c69637956657273696f6e223a322c22736368656d6156657273696f6e223a317d",
+    "digestHex": "6ef8489dac852f64c567efd63a196ef4b8bbf06d9b709b8af491d24c5a2b52b3"
+  }
+}

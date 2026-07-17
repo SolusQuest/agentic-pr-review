@@ -1,0 +1,10 @@
+{
+  "id": "framing-tag-interaction",
+  "kind": "framing-vector",
+  "input": {
+    "tag": "agentic-pr-review/interaction/v1"
+  },
+  "expected": {
+    "preimageHex": "6167656e7469632d70722d7265766965772f696e746572616374696f6e2f763100"
+  }
+}

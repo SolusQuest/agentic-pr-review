@@ -1,0 +1,10 @@
+{
+  "id": "framing-identity-ascii",
+  "kind": "framing-vector",
+  "input": {
+    "value": "a"
+  },
+  "expected": {
+    "framedHex": "0000000161"
+  }
+}

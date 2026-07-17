@@ -1,0 +1,10 @@
+{
+  "id": "framing-tag-providerPrefix",
+  "kind": "framing-vector",
+  "input": {
+    "tag": "agentic-pr-review/provider-prefix/v1"
+  },
+  "expected": {
+    "preimageHex": "6167656e7469632d70722d7265766965772f70726f76696465722d7072656669782f763100"
+  }
+}

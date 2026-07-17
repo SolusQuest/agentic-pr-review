@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": {
+    "tool": "src/prefix-contract/generate-fixtures.testhelper.ts",
+    "version": 1
+  },
+  "creationCrossCheck": {
+    "tool": "node",
+    "version": "v23.8.0",
+    "checkedAt": "2026-07-17T00:00:00Z"
+  },
+  "vectors": [
+    {
+      "id": "digest-template",
+      "kind": "digest-vector",
+      "file": "digest/template.json"
+    },
+    {
+      "id": "digest-policy",
+      "kind": "digest-vector",
+      "file": "digest/policy.json"
+    },
+    {
+      "id": "digest-tools",
+      "kind": "digest-vector",
+      "file": "digest/tools.json"
+    },
+    {
+      "id": "digest-config",
+      "kind": "digest-vector",
+      "file": "digest/config.json"
+    },
+    {
+      "id": "digest-adapter",
+      "kind": "digest-vector",
+      "file": "digest/adapter.json"
+    },
+    {
+      "id": "digest-tools-empty",
+      "kind": "digest-vector",
+      "file": "digest/tools-empty.json"
+    },
+    {
+      "id": "digest-template-nul-content",
+      "kind": "digest-vector",
+      "file": "digest/template-nul-content.json"
+    },
+    {
+      "id": "digest-policy-number-domain",
+      "kind": "digest-vector",
+      "file": "digest/policy-number-domain.json"
+    },
+    {
+      "id": "framing-tag-template",
+      "kind": "framing-vector",
+      "file": "framing/tag-template.json"
+    },
+    {
+      "id": "framing-tag-policy",
+      "kind": "framing-vector",
+      "file": "framing/tag-policy.json"
+    },
+    {
+      "id": "framing-tag-tools",
+      "kind": "framing-vector",
+      "file": "framing/tag-tools.json"
+    },
+    {
+      "id": "framing-tag-config",
+      "kind": "framing-vector",
+      "file": "framing/tag-config.json"
+    },
+    {
+      "id": "framing-tag-adapter",
+      "kind": "framing-vector",
+      "file": "framing/tag-adapter.json"
+    },
+    {
+      "id": "framing-tag-logicalPrefix",
+      "kind": "framing-vector",
+      "file": "framing/tag-logicalPrefix.json"
+    },
+    {
+      "id": "framing-tag-providerPrefix",
+      "kind": "framing-vector",
+      "file": "framing/tag-providerPrefix.json"
+    },
+    {
+      "id": "framing-tag-interaction",
+      "kind": "framing-vector",
+      "file": "framing/tag-interaction.json"
+    },
+    {
+      "id": "framing-identity-ascii",
+      "kind": "framing-vector",
+      "file": "framing/identity-ascii.json"
+    },
+    {
+      "id": "framing-identity-multibyte",
+      "kind": "framing-vector",
+      "file": "framing/identity-multibyte.json"
+    },
+    {
+      "id": "framing-identity-surrogate-pair",
+      "kind": "framing-vector",
+      "file": "framing/identity-surrogate-pair.json"
+    },
+    {
+      "id": "framing-identity-256-bytes",
+      "kind": "framing-vector",
+      "file": "framing/identity-256-bytes.json"
+    },
+    {
+      "id": "framing-frame-segment",
+      "kind": "framing-vector",
+      "file": "framing/frame-segment.json"
+    },
+    {
+      "id": "framing-empty-stream-logical-hash",
+      "kind": "framing-vector",
+      "file": "framing/empty-stream-logical-hash.json"
+    },
+    {
+      "id": "interaction-bootstrap",
+      "kind": "interaction-vector",
+      "file": "interaction/bootstrap.json"
+    },
+    {
+      "id": "interaction-reset",
+      "kind": "interaction-vector",
+      "file": "interaction/reset.json"
+    },
+    {
+      "id": "interaction-continuation",
+      "kind": "interaction-vector",
+      "file": "interaction/continuation.json"
+    },
+    {
+      "id": "interaction-head-sha-64",
+      "kind": "interaction-vector",
+      "file": "interaction/head-sha-64.json"
+    },
+    {
+      "id": "materialization-bootstrap",
+      "kind": "materialization-vector",
+      "file": "materialization/bootstrap.json"
+    },
+    {
+      "id": "materialization-continuation",
+      "kind": "materialization-vector",
+      "file": "materialization/continuation.json"
+    },
+    {
+      "id": "materialization-reset",
+      "kind": "materialization-vector",
+      "file": "materialization/reset.json"
+    }
+  ]
+}

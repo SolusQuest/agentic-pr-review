@@ -1,0 +1,23 @@
+{
+  "id": "digest-policy-number-domain",
+  "kind": "digest-vector",
+  "tag": "agentic-pr-review/cache-contract/policy/v1",
+  "envelope": {
+    "schemaVersion": 1,
+    "policyVersion": 1,
+    "instructions": "x",
+    "constraints": {
+      "a": 1,
+      "b": 1.5,
+      "c": 0,
+      "d": 1e+21,
+      "e": 0.000001,
+      "f": 1e-7,
+      "g": 0.1
+    }
+  },
+  "expected": {
+    "preimageHex": "6167656e7469632d70722d7265766965772f63616368652d636f6e74726163742f706f6c6963792f7631007b22636f6e73747261696e7473223a7b2261223a312c2262223a312e352c2263223a302c2264223a31652b32312c2265223a302e3030303030312c2266223a31652d372c2267223a302e317d2c22696e737472756374696f6e73223a2278222c22706f6c69637956657273696f6e223a312c22736368656d6156657273696f6e223a317d",
+    "digestHex": "451e0a7433899a7aad0bdfa038ad2cde00a66c0bb307c4a4e25848f4fda50022"
+  }
+}

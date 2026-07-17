@@ -83,11 +83,8 @@ internal static class JsonElementCanonicalizer
                 writer.WriteObjectStart();
                 for (var i = 0; i < properties.Count; i++)
                 {
-                    if (i > 0)
-                    {
-                        writer.WriteComma();
-                    }
-
+                    // Property commas are handled by the writer's state machine;
+                    // an explicit WriteComma here would double up.
                     writer.WriteProperty(properties[i].Name);
                     WriteValue(
                         ref writer,
