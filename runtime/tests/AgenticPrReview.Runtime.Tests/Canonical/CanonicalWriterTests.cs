@@ -65,7 +65,7 @@ public sealed class CanonicalWriterTests
         // U+10000 (first UTF-16 unit 0xD800 = 55296) sorts before U+E000 (57344)
         // in UTF-16 code-unit order, the reverse of code-point order.
         using var doc = JsonDocument.Parse("{\"\uE000\":1,\"𐀀\":2}");
-        var canonical = JsonElementCanonicalizer.Canonicalize(doc.RootElement, 64, 256, 1024);
+        var canonical = JsonElementCanonicalizer.Canonicalize(doc.RootElement, 64, 256, 1024, long.MaxValue, out _);
         Assert.Equal("{\"𐀀\":2,\"\uE000\":1}", Encoding.UTF8.GetString(canonical.AsSpan()));
     }
     [Fact]
@@ -73,7 +73,7 @@ public sealed class CanonicalWriterTests
     {
         using var doc = JsonDocument.Parse("{\"a\":1,\"a\":2}");
         var ex = Assert.Throws<Rfc8785CanonicalizationException>(
-            () => JsonElementCanonicalizer.Canonicalize(doc.RootElement, 64, 256, 1024));
+            () => JsonElementCanonicalizer.Canonicalize(doc.RootElement, 64, 256, 1024, long.MaxValue, out _));
         Assert.Equal(Rfc8785RejectionReason.DuplicateProperty, ex.Reason);
     }
 }

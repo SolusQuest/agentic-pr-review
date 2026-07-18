@@ -23,45 +23,67 @@ internal struct Rfc8785Writer
         _needsComma = false;
     }
 
+    /// <summary>
+    /// When set to a non-negative value, appends stop once the buffer exceeds
+    /// the limit (discard/count-only mode): no more bytes are allocated, the
+    /// caller's traversal continues, and <see cref="Exceeded"/> records that
+    /// the cap was crossed. Domain validation must always run to completion.
+    /// </summary>
+    internal long DiscardLimit { get; set; } = -1;
+
+    /// <summary>True once any append was skipped because of <see cref="DiscardLimit"/>.</summary>
+    internal bool Exceeded { get; private set; }
+
+    private void Append(ReadOnlySpan<byte> bytes)
+    {
+        if (DiscardLimit >= 0 && _writer.WrittenCount + bytes.Length > DiscardLimit)
+        {
+            Exceeded = true;
+            return;
+        }
+
+        _writer.Write(bytes);
+    }
+
     internal ImmutableArray<byte> ToImmutableArray() => _writer.WrittenSpan.ToArray().ToImmutableArray();
 
     internal long WrittenCount => _writer.WrittenCount;
 
     internal void WriteObjectStart()
     {
-        _writer.Write("{"u8);
+        Append("{"u8);
         _needsComma = false;
     }
 
     internal void WriteObjectEnd()
     {
-        _writer.Write("}"u8);
+        Append("}"u8);
         _needsComma = true;
     }
 
     internal void WriteArrayStart()
     {
-        _writer.Write("["u8);
+        Append("["u8);
         _needsComma = false;
     }
 
     internal void WriteArrayEnd()
     {
-        _writer.Write("]"u8);
+        Append("]"u8);
         _needsComma = true;
     }
 
-    internal void WriteComma() => _writer.Write(","u8);
+    internal void WriteComma() => Append(","u8);
 
     internal void WriteNull()
     {
-        _writer.Write("null"u8);
+        Append("null"u8);
         _needsComma = true;
     }
 
     internal void WriteBoolean(bool value)
     {
-        _writer.Write(value ? "true"u8 : "false"u8);
+        Append(value ? "true"u8 : "false"u8);
         _needsComma = true;
     }
 
@@ -69,25 +91,25 @@ internal struct Rfc8785Writer
     {
         if (_needsComma)
         {
-            _writer.Write(","u8);
+            Append(","u8);
         }
 
         WriteEscapedString(name);
-        _writer.Write(":"u8);
+        Append(":"u8);
         _needsComma = false;
     }
 
     internal void WriteNumber(long value)
     {
         var text = value.ToString(CultureInfo.InvariantCulture);
-        _writer.Write(Encoding.UTF8.GetBytes(text));
+        Append(Encoding.UTF8.GetBytes(text));
         _needsComma = true;
     }
 
     internal void WriteNumber(double value)
     {
         var text = EcmaScriptNumberFormatter.Format(value);
-        _writer.Write(Encoding.UTF8.GetBytes(text));
+        Append(Encoding.UTF8.GetBytes(text));
         _needsComma = true;
     }
 
@@ -99,7 +121,7 @@ internal struct Rfc8785Writer
 
     private void WriteEscapedString(string value)
     {
-        _writer.Write("\""u8);
+        Append("\""u8);
         var utf16 = value.AsSpan();
         for (var i = 0; i < utf16.Length; i++)
         {
@@ -131,7 +153,7 @@ internal struct Rfc8785Writer
             }
         }
 
-        _writer.Write("\""u8);
+        Append("\""u8);
     }
 
     private void WriteEscapedCodepoint(char c)
@@ -139,32 +161,32 @@ internal struct Rfc8785Writer
         switch (c)
         {
             case '"':
-                _writer.Write("\\\""u8);
+                Append("\\\""u8);
                 return;
             case '\\':
-                _writer.Write("\\\\"u8);
+                Append("\\\\"u8);
                 return;
             case '\b':
-                _writer.Write("\\b"u8);
+                Append("\\b"u8);
                 return;
             case '\f':
-                _writer.Write("\\f"u8);
+                Append("\\f"u8);
                 return;
             case '\n':
-                _writer.Write("\\n"u8);
+                Append("\\n"u8);
                 return;
             case '\r':
-                _writer.Write("\\r"u8);
+                Append("\\r"u8);
                 return;
             case '\t':
-                _writer.Write("\\t"u8);
+                Append("\\t"u8);
                 return;
         }
 
         if (c < 0x20)
         {
             // Includes U+0000: emitted as \u0000 per RFC 8785, not rejected.
-            _writer.Write(Encoding.UTF8.GetBytes($"\\u{(int)c:x4}"));
+            Append(Encoding.UTF8.GetBytes($"\\u{(int)c:x4}"));
             return;
         }
 
@@ -174,6 +196,6 @@ internal struct Rfc8785Writer
     private void WriteUtf8Codepoint(int codepoint)
     {
         var chars = char.ConvertFromUtf32(codepoint);
-        _writer.Write(Encoding.UTF8.GetBytes(chars));
+        Append(Encoding.UTF8.GetBytes(chars));
     }
 }

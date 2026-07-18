@@ -8,18 +8,33 @@ namespace AgenticPrReview.Runtime.Canonical;
 /// canonical bytes with duplicate-property detection and structural bounds.
 /// Rejections raise <see cref="Rfc8785CanonicalizationException"/>; callers
 /// map them to prefix-contract diagnostics.
+///
+/// When a byte cap is supplied, the writer switches to discard/count-only
+/// mode once the cap is crossed: emission stops growing but the traversal
+/// always completes, so canonical-domain defects anywhere in the document
+/// still surface before the cap verdict.
 /// </summary>
 internal static class JsonElementCanonicalizer
 {
+    /// <summary>Sentinel standing in for a property name that cannot be decoded as valid UTF-16.</summary>
+    internal const string InvalidNameSentinel = "\uD800";
+
     internal static ImmutableArray<byte> Canonicalize(
         JsonElement element,
         int maxDepth,
         int maxProperties,
         int maxArrayItems,
-        long maxBytes = long.MaxValue)
+        long maxBytes,
+        out bool capExceeded)
     {
         var writer = new Rfc8785Writer(4096);
-        WriteValue(ref writer, element, depth: 0, maxDepth, maxProperties, maxArrayItems, maxBytes, segments: System.Array.Empty<CanonicalPathSegment>());
+        if (maxBytes != long.MaxValue)
+        {
+            writer.DiscardLimit = maxBytes;
+        }
+
+        WriteValue(ref writer, element, depth: 0, maxDepth, maxProperties, maxArrayItems, segments: System.Array.Empty<CanonicalPathSegment>());
+        capExceeded = writer.Exceeded;
         return writer.ToImmutableArray();
     }
 
@@ -30,7 +45,30 @@ internal static class JsonElementCanonicalizer
     /// </summary>
     internal static void WriteCanonicalValue(ref Rfc8785Writer writer, JsonElement element)
     {
-        WriteValue(ref writer, element, depth: 1, 64, 256, 1_024, long.MaxValue, segments: System.Array.Empty<CanonicalPathSegment>());
+        WriteValue(ref writer, element, depth: 1, 64, 256, 1_024, segments: System.Array.Empty<CanonicalPathSegment>());
+    }
+
+    /// <summary>
+    /// Reads a property name, converting a decode failure into a structured
+    /// UnpairedSurrogate rejection at the property-name position.
+    /// </summary>
+    internal static string ReadPropertyName(
+        JsonProperty property,
+        System.Collections.Generic.IReadOnlyList<CanonicalPathSegment> segments)
+    {
+        try
+        {
+            return property.Name;
+        }
+        catch (InvalidOperationException)
+        {
+            // System.Text.Json refuses to decode incomplete UTF-16. The sentinel
+            // maps to the terminal <invalid-utf16> marker in the safe-path encoder.
+            throw new Rfc8785CanonicalizationException(
+                Rfc8785RejectionReason.UnpairedSurrogate,
+                "Unpaired UTF-16 surrogate in JSON property name.",
+                Append(segments, CanonicalPathSegment.Property(InvalidNameSentinel)));
+        }
     }
 
     private static CanonicalPathSegment[] Append(System.Collections.Generic.IReadOnlyList<CanonicalPathSegment> segments, CanonicalPathSegment next)
@@ -45,17 +83,6 @@ internal static class JsonElementCanonicalizer
         return copy;
     }
 
-    private static void CheckBudget(ref Rfc8785Writer writer, long maxBytes, System.Collections.Generic.IReadOnlyList<CanonicalPathSegment> segments)
-    {
-        if (writer.WrittenCount > maxBytes)
-        {
-            throw new Rfc8785CanonicalizationException(
-                Rfc8785RejectionReason.ByteCapExceeded,
-                "Canonical output exceeds the byte cap.",
-                segments);
-        }
-    }
-
     private static void WriteValue(
         ref Rfc8785Writer writer,
         JsonElement element,
@@ -63,10 +90,8 @@ internal static class JsonElementCanonicalizer
         int maxDepth,
         int maxProperties,
         int maxArrayItems,
-        long maxBytes,
         System.Collections.Generic.IReadOnlyList<CanonicalPathSegment> segments)
     {
-        CheckBudget(ref writer, maxBytes, segments);
         switch (element.ValueKind)
         {
             case JsonValueKind.Object:
@@ -83,15 +108,16 @@ internal static class JsonElementCanonicalizer
                 var seen = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var property in element.EnumerateObject())
                 {
-                    if (!seen.Add(property.Name))
+                    var name = ReadPropertyName(property, segments);
+                    if (!seen.Add(name))
                     {
                         throw new Rfc8785CanonicalizationException(
                             Rfc8785RejectionReason.DuplicateProperty,
                             "Duplicate JSON property name.",
-                            segments);
+                            Append(segments, CanonicalPathSegment.Property(name)));
                     }
 
-                    properties.Add((property.Name, property.Value));
+                    properties.Add((name, property.Value));
                 }
 
                 if (properties.Count > maxProperties)
@@ -119,12 +145,10 @@ internal static class JsonElementCanonicalizer
                         maxDepth,
                         maxProperties,
                         maxArrayItems,
-                        maxBytes,
                         Append(segments, CanonicalPathSegment.Property(properties[i].Name)));
                 }
 
                 writer.WriteObjectEnd();
-                CheckBudget(ref writer, maxBytes, segments);
                 return;
             }
 
@@ -134,7 +158,7 @@ internal static class JsonElementCanonicalizer
                 {
                     throw new Rfc8785CanonicalizationException(
                         Rfc8785RejectionReason.DepthLimitExceeded,
-                        $"Array nesting exceeds the depth limit of {maxDepth}.",
+                        $"Array nesting exceeds the limit of {maxDepth}.",
                         segments);
                 }
 
@@ -163,13 +187,11 @@ internal static class JsonElementCanonicalizer
                         maxDepth,
                         maxProperties,
                         maxArrayItems,
-                        maxBytes,
                         Append(segments, CanonicalPathSegment.Index(index)));
                     index++;
                 }
 
                 writer.WriteArrayEnd();
-                CheckBudget(ref writer, maxBytes, segments);
                 return;
             }
 
@@ -189,16 +211,7 @@ internal static class JsonElementCanonicalizer
                         segments);
                 }
 
-                if (writer.WrittenCount + System.Text.Encoding.UTF8.GetByteCount(value) + 2 > maxBytes)
-                {
-                    throw new Rfc8785CanonicalizationException(
-                        Rfc8785RejectionReason.ByteCapExceeded,
-                        "Canonical output exceeds the byte cap.",
-                        segments);
-                }
-
                 writer.WriteString(value);
-                CheckBudget(ref writer, maxBytes, segments);
                 return;
             }
 
@@ -213,23 +226,19 @@ internal static class JsonElementCanonicalizer
                 }
 
                 writer.WriteNumber(number);
-                CheckBudget(ref writer, maxBytes, segments);
                 return;
             }
 
             case JsonValueKind.True:
                 writer.WriteBoolean(true);
-                CheckBudget(ref writer, maxBytes, segments);
                 return;
 
             case JsonValueKind.False:
                 writer.WriteBoolean(false);
-                CheckBudget(ref writer, maxBytes, segments);
                 return;
 
             case JsonValueKind.Null:
                 writer.WriteNull();
-                CheckBudget(ref writer, maxBytes, segments);
                 return;
 
             default:

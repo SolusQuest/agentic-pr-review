@@ -36,6 +36,36 @@ export class CanonicalJsonInputError extends Error {
 }
 
 /**
+ * Raised by the bounded-counting mode of `canonicalJsonBytes` once the
+ * canonical output would exceed the caller-supplied UTF-8 byte cap. The
+ * traversal stops at cap + the current token; it never allocates the rest.
+ */
+export class CanonicalJsonByteCapError extends Error {
+  readonly limit: number;
+
+  constructor(limit: number) {
+    super(`canonical JSON output exceeds the byte cap of ${limit}`);
+    this.name = 'CanonicalJsonByteCapError';
+    this.limit = limit;
+  }
+}
+
+interface ByteBudget {
+  readonly limit: number;
+  written: number;
+}
+
+function charge(budget: ByteBudget | undefined, text: string): void {
+  if (budget === undefined) {
+    return;
+  }
+  budget.written += new TextEncoder().encode(text).byteLength;
+  if (budget.written > budget.limit) {
+    throw new CanonicalJsonByteCapError(budget.limit);
+  }
+}
+
+/**
  * Canonicalize a `CanonicalJsonValue` into RFC 8785 canonical UTF-8 bytes.
  *
  * The primary public signature accepts `CanonicalJsonValue`. A secondary
@@ -43,21 +73,38 @@ export class CanonicalJsonInputError extends Error {
  * values can be fed in without a manual cast; runtime rejection still
  * fires for any value outside the canonical accepted domain.
  */
-export function canonicalJsonBytes(value: CanonicalJsonValue): Uint8Array;
-export function canonicalJsonBytes(value: unknown): Uint8Array;
-export function canonicalJsonBytes(value: unknown): Uint8Array {
+export function canonicalJsonBytes(value: CanonicalJsonValue, maxUtf8Bytes?: number): Uint8Array;
+export function canonicalJsonBytes(value: unknown, maxUtf8Bytes?: number): Uint8Array;
+export function canonicalJsonBytes(value: unknown, maxUtf8Bytes?: number): Uint8Array {
   const seen = new WeakSet<object>();
-  const text = encodeValue(value, '$', seen);
-  return new TextEncoder().encode(text);
+  const budget: ByteBudget | undefined =
+    maxUtf8Bytes === undefined ? undefined : { limit: maxUtf8Bytes, written: 0 };
+  const text = encodeValue(value, '$', seen, budget);
+  const bytes = new TextEncoder().encode(text);
+  if (budget !== undefined && bytes.byteLength > budget.limit) {
+    throw new CanonicalJsonByteCapError(budget.limit);
+  }
+  return bytes;
 }
 
-function encodeValue(value: unknown, path: string, seen: WeakSet<object>): string {
-  if (value === null) return 'null';
-  if (typeof value === 'boolean') return value ? 'true' : 'false';
-  if (typeof value === 'number') return encodeNumber(value, path);
-  if (typeof value === 'string') return encodeString(value, path);
-  if (Array.isArray(value)) return encodeArray(value, path, seen);
-  if (typeof value === 'object') return encodeObject(value, path, seen);
+function encodeValue(
+  value: unknown,
+  path: string,
+  seen: WeakSet<object>,
+  budget: ByteBudget | undefined,
+): string {
+  if (value === null) {
+    charge(budget, 'null');
+    return 'null';
+  }
+  if (typeof value === 'boolean') {
+    charge(budget, value ? 'true' : 'false');
+    return value ? 'true' : 'false';
+  }
+  if (typeof value === 'number') return encodeNumber(value, path, budget);
+  if (typeof value === 'string') return encodeString(value, path, budget);
+  if (Array.isArray(value)) return encodeArray(value, path, seen, budget);
+  if (typeof value === 'object') return encodeObject(value, path, seen, budget);
 
   // Rejected runtime types
   const type = value === undefined ? 'undefined' : typeof value;
@@ -72,7 +119,7 @@ function encodeValue(value: unknown, path: string, seen: WeakSet<object>): strin
   throw new CanonicalJsonInputError(label, path);
 }
 
-function encodeNumber(value: number, path: string): string {
+function encodeNumber(value: number, path: string, budget: ByteBudget | undefined): string {
   if (Number.isNaN(value)) {
     throw new CanonicalJsonInputError('NaN is not a JSON number', path);
   }
@@ -80,17 +127,32 @@ function encodeNumber(value: number, path: string): string {
     throw new CanonicalJsonInputError('Infinity is not a JSON number', path);
   }
   // RFC 8785: negative zero serializes as `0`.
-  if (Object.is(value, -0)) return '0';
+  if (Object.is(value, -0)) {
+    charge(budget, '0');
+    return '0';
+  }
   // Numbers are emitted using ECMAScript ToString, which is the JCS
   // reference algorithm on JSON's number domain.
-  return String(value);
+  const text = String(value);
+  charge(budget, text);
+  return text;
 }
 
-function encodeString(value: string, path: string): string {
-  return escapeJsonString(value, path);
+function encodeString(value: string, path: string, budget: ByteBudget | undefined): string {
+  return escapeJsonString(value, path, budget);
 }
 
-function escapeJsonString(value: string, path: string): string {
+function escapeJsonString(value: string, path: string, budget: ByteBudget | undefined): string {
+  // The escaped output is never shorter than the raw UTF-8 input plus two
+  // quotes, so a raw length that already exceeds the budget aborts before any
+  // escaped bytes are built.
+  if (budget !== undefined) {
+    const rawBytes = new TextEncoder().encode(value).byteLength + 2;
+    if (budget.written + rawBytes > budget.limit) {
+      budget.written += rawBytes;
+      throw new CanonicalJsonByteCapError(budget.limit);
+    }
+  }
   // Reject lone surrogates (invalid UTF-16 sequences); ECMA-262 well-formed
   // string check.
   for (let i = 0; i < value.length; i++) {
@@ -107,8 +169,28 @@ function escapeJsonString(value: string, path: string): string {
   }
 
   let out = '"';
+  let byteLen = 1;
   for (let i = 0; i < value.length; i++) {
     const code = value.charCodeAt(i);
+    // Exact UTF-8 byte accounting: escapes are ASCII; a surrogate pair counts
+    // 2 + 2 = 4 bytes across the two code units.
+    if (code === 0x22 || code === 0x5c) {
+      byteLen += 2;
+    } else if (code < 0x20) {
+      byteLen += 6;
+    } else if (code < 0x80) {
+      byteLen += 1;
+    } else if (code < 0x800) {
+      byteLen += 2;
+    } else if (code >= 0xd800 && code <= 0xdfff) {
+      byteLen += 2;
+    } else {
+      byteLen += 3;
+    }
+    if (budget !== undefined && (i & 0x3ff) === 0 && budget.written + byteLen > budget.limit) {
+      budget.written += byteLen;
+      throw new CanonicalJsonByteCapError(budget.limit);
+    }
     switch (code) {
       case 0x22:
         out += '\\"';
@@ -141,10 +223,22 @@ function escapeJsonString(value: string, path: string): string {
     }
   }
   out += '"';
+  byteLen += 1;
+  if (budget !== undefined) {
+    budget.written += byteLen;
+    if (budget.written > budget.limit) {
+      throw new CanonicalJsonByteCapError(budget.limit);
+    }
+  }
   return out;
 }
 
-function encodeArray(value: readonly unknown[], path: string, seen: WeakSet<object>): string {
+function encodeArray(
+  value: readonly unknown[],
+  path: string,
+  seen: WeakSet<object>,
+  budget: ByteBudget | undefined,
+): string {
   const array = value as unknown[] & object;
   if (seen.has(array)) {
     throw new CanonicalJsonInputError('cyclic structure', path);
@@ -196,15 +290,22 @@ function encodeArray(value: readonly unknown[], path: string, seen: WeakSet<obje
 
     const parts: string[] = [];
     for (let i = 0; i < array.length; i++) {
-      parts.push(encodeValue(array[i], `${path}[${i}]`, seen));
+      parts.push(encodeValue(array[i], `${path}[${i}]`, seen, budget));
     }
-    return '[' + parts.join(',') + ']';
+    const joined = '[' + parts.join(',') + ']';
+    charge(budget, '[');
+    return joined;
   } finally {
     seen.delete(array);
   }
 }
 
-function encodeObject(value: object, path: string, seen: WeakSet<object>): string {
+function encodeObject(
+  value: object,
+  path: string,
+  seen: WeakSet<object>,
+  budget: ByteBudget | undefined,
+): string {
   if (seen.has(value)) {
     throw new CanonicalJsonInputError('cyclic structure', path);
   }
@@ -235,9 +336,9 @@ function encodeObject(value: object, path: string, seen: WeakSet<object>): strin
     keys.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     const parts: string[] = [];
     for (const key of keys) {
-      const encodedKey = escapeJsonString(key, `${path}.${key}`);
+      const encodedKey = escapeJsonString(key, `${path}.${key}`, budget);
       const child = (value as Record<string, unknown>)[key];
-      const encodedChild = encodeValue(child, `${path}.${key}`, seen);
+      const encodedChild = encodeValue(child, `${path}.${key}`, seen, budget);
       parts.push(`${encodedKey}:${encodedChild}`);
     }
     return '{' + parts.join(',') + '}';

@@ -1,4 +1,8 @@
-import { canonicalJsonBytes, CanonicalJsonInputError } from '../canonical-json/index.js';
+import {
+  canonicalJsonBytes,
+  CanonicalJsonByteCapError,
+  CanonicalJsonInputError,
+} from '../canonical-json/index.js';
 import { isValidIdentity } from './identity.js';
 import { PREFIX_CODES, fail, ok, type PrefixResult } from './result.js';
 import {
@@ -180,27 +184,20 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
     );
   }
 
-  // Bounded-allocation cap check: for a canonical-domain-clean value,
-  // JSON.stringify has the same byte length as the canonical form, so an
-  // oversize envelope is rejected before the canonical copy is built.
-  const estimatedBytes = new TextEncoder().encode(JSON.stringify(record)).byteLength;
-  if (estimatedBytes > MAX_ENVELOPE_CANONICAL_BYTES) {
-    return fail(PREFIX_CODES.envelopeTooLarge);
-  }
-
+  // Bounded-counting canonicalization: the shared helper aborts as soon as
+  // the canonical output would exceed the cap; no full copy is allocated.
   let canonical: Uint8Array;
   try {
-    canonical = canonicalJsonBytes(record);
+    canonical = canonicalJsonBytes(record, MAX_ENVELOPE_CANONICAL_BYTES);
   } catch (error) {
+    if (error instanceof CanonicalJsonByteCapError) {
+      return fail(PREFIX_CODES.envelopeTooLarge);
+    }
     if (error instanceof CanonicalJsonInputError) {
       // Unreachable after the structured pre-scan; defensive mapping.
       return fail(PREFIX_CODES.canonicalInputRejected);
     }
     throw error;
-  }
-
-  if (canonical.byteLength > MAX_ENVELOPE_CANONICAL_BYTES) {
-    return fail(PREFIX_CODES.envelopeTooLarge);
   }
 
   return ok({ value: record, canonicalBytes: canonical });

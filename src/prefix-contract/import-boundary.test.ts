@@ -30,10 +30,7 @@ describe('prefix-contract import boundary', () => {
   it('canonicalization comes only from src/canonical-json/', () => {
     for (const file of productionFiles()) {
       const text = readFileSync(file, 'utf8');
-      // The single bounded-allocation cap pre-check is an explicit exception;
-      // it is a length estimate, never a digest producer.
-      const withoutCapEstimate = text.replace('JSON.stringify(record)', '');
-      expect(withoutCapEstimate, file).not.toContain('JSON.stringify(');
+      expect(text, file).not.toContain('JSON.stringify(');
       const imports = [...text.matchAll(/from '([^']+)'/g)].map((match) => match[1]);
       for (const specifier of imports) {
         if (specifier.includes('canonical')) {

@@ -611,3 +611,130 @@ describe('first-defect ordering and descriptor safety', () => {
     expect(computeTemplateId(parsedWithBogus).ok).toBe(false);
   });
 });
+
+describe('byte cap never masks canonical defects; invalid names are structured', () => {
+  it('early oversize string does not mask a later lone surrogate', () => {
+    const result = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { a: 'x'.repeat(300_000), z: String.fromCharCode(0xd800) },
+    });
+    expect(result).toEqual({
+      ok: false,
+      errors: [
+        {
+          code: PREFIX_CODES.canonicalInputRejected,
+          path: '/definition/<untrusted-property>',
+        },
+      ],
+    });
+  });
+
+  it('early oversize string does not mask a later non-finite number', () => {
+    const result = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { a: 'x'.repeat(300_000), z: 1e999 },
+    });
+    expect(result).toEqual({
+      ok: false,
+      errors: [
+        {
+          code: PREFIX_CODES.canonicalInputRejected,
+          path: '/definition/<untrusted-property>',
+        },
+      ],
+    });
+  });
+
+  it('invalid property name at the open-JSON root gets the terminal marker', () => {
+    const result = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { [String.fromCharCode(0xd800)]: 1 },
+    });
+    expect(result).toEqual({
+      ok: false,
+      errors: [
+        {
+          code: PREFIX_CODES.canonicalInputRejected,
+          path: '/definition/<invalid-utf16>',
+        },
+      ],
+    });
+  });
+
+  it('invalid property name under an unknown ancestor keeps both markers', () => {
+    const result = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { secretToken: { [String.fromCharCode(0xd800)]: 1 } },
+    });
+    expect(result).toEqual({
+      ok: false,
+      errors: [
+        {
+          code: PREFIX_CODES.canonicalInputRejected,
+          path: '/definition/<untrusted-property>/<invalid-utf16>',
+        },
+      ],
+    });
+  });
+
+  it('high escape-inflation strings are rejected at the cap', () => {
+    const result = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: ''.repeat(100_000),
+    });
+    expect(result).toEqual({ ok: false, errors: [{ code: PREFIX_CODES.envelopeTooLarge }] });
+  });
+
+  it('long plain strings over the cap are rejected', () => {
+    const result = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: 'x'.repeat(300_000),
+    });
+    expect(result).toEqual({ ok: false, errors: [{ code: PREFIX_CODES.envelopeTooLarge }] });
+  });
+
+  it('exact envelope cap passes and cap+1 fails', () => {
+    const make = (pad: number) =>
+      computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition: 'x'.repeat(pad) });
+    // Find the exact pad landing the canonical envelope on the cap.
+    let lo = 262_000;
+    let hi = 262_144;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      const result = make(mid);
+      if (result.ok) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    const atCap = make(lo - 1);
+    expect(atCap.ok).toBe(true);
+    const overCap = make(lo);
+    expect(overCap.ok).toBe(false);
+  });
+
+  it('proxies and inherited toJSON do not affect the cap semantics', () => {
+    const proxy = new Proxy(
+      { schemaVersion: 1, templateVersion: 1, definition: 'x'.repeat(300_000) },
+      {
+        get(target, prop) {
+          if (prop === 'toJSON') {
+            return () => ({ schemaVersion: 1, templateVersion: 1, definition: 'tiny' });
+          }
+          return (target as Record<string | symbol, unknown>)[prop];
+        },
+      },
+    );
+    // The descriptor snapshot rejects proxies whose reads trap; it never
+    // reaches a toJSON-influenced serialization.
+    const result = computeTemplateId(proxy);
+    expect(result.ok).toBe(false);
+  });
+});
