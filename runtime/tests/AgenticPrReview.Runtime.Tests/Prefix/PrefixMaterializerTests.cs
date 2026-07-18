@@ -242,6 +242,33 @@ public sealed class PrefixMaterializerTests
 public sealed class PrefixMaterializerInputGuardTests
 {
     [Fact]
+    public void IllFormedUtf16IdentitiesFailInTheHostIdentityStage()
+    {
+        var vector = PrefixFixtureLoader.LoadVector("materialization/bootstrap.json");
+        var input = PrefixFixtureLoader.BuildMaterializeInput(vector.GetProperty("input"));
+        foreach (var invalid in new[] { "\uD800", "\uDC00", new string('x', 1_000_000) })
+        {
+            var outcome = PrefixMaterializer.Materialize(input with
+            {
+                ExpectedIdentities = input.ExpectedIdentities with { ProviderId = invalid },
+            });
+            Assert.Equal("prefix_identity_invalid", Assert.Single(outcome.Diagnostics).Code);
+        }
+    }
+
+    [Fact]
+    public void ReplacementCharacterIsDistinctAndValidIdentityData()
+    {
+        var vector = PrefixFixtureLoader.LoadVector("materialization/bootstrap.json");
+        var input = PrefixFixtureLoader.BuildMaterializeInput(vector.GetProperty("input"));
+        var outcome = PrefixMaterializer.Materialize(input with
+        {
+            ExpectedIdentities = input.ExpectedIdentities with { ProviderId = "\uFFFD" },
+        });
+        Assert.NotNull(outcome.Value);
+    }
+
+    [Fact]
     public void NullInputYieldsTypedFailure()
     {
         var outcome = PrefixMaterializer.Materialize(null!);

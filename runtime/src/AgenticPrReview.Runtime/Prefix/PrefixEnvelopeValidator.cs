@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Linq;
 using System.Text.Json;
 using AgenticPrReview.Runtime.Canonical;
 
@@ -92,16 +93,17 @@ internal static class PrefixEnvelopeValidator
                     return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, segments));
                 }
 
-                var properties = new List<LenientJsonObjectEnumerator.Entry>();
-                foreach (var property in LenientJsonObjectEnumerator.Enumerate(value))
+                var properties = new List<(string Name, JsonElement Value)>();
+                foreach (var property in value.EnumerateObject())
                 {
-                    properties.Add(property);
-                    if (properties.Count > PrefixBounds.MaxEnvelopeObjectProperties)
+                    if (properties.Count >= PrefixBounds.MaxEnvelopeObjectProperties)
                     {
                         return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, segments));
                     }
+
+                    properties.Add((ReadPropertyNameOrSentinel(property), property.Value));
                 }
-                properties.Sort((left, right) => StringComparer.Ordinal.Compare(left.Name, right.Name));
+                properties.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Name, right.Name));
                 // LIFO: push the reverse of the required unsigned UTF-16 order.
                 for (var i = properties.Count - 1; i >= 0; i--)
                 {
@@ -310,6 +312,18 @@ internal static class PrefixEnvelopeValidator
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
+    private static string ReadPropertyNameOrSentinel(JsonProperty property)
+    {
+        try
+        {
+            return property.Name;
+        }
+        catch (InvalidOperationException)
+        {
+            return JsonElementCanonicalizer.InvalidNameSentinel;
+        }
+    }
+
     private static PrefixDiagnostic? CheckExactKeySet(EnvelopeKind kind, JsonElement envelope)
     {
         var allowed = kind switch
@@ -322,25 +336,40 @@ internal static class PrefixEnvelopeValidator
             _ => throw new ArgumentOutOfRangeException(nameof(kind)),
         };
 
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
         var allowedSet = new HashSet<string>(allowed, StringComparer.Ordinal);
-        foreach (var property in LenientJsonObjectEnumerator.Enumerate(envelope))
+        string? firstUnknown = null;
+        foreach (var property in envelope.EnumerateObject())
         {
-            var propertyName = property.Name;
-            if (!seen.Add(propertyName))
+            var propertyName = ReadPropertyNameOrSentinel(property);
+            if (allowedSet.Contains(propertyName))
             {
-                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property(propertyName) }));
+                counts[propertyName] = counts.GetValueOrDefault(propertyName) + 1;
             }
+            else if (firstUnknown is null || StringComparer.Ordinal.Compare(propertyName, firstUnknown) < 0)
+            {
+                firstUnknown = propertyName;
+            }
+        }
 
-            if (!allowedSet.Contains(propertyName))
-            {
-                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property(propertyName) }));
-            }
+        var firstDuplicate = counts
+            .Where(pair => pair.Value > 1)
+            .Select(pair => pair.Key)
+            .OrderBy(static name => name, StringComparer.Ordinal)
+            .FirstOrDefault();
+        var firstKeyDefect = firstUnknown is null
+            ? firstDuplicate
+            : firstDuplicate is null || StringComparer.Ordinal.Compare(firstUnknown, firstDuplicate) < 0
+                ? firstUnknown
+                : firstDuplicate;
+        if (firstKeyDefect is not null)
+        {
+            return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property(firstKeyDefect) }));
         }
 
         foreach (var required in allowed)
         {
-            if (!seen.Contains(required))
+            if (!counts.ContainsKey(required))
             {
                 return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property(required) }));
             }
@@ -480,22 +509,37 @@ internal static class PrefixEnvelopeValidator
                 return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions"), CanonicalPathSegment.Index(indexText) }));
             }
 
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var property in LenientJsonObjectEnumerator.Enumerate(tool))
+            var wrapperCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+            string? firstUnknown = null;
+            foreach (var property in tool.EnumerateObject())
             {
-                var wrapperName = property.Name;
-                if (!seen.Add(wrapperName))
+                var wrapperName = ReadPropertyNameOrSentinel(property);
+                if (wrapperName is "description" or "inputSchema" or "name" or "policyMetadata")
                 {
-                    return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions"), CanonicalPathSegment.Index(indexText), CanonicalPathSegment.Property(wrapperName) }));
+                    wrapperCounts[wrapperName] = wrapperCounts.GetValueOrDefault(wrapperName) + 1;
                 }
-
-                if (wrapperName is not ("description" or "inputSchema" or "name" or "policyMetadata"))
+                else if (firstUnknown is null || StringComparer.Ordinal.Compare(wrapperName, firstUnknown) < 0)
                 {
-                    return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions"), CanonicalPathSegment.Index(indexText), CanonicalPathSegment.Property(wrapperName) }));
+                    firstUnknown = wrapperName;
                 }
             }
 
-            if (!seen.Contains("name") || !seen.Contains("description") || !seen.Contains("inputSchema"))
+            var firstDuplicate = wrapperCounts
+                .Where(pair => pair.Value > 1)
+                .Select(pair => pair.Key)
+                .OrderBy(static name => name, StringComparer.Ordinal)
+                .FirstOrDefault();
+            var firstKeyDefect = firstUnknown is null
+                ? firstDuplicate
+                : firstDuplicate is null || StringComparer.Ordinal.Compare(firstUnknown, firstDuplicate) < 0
+                    ? firstUnknown
+                    : firstDuplicate;
+            if (firstKeyDefect is not null)
+            {
+                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions"), CanonicalPathSegment.Index(indexText), CanonicalPathSegment.Property(firstKeyDefect) }));
+            }
+
+            if (!wrapperCounts.ContainsKey("name") || !wrapperCounts.ContainsKey("description") || !wrapperCounts.ContainsKey("inputSchema"))
             {
                 return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions"), CanonicalPathSegment.Index(indexText) }));
             }

@@ -52,10 +52,10 @@ const REQUIRED_KEYS: Record<EnvelopeKind, readonly string[]> = {
 
 const VERSION_FIELDS: Record<EnvelopeKind, readonly string[]> = {
   template: ['schemaVersion', 'templateVersion'],
-  policy: ['policyVersion', 'schemaVersion'],
+  policy: ['schemaVersion', 'policyVersion'],
   tools: ['schemaVersion', 'toolsetVersion'],
-  cacheConfig: ['cacheConfigVersion', 'schemaVersion'],
-  adapter: ['capabilityProfileVersion', 'schemaVersion'],
+  cacheConfig: ['schemaVersion', 'cacheConfigVersion'],
+  adapter: ['schemaVersion', 'capabilityProfileVersion'],
 };
 
 export function validateTemplateEnvelope(raw: unknown): PrefixResult<ValidatedEnvelope> {
@@ -128,6 +128,7 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
     }
     rootEntries.push({ name, value: descriptor.value });
   }
+  rootEntries.sort((a, b) => compareClosedKeys(a.name, b.name));
 
   const allowed = new Set(REQUIRED_KEYS[kind]);
   for (const entry of rootEntries) {
@@ -420,6 +421,7 @@ function prepareToolDefinitions(
 
   const names = new Set<string>();
   const prepared: Record<string, unknown>[] = [];
+  const wrapperMemo = new WeakMap<object, Record<string, unknown>>();
   for (let index = 0; index < items.length; index++) {
     const indexText = String(index);
     const wrapperPath: PrefixPathSegment[] = [
@@ -437,59 +439,63 @@ function prepareToolDefinitions(
         ),
       };
     }
-    const proto = Object.getPrototypeOf(rawTool);
-    if (proto !== Object.prototype && proto !== null) {
-      return {
-        ok: false,
-        error: fail(
-          PREFIX_CODES.envelopeInvalid,
-          encodePrefixPath(wrapperPath, kind, PREFIX_CODES.envelopeInvalid),
-        ),
-      };
-    }
-    const wrapperKeys = Reflect.ownKeys(rawTool);
-    if (wrapperKeys.some((key) => typeof key === 'symbol')) {
-      return {
-        ok: false,
-        error: fail(
-          PREFIX_CODES.envelopeInvalid,
-          encodePrefixPath(wrapperPath, kind, PREFIX_CODES.envelopeInvalid),
-        ),
-      };
-    }
-    const tool: Record<string, unknown> = Object.create(null);
-    const sortedKeys = (wrapperKeys as string[]).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-    for (const key of sortedKeys) {
-      const descriptor = Object.getOwnPropertyDescriptor(rawTool, key);
-      if (
-        descriptor === undefined ||
-        'get' in descriptor ||
-        'set' in descriptor ||
-        !descriptor.enumerable
-      ) {
+    let tool = wrapperMemo.get(rawTool);
+    if (tool === undefined) {
+      const proto = Object.getPrototypeOf(rawTool);
+      if (proto !== Object.prototype && proto !== null) {
         return {
           ok: false,
           error: fail(
             PREFIX_CODES.envelopeInvalid,
-            encodePrefixPath([...wrapperPath, { name: key }], kind, PREFIX_CODES.envelopeInvalid),
+            encodePrefixPath(wrapperPath, kind, PREFIX_CODES.envelopeInvalid),
           ),
         };
       }
-      if (
-        key !== 'description' &&
-        key !== 'inputSchema' &&
-        key !== 'name' &&
-        key !== 'policyMetadata'
-      ) {
+      const wrapperKeys = Reflect.ownKeys(rawTool);
+      if (wrapperKeys.some((key) => typeof key === 'symbol')) {
         return {
           ok: false,
           error: fail(
             PREFIX_CODES.envelopeInvalid,
-            encodePrefixPath([...wrapperPath, { name: key }], kind, PREFIX_CODES.envelopeInvalid),
+            encodePrefixPath(wrapperPath, kind, PREFIX_CODES.envelopeInvalid),
           ),
         };
       }
-      Object.defineProperty(tool, key, { value: descriptor.value, enumerable: true });
+      tool = Object.create(null) as Record<string, unknown>;
+      const sortedKeys = (wrapperKeys as string[]).sort(compareClosedKeys);
+      for (const key of sortedKeys) {
+        const descriptor = Object.getOwnPropertyDescriptor(rawTool, key);
+        if (
+          descriptor === undefined ||
+          'get' in descriptor ||
+          'set' in descriptor ||
+          !descriptor.enumerable
+        ) {
+          return {
+            ok: false,
+            error: fail(
+              PREFIX_CODES.envelopeInvalid,
+              encodePrefixPath([...wrapperPath, { name: key }], kind, PREFIX_CODES.envelopeInvalid),
+            ),
+          };
+        }
+        if (
+          key !== 'description' &&
+          key !== 'inputSchema' &&
+          key !== 'name' &&
+          key !== 'policyMetadata'
+        ) {
+          return {
+            ok: false,
+            error: fail(
+              PREFIX_CODES.envelopeInvalid,
+              encodePrefixPath([...wrapperPath, { name: key }], kind, PREFIX_CODES.envelopeInvalid),
+            ),
+          };
+        }
+        Object.defineProperty(tool, key, { value: descriptor.value, enumerable: true });
+      }
+      wrapperMemo.set(rawTool, tool);
     }
     if (!('name' in tool) || !('description' in tool) || !('inputSchema' in tool)) {
       return {
@@ -556,6 +562,28 @@ function prepareToolDefinitions(
   }
 
   return { ok: true, value: prepared };
+}
+
+/** Invalid UTF-16 closed keys share the public sentinel sort position in both languages. */
+function compareClosedKeys(left: string, right: string): number {
+  const leftKey = hasUnpairedSurrogate(left) ? '\ud800' : left;
+  const rightKey = hasUnpairedSurrogate(right) ? '\ud800' : right;
+  return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+}
+
+function hasUnpairedSurrogate(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      if (index + 1 >= value.length) return true;
+      const low = value.charCodeAt(index + 1);
+      if (low < 0xdc00 || low > 0xdfff) return true;
+      index++;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Stage: embedded identity semantics (tool names, adapterBuildVersion). */

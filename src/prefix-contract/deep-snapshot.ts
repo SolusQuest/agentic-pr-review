@@ -136,6 +136,12 @@ export function deepDescriptorSnapshot(
       return null;
     }
 
+    // Depth is path-dependent, so it must be checked for every occurrence
+    // before marker passthrough, cycle detection, or DAG memo reuse.
+    if (depth > bounds.maxDepth) {
+      return { segments, reason: 'depth-exceeded' };
+    }
+
     if (isCanonicalViolationMarker(node)) {
       // An already-created marker (e.g. from an accessor descriptor) passes
       // through untouched; copying it would erase its identity.
@@ -179,9 +185,6 @@ export function deepDescriptorSnapshot(
         return null;
       }
       const arrayLength = lengthDescriptor.value as number;
-      if (depth > bounds.maxDepth) {
-        return { segments, reason: 'depth-exceeded' };
-      }
       if (arrayLength > bounds.maxArrayItems) {
         return { segments, reason: 'array-length-exceeded' };
       }
@@ -224,9 +227,6 @@ export function deepDescriptorSnapshot(
     if (keys.some((key) => typeof key === 'symbol')) {
       assign(marker('symbol-key'));
       return null;
-    }
-    if (depth > bounds.maxDepth) {
-      return { segments, reason: 'depth-exceeded' };
     }
     const names = (keys as string[]).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     if (names.length > bounds.maxObjectProperties) {

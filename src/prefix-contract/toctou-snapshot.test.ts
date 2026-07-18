@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeTemplateId } from './index.js';
+import { computeTemplateId, computeToolDefinitionId } from './index.js';
 
 /**
  * TOCTOU coverage (round 7): validation and canonical emission must see
@@ -256,6 +256,58 @@ describe('root own-key capture is atomic', () => {
 });
 
 describe('bounded alias-preserving snapshots', () => {
+  const atDepth65 = (value: unknown) => {
+    let nested = value;
+    for (let index = 0; index < 63; index++) {
+      nested = [nested];
+    }
+    return nested;
+  };
+
+  it('checks the path-dependent depth before reusing a shallow-first alias', () => {
+    const shared = { x: 1 };
+    const aliased = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { a: shared, b: atDepth65(shared) },
+    });
+    const dealiased = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { a: { x: 1 }, b: atDepth65({ x: 1 }) },
+    });
+    expect(aliased).toEqual(dealiased);
+    expect(aliased.ok).toBe(false);
+    if (!aliased.ok) expect(aliased.errors[0].code).toBe('prefix-envelope-invalid');
+  });
+
+  it('reports the same depth defect when the deep alias occurs first', () => {
+    const shared = { x: 1 };
+    const aliased = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { a: atDepth65(shared), b: shared },
+    });
+    const dealiased = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { a: atDepth65({ x: 1 }), b: { x: 1 } },
+    });
+    expect(aliased).toEqual(dealiased);
+  });
+
+  it('does not let a memoized object containing a violation marker bypass depth', () => {
+    const shared = Object.create(null) as Record<string, unknown>;
+    Object.defineProperty(shared, 'bad', { get: () => 1, enumerable: true });
+    const result = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { a: shared, b: atDepth65(shared) },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors[0].code).toBe('prefix-envelope-invalid');
+  });
+
   it('rejects a compact shared DAG at the canonical byte cap without expanding it in memory', () => {
     const leaf = new Array(1024).fill(0);
     const middle = new Array(1024).fill(leaf);
@@ -265,6 +317,79 @@ describe('bounded alias-preserving snapshots', () => {
       ok: false,
       errors: [{ code: 'prefix-envelope-too-large' }],
     });
+  });
+});
+
+describe('contract-owned tool wrappers are captured once by identity', () => {
+  const envelope = (definitions: unknown[]) => ({
+    schemaVersion: 1,
+    toolsetVersion: 1,
+    definitions,
+  });
+
+  it('reuses one captured plain wrapper and rejects its duplicate name', () => {
+    const shared = { name: 'tool', description: 'd', inputSchema: {} };
+    const result = computeToolDefinitionId(envelope([shared, shared]));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors[0]).toEqual({
+        code: 'prefix-envelope-invalid',
+        path: '/definitions/1/name',
+      });
+    }
+  });
+
+  it('observes a shared stateful proxy wrapper only once per public call', () => {
+    let ownKeysCalls = 0;
+    let prototypeCalls = 0;
+    const descriptorCalls = new Map<PropertyKey, number>();
+    const target = { name: 'tool-a', description: 'd', inputSchema: {} };
+    const shared = new Proxy(target, {
+      getPrototypeOf(current) {
+        prototypeCalls++;
+        return Reflect.getPrototypeOf(current);
+      },
+      ownKeys(current) {
+        ownKeysCalls++;
+        return Reflect.ownKeys(current);
+      },
+      getOwnPropertyDescriptor(current, property) {
+        descriptorCalls.set(property, (descriptorCalls.get(property) ?? 0) + 1);
+        const descriptor = Reflect.getOwnPropertyDescriptor(current, property)!;
+        if (property === 'name') {
+          return {
+            ...descriptor,
+            value: descriptorCalls.get(property) === 1 ? 'tool-a' : 'tool-b',
+          };
+        }
+        return descriptor;
+      },
+    });
+
+    const first = computeToolDefinitionId(envelope([shared, shared]));
+    expect(first.ok).toBe(false);
+    if (!first.ok) expect(first.errors[0].path).toBe('/definitions/1/name');
+    expect(ownKeysCalls).toBe(1);
+    expect(prototypeCalls).toBe(1);
+    expect([...descriptorCalls.values()]).toEqual([1, 1, 1]);
+
+    const second = computeToolDefinitionId(envelope([shared, shared]));
+    expect(second).toEqual(first);
+    expect(ownKeysCalls).toBe(2);
+    expect(prototypeCalls).toBe(2);
+    expect([...descriptorCalls.values()]).toEqual([2, 2, 2]);
+  });
+
+  it('matches the duplicate diagnostic of equivalent dealiased wrappers', () => {
+    const shared = { name: 'tool', description: 'd', inputSchema: {} };
+    expect(computeToolDefinitionId(envelope([shared, shared]))).toEqual(
+      computeToolDefinitionId(
+        envelope([
+          { name: 'tool', description: 'd', inputSchema: {} },
+          { name: 'tool', description: 'd', inputSchema: {} },
+        ]),
+      ),
+    );
   });
 });
 

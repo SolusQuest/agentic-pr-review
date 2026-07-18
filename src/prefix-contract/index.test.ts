@@ -71,6 +71,58 @@ describe('cache-contract digest helpers', () => {
     });
   });
 
+  it('orders root and tool-wrapper key-set defects by unsigned UTF-16', () => {
+    const invalidName = '\ud800';
+    const root = new Proxy(
+      { ...TEMPLATE, [invalidName]: 1, '2': 2 },
+      {
+        ownKeys() {
+          return [invalidName, '2', 'definition', 'templateVersion', 'schemaVersion'];
+        },
+      },
+    );
+    expect(computeTemplateId(root)).toEqual({
+      ok: false,
+      errors: [{ code: PREFIX_CODES.envelopeInvalid, path: '/<untrusted-property>' }],
+    });
+
+    const tool = new Proxy(
+      { name: 'tool', description: 'd', inputSchema: {}, [invalidName]: 1, '2': 2 },
+      {
+        ownKeys() {
+          return [invalidName, '2', 'name', 'description', 'inputSchema'];
+        },
+      },
+    );
+    expect(
+      computeToolDefinitionId({
+        schemaVersion: 1,
+        toolsetVersion: 1,
+        definitions: [tool],
+      }),
+    ).toEqual({
+      ok: false,
+      errors: [{ code: PREFIX_CODES.envelopeInvalid, path: '/definitions/0/<untrusted-property>' }],
+    });
+  });
+
+  it('checks schemaVersion before the envelope-specific version', () => {
+    expect(computePolicyId({ ...POLICY, schemaVersion: 0, policyVersion: 0 })).toEqual({
+      ok: false,
+      errors: [{ code: PREFIX_CODES.envelopeInvalid, path: '/schemaVersion' }],
+    });
+    expect(computeCacheConfigId({ ...CONFIG, schemaVersion: 0, cacheConfigVersion: 0 })).toEqual({
+      ok: false,
+      errors: [{ code: PREFIX_CODES.envelopeInvalid, path: '/schemaVersion' }],
+    });
+    expect(computeAdapterId({ ...ADAPTER, schemaVersion: 0, capabilityProfileVersion: 0 })).toEqual(
+      {
+        ok: false,
+        errors: [{ code: PREFIX_CODES.envelopeInvalid, path: '/schemaVersion' }],
+      },
+    );
+  });
+
   it('rejects missing required fields', () => {
     const result = computeTemplateId({ schemaVersion: 1, templateVersion: 3 });
     expect(result).toEqual({
@@ -340,6 +392,12 @@ describe('identity validation', () => {
     expect(validateIdentity('é'.repeat(129)).ok).toBe(false); // 258 UTF-8 bytes
     expect(validateIdentity('a\u0001b').ok).toBe(false);
     expect(validateIdentity('ab').ok).toBe(false);
+    expect(validateIdentity('\ud800').ok).toBe(false);
+    expect(validateIdentity('\udc00').ok).toBe(false);
+    expect(validateIdentity('\ufffd').ok).toBe(true);
+    expect(validateIdentity('😀'.repeat(64)).ok).toBe(true); // 256 UTF-8 bytes
+    expect(validateIdentity('😀'.repeat(65)).ok).toBe(false);
+    expect(validateIdentity('x'.repeat(1_000_000)).ok).toBe(false);
     expect(validateIdentity(42).ok).toBe(false);
   });
 

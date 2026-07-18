@@ -111,6 +111,15 @@ public sealed class PrefixCanonicalBoundaryTests
             "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":\"" + string.Concat(Enumerable.Repeat("\\u0001", 100_000)) + "\"}");
         Assert.Equal("prefix_envelope_too_large", error?.Code);
     }
+
+    [Fact]
+    public void OversizePlainStringUsesTheNormalBoundedCanonicalPath()
+    {
+        var error = ValidateTemplate(
+            "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":\"" + new string('x', 1_000_000) + "\"}");
+        Assert.Equal("prefix_envelope_too_large", error?.Code);
+    }
+
     [Fact]
     public void EarlierNonFiniteValueBeatsLaterInvalidName()
     {

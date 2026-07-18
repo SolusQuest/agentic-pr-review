@@ -9,17 +9,37 @@ const LOWER_HEX_64 = /^[a-f0-9]{64}$/;
 const GIT_SHA = /^([a-f0-9]{40}|[a-f0-9]{64})$/;
 const EPOCH_ID = /^[A-Za-z0-9_-]{22}$/;
 
-/** Shared identity-string domain: non-empty, ≤ 256 UTF-8 bytes, no control characters. */
+/** Shared identity-string domain: well-formed UTF-16, non-empty, bounded UTF-8, no controls. */
 export function isValidIdentity(value: unknown): value is string {
   if (typeof value !== 'string' || value.length === 0) {
     return false;
   }
-  if (new TextEncoder().encode(value).byteLength > MAX_IDENTITY_UTF8_BYTES) {
-    return false;
-  }
+  let utf8Bytes = 0;
   for (let i = 0; i < value.length; i++) {
     const code = value.charCodeAt(i);
     if (code <= 0x1f || code === 0x7f) {
+      return false;
+    }
+    if (code <= 0x7f) {
+      utf8Bytes += 1;
+    } else if (code <= 0x7ff) {
+      utf8Bytes += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff) {
+      if (i + 1 >= value.length) {
+        return false;
+      }
+      const low = value.charCodeAt(i + 1);
+      if (low < 0xdc00 || low > 0xdfff) {
+        return false;
+      }
+      utf8Bytes += 4;
+      i++;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return false;
+    } else {
+      utf8Bytes += 3;
+    }
+    if (utf8Bytes > MAX_IDENTITY_UTF8_BYTES) {
       return false;
     }
   }

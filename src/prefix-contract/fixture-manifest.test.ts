@@ -28,10 +28,13 @@ const HEX = /^[0-9a-f]+$/;
 
 function validateCorpus(root: string): string[] {
   const violations: string[] = [];
-  const manifest = JSON.parse(readFileSync(path.join(root, 'manifest.json'), 'utf8')) as Record<
-    string,
-    unknown
-  >;
+  const parsedManifest: unknown = JSON.parse(
+    readFileSync(path.join(root, 'manifest.json'), 'utf8'),
+  );
+  if (!isRecord(parsedManifest)) {
+    return ['bad-manifest-shape'];
+  }
+  const manifest = parsedManifest;
 
   for (const key of Object.keys(manifest)) {
     if (!ALLOWED_MANIFEST_KEYS.has(key)) {
@@ -42,18 +45,18 @@ function validateCorpus(root: string): string[] {
   if (manifest.schemaVersion !== 1) {
     violations.push('bad-manifest-schemaVersion');
   }
-  const generatedBy = manifest.generatedBy as Record<string, unknown> | undefined;
+  const generatedBy = manifest.generatedBy;
   if (
-    generatedBy === undefined ||
+    !isRecord(generatedBy) ||
     typeof generatedBy.tool !== 'string' ||
     typeof generatedBy.version !== 'number' ||
     Object.keys(generatedBy).some((key) => key !== 'tool' && key !== 'version')
   ) {
     violations.push('bad-metadata:generatedBy');
   }
-  const crossCheck = manifest.creationCrossCheck as Record<string, unknown> | undefined;
+  const crossCheck = manifest.creationCrossCheck;
   if (
-    crossCheck === undefined ||
+    !isRecord(crossCheck) ||
     typeof crossCheck.tool !== 'string' ||
     typeof crossCheck.version !== 'string' ||
     typeof crossCheck.checkedAt !== 'string' ||
@@ -65,7 +68,29 @@ function validateCorpus(root: string): string[] {
     violations.push('bad-metadata:creationCrossCheck');
   }
 
-  const entries = manifest.vectors as ManifestEntry[];
+  if (!Array.isArray(manifest.vectors)) {
+    violations.push('bad-manifest-vectors');
+    return violations;
+  }
+  const entries: ManifestEntry[] = [];
+  for (let index = 0; index < manifest.vectors.length; index++) {
+    const candidate: unknown = manifest.vectors[index];
+    if (
+      !isRecord(candidate) ||
+      typeof candidate.id !== 'string' ||
+      typeof candidate.kind !== 'string' ||
+      typeof candidate.file !== 'string'
+    ) {
+      violations.push(`bad-entry-shape:${index}`);
+      continue;
+    }
+    for (const key of Object.keys(candidate)) {
+      if (!ALLOWED_ENTRY_KEYS.has(key)) {
+        violations.push(`unknown-entry-field:${candidate.id}:${key}`);
+      }
+    }
+    entries.push({ id: candidate.id, kind: candidate.kind, file: candidate.file });
+  }
   const ids = new Set<string>();
   const files = new Set<string>();
   const byId = new Map<string, ManifestEntry>();
@@ -174,6 +199,10 @@ function validateCorpus(root: string): string[] {
   }
 
   return violations;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** Deep-diff two JSON values; returns the set of differing dotted paths. */
@@ -878,6 +907,34 @@ describe('prefix-contract fixture manifest', () => {
       vectors.set('m/a.json', { id: 'materialization-a', kind: 'materialization-vector' });
     });
     expect(validateCorpus(root)).toContain('missing-field:materialization-a:input');
+  });
+
+  it('returns stable violations for malformed top-level manifest containers', () => {
+    const root = buildCorpus(() => undefined);
+    const manifestPath = path.join(root, 'manifest.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+
+    manifest.generatedBy = null;
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    expect(validateCorpus(root)).toContain('bad-metadata:generatedBy');
+
+    manifest.generatedBy = { tool: 'test', version: 1 };
+    manifest.vectors = null;
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    expect(validateCorpus(root)).toContain('bad-manifest-vectors');
+  });
+
+  it('returns a stable violation for malformed manifest entries', () => {
+    const root = buildCorpus(() => undefined);
+    const manifestPath = path.join(root, 'manifest.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+    (manifest.vectors as unknown[])[0] = {
+      id: 'materialization-a',
+      kind: 'materialization-vector',
+      file: 42,
+    };
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    expect(validateCorpus(root)).toContain('bad-entry-shape:0');
   });
 
   it('rejects unknown invalidation mode', () => {

@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
@@ -9,21 +8,27 @@ namespace AgenticPrReview.Runtime.Canonical;
 /// Enumerates object properties with their REAL names, decoding JSON string
 /// escapes leniently so incomplete UTF-16 (lone surrogates from escaped forms)
 /// is preserved as code units. System.Text.Json refuses to decode such names
-/// through <c>JsonProperty.Name</c>, so this helper re-reads the object's raw
-/// text with a Utf8JsonReader and decodes the escapes manually.
+/// through <c>JsonProperty.Name</c>, so this helper scans the object's raw
+/// UTF-16 text directly. It does not create a second full UTF-8 copy or impose
+/// a parser depth limit, and callers can cap the number of captured entries.
 /// </summary>
 internal static class LenientJsonObjectEnumerator
 {
     internal readonly record struct Entry(string Name, bool NameValid, JsonElement Value);
 
-    internal static ImmutableArray<Entry> Enumerate(JsonElement element)
+    internal static ImmutableArray<Entry> Enumerate(JsonElement element, int maxEntries = int.MaxValue)
     {
         var raw = element.GetRawText();
-        var names = ReadPropertyNames(raw);
+        var names = ReadPropertyNames(raw, maxEntries);
         var builder = ImmutableArray.CreateBuilder<Entry>(names.Count);
         var index = 0;
         foreach (var property in element.EnumerateObject())
         {
+            if (index >= names.Count)
+            {
+                break;
+            }
+
             var (name, valid) = names[index];
             builder.Add(new Entry(name, valid, property.Value));
             index++;
@@ -32,77 +37,164 @@ internal static class LenientJsonObjectEnumerator
         return builder.ToImmutable();
     }
 
-    private static List<(string Name, bool Valid)> ReadPropertyNames(string json)
+    private static List<(string Name, bool Valid)> ReadPropertyNames(string json, int maxEntries)
     {
         var names = new List<(string Name, bool Valid)>();
-        var reader = new Utf8JsonReader(
-            Encoding.UTF8.GetBytes(json),
-            isFinalBlock: true,
-            state: new JsonReaderState(new JsonReaderOptions
-            {
-                MaxDepth = 1024,
-                AllowTrailingCommas = true,
-                CommentHandling = JsonCommentHandling.Skip,
-            }));
-        if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
+        var index = 0;
+        SkipTrivia(json, ref index);
+        if (index >= json.Length || json[index] != '{')
         {
             return names;
         }
+        index++;
 
-        while (reader.Read())
+        while (names.Count < maxEntries)
         {
-            if (reader.TokenType == JsonTokenType.EndObject)
+            SkipTrivia(json, ref index);
+            if (index >= json.Length || json[index] == '}')
+            {
+                break;
+            }
+            if (json[index] != '"')
             {
                 break;
             }
 
-            if (reader.TokenType == JsonTokenType.PropertyName)
+            var nameStart = ++index;
+            while (index < json.Length && json[index] != '"')
             {
-                var rawName = reader.HasValueSequence
-                    ? reader.ValueSequence.ToArray()
-                    : reader.ValueSpan.ToArray();
-                names.Add(DecodeStringToken(rawName));
+                if (json[index] == '\\' && index + 1 < json.Length)
+                {
+                    index += 2;
+                }
+                else
+                {
+                    index++;
+                }
+            }
+            if (index >= json.Length)
+            {
+                break;
             }
 
-            reader.Skip();
+            names.Add(DecodeStringToken(json.AsSpan(nameStart, index - nameStart)));
+            index++;
+            SkipTrivia(json, ref index);
+            if (index >= json.Length || json[index] != ':')
+            {
+                break;
+            }
+            index++;
+            SkipJsonValue(json, ref index);
+            SkipTrivia(json, ref index);
+            if (index < json.Length && json[index] == ',')
+            {
+                index++;
+                continue;
+            }
+            if (index >= json.Length || json[index] == '}')
+            {
+                break;
+            }
         }
 
         return names;
     }
 
-    /// <summary>Decodes a JSON string token's raw bytes, preserving lone surrogates.</summary>
-    private static (string Name, bool Valid) DecodeStringToken(byte[] raw)
+    private static void SkipTrivia(string json, ref int index)
     {
-        // The token may be plain UTF-8 or contain \uXXXX / simple escapes.
-        // Runs of non-escape bytes are decoded as UTF-8; escapes are decoded
-        // individually, preserving lone surrogates as code units.
+        while (index < json.Length)
+        {
+            if (char.IsWhiteSpace(json[index]))
+            {
+                index++;
+                continue;
+            }
+            if (json[index] == '/' && index + 1 < json.Length && json[index + 1] == '/')
+            {
+                index += 2;
+                while (index < json.Length && json[index] is not ('\r' or '\n')) index++;
+                continue;
+            }
+            if (json[index] == '/' && index + 1 < json.Length && json[index + 1] == '*')
+            {
+                index += 2;
+                while (index + 1 < json.Length && !(json[index] == '*' && json[index + 1] == '/')) index++;
+                index = Math.Min(index + 2, json.Length);
+                continue;
+            }
+            break;
+        }
+    }
+
+    private static void SkipJsonValue(string json, ref int index)
+    {
+        SkipTrivia(json, ref index);
+        var depth = 0;
+        var inString = false;
+        while (index < json.Length)
+        {
+            var c = json[index];
+            if (inString)
+            {
+                if (c == '\\' && index + 1 < json.Length)
+                {
+                    index += 2;
+                    continue;
+                }
+                index++;
+                if (c == '"') inString = false;
+                continue;
+            }
+
+            if (c == '"')
+            {
+                inString = true;
+                index++;
+            }
+            else if (c is '{' or '[')
+            {
+                depth++;
+                index++;
+            }
+            else if (c is '}' or ']')
+            {
+                if (depth == 0) return;
+                depth--;
+                index++;
+            }
+            else if (c == ',' && depth == 0)
+            {
+                return;
+            }
+            else if (c == '/' && index + 1 < json.Length && json[index + 1] is '/' or '*')
+            {
+                SkipTrivia(json, ref index);
+            }
+            else
+            {
+                index++;
+            }
+        }
+    }
+
+    /// <summary>Decodes a raw JSON property-name token, preserving lone surrogates.</summary>
+    private static (string Name, bool Valid) DecodeStringToken(ReadOnlySpan<char> raw)
+    {
         var builder = new StringBuilder(raw.Length);
         var valid = true;
         var i = 0;
         var runStart = 0;
 
-        void FlushRun(int end)
-        {
-            if (end > runStart)
-            {
-                var run = System.Text.Encoding.UTF8.GetString(raw, runStart, end - runStart);
-                builder.Append(run);
-                if (!IsWellFormedUtf16(run))
-                {
-                    valid = false;
-                }
-            }
-        }
-
         while (i < raw.Length)
         {
-            if (raw[i] != (byte)'\\')
+            if (raw[i] != '\\')
             {
                 i++;
                 continue;
             }
 
-            FlushRun(i);
+            AppendRun(builder, raw, runStart, i, ref valid);
 
             if (i + 1 >= raw.Length)
             {
@@ -112,7 +204,7 @@ internal static class LenientJsonObjectEnumerator
                 continue;
             }
 
-            var esc = (char)raw[i + 1];
+            var esc = raw[i + 1];
             switch (esc)
             {
                 case '"':
@@ -151,8 +243,8 @@ internal static class LenientJsonObjectEnumerator
                     var unit = (char)ParseHex4(raw, i + 2);
                     if (unit >= 0xD800 && unit <= 0xDBFF
                         && i + 11 < raw.Length
-                        && raw[i + 6] == (byte)'\\'
-                        && raw[i + 7] == (byte)'u')
+                        && raw[i + 6] == '\\'
+                        && raw[i + 7] == 'u')
                     {
                         var low = (char)ParseHex4(raw, i + 8);
                         if (low >= 0xDC00 && low <= 0xDFFF)
@@ -184,13 +276,33 @@ internal static class LenientJsonObjectEnumerator
             runStart = i;
         }
 
-        FlushRun(raw.Length);
+        AppendRun(builder, raw, runStart, raw.Length, ref valid);
         var result = builder.ToString();
         return (result, valid && IsWellFormedUtf16(result));
     }
 
+    private static void AppendRun(
+        StringBuilder builder,
+        ReadOnlySpan<char> raw,
+        int start,
+        int end,
+        ref bool valid)
+    {
+        if (end <= start)
+        {
+            return;
+        }
 
-    private static int ParseHex4(byte[] raw, int offset)
+        var run = raw[start..end];
+        builder.Append(run);
+        if (!IsWellFormedUtf16(run))
+        {
+            valid = false;
+        }
+    }
+
+
+    private static int ParseHex4(ReadOnlySpan<char> raw, int offset)
     {
         var value = 0;
         for (var i = 0; i < 4; i++)
@@ -198,9 +310,9 @@ internal static class LenientJsonObjectEnumerator
             var c = raw[offset + i];
             value = (value << 4) | (c switch
             {
-                >= (byte)'0' and <= (byte)'9' => c - '0',
-                >= (byte)'a' and <= (byte)'f' => c - 'a' + 10,
-                >= (byte)'A' and <= (byte)'F' => c - 'A' + 10,
+                >= '0' and <= '9' => c - '0',
+                >= 'a' and <= 'f' => c - 'a' + 10,
+                >= 'A' and <= 'F' => c - 'A' + 10,
                 _ => 0,
             });
         }
@@ -208,7 +320,7 @@ internal static class LenientJsonObjectEnumerator
         return value;
     }
 
-    private static bool IsWellFormedUtf16(string value)
+    private static bool IsWellFormedUtf16(ReadOnlySpan<char> value)
     {
         for (var i = 0; i < value.Length; i++)
         {

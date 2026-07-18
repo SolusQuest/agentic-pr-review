@@ -69,6 +69,18 @@ public sealed class PrefixEnvelopeValidatorTests
     }
 
     [Fact]
+    public void ParserDepthAboveOneThousandStillFailsInStructureStage()
+    {
+        string Nest(int depth) => depth == 0 ? "1" : $"[{Nest(depth - 1)}]";
+        using var doc = JsonDocument.Parse(
+            $"{{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":{Nest(1025)}}}",
+            new JsonDocumentOptions { MaxDepth = 2048 });
+        var error = PrefixEnvelopeValidator.Validate(
+            PrefixEnvelopeValidator.EnvelopeKind.Template, doc.RootElement, out _);
+        Assert.Equal("prefix_envelope_invalid", error?.Code);
+    }
+
+    [Fact]
     public void PropertyCountBoundIsEnforced()
     {
         string Obj(int n) =>
@@ -104,6 +116,32 @@ public sealed class PrefixEnvelopeValidatorTests
     {
         var error = ValidateTemplate("""{"schemaVersion":1,"schemaVersion":1,"templateVersion":3,"definition":{}}""");
         Assert.Equal("prefix_envelope_invalid", error?.Code);
+        Assert.Equal("prefix_envelope_invalid:/schemaVersion", error?.Message);
+    }
+
+    [Fact]
+    public void NumericUnknownRootFieldPrecedesInvalidUtf16Sentinel()
+    {
+        var error = ValidateTemplate(
+            """{"schemaVersion":1,"templateVersion":1,"definition":{},"\ud800":1,"2":2}""");
+        Assert.Equal("prefix_envelope_invalid:/<untrusted-property>", error?.Message);
+    }
+
+    [Fact]
+    public void ToolWrapperUnknownFieldsUseUnsignedUtf16Order()
+    {
+        var error = ValidateToolsDeep(
+            """{"schemaVersion":1,"toolsetVersion":1,"definitions":[{"name":"t","description":"d","inputSchema":{},"\ud800":1,"2":2}]}""");
+        Assert.Equal("prefix_envelope_invalid:/definitions/0/<untrusted-property>", error?.Message);
+    }
+
+    [Fact]
+    public void SchemaVersionPrecedesEnvelopeSpecificVersion()
+    {
+        using var doc = JsonDocument.Parse(
+            """{"schemaVersion":0,"policyVersion":0,"instructions":"i","constraints":{}}""");
+        var error = PrefixEnvelopeValidator.Validate(
+            PrefixEnvelopeValidator.EnvelopeKind.Policy, doc.RootElement, out _);
         Assert.Equal("prefix_envelope_invalid:/schemaVersion", error?.Message);
     }
 

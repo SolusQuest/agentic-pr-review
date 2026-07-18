@@ -32,6 +32,9 @@ internal static class PrefixFixtureLoader
         Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
         AssertExactObject(root.GetProperty("generatedBy"), "generatedBy", ("tool", JsonValueKind.String), ("version", JsonValueKind.Number));
         AssertExactObject(root.GetProperty("creationCrossCheck"), "creationCrossCheck", ("tool", JsonValueKind.String), ("version", JsonValueKind.String), ("checkedAt", JsonValueKind.String));
+        Assert.Matches(
+            "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+            root.GetProperty("creationCrossCheck").GetProperty("checkedAt").GetString()!);
         Assert.Equal(JsonValueKind.Array, root.GetProperty("vectors").ValueKind);
 
         var entries = ImmutableArray.CreateBuilder<ManifestEntry>();

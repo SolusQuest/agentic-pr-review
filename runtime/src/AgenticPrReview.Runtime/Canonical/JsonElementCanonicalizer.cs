@@ -67,7 +67,7 @@ internal static class JsonElementCanonicalizer
     /// </summary>
     private static System.Collections.Generic.List<(string Name, bool NameValid, JsonElement Value)> EnumerateProperties(
         JsonElement element,
-        System.Collections.Generic.IReadOnlyList<CanonicalPathSegment> segments)
+        int maxProperties)
     {
         var properties = new System.Collections.Generic.List<(string Name, bool NameValid, JsonElement Value)>();
         var needsLenient = false;
@@ -89,6 +89,10 @@ internal static class JsonElementCanonicalizer
             }
 
             properties.Add((name, nameValid, property.Value));
+            if (properties.Count > maxProperties)
+            {
+                return properties;
+            }
         }
 
         if (!needsLenient)
@@ -97,7 +101,7 @@ internal static class JsonElementCanonicalizer
         }
 
         properties.Clear();
-        foreach (var entry in LenientJsonObjectEnumerator.Enumerate(element))
+        foreach (var entry in LenientJsonObjectEnumerator.Enumerate(element, maxProperties + 1))
         {
             properties.Add((entry.Name, entry.NameValid, entry.Value));
         }
@@ -128,7 +132,7 @@ internal static class JsonElementCanonicalizer
 
                 var seen = new HashSet<string>(StringComparer.Ordinal);
                 var properties = new List<(string Name, bool NameValid, JsonElement Value)>();
-                foreach (var entry in EnumerateProperties(element, segments))
+                foreach (var entry in EnumerateProperties(element, maxProperties))
                 {
                     // Duplicate detection uses the real (leniently decoded) name,
                     // so two distinct invalid names never collapse into one sentinel.
