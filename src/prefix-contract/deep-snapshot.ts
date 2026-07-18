@@ -70,6 +70,18 @@ interface NodeFrame {
   readonly depth: number;
   readonly ancestors: ReadonlySet<object>;
   readonly assign: (child: unknown) => void;
+  readonly acceptDepthSummary: (summary: DepthSummary | null) => void;
+}
+
+interface DepthWitness {
+  readonly height: number;
+  readonly segment: PrefixPathSegment;
+  readonly child: DepthSummary;
+}
+
+interface DepthSummary {
+  height: number;
+  readonly witnesses: DepthWitness[];
 }
 
 interface ArrayFrame {
@@ -81,6 +93,8 @@ interface ArrayFrame {
   readonly ancestors: ReadonlySet<object>;
   readonly index: number;
   readonly length: number;
+  readonly depthSummary: DepthSummary;
+  readonly acceptDepthSummary: (summary: DepthSummary | null) => void;
 }
 
 interface ObjectFrame {
@@ -92,6 +106,8 @@ interface ObjectFrame {
   readonly ancestors: ReadonlySet<object>;
   readonly names: readonly string[];
   readonly index: number;
+  readonly depthSummary: DepthSummary;
+  readonly acceptDepthSummary: (summary: DepthSummary | null) => void;
 }
 
 type Frame = NodeFrame | ArrayFrame | ObjectFrame;
@@ -111,7 +127,7 @@ export function deepDescriptorSnapshot(
 ): SnapshotOutcome {
   const frames: Frame[] = [];
   const snapshotMemo = new WeakMap<object, unknown>();
-  const validationOnlyDone = new WeakSet<object>();
+  const completedDepthSummaries = new WeakMap<object, DepthSummary>();
   const replacementMap = new WeakMap<object, object>();
   for (const replacement of replacements ?? [])
     replacementMap.set(replacement.source, replacement.target);
@@ -144,6 +160,7 @@ export function deepDescriptorSnapshot(
       assign: (child) => {
         rootValue = child;
       },
+      acceptDepthSummary: () => {},
     });
   } else {
     const rootEntries = [...rootEntriesOverride].sort((a, b) => compareNames(a.name, b.name));
@@ -152,6 +169,7 @@ export function deepDescriptorSnapshot(
     rootValue = rootOut;
     retainSlots(rootEntries.length);
     const rootAncestors = new Set<object>([root as object]);
+    const rootDepthSummary: DepthSummary = { height: 0, witnesses: [] };
     frames.push({
       kind: 'object',
       node: root as object,
@@ -161,6 +179,8 @@ export function deepDescriptorSnapshot(
       ancestors: rootAncestors,
       names: rootEntries.map((entry) => entry.name),
       index: rootEntries.length,
+      depthSummary: rootDepthSummary,
+      acceptDepthSummary: () => {},
     });
     // Root descriptors were captured by the caller. Schedule their values in
     // ascending order without observing the root again.
@@ -174,6 +194,9 @@ export function deepDescriptorSnapshot(
         ancestors: rootAncestors,
         assign: (child) => {
           Object.defineProperty(rootOut, entry.name, { value: child, enumerable: true });
+        },
+        acceptDepthSummary: (summary) => {
+          recordChildDepth(rootDepthSummary, { name: entry.name }, summary);
         },
       });
     }
@@ -213,6 +236,7 @@ export function deepDescriptorSnapshot(
       )
         noteCanonical(segments);
       if (retaining) assign(rawNode);
+      frame.acceptDepthSummary(null);
       return null;
     }
 
@@ -221,17 +245,36 @@ export function deepDescriptorSnapshot(
     if (isCanonicalViolationMarker(node)) {
       noteCanonical(segments);
       if (retaining) assign(node);
+      frame.acceptDepthSummary({ height: 0, witnesses: [] });
       return null;
     }
     if (ancestors.has(node)) {
       noteCanonical(segments);
       if (retaining) assign(marker('cyclic'));
+      frame.acceptDepthSummary({ height: 0, witnesses: [] });
       return null;
     }
-    if (validationOnlyDone.has(node)) return null;
+    const completedDepth = completedDepthSummaries.get(node);
+    if (completedDepth !== undefined) {
+      const availableRelativeDepth = bounds.maxDepth - depth;
+      if (completedDepth.height > availableRelativeDepth) {
+        return {
+          segments: [
+            ...segments,
+            ...firstRelativePathAtDepth(completedDepth, availableRelativeDepth + 1),
+          ],
+          reason: 'depth-exceeded',
+        };
+      }
+      const memoized = snapshotMemo.get(node);
+      if (retaining && memoized !== undefined) assign(memoized);
+      frame.acceptDepthSummary(completedDepth);
+      return null;
+    }
     const memoized = snapshotMemo.get(node);
     if (memoized !== undefined) {
       if (retaining) assign(memoized);
+      frame.acceptDepthSummary({ height: 0, witnesses: [] });
       return null;
     }
 
@@ -250,6 +293,7 @@ export function deepDescriptorSnapshot(
     ) {
       noteCanonical(frame.segments);
       if (retaining) frame.assign(marker('non-plain-object'));
+      frame.acceptDepthSummary({ height: 0, witnesses: [] });
       return null;
     }
     const length = lengthDescriptor.value as number;
@@ -259,17 +303,20 @@ export function deepDescriptorSnapshot(
     if (Object.getPrototypeOf(node) !== Array.prototype) {
       noteCanonical(frame.segments);
       if (retaining) frame.assign(marker('non-plain-object'));
+      frame.acceptDepthSummary({ height: 0, witnesses: [] });
       return null;
     }
     if (keys.some((key) => typeof key === 'symbol')) {
       noteCanonical(frame.segments);
       if (retaining) frame.assign(marker('symbol-key'));
+      frame.acceptDepthSummary({ height: 0, witnesses: [] });
       return null;
     }
     for (const name of keys as string[]) {
       if (name !== 'length' && !isCanonicalArrayIndexName(name, length)) {
         noteCanonical(frame.segments);
         if (retaining) frame.assign(marker('non-plain-object'));
+        frame.acceptDepthSummary({ height: 0, witnesses: [] });
         return null;
       }
     }
@@ -282,6 +329,7 @@ export function deepDescriptorSnapshot(
       retainSlots(length);
     }
     const ancestors = new Set([...frame.ancestors, node]);
+    const depthSummary: DepthSummary = { height: 0, witnesses: [] };
     frames.push({
       kind: 'array',
       node,
@@ -291,13 +339,16 @@ export function deepDescriptorSnapshot(
       ancestors,
       index: 0,
       length,
+      depthSummary,
+      acceptDepthSummary: frame.acceptDepthSummary,
     });
     return null;
   }
 
   function continueArray(frame: ArrayFrame): void {
     if (frame.index >= frame.length) {
-      if (frame.out === undefined) validationOnlyDone.add(frame.node);
+      completedDepthSummaries.set(frame.node, frame.depthSummary);
+      frame.acceptDepthSummary(frame.depthSummary);
       return;
     }
     const index = frame.index;
@@ -324,6 +375,9 @@ export function deepDescriptorSnapshot(
       assign: (child) => {
         if (frame.out !== undefined) frame.out[index] = child;
       },
+      acceptDepthSummary: (summary) => {
+        recordChildDepth(frame.depthSummary, { name: String(index), isIndex: true }, summary);
+      },
     });
   }
 
@@ -336,11 +390,13 @@ export function deepDescriptorSnapshot(
     if (proto !== Object.prototype && proto !== null) {
       noteCanonical(frame.segments);
       if (retaining) frame.assign(marker('non-plain-object'));
+      frame.acceptDepthSummary({ height: 0, witnesses: [] });
       return null;
     }
     if (keys.some((key) => typeof key === 'symbol')) {
       noteCanonical(frame.segments);
       if (retaining) frame.assign(marker('symbol-key'));
+      frame.acceptDepthSummary({ height: 0, witnesses: [] });
       return null;
     }
 
@@ -352,6 +408,7 @@ export function deepDescriptorSnapshot(
       retainSlots(names.length);
     }
     const ancestors = new Set([...frame.ancestors, node]);
+    const depthSummary: DepthSummary = { height: 0, witnesses: [] };
     frames.push({
       kind: 'object',
       node,
@@ -361,13 +418,16 @@ export function deepDescriptorSnapshot(
       ancestors,
       names,
       index: 0,
+      depthSummary,
+      acceptDepthSummary: frame.acceptDepthSummary,
     });
     return null;
   }
 
   function continueObject(frame: ObjectFrame): void {
     if (frame.index >= frame.names.length) {
-      if (frame.out === undefined) validationOnlyDone.add(frame.node);
+      completedDepthSummaries.set(frame.node, frame.depthSummary);
+      frame.acceptDepthSummary(frame.depthSummary);
       return;
     }
     const name = frame.names[frame.index];
@@ -405,6 +465,9 @@ export function deepDescriptorSnapshot(
         if (frame.out !== undefined)
           Object.defineProperty(frame.out, name, { value: child, enumerable: true });
       },
+      acceptDepthSummary: (summary) => {
+        recordChildDepth(frame.depthSummary, { name }, summary);
+      },
     });
   }
 
@@ -414,6 +477,28 @@ export function deepDescriptorSnapshot(
     else if (value === false) addLowerBound(5);
     else if (typeof value === 'string') addLowerBound(2);
     else addLowerBound(1);
+  }
+
+  function recordChildDepth(
+    parent: DepthSummary,
+    segment: PrefixPathSegment,
+    child: DepthSummary | null,
+  ): void {
+    if (child === null) return;
+    const height = child.height + 1;
+    if (height <= parent.height) return;
+    parent.height = height;
+    parent.witnesses.push({ height, segment, child });
+  }
+
+  function firstRelativePathAtDepth(
+    summary: DepthSummary,
+    targetDepth: number,
+  ): PrefixPathSegment[] {
+    if (targetDepth === 0) return [];
+    const witness = summary.witnesses.find((candidate) => candidate.height >= targetDepth);
+    if (witness === undefined) throw new Error('missing depth witness');
+    return [witness.segment, ...firstRelativePathAtDepth(witness.child, targetDepth - 1)];
   }
 }
 

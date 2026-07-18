@@ -341,6 +341,28 @@ describe('root own-key capture is atomic', () => {
     expect(computeTemplateId(envelope).ok).toBe(true);
     expect(reads).toEqual(['definition', 'schemaVersion', 'templateVersion']);
   });
+
+  it('rejects an earlier unknown key without observing any descriptor', () => {
+    let descriptorCalls = 0;
+    const target: Record<string, unknown> = { a: 1, schemaVersion: 1, templateVersion: 1 };
+    Object.defineProperty(target, 'definition', {
+      get: () => ({}),
+      enumerable: true,
+      configurable: true,
+    });
+    const envelope = new Proxy(target, {
+      getOwnPropertyDescriptor(current, property) {
+        descriptorCalls++;
+        return Reflect.getOwnPropertyDescriptor(current, property);
+      },
+    });
+
+    expect(computeTemplateId(envelope)).toEqual({
+      ok: false,
+      errors: [{ code: 'prefix-envelope-invalid', path: '/<untrusted-property>' }],
+    });
+    expect(descriptorCalls).toBe(0);
+  });
 });
 
 describe('nested descriptor capture order', () => {
@@ -430,6 +452,61 @@ describe('bounded alias-preserving snapshots', () => {
     if (!result.ok) expect(result.errors[0].code).toBe('prefix-envelope-invalid');
   });
 
+  it('checks memoized descendants when an alias root remains at depth 64', () => {
+    const shared = { child: {} };
+    let deep: unknown = shared;
+    for (let index = 0; index < 62; index++) deep = [deep];
+    let dealiasedDeep: unknown = { child: {} };
+    for (let index = 0; index < 62; index++) dealiasedDeep = [dealiasedDeep];
+
+    const aliased = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { a: shared, b: deep },
+    });
+    const dealiased = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { a: { child: {} }, b: dealiasedDeep },
+    });
+
+    expect(aliased).toEqual(dealiased);
+    expect(aliased.ok).toBe(false);
+    if (!aliased.ok) expect(aliased.errors[0].code).toBe('prefix-envelope-invalid');
+  });
+
+  it('finds the same depth defect when the deep alias occurrence comes first', () => {
+    const shared = { child: [] };
+    let deep: unknown = shared;
+    for (let index = 0; index < 62; index++) deep = [deep];
+    const result = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { a: deep, b: shared },
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors[0].code).toBe('prefix-envelope-invalid');
+  });
+
+  it('checks memoized descendant depth after entering validation-only mode', () => {
+    const shared = { child: [] };
+    let deep: unknown = shared;
+    for (let index = 0; index < 63; index++) deep = [deep];
+    const outcome = deepDescriptorSnapshot(
+      { a: shared, b: deep },
+      {
+        maxDepth: 64,
+        maxObjectProperties: 256,
+        maxArrayItems: 1024,
+        maxRetainedCanonicalBytes: 1,
+      },
+    );
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.violation.reason).toBe('depth-exceeded');
+  });
+
   it('rejects a compact shared DAG at the canonical byte cap without expanding it in memory', () => {
     const leaf = new Array(1024).fill(0);
     const middle = new Array(1024).fill(leaf);
@@ -502,6 +579,28 @@ describe('contract-owned tool wrappers are captured once by identity', () => {
         path: '/definitions/1/name',
       });
     }
+  });
+
+  it('rejects an earlier unknown wrapper key without observing any descriptor', () => {
+    let descriptorCalls = 0;
+    const target: Record<string, unknown> = { a: 1, name: 'tool', inputSchema: {} };
+    Object.defineProperty(target, 'description', {
+      get: () => 'd',
+      enumerable: true,
+      configurable: true,
+    });
+    const tool = new Proxy(target, {
+      getOwnPropertyDescriptor(current, property) {
+        descriptorCalls++;
+        return Reflect.getOwnPropertyDescriptor(current, property);
+      },
+    });
+
+    expect(computeToolDefinitionId(envelope([tool]))).toEqual({
+      ok: false,
+      errors: [{ code: 'prefix-envelope-invalid', path: '/definitions/0/<untrusted-property>' }],
+    });
+    expect(descriptorCalls).toBe(0);
   });
 
   it('observes a shared stateful proxy wrapper only once per public call', () => {

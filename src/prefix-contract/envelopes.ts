@@ -112,9 +112,16 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
   if (rootKeys.some((key) => typeof key === 'symbol')) {
     return fail(PREFIX_CODES.envelopeInvalid);
   }
+  const allowed = new Set(REQUIRED_KEYS[kind]);
   const rootEntries: RootEntry[] = [];
   const rootNames = (rootKeys as string[]).sort(compareClosedKeys);
   for (const name of rootNames) {
+    if (!allowed.has(name)) {
+      return fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath([{ name }], kind, PREFIX_CODES.envelopeInvalid),
+      );
+    }
     const descriptor = Object.getOwnPropertyDescriptor(raw, name);
     if (descriptor === undefined) {
       return fail(
@@ -129,15 +136,6 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
       );
     }
     rootEntries.push({ name, value: descriptor.value });
-  }
-  const allowed = new Set(REQUIRED_KEYS[kind]);
-  for (const entry of rootEntries) {
-    if (!allowed.has(entry.name)) {
-      return fail(
-        PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath([{ name: entry.name }], kind, PREFIX_CODES.envelopeInvalid),
-      );
-    }
   }
   for (const required of REQUIRED_KEYS[kind]) {
     if (!rootEntries.some((entry) => entry.name === required)) {
@@ -491,12 +489,11 @@ function prepareToolDefinitions(
       tool = Object.create(null) as Record<string, unknown>;
       const sortedKeys = (wrapperKeys as string[]).sort(compareClosedKeys);
       for (const key of sortedKeys) {
-        const descriptor = Object.getOwnPropertyDescriptor(rawTool, key);
         if (
-          descriptor === undefined ||
-          'get' in descriptor ||
-          'set' in descriptor ||
-          !descriptor.enumerable
+          key !== 'description' &&
+          key !== 'inputSchema' &&
+          key !== 'name' &&
+          key !== 'policyMetadata'
         ) {
           return {
             ok: false,
@@ -506,11 +503,12 @@ function prepareToolDefinitions(
             ),
           };
         }
+        const descriptor = Object.getOwnPropertyDescriptor(rawTool, key);
         if (
-          key !== 'description' &&
-          key !== 'inputSchema' &&
-          key !== 'name' &&
-          key !== 'policyMetadata'
+          descriptor === undefined ||
+          'get' in descriptor ||
+          'set' in descriptor ||
+          !descriptor.enumerable
         ) {
           return {
             ok: false,
