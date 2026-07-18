@@ -27,7 +27,11 @@ public sealed class EcmaScriptNumberFormatterCorpusTests
             {
                 actual = EcmaScriptNumberFormatter.Format(value);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is Rfc8785CanonicalizationException
+                or ArgumentException
+                or InvalidOperationException
+                or OverflowException
+                or FormatException)
             {
                 actual = "EX:" + ex.GetType().Name;
             }

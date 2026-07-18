@@ -280,12 +280,9 @@ internal static class LenientJsonObjectEnumerator
             {
                 var cursor = group[index];
                 cursor.Current = cursor.MoveNext(out var unit) ? unit : -1;
-                if (cursor.Current >= 0)
+                if (cursor.Current >= 0 && workCounter is { } counter)
                 {
-                    if (workCounter is not null)
-                    {
-                        workCounter.CodeUnitsRead++;
-                    }
+                    counter.CodeUnitsRead++;
                 }
 
                 group[index] = cursor;
