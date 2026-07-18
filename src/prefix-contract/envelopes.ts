@@ -122,6 +122,17 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
         encodePrefixPath([{ name }], kind, PREFIX_CODES.envelopeInvalid),
       );
     }
+  }
+  const rootNameSet = new Set(rootNames);
+  for (const required of REQUIRED_KEYS[kind]) {
+    if (!rootNameSet.has(required)) {
+      return fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath([{ name: required }], kind, PREFIX_CODES.envelopeInvalid),
+      );
+    }
+  }
+  for (const name of rootNames) {
     const descriptor = Object.getOwnPropertyDescriptor(raw, name);
     if (descriptor === undefined) {
       return fail(
@@ -136,14 +147,6 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
       );
     }
     rootEntries.push({ name, value: descriptor.value });
-  }
-  for (const required of REQUIRED_KEYS[kind]) {
-    if (!rootEntries.some((entry) => entry.name === required)) {
-      return fail(
-        PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath([{ name: required }], kind, PREFIX_CODES.envelopeInvalid),
-      );
-    }
   }
 
   // Contract-owned shallow structure is validated before recursive bounds,
@@ -411,50 +414,35 @@ function prepareToolDefinitions(
     }
   }
 
-  const items: unknown[] = [];
-  for (let index = 0; index < length; index++) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
-    if (descriptor === undefined) {
-      return {
-        ok: false,
-        error: fail(
-          PREFIX_CODES.envelopeInvalid,
-          encodePrefixPath(
-            [...path, { name: String(index), isIndex: true }],
-            kind,
-            PREFIX_CODES.envelopeInvalid,
-          ),
-        ),
-      };
-    }
-    if ('get' in descriptor || 'set' in descriptor || !descriptor.enumerable) {
-      return {
-        ok: false,
-        error: fail(
-          PREFIX_CODES.envelopeInvalid,
-          encodePrefixPath(
-            [...path, { name: String(index), isIndex: true }],
-            kind,
-            PREFIX_CODES.envelopeInvalid,
-          ),
-        ),
-      };
-    }
-    items.push(descriptor.value);
-  }
-
   const names = new Set<string>();
   const prepared: Record<string, unknown>[] = [];
   const wrapperMemo = new WeakMap<object, Record<string, unknown>>();
   const replacements: { source: object; target: object }[] = [];
-  for (let index = 0; index < items.length; index++) {
+  for (let index = 0; index < length; index++) {
     const indexText = String(index);
     const wrapperPath: PrefixPathSegment[] = [
       { name: 'definitions' },
       { name: indexText, isIndex: true },
     ];
 
-    const rawTool = items[index];
+    // Capture and completely validate one wrapper before observing the next
+    // array index, preserving the frozen ascending-index defect order.
+    const itemDescriptor = Object.getOwnPropertyDescriptor(value, indexText);
+    if (
+      itemDescriptor === undefined ||
+      'get' in itemDescriptor ||
+      'set' in itemDescriptor ||
+      !itemDescriptor.enumerable
+    ) {
+      return {
+        ok: false,
+        error: fail(
+          PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath(wrapperPath, kind, PREFIX_CODES.envelopeInvalid),
+        ),
+      };
+    }
+    const rawTool = itemDescriptor.value;
     if (typeof rawTool !== 'object' || rawTool === null || Array.isArray(rawTool)) {
       return {
         ok: false,
@@ -503,6 +491,22 @@ function prepareToolDefinitions(
             ),
           };
         }
+      }
+      const wrapperKeySet = new Set(sortedKeys);
+      if (
+        !wrapperKeySet.has('name') ||
+        !wrapperKeySet.has('description') ||
+        !wrapperKeySet.has('inputSchema')
+      ) {
+        return {
+          ok: false,
+          error: fail(
+            PREFIX_CODES.envelopeInvalid,
+            encodePrefixPath(wrapperPath, kind, PREFIX_CODES.envelopeInvalid),
+          ),
+        };
+      }
+      for (const key of sortedKeys) {
         const descriptor = Object.getOwnPropertyDescriptor(rawTool, key);
         if (
           descriptor === undefined ||
@@ -522,15 +526,6 @@ function prepareToolDefinitions(
       }
       wrapperMemo.set(rawTool, tool);
       replacements.push({ source: rawTool, target: tool });
-    }
-    if (!('name' in tool) || !('description' in tool) || !('inputSchema' in tool)) {
-      return {
-        ok: false,
-        error: fail(
-          PREFIX_CODES.envelopeInvalid,
-          encodePrefixPath(wrapperPath, kind, PREFIX_CODES.envelopeInvalid),
-        ),
-      };
     }
 
     const name = tool.name;

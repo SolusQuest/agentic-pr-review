@@ -300,29 +300,29 @@ export function deepDescriptorSnapshot(
     if (length > bounds.maxArrayItems)
       return { segments: frame.segments, reason: 'array-length-exceeded' };
     const keys = Reflect.ownKeys(node);
-    if (Object.getPrototypeOf(node) !== Array.prototype) {
-      noteCanonical(frame.segments);
-      if (retaining) frame.assign(marker('non-plain-object'));
-      frame.acceptDepthSummary({ height: 0, witnesses: [] });
-      return null;
-    }
-    if (keys.some((key) => typeof key === 'symbol')) {
-      noteCanonical(frame.segments);
-      if (retaining) frame.assign(marker('symbol-key'));
-      frame.acceptDepthSummary({ height: 0, witnesses: [] });
-      return null;
-    }
-    for (const name of keys as string[]) {
-      if (name !== 'length' && !isCanonicalArrayIndexName(name, length)) {
-        noteCanonical(frame.segments);
-        if (retaining) frame.assign(marker('non-plain-object'));
-        frame.acceptDepthSummary({ height: 0, witnesses: [] });
-        return null;
-      }
-    }
+    let anomalyReason: CanonicalViolationReason | undefined;
+    if (Object.getPrototypeOf(node) !== Array.prototype) anomalyReason = 'non-plain-object';
+    else if (keys.some((key) => typeof key === 'symbol')) anomalyReason = 'symbol-key';
+    else if (
+      (keys as readonly PropertyKey[]).some(
+        (key) =>
+          typeof key === 'string' && key !== 'length' && !isCanonicalArrayIndexName(key, length),
+      )
+    )
+      anomalyReason = 'non-plain-object';
 
     addLowerBound(arrayLowerBound(length));
-    const out = retaining ? new Array<unknown>(length) : undefined;
+    const anomalyMarker = anomalyReason === undefined ? undefined : marker(anomalyReason);
+    if (anomalyMarker !== undefined) {
+      noteCanonical(frame.segments);
+      snapshotMemo.set(node, anomalyMarker);
+      if (retaining) frame.assign(anomalyMarker);
+    }
+    // Even an anomalous container must traverse its canonical index children:
+    // recursive structural bounds precede the canonical-domain verdict. The
+    // marker memo freezes the captured anomaly for later aliases while the
+    // undefined output avoids retaining a tree that can never be emitted.
+    const out = retaining && anomalyMarker === undefined ? new Array<unknown>(length) : undefined;
     if (out !== undefined) {
       frame.assign(out);
       snapshotMemo.set(node, out);
@@ -387,21 +387,25 @@ export function deepDescriptorSnapshot(
     if (names.length > bounds.maxObjectProperties)
       return { segments: frame.segments, reason: 'property-count-exceeded' };
     const proto = Object.getPrototypeOf(node);
-    if (proto !== Object.prototype && proto !== null) {
-      noteCanonical(frame.segments);
-      if (retaining) frame.assign(marker('non-plain-object'));
-      frame.acceptDepthSummary({ height: 0, witnesses: [] });
-      return null;
-    }
-    if (keys.some((key) => typeof key === 'symbol')) {
-      noteCanonical(frame.segments);
-      if (retaining) frame.assign(marker('symbol-key'));
-      frame.acceptDepthSummary({ height: 0, witnesses: [] });
-      return null;
-    }
+    const anomalyReason: CanonicalViolationReason | undefined =
+      proto !== Object.prototype && proto !== null
+        ? 'non-plain-object'
+        : keys.some((key) => typeof key === 'symbol')
+          ? 'symbol-key'
+          : undefined;
 
     addLowerBound(containerLowerBound(names.length));
-    const out: Record<string, unknown> | undefined = retaining ? Object.create(null) : undefined;
+    const anomalyMarker = anomalyReason === undefined ? undefined : marker(anomalyReason);
+    if (anomalyMarker !== undefined) {
+      noteCanonical(frame.segments);
+      snapshotMemo.set(node, anomalyMarker);
+      if (retaining) frame.assign(anomalyMarker);
+    }
+    // String data properties still participate in recursive structural
+    // validation. Symbol values are intentionally ignored, but the node's
+    // stable marker and eventual depth summary prevent any alias re-observation.
+    const out: Record<string, unknown> | undefined =
+      retaining && anomalyMarker === undefined ? Object.create(null) : undefined;
     if (out !== undefined) {
       frame.assign(out);
       snapshotMemo.set(node, out);

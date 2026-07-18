@@ -363,6 +363,28 @@ describe('root own-key capture is atomic', () => {
     });
     expect(descriptorCalls).toBe(0);
   });
+
+  it('reports a missing root key before observing allowed descriptors', () => {
+    let descriptorCalls = 0;
+    const target: Record<string, unknown> = { templateVersion: 1 };
+    Object.defineProperty(target, 'schemaVersion', {
+      get: () => 1,
+      enumerable: true,
+      configurable: true,
+    });
+    const envelope = new Proxy(target, {
+      getOwnPropertyDescriptor(current, property) {
+        descriptorCalls++;
+        return Reflect.getOwnPropertyDescriptor(current, property);
+      },
+    });
+
+    expect(computeTemplateId(envelope)).toEqual({
+      ok: false,
+      errors: [{ code: 'prefix-envelope-invalid', path: '/definition' }],
+    });
+    expect(descriptorCalls).toBe(0);
+  });
 });
 
 describe('nested descriptor capture order', () => {
@@ -603,6 +625,50 @@ describe('contract-owned tool wrappers are captured once by identity', () => {
     expect(descriptorCalls).toBe(0);
   });
 
+  it('reports a missing wrapper key before observing allowed descriptors', () => {
+    let descriptorCalls = 0;
+    const target: Record<string, unknown> = { name: 'tool' };
+    Object.defineProperty(target, 'description', {
+      get: () => 'd',
+      enumerable: true,
+      configurable: true,
+    });
+    const tool = new Proxy(target, {
+      getOwnPropertyDescriptor(current, property) {
+        descriptorCalls++;
+        return Reflect.getOwnPropertyDescriptor(current, property);
+      },
+    });
+
+    expect(computeToolDefinitionId(envelope([tool]))).toEqual({
+      ok: false,
+      errors: [{ code: 'prefix-envelope-invalid', path: '/definitions/0' }],
+    });
+    expect(descriptorCalls).toBe(0);
+  });
+
+  it('fully validates an earlier wrapper before observing the next index', () => {
+    let laterIndexReads = 0;
+    const definitions = [{ name: 'a', description: 'd', inputSchema: {}, bogus: 1 }, null];
+    Object.defineProperty(definitions, '1', {
+      get: () => null,
+      enumerable: true,
+      configurable: true,
+    });
+    const proxied = new Proxy(definitions, {
+      getOwnPropertyDescriptor(current, property) {
+        if (property === '1') laterIndexReads++;
+        return Reflect.getOwnPropertyDescriptor(current, property);
+      },
+    });
+
+    expect(computeToolDefinitionId(envelope(proxied))).toEqual({
+      ok: false,
+      errors: [{ code: 'prefix-envelope-invalid', path: '/definitions/0/<untrusted-property>' }],
+    });
+    expect(laterIndexReads).toBe(0);
+  });
+
   it('observes a shared stateful proxy wrapper only once per public call', () => {
     let ownKeysCalls = 0;
     let prototypeCalls = 0;
@@ -709,6 +775,93 @@ describe('contract-owned tool wrappers are captured once by identity', () => {
 });
 
 describe('structural caps precede canonical anomalies', () => {
+  it('finds descendant depth under a modified-prototype array', () => {
+    let deep: unknown = 0;
+    for (let index = 0; index < 64; index++) deep = [deep];
+    const definition = [deep];
+    Object.setPrototypeOf(definition, null);
+
+    const result = computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors[0].code).toBe('prefix-envelope-invalid');
+  });
+
+  it('finds descendant property count under a symbol-keyed object', () => {
+    const overCap = Object.fromEntries(
+      Array.from({ length: 257 }, (_, index) => [`k${index}`, index]),
+    );
+    const definition = { child: overCap };
+    Object.defineProperty(definition, Symbol('bad'), { value: 1, enumerable: true });
+
+    const result = computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors[0].code).toBe('prefix-envelope-invalid');
+  });
+
+  it('continues anomaly traversal after entering validation-only mode', () => {
+    let deep: unknown = 0;
+    for (let index = 0; index < 65; index++) deep = [deep];
+    const root = [deep];
+    Object.setPrototypeOf(root, null);
+
+    const outcome = deepDescriptorSnapshot(root, {
+      maxDepth: 64,
+      maxObjectProperties: 256,
+      maxArrayItems: 1024,
+      maxRetainedCanonicalBytes: 1,
+    });
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.violation.reason).toBe('depth-exceeded');
+  });
+
+  it('finds descendant property count under a validation-only symbol anomaly', () => {
+    const overCap = Object.fromEntries(
+      Array.from({ length: 257 }, (_, index) => [`k${index}`, index]),
+    );
+    const root = { child: overCap };
+    Object.defineProperty(root, Symbol('bad'), { value: 1, enumerable: true });
+
+    const outcome = deepDescriptorSnapshot(root, {
+      maxDepth: 64,
+      maxObjectProperties: 256,
+      maxArrayItems: 1024,
+      maxRetainedCanonicalBytes: 1,
+    });
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.violation.reason).toBe('property-count-exceeded');
+  });
+
+  it('observes a shared anomalous proxy once and freezes its first captured graph', () => {
+    let ownKeysCalls = 0;
+    let prototypeCalls = 0;
+    const target = { child: 1 };
+    const nonPlainPrototype = {};
+    const shared = new Proxy(target, {
+      ownKeys(current) {
+        ownKeysCalls++;
+        if (ownKeysCalls === 1) return Reflect.ownKeys(current);
+        return Array.from({ length: 257 }, (_, index) => `k${index}`);
+      },
+      getPrototypeOf(current) {
+        prototypeCalls++;
+        return prototypeCalls === 1 ? nonPlainPrototype : Reflect.getPrototypeOf(current);
+      },
+      getOwnPropertyDescriptor(current, property) {
+        return Reflect.getOwnPropertyDescriptor(current, property);
+      },
+    });
+
+    const result = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { a: shared, b: shared },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors[0].code).toBe('prefix-canonical-input-rejected');
+    expect(ownKeysCalls).toBe(1);
+    expect(prototypeCalls).toBe(1);
+  });
+
   it('rejects an over-cap open array before observing its own keys', () => {
     let ownKeysCalls = 0;
     const definition = new Proxy(new Array(1025).fill(0), {
