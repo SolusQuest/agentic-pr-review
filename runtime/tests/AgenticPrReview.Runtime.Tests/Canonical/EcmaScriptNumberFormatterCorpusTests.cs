@@ -11,7 +11,9 @@ public sealed class EcmaScriptNumberFormatterCorpusTests
     [Fact]
     public void MatchesNodeCorpus()
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "fixtures", "prefix-contract", "num-corpus.json");
+        var path = Path.GetFullPath(
+            Path.Join("fixtures", "prefix-contract", "num-corpus.json"),
+            AppContext.BaseDirectory);
         var json = File.ReadAllText(path);
         using var doc = JsonDocument.Parse(json);
         var failures = 0;

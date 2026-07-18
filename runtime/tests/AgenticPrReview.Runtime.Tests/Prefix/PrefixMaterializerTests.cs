@@ -246,12 +246,13 @@ public sealed class PrefixMaterializerInputGuardTests
     {
         var vector = PrefixFixtureLoader.LoadVector("materialization/bootstrap.json");
         var input = PrefixFixtureLoader.BuildMaterializeInput(vector.GetProperty("input"));
-        foreach (var invalid in new[] { "\uD800", "\uDC00", new string('x', 1_000_000) })
-        {
-            var outcome = PrefixMaterializer.Materialize(input with
+        var outcomes = new[] { "\uD800", "\uDC00", new string('x', 1_000_000) }
+            .Select(invalid => PrefixMaterializer.Materialize(input with
             {
                 ExpectedIdentities = input.ExpectedIdentities with { ProviderId = invalid },
-            });
+            }));
+        foreach (var outcome in outcomes)
+        {
             Assert.Equal("prefix_identity_invalid", Assert.Single(outcome.Diagnostics).Code);
         }
     }

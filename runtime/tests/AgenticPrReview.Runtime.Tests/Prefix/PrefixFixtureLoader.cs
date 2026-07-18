@@ -19,13 +19,15 @@ namespace AgenticPrReview.Runtime.Tests.Prefix;
 internal static class PrefixFixtureLoader
 {
     internal static readonly string FixtureRoot =
-        Path.Combine(AppContext.BaseDirectory, "protocol", "fixtures", "prefix-contract", "v1");
+        Path.GetFullPath(
+            Path.Join("protocol", "fixtures", "prefix-contract", "v1"),
+            AppContext.BaseDirectory);
 
     internal sealed record ManifestEntry(string Id, string Kind, string File);
 
     internal static ImmutableArray<ManifestEntry> LoadManifest()
     {
-        var manifestPath = Path.Combine(FixtureRoot, "manifest.json");
+        var manifestPath = ResolveFixturePath("manifest.json");
         using var doc = JsonDocument.Parse(File.ReadAllText(manifestPath));
         var root = doc.RootElement;
         AssertAllowedKeys(root, "schemaVersion", "generatedBy", "creationCrossCheck", "vectors");
@@ -107,8 +109,22 @@ internal static class PrefixFixtureLoader
 
     internal static JsonElement LoadVector(string relative)
     {
-        var text = File.ReadAllText(Path.Combine(FixtureRoot, relative));
+        var text = File.ReadAllText(ResolveFixturePath(relative));
         return JsonDocument.Parse(text).RootElement.Clone();
+    }
+
+    private static string ResolveFixturePath(string relativePath)
+    {
+        var normalizedRoot = Path.GetFullPath(FixtureRoot)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var resolved = Path.GetFullPath(relativePath, normalizedRoot);
+        var rootBoundary = normalizedRoot + Path.DirectorySeparatorChar;
+        if (!resolved.StartsWith(rootBoundary, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("Fixture path escapes the fixture root.");
+        }
+
+        return resolved;
     }
 
     private static void AssertVectorShape(ManifestEntry entry, JsonElement vector)
