@@ -563,10 +563,27 @@ describe('first-defect ordering and descriptor safety', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('rejects a throwing definitions-array proxy without throwing', () => {
+  it('a get-trap proxy is read through descriptors only (trap never fires)', () => {
+    let invoked = false;
     const proxy = new Proxy([{ name: 'a', description: 'd', inputSchema: {} }], {
       get() {
+        invoked = true;
         throw new Error('proxy trap');
+      },
+    });
+    const result = computeToolDefinitionId({
+      schemaVersion: 1,
+      toolsetVersion: 1,
+      definitions: proxy,
+    });
+    expect(invoked).toBe(false);
+    expect(result.ok).toBe(true);
+  });
+
+  it('a descriptor-throwing proxy yields a typed failure without escaping', () => {
+    const proxy = new Proxy([{ name: 'a', description: 'd', inputSchema: {} }], {
+      getOwnPropertyDescriptor() {
+        throw new Error('descriptor trap');
       },
     });
     const result = computeToolDefinitionId({
