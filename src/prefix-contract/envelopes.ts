@@ -356,25 +356,6 @@ function prepareToolDefinitions(
       ),
     };
   }
-  if (Object.getPrototypeOf(value) !== Array.prototype) {
-    return {
-      ok: false,
-      error: fail(
-        PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath(path, kind, PREFIX_CODES.envelopeInvalid),
-      ),
-    };
-  }
-  const keys = Reflect.ownKeys(value);
-  if (keys.some((key) => typeof key === 'symbol')) {
-    return {
-      ok: false,
-      error: fail(
-        PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath(path, kind, PREFIX_CODES.envelopeInvalid),
-      ),
-    };
-  }
   const lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length');
   if (
     lengthDescriptor === undefined ||
@@ -393,6 +374,25 @@ function prepareToolDefinitions(
   }
   const length = lengthDescriptor.value;
   if (length > MAX_TOOL_DEFINITIONS) {
+    return {
+      ok: false,
+      error: fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath(path, kind, PREFIX_CODES.envelopeInvalid),
+      ),
+    };
+  }
+  const keys = Reflect.ownKeys(value);
+  if (Object.getPrototypeOf(value) !== Array.prototype) {
+    return {
+      ok: false,
+      error: fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath(path, kind, PREFIX_CODES.envelopeInvalid),
+      ),
+    };
+  }
+  if (keys.some((key) => typeof key === 'symbol')) {
     return {
       ok: false,
       error: fail(

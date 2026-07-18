@@ -610,6 +610,36 @@ describe('contract-owned tool wrappers are captured once by identity', () => {
 });
 
 describe('structural caps precede canonical anomalies', () => {
+  it('rejects an over-cap open array before observing its own keys', () => {
+    let ownKeysCalls = 0;
+    const definition = new Proxy(new Array(1025).fill(0), {
+      ownKeys(target) {
+        ownKeysCalls++;
+        return Reflect.ownKeys(target);
+      },
+    });
+
+    const result = computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors[0].code).toBe('prefix-envelope-invalid');
+    expect(ownKeysCalls).toBe(0);
+  });
+
+  it('rejects over-cap tool definitions before observing their own keys', () => {
+    let ownKeysCalls = 0;
+    const definitions = new Proxy(new Array(65).fill(null), {
+      ownKeys(target) {
+        ownKeysCalls++;
+        return Reflect.ownKeys(target);
+      },
+    });
+
+    const result = computeToolDefinitionId({ schemaVersion: 1, toolsetVersion: 1, definitions });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors[0].code).toBe('prefix-envelope-invalid');
+    expect(ownKeysCalls).toBe(0);
+  });
+
   it('array length wins over symbol keys and modified prototypes', () => {
     const withSymbol = new Array(1025).fill(0);
     Object.defineProperty(withSymbol, Symbol('bad'), { value: 1, enumerable: true });

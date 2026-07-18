@@ -117,4 +117,20 @@ public sealed class LenientJsonObjectEnumeratorTests
             Assert.True(LenientJsonObjectEnumerator.CompareClosedNames(entries[0], entries[3]) < 0);
         }
     }
+
+    [Fact]
+    public void EnumerationAnalyzesOnlyEntriesThatAreConsumed()
+    {
+        var lateName = new string('x', 1_000_000);
+        using var document = JsonDocument.Parse("{\"a\":1," + JsonSerializer.Serialize(lateName) + ":2}");
+        var counter = new LenientJsonObjectEnumerator.TokenWorkCounter();
+
+        using var enumerator = LenientJsonObjectEnumerator
+            .Enumerate(document.RootElement, workCounter: counter)
+            .GetEnumerator();
+
+        Assert.True(enumerator.MoveNext());
+        Assert.Equal(1, counter.CodeUnitsRead);
+        Assert.Equal(0, LenientJsonObjectEnumerator.CompareNameTo(enumerator.Current, "a"));
+    }
 }

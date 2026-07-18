@@ -240,7 +240,6 @@ export function deepDescriptorSnapshot(
   }
 
   function startArray(node: unknown[], frame: NodeFrame): SnapshotStructuralViolation | null {
-    const keys = Reflect.ownKeys(node);
     const lengthDescriptor = Object.getOwnPropertyDescriptor(node, 'length');
     if (
       lengthDescriptor === undefined ||
@@ -256,6 +255,7 @@ export function deepDescriptorSnapshot(
     const length = lengthDescriptor.value as number;
     if (length > bounds.maxArrayItems)
       return { segments: frame.segments, reason: 'array-length-exceeded' };
+    const keys = Reflect.ownKeys(node);
     if (Object.getPrototypeOf(node) !== Array.prototype) {
       noteCanonical(frame.segments);
       if (retaining) frame.assign(marker('non-plain-object'));

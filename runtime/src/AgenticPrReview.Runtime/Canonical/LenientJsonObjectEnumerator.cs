@@ -44,9 +44,7 @@ internal static class LenientJsonObjectEnumerator
         int maxEntries = int.MaxValue,
         TokenWorkCounter? workCounter = null)
     {
-        var entries = new List<Entry>();
         var count = 0;
-        var containerRaw = JsonMarshal.GetRawUtf8Value(element);
         foreach (var property in element.EnumerateObject())
         {
             if (count >= maxEntries)
@@ -55,20 +53,8 @@ internal static class LenientJsonObjectEnumerator
             }
 
             count++;
-            var rawName = JsonMarshal.GetRawUtf8PropertyName(property);
-            if (!containerRaw.Overlaps(rawName, out var rawNameOffset))
-            {
-                throw new JsonException("Property-name token is outside its containing object.");
-            }
-            entries.Add(new Entry(
-                property,
-                element,
-                rawNameOffset,
-                rawName.Length,
-                AnalyzeToken(rawName, workCounter)));
+            yield return CreateEntry(element, property, workCounter);
         }
-
-        return entries;
     }
 
     internal static ReadOnlySpan<byte> RawName(Entry entry) =>
@@ -158,6 +144,26 @@ internal static class LenientJsonObjectEnumerator
     }
 
     internal static Utf16TokenEnumerator EnumerateRawToken(ReadOnlySpan<byte> raw) => new(raw);
+
+    private static Entry CreateEntry(
+        JsonElement container,
+        JsonProperty property,
+        TokenWorkCounter? workCounter)
+    {
+        var containerRaw = JsonMarshal.GetRawUtf8Value(container);
+        var rawName = JsonMarshal.GetRawUtf8PropertyName(property);
+        if (!containerRaw.Overlaps(rawName, out var rawNameOffset))
+        {
+            throw new JsonException("Property-name token is outside its containing object.");
+        }
+
+        return new Entry(
+            property,
+            container,
+            rawNameOffset,
+            rawName.Length,
+            AnalyzeToken(rawName, workCounter));
+    }
 
     private static TokenMetadata AnalyzeToken(
         ReadOnlySpan<byte> raw,
