@@ -63,6 +63,17 @@ export function isCanonicalArrayIndexName(name: string, length: number): boolean
   return /^(?:0|[1-9]\d*)$/.test(name) && Number(name) < length;
 }
 
+/** The ECMAScript array-length value domain, excluding observable negative zero. */
+export function isValidArrayLengthValue(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= 0xffff_ffff &&
+    !Object.is(value, -0)
+  );
+}
+
 interface NodeFrame {
   readonly kind: 'node';
   readonly value: unknown;
@@ -288,15 +299,18 @@ export function deepDescriptorSnapshot(
       lengthDescriptor === undefined ||
       lengthDescriptor.enumerable ||
       'get' in lengthDescriptor ||
-      'set' in lengthDescriptor ||
-      typeof lengthDescriptor.value !== 'number'
+      'set' in lengthDescriptor
     ) {
       noteCanonical(frame.segments);
-      if (retaining) frame.assign(marker('non-plain-object'));
-      frame.acceptDepthSummary({ height: 0, witnesses: [] });
+      completeTerminalArrayAnomaly(node, frame);
       return null;
     }
-    const length = lengthDescriptor.value as number;
+    if (!isValidArrayLengthValue(lengthDescriptor.value)) {
+      noteCanonical(frame.segments);
+      completeTerminalArrayAnomaly(node, frame);
+      return null;
+    }
+    const length = lengthDescriptor.value;
     if (length > bounds.maxArrayItems)
       return { segments: frame.segments, reason: 'array-length-exceeded' };
     const keys = Reflect.ownKeys(node);
@@ -343,6 +357,15 @@ export function deepDescriptorSnapshot(
       acceptDepthSummary: frame.acceptDepthSummary,
     });
     return null;
+  }
+
+  function completeTerminalArrayAnomaly(node: unknown[], frame: NodeFrame): void {
+    const anomalyMarker = marker('non-plain-object');
+    const depthSummary: DepthSummary = { height: 0, witnesses: [] };
+    snapshotMemo.set(node, anomalyMarker);
+    completedDepthSummaries.set(node, depthSummary);
+    if (retaining) frame.assign(anomalyMarker);
+    frame.acceptDepthSummary(depthSummary);
   }
 
   function continueArray(frame: ArrayFrame): void {

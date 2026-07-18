@@ -774,6 +774,130 @@ describe('contract-owned tool wrappers are captured once by identity', () => {
   });
 });
 
+describe('array length descriptor domain', () => {
+  const invalidLengths: readonly [label: string, value: number][] = [
+    ['fractional-half', 0.5],
+    ['fractional-one-and-half', 1.5],
+    ['nan', Number.NaN],
+    ['negative', -1],
+    ['negative-zero', -0],
+  ];
+
+  const withReportedLength = <T>(array: T[], reportedLength: number): T[] =>
+    new Proxy(array, {
+      getOwnPropertyDescriptor(target, property) {
+        const descriptor = Reflect.getOwnPropertyDescriptor(target, property);
+        if (property !== 'length' || descriptor === undefined) return descriptor;
+        return { ...descriptor, value: reportedLength };
+      },
+    });
+
+  for (const [label, invalidLength] of invalidLengths) {
+    it(`rejects ${label} for contract-owned definitions without a digest`, () => {
+      const tool = { name: 'tool', description: 'd', inputSchema: {} };
+      const valid = computeToolDefinitionId({
+        schemaVersion: 1,
+        toolsetVersion: 1,
+        definitions: [tool],
+      });
+      const invalid = computeToolDefinitionId({
+        schemaVersion: 1,
+        toolsetVersion: 1,
+        definitions: withReportedLength([tool], invalidLength),
+      });
+
+      expect(valid.ok).toBe(true);
+      expect(invalid).toEqual({
+        ok: false,
+        errors: [{ code: 'prefix-envelope-invalid', path: '/definitions' }],
+      });
+    });
+
+    it(`reports ${label} open-array length as a pathful canonical defect`, () => {
+      const definition = withReportedLength([1], invalidLength);
+      expect(computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition })).toEqual({
+        ok: false,
+        errors: [{ code: 'prefix-canonical-input-rejected', path: '/definition' }],
+      });
+    });
+
+    it(`preserves ${label} canonical classification in validation-only mode`, () => {
+      const root = { a: 'force-validation-only', b: withReportedLength([1], invalidLength) };
+      const outcome = deepDescriptorSnapshot(root, {
+        maxDepth: 64,
+        maxObjectProperties: 256,
+        maxArrayItems: 1024,
+        maxRetainedCanonicalBytes: 1,
+      });
+
+      expect(outcome.ok).toBe(true);
+      if (outcome.ok) {
+        expect(outcome.retentionExceeded).toBe(true);
+        expect(outcome.canonicalViolation?.segments).toEqual([{ name: 'b' }]);
+      }
+    });
+  }
+
+  it('rejects an invalid definitions length before own keys or index descriptors', () => {
+    let lengthReads = 0;
+    let ownKeysCalls = 0;
+    let indexReads = 0;
+    const tool = { name: 'tool', description: 'd', inputSchema: {} };
+    const definitions = new Proxy([tool], {
+      ownKeys(target) {
+        ownKeysCalls++;
+        return Reflect.ownKeys(target);
+      },
+      getOwnPropertyDescriptor(target, property) {
+        const descriptor = Reflect.getOwnPropertyDescriptor(target, property);
+        if (property === 'length' && descriptor !== undefined) {
+          lengthReads++;
+          return { ...descriptor, value: 0.5 };
+        }
+        if (property === '0') indexReads++;
+        return descriptor;
+      },
+    });
+
+    expect(computeToolDefinitionId({ schemaVersion: 1, toolsetVersion: 1, definitions })).toEqual({
+      ok: false,
+      errors: [{ code: 'prefix-envelope-invalid', path: '/definitions' }],
+    });
+    expect(lengthReads).toBe(1);
+    expect(ownKeysCalls).toBe(0);
+    expect(indexReads).toBe(0);
+  });
+
+  it('memoizes a shared invalid-length array without observing it twice', () => {
+    let lengthReads = 0;
+    let ownKeysCalls = 0;
+    const shared = new Proxy([1], {
+      ownKeys(target) {
+        ownKeysCalls++;
+        return Reflect.ownKeys(target);
+      },
+      getOwnPropertyDescriptor(target, property) {
+        const descriptor = Reflect.getOwnPropertyDescriptor(target, property);
+        if (property === 'length' && descriptor !== undefined) {
+          lengthReads++;
+          return { ...descriptor, value: 1.5 };
+        }
+        return descriptor;
+      },
+    });
+
+    const result = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { a: shared, b: shared },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors[0].code).toBe('prefix-canonical-input-rejected');
+    expect(lengthReads).toBe(1);
+    expect(ownKeysCalls).toBe(0);
+  });
+});
+
 describe('structural caps precede canonical anomalies', () => {
   it('finds descendant depth under a modified-prototype array', () => {
     let deep: unknown = 0;

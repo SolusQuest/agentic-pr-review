@@ -7,6 +7,7 @@ import {
   deepDescriptorSnapshot,
   isCanonicalArrayIndexName,
   isCanonicalViolationMarker,
+  isValidArrayLengthValue,
   canonicalViolationReason,
 } from './deep-snapshot.js';
 import { isValidIdentity } from './identity.js';
@@ -363,7 +364,7 @@ function prepareToolDefinitions(
     lengthDescriptor.enumerable ||
     'get' in lengthDescriptor ||
     'set' in lengthDescriptor ||
-    typeof lengthDescriptor.value !== 'number'
+    !isValidArrayLengthValue(lengthDescriptor.value)
   ) {
     return {
       ok: false,
