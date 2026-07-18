@@ -255,6 +255,19 @@ describe('root own-key capture is atomic', () => {
   });
 });
 
+describe('bounded alias-preserving snapshots', () => {
+  it('rejects a compact shared DAG at the canonical byte cap without expanding it in memory', () => {
+    const leaf = new Array(1024).fill(0);
+    const middle = new Array(1024).fill(leaf);
+    const definition = new Array(1024).fill(middle);
+
+    expect(computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition })).toEqual({
+      ok: false,
+      errors: [{ code: 'prefix-envelope-too-large' }],
+    });
+  });
+});
+
 describe('marker brand never collides with legitimate open JSON', () => {
   it('a caller object shaped like the old marker is plain data', () => {
     for (const reason of ['cyclic', 'non-plain-object', 'arbitrary-user-string']) {

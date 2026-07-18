@@ -202,6 +202,7 @@ export type CanonicalScanViolation = {
 };
 
 export function scanCanonicalDomainAndBounds(root: unknown): CanonicalScanViolation | null {
+  const validated = new WeakSet<object>();
   return scan(root, [], new Set<object>());
 
   function scan(
@@ -228,6 +229,12 @@ export function scanCanonicalDomainAndBounds(root: unknown): CanonicalScanViolat
     }
     if (isCanonicalViolationMarker(value)) {
       return { segments, reason: canonicalViolationReason(value) };
+    }
+    if (validated.has(value)) {
+      // The descriptor snapshot preserves legal DAG aliases. Once a snapshot
+      // node has been fully validated, later non-ancestor occurrences have
+      // identical content and need not be rescanned.
+      return null;
     }
     ancestors.add(value);
     try {
@@ -285,6 +292,7 @@ export function scanCanonicalDomainAndBounds(root: unknown): CanonicalScanViolat
             return child;
           }
         }
+        validated.add(value);
         return null;
       }
 
@@ -315,6 +323,7 @@ export function scanCanonicalDomainAndBounds(root: unknown): CanonicalScanViolat
           return child;
         }
       }
+      validated.add(value);
       return null;
     } finally {
       ancestors.delete(value);

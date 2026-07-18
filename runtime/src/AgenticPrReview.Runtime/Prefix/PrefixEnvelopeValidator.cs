@@ -92,26 +92,23 @@ internal static class PrefixEnvelopeValidator
                     return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, segments));
                 }
 
-                var count = 0;
-                foreach (var property in value.EnumerateObject())
+                var properties = new List<LenientJsonObjectEnumerator.Entry>();
+                foreach (var property in LenientJsonObjectEnumerator.Enumerate(value))
                 {
-                    count++;
-                    if (count > PrefixBounds.MaxEnvelopeObjectProperties)
+                    properties.Add(property);
+                    if (properties.Count > PrefixBounds.MaxEnvelopeObjectProperties)
                     {
                         return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, segments));
                     }
-
-                    // A property name that cannot be decoded is a canonical-domain
-                    // defect owned by the canonical stage; keep descending with the
-                    // sentinel so bounds below it are still evaluated.
-                    if (!TryReadPropertyName(property, out var childName))
-                    {
-                        childName = JsonElementCanonicalizer.InvalidNameSentinel;
-                    }
-
+                }
+                properties.Sort((left, right) => StringComparer.Ordinal.Compare(left.Name, right.Name));
+                // LIFO: push the reverse of the required unsigned UTF-16 order.
+                for (var i = properties.Count - 1; i >= 0; i--)
+                {
+                    var property = properties[i];
                     var child = new System.Collections.Generic.List<CanonicalPathSegment>(segments)
                     {
-                        CanonicalPathSegment.Property(childName),
+                        CanonicalPathSegment.Property(property.Name),
                     };
                     stack.Push((property.Value, depth + 1, child));
                 }
@@ -123,40 +120,28 @@ internal static class PrefixEnvelopeValidator
                     return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, segments));
                 }
 
-                var index = 0;
+                var items = new List<JsonElement>();
                 foreach (var item in value.EnumerateArray())
                 {
-                    if (index >= PrefixBounds.MaxEnvelopeArrayItems)
+                    if (items.Count >= PrefixBounds.MaxEnvelopeArrayItems)
                     {
                         return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, segments));
                     }
-
+                    items.Add(item);
+                }
+                // LIFO: push descending so indices are visited ascending.
+                for (var index = items.Count - 1; index >= 0; index--)
+                {
                     var child = new System.Collections.Generic.List<CanonicalPathSegment>(segments)
                     {
                         CanonicalPathSegment.Index(index),
                     };
-                    stack.Push((item, depth + 1, child));
-                    index++;
+                    stack.Push((items[index], depth + 1, child));
                 }
             }
         }
 
         return null;
-    }
-
-    /// <summary>Reads a property name without throwing on incomplete UTF-16.</summary>
-    private static bool TryReadPropertyName(JsonProperty property, out string name)
-    {
-        try
-        {
-            name = property.Name;
-            return true;
-        }
-        catch (InvalidOperationException)
-        {
-            name = string.Empty;
-            return false;
-        }
     }
 
     /// <summary>Stage 3: embedded identity semantics (tool names, adapterBuildVersion).</summary>
@@ -339,15 +324,9 @@ internal static class PrefixEnvelopeValidator
 
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var allowedSet = new HashSet<string>(allowed, StringComparer.Ordinal);
-        foreach (var property in envelope.EnumerateObject())
+        foreach (var property in LenientJsonObjectEnumerator.Enumerate(envelope))
         {
-            // A property name that cannot be decoded is owned by the canonical
-            // stage; it is not evaluated as a key here.
-            if (!TryReadPropertyName(property, out var propertyName))
-            {
-                continue;
-            }
-
+            var propertyName = property.Name;
             if (!seen.Add(propertyName))
             {
                 return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property(propertyName) }));
@@ -502,13 +481,9 @@ internal static class PrefixEnvelopeValidator
             }
 
             var seen = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var property in tool.EnumerateObject())
+            foreach (var property in LenientJsonObjectEnumerator.Enumerate(tool))
             {
-                if (!TryReadPropertyName(property, out var wrapperName))
-                {
-                    continue;
-                }
-
+                var wrapperName = property.Name;
                 if (!seen.Add(wrapperName))
                 {
                     return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions"), CanonicalPathSegment.Index(indexText), CanonicalPathSegment.Property(wrapperName) }));

@@ -355,6 +355,81 @@ describe('identity validation', () => {
 });
 
 describe('canonical traversal determinism and accepted domain', () => {
+  const tooManyProperties = () =>
+    Object.fromEntries(Array.from({ length: 257 }, (_, index) => [`k${index}`, index]));
+
+  it('checks structural object branches in unsigned UTF-16 order regardless of insertion order', () => {
+    for (const definition of [
+      { z: [0, tooManyProperties()], a: [tooManyProperties()] },
+      { a: [tooManyProperties()], z: [0, tooManyProperties()] },
+    ]) {
+      expect(computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition })).toEqual({
+        ok: false,
+        errors: [
+          { code: PREFIX_CODES.envelopeInvalid, path: '/definition/<untrusted-property>/0' },
+        ],
+      });
+    }
+  });
+
+  it('sorts numeric-looking object keys lexically rather than by JS integer-index order', () => {
+    const definition = { '2': [0, tooManyProperties()], '10': [tooManyProperties()] };
+    expect(computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition })).toEqual({
+      ok: false,
+      errors: [{ code: PREFIX_CODES.envelopeInvalid, path: '/definition/<untrusted-property>/0' }],
+    });
+  });
+
+  it('checks structural array branches in ascending index order', () => {
+    const definition = [tooManyProperties(), [tooManyProperties()]];
+    expect(computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition })).toEqual({
+      ok: false,
+      errors: [{ code: PREFIX_CODES.envelopeInvalid, path: '/definition/0' }],
+    });
+  });
+
+  it('contract-owned field defects beat nested structural bounds in the same tool', () => {
+    let deep: unknown = 0;
+    for (let depth = 0; depth < 65; depth++) {
+      deep = [deep];
+    }
+    expect(
+      computeToolDefinitionId({
+        schemaVersion: 1,
+        toolsetVersion: 1,
+        definitions: [{ name: 't', description: 42, inputSchema: { deep } }],
+      }),
+    ).toEqual({
+      ok: false,
+      errors: [{ code: PREFIX_CODES.envelopeInvalid, path: '/definitions/0/description' }],
+    });
+  });
+
+  it('invalid UTF-16 names in closed roots and tool wrappers stay in the structure stage', () => {
+    const invalidName = String.fromCharCode(0xd800);
+    expect(
+      computeTemplateId({
+        schemaVersion: 1,
+        templateVersion: 1,
+        definition: {},
+        [invalidName]: 1,
+      }),
+    ).toEqual({
+      ok: false,
+      errors: [{ code: PREFIX_CODES.envelopeInvalid, path: '/<invalid-utf16>' }],
+    });
+    expect(
+      computeToolDefinitionId({
+        schemaVersion: 1,
+        toolsetVersion: 1,
+        definitions: [{ name: 't', description: 'd', inputSchema: {}, [invalidName]: 1 }],
+      }),
+    ).toEqual({
+      ok: false,
+      errors: [{ code: PREFIX_CODES.envelopeInvalid, path: '/definitions/0/<invalid-utf16>' }],
+    });
+  });
+
   it('reports the first violation in array-index order', () => {
     const result = computeTemplateId({
       schemaVersion: 1,

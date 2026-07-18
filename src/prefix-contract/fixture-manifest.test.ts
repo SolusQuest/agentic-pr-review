@@ -216,46 +216,32 @@ const ENVELOPE_DIGEST_FIELD: Record<string, string> = {
   adapter: 'adapterId',
 };
 
+function envelopeMutation(diffs: string[], envelopeName: string, digestField: string): boolean {
+  const envelopePrefix = `envelopes.${envelopeName}.`;
+  const digestPath = `expectedIdentities.${digestField}`;
+  return (
+    diffs.some(
+      (diff) => diff.startsWith(envelopePrefix) && diff !== `${envelopePrefix}schemaVersion`,
+    ) &&
+    diffs.includes(digestPath) &&
+    diffs.every(
+      (diff) =>
+        (diff.startsWith(envelopePrefix) && diff !== `${envelopePrefix}schemaVersion`) ||
+        diff === digestPath,
+    )
+  );
+}
+
 /** Exact per-mutation diff predicates (no prefix wildcards). */
 const MUTATION_DIFF_PREDICATES: Record<string, (diffs: string[]) => boolean> = {
   providerId: (d) => d.length === 1 && d[0] === 'expectedIdentities.providerId',
   modelId: (d) => d.length === 1 && d[0] === 'expectedIdentities.modelId',
-  'adapter envelope content/version': (d) =>
-    d.length > 0 &&
-    d.every(
-      (diff) =>
-        (diff.startsWith('envelopes.adapter.') && diff !== 'envelopes.adapter.schemaVersion') ||
-        diff === 'expectedIdentities.adapterId',
-    ),
+  'adapter envelope content/version': (d) => envelopeMutation(d, 'adapter', 'adapterId'),
   'cache-config envelope content/version': (d) =>
-    d.length > 0 &&
-    d.every(
-      (diff) =>
-        (diff.startsWith('envelopes.cacheConfig.') &&
-          diff !== 'envelopes.cacheConfig.schemaVersion') ||
-        diff === 'expectedIdentities.cacheConfigId',
-    ),
-  'template envelope content/version': (d) =>
-    d.length > 0 &&
-    d.every(
-      (diff) =>
-        (diff.startsWith('envelopes.template.') && diff !== 'envelopes.template.schemaVersion') ||
-        diff === 'expectedIdentities.templateId',
-    ),
-  'policy envelope content/version': (d) =>
-    d.length > 0 &&
-    d.every(
-      (diff) =>
-        (diff.startsWith('envelopes.policy.') && diff !== 'envelopes.policy.schemaVersion') ||
-        diff === 'expectedIdentities.policyId',
-    ),
-  'tools envelope content/version/order': (d) =>
-    d.length > 0 &&
-    d.every(
-      (diff) =>
-        (diff.startsWith('envelopes.tools.') && diff !== 'envelopes.tools.schemaVersion') ||
-        diff === 'expectedIdentities.toolDefinitionId',
-    ),
+    envelopeMutation(d, 'cacheConfig', 'cacheConfigId'),
+  'template envelope content/version': (d) => envelopeMutation(d, 'template', 'templateId'),
+  'policy envelope content/version': (d) => envelopeMutation(d, 'policy', 'policyId'),
+  'tools envelope content/version/order': (d) => envelopeMutation(d, 'tools', 'toolDefinitionId'),
   'any envelope schemaVersion': (d) => {
     if (d.length !== 2) {
       return false;
@@ -304,7 +290,7 @@ function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknow
     container: unknown,
     label: string,
     keys: string[],
-    valueKind: 'string' | 'number',
+    valueKind: 'string' | 'number' | 'boolean',
   ) => {
     if (typeof container !== 'object' || container === null) {
       violations.push(`bad-shape:${entry.id}:${label}`);
@@ -338,16 +324,122 @@ function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknow
       }
     }
   };
+  const exactObject = (
+    container: unknown,
+    label: string,
+    fields: Record<string, 'string' | 'number' | 'boolean' | 'object' | 'array'>,
+    optional: Record<string, 'string' | 'number' | 'boolean' | 'object' | 'array'> = {},
+  ): Record<string, unknown> | undefined => {
+    if (typeof container !== 'object' || container === null || Array.isArray(container)) {
+      violations.push(`bad-shape:${entry.id}:${label}`);
+      return undefined;
+    }
+    const record = container as Record<string, unknown>;
+    const matches = (value: unknown, kind: string) =>
+      kind === 'array'
+        ? Array.isArray(value)
+        : kind === 'object'
+          ? typeof value === 'object' && value !== null && !Array.isArray(value)
+          : typeof value === kind;
+    for (const [key, kind] of Object.entries(fields)) {
+      if (!(key in record) || !matches(record[key], kind)) {
+        violations.push(`bad-shape:${entry.id}:${label}.${key}`);
+      }
+    }
+    for (const [key, kind] of Object.entries(optional)) {
+      if (key in record && !matches(record[key], kind)) {
+        violations.push(`bad-shape:${entry.id}:${label}.${key}`);
+      }
+    }
+    const allowed = new Set([...Object.keys(fields), ...Object.keys(optional)]);
+    for (const key of Object.keys(record)) {
+      if (!allowed.has(key)) {
+        violations.push(`unknown-field:${entry.id}:${label}.${key}`);
+      }
+    }
+    return record;
+  };
+  const hexField = (container: unknown, key: string, label = key, exactLength?: number) => {
+    const value = (container as Record<string, unknown> | undefined)?.[key];
+    if (
+      typeof value !== 'string' ||
+      value.length % 2 !== 0 ||
+      !HEX.test(value) ||
+      (exactLength !== undefined && value.length !== exactLength)
+    ) {
+      violations.push(`bad-hex:${entry.id}:${label}`);
+    }
+  };
+  const nonnegativeIntegerField = (container: unknown, key: string, label = key) => {
+    const value = (container as Record<string, unknown> | undefined)?.[key];
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+      violations.push(`bad-integer:${entry.id}:${label}`);
+    }
+  };
 
   switch (entry.kind) {
-    case 'framing-vector':
+    case 'framing-vector': {
       require(['input', 'expected']);
+      const input = vector.input;
+      if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+        violations.push(`bad-shape:${entry.id}:input`);
+        break;
+      }
+      const keys = Object.keys(input);
+      if (keys.length === 1 && keys[0] === 'tag') {
+        exactObject(input, 'input', { tag: 'string' });
+        const expected = exactObject(vector.expected, 'expected', { preimageHex: 'string' });
+        hexField(expected, 'preimageHex', 'expected.preimageHex');
+      } else if (keys.length === 1 && keys[0] === 'value') {
+        exactObject(input, 'input', { value: 'string' });
+        const expected = exactObject(vector.expected, 'expected', { framedHex: 'string' });
+        hexField(expected, 'framedHex', 'expected.framedHex');
+      } else if (keys.length === 1 && keys[0] === 'payloadHex') {
+        const framedInput = exactObject(input, 'input', { payloadHex: 'string' });
+        hexField(framedInput, 'payloadHex', 'input.payloadHex');
+        const expected = exactObject(vector.expected, 'expected', { framedHex: 'string' });
+        hexField(expected, 'framedHex', 'expected.framedHex');
+      } else if (
+        keys.length === 2 &&
+        keys.includes('ledgerSchemaVersion') &&
+        keys.includes('prefixContractVersion')
+      ) {
+        const framingInput = exactObject(input, 'input', {
+          ledgerSchemaVersion: 'number',
+          prefixContractVersion: 'number',
+        });
+        nonnegativeIntegerField(framingInput, 'ledgerSchemaVersion', 'input.ledgerSchemaVersion');
+        nonnegativeIntegerField(
+          framingInput,
+          'prefixContractVersion',
+          'input.prefixContractVersion',
+        );
+        const expected = exactObject(vector.expected, 'expected', {
+          logicalPrefixSha256: 'string',
+        });
+        shaField(expected, 'logicalPrefixSha256');
+      } else {
+        violations.push(`expected-union:${entry.id}:framing-input`);
+      }
       break;
+    }
     case 'digest-vector':
       require(['tag', 'envelope', 'expected']);
-      if (typeof vector.expected === 'object' && vector.expected !== null) {
-        requireExpected(vector.expected, ['preimageHex', 'digestHex']);
-        shaField(vector.expected, 'digestHex');
+      if (typeof vector.tag !== 'string') violations.push(`bad-shape:${entry.id}:tag`);
+      if (
+        typeof vector.envelope !== 'object' ||
+        vector.envelope === null ||
+        Array.isArray(vector.envelope)
+      ) {
+        violations.push(`bad-shape:${entry.id}:envelope`);
+      }
+      {
+        const expected = exactObject(vector.expected, 'expected', {
+          preimageHex: 'string',
+          digestHex: 'string',
+        });
+        hexField(expected, 'preimageHex', 'expected.preimageHex');
+        shaField(expected, 'digestHex');
       }
       break;
     case 'interaction-vector':
@@ -359,9 +451,27 @@ function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknow
         'expected',
       ]);
       shaField(vector, 'consumedInputSha256');
-      if (typeof vector.expected === 'object' && vector.expected !== null) {
-        requireExpected(vector.expected, ['preimageHex', 'interactionId']);
-        shaField(vector.expected, 'interactionId');
+      if (
+        typeof vector.currentHeadSha !== 'string' ||
+        !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(vector.currentHeadSha)
+      ) {
+        violations.push(`bad-sha:${entry.id}:currentHeadSha`);
+      }
+      nonnegativeIntegerField(vector, 'interactionOrdinal');
+      {
+        const predecessor = vector.predecessor as Record<string, unknown> | undefined;
+        if (predecessor?.bootstrap === true) {
+          exactObject(predecessor, 'predecessor', { bootstrap: 'boolean' });
+        } else {
+          const ledger = exactObject(predecessor, 'predecessor', { ledgerSha256: 'string' });
+          shaField(ledger, 'ledgerSha256');
+        }
+        const expected = exactObject(vector.expected, 'expected', {
+          preimageHex: 'string',
+          interactionId: 'string',
+        });
+        hexField(expected, 'preimageHex', 'expected.preimageHex');
+        shaField(expected, 'interactionId');
       }
       break;
     case 'materialization-vector': {
@@ -378,6 +488,8 @@ function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknow
       ]);
       shaField(expected, 'logicalPrefixSha256');
       shaField(expected, 'prefixSha256');
+      hexField(expected, 'logicalStreamHex', 'expected.logicalStreamHex');
+      hexField(expected, 'providerStreamHex', 'expected.providerStreamHex');
       {
         const digests = (expected as Record<string, unknown> | undefined)?.digests;
         closedObject(
@@ -401,51 +513,94 @@ function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknow
           ['segmentCount', 'logicalStreamBytes', 'providerStreamBytes'],
           'number',
         );
+        for (const boundaryKey of ['segmentCount', 'logicalStreamBytes', 'providerStreamBytes']) {
+          nonnegativeIntegerField(
+            (expected as Record<string, unknown> | undefined)?.stableBoundary,
+            boundaryKey,
+            `stableBoundary.${boundaryKey}`,
+          );
+        }
         closedObject(
           (expected as Record<string, unknown> | undefined)?.dynamicSuffix,
           'dynamicSuffix',
           ['logicalHex', 'providerHex'],
           'string',
         );
+        hexField(
+          (expected as Record<string, unknown> | undefined)?.dynamicSuffix,
+          'logicalHex',
+          'dynamicSuffix.logicalHex',
+        );
+        hexField(
+          (expected as Record<string, unknown> | undefined)?.dynamicSuffix,
+          'providerHex',
+          'dynamicSuffix.providerHex',
+        );
       }
       break;
     }
     case 'append-vector':
       require(['baseVectorId', 'successorVectorId', 'expected']);
-      requireExpected(vector.expected, [
-        'logicalStrictPrefix',
-        'providerStrictPrefix',
-        'promotedContextLogicalBytesEqual',
-        'promotedContextProviderBytesEqual',
-      ]);
+      if (typeof vector.baseVectorId !== 'string' || typeof vector.successorVectorId !== 'string') {
+        violations.push(`bad-shape:${entry.id}:references`);
+      }
+      exactObject(vector.expected, 'expected', {
+        logicalStrictPrefix: 'boolean',
+        providerStrictPrefix: 'boolean',
+        promotedContextLogicalBytesEqual: 'boolean',
+        promotedContextProviderBytesEqual: 'boolean',
+      });
       break;
     case 'invalidation-vector': {
       require(['mode', 'mutation', 'expected']);
       const mode = vector.mode;
+      if (typeof vector.mutation !== 'string') violations.push(`bad-shape:${entry.id}:mutation`);
       if (mode === 'materializer') {
         require(['baseVectorId', 'successorVectorId']);
-        requireExpected(vector.expected, [
-          'logicalStreamChanged',
-          'providerStreamChanged',
-          'logicalHashChanged',
-          'prefixHashChanged',
-        ]);
+        if (
+          typeof vector.baseVectorId !== 'string' ||
+          typeof vector.successorVectorId !== 'string'
+        ) {
+          violations.push(`bad-shape:${entry.id}:references`);
+        }
+        exactObject(vector.expected, 'expected', {
+          logicalStreamChanged: 'boolean',
+          providerStreamChanged: 'boolean',
+          logicalHashChanged: 'boolean',
+          prefixHashChanged: 'boolean',
+        });
       } else if (mode === 'hash-framing') {
         require(['baseInput', 'mutatedInput']);
-        requireExpected(vector.expected, [
-          'baseLogicalPrefixSha256',
-          'mutatedLogicalPrefixSha256',
-          'basePrefixSha256',
-          'mutatedPrefixSha256',
-          'logicalStreamChanged',
-          'providerStreamChanged',
-          'logicalHashChanged',
-          'prefixHashChanged',
-        ]);
-        shaField(vector.expected, 'baseLogicalPrefixSha256');
-        shaField(vector.expected, 'mutatedLogicalPrefixSha256');
-        shaField(vector.expected, 'basePrefixSha256');
-        shaField(vector.expected, 'mutatedPrefixSha256');
+        for (const label of ['baseInput', 'mutatedInput'] as const) {
+          const hashInput = exactObject(vector[label], label, {
+            ledgerSchemaVersion: 'number',
+            prefixContractVersion: 'number',
+            logicalStreamHex: 'string',
+            providerStreamHex: 'string',
+          });
+          nonnegativeIntegerField(hashInput, 'ledgerSchemaVersion', `${label}.ledgerSchemaVersion`);
+          nonnegativeIntegerField(
+            hashInput,
+            'prefixContractVersion',
+            `${label}.prefixContractVersion`,
+          );
+          hexField(hashInput, 'logicalStreamHex', `${label}.logicalStreamHex`);
+          hexField(hashInput, 'providerStreamHex', `${label}.providerStreamHex`);
+        }
+        const invalidationExpected = exactObject(vector.expected, 'expected', {
+          baseLogicalPrefixSha256: 'string',
+          mutatedLogicalPrefixSha256: 'string',
+          basePrefixSha256: 'string',
+          mutatedPrefixSha256: 'string',
+          logicalStreamChanged: 'boolean',
+          providerStreamChanged: 'boolean',
+          logicalHashChanged: 'boolean',
+          prefixHashChanged: 'boolean',
+        });
+        shaField(invalidationExpected, 'baseLogicalPrefixSha256');
+        shaField(invalidationExpected, 'mutatedLogicalPrefixSha256');
+        shaField(invalidationExpected, 'basePrefixSha256');
+        shaField(invalidationExpected, 'mutatedPrefixSha256');
       } else {
         violations.push(`unknown-mode:${entry.id}:${String(mode)}`);
       }
@@ -506,6 +661,8 @@ function validateInvalidExpected(
   for (const key of Object.keys(expected)) {
     if (!['csharpCode', 'typescriptCode', 'causeCode', 'path'].includes(key)) {
       violations.push(`unknown-expected-field:${id}:${key}`);
+    } else if (typeof expected[key] !== 'string') {
+      violations.push(`bad-shape:${id}:expected.${key}`);
     }
   }
 
@@ -763,5 +920,95 @@ describe('prefix-contract fixture manifest', () => {
       });
     });
     expect(validateCorpus(root)).toContain('expected-union:invalid-x:typescriptCode');
+  });
+
+  it('rejects wrong recursive value types in framing and append unions', () => {
+    expect(
+      validateVectorShape(
+        { id: 'framing-x', kind: 'framing-vector', file: 'x.json' },
+        {
+          id: 'framing-x',
+          kind: 'framing-vector',
+          input: { tag: 1 },
+          expected: { preimageHex: '00' },
+        },
+      ),
+    ).toContain('bad-shape:framing-x:input.tag');
+    expect(
+      validateVectorShape(
+        { id: 'append-x', kind: 'append-vector', file: 'x.json' },
+        {
+          id: 'append-x',
+          kind: 'append-vector',
+          baseVectorId: 'a',
+          successorVectorId: 'b',
+          expected: {
+            logicalStrictPrefix: 'true',
+            providerStrictPrefix: true,
+            promotedContextLogicalBytesEqual: true,
+            promotedContextProviderBytesEqual: true,
+          },
+        },
+      ),
+    ).toContain('bad-shape:append-x:expected.logicalStrictPrefix');
+  });
+
+  it('rejects malformed nested materialization fields and invalid diagnostics', () => {
+    const materializationViolations = validateVectorShape(
+      { id: 'materialization-x', kind: 'materialization-vector', file: 'x.json' },
+      {
+        id: 'materialization-x',
+        kind: 'materialization-vector',
+        input: {},
+        expected: {
+          logicalStreamHex: '0',
+          providerStreamHex: 'zz',
+          logicalPrefixSha256: '00',
+          prefixSha256: '00',
+          digests: {
+            templateId: '00',
+            policyId: '00',
+            toolDefinitionId: '00',
+            cacheConfigId: '00',
+            adapterId: '00',
+          },
+          stableBoundary: {
+            segmentCount: 1.5,
+            logicalStreamBytes: 0,
+            providerStreamBytes: 0,
+          },
+          dynamicSuffix: { logicalHex: '00', providerHex: '00' },
+        },
+      },
+    );
+    expect(materializationViolations).toContain(
+      'bad-hex:materialization-x:expected.logicalStreamHex',
+    );
+    expect(materializationViolations).toContain(
+      'bad-integer:materialization-x:stableBoundary.segmentCount',
+    );
+
+    expect(
+      validateInvalidExpected('invalid-x', 'identity', { typescriptCode: 'bad', path: 42 }, false),
+    ).toContain('bad-shape:invalid-x:expected.path');
+  });
+
+  it('requires envelope mutations and their matching digest updates together', () => {
+    expect(
+      validateMutationDiffs('inv-x', 'template envelope content/version', [
+        'envelopes.template.definition',
+      ]),
+    ).toEqual(['mutation-diff:inv-x']);
+    expect(
+      validateMutationDiffs('inv-x', 'template envelope content/version', [
+        'expectedIdentities.templateId',
+      ]),
+    ).toEqual(['mutation-diff:inv-x']);
+    expect(
+      validateMutationDiffs('inv-x', 'template envelope content/version', [
+        'envelopes.template.definition',
+        'expectedIdentities.templateId',
+      ]),
+    ).toEqual([]);
   });
 });

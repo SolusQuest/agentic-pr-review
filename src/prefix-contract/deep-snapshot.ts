@@ -76,6 +76,7 @@ export function deepDescriptorSnapshot(
   }
 
   const childStack: ChildFrame[] = [];
+  const snapshotMemo = new WeakMap<object, unknown>();
 
   let rootValue: unknown;
 
@@ -93,8 +94,11 @@ export function deepDescriptorSnapshot(
     const rootOut: Record<string, unknown> = Object.create(null);
     rootValue = rootOut;
     const rootAncestors = new Set<object>([root as object]);
-    for (let i = rootEntriesOverride.length - 1; i >= 0; i--) {
-      const entry = rootEntriesOverride[i];
+    const rootEntries = [...rootEntriesOverride].sort((a, b) =>
+      a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+    );
+    for (let i = rootEntries.length - 1; i >= 0; i--) {
+      const entry = rootEntries[i];
       childStack.push({
         value: entry.value,
         segments: [{ name: entry.name }],
@@ -144,6 +148,15 @@ export function deepDescriptorSnapshot(
       return null;
     }
 
+    const memoized = snapshotMemo.get(node);
+    if (memoized !== undefined) {
+      // Preserve legal DAG aliases. Cycle detection must run first so an
+      // ancestor back-edge is still rejected even though the ancestor already
+      // has a partially constructed snapshot in the memo.
+      assign(memoized);
+      return null;
+    }
+
     if (Array.isArray(node)) {
       if (Object.getPrototypeOf(node) !== Array.prototype) {
         assign(marker('non-plain-object'));
@@ -184,6 +197,7 @@ export function deepDescriptorSnapshot(
 
       const out: unknown[] = new Array(arrayLength);
       assign(out);
+      snapshotMemo.set(node, out);
       const childAncestors: ReadonlySet<object> = new Set([...ancestors, node]);
       // Push children reversed so they pop in ascending index order.
       for (let i = arrayLength - 1; i >= 0; i--) {
@@ -214,13 +228,14 @@ export function deepDescriptorSnapshot(
     if (depth > bounds.maxDepth) {
       return { segments, reason: 'depth-exceeded' };
     }
-    const names = keys as string[];
+    const names = (keys as string[]).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     if (names.length > bounds.maxObjectProperties) {
       return { segments, reason: 'property-count-exceeded' };
     }
 
     const out: Record<string, unknown> = Object.create(null);
     assign(out);
+    snapshotMemo.set(node, out);
     const childAncestors: ReadonlySet<object> = new Set([...ancestors, node]);
     for (let i = names.length - 1; i >= 0; i--) {
       const name = names[i];

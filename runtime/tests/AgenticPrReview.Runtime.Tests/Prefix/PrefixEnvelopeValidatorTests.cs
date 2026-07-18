@@ -22,6 +22,16 @@ public sealed class PrefixEnvelopeValidatorTests
             PrefixEnvelopeValidator.EnvelopeKind.Template, doc.RootElement, out _);
     }
 
+    private static PrefixDiagnostic? ValidateToolsDeep(string json)
+    {
+        using var doc = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 256 });
+        return PrefixEnvelopeValidator.Validate(
+            PrefixEnvelopeValidator.EnvelopeKind.Tools, doc.RootElement, out _);
+    }
+
+    private static string TooManyProperties() =>
+        "{" + string.Join(",", Enumerable.Range(0, 257).Select(i => $"\"k{i}\":{i}")) + "}";
+
     [Fact]
     public void SchemaVersionTwoIsLegal()
     {
@@ -95,6 +105,79 @@ public sealed class PrefixEnvelopeValidatorTests
         var error = ValidateTemplate("""{"schemaVersion":1,"schemaVersion":1,"templateVersion":3,"definition":{}}""");
         Assert.Equal("prefix_envelope_invalid", error?.Code);
         Assert.Equal("prefix_envelope_invalid:/schemaVersion", error?.Message);
+    }
+
+    [Fact]
+    public void InvalidUtf16PropertyInEnvelopeRootFailsWithEnvelopeInvalid()
+    {
+        var error = ValidateTemplate("""{"schemaVersion":1,"templateVersion":1,"definition":{},"\ud800":1}""");
+        Assert.Equal("prefix_envelope_invalid", error?.Code);
+        Assert.Equal("prefix_envelope_invalid:/<invalid-utf16>", error?.Message);
+    }
+
+    [Fact]
+    public void DuplicateInvalidUtf16PropertyInEnvelopeRootFailsWithEnvelopeInvalid()
+    {
+        var error = ValidateTemplate("""{"schemaVersion":1,"templateVersion":1,"definition":{},"\ud800":1,"\ud800":2}""");
+        Assert.Equal("prefix_envelope_invalid", error?.Code);
+        Assert.Equal("prefix_envelope_invalid:/<invalid-utf16>", error?.Message);
+    }
+
+    [Fact]
+    public void InvalidUtf16PropertyInToolWrapperFailsWithEnvelopeInvalid()
+    {
+        var error = ValidateToolsDeep("""{"schemaVersion":1,"toolsetVersion":1,"definitions":[{"name":"t","description":"d","inputSchema":{},"\ud800":1}]}""");
+        Assert.Equal("prefix_envelope_invalid", error?.Code);
+        Assert.Equal("prefix_envelope_invalid:/definitions/0/<invalid-utf16>", error?.Message);
+    }
+
+    [Fact]
+    public void DuplicateInvalidUtf16PropertyInToolWrapperFailsWithEnvelopeInvalid()
+    {
+        var error = ValidateToolsDeep("""{"schemaVersion":1,"toolsetVersion":1,"definitions":[{"name":"t","description":"d","inputSchema":{},"\ud800":1,"\ud800":2}]}""");
+        Assert.Equal("prefix_envelope_invalid", error?.Code);
+        Assert.Equal("prefix_envelope_invalid:/definitions/0/<invalid-utf16>", error?.Message);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void StructuralObjectTraversalUsesUnsignedUtf16OrderRegardlessOfInsertion(bool reverse)
+    {
+        var fat = TooManyProperties();
+        var definition = reverse
+            ? $"{{\"a\":[{fat}],\"z\":[0,{fat}]}}"
+            : $"{{\"z\":[0,{fat}],\"a\":[{fat}]}}";
+        var error = ValidateTemplate(
+            $"{{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":{definition}}}");
+        Assert.Equal("prefix_envelope_invalid:/definition/<untrusted-property>/0", error?.Message);
+    }
+
+    [Fact]
+    public void StructuralObjectTraversalSortsNumericNamesLexically()
+    {
+        var fat = TooManyProperties();
+        var error = ValidateTemplate(
+            $"{{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":{{\"2\":[0,{fat}],\"10\":[{fat}]}}}}");
+        Assert.Equal("prefix_envelope_invalid:/definition/<untrusted-property>/0", error?.Message);
+    }
+
+    [Fact]
+    public void StructuralArrayTraversalUsesAscendingIndices()
+    {
+        var fat = TooManyProperties();
+        var error = ValidateTemplate(
+            $"{{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":[{fat},[{fat}]]}}");
+        Assert.Equal("prefix_envelope_invalid:/definition/0", error?.Message);
+    }
+
+    [Fact]
+    public void ContractOwnedFieldDefectBeatsNestedStructuralBound()
+    {
+        string Nest(int depth) => depth == 0 ? "0" : $"[{Nest(depth - 1)}]";
+        var error = ValidateToolsDeep(
+            $"{{\"schemaVersion\":1,\"toolsetVersion\":1,\"definitions\":[{{\"name\":\"t\",\"description\":42,\"inputSchema\":{{\"deep\":{Nest(65)}}}}}]}}");
+        Assert.Equal("prefix_envelope_invalid:/definitions/0/description", error?.Message);
     }
 
     [Fact]

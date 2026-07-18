@@ -30,8 +30,9 @@ internal static class PrefixFixtureLoader
         var root = doc.RootElement;
         AssertAllowedKeys(root, "schemaVersion", "generatedBy", "creationCrossCheck", "vectors");
         Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
-        AssertAllowedKeys(root.GetProperty("generatedBy"), "tool", "version");
-        AssertAllowedKeys(root.GetProperty("creationCrossCheck"), "tool", "version", "checkedAt");
+        AssertExactObject(root.GetProperty("generatedBy"), "generatedBy", ("tool", JsonValueKind.String), ("version", JsonValueKind.Number));
+        AssertExactObject(root.GetProperty("creationCrossCheck"), "creationCrossCheck", ("tool", JsonValueKind.String), ("version", JsonValueKind.String), ("checkedAt", JsonValueKind.String));
+        Assert.Equal(JsonValueKind.Array, root.GetProperty("vectors").ValueKind);
 
         var entries = ImmutableArray.CreateBuilder<ManifestEntry>();
         var ids = new HashSet<string>(StringComparer.Ordinal);
@@ -68,6 +69,7 @@ internal static class PrefixFixtureLoader
 
         // Reference integrity.
         var materializationIds = entries.Where(e => e.Kind == "materialization-vector").Select(e => e.Id).ToHashSet(StringComparer.Ordinal);
+        var entriesById = entries.ToDictionary(entry => entry.Id, StringComparer.Ordinal);
         foreach (var entry in entries.Where(e => e.Kind is "append-vector" or "invalidation-vector"))
         {
             var vector = LoadVector(entry.File);
@@ -79,6 +81,17 @@ internal static class PrefixFixtureLoader
                     Assert.True(materializationIds.Contains(referenced), $"{entry.Id}: {refProperty} -> {referenced} must resolve to a materialization-vector");
                     Assert.NotEqual(entry.Id, referenced);
                 }
+            }
+
+            if (entry.Kind == "invalidation-vector"
+                && vector.GetProperty("mode").GetString() == "materializer")
+            {
+                var baseEntry = entriesById[vector.GetProperty("baseVectorId").GetString()!];
+                var successorEntry = entriesById[vector.GetProperty("successorVectorId").GetString()!];
+                var baseInput = LoadVector(baseEntry.File).GetProperty("input");
+                var successorInput = LoadVector(successorEntry.File).GetProperty("input");
+                var diffs = JsonDiffPaths(baseInput, successorInput);
+                AssertMutationDiffs(entry.Id, vector.GetProperty("mutation").GetString()!, diffs);
             }
         }
 
@@ -110,34 +123,54 @@ internal static class PrefixFixtureLoader
         {
             case "framing-vector":
                 Require("input", "expected");
+                AssertFramingVector(entry.Id, vector);
                 break;
             case "digest-vector":
                 Require("tag", "envelope", "expected");
+                Assert.Equal(JsonValueKind.String, vector.GetProperty("tag").ValueKind);
+                Assert.Equal(JsonValueKind.Object, vector.GetProperty("envelope").ValueKind);
+                AssertExactObject(vector.GetProperty("expected"), $"{entry.Id}.expected", ("preimageHex", JsonValueKind.String), ("digestHex", JsonValueKind.String));
+                AssertHex(vector.GetProperty("expected").GetProperty("preimageHex").GetString()!);
+                AssertHex(vector.GetProperty("expected").GetProperty("digestHex").GetString()!, 64);
                 break;
             case "interaction-vector":
                 Require("predecessor", "consumedInputSha256", "currentHeadSha", "interactionOrdinal", "expected");
+                AssertInteractionVector(entry.Id, vector);
                 break;
             case "materialization-vector":
                 Require("input", "expected");
-                foreach (var key in new[] { "logicalStreamHex", "providerStreamHex", "logicalPrefixSha256", "prefixSha256", "digests", "stableBoundary", "dynamicSuffix" })
-                {
-                    Assert.True(vector.GetProperty("expected").TryGetProperty(key, out _), $"{entry.Id}: missing expected.{key}");
-                }
-
+                AssertMaterializationExpected(entry.Id, vector.GetProperty("expected"));
                 break;
             case "append-vector":
                 Require("baseVectorId", "successorVectorId", "expected");
+                Assert.Equal(JsonValueKind.String, vector.GetProperty("baseVectorId").ValueKind);
+                Assert.Equal(JsonValueKind.String, vector.GetProperty("successorVectorId").ValueKind);
+                AssertExactObject(
+                    vector.GetProperty("expected"),
+                    $"{entry.Id}.expected",
+                    ("logicalStrictPrefix", JsonValueKind.True, JsonValueKind.False),
+                    ("providerStrictPrefix", JsonValueKind.True, JsonValueKind.False),
+                    ("promotedContextLogicalBytesEqual", JsonValueKind.True, JsonValueKind.False),
+                    ("promotedContextProviderBytesEqual", JsonValueKind.True, JsonValueKind.False));
                 break;
             case "invalidation-vector":
                 Require("mode", "mutation", "expected");
+                Assert.Equal(JsonValueKind.String, vector.GetProperty("mode").ValueKind);
+                Assert.Equal(JsonValueKind.String, vector.GetProperty("mutation").ValueKind);
                 var mode = vector.GetProperty("mode").GetString();
                 if (mode == "materializer")
                 {
                     Require("baseVectorId", "successorVectorId");
+                    Assert.Equal(JsonValueKind.String, vector.GetProperty("baseVectorId").ValueKind);
+                    Assert.Equal(JsonValueKind.String, vector.GetProperty("successorVectorId").ValueKind);
+                    AssertChangedExpected(entry.Id, vector.GetProperty("expected"));
                 }
                 else if (mode == "hash-framing")
                 {
                     Require("baseInput", "mutatedInput");
+                    AssertHashFramingInput(entry.Id, "baseInput", vector.GetProperty("baseInput"));
+                    AssertHashFramingInput(entry.Id, "mutatedInput", vector.GetProperty("mutatedInput"));
+                    AssertHashFramingExpected(entry.Id, vector.GetProperty("expected"));
                 }
                 else
                 {
@@ -150,6 +183,11 @@ internal static class PrefixFixtureLoader
                 Require("target", "input", "expected");
                 allowed.Add("scope");
                 var expected = vector.GetProperty("expected");
+                AssertAllowedKeys(expected, "csharpCode", "typescriptCode", "causeCode", "path");
+                foreach (var property in expected.EnumerateObject())
+                {
+                    Assert.Equal(JsonValueKind.String, property.Value.ValueKind);
+                }
                 var target = vector.GetProperty("target").GetString()!;
                 var hasCsharp = expected.TryGetProperty("csharpCode", out _);
                 var hasTs = expected.TryGetProperty("typescriptCode", out _);
@@ -205,6 +243,315 @@ internal static class PrefixFixtureLoader
         {
             Assert.True(allowed.Contains(property.Name), $"{entry.Id}: unknown vector field {property.Name}");
         }
+    }
+
+    private static void AssertFramingVector(string id, JsonElement vector)
+    {
+        var input = vector.GetProperty("input");
+        Assert.Equal(JsonValueKind.Object, input.ValueKind);
+        var names = input.EnumerateObject().Select(property => property.Name).ToArray();
+        if (names.SequenceEqual(new[] { "tag" }, StringComparer.Ordinal))
+        {
+            AssertExactObject(input, $"{id}.input", ("tag", JsonValueKind.String));
+            AssertExactObject(vector.GetProperty("expected"), $"{id}.expected", ("preimageHex", JsonValueKind.String));
+            AssertHex(vector.GetProperty("expected").GetProperty("preimageHex").GetString()!);
+        }
+        else if (names.SequenceEqual(new[] { "value" }, StringComparer.Ordinal))
+        {
+            AssertExactObject(input, $"{id}.input", ("value", JsonValueKind.String));
+            AssertExactObject(vector.GetProperty("expected"), $"{id}.expected", ("framedHex", JsonValueKind.String));
+            AssertHex(vector.GetProperty("expected").GetProperty("framedHex").GetString()!);
+        }
+        else if (names.SequenceEqual(new[] { "payloadHex" }, StringComparer.Ordinal))
+        {
+            AssertExactObject(input, $"{id}.input", ("payloadHex", JsonValueKind.String));
+            AssertHex(input.GetProperty("payloadHex").GetString()!);
+            AssertExactObject(vector.GetProperty("expected"), $"{id}.expected", ("framedHex", JsonValueKind.String));
+            AssertHex(vector.GetProperty("expected").GetProperty("framedHex").GetString()!);
+        }
+        else if (names.ToHashSet(StringComparer.Ordinal).SetEquals(new[] { "ledgerSchemaVersion", "prefixContractVersion" }))
+        {
+            AssertExactObject(input, $"{id}.input", ("ledgerSchemaVersion", JsonValueKind.Number), ("prefixContractVersion", JsonValueKind.Number));
+            AssertNonnegativeInteger(input.GetProperty("ledgerSchemaVersion"), $"{id}.input.ledgerSchemaVersion");
+            AssertNonnegativeInteger(input.GetProperty("prefixContractVersion"), $"{id}.input.prefixContractVersion");
+            AssertExactObject(vector.GetProperty("expected"), $"{id}.expected", ("logicalPrefixSha256", JsonValueKind.String));
+            AssertHex(vector.GetProperty("expected").GetProperty("logicalPrefixSha256").GetString()!, 64);
+        }
+        else
+        {
+            Assert.Fail($"{id}: unknown framing input union");
+        }
+    }
+
+    private static void AssertInteractionVector(string id, JsonElement vector)
+    {
+        AssertHex(vector.GetProperty("consumedInputSha256").GetString()!, 64);
+        var head = vector.GetProperty("currentHeadSha").GetString()!;
+        Assert.True(head.Length is 40 or 64, $"{id}: currentHeadSha must be 40 or 64 lowercase hex characters");
+        AssertHex(head, head.Length);
+        AssertNonnegativeInteger(vector.GetProperty("interactionOrdinal"), $"{id}.interactionOrdinal");
+
+        var predecessor = vector.GetProperty("predecessor");
+        if (predecessor.TryGetProperty("bootstrap", out var bootstrap))
+        {
+            AssertExactObject(predecessor, $"{id}.predecessor", ("bootstrap", JsonValueKind.True));
+            Assert.True(bootstrap.GetBoolean());
+        }
+        else
+        {
+            AssertExactObject(predecessor, $"{id}.predecessor", ("ledgerSha256", JsonValueKind.String));
+            AssertHex(predecessor.GetProperty("ledgerSha256").GetString()!, 64);
+        }
+
+        var expected = vector.GetProperty("expected");
+        AssertExactObject(expected, $"{id}.expected", ("preimageHex", JsonValueKind.String), ("interactionId", JsonValueKind.String));
+        AssertHex(expected.GetProperty("preimageHex").GetString()!);
+        AssertHex(expected.GetProperty("interactionId").GetString()!, 64);
+    }
+
+    private static void AssertMaterializationExpected(string id, JsonElement expected)
+    {
+        AssertExactObject(
+            expected,
+            $"{id}.expected",
+            ("logicalStreamHex", JsonValueKind.String),
+            ("providerStreamHex", JsonValueKind.String),
+            ("logicalPrefixSha256", JsonValueKind.String),
+            ("prefixSha256", JsonValueKind.String),
+            ("digests", JsonValueKind.Object),
+            ("stableBoundary", JsonValueKind.Object),
+            ("dynamicSuffix", JsonValueKind.Object));
+        AssertHex(expected.GetProperty("logicalStreamHex").GetString()!);
+        AssertHex(expected.GetProperty("providerStreamHex").GetString()!);
+        AssertHex(expected.GetProperty("logicalPrefixSha256").GetString()!, 64);
+        AssertHex(expected.GetProperty("prefixSha256").GetString()!, 64);
+
+        var digests = expected.GetProperty("digests");
+        AssertExactObject(
+            digests,
+            $"{id}.expected.digests",
+            ("templateId", JsonValueKind.String),
+            ("policyId", JsonValueKind.String),
+            ("toolDefinitionId", JsonValueKind.String),
+            ("cacheConfigId", JsonValueKind.String),
+            ("adapterId", JsonValueKind.String));
+        foreach (var property in digests.EnumerateObject())
+        {
+            AssertHex(property.Value.GetString()!, 64);
+        }
+
+        var stableBoundary = expected.GetProperty("stableBoundary");
+        AssertExactObject(
+            stableBoundary,
+            $"{id}.expected.stableBoundary",
+            ("segmentCount", JsonValueKind.Number),
+            ("logicalStreamBytes", JsonValueKind.Number),
+            ("providerStreamBytes", JsonValueKind.Number));
+        foreach (var property in stableBoundary.EnumerateObject())
+        {
+            AssertNonnegativeInteger(property.Value, $"{id}.expected.stableBoundary.{property.Name}");
+        }
+
+        var suffix = expected.GetProperty("dynamicSuffix");
+        AssertExactObject(suffix, $"{id}.expected.dynamicSuffix", ("logicalHex", JsonValueKind.String), ("providerHex", JsonValueKind.String));
+        AssertHex(suffix.GetProperty("logicalHex").GetString()!);
+        AssertHex(suffix.GetProperty("providerHex").GetString()!);
+    }
+
+    private static void AssertChangedExpected(string id, JsonElement expected) =>
+        AssertExactObject(
+            expected,
+            $"{id}.expected",
+            ("logicalStreamChanged", JsonValueKind.True, JsonValueKind.False),
+            ("providerStreamChanged", JsonValueKind.True, JsonValueKind.False),
+            ("logicalHashChanged", JsonValueKind.True, JsonValueKind.False),
+            ("prefixHashChanged", JsonValueKind.True, JsonValueKind.False));
+
+    private static void AssertHashFramingInput(string id, string label, JsonElement input)
+    {
+        AssertExactObject(
+            input,
+            $"{id}.{label}",
+            ("ledgerSchemaVersion", JsonValueKind.Number),
+            ("prefixContractVersion", JsonValueKind.Number),
+            ("logicalStreamHex", JsonValueKind.String),
+            ("providerStreamHex", JsonValueKind.String));
+        AssertNonnegativeInteger(input.GetProperty("ledgerSchemaVersion"), $"{id}.{label}.ledgerSchemaVersion");
+        AssertNonnegativeInteger(input.GetProperty("prefixContractVersion"), $"{id}.{label}.prefixContractVersion");
+        AssertHex(input.GetProperty("logicalStreamHex").GetString()!);
+        AssertHex(input.GetProperty("providerStreamHex").GetString()!);
+    }
+
+    private static void AssertHashFramingExpected(string id, JsonElement expected)
+    {
+        AssertExactObject(
+            expected,
+            $"{id}.expected",
+            ("baseLogicalPrefixSha256", JsonValueKind.String, JsonValueKind.String),
+            ("mutatedLogicalPrefixSha256", JsonValueKind.String, JsonValueKind.String),
+            ("basePrefixSha256", JsonValueKind.String, JsonValueKind.String),
+            ("mutatedPrefixSha256", JsonValueKind.String, JsonValueKind.String),
+            ("logicalStreamChanged", JsonValueKind.True, JsonValueKind.False),
+            ("providerStreamChanged", JsonValueKind.True, JsonValueKind.False),
+            ("logicalHashChanged", JsonValueKind.True, JsonValueKind.False),
+            ("prefixHashChanged", JsonValueKind.True, JsonValueKind.False));
+        foreach (var property in expected.EnumerateObject().Where(property => property.Name.EndsWith("Sha256", StringComparison.Ordinal)))
+        {
+            AssertHex(property.Value.GetString()!, 64);
+        }
+    }
+
+    private static void AssertExactObject(
+        JsonElement element,
+        string label,
+        params (string Name, JsonValueKind Kind)[] fields)
+    {
+        Assert.Equal(JsonValueKind.Object, element.ValueKind);
+        AssertAllowedKeys(element, fields.Select(field => field.Name).ToArray());
+        foreach (var field in fields)
+        {
+            Assert.True(element.TryGetProperty(field.Name, out var value), $"{label}: missing {field.Name}");
+            Assert.Equal(field.Kind, value.ValueKind);
+        }
+    }
+
+    private static void AssertExactObject(
+        JsonElement element,
+        string label,
+        params (string Name, JsonValueKind First, JsonValueKind Second)[] fields)
+    {
+        Assert.Equal(JsonValueKind.Object, element.ValueKind);
+        AssertAllowedKeys(element, fields.Select(field => field.Name).ToArray());
+        foreach (var field in fields)
+        {
+            Assert.True(element.TryGetProperty(field.Name, out var value), $"{label}: missing {field.Name}");
+            Assert.True(value.ValueKind == field.First || value.ValueKind == field.Second, $"{label}.{field.Name}: unexpected JSON kind {value.ValueKind}");
+        }
+    }
+
+    private static void AssertNonnegativeInteger(JsonElement element, string label)
+    {
+        Assert.Equal(JsonValueKind.Number, element.ValueKind);
+        Assert.True(element.TryGetInt64(out var value) && value >= 0, $"{label}: expected a nonnegative integer");
+    }
+
+    private static List<string> JsonDiffPaths(JsonElement left, JsonElement right, string prefix = "")
+    {
+        if (left.ValueKind != right.ValueKind)
+        {
+            return new List<string> { prefix.Length == 0 ? "$" : prefix };
+        }
+
+        if (left.ValueKind == JsonValueKind.Object)
+        {
+            var leftProperties = left.EnumerateObject().ToDictionary(property => property.Name, property => property.Value, StringComparer.Ordinal);
+            var rightProperties = right.EnumerateObject().ToDictionary(property => property.Name, property => property.Value, StringComparer.Ordinal);
+            var diffs = new List<string>();
+            foreach (var key in leftProperties.Keys.Concat(rightProperties.Keys).Distinct(StringComparer.Ordinal))
+            {
+                var childPath = prefix.Length == 0 ? key : $"{prefix}.{key}";
+                if (!leftProperties.TryGetValue(key, out var leftValue)
+                    || !rightProperties.TryGetValue(key, out var rightValue))
+                {
+                    diffs.Add(childPath);
+                }
+                else
+                {
+                    diffs.AddRange(JsonDiffPaths(leftValue, rightValue, childPath));
+                }
+            }
+
+            return diffs;
+        }
+
+        if (left.ValueKind == JsonValueKind.Array)
+        {
+            var leftItems = left.EnumerateArray().ToArray();
+            var rightItems = right.EnumerateArray().ToArray();
+            if (leftItems.Length != rightItems.Length)
+            {
+                return new List<string> { prefix.Length == 0 ? "$" : prefix };
+            }
+
+            var diffs = new List<string>();
+            for (var index = 0; index < leftItems.Length; index++)
+            {
+                diffs.AddRange(JsonDiffPaths(leftItems[index], rightItems[index], $"{prefix}[{index}]"));
+            }
+
+            return diffs;
+        }
+
+        var equal = left.ValueKind switch
+        {
+            JsonValueKind.String => left.GetString() == right.GetString(),
+            JsonValueKind.Number => left.GetDouble().Equals(right.GetDouble()),
+            JsonValueKind.True or JsonValueKind.False or JsonValueKind.Null => true,
+            _ => left.GetRawText() == right.GetRawText(),
+        };
+        return equal
+            ? new List<string>()
+            : new List<string> { prefix.Length == 0 ? "$" : prefix };
+    }
+
+    private static void AssertMutationDiffs(string id, string mutation, IReadOnlyCollection<string> diffs)
+    {
+        static bool EnvelopeMutation(
+            IReadOnlyCollection<string> paths,
+            string envelopeName,
+            string digestField)
+        {
+            var envelopePrefix = $"envelopes.{envelopeName}.";
+            var schemaVersion = $"{envelopePrefix}schemaVersion";
+            var digestPath = $"expectedIdentities.{digestField}";
+            return paths.Any(path => path.StartsWith(envelopePrefix, StringComparison.Ordinal) && path != schemaVersion)
+                && paths.Contains(digestPath, StringComparer.Ordinal)
+                && paths.All(path =>
+                    (path.StartsWith(envelopePrefix, StringComparison.Ordinal) && path != schemaVersion)
+                    || path == digestPath);
+        }
+
+        var valid = mutation switch
+        {
+            "providerId" => diffs.SequenceEqual(new[] { "expectedIdentities.providerId" }, StringComparer.Ordinal),
+            "modelId" => diffs.SequenceEqual(new[] { "expectedIdentities.modelId" }, StringComparer.Ordinal),
+            "adapter envelope content/version" => EnvelopeMutation(diffs, "adapter", "adapterId"),
+            "cache-config envelope content/version" => EnvelopeMutation(diffs, "cacheConfig", "cacheConfigId"),
+            "template envelope content/version" => EnvelopeMutation(diffs, "template", "templateId"),
+            "policy envelope content/version" => EnvelopeMutation(diffs, "policy", "policyId"),
+            "tools envelope content/version/order" => EnvelopeMutation(diffs, "tools", "toolDefinitionId"),
+            "any envelope schemaVersion" => ValidateSchemaVersionMutation(diffs),
+            "run/provenance metadata" => diffs.SequenceEqual(new[] { "interaction.interactionId" }, StringComparer.Ordinal),
+            _ => false,
+        };
+        Assert.True(valid, $"{id}: mutation {mutation} does not match its exact input diff predicate ({string.Join(',', diffs)})");
+    }
+
+    private static bool ValidateSchemaVersionMutation(IReadOnlyCollection<string> diffs)
+    {
+        if (diffs.Count != 2)
+        {
+            return false;
+        }
+
+        var digestFields = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["template"] = "templateId",
+            ["policy"] = "policyId",
+            ["tools"] = "toolDefinitionId",
+            ["cacheConfig"] = "cacheConfigId",
+            ["adapter"] = "adapterId",
+        };
+        foreach (var pair in digestFields)
+        {
+            if (diffs.Contains($"envelopes.{pair.Key}.schemaVersion", StringComparer.Ordinal)
+                && diffs.Contains($"expectedIdentities.{pair.Value}", StringComparer.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     internal static void AssertSafeRelativePath(string file)

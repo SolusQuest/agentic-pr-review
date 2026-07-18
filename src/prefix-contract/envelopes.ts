@@ -30,7 +30,7 @@ const MAX_OBJECT_PROPERTIES = 256;
 const MAX_ARRAY_ITEMS = 1_024;
 
 export interface ValidatedEnvelope {
-  /** The original (validated) envelope value. */
+  /** Descriptor-safe validated snapshot; never the caller's original object. */
   readonly value: unknown;
   /** RFC 8785 canonical UTF-8 bytes of the whole envelope. */
   readonly canonicalBytes: Uint8Array;
@@ -147,6 +147,43 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
     }
   }
 
+  // Contract-owned shallow structure is validated before recursive bounds,
+  // matching the C# stage-2 order. For the tools envelope this also replaces
+  // the caller-owned array/wrappers with descriptor-captured internal clones,
+  // so the later deep snapshot never observes those caller nodes a second
+  // time while open JSON fields are still snapshotted normally.
+  const rawRecord = recordFromEntries(rootEntries);
+  for (const versionField of VERSION_FIELDS[kind]) {
+    const value = rawRecord[versionField];
+    if (
+      typeof value !== 'number' ||
+      !Number.isInteger(value) ||
+      value < 1 ||
+      value > 2_147_483_647
+    ) {
+      return fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath([{ name: versionField }], kind, PREFIX_CODES.envelopeInvalid),
+      );
+    }
+  }
+
+  let snapshotRootEntries: readonly RootEntry[] = rootEntries;
+  if (kind === 'tools') {
+    const prepared = prepareToolDefinitions(kind, rawRecord.definitions);
+    if (!prepared.ok) {
+      return prepared.error;
+    }
+    snapshotRootEntries = rootEntries.map((entry) =>
+      entry.name === 'definitions' ? { name: entry.name, value: prepared.value } : entry,
+    );
+  } else {
+    const fieldError = checkKindFields(kind, rawRecord);
+    if (fieldError !== null) {
+      return fieldError;
+    }
+  }
+
   // Deep descriptor snapshot with inline structural bounds: the whole
   // envelope graph is copied exactly once through descriptors, and an
   // oversize graph is rejected before its size can be iterated or allocated.
@@ -157,7 +194,7 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
       maxObjectProperties: MAX_OBJECT_PROPERTIES,
       maxArrayItems: MAX_ARRAY_ITEMS,
     },
-    rootEntries,
+    snapshotRootEntries,
   );
   if (!snapshotOutcome.ok) {
     return fail(
@@ -183,26 +220,6 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
       );
     }
     Object.defineProperty(record, entry.name, { value, enumerable: true });
-  }
-
-  for (const versionField of VERSION_FIELDS[kind]) {
-    const value = record[versionField];
-    if (
-      typeof value !== 'number' ||
-      !Number.isInteger(value) ||
-      value < 1 ||
-      value > 2_147_483_647
-    ) {
-      return fail(
-        PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath([{ name: versionField }], kind, PREFIX_CODES.envelopeInvalid),
-      );
-    }
-  }
-
-  const fieldError = checkKindFields(kind, record);
-  if (fieldError !== null) {
-    return fieldError;
   }
 
   const identityError = checkEmbeddedIdentities(kind, record);
@@ -237,6 +254,16 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
   return ok({ value: record, canonicalBytes: canonical });
 }
 
+function recordFromEntries(
+  entries: readonly { readonly name: string; readonly value: unknown }[],
+): Record<string, unknown> {
+  const record: Record<string, unknown> = Object.create(null);
+  for (const entry of entries) {
+    Object.defineProperty(record, entry.name, { value: entry.value, enumerable: true });
+  }
+  return record;
+}
+
 function checkKindFields(
   kind: EnvelopeKind,
   record: Record<string, unknown>,
@@ -250,7 +277,7 @@ function checkKindFields(
             encodePrefixPath([{ name: 'instructions' }], kind, PREFIX_CODES.envelopeInvalid),
           );
     case 'tools':
-      return checkToolDefinitions(kind, record.definitions);
+      return null;
     case 'cacheConfig': {
       if (typeof record.markerPolicy !== 'string') {
         return fail(
@@ -286,12 +313,13 @@ function checkKindFields(
   }
 }
 
-/** Snapshot an array's index values via descriptors (never invoking getters). */
-function snapshotArrayIndices(
+function prepareToolDefinitions(
   kind: EnvelopeKind,
-  path: PrefixPathSegment[],
   value: unknown,
-): { ok: true; items: unknown[] } | { ok: false; error: PrefixResult<ValidatedEnvelope> } {
+):
+  | { ok: true; value: readonly Record<string, unknown>[] }
+  | { ok: false; error: PrefixResult<ValidatedEnvelope> } {
+  const path: PrefixPathSegment[] = [{ name: 'definitions' }];
   if (!Array.isArray(value)) {
     return {
       ok: false,
@@ -301,8 +329,65 @@ function snapshotArrayIndices(
       ),
     };
   }
+  if (Object.getPrototypeOf(value) !== Array.prototype) {
+    return {
+      ok: false,
+      error: fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath(path, kind, PREFIX_CODES.envelopeInvalid),
+      ),
+    };
+  }
+  const keys = Reflect.ownKeys(value);
+  if (keys.some((key) => typeof key === 'symbol')) {
+    return {
+      ok: false,
+      error: fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath(path, kind, PREFIX_CODES.envelopeInvalid),
+      ),
+    };
+  }
+  const lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length');
+  if (
+    lengthDescriptor === undefined ||
+    lengthDescriptor.enumerable ||
+    'get' in lengthDescriptor ||
+    'set' in lengthDescriptor ||
+    typeof lengthDescriptor.value !== 'number'
+  ) {
+    return {
+      ok: false,
+      error: fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath(path, kind, PREFIX_CODES.envelopeInvalid),
+      ),
+    };
+  }
+  const length = lengthDescriptor.value;
+  if (length > MAX_TOOL_DEFINITIONS) {
+    return {
+      ok: false,
+      error: fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath(path, kind, PREFIX_CODES.envelopeInvalid),
+      ),
+    };
+  }
+  for (const key of keys as string[]) {
+    if (key !== 'length' && (!/^\d+$/.test(key) || Number(key) >= length)) {
+      return {
+        ok: false,
+        error: fail(
+          PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath(path, kind, PREFIX_CODES.envelopeInvalid),
+        ),
+      };
+    }
+  }
+
   const items: unknown[] = [];
-  for (let index = 0; index < value.length; index++) {
+  for (let index = 0; index < length; index++) {
     const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
     if (descriptor === undefined) {
       return {
@@ -332,51 +417,9 @@ function snapshotArrayIndices(
     }
     items.push(descriptor.value);
   }
-  return { ok: true, items };
-}
-
-/** Snapshot an object's own data properties via descriptors (never invoking getters). */
-function snapshotObjectData(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return null;
-  }
-  const proto = Object.getPrototypeOf(value);
-  if (proto !== Object.prototype && proto !== null) {
-    return null;
-  }
-  if (Object.getOwnPropertySymbols(value).length > 0) {
-    return null;
-  }
-  const record: Record<string, unknown> = Object.create(null);
-  for (const name of Object.getOwnPropertyNames(value)) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, name)!;
-    if ('get' in descriptor || 'set' in descriptor || !descriptor.enumerable) {
-      return null;
-    }
-    Object.defineProperty(record, name, { value: descriptor.value, enumerable: true });
-  }
-  return record;
-}
-
-function checkToolDefinitions(
-  kind: EnvelopeKind,
-  definitions: unknown,
-): PrefixResult<ValidatedEnvelope> | null {
-  const arrayPath: PrefixPathSegment[] = [{ name: 'definitions' }];
-  const snapshot = snapshotArrayIndices(kind, arrayPath, definitions);
-  if (!snapshot.ok) {
-    return snapshot.error;
-  }
-
-  const items = snapshot.items;
-  if (items.length > MAX_TOOL_DEFINITIONS) {
-    return fail(
-      PREFIX_CODES.envelopeInvalid,
-      encodePrefixPath(arrayPath, kind, PREFIX_CODES.envelopeInvalid),
-    );
-  }
 
   const names = new Set<string>();
+  const prepared: Record<string, unknown>[] = [];
   for (let index = 0; index < items.length; index++) {
     const indexText = String(index);
     const wrapperPath: PrefixPathSegment[] = [
@@ -384,76 +427,135 @@ function checkToolDefinitions(
       { name: indexText, isIndex: true },
     ];
 
-    const tool = snapshotObjectData(items[index]);
-    if (tool === null) {
-      return fail(
-        PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath(wrapperPath, kind, PREFIX_CODES.envelopeInvalid),
-      );
+    const rawTool = items[index];
+    if (typeof rawTool !== 'object' || rawTool === null || Array.isArray(rawTool)) {
+      return {
+        ok: false,
+        error: fail(
+          PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath(wrapperPath, kind, PREFIX_CODES.envelopeInvalid),
+        ),
+      };
     }
-
-    for (const key of Object.keys(tool)) {
+    const proto = Object.getPrototypeOf(rawTool);
+    if (proto !== Object.prototype && proto !== null) {
+      return {
+        ok: false,
+        error: fail(
+          PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath(wrapperPath, kind, PREFIX_CODES.envelopeInvalid),
+        ),
+      };
+    }
+    const wrapperKeys = Reflect.ownKeys(rawTool);
+    if (wrapperKeys.some((key) => typeof key === 'symbol')) {
+      return {
+        ok: false,
+        error: fail(
+          PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath(wrapperPath, kind, PREFIX_CODES.envelopeInvalid),
+        ),
+      };
+    }
+    const tool: Record<string, unknown> = Object.create(null);
+    const sortedKeys = (wrapperKeys as string[]).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    for (const key of sortedKeys) {
+      const descriptor = Object.getOwnPropertyDescriptor(rawTool, key);
+      if (
+        descriptor === undefined ||
+        'get' in descriptor ||
+        'set' in descriptor ||
+        !descriptor.enumerable
+      ) {
+        return {
+          ok: false,
+          error: fail(
+            PREFIX_CODES.envelopeInvalid,
+            encodePrefixPath([...wrapperPath, { name: key }], kind, PREFIX_CODES.envelopeInvalid),
+          ),
+        };
+      }
       if (
         key !== 'description' &&
         key !== 'inputSchema' &&
         key !== 'name' &&
         key !== 'policyMetadata'
       ) {
-        return fail(
-          PREFIX_CODES.envelopeInvalid,
-          encodePrefixPath([...wrapperPath, { name: key }], kind, PREFIX_CODES.envelopeInvalid),
-        );
+        return {
+          ok: false,
+          error: fail(
+            PREFIX_CODES.envelopeInvalid,
+            encodePrefixPath([...wrapperPath, { name: key }], kind, PREFIX_CODES.envelopeInvalid),
+          ),
+        };
       }
+      Object.defineProperty(tool, key, { value: descriptor.value, enumerable: true });
     }
     if (!('name' in tool) || !('description' in tool) || !('inputSchema' in tool)) {
-      return fail(
-        PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath(wrapperPath, kind, PREFIX_CODES.envelopeInvalid),
-      );
+      return {
+        ok: false,
+        error: fail(
+          PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath(wrapperPath, kind, PREFIX_CODES.envelopeInvalid),
+        ),
+      };
     }
 
     const name = tool.name;
     if (typeof name !== 'string') {
-      return fail(
-        PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath([...wrapperPath, { name: 'name' }], kind, PREFIX_CODES.envelopeInvalid),
-      );
+      return {
+        ok: false,
+        error: fail(
+          PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath([...wrapperPath, { name: 'name' }], kind, PREFIX_CODES.envelopeInvalid),
+        ),
+      };
     }
     if (names.has(name)) {
-      return fail(
-        PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath([...wrapperPath, { name: 'name' }], kind, PREFIX_CODES.envelopeInvalid),
-      );
+      return {
+        ok: false,
+        error: fail(
+          PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath([...wrapperPath, { name: 'name' }], kind, PREFIX_CODES.envelopeInvalid),
+        ),
+      };
     }
     names.add(name);
 
     if (typeof tool.description !== 'string') {
-      return fail(
-        PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath(
-          [...wrapperPath, { name: 'description' }],
-          kind,
+      return {
+        ok: false,
+        error: fail(
           PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath(
+            [...wrapperPath, { name: 'description' }],
+            kind,
+            PREFIX_CODES.envelopeInvalid,
+          ),
         ),
-      );
+      };
     }
     if (
       typeof tool.inputSchema !== 'object' ||
       tool.inputSchema === null ||
       Array.isArray(tool.inputSchema)
     ) {
-      return fail(
-        PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath(
-          [...wrapperPath, { name: 'inputSchema' }],
-          kind,
+      return {
+        ok: false,
+        error: fail(
           PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath(
+            [...wrapperPath, { name: 'inputSchema' }],
+            kind,
+            PREFIX_CODES.envelopeInvalid,
+          ),
         ),
-      );
+      };
     }
+    prepared.push(tool);
   }
 
-  return null;
+  return { ok: true, value: prepared };
 }
 
 /** Stage: embedded identity semantics (tool names, adapterBuildVersion). */
