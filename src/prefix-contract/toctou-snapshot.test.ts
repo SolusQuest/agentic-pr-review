@@ -8,6 +8,76 @@ import { computeTemplateId, computeToolDefinitionId } from './index.js';
  */
 
 describe('deep snapshot eliminates validation/emission TOCTOU', () => {
+  for (const extraName of ['00', '01', '000']) {
+    it(`rejects non-canonical open-array key ${extraName} without digest aliasing`, () => {
+      const base = [1, 2];
+      const baseline = computeTemplateId({
+        schemaVersion: 1,
+        templateVersion: 1,
+        definition: base,
+      });
+      const mutated = [1, 2];
+      Object.defineProperty(mutated, extraName, { value: 'hidden', enumerable: true });
+      const result = computeTemplateId({
+        schemaVersion: 1,
+        templateVersion: 1,
+        definition: mutated,
+      });
+
+      expect(baseline.ok).toBe(true);
+      expect(result).toEqual({
+        ok: false,
+        errors: [{ code: 'prefix-canonical-input-rejected', path: '/definition' }],
+      });
+    });
+  }
+
+  it('rejects a non-canonical open-array accessor without invoking it', () => {
+    const value = [1, 2];
+    let reads = 0;
+    Object.defineProperty(value, '00', {
+      get: () => {
+        reads++;
+        return 'hidden';
+      },
+      enumerable: true,
+    });
+
+    expect(computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition: value })).toEqual({
+      ok: false,
+      errors: [{ code: 'prefix-canonical-input-rejected', path: '/definition' }],
+    });
+    expect(reads).toBe(0);
+  });
+
+  for (const descriptor of ['data', 'accessor'] as const) {
+    it(`rejects a non-canonical definitions-array ${descriptor} property structurally`, () => {
+      const definitions = [{ name: 'a', description: 'd', inputSchema: {} }];
+      let reads = 0;
+      Object.defineProperty(
+        definitions,
+        '00',
+        descriptor === 'data'
+          ? { value: definitions[0], enumerable: true }
+          : {
+              get: () => {
+                reads++;
+                return definitions[0];
+              },
+              enumerable: true,
+            },
+      );
+
+      expect(computeToolDefinitionId({ schemaVersion: 1, toolsetVersion: 1, definitions })).toEqual(
+        {
+          ok: false,
+          errors: [{ code: 'prefix-envelope-invalid', path: '/definitions' }],
+        },
+      );
+      expect(reads).toBe(0);
+    });
+  }
+
   it('does not confuse slash-delimited property paths with nested paths', () => {
     const shared = { x: 1 };
     const aliased = computeTemplateId({

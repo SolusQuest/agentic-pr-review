@@ -99,6 +99,18 @@ internal struct Rfc8785Writer
         _needsComma = false;
     }
 
+    internal void WriteRawProperty(ReadOnlySpan<byte> rawName)
+    {
+        if (_needsComma)
+        {
+            Append(","u8);
+        }
+
+        WriteRawEscapedString(rawName);
+        Append(":"u8);
+        _needsComma = false;
+    }
+
     internal void WriteNumber(long value)
     {
         var text = value.ToString(CultureInfo.InvariantCulture);
@@ -117,6 +129,51 @@ internal struct Rfc8785Writer
     {
         WriteEscapedString(value);
         _needsComma = true;
+    }
+
+    internal void WriteRawString(ReadOnlySpan<byte> rawValue)
+    {
+        WriteRawEscapedString(rawValue);
+        _needsComma = true;
+    }
+
+    private void WriteRawEscapedString(ReadOnlySpan<byte> raw)
+    {
+        Append("\""u8);
+        var enumerator = LenientJsonObjectEnumerator.EnumerateRawToken(raw);
+        while (enumerator.MoveNext(out var unit))
+        {
+            if (char.IsHighSurrogate(unit))
+            {
+                if (!enumerator.MoveNext(out var low) || !char.IsLowSurrogate(low))
+                {
+                    throw new Rfc8785CanonicalizationException(
+                        Rfc8785RejectionReason.UnpairedSurrogate,
+                        "Unpaired UTF-16 surrogate encountered during canonicalization.");
+                }
+
+                WriteUtf8Codepoint(char.ConvertToUtf32(unit, low));
+            }
+            else if (char.IsLowSurrogate(unit))
+            {
+                throw new Rfc8785CanonicalizationException(
+                    Rfc8785RejectionReason.UnpairedSurrogate,
+                    "Unpaired UTF-16 surrogate encountered during canonicalization.");
+            }
+            else
+            {
+                WriteEscapedCodepoint(unit);
+            }
+        }
+
+        if (enumerator.Malformed)
+        {
+            throw new Rfc8785CanonicalizationException(
+                Rfc8785RejectionReason.UnpairedSurrogate,
+                "Malformed UTF-8 JSON string token encountered during canonicalization.");
+        }
+
+        Append("\""u8);
     }
 
     private void WriteEscapedString(string value)
@@ -186,7 +243,18 @@ internal struct Rfc8785Writer
         if (c < 0x20)
         {
             // Includes U+0000: emitted as \u0000 per RFC 8785, not rejected.
-            Append(Encoding.UTF8.GetBytes($"\\u{(int)c:x4}"));
+            Span<byte> escape = stackalloc byte[6];
+            escape[0] = (byte)'\\';
+            escape[1] = (byte)'u';
+            var value = (int)c;
+            for (var index = 5; index >= 2; index--)
+            {
+                var nibble = value & 0xF;
+                escape[index] = (byte)(nibble < 10 ? '0' + nibble : 'a' + nibble - 10);
+                value >>= 4;
+            }
+
+            Append(escape);
             return;
         }
 
@@ -195,7 +263,35 @@ internal struct Rfc8785Writer
 
     private void WriteUtf8Codepoint(int codepoint)
     {
-        var chars = char.ConvertFromUtf32(codepoint);
-        Append(Encoding.UTF8.GetBytes(chars));
+        Span<byte> utf8 = stackalloc byte[4];
+        int length;
+        if (codepoint <= 0x7F)
+        {
+            utf8[0] = (byte)codepoint;
+            length = 1;
+        }
+        else if (codepoint <= 0x7FF)
+        {
+            utf8[0] = (byte)(0xC0 | (codepoint >> 6));
+            utf8[1] = (byte)(0x80 | (codepoint & 0x3F));
+            length = 2;
+        }
+        else if (codepoint <= 0xFFFF)
+        {
+            utf8[0] = (byte)(0xE0 | (codepoint >> 12));
+            utf8[1] = (byte)(0x80 | ((codepoint >> 6) & 0x3F));
+            utf8[2] = (byte)(0x80 | (codepoint & 0x3F));
+            length = 3;
+        }
+        else
+        {
+            utf8[0] = (byte)(0xF0 | (codepoint >> 18));
+            utf8[1] = (byte)(0x80 | ((codepoint >> 12) & 0x3F));
+            utf8[2] = (byte)(0x80 | ((codepoint >> 6) & 0x3F));
+            utf8[3] = (byte)(0x80 | (codepoint & 0x3F));
+            length = 4;
+        }
+
+        Append(utf8[..length]);
     }
 }

@@ -4,9 +4,11 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.Canonical;
 using AgenticPrReview.Runtime.Prefix;
 using Xunit;
+using Xunit.Sdk;
 
 namespace AgenticPrReview.Runtime.Tests.Prefix;
 
@@ -244,8 +246,15 @@ public sealed class PrefixGoldenVectorTests
             {
                 var baseInput = vector.GetProperty("baseInput");
                 var mutatedInput = vector.GetProperty("mutatedInput");
-                var stableLogical = Convert.FromHexString(baseInput.GetProperty("logicalStreamHex").GetString()!);
-                var stableProvider = Convert.FromHexString(baseInput.GetProperty("providerStreamHex").GetString()!);
+                var baseLogical = Convert.FromHexString(baseInput.GetProperty("logicalStreamHex").GetString()!);
+                var mutatedLogical = Convert.FromHexString(mutatedInput.GetProperty("logicalStreamHex").GetString()!);
+                var baseProvider = Convert.FromHexString(baseInput.GetProperty("providerStreamHex").GetString()!);
+                var mutatedProvider = Convert.FromHexString(mutatedInput.GetProperty("providerStreamHex").GetString()!);
+
+                Assert.Equal(expected.GetProperty("logicalStreamChanged").GetBoolean(), !baseLogical.AsSpan().SequenceEqual(mutatedLogical));
+                Assert.Equal(expected.GetProperty("providerStreamChanged").GetBoolean(), !baseProvider.AsSpan().SequenceEqual(mutatedProvider));
+                Assert.Equal(baseLogical, mutatedLogical);
+                Assert.Equal(baseProvider, mutatedProvider);
 
                 var identities = PrefixFixtureLoader
                     .BuildMaterializeInput(
@@ -253,17 +262,17 @@ public sealed class PrefixGoldenVectorTests
                     .ExpectedIdentities;
 
                 var baseLogicalHash = PrefixMaterializer.ComputeLogicalPrefixSha256(
-                    stableLogical,
+                    baseLogical,
                     baseInput.GetProperty("ledgerSchemaVersion").GetInt64(),
                     baseInput.GetProperty("prefixContractVersion").GetInt64());
                 var mutatedLogicalHash = PrefixMaterializer.ComputeLogicalPrefixSha256(
-                    stableLogical,
+                    mutatedLogical,
                     mutatedInput.GetProperty("ledgerSchemaVersion").GetInt64(),
                     mutatedInput.GetProperty("prefixContractVersion").GetInt64());
 
                 Assert.Equal(expected.GetProperty("baseLogicalPrefixSha256").GetString(), baseLogicalHash);
                 Assert.Equal(expected.GetProperty("mutatedLogicalPrefixSha256").GetString(), mutatedLogicalHash);
-                Assert.NotEqual(baseLogicalHash, mutatedLogicalHash);
+                Assert.Equal(expected.GetProperty("logicalHashChanged").GetBoolean(), baseLogicalHash != mutatedLogicalHash);
 
                 var digests = identities;
                 var basePrefixHash = PrefixMaterializer.ComputePrefixSha256(
@@ -273,7 +282,7 @@ public sealed class PrefixGoldenVectorTests
                     digests.ToolDefinitionId,
                     digests.CacheConfigId,
                     digests.AdapterId,
-                    stableProvider,
+                    baseProvider,
                     baseInput.GetProperty("ledgerSchemaVersion").GetInt64(),
                     baseInput.GetProperty("prefixContractVersion").GetInt64());
                 var mutatedPrefixHash = PrefixMaterializer.ComputePrefixSha256(
@@ -283,15 +292,43 @@ public sealed class PrefixGoldenVectorTests
                     digests.ToolDefinitionId,
                     digests.CacheConfigId,
                     digests.AdapterId,
-                    stableProvider,
+                    mutatedProvider,
                     mutatedInput.GetProperty("ledgerSchemaVersion").GetInt64(),
                     mutatedInput.GetProperty("prefixContractVersion").GetInt64());
 
                 Assert.Equal(expected.GetProperty("basePrefixSha256").GetString(), basePrefixHash);
                 Assert.Equal(expected.GetProperty("mutatedPrefixSha256").GetString(), mutatedPrefixHash);
-                Assert.NotEqual(basePrefixHash, mutatedPrefixHash);
+                Assert.Equal(expected.GetProperty("prefixHashChanged").GetBoolean(), basePrefixHash != mutatedPrefixHash);
             }
         }
+    }
+
+    [Fact]
+    public void HashFramingFixtureValidatorRejectsSemanticTampering()
+    {
+        var original = PrefixFixtureLoader.LoadVector("invalidation/ledger-schema-version.json");
+
+        static JsonElement Mutate(JsonElement source, Action<JsonObject> mutation)
+        {
+            var root = JsonNode.Parse(source.GetRawText())!.AsObject();
+            mutation(root);
+            using var document = JsonDocument.Parse(root.ToJsonString());
+            return document.RootElement.Clone();
+        }
+
+        var badMutation = Mutate(original, root => root["mutation"] = "arbitrary version");
+        Assert.ThrowsAny<XunitException>(() =>
+            PrefixFixtureLoader.AssertHashFramingMutation("invalidation-ledger-schema-version", badMutation));
+
+        var badStream = Mutate(original, root =>
+            root["mutatedInput"]!.AsObject()["logicalStreamHex"] = "00");
+        Assert.ThrowsAny<XunitException>(() =>
+            PrefixFixtureLoader.AssertHashFramingMutation("invalidation-ledger-schema-version", badStream));
+
+        var badMatrix = Mutate(original, root =>
+            root["expected"]!.AsObject()["prefixHashChanged"] = false);
+        Assert.ThrowsAny<XunitException>(() =>
+            PrefixFixtureLoader.AssertHashFramingMutation("invalidation-ledger-schema-version", badMatrix));
     }
 
     [Fact]

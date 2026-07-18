@@ -55,6 +55,11 @@ export type SnapshotOutcome =
   | { readonly ok: true; readonly value: unknown }
   | { readonly ok: false; readonly violation: SnapshotStructuralViolation };
 
+/** True only for the canonical decimal spelling of an in-range array index. */
+export function isCanonicalArrayIndexName(name: string, length: number): boolean {
+  return /^(?:0|[1-9]\d*)$/.test(name) && Number(name) < length;
+}
+
 /**
  * Iterative deep snapshot with inline structural bounds. When
  * `rootEntriesOverride` is provided, the ROOT frame uses those pre-captured
@@ -203,8 +208,11 @@ export function deepDescriptorSnapshot(
         if (name === 'length') {
           continue;
         }
-        if (!/^\d+$/.test(name) || Number(name) >= arrayLength) {
-          assign(marker('non-enumerable-property'));
+        if (!isCanonicalArrayIndexName(name, arrayLength)) {
+          // An extra string property is a canonical-domain defect for open
+          // JSON arrays. Keep it distinct from a root descriptor defect,
+          // which belongs to the closed-envelope structure stage.
+          assign(marker('non-plain-object'));
           return null;
         }
       }

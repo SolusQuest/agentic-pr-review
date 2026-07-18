@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using System.Text.Json;
+using AgenticPrReview.Runtime.Canonical;
 
 namespace AgenticPrReview.Runtime.Prefix;
 
@@ -60,6 +62,66 @@ internal static class PrefixIdentityValidation
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Validates a JSON string identity directly from its raw UTF-8 token.
+    /// Once the 256-byte identity cap is crossed, validation terminates without
+    /// allocating or decoding the remainder into a managed string.
+    /// </summary>
+    internal static bool IsValidIdentity(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        var enumerator = LenientJsonObjectEnumerator.EnumerateRawToken(
+            LenientJsonObjectEnumerator.RawStringValue(element));
+        var utf8Bytes = 0;
+        var codeUnits = 0;
+        while (enumerator.MoveNext(out var unit))
+        {
+            codeUnits++;
+            if (unit <= 0x1F || unit == 0x7F)
+            {
+                return false;
+            }
+
+            if (unit <= 0x7F)
+            {
+                utf8Bytes++;
+            }
+            else if (unit <= 0x7FF)
+            {
+                utf8Bytes += 2;
+            }
+            else if (char.IsHighSurrogate(unit))
+            {
+                if (!enumerator.MoveNext(out var low) || !char.IsLowSurrogate(low))
+                {
+                    return false;
+                }
+
+                codeUnits++;
+                utf8Bytes += 4;
+            }
+            else if (char.IsLowSurrogate(unit))
+            {
+                return false;
+            }
+            else
+            {
+                utf8Bytes += 3;
+            }
+
+            if (utf8Bytes > PrefixBounds.MaxIdentityUtf8Bytes)
+            {
+                return false;
+            }
+        }
+
+        return codeUnits > 0 && !enumerator.Malformed;
     }
 
     internal static bool IsValidDigest(string? value) => value is not null && LowerHex64.IsMatch(value);

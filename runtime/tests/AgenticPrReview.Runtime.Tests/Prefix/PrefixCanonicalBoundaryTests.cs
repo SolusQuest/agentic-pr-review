@@ -20,6 +20,29 @@ public sealed class PrefixCanonicalBoundaryTests
 
     private static string BigString(int bytes) => new('x', bytes);
 
+    private static long MeasureValidationAllocations(JsonElement envelope, PrefixEnvelopeValidator.EnvelopeKind kind)
+    {
+        // Warm the relevant code paths before measuring per-call managed
+        // allocations; the JsonDocument's own retained input buffer is outside
+        // this validation measurement.
+        using (var warm = JsonDocument.Parse("{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":\"x\"}"))
+        {
+            _ = CacheContractDigests.ComputeTemplateId(warm.RootElement);
+        }
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        _ = kind switch
+        {
+            PrefixEnvelopeValidator.EnvelopeKind.Template => CacheContractDigests.ComputeTemplateId(envelope),
+            PrefixEnvelopeValidator.EnvelopeKind.Policy => CacheContractDigests.ComputePolicyId(envelope),
+            PrefixEnvelopeValidator.EnvelopeKind.Tools => CacheContractDigests.ComputeToolDefinitionId(envelope),
+            PrefixEnvelopeValidator.EnvelopeKind.CacheConfig => CacheContractDigests.ComputeCacheConfigId(envelope),
+            PrefixEnvelopeValidator.EnvelopeKind.Adapter => CacheContractDigests.ComputeAdapterId(envelope),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
+        return GC.GetAllocatedBytesForCurrentThread() - before;
+    }
+
     [Fact]
     public void EarlyOversizeStringDoesNotMaskLaterLoneSurrogate()
     {
@@ -118,6 +141,45 @@ public sealed class PrefixCanonicalBoundaryTests
         var error = ValidateTemplate(
             "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":\"" + new string('x', 1_000_000) + "\"}");
         Assert.Equal("prefix_envelope_too_large", error?.Code);
+    }
+
+    [Fact]
+    public void OversizeStringValidationAllocationIsBoundedBelowTokenSize()
+    {
+        const int tokenBytes = 4_000_000;
+        using var doc = JsonDocument.Parse(
+            "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":\"" + BigString(tokenBytes) + "\"}");
+        var allocated = MeasureValidationAllocations(
+            doc.RootElement, PrefixEnvelopeValidator.EnvelopeKind.Template);
+        Assert.True(allocated < tokenBytes / 2, $"validation allocated {allocated} bytes for a {tokenBytes}-byte token");
+    }
+
+    [Fact]
+    public void OversizePropertyNameValidationAllocationIsBoundedBelowTokenSize()
+    {
+        const int tokenBytes = 4_000_000;
+        using var doc = JsonDocument.Parse(
+            "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":{\"" + BigString(tokenBytes) + "\":1}}");
+        var allocated = MeasureValidationAllocations(
+            doc.RootElement, PrefixEnvelopeValidator.EnvelopeKind.Template);
+        Assert.True(allocated < tokenBytes / 2, $"validation allocated {allocated} bytes for a {tokenBytes}-byte name");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void OversizeEmbeddedIdentityValidationAllocationIsBounded(bool toolsEnvelope)
+    {
+        const int tokenBytes = 4_000_000;
+        var json = toolsEnvelope
+            ? "{\"schemaVersion\":1,\"toolsetVersion\":1,\"definitions\":[{\"name\":\"" + BigString(tokenBytes) + "\",\"description\":\"d\",\"inputSchema\":{}}]}"
+            : "{\"schemaVersion\":1,\"capabilityProfileVersion\":1,\"adapterBuildVersion\":\"" + BigString(tokenBytes) + "\"}";
+        using var doc = JsonDocument.Parse(json);
+        var kind = toolsEnvelope
+            ? PrefixEnvelopeValidator.EnvelopeKind.Tools
+            : PrefixEnvelopeValidator.EnvelopeKind.Adapter;
+        var allocated = MeasureValidationAllocations(doc.RootElement, kind);
+        Assert.True(allocated < tokenBytes / 8, $"identity validation allocated {allocated} bytes for a {tokenBytes}-byte token");
     }
 
     [Fact]

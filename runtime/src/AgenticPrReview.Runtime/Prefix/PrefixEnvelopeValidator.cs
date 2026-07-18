@@ -93,7 +93,7 @@ internal static class PrefixEnvelopeValidator
                     return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, segments));
                 }
 
-                var properties = new List<(string Name, JsonElement Value)>();
+                var properties = new List<LenientJsonObjectEnumerator.Entry>();
                 foreach (var property in LenientJsonObjectEnumerator.Enumerate(
                     value,
                     PrefixBounds.MaxEnvelopeObjectProperties + 1))
@@ -103,16 +103,16 @@ internal static class PrefixEnvelopeValidator
                         return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, segments));
                     }
 
-                    properties.Add((property.Name, property.Value));
+                    properties.Add(property);
                 }
-                properties.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Name, right.Name));
+                properties.Sort(static (left, right) => LenientJsonObjectEnumerator.CompareNames(left, right));
                 // LIFO: push the reverse of the required unsigned UTF-16 order.
                 for (var i = properties.Count - 1; i >= 0; i--)
                 {
                     var property = properties[i];
                     var child = new System.Collections.Generic.List<CanonicalPathSegment>(segments)
                     {
-                        CanonicalPathSegment.Property(property.Name),
+                        CanonicalPathSegment.Property(LenientJsonObjectEnumerator.DiagnosticName(property)),
                     };
                     stack.Push((property.Value, depth + 1, child));
                 }
@@ -172,8 +172,7 @@ internal static class PrefixEnvelopeValidator
                         continue;
                     }
 
-                    var decodedName = LenientJsonObjectEnumerator.DecodeStringValue(name);
-                    if (!PrefixIdentityValidation.IsValidIdentity(decodedName))
+                    if (!PrefixIdentityValidation.IsValidIdentity(name))
                     {
                         return PrefixDiagnostic.Create(
                             PrefixDiagnosticCodes.IdentityInvalid,
@@ -191,8 +190,7 @@ internal static class PrefixEnvelopeValidator
             {
                 var buildVersion = envelope.GetProperty("adapterBuildVersion");
                 if (buildVersion.ValueKind == JsonValueKind.String
-                    && !PrefixIdentityValidation.IsValidIdentity(
-                        LenientJsonObjectEnumerator.DecodeStringValue(buildVersion)))
+                    && !PrefixIdentityValidation.IsValidIdentity(buildVersion))
                 {
                     return PrefixDiagnostic.Create(
                         PrefixDiagnosticCodes.IdentityInvalid,
@@ -316,16 +314,19 @@ internal static class PrefixEnvelopeValidator
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
-    private static string ReadPropertyNameOrSentinel(JsonProperty property)
+    private static string? MatchKnownName(
+        LenientJsonObjectEnumerator.Entry entry,
+        IEnumerable<string> knownNames)
     {
-        try
+        foreach (var name in knownNames)
         {
-            return property.Name;
+            if (LenientJsonObjectEnumerator.NameEquals(entry, name))
+            {
+                return name;
+            }
         }
-        catch (InvalidOperationException)
-        {
-            return JsonElementCanonicalizer.InvalidNameSentinel;
-        }
+
+        return null;
     }
 
     private static PrefixDiagnostic? CheckExactKeySet(EnvelopeKind kind, JsonElement envelope)
@@ -341,18 +342,18 @@ internal static class PrefixEnvelopeValidator
         };
 
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
-        var allowedSet = new HashSet<string>(allowed, StringComparer.Ordinal);
-        string? firstUnknown = null;
-        foreach (var property in envelope.EnumerateObject())
+        LenientJsonObjectEnumerator.Entry? firstUnknown = null;
+        foreach (var entry in LenientJsonObjectEnumerator.Enumerate(envelope))
         {
-            var propertyName = ReadPropertyNameOrSentinel(property);
-            if (allowedSet.Contains(propertyName))
+            var propertyName = MatchKnownName(entry, allowed);
+            if (propertyName is not null)
             {
                 counts[propertyName] = counts.GetValueOrDefault(propertyName) + 1;
             }
-            else if (firstUnknown is null || StringComparer.Ordinal.Compare(propertyName, firstUnknown) < 0)
+            else if (firstUnknown is null
+                || LenientJsonObjectEnumerator.CompareNames(entry, firstUnknown.Value) < 0)
             {
-                firstUnknown = propertyName;
+                firstUnknown = entry;
             }
         }
 
@@ -363,8 +364,9 @@ internal static class PrefixEnvelopeValidator
             .FirstOrDefault();
         var firstKeyDefect = firstUnknown is null
             ? firstDuplicate
-            : firstDuplicate is null || StringComparer.Ordinal.Compare(firstUnknown, firstDuplicate) < 0
-                ? firstUnknown
+            : firstDuplicate is null
+                || LenientJsonObjectEnumerator.CompareNameTo(firstUnknown.Value, firstDuplicate) < 0
+                ? LenientJsonObjectEnumerator.DiagnosticName(firstUnknown.Value)
                 : firstDuplicate;
         if (firstKeyDefect is not null)
         {
@@ -503,7 +505,7 @@ internal static class PrefixEnvelopeValidator
             return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions") }));
         }
 
-        var names = new HashSet<string>(StringComparer.Ordinal);
+        var names = new List<JsonElement>();
         var index = 0;
         foreach (var tool in definitions.EnumerateArray())
         {
@@ -514,17 +516,19 @@ internal static class PrefixEnvelopeValidator
             }
 
             var wrapperCounts = new Dictionary<string, int>(StringComparer.Ordinal);
-            string? firstUnknown = null;
-            foreach (var property in tool.EnumerateObject())
+            var wrapperKeys = new[] { "description", "inputSchema", "name", "policyMetadata" };
+            LenientJsonObjectEnumerator.Entry? firstUnknown = null;
+            foreach (var entry in LenientJsonObjectEnumerator.Enumerate(tool))
             {
-                var wrapperName = ReadPropertyNameOrSentinel(property);
-                if (wrapperName is "description" or "inputSchema" or "name" or "policyMetadata")
+                var wrapperName = MatchKnownName(entry, wrapperKeys);
+                if (wrapperName is not null)
                 {
                     wrapperCounts[wrapperName] = wrapperCounts.GetValueOrDefault(wrapperName) + 1;
                 }
-                else if (firstUnknown is null || StringComparer.Ordinal.Compare(wrapperName, firstUnknown) < 0)
+                else if (firstUnknown is null
+                    || LenientJsonObjectEnumerator.CompareNames(entry, firstUnknown.Value) < 0)
                 {
-                    firstUnknown = wrapperName;
+                    firstUnknown = entry;
                 }
             }
 
@@ -535,8 +539,9 @@ internal static class PrefixEnvelopeValidator
                 .FirstOrDefault();
             var firstKeyDefect = firstUnknown is null
                 ? firstDuplicate
-                : firstDuplicate is null || StringComparer.Ordinal.Compare(firstUnknown, firstDuplicate) < 0
-                    ? firstUnknown
+                : firstDuplicate is null
+                    || LenientJsonObjectEnumerator.CompareNameTo(firstUnknown.Value, firstDuplicate) < 0
+                    ? LenientJsonObjectEnumerator.DiagnosticName(firstUnknown.Value)
                     : firstDuplicate;
             if (firstKeyDefect is not null)
             {
@@ -554,11 +559,11 @@ internal static class PrefixEnvelopeValidator
                 return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions"), CanonicalPathSegment.Index(indexText), CanonicalPathSegment.Property("name") }));
             }
 
-            var decodedName = LenientJsonObjectEnumerator.DecodeStringValue(name);
-            if (!names.Add(decodedName))
+            if (names.Any(previous => LenientJsonObjectEnumerator.StringValuesEqual(previous, name)))
             {
                 return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions"), CanonicalPathSegment.Index(indexText), CanonicalPathSegment.Property("name") }));
             }
+            names.Add(name);
 
             if (tool.GetProperty("description").ValueKind != JsonValueKind.String)
             {

@@ -36,6 +36,10 @@ function sha256Hex(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
+function tagBytes(tag: string): Buffer {
+  return Buffer.concat([Buffer.from(tag, 'utf8'), Buffer.from([0])]);
+}
+
 function uint32be(value: number): number[] {
   return [(value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff];
 }
@@ -158,6 +162,92 @@ describe('prefix-contract golden vectors (TS consumer)', () => {
       expect(Buffer.from(preimage).toString('hex'), entry.id).toBe(
         (vector.expected as { preimageHex: string }).preimageHex,
       );
+    }
+  });
+
+  it('consumes every invalidation vector as a closed oracle', () => {
+    const entries = loadManifest();
+    const byId = new Map(entries.map((entry) => [entry.id, entry]));
+    const bootstrap = loadVector('materialization/bootstrap.json');
+    const identities = (bootstrap.input as Record<string, unknown>).expectedIdentities as Record<
+      string,
+      string
+    >;
+    const changed = (left: unknown, right: unknown) => left !== right;
+
+    for (const entry of entries.filter((candidate) => candidate.kind === 'invalidation-vector')) {
+      const vector = loadVector(entry.file);
+      const expected = vector.expected as Record<string, unknown>;
+      if (vector.mode === 'materializer') {
+        const base = loadVector(byId.get(vector.baseVectorId as string)!.file).expected as Record<
+          string,
+          unknown
+        >;
+        const successor = loadVector(byId.get(vector.successorVectorId as string)!.file)
+          .expected as Record<string, unknown>;
+        expect(changed(base.logicalStreamHex, successor.logicalStreamHex), entry.id).toBe(
+          expected.logicalStreamChanged,
+        );
+        expect(changed(base.providerStreamHex, successor.providerStreamHex), entry.id).toBe(
+          expected.providerStreamChanged,
+        );
+        expect(changed(base.logicalPrefixSha256, successor.logicalPrefixSha256), entry.id).toBe(
+          expected.logicalHashChanged,
+        );
+        expect(changed(base.prefixSha256, successor.prefixSha256), entry.id).toBe(
+          expected.prefixHashChanged,
+        );
+        continue;
+      }
+
+      const base = vector.baseInput as Record<string, unknown>;
+      const mutated = vector.mutatedInput as Record<string, unknown>;
+      const logicalHash = (input: Record<string, unknown>) =>
+        sha256Hex(
+          Buffer.concat([
+            tagBytes('agentic-pr-review/logical-prefix/v1'),
+            Buffer.from(encodeIdentity(String(input.ledgerSchemaVersion))),
+            Buffer.from(encodeIdentity(String(input.prefixContractVersion))),
+            Buffer.from(input.logicalStreamHex as string, 'hex'),
+          ]),
+        );
+      const prefixHash = (input: Record<string, unknown>) =>
+        sha256Hex(
+          Buffer.concat([
+            tagBytes('agentic-pr-review/provider-prefix/v1'),
+            Buffer.from(encodeIdentity(String(input.ledgerSchemaVersion))),
+            Buffer.from(encodeIdentity(String(input.prefixContractVersion))),
+            ...[
+              'providerId',
+              'modelId',
+              'adapterId',
+              'templateId',
+              'policyId',
+              'toolDefinitionId',
+              'cacheConfigId',
+            ].map((key) => Buffer.from(encodeIdentity(identities[key]))),
+            Buffer.from(input.providerStreamHex as string, 'hex'),
+          ]),
+        );
+
+      const baseLogicalHash = logicalHash(base);
+      const mutatedLogicalHash = logicalHash(mutated);
+      const basePrefixHash = prefixHash(base);
+      const mutatedPrefixHash = prefixHash(mutated);
+      expect(baseLogicalHash, entry.id).toBe(expected.baseLogicalPrefixSha256);
+      expect(mutatedLogicalHash, entry.id).toBe(expected.mutatedLogicalPrefixSha256);
+      expect(basePrefixHash, entry.id).toBe(expected.basePrefixSha256);
+      expect(mutatedPrefixHash, entry.id).toBe(expected.mutatedPrefixSha256);
+      expect(changed(base.logicalStreamHex, mutated.logicalStreamHex), entry.id).toBe(
+        expected.logicalStreamChanged,
+      );
+      expect(changed(base.providerStreamHex, mutated.providerStreamHex), entry.id).toBe(
+        expected.providerStreamChanged,
+      );
+      expect(changed(baseLogicalHash, mutatedLogicalHash), entry.id).toBe(
+        expected.logicalHashChanged,
+      );
+      expect(changed(basePrefixHash, mutatedPrefixHash), entry.id).toBe(expected.prefixHashChanged);
     }
   });
 

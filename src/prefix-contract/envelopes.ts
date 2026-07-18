@@ -5,6 +5,7 @@ import {
 } from '../canonical-json/index.js';
 import {
   deepDescriptorSnapshot,
+  isCanonicalArrayIndexName,
   isCanonicalViolationMarker,
   canonicalViolationReason,
 } from './deep-snapshot.js';
@@ -385,7 +386,7 @@ function prepareToolDefinitions(
     };
   }
   for (const key of keys as string[]) {
-    if (key !== 'length' && (!/^\d+$/.test(key) || Number(key) >= length)) {
+    if (key !== 'length' && !isCanonicalArrayIndexName(key, length)) {
       return {
         ok: false,
         error: fail(

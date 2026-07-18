@@ -177,6 +177,7 @@ internal static class PrefixFixtureLoader
                     AssertHashFramingInput(entry.Id, "baseInput", vector.GetProperty("baseInput"));
                     AssertHashFramingInput(entry.Id, "mutatedInput", vector.GetProperty("mutatedInput"));
                     AssertHashFramingExpected(entry.Id, vector.GetProperty("expected"));
+                    AssertHashFramingMutation(entry.Id, vector);
                 }
                 else
                 {
@@ -585,6 +586,27 @@ internal static class PrefixFixtureLoader
         {
             AssertHex(property.Value.GetString()!, 64);
         }
+    }
+
+    internal static void AssertHashFramingMutation(string id, JsonElement vector)
+    {
+        var mutation = vector.GetProperty("mutation").GetString();
+        var expectedField = mutation switch
+        {
+            "ledger schema version" => "ledgerSchemaVersion",
+            "prefix contract version" => "prefixContractVersion",
+            _ => throw new Xunit.Sdk.XunitException($"{id}: unknown hash-framing mutation {mutation}"),
+        };
+        var diffs = JsonDiffPaths(vector.GetProperty("baseInput"), vector.GetProperty("mutatedInput"));
+        Assert.True(
+            diffs.Count == 1 && PathEquals(diffs.Single(), expectedField),
+            $"{id}: hash-framing mutation must change only {expectedField} ({string.Join(',', diffs.Select(FormatDiffPath))})");
+
+        var expected = vector.GetProperty("expected");
+        Assert.False(expected.GetProperty("logicalStreamChanged").GetBoolean());
+        Assert.False(expected.GetProperty("providerStreamChanged").GetBoolean());
+        Assert.True(expected.GetProperty("logicalHashChanged").GetBoolean());
+        Assert.True(expected.GetProperty("prefixHashChanged").GetBoolean());
     }
 
     private static void AssertExactObject(

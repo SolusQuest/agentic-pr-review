@@ -8,10 +8,10 @@ namespace AgenticPrReview.Runtime.Tests.Canonical;
 
 public sealed class LenientJsonObjectEnumeratorTests
 {
-    private static ImmutableArray<LenientJsonObjectEnumerator.Entry> Enumerate(string json)
+    private static (JsonDocument Document, ImmutableArray<LenientJsonObjectEnumerator.Entry> Entries) Enumerate(string json)
     {
-        using var doc = JsonDocument.Parse(json);
-        return LenientJsonObjectEnumerator.Enumerate(doc.RootElement);
+        var document = JsonDocument.Parse(json);
+        return (document, LenientJsonObjectEnumerator.Enumerate(document.RootElement).ToImmutableArray());
     }
 
     [Fact]
@@ -19,36 +19,48 @@ public sealed class LenientJsonObjectEnumeratorTests
     {
         // Direct é (2 UTF-8 bytes) followed by an escaped newline and an
         // escaped backslash: the run before the escape must decode as UTF-8.
-        var entries = Enumerate("{\"é\\n\\\\\":1}");
-        var entry = Assert.Single(entries);
-        Assert.True(entry.NameValid);
-        Assert.Equal("é\n\\", entry.Name);
+        var (document, entries) = Enumerate("{\"é\\n\\\\\":1}");
+        using (document)
+        {
+            var entry = Assert.Single(entries);
+            Assert.True(LenientJsonObjectEnumerator.NameIsWellFormed(entry));
+            Assert.Equal(0, LenientJsonObjectEnumerator.CompareNameTo(entry, "é\n\\"));
+        }
     }
 
     [Fact]
     public void DirectCjkWithUnicodeEscapeDecodesCorrectly()
     {
-        var entries = Enumerate("{\"界面\\u000a\":1}");
-        var entry = Assert.Single(entries);
-        Assert.True(entry.NameValid);
-        Assert.Equal("界面\n", entry.Name);
+        var (document, entries) = Enumerate("{\"界面\\u000a\":1}");
+        using (document)
+        {
+            var entry = Assert.Single(entries);
+            Assert.True(LenientJsonObjectEnumerator.NameIsWellFormed(entry));
+            Assert.Equal(0, LenientJsonObjectEnumerator.CompareNameTo(entry, "界面\n"));
+        }
     }
 
     [Fact]
     public void DirectNonAsciiPrefixWithLoneSurrogateIsMarkedInvalidButPreservesName()
     {
-        var entries = Enumerate("{\"é\\ud800\":1}");
-        var entry = Assert.Single(entries);
-        Assert.False(entry.NameValid);
-        Assert.Equal("é\ud800", entry.Name);
+        var (document, entries) = Enumerate("{\"é\\ud800\":1}");
+        using (document)
+        {
+            var entry = Assert.Single(entries);
+            Assert.False(LenientJsonObjectEnumerator.NameIsWellFormed(entry));
+            Assert.Equal(0, LenientJsonObjectEnumerator.CompareNameTo(entry, "é\ud800"));
+        }
     }
 
     [Fact]
     public void DirectUtf8AndUnicodeEscapeSpellingsAreDuplicates()
     {
-        var entries = Enumerate("{\"é\":1,\"\\u00e9\":2}");
-        Assert.Equal(2, entries.Length);
-        Assert.Equal(entries[0].Name, entries[1].Name);
+        var (document, entries) = Enumerate("{\"é\":1,\"\\u00e9\":2}");
+        using (document)
+        {
+            Assert.Equal(2, entries.Length);
+            Assert.Equal(0, LenientJsonObjectEnumerator.CompareNames(entries[0], entries[1]));
+        }
     }
 
     [Fact]

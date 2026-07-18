@@ -883,6 +883,8 @@ function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknow
         }
       } else if (mode === 'hash-framing') {
         require(['baseInput', 'mutatedInput']);
+        let baseInput: Record<string, unknown> | undefined;
+        let mutatedInput: Record<string, unknown> | undefined;
         for (const label of ['baseInput', 'mutatedInput'] as const) {
           const hashInput = exactObject(vector[label], label, {
             ledgerSchemaVersion: 'number',
@@ -898,6 +900,8 @@ function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknow
           );
           hexField(hashInput, 'logicalStreamHex', `${label}.logicalStreamHex`);
           hexField(hashInput, 'providerStreamHex', `${label}.providerStreamHex`);
+          if (label === 'baseInput') baseInput = hashInput;
+          else mutatedInput = hashInput;
         }
         const invalidationExpected = exactObject(vector.expected, 'expected', {
           baseLogicalPrefixSha256: 'string',
@@ -913,6 +917,29 @@ function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknow
         shaField(invalidationExpected, 'mutatedLogicalPrefixSha256');
         shaField(invalidationExpected, 'basePrefixSha256');
         shaField(invalidationExpected, 'mutatedPrefixSha256');
+        const expectedVersionField: Record<string, string> = {
+          'ledger schema version': 'ledgerSchemaVersion',
+          'prefix contract version': 'prefixContractVersion',
+        };
+        const versionField =
+          typeof vector.mutation === 'string' ? expectedVersionField[vector.mutation] : undefined;
+        if (versionField === undefined) {
+          violations.push(`unknown-mutation:${entry.id}:${String(vector.mutation)}`);
+        } else if (baseInput !== undefined && mutatedInput !== undefined) {
+          const diffs = jsonDiffPaths(baseInput, mutatedInput);
+          if (diffs.length !== 1 || !pathEquals(diffs[0], versionField)) {
+            violations.push(`hash-framing-diff:${entry.id}`);
+          }
+        }
+        if (
+          invalidationExpected !== undefined &&
+          (invalidationExpected.logicalStreamChanged !== false ||
+            invalidationExpected.providerStreamChanged !== false ||
+            invalidationExpected.logicalHashChanged !== true ||
+            invalidationExpected.prefixHashChanged !== true)
+        ) {
+          violations.push(`invalidation-matrix:${entry.id}`);
+        }
       } else {
         violations.push(`unknown-mode:${entry.id}:${String(mode)}`);
       }
@@ -1402,6 +1429,36 @@ describe('prefix-contract fixture manifest', () => {
         vector,
       ),
     ).toContain('invalidation-matrix:invalidation-provider-id');
+  });
+
+  it('closes hash-framing mutation, stream, and boolean semantics', () => {
+    const load = () =>
+      JSON.parse(
+        readFileSync(path.join(FIXTURE_ROOT, 'invalidation/ledger-schema-version.json'), 'utf8'),
+      ) as Record<string, unknown>;
+    const entry = {
+      id: 'invalidation-ledger-schema-version',
+      kind: 'invalidation-vector',
+      file: 'x.json',
+    };
+
+    const badMutation = load();
+    badMutation.mutation = 'arbitrary version';
+    expect(validateVectorShape(entry, badMutation)).toContain(
+      'unknown-mutation:invalidation-ledger-schema-version:arbitrary version',
+    );
+
+    const badStream = load();
+    (badStream.mutatedInput as Record<string, unknown>).logicalStreamHex = '00';
+    expect(validateVectorShape(entry, badStream)).toContain(
+      'hash-framing-diff:invalidation-ledger-schema-version',
+    );
+
+    const badMatrix = load();
+    (badMatrix.expected as Record<string, unknown>).logicalStreamChanged = true;
+    expect(validateVectorShape(entry, badMatrix)).toContain(
+      'invalidation-matrix:invalidation-ledger-schema-version',
+    );
   });
 
   it('rejects non-object vector files with a stable rule id', () => {

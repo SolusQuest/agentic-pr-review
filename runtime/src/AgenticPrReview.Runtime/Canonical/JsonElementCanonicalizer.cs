@@ -65,14 +65,14 @@ internal static class JsonElementCanonicalizer
     /// token views preserve invalid UTF-16 names without copying the complete
     /// object subtree.
     /// </summary>
-    private static System.Collections.Generic.List<(string Name, bool NameValid, JsonElement Value)> EnumerateProperties(
+    private static System.Collections.Generic.List<LenientJsonObjectEnumerator.Entry> EnumerateProperties(
         JsonElement element,
         int maxProperties)
     {
-        var properties = new System.Collections.Generic.List<(string Name, bool NameValid, JsonElement Value)>();
+        var properties = new System.Collections.Generic.List<LenientJsonObjectEnumerator.Entry>();
         foreach (var entry in LenientJsonObjectEnumerator.Enumerate(element, maxProperties + 1))
         {
-            properties.Add((entry.Name, entry.NameValid, entry.Value));
+            properties.Add(entry);
         }
 
         return properties;
@@ -99,21 +99,22 @@ internal static class JsonElementCanonicalizer
                         segments);
                 }
 
-                var seen = new HashSet<string>(StringComparer.Ordinal);
-                var properties = new List<(string Name, bool NameValid, JsonElement Value)>();
+                var properties = new List<LenientJsonObjectEnumerator.Entry>();
                 foreach (var entry in EnumerateProperties(element, maxProperties))
                 {
-                    // Duplicate detection uses the real (leniently decoded) name,
-                    // so two distinct invalid names never collapse into one sentinel.
-                    if (!seen.Add(entry.Name))
+                    // Preserve the input-occurrence duplicate check without
+                    // decoding any complete property name. The object bound
+                    // caps this comparison at 256 prior raw-token views.
+                    if (properties.Any(previous => LenientJsonObjectEnumerator.CompareNames(previous, entry) == 0))
                     {
+                        var diagnosticName = LenientJsonObjectEnumerator.DiagnosticName(entry);
                         throw new Rfc8785CanonicalizationException(
                             Rfc8785RejectionReason.DuplicateProperty,
                             "Duplicate JSON property name.",
-                            Append(segments, CanonicalPathSegment.Property(entry.Name)));
+                            Append(segments, CanonicalPathSegment.Property(diagnosticName)));
                     }
 
-                    properties.Add((entry.Name, entry.NameValid, entry.Value));
+                    properties.Add(entry);
                 }
 
                 if (properties.Count > maxProperties)
@@ -124,32 +125,35 @@ internal static class JsonElementCanonicalizer
                         segments);
                 }
 
-                // RFC 8785 orders keys by UTF-16 code units; StringComparer.Ordinal
-                // compares .NET strings by UTF-16 code unit.
-                properties.Sort(static (a, b) => string.CompareOrdinal(a.Name, b.Name));
+                // RFC 8785 orders keys by decoded UTF-16 code units. The raw
+                // comparer yields those units incrementally and retains no
+                // token-sized string.
+                properties.Sort(static (a, b) => LenientJsonObjectEnumerator.CompareNames(a, b));
 
                 writer.WriteObjectStart();
                 for (var i = 0; i < properties.Count; i++)
                 {
-                    if (!properties[i].NameValid)
+                    var property = properties[i];
+                    var diagnosticName = LenientJsonObjectEnumerator.DiagnosticName(property);
+                    if (!LenientJsonObjectEnumerator.NameIsWellFormed(property))
                     {
                         throw new Rfc8785CanonicalizationException(
                             Rfc8785RejectionReason.UnpairedSurrogate,
                             "Unpaired UTF-16 surrogate in JSON property name.",
-                            Append(segments, CanonicalPathSegment.Property(properties[i].Name)));
+                            Append(segments, CanonicalPathSegment.Property(diagnosticName)));
                     }
 
                     // Property commas are handled by the writer's state machine;
                     // an explicit WriteComma here would double up.
-                    writer.WriteProperty(properties[i].Name);
+                    writer.WriteRawProperty(LenientJsonObjectEnumerator.RawName(property));
                     WriteValue(
                         ref writer,
-                        properties[i].Value,
+                        property.Value,
                         depth + 1,
                         maxDepth,
                         maxProperties,
                         maxArrayItems,
-                        Append(segments, CanonicalPathSegment.Property(properties[i].Name)));
+                        Append(segments, CanonicalPathSegment.Property(diagnosticName)));
                 }
 
                 writer.WriteObjectEnd();
@@ -201,21 +205,17 @@ internal static class JsonElementCanonicalizer
 
             case JsonValueKind.String:
             {
-                string value;
                 try
                 {
-                    value = element.GetString()!;
+                    writer.WriteRawString(LenientJsonObjectEnumerator.RawStringValue(element));
                 }
-                catch (InvalidOperationException)
+                catch (Rfc8785CanonicalizationException ex) when (ex.Reason == Rfc8785RejectionReason.UnpairedSurrogate)
                 {
-                    // System.Text.Json refuses to decode incomplete UTF-16.
                     throw new Rfc8785CanonicalizationException(
                         Rfc8785RejectionReason.UnpairedSurrogate,
                         "Unpaired UTF-16 surrogate in JSON string.",
                         segments);
                 }
-
-                writer.WriteString(value);
                 return;
             }
 
