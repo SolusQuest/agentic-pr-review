@@ -8,8 +8,8 @@ import {
   deriveInteractionId,
   validateIdentity,
   validateModelSnapshot,
-  PREFIX_CODES,
 } from './index.js';
+import { PREFIX_CODES } from './result.js';
 
 const TEMPLATE = {
   schemaVersion: 1,
@@ -308,7 +308,10 @@ describe('cache-contract digest helpers', () => {
       templateVersion: 1,
       definition: 'x'.repeat(300_000),
     });
-    expect(result).toEqual({ ok: false, errors: [{ code: PREFIX_CODES.envelopeTooLarge }] });
+    expect(result).toEqual({
+      ok: false,
+      errors: [{ code: PREFIX_CODES.envelopeTooLarge, path: '' }],
+    });
   });
 
   it('rejects embedded identity violations', () => {
@@ -380,6 +383,53 @@ describe('deriveInteractionId', () => {
     const b = deriveInteractionId({ kind: 'bootstrap' }, consumed, head, 0);
     expect(a.ok && b.ok && a.value === b.value).toBe(true);
   });
+
+  it('captures predecessor discriminant and ledger digest exactly once', () => {
+    let kindReads = 0;
+    let digestReads = 0;
+    const digest = 'f'.repeat(64);
+    const predecessor = new Proxy<{ kind: 'ledger'; sha256Hex: string }>(
+      { kind: 'ledger', sha256Hex: digest },
+      {
+        get(target, property, receiver) {
+          if (property === 'kind') {
+            kindReads++;
+            return kindReads === 1 ? 'ledger' : 'bootstrap';
+          }
+          if (property === 'sha256Hex') {
+            digestReads++;
+            return digestReads === 1 ? digest : 'bootstrap';
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    );
+    expect(deriveInteractionId(predecessor, consumed, head, 0)).toEqual(
+      deriveInteractionId({ kind: 'ledger', sha256Hex: digest }, consumed, head, 0),
+    );
+    expect(kindReads).toBe(1);
+    expect(digestReads).toBe(1);
+  });
+
+  it('cannot smuggle the bootstrap sentinel through a stateful ledger digest', () => {
+    let reads = 0;
+    const predecessor = new Proxy<{ kind: 'ledger'; sha256Hex: string }>(
+      { kind: 'ledger', sha256Hex: 'f'.repeat(64) },
+      {
+        get(target, property, receiver) {
+          if (property === 'sha256Hex') {
+            reads++;
+            return reads === 1 ? target.sha256Hex : 'bootstrap';
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    );
+    const result = deriveInteractionId(predecessor, consumed, head, 0);
+    const bootstrap = deriveInteractionId({ kind: 'bootstrap' }, consumed, head, 0);
+    expect(result.ok && bootstrap.ok && result.value).not.toBe(bootstrap.ok && bootstrap.value);
+    expect(reads).toBe(1);
+  });
 });
 
 describe('identity validation', () => {
@@ -404,7 +454,7 @@ describe('identity validation', () => {
   it('rejects only the exact latest literal as a floating alias', () => {
     expect(validateModelSnapshot('latest')).toEqual({
       ok: false,
-      errors: [{ code: PREFIX_CODES.modelAliasLiteral }],
+      errors: [{ code: PREFIX_CODES.modelAliasLiteral, path: '' }],
     });
     expect(validateModelSnapshot('Latest').ok).toBe(true);
     expect(validateModelSnapshot('LATEST').ok).toBe(true);
@@ -838,7 +888,10 @@ describe('byte cap never masks canonical defects; invalid names are structured',
       templateVersion: 1,
       definition: ''.repeat(100_000),
     });
-    expect(result).toEqual({ ok: false, errors: [{ code: PREFIX_CODES.envelopeTooLarge }] });
+    expect(result).toEqual({
+      ok: false,
+      errors: [{ code: PREFIX_CODES.envelopeTooLarge, path: '' }],
+    });
   });
 
   it('long plain strings over the cap are rejected', () => {
@@ -847,7 +900,10 @@ describe('byte cap never masks canonical defects; invalid names are structured',
       templateVersion: 1,
       definition: 'x'.repeat(300_000),
     });
-    expect(result).toEqual({ ok: false, errors: [{ code: PREFIX_CODES.envelopeTooLarge }] });
+    expect(result).toEqual({
+      ok: false,
+      errors: [{ code: PREFIX_CODES.envelopeTooLarge, path: '' }],
+    });
   });
 
   it('exact envelope cap passes and cap+1 fails', () => {

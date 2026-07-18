@@ -111,6 +111,16 @@
       "file": "framing/identity-256-bytes.json"
     },
     {
+      "id": "framing-identity-concat-ab-c",
+      "kind": "framing-vector",
+      "file": "framing/identity-concat-ab-c.json"
+    },
+    {
+      "id": "framing-identity-concat-a-bc",
+      "kind": "framing-vector",
+      "file": "framing/identity-concat-a-bc.json"
+    },
+    {
       "id": "framing-frame-segment",
       "kind": "framing-vector",
       "file": "framing/frame-segment.json"

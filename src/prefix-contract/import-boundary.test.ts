@@ -20,6 +20,20 @@ function productionFiles(): string[] {
 }
 
 describe('prefix-contract import boundary', () => {
+  it('exports exactly the frozen D9 TypeScript surface', async () => {
+    const publicApi = await import('./index.js');
+    expect(Object.keys(publicApi).sort()).toEqual([
+      'computeAdapterId',
+      'computeCacheConfigId',
+      'computePolicyId',
+      'computeTemplateId',
+      'computeToolDefinitionId',
+      'deriveInteractionId',
+      'validateIdentity',
+      'validateModelSnapshot',
+    ]);
+  });
+
   it('production files never import the oracle generator', () => {
     for (const file of productionFiles()) {
       const text = readFileSync(file, 'utf8');

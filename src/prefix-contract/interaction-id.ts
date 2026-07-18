@@ -37,13 +37,15 @@ export function deriveInteractionId(
     if (typeof predecessor !== 'object' || predecessor === null) {
       return fail(PREFIX_CODES.identityInvalid, '/predecessor');
     }
-    if (predecessor.kind === 'bootstrap') {
+    const kind = predecessor.kind;
+    if (kind === 'bootstrap') {
       predecessorComponent = 'bootstrap';
-    } else if (predecessor.kind === 'ledger') {
-      if (!isValidDigest(predecessor.sha256Hex)) {
+    } else if (kind === 'ledger') {
+      const sha256Hex = predecessor.sha256Hex;
+      if (!isValidDigest(sha256Hex)) {
         return fail(PREFIX_CODES.digestInvalid, '/predecessor');
       }
-      predecessorComponent = predecessor.sha256Hex;
+      predecessorComponent = sha256Hex;
     } else {
       return fail(PREFIX_CODES.identityInvalid, '/predecessor');
     }

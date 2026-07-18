@@ -315,7 +315,7 @@ describe('bounded alias-preserving snapshots', () => {
 
     expect(computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition })).toEqual({
       ok: false,
-      errors: [{ code: 'prefix-envelope-too-large' }],
+      errors: [{ code: 'prefix-envelope-too-large', path: '' }],
     });
   });
 });
@@ -390,6 +390,81 @@ describe('contract-owned tool wrappers are captured once by identity', () => {
         ]),
       ),
     );
+  });
+
+  it('does not re-observe a wrapper reached through its own inputSchema', () => {
+    let ownKeysCalls = 0;
+    const target: Record<string, unknown> = { name: 'tool', description: 'd' };
+    const tool = new Proxy(target, {
+      ownKeys(current) {
+        ownKeysCalls++;
+        return Reflect.ownKeys(current);
+      },
+    });
+    target.inputSchema = tool;
+    const result = computeToolDefinitionId(envelope([tool]));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors[0].code).toBe('prefix-canonical-input-rejected');
+    expect(ownKeysCalls).toBe(1);
+  });
+
+  it('uses one prepared graph for policyMetadata array and mutual wrapper back-references', () => {
+    let leftReads = 0;
+    let rightReads = 0;
+    let definitionsReads = 0;
+    const leftTarget: Record<string, unknown> = { name: 'left', description: 'd' };
+    const rightTarget: Record<string, unknown> = { name: 'right', description: 'd' };
+    const left = new Proxy(leftTarget, {
+      ownKeys(target) {
+        leftReads++;
+        return Reflect.ownKeys(target);
+      },
+    });
+    const right = new Proxy(rightTarget, {
+      ownKeys(target) {
+        rightReads++;
+        return Reflect.ownKeys(target);
+      },
+    });
+    const definitions = new Proxy([left, right], {
+      ownKeys(target) {
+        definitionsReads++;
+        return Reflect.ownKeys(target);
+      },
+    });
+    leftTarget.inputSchema = right;
+    leftTarget.policyMetadata = definitions;
+    rightTarget.inputSchema = left;
+    const result = computeToolDefinitionId(envelope(definitions));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors[0].code).toBe('prefix-canonical-input-rejected');
+    expect(leftReads).toBe(1);
+    expect(rightReads).toBe(1);
+    expect(definitionsReads).toBe(1);
+  });
+});
+
+describe('structural caps precede canonical anomalies', () => {
+  it('array length wins over symbol keys and modified prototypes', () => {
+    const withSymbol = new Array(1025).fill(0);
+    Object.defineProperty(withSymbol, Symbol('bad'), { value: 1, enumerable: true });
+    const withPrototype = new Array(1025).fill(0);
+    Object.setPrototypeOf(withPrototype, null);
+    for (const definition of [withSymbol, withPrototype]) {
+      const result = computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.errors[0].code).toBe('prefix-envelope-invalid');
+    }
+  });
+
+  it('object property count wins over a symbol key', () => {
+    const definition = Object.fromEntries(
+      Array.from({ length: 257 }, (_, index) => [`k${index}`, index]),
+    );
+    Object.defineProperty(definition, Symbol('bad'), { value: 1, enumerable: true });
+    const result = computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors[0].code).toBe('prefix-envelope-invalid');
   });
 });
 

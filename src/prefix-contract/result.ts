@@ -5,7 +5,7 @@
 
 export interface PrefixError {
   readonly code: string;
-  readonly path?: string;
+  readonly path: string;
 }
 
 export type PrefixResult<T> =
@@ -16,8 +16,8 @@ export function ok<T>(value: T): PrefixResult<T> {
   return { ok: true, value };
 }
 
-export function fail<T>(code: string, path?: string): PrefixResult<T> {
-  return { ok: false, errors: [path === undefined ? { code } : { code, path }] };
+export function fail<T>(code: string, path = ''): PrefixResult<T> {
+  return { ok: false, errors: [{ code, path }] };
 }
 
 /** Diagnostic codes — mechanical kebab-case mirrors of the C# codes (D10). */

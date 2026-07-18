@@ -74,6 +74,11 @@ describe('prefix-contract golden vectors (TS consumer)', () => {
       } else if (typeof input.value === 'string') {
         const framed = Uint8Array.from(encodeIdentity(input.value));
         expect(Buffer.from(framed).toString('hex'), entry.id).toBe(expected.framedHex);
+      } else if (Array.isArray(input.values)) {
+        const framed = Buffer.concat(
+          input.values.map((value) => Buffer.from(encodeIdentity(value as string))),
+        );
+        expect(framed.toString('hex'), entry.id).toBe(expected.framedHex);
       } else if (typeof input.payloadHex === 'string') {
         const payload = Buffer.from(input.payloadHex as string, 'hex');
         const framed = Buffer.concat([Buffer.from(uint32be(payload.byteLength)), payload]);
@@ -88,6 +93,16 @@ describe('prefix-contract golden vectors (TS consumer)', () => {
         expect(sha256Hex(preimage), entry.id).toBe(expected.logicalPrefixSha256);
       }
     }
+
+    const left = loadVector('framing/identity-concat-ab-c.json').expected as Record<
+      string,
+      unknown
+    >;
+    const right = loadVector('framing/identity-concat-a-bc.json').expected as Record<
+      string,
+      unknown
+    >;
+    expect(left.framedHex).not.toBe(right.framedHex);
   });
 
   it('digest vectors match', () => {

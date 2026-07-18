@@ -249,6 +249,62 @@ public sealed class PrefixEnvelopeValidatorTests
     }
 
     [Fact]
+    public void LoneSurrogateToolNameFailsAtEmbeddedIdentityStage()
+    {
+        var error = ValidateToolsDeep(
+            """{"schemaVersion":1,"toolsetVersion":1,"definitions":[{"name":"\ud800","description":"d","inputSchema":{}}]}""");
+        Assert.Equal("prefix_identity_invalid", error?.Code);
+        Assert.Equal("prefix_identity_invalid:/definitions/0/name", error?.Message);
+    }
+
+    [Fact]
+    public void DuplicateLoneSurrogateToolNamesFailAtStructureStage()
+    {
+        var error = ValidateToolsDeep(
+            """{"schemaVersion":1,"toolsetVersion":1,"definitions":[{"name":"\ud800","description":"d","inputSchema":{}},{"name":"\ud800","description":"d","inputSchema":{}}]}""");
+        Assert.Equal("prefix_envelope_invalid", error?.Code);
+        Assert.Equal("prefix_envelope_invalid:/definitions/1/name", error?.Message);
+    }
+
+    [Fact]
+    public void LoneSurrogateAdapterVersionFailsAtEmbeddedIdentityStage()
+    {
+        using var doc = JsonDocument.Parse(
+            """{"schemaVersion":1,"capabilityProfileVersion":1,"adapterBuildVersion":"\ud800"}""");
+        var error = PrefixEnvelopeValidator.Validate(
+            PrefixEnvelopeValidator.EnvelopeKind.Adapter, doc.RootElement, out _);
+        Assert.Equal("prefix_identity_invalid", error?.Code);
+        Assert.Equal("prefix_identity_invalid:/adapterBuildVersion", error?.Message);
+    }
+
+    [Fact]
+    public void RecursiveTraversalSortsRealInvalidNameCodeUnits()
+    {
+        var fat = TooManyProperties();
+        var error = ValidateTemplate(
+            $"{{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":{{\"b\":[0,{fat}],\"a\\ud800\":[{fat}]}}}}\n");
+        Assert.Equal("prefix_envelope_invalid:/definition/<invalid-utf16>/0", error?.Message);
+    }
+
+    [Fact]
+    public void RecursiveTraversalOrdersAstralBeforeLoneLowSurrogate()
+    {
+        var fat = TooManyProperties();
+        var error = ValidateTemplate(
+            $"{{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":{{\"\\udc00\":[0,{fat}],\"😀\":[{fat}]}}}}");
+        Assert.Equal("prefix_envelope_invalid:/definition/<untrusted-property>/0", error?.Message);
+    }
+
+    [Fact]
+    public void InvalidNameDoesNotCopyItsLargeSiblingSubtree()
+    {
+        var payload = new string('x', 1_000_000);
+        var error = ValidateTemplate(
+            $"{{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":{{\"\\ud800\":0,\"payload\":\"{payload}\"}}}}");
+        Assert.Equal("prefix_canonical_input_rejected", error?.Code);
+    }
+
+    [Fact]
     public void ToolNamesAreCaseSensitive()
     {
         using var doc = JsonDocument.Parse("""

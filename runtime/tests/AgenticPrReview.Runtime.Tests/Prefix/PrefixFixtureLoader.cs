@@ -65,6 +65,7 @@ internal static class PrefixFixtureLoader
         foreach (var entry in entries)
         {
             var vector = LoadVector(entry.File);
+            Assert.Equal(JsonValueKind.Object, vector.ValueKind);
             Assert.Equal(entry.Id, vector.GetProperty("id").GetString());
             Assert.Equal(entry.Kind, vector.GetProperty("kind").GetString());
             AssertVectorShape(entry, vector);
@@ -112,6 +113,7 @@ internal static class PrefixFixtureLoader
 
     private static void AssertVectorShape(ManifestEntry entry, JsonElement vector)
     {
+        Assert.Equal(JsonValueKind.Object, vector.ValueKind);
         var allowed = new HashSet<string>(StringComparer.Ordinal) { "id", "kind" };
         void Require(params string[] keys)
         {
@@ -142,6 +144,7 @@ internal static class PrefixFixtureLoader
                 break;
             case "materialization-vector":
                 Require("input", "expected");
+                AssertMaterializationInput(entry.Id, vector.GetProperty("input"));
                 AssertMaterializationExpected(entry.Id, vector.GetProperty("expected"));
                 break;
             case "append-vector":
@@ -166,7 +169,7 @@ internal static class PrefixFixtureLoader
                     Require("baseVectorId", "successorVectorId");
                     Assert.Equal(JsonValueKind.String, vector.GetProperty("baseVectorId").ValueKind);
                     Assert.Equal(JsonValueKind.String, vector.GetProperty("successorVectorId").ValueKind);
-                    AssertChangedExpected(entry.Id, vector.GetProperty("expected"));
+                    AssertChangedExpected(entry.Id, vector.GetProperty("mutation").GetString()!, vector.GetProperty("expected"));
                 }
                 else if (mode == "hash-framing")
                 {
@@ -265,6 +268,13 @@ internal static class PrefixFixtureLoader
             AssertExactObject(vector.GetProperty("expected"), $"{id}.expected", ("framedHex", JsonValueKind.String));
             AssertHex(vector.GetProperty("expected").GetProperty("framedHex").GetString()!);
         }
+        else if (names.SequenceEqual(new[] { "values" }, StringComparer.Ordinal))
+        {
+            AssertExactObject(input, $"{id}.input", ("values", JsonValueKind.Array));
+            Assert.All(input.GetProperty("values").EnumerateArray(), value => Assert.Equal(JsonValueKind.String, value.ValueKind));
+            AssertExactObject(vector.GetProperty("expected"), $"{id}.expected", ("framedHex", JsonValueKind.String));
+            AssertHex(vector.GetProperty("expected").GetProperty("framedHex").GetString()!);
+        }
         else if (names.SequenceEqual(new[] { "payloadHex" }, StringComparer.Ordinal))
         {
             AssertExactObject(input, $"{id}.input", ("payloadHex", JsonValueKind.String));
@@ -310,6 +320,166 @@ internal static class PrefixFixtureLoader
         AssertExactObject(expected, $"{id}.expected", ("preimageHex", JsonValueKind.String), ("interactionId", JsonValueKind.String));
         AssertHex(expected.GetProperty("preimageHex").GetString()!);
         AssertHex(expected.GetProperty("interactionId").GetString()!, 64);
+    }
+
+    private static void AssertMaterializationInput(string id, JsonElement input)
+    {
+        AssertExactObject(
+            input,
+            $"{id}.input",
+            ("history", JsonValueKind.Object),
+            ("currentContext", JsonValueKind.Object),
+            ("interaction", JsonValueKind.Object),
+            ("expectedIdentities", JsonValueKind.Object),
+            ("sessionEpoch", JsonValueKind.String),
+            ("envelopes", JsonValueKind.Object));
+
+        var history = input.GetProperty("history");
+        var historyKind = history.GetProperty("kind").GetString();
+        if (historyKind == "bootstrap")
+        {
+            AssertExactObject(history, $"{id}.input.history", ("kind", JsonValueKind.String));
+        }
+        else
+        {
+            Assert.True(historyKind is "continuation" or "reset", $"{id}: unknown history kind {historyKind}");
+            AssertExactObject(history, $"{id}.input.history", ("kind", JsonValueKind.String), ("ledgerHex", JsonValueKind.String));
+            AssertHex(history.GetProperty("ledgerHex").GetString()!);
+        }
+
+        var context = input.GetProperty("currentContext");
+        AssertExactObject(
+            context,
+            $"{id}.input.currentContext",
+            ("subjectDigest", JsonValueKind.String),
+            ("reviewedHeadSha", JsonValueKind.String),
+            ("reviewedBaseSha", JsonValueKind.String),
+            ("changedFiles", JsonValueKind.Array));
+        AssertHex(context.GetProperty("subjectDigest").GetString()!, 64);
+        AssertGitSha(context.GetProperty("reviewedHeadSha").GetString()!, $"{id}.input.currentContext.reviewedHeadSha");
+        AssertGitSha(context.GetProperty("reviewedBaseSha").GetString()!, $"{id}.input.currentContext.reviewedBaseSha");
+        var fileIndex = 0;
+        foreach (var file in context.GetProperty("changedFiles").EnumerateArray())
+        {
+            var label = $"{id}.input.currentContext.changedFiles[{fileIndex}]";
+            Assert.Equal(JsonValueKind.Object, file.ValueKind);
+            AssertAllowedKeys(file, "path", "previousPath", "status", "additions", "deletions", "changes", "patch");
+            Assert.Equal(JsonValueKind.String, file.GetProperty("path").ValueKind);
+            Assert.Equal(JsonValueKind.String, file.GetProperty("status").ValueKind);
+            foreach (var key in new[] { "additions", "deletions", "changes" })
+            {
+                AssertNonnegativeInteger(file.GetProperty(key), $"{label}.{key}");
+            }
+            if (file.TryGetProperty("previousPath", out var previous))
+            {
+                Assert.True(previous.ValueKind is JsonValueKind.String or JsonValueKind.Null, $"{label}.previousPath");
+            }
+            if (file.TryGetProperty("patch", out var patch))
+            {
+                AssertExactObject(
+                    patch,
+                    $"{label}.patch",
+                    ("sha256", JsonValueKind.String, JsonValueKind.String),
+                    ("truncated", JsonValueKind.True, JsonValueKind.False),
+                    ("maxChars", JsonValueKind.Number, JsonValueKind.Number));
+                AssertHex(patch.GetProperty("sha256").GetString()!, 64);
+                AssertNonnegativeInteger(patch.GetProperty("maxChars"), $"{label}.patch.maxChars");
+            }
+            fileIndex++;
+        }
+
+        var interaction = input.GetProperty("interaction");
+        AssertExactObject(interaction, $"{id}.input.interaction", ("interactionId", JsonValueKind.String), ("interactionOrdinal", JsonValueKind.Number));
+        AssertHex(interaction.GetProperty("interactionId").GetString()!, 64);
+        AssertNonnegativeInteger(interaction.GetProperty("interactionOrdinal"), $"{id}.input.interaction.interactionOrdinal");
+
+        var identities = input.GetProperty("expectedIdentities");
+        AssertExactObject(
+            identities,
+            $"{id}.input.expectedIdentities",
+            ("repository", JsonValueKind.String),
+            ("headRepository", JsonValueKind.String),
+            ("pullRequest", JsonValueKind.Number),
+            ("workflowIdentity", JsonValueKind.String),
+            ("trustedExecutionDomain", JsonValueKind.String),
+            ("providerId", JsonValueKind.String),
+            ("modelId", JsonValueKind.String),
+            ("templateId", JsonValueKind.String),
+            ("policyId", JsonValueKind.String),
+            ("toolDefinitionId", JsonValueKind.String),
+            ("cacheConfigId", JsonValueKind.String),
+            ("adapterId", JsonValueKind.String));
+        AssertNonnegativeInteger(identities.GetProperty("pullRequest"), $"{id}.input.expectedIdentities.pullRequest");
+        foreach (var key in new[] { "templateId", "policyId", "toolDefinitionId", "cacheConfigId", "adapterId" })
+        {
+            AssertHex(identities.GetProperty(key).GetString()!, 64);
+        }
+
+        var envelopes = input.GetProperty("envelopes");
+        AssertExactObject(
+            envelopes,
+            $"{id}.input.envelopes",
+            ("template", JsonValueKind.Object),
+            ("policy", JsonValueKind.Object),
+            ("tools", JsonValueKind.Object),
+            ("cacheConfig", JsonValueKind.Object),
+            ("adapter", JsonValueKind.Object));
+        AssertVersionedEnvelope(envelopes.GetProperty("template"), $"{id}.input.envelopes.template", "templateVersion", "definition");
+        AssertVersionedEnvelope(envelopes.GetProperty("policy"), $"{id}.input.envelopes.policy", "policyVersion", "instructions", "constraints");
+
+        var tools = envelopes.GetProperty("tools");
+        AssertExactObject(tools, $"{id}.input.envelopes.tools", ("schemaVersion", JsonValueKind.Number), ("toolsetVersion", JsonValueKind.Number), ("definitions", JsonValueKind.Array));
+        AssertNonnegativeInteger(tools.GetProperty("schemaVersion"), $"{id}.input.envelopes.tools.schemaVersion");
+        AssertNonnegativeInteger(tools.GetProperty("toolsetVersion"), $"{id}.input.envelopes.tools.toolsetVersion");
+        var toolIndex = 0;
+        foreach (var tool in tools.GetProperty("definitions").EnumerateArray())
+        {
+            var label = $"{id}.input.envelopes.tools.definitions[{toolIndex}]";
+            AssertAllowedKeys(tool, "name", "description", "inputSchema", "policyMetadata");
+            Assert.Equal(JsonValueKind.String, tool.GetProperty("name").ValueKind);
+            Assert.Equal(JsonValueKind.String, tool.GetProperty("description").ValueKind);
+            Assert.Equal(JsonValueKind.Object, tool.GetProperty("inputSchema").ValueKind);
+            toolIndex++;
+        }
+
+        var config = envelopes.GetProperty("cacheConfig");
+        AssertExactObject(
+            config,
+            $"{id}.input.envelopes.cacheConfig",
+            ("schemaVersion", JsonValueKind.Number, JsonValueKind.Number),
+            ("cacheConfigVersion", JsonValueKind.Number, JsonValueKind.Number),
+            ("markerPolicy", JsonValueKind.String, JsonValueKind.String),
+            ("eligibility", JsonValueKind.String, JsonValueKind.String),
+            ("statelessMode", JsonValueKind.True, JsonValueKind.False));
+        AssertNonnegativeInteger(config.GetProperty("schemaVersion"), $"{id}.input.envelopes.cacheConfig.schemaVersion");
+        AssertNonnegativeInteger(config.GetProperty("cacheConfigVersion"), $"{id}.input.envelopes.cacheConfig.cacheConfigVersion");
+
+        var adapter = envelopes.GetProperty("adapter");
+        AssertExactObject(adapter, $"{id}.input.envelopes.adapter", ("schemaVersion", JsonValueKind.Number), ("capabilityProfileVersion", JsonValueKind.Number), ("adapterBuildVersion", JsonValueKind.String));
+        AssertNonnegativeInteger(adapter.GetProperty("schemaVersion"), $"{id}.input.envelopes.adapter.schemaVersion");
+        AssertNonnegativeInteger(adapter.GetProperty("capabilityProfileVersion"), $"{id}.input.envelopes.adapter.capabilityProfileVersion");
+    }
+
+    private static void AssertVersionedEnvelope(JsonElement envelope, string label, string versionField, params string[] otherFields)
+    {
+        Assert.Equal(JsonValueKind.Object, envelope.ValueKind);
+        AssertAllowedKeys(envelope, new[] { "schemaVersion", versionField }.Concat(otherFields).ToArray());
+        AssertNonnegativeInteger(envelope.GetProperty("schemaVersion"), $"{label}.schemaVersion");
+        AssertNonnegativeInteger(envelope.GetProperty(versionField), $"{label}.{versionField}");
+        foreach (var field in otherFields)
+        {
+            Assert.True(envelope.TryGetProperty(field, out _), $"{label}: missing {field}");
+        }
+        if (otherFields.Contains("instructions", StringComparer.Ordinal))
+        {
+            Assert.Equal(JsonValueKind.String, envelope.GetProperty("instructions").ValueKind);
+        }
+    }
+
+    private static void AssertGitSha(string value, string label)
+    {
+        Assert.True(value.Length is 40 or 64, $"{label}: expected 40 or 64 lowercase hex characters");
+        AssertHex(value, value.Length);
     }
 
     private static void AssertMaterializationExpected(string id, JsonElement expected)
@@ -361,7 +531,8 @@ internal static class PrefixFixtureLoader
         AssertHex(suffix.GetProperty("providerHex").GetString()!);
     }
 
-    private static void AssertChangedExpected(string id, JsonElement expected) =>
+    private static void AssertChangedExpected(string id, string mutation, JsonElement expected)
+    {
         AssertExactObject(
             expected,
             $"{id}.expected",
@@ -369,6 +540,21 @@ internal static class PrefixFixtureLoader
             ("providerStreamChanged", JsonValueKind.True, JsonValueKind.False),
             ("logicalHashChanged", JsonValueKind.True, JsonValueKind.False),
             ("prefixHashChanged", JsonValueKind.True, JsonValueKind.False));
+        var fixedValues = mutation switch
+        {
+            "providerId" or "modelId" or "adapter envelope content/version" or "cache-config envelope content/version" or "any envelope schemaVersion"
+                => new[] { false, false, false, true },
+            "template envelope content/version" or "policy envelope content/version" or "tools envelope content/version/order"
+                => new[] { true, true, true, true },
+            "run/provenance metadata" => new[] { false, false, false, false },
+            _ => throw new Xunit.Sdk.XunitException($"{id}: unknown mutation {mutation}"),
+        };
+        var keys = new[] { "logicalStreamChanged", "providerStreamChanged", "logicalHashChanged", "prefixHashChanged" };
+        for (var index = 0; index < keys.Length; index++)
+        {
+            Assert.Equal(fixedValues[index], expected.GetProperty(keys[index]).GetBoolean());
+        }
+    }
 
     private static void AssertHashFramingInput(string id, string label, JsonElement input)
     {
@@ -438,21 +624,30 @@ internal static class PrefixFixtureLoader
         Assert.True(element.TryGetInt64(out var value) && value >= 0, $"{label}: expected a nonnegative integer");
     }
 
-    private static List<string> JsonDiffPaths(JsonElement left, JsonElement right, string prefix = "")
+    private readonly record struct DiffPathSegment(string Name, bool IsIndex = false);
+
+    private static List<ImmutableArray<DiffPathSegment>> JsonDiffPaths(
+        JsonElement left,
+        JsonElement right,
+        ImmutableArray<DiffPathSegment> prefix = default)
     {
+        if (prefix.IsDefault)
+        {
+            prefix = ImmutableArray<DiffPathSegment>.Empty;
+        }
         if (left.ValueKind != right.ValueKind)
         {
-            return new List<string> { prefix.Length == 0 ? "$" : prefix };
+            return new List<ImmutableArray<DiffPathSegment>> { prefix };
         }
 
         if (left.ValueKind == JsonValueKind.Object)
         {
             var leftProperties = left.EnumerateObject().ToDictionary(property => property.Name, property => property.Value, StringComparer.Ordinal);
             var rightProperties = right.EnumerateObject().ToDictionary(property => property.Name, property => property.Value, StringComparer.Ordinal);
-            var diffs = new List<string>();
+            var diffs = new List<ImmutableArray<DiffPathSegment>>();
             foreach (var key in leftProperties.Keys.Concat(rightProperties.Keys).Distinct(StringComparer.Ordinal))
             {
-                var childPath = prefix.Length == 0 ? key : $"{prefix}.{key}";
+                var childPath = prefix.Add(new DiffPathSegment(key));
                 if (!leftProperties.TryGetValue(key, out var leftValue)
                     || !rightProperties.TryGetValue(key, out var rightValue))
                 {
@@ -473,13 +668,16 @@ internal static class PrefixFixtureLoader
             var rightItems = right.EnumerateArray().ToArray();
             if (leftItems.Length != rightItems.Length)
             {
-                return new List<string> { prefix.Length == 0 ? "$" : prefix };
+                return new List<ImmutableArray<DiffPathSegment>> { prefix };
             }
 
-            var diffs = new List<string>();
+            var diffs = new List<ImmutableArray<DiffPathSegment>>();
             for (var index = 0; index < leftItems.Length; index++)
             {
-                diffs.AddRange(JsonDiffPaths(leftItems[index], rightItems[index], $"{prefix}[{index}]"));
+                diffs.AddRange(JsonDiffPaths(
+                    leftItems[index],
+                    rightItems[index],
+                    prefix.Add(new DiffPathSegment(index.ToString(System.Globalization.CultureInfo.InvariantCulture), IsIndex: true))));
             }
 
             return diffs;
@@ -490,47 +688,60 @@ internal static class PrefixFixtureLoader
             JsonValueKind.String => left.GetString() == right.GetString(),
             JsonValueKind.Number => left.GetDouble().Equals(right.GetDouble()),
             JsonValueKind.True or JsonValueKind.False or JsonValueKind.Null => true,
-            _ => left.GetRawText() == right.GetRawText(),
+            _ => false,
         };
         return equal
-            ? new List<string>()
-            : new List<string> { prefix.Length == 0 ? "$" : prefix };
+            ? new List<ImmutableArray<DiffPathSegment>>()
+            : new List<ImmutableArray<DiffPathSegment>> { prefix };
     }
 
-    private static void AssertMutationDiffs(string id, string mutation, IReadOnlyCollection<string> diffs)
+    private static bool PathEquals(ImmutableArray<DiffPathSegment> path, params string[] names) =>
+        path.Length == names.Length
+        && path.Select(static segment => segment.Name).SequenceEqual(names, StringComparer.Ordinal)
+        && path.All(static segment => !segment.IsIndex);
+
+    private static bool PathStartsWith(ImmutableArray<DiffPathSegment> path, params string[] names) =>
+        path.Length >= names.Length
+        && path.Take(names.Length).Select(static segment => segment.Name).SequenceEqual(names, StringComparer.Ordinal)
+        && path.Take(names.Length).All(static segment => !segment.IsIndex);
+
+    private static void AssertMutationDiffs(
+        string id,
+        string mutation,
+        IReadOnlyCollection<ImmutableArray<DiffPathSegment>> diffs)
     {
         static bool EnvelopeMutation(
-            IReadOnlyCollection<string> paths,
+            IReadOnlyCollection<ImmutableArray<DiffPathSegment>> paths,
             string envelopeName,
             string digestField)
         {
-            var envelopePrefix = $"envelopes.{envelopeName}.";
-            var schemaVersion = $"{envelopePrefix}schemaVersion";
-            var digestPath = $"expectedIdentities.{digestField}";
-            return paths.Any(path => path.StartsWith(envelopePrefix, StringComparison.Ordinal) && path != schemaVersion)
-                && paths.Contains(digestPath, StringComparer.Ordinal)
+            return paths.Any(path => PathStartsWith(path, "envelopes", envelopeName) && !PathEquals(path, "envelopes", envelopeName, "schemaVersion"))
+                && paths.Any(path => PathEquals(path, "expectedIdentities", digestField))
                 && paths.All(path =>
-                    (path.StartsWith(envelopePrefix, StringComparison.Ordinal) && path != schemaVersion)
-                    || path == digestPath);
+                    (PathStartsWith(path, "envelopes", envelopeName) && !PathEquals(path, "envelopes", envelopeName, "schemaVersion"))
+                    || PathEquals(path, "expectedIdentities", digestField));
         }
 
         var valid = mutation switch
         {
-            "providerId" => diffs.SequenceEqual(new[] { "expectedIdentities.providerId" }, StringComparer.Ordinal),
-            "modelId" => diffs.SequenceEqual(new[] { "expectedIdentities.modelId" }, StringComparer.Ordinal),
+            "providerId" => diffs.Count == 1 && PathEquals(diffs.Single(), "expectedIdentities", "providerId"),
+            "modelId" => diffs.Count == 1 && PathEquals(diffs.Single(), "expectedIdentities", "modelId"),
             "adapter envelope content/version" => EnvelopeMutation(diffs, "adapter", "adapterId"),
             "cache-config envelope content/version" => EnvelopeMutation(diffs, "cacheConfig", "cacheConfigId"),
             "template envelope content/version" => EnvelopeMutation(diffs, "template", "templateId"),
             "policy envelope content/version" => EnvelopeMutation(diffs, "policy", "policyId"),
             "tools envelope content/version/order" => EnvelopeMutation(diffs, "tools", "toolDefinitionId"),
             "any envelope schemaVersion" => ValidateSchemaVersionMutation(diffs),
-            "run/provenance metadata" => diffs.SequenceEqual(new[] { "interaction.interactionId" }, StringComparer.Ordinal),
+            "run/provenance metadata" => diffs.Count == 1 && PathEquals(diffs.Single(), "interaction", "interactionId"),
             _ => false,
         };
-        Assert.True(valid, $"{id}: mutation {mutation} does not match its exact input diff predicate ({string.Join(',', diffs)})");
+        Assert.True(valid, $"{id}: mutation {mutation} does not match its exact input diff predicate ({string.Join(',', diffs.Select(FormatDiffPath))})");
     }
 
-    private static bool ValidateSchemaVersionMutation(IReadOnlyCollection<string> diffs)
+    private static string FormatDiffPath(ImmutableArray<DiffPathSegment> path) =>
+        path.Length == 0 ? "$" : string.Join('/', path.Select(segment => segment.IsIndex ? $"#{segment.Name}" : segment.Name));
+
+    private static bool ValidateSchemaVersionMutation(IReadOnlyCollection<ImmutableArray<DiffPathSegment>> diffs)
     {
         if (diffs.Count != 2)
         {
@@ -547,8 +758,8 @@ internal static class PrefixFixtureLoader
         };
         foreach (var pair in digestFields)
         {
-            if (diffs.Contains($"envelopes.{pair.Key}.schemaVersion", StringComparer.Ordinal)
-                && diffs.Contains($"expectedIdentities.{pair.Value}", StringComparer.Ordinal))
+            if (diffs.Any(path => PathEquals(path, "envelopes", pair.Key, "schemaVersion"))
+                && diffs.Any(path => PathEquals(path, "expectedIdentities", pair.Value)))
             {
                 return true;
             }

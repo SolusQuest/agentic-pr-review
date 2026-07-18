@@ -50,6 +50,17 @@ public sealed class PrefixGoldenVectorTests
                     expected.GetProperty("framedHex").GetString(),
                     Convert.ToHexString(writer.WrittenSpan).ToLowerInvariant());
             }
+            else if (input.TryGetProperty("values", out var valuesElement))
+            {
+                var writer = new ArrayBufferWriter<byte>();
+                foreach (var value in valuesElement.EnumerateArray())
+                {
+                    PrefixHashPrimitives.WriteIdentity(writer, value.GetString()!);
+                }
+                Assert.Equal(
+                    expected.GetProperty("framedHex").GetString(),
+                    Convert.ToHexString(writer.WrittenSpan).ToLowerInvariant());
+            }
             else if (input.TryGetProperty("payloadHex", out var payloadElement))
             {
                 var framed = PrefixHashPrimitives.FrameSegment(Convert.FromHexString(payloadElement.GetString()!));
@@ -66,6 +77,12 @@ public sealed class PrefixGoldenVectorTests
                 Assert.Equal(expected.GetProperty("logicalPrefixSha256").GetString(), hash);
             }
         }
+
+        var left = PrefixFixtureLoader.LoadVector("framing/identity-concat-ab-c.json")
+            .GetProperty("expected").GetProperty("framedHex").GetString();
+        var right = PrefixFixtureLoader.LoadVector("framing/identity-concat-a-bc.json")
+            .GetProperty("expected").GetProperty("framedHex").GetString();
+        Assert.NotEqual(left, right);
     }
 
     [Fact]

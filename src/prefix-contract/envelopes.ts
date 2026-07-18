@@ -170,6 +170,9 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
   }
 
   let snapshotRootEntries: readonly RootEntry[] = rootEntries;
+  let snapshotReplacements:
+    | readonly { readonly source: object; readonly target: object }[]
+    | undefined;
   if (kind === 'tools') {
     const prepared = prepareToolDefinitions(kind, rawRecord.definitions);
     if (!prepared.ok) {
@@ -178,6 +181,7 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
     snapshotRootEntries = rootEntries.map((entry) =>
       entry.name === 'definitions' ? { name: entry.name, value: prepared.value } : entry,
     );
+    snapshotReplacements = prepared.replacements;
   } else {
     const fieldError = checkKindFields(kind, rawRecord);
     if (fieldError !== null) {
@@ -196,6 +200,7 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
       maxArrayItems: MAX_ARRAY_ITEMS,
     },
     snapshotRootEntries,
+    snapshotReplacements,
   );
   if (!snapshotOutcome.ok) {
     return fail(
@@ -318,7 +323,11 @@ function prepareToolDefinitions(
   kind: EnvelopeKind,
   value: unknown,
 ):
-  | { ok: true; value: readonly Record<string, unknown>[] }
+  | {
+      ok: true;
+      value: readonly Record<string, unknown>[];
+      replacements: readonly { readonly source: object; readonly target: object }[];
+    }
   | { ok: false; error: PrefixResult<ValidatedEnvelope> } {
   const path: PrefixPathSegment[] = [{ name: 'definitions' }];
   if (!Array.isArray(value)) {
@@ -422,6 +431,7 @@ function prepareToolDefinitions(
   const names = new Set<string>();
   const prepared: Record<string, unknown>[] = [];
   const wrapperMemo = new WeakMap<object, Record<string, unknown>>();
+  const replacements: { source: object; target: object }[] = [];
   for (let index = 0; index < items.length; index++) {
     const indexText = String(index);
     const wrapperPath: PrefixPathSegment[] = [
@@ -496,6 +506,7 @@ function prepareToolDefinitions(
         Object.defineProperty(tool, key, { value: descriptor.value, enumerable: true });
       }
       wrapperMemo.set(rawTool, tool);
+      replacements.push({ source: rawTool, target: tool });
     }
     if (!('name' in tool) || !('description' in tool) || !('inputSchema' in tool)) {
       return {
@@ -561,7 +572,8 @@ function prepareToolDefinitions(
     prepared.push(tool);
   }
 
-  return { ok: true, value: prepared };
+  replacements.unshift({ source: value, target: prepared });
+  return { ok: true, value: prepared, replacements };
 }
 
 /** Invalid UTF-16 closed keys share the public sentinel sort position in both languages. */

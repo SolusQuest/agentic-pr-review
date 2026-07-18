@@ -65,6 +65,7 @@ export function deepDescriptorSnapshot(
   root: unknown,
   bounds: SnapshotBounds,
   rootEntriesOverride?: readonly { readonly name: string; readonly value: unknown }[],
+  replacements?: readonly { readonly source: object; readonly target: object }[],
 ): SnapshotOutcome {
   interface ChildFrame {
     value: unknown;
@@ -77,6 +78,10 @@ export function deepDescriptorSnapshot(
 
   const childStack: ChildFrame[] = [];
   const snapshotMemo = new WeakMap<object, unknown>();
+  const replacementMap = new WeakMap<object, object>();
+  for (const replacement of replacements ?? []) {
+    replacementMap.set(replacement.source, replacement.target);
+  }
 
   let rootValue: unknown;
 
@@ -125,16 +130,22 @@ export function deepDescriptorSnapshot(
   return { ok: true, value: rootValue };
 
   function snapshotNode(
-    node: unknown,
+    rawNode: unknown,
     segments: import('./safe-path.js').PrefixPathSegment[],
     depth: number,
     ancestors: ReadonlySet<object>,
     assign: (child: unknown) => void,
   ): SnapshotStructuralViolation | null {
-    if (typeof node !== 'object' || node === null) {
-      assign(node);
+    if (typeof rawNode !== 'object' || rawNode === null) {
+      assign(rawNode);
       return null;
     }
+
+    // Contract-owned nodes captured before the generic snapshot are replaced
+    // by their internal clones before any identity/cycle/memo decision. This
+    // lets back-references reuse the same captured graph instead of observing
+    // the caller's Proxy or descriptors a second time.
+    const node = replacementMap.get(rawNode) ?? rawNode;
 
     // Depth is path-dependent, so it must be checked for every occurrence
     // before marker passthrough, cycle detection, or DAG memo reuse.
@@ -164,15 +175,7 @@ export function deepDescriptorSnapshot(
     }
 
     if (Array.isArray(node)) {
-      if (Object.getPrototypeOf(node) !== Array.prototype) {
-        assign(marker('non-plain-object'));
-        return null;
-      }
       const keys = Reflect.ownKeys(node);
-      if (keys.some((key) => typeof key === 'symbol')) {
-        assign(marker('symbol-key'));
-        return null;
-      }
       const lengthDescriptor = Object.getOwnPropertyDescriptor(node, 'length');
       if (
         lengthDescriptor === undefined ||
@@ -187,6 +190,14 @@ export function deepDescriptorSnapshot(
       const arrayLength = lengthDescriptor.value as number;
       if (arrayLength > bounds.maxArrayItems) {
         return { segments, reason: 'array-length-exceeded' };
+      }
+      if (Object.getPrototypeOf(node) !== Array.prototype) {
+        assign(marker('non-plain-object'));
+        return null;
+      }
+      if (keys.some((key) => typeof key === 'symbol')) {
+        assign(marker('symbol-key'));
+        return null;
       }
       for (const name of keys as string[]) {
         if (name === 'length') {
@@ -218,19 +229,21 @@ export function deepDescriptorSnapshot(
       return null;
     }
 
+    const keys = Reflect.ownKeys(node);
+    const names = keys
+      .filter((key): key is string => typeof key === 'string')
+      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    if (names.length > bounds.maxObjectProperties) {
+      return { segments, reason: 'property-count-exceeded' };
+    }
     const proto = Object.getPrototypeOf(node);
     if (proto !== Object.prototype && proto !== null) {
       assign(marker('non-plain-object'));
       return null;
     }
-    const keys = Reflect.ownKeys(node);
     if (keys.some((key) => typeof key === 'symbol')) {
       assign(marker('symbol-key'));
       return null;
-    }
-    const names = (keys as string[]).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-    if (names.length > bounds.maxObjectProperties) {
-      return { segments, reason: 'property-count-exceeded' };
     }
 
     const out: Record<string, unknown> = Object.create(null);

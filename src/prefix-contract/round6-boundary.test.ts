@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { computeTemplateId, PREFIX_CODES } from './index.js';
+import { computeTemplateId } from './index.js';
+import { PREFIX_CODES } from './result.js';
 
 /**
  * Round-6 review coverage: exact bounded byte accounting and first-defect
@@ -36,7 +37,10 @@ describe('bounded sink: exact byte accounting', () => {
       templateVersion: 1,
       definition: many,
     });
-    expect(result).toEqual({ ok: false, errors: [{ code: PREFIX_CODES.envelopeTooLarge }] });
+    expect(result).toEqual({
+      ok: false,
+      errors: [{ code: PREFIX_CODES.envelopeTooLarge, path: '' }],
+    });
   });
 
   it('very long property names are counted exactly', () => {
@@ -45,7 +49,10 @@ describe('bounded sink: exact byte accounting', () => {
       templateVersion: 1,
       definition: { ['k'.repeat(300_000)]: 1 },
     });
-    expect(result).toEqual({ ok: false, errors: [{ code: PREFIX_CODES.envelopeTooLarge }] });
+    expect(result).toEqual({
+      ok: false,
+      errors: [{ code: PREFIX_CODES.envelopeTooLarge, path: '' }],
+    });
   });
 
   it('exact cap boundary on short-escape content', () => {

@@ -895,6 +895,18 @@ function buildFramingVectors(): void {
     });
   }
 
+  for (const [id, values] of [
+    ['framing-identity-concat-ab-c', ['ab', 'c']],
+    ['framing-identity-concat-a-bc', ['a', 'bc']],
+  ] as const) {
+    add(id, 'framing-vector', `framing/${id.replace('framing-', '')}.json`, {
+      id,
+      kind: 'framing-vector',
+      input: { values },
+      expected: { framedHex: hex(concat(...values.map(encodeIdentity))) },
+    });
+  }
+
   const payload = canonicalJsonBytes({ kind: 'template' });
   add('framing-frame-segment', 'framing-vector', 'framing/frame-segment.json', {
     id: 'framing-frame-segment',

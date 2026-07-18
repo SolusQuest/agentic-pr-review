@@ -126,10 +126,12 @@ function validateCorpus(root: string): string[] {
       continue;
     }
 
-    const vector = JSON.parse(readFileSync(path.join(root, entry.file), 'utf8')) as Record<
-      string,
-      unknown
-    >;
+    const parsedVector: unknown = JSON.parse(readFileSync(path.join(root, entry.file), 'utf8'));
+    if (!isRecord(parsedVector)) {
+      violations.push(`bad-vector-shape:${entry.id}`);
+      continue;
+    }
+    const vector = parsedVector;
     if (vector.id !== entry.id) {
       violations.push(`id-mismatch:${entry.id}`);
     }
@@ -160,9 +162,13 @@ function validateCorpus(root: string): string[] {
   for (const entry of entries.filter(
     (e) => e.kind === 'append-vector' || e.kind === 'invalidation-vector',
   )) {
-    const vector = existsQuiet(path.join(root, entry.file))
-      ? (JSON.parse(readFileSync(path.join(root, entry.file), 'utf8')) as Record<string, unknown>)
+    const parsedVector: unknown = existsQuiet(path.join(root, entry.file))
+      ? JSON.parse(readFileSync(path.join(root, entry.file), 'utf8'))
       : {};
+    if (!isRecord(parsedVector)) {
+      continue;
+    }
+    const vector = parsedVector;
     for (const refKey of ['baseVectorId', 'successorVectorId']) {
       const referenced = vector[refKey];
       if (typeof referenced !== 'string') {
@@ -205,36 +211,50 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Deep-diff two JSON values; returns the set of differing dotted paths. */
-function jsonDiffPaths(a: unknown, b: unknown, prefix = ''): string[] {
+type JsonPath = readonly (string | number)[];
+
+/** Deep-diff two JSON values; paths remain structured and collision-free. */
+function jsonDiffPaths(a: unknown, b: unknown, prefix: JsonPath = []): JsonPath[] {
   if (typeof a !== 'object' || a === null || typeof b !== 'object' || b === null) {
-    return Object.is(a, b) ? [] : [prefix || '$'];
+    return Object.is(a, b) ? [] : [prefix];
   }
   if (Array.isArray(a) !== Array.isArray(b)) {
-    return [prefix || '$'];
+    return [prefix];
   }
   if (Array.isArray(a) && Array.isArray(b)) {
     if (a.length !== b.length) {
-      return [prefix || '$'];
+      return [prefix];
     }
-    const out: string[] = [];
+    const out: JsonPath[] = [];
     for (let i = 0; i < a.length; i++) {
-      out.push(...jsonDiffPaths(a[i], b[i], `${prefix}[${i}]`));
+      out.push(...jsonDiffPaths(a[i], b[i], [...prefix, i]));
     }
     return out;
   }
   const aObj = a as Record<string, unknown>;
   const bObj = b as Record<string, unknown>;
   const keys = new Set([...Object.keys(aObj), ...Object.keys(bObj)]);
-  const out: string[] = [];
+  const out: JsonPath[] = [];
   for (const key of keys) {
     if (!(key in aObj) || !(key in bObj)) {
-      out.push(prefix === '' ? key : prefix + '.' + key);
+      out.push([...prefix, key]);
       continue;
     }
-    out.push(...jsonDiffPaths(aObj[key], bObj[key], prefix === '' ? key : prefix + '.' + key));
+    out.push(...jsonDiffPaths(aObj[key], bObj[key], [...prefix, key]));
   }
   return out;
+}
+
+function pathEquals(path: JsonPath, ...segments: (string | number)[]): boolean {
+  return (
+    path.length === segments.length && path.every((segment, index) => segment === segments[index])
+  );
+}
+
+function pathStartsWith(path: JsonPath, ...segments: (string | number)[]): boolean {
+  return (
+    path.length >= segments.length && segments.every((segment, index) => path[index] === segment)
+  );
 }
 
 const ENVELOPE_DIGEST_FIELD: Record<string, string> = {
@@ -245,26 +265,27 @@ const ENVELOPE_DIGEST_FIELD: Record<string, string> = {
   adapter: 'adapterId',
 };
 
-function envelopeMutation(diffs: string[], envelopeName: string, digestField: string): boolean {
-  const envelopePrefix = `envelopes.${envelopeName}.`;
-  const digestPath = `expectedIdentities.${digestField}`;
+function envelopeMutation(diffs: JsonPath[], envelopeName: string, digestField: string): boolean {
   return (
     diffs.some(
-      (diff) => diff.startsWith(envelopePrefix) && diff !== `${envelopePrefix}schemaVersion`,
+      (diff) =>
+        pathStartsWith(diff, 'envelopes', envelopeName) &&
+        !pathEquals(diff, 'envelopes', envelopeName, 'schemaVersion'),
     ) &&
-    diffs.includes(digestPath) &&
+    diffs.some((diff) => pathEquals(diff, 'expectedIdentities', digestField)) &&
     diffs.every(
       (diff) =>
-        (diff.startsWith(envelopePrefix) && diff !== `${envelopePrefix}schemaVersion`) ||
-        diff === digestPath,
+        (pathStartsWith(diff, 'envelopes', envelopeName) &&
+          !pathEquals(diff, 'envelopes', envelopeName, 'schemaVersion')) ||
+        pathEquals(diff, 'expectedIdentities', digestField),
     )
   );
 }
 
 /** Exact per-mutation diff predicates (no prefix wildcards). */
-const MUTATION_DIFF_PREDICATES: Record<string, (diffs: string[]) => boolean> = {
-  providerId: (d) => d.length === 1 && d[0] === 'expectedIdentities.providerId',
-  modelId: (d) => d.length === 1 && d[0] === 'expectedIdentities.modelId',
+const MUTATION_DIFF_PREDICATES: Record<string, (diffs: JsonPath[]) => boolean> = {
+  providerId: (d) => d.length === 1 && pathEquals(d[0], 'expectedIdentities', 'providerId'),
+  modelId: (d) => d.length === 1 && pathEquals(d[0], 'expectedIdentities', 'modelId'),
   'adapter envelope content/version': (d) => envelopeMutation(d, 'adapter', 'adapterId'),
   'cache-config envelope content/version': (d) =>
     envelopeMutation(d, 'cacheConfig', 'cacheConfigId'),
@@ -275,19 +296,27 @@ const MUTATION_DIFF_PREDICATES: Record<string, (diffs: string[]) => boolean> = {
     if (d.length !== 2) {
       return false;
     }
-    const envelopeDiff = d.find((diff) =>
-      /^envelopes\.(template|policy|tools|cacheConfig|adapter)\.schemaVersion$/.test(diff),
+    const envelopeDiff = d.find(
+      (diff) =>
+        diff.length === 3 &&
+        diff[0] === 'envelopes' &&
+        typeof diff[1] === 'string' &&
+        diff[1] in ENVELOPE_DIGEST_FIELD &&
+        diff[2] === 'schemaVersion',
     );
     if (envelopeDiff === undefined) {
       return false;
     }
-    const envelopeName = envelopeDiff.split('.')[1];
-    return d.some((diff) => diff === `expectedIdentities.${ENVELOPE_DIGEST_FIELD[envelopeName]}`);
+    const envelopeName = envelopeDiff[1] as string;
+    return d.some((diff) =>
+      pathEquals(diff, 'expectedIdentities', ENVELOPE_DIGEST_FIELD[envelopeName]),
+    );
   },
-  'run/provenance metadata': (d) => d.length === 1 && d[0] === 'interaction.interactionId',
+  'run/provenance metadata': (d) =>
+    d.length === 1 && pathEquals(d[0], 'interaction', 'interactionId'),
 };
 
-function validateMutationDiffs(id: string, mutation: unknown, diffs: string[]): string[] {
+function validateMutationDiffs(id: string, mutation: unknown, diffs: JsonPath[]): string[] {
   if (typeof mutation !== 'string' || !(mutation in MUTATION_DIFF_PREDICATES)) {
     return [`unknown-mutation:${id}:${String(mutation)}`];
   }
@@ -296,6 +325,231 @@ function validateMutationDiffs(id: string, mutation: unknown, diffs: string[]): 
 
 const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+function validateMaterializationInput(id: string, input: unknown): string[] {
+  const violations: string[] = [];
+  const object = (
+    value: unknown,
+    label: string,
+    required: readonly string[],
+    optional: readonly string[] = [],
+  ): Record<string, unknown> | undefined => {
+    if (!isRecord(value)) {
+      violations.push(`bad-shape:${id}:${label}`);
+      return undefined;
+    }
+    const allowed = new Set([...required, ...optional]);
+    for (const key of required) {
+      if (!(key in value)) violations.push(`bad-shape:${id}:${label}.${key}`);
+    }
+    for (const key of Object.keys(value)) {
+      if (!allowed.has(key)) violations.push(`unknown-field:${id}:${label}.${key}`);
+    }
+    return value;
+  };
+  const kind = (
+    record: Record<string, unknown> | undefined,
+    key: string,
+    type: string,
+    label: string,
+  ) => {
+    const value = record?.[key];
+    const matches =
+      type === 'array'
+        ? Array.isArray(value)
+        : type === 'object'
+          ? isRecord(value)
+          : typeof value === type;
+    if (!matches) violations.push(`bad-shape:${id}:${label}.${key}`);
+  };
+  const integer = (record: Record<string, unknown> | undefined, key: string, label: string) => {
+    const value = record?.[key];
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+      violations.push(`bad-integer:${id}:${label}.${key}`);
+    }
+  };
+  const sha256 = (record: Record<string, unknown> | undefined, key: string, label: string) => {
+    if (typeof record?.[key] !== 'string' || !SHA256_HEX.test(record[key] as string)) {
+      violations.push(`bad-sha256:${id}:${label}.${key}`);
+    }
+  };
+
+  const root = object(input, 'input', [
+    'history',
+    'currentContext',
+    'interaction',
+    'expectedIdentities',
+    'sessionEpoch',
+    'envelopes',
+  ]);
+  kind(root, 'sessionEpoch', 'string', 'input');
+
+  const history = object(root?.history, 'input.history', ['kind'], ['ledgerHex']);
+  if (history?.kind === 'bootstrap') {
+    if ('ledgerHex' in history) violations.push(`unknown-field:${id}:input.history.ledgerHex`);
+  } else if (history?.kind === 'continuation' || history?.kind === 'reset') {
+    kind(history, 'ledgerHex', 'string', 'input.history');
+    const ledgerHex = history.ledgerHex;
+    if (typeof ledgerHex !== 'string' || ledgerHex.length % 2 !== 0 || !HEX.test(ledgerHex)) {
+      violations.push(`bad-hex:${id}:input.history.ledgerHex`);
+    }
+  } else {
+    violations.push(`bad-shape:${id}:input.history.kind`);
+  }
+
+  const context = object(root?.currentContext, 'input.currentContext', [
+    'subjectDigest',
+    'reviewedHeadSha',
+    'reviewedBaseSha',
+    'changedFiles',
+  ]);
+  sha256(context, 'subjectDigest', 'input.currentContext');
+  for (const key of ['reviewedHeadSha', 'reviewedBaseSha']) {
+    if (
+      typeof context?.[key] !== 'string' ||
+      !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(context[key] as string)
+    ) {
+      violations.push(`bad-sha:${id}:input.currentContext.${key}`);
+    }
+  }
+  kind(context, 'changedFiles', 'array', 'input.currentContext');
+  if (Array.isArray(context?.changedFiles)) {
+    for (let index = 0; index < context.changedFiles.length; index++) {
+      const label = `input.currentContext.changedFiles[${index}]`;
+      const file = object(
+        context.changedFiles[index],
+        label,
+        ['path', 'status', 'additions', 'deletions', 'changes'],
+        ['previousPath', 'patch'],
+      );
+      kind(file, 'path', 'string', label);
+      kind(file, 'status', 'string', label);
+      if ('previousPath' in (file ?? {}) && file?.previousPath !== null) {
+        kind(file, 'previousPath', 'string', label);
+      }
+      for (const key of ['additions', 'deletions', 'changes']) integer(file, key, label);
+      if ('patch' in (file ?? {})) {
+        const patch = object(file?.patch, `${label}.patch`, ['sha256', 'truncated', 'maxChars']);
+        sha256(patch, 'sha256', `${label}.patch`);
+        kind(patch, 'truncated', 'boolean', `${label}.patch`);
+        integer(patch, 'maxChars', `${label}.patch`);
+      }
+    }
+  }
+
+  const interaction = object(root?.interaction, 'input.interaction', [
+    'interactionId',
+    'interactionOrdinal',
+  ]);
+  sha256(interaction, 'interactionId', 'input.interaction');
+  integer(interaction, 'interactionOrdinal', 'input.interaction');
+
+  const identityKeys = [
+    'repository',
+    'headRepository',
+    'pullRequest',
+    'workflowIdentity',
+    'trustedExecutionDomain',
+    'providerId',
+    'modelId',
+    'templateId',
+    'policyId',
+    'toolDefinitionId',
+    'cacheConfigId',
+    'adapterId',
+  ];
+  const identities = object(root?.expectedIdentities, 'input.expectedIdentities', identityKeys);
+  for (const key of identityKeys) {
+    if (key === 'pullRequest') integer(identities, key, 'input.expectedIdentities');
+    else kind(identities, key, 'string', 'input.expectedIdentities');
+  }
+  for (const key of ['templateId', 'policyId', 'toolDefinitionId', 'cacheConfigId', 'adapterId']) {
+    sha256(identities, key, 'input.expectedIdentities');
+  }
+
+  const envelopes = object(root?.envelopes, 'input.envelopes', [
+    'template',
+    'policy',
+    'tools',
+    'cacheConfig',
+    'adapter',
+  ]);
+  const template = object(envelopes?.template, 'input.envelopes.template', [
+    'schemaVersion',
+    'templateVersion',
+    'definition',
+  ]);
+  integer(template, 'schemaVersion', 'input.envelopes.template');
+  integer(template, 'templateVersion', 'input.envelopes.template');
+  const policy = object(envelopes?.policy, 'input.envelopes.policy', [
+    'schemaVersion',
+    'policyVersion',
+    'instructions',
+    'constraints',
+  ]);
+  integer(policy, 'schemaVersion', 'input.envelopes.policy');
+  integer(policy, 'policyVersion', 'input.envelopes.policy');
+  kind(policy, 'instructions', 'string', 'input.envelopes.policy');
+  const tools = object(envelopes?.tools, 'input.envelopes.tools', [
+    'schemaVersion',
+    'toolsetVersion',
+    'definitions',
+  ]);
+  integer(tools, 'schemaVersion', 'input.envelopes.tools');
+  integer(tools, 'toolsetVersion', 'input.envelopes.tools');
+  kind(tools, 'definitions', 'array', 'input.envelopes.tools');
+  if (Array.isArray(tools?.definitions)) {
+    for (let index = 0; index < tools.definitions.length; index++) {
+      const label = `input.envelopes.tools.definitions[${index}]`;
+      const tool = object(
+        tools.definitions[index],
+        label,
+        ['name', 'description', 'inputSchema'],
+        ['policyMetadata'],
+      );
+      kind(tool, 'name', 'string', label);
+      kind(tool, 'description', 'string', label);
+      kind(tool, 'inputSchema', 'object', label);
+    }
+  }
+  const cacheConfig = object(envelopes?.cacheConfig, 'input.envelopes.cacheConfig', [
+    'schemaVersion',
+    'cacheConfigVersion',
+    'markerPolicy',
+    'eligibility',
+    'statelessMode',
+  ]);
+  integer(cacheConfig, 'schemaVersion', 'input.envelopes.cacheConfig');
+  integer(cacheConfig, 'cacheConfigVersion', 'input.envelopes.cacheConfig');
+  kind(cacheConfig, 'markerPolicy', 'string', 'input.envelopes.cacheConfig');
+  kind(cacheConfig, 'eligibility', 'string', 'input.envelopes.cacheConfig');
+  kind(cacheConfig, 'statelessMode', 'boolean', 'input.envelopes.cacheConfig');
+  const adapter = object(envelopes?.adapter, 'input.envelopes.adapter', [
+    'schemaVersion',
+    'capabilityProfileVersion',
+    'adapterBuildVersion',
+  ]);
+  integer(adapter, 'schemaVersion', 'input.envelopes.adapter');
+  integer(adapter, 'capabilityProfileVersion', 'input.envelopes.adapter');
+  kind(adapter, 'adapterBuildVersion', 'string', 'input.envelopes.adapter');
+
+  return violations;
+}
+
+const MATERIALIZER_INVALIDATION_EXPECTED: Record<
+  string,
+  readonly [boolean, boolean, boolean, boolean]
+> = {
+  providerId: [false, false, false, true],
+  modelId: [false, false, false, true],
+  'adapter envelope content/version': [false, false, false, true],
+  'cache-config envelope content/version': [false, false, false, true],
+  'template envelope content/version': [true, true, true, true],
+  'policy envelope content/version': [true, true, true, true],
+  'tools envelope content/version/order': [true, true, true, true],
+  'any envelope schemaVersion': [false, false, false, true],
+  'run/provenance metadata': [false, false, false, false],
+};
 
 /** Per-kind closed field-set validation plus semantic SHA-256 fields. */
 function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknown>): string[] {
@@ -423,6 +677,17 @@ function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknow
         exactObject(input, 'input', { value: 'string' });
         const expected = exactObject(vector.expected, 'expected', { framedHex: 'string' });
         hexField(expected, 'framedHex', 'expected.framedHex');
+      } else if (keys.length === 1 && keys[0] === 'values') {
+        const valuesInput = exactObject(input, 'input', { values: 'array' });
+        if (
+          !(valuesInput?.values as unknown[] | undefined)?.every(
+            (value) => typeof value === 'string',
+          )
+        ) {
+          violations.push(`bad-shape:${entry.id}:input.values`);
+        }
+        const expected = exactObject(vector.expected, 'expected', { framedHex: 'string' });
+        hexField(expected, 'framedHex', 'expected.framedHex');
       } else if (keys.length === 1 && keys[0] === 'payloadHex') {
         const framedInput = exactObject(input, 'input', { payloadHex: 'string' });
         hexField(framedInput, 'payloadHex', 'input.payloadHex');
@@ -505,6 +770,7 @@ function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknow
       break;
     case 'materialization-vector': {
       require(['input', 'expected']);
+      violations.push(...validateMaterializationInput(entry.id, vector.input));
       const expected = vector.expected;
       requireExpected(expected, [
         'logicalStreamHex',
@@ -592,12 +858,29 @@ function validateVectorShape(entry: ManifestEntry, vector: Record<string, unknow
         ) {
           violations.push(`bad-shape:${entry.id}:references`);
         }
-        exactObject(vector.expected, 'expected', {
+        const materializerExpected = exactObject(vector.expected, 'expected', {
           logicalStreamChanged: 'boolean',
           providerStreamChanged: 'boolean',
           logicalHashChanged: 'boolean',
           prefixHashChanged: 'boolean',
         });
+        const fixed =
+          typeof vector.mutation === 'string'
+            ? MATERIALIZER_INVALIDATION_EXPECTED[vector.mutation]
+            : undefined;
+        if (fixed === undefined) {
+          violations.push(`unknown-mutation:${entry.id}:${String(vector.mutation)}`);
+        } else if (materializerExpected !== undefined) {
+          const keys = [
+            'logicalStreamChanged',
+            'providerStreamChanged',
+            'logicalHashChanged',
+            'prefixHashChanged',
+          ] as const;
+          if (keys.some((key, index) => materializerExpected[key] !== fixed[index])) {
+            violations.push(`invalidation-matrix:${entry.id}`);
+          }
+        }
       } else if (mode === 'hash-framing') {
         require(['baseInput', 'mutatedInput']);
         for (const label of ['baseInput', 'mutatedInput'] as const) {
@@ -1053,19 +1336,78 @@ describe('prefix-contract fixture manifest', () => {
   it('requires envelope mutations and their matching digest updates together', () => {
     expect(
       validateMutationDiffs('inv-x', 'template envelope content/version', [
-        'envelopes.template.definition',
+        ['envelopes', 'template', 'definition'],
       ]),
     ).toEqual(['mutation-diff:inv-x']);
     expect(
       validateMutationDiffs('inv-x', 'template envelope content/version', [
-        'expectedIdentities.templateId',
+        ['expectedIdentities', 'templateId'],
       ]),
     ).toEqual(['mutation-diff:inv-x']);
     expect(
       validateMutationDiffs('inv-x', 'template envelope content/version', [
-        'envelopes.template.definition',
-        'expectedIdentities.templateId',
+        ['envelopes', 'template', 'definition'],
+        ['expectedIdentities', 'templateId'],
       ]),
     ).toEqual([]);
+  });
+
+  it('keeps dotted property names distinct from nested mutation paths', () => {
+    const base = { envelopes: { template: { definition: 1 } } };
+    const forged = {
+      ...base,
+      'envelopes.template.definition': 2,
+      'expectedIdentities.templateId': 'x',
+    };
+    expect(jsonDiffPaths(base, forged)).toEqual([
+      ['envelopes.template.definition'],
+      ['expectedIdentities.templateId'],
+    ]);
+    expect(
+      validateMutationDiffs(
+        'inv-x',
+        'template envelope content/version',
+        jsonDiffPaths(base, forged),
+      ),
+    ).toEqual(['mutation-diff:inv-x']);
+
+    const bootstrap = JSON.parse(
+      readFileSync(path.join(FIXTURE_ROOT, 'materialization/bootstrap.json'), 'utf8'),
+    ) as Record<string, unknown>;
+    expect(
+      validateMaterializationInput('materialization-x', {
+        ...(bootstrap.input as Record<string, unknown>),
+        'envelopes.template.definition': 1,
+        'expectedIdentities.templateId': 'f'.repeat(64),
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        'unknown-field:materialization-x:input.envelopes.template.definition',
+        'unknown-field:materialization-x:input.expectedIdentities.templateId',
+      ]),
+    );
+  });
+
+  it('locks the declared invalidation matrix instead of trusting fixture booleans', () => {
+    const vector = JSON.parse(
+      readFileSync(path.join(FIXTURE_ROOT, 'invalidation/provider-id.json'), 'utf8'),
+    ) as Record<string, unknown>;
+    vector.expected = {
+      ...(vector.expected as Record<string, unknown>),
+      prefixHashChanged: false,
+    };
+    expect(
+      validateVectorShape(
+        { id: vector.id as string, kind: vector.kind as string, file: 'x.json' },
+        vector,
+      ),
+    ).toContain('invalidation-matrix:invalidation-provider-id');
+  });
+
+  it('rejects non-object vector files with a stable rule id', () => {
+    const root = buildCorpus(({ vectors }) => {
+      vectors.set('m/a.json', null);
+    });
+    expect(validateCorpus(root)).toContain('bad-vector-shape:materialization-a');
   });
 });

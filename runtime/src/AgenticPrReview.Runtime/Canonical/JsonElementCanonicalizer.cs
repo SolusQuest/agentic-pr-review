@@ -61,46 +61,15 @@ internal static class JsonElementCanonicalizer
     }
 
     /// <summary>
-    /// Enumerates an object's properties. Fast path: plain JsonElement
-    /// enumeration (no raw copies). Only when a property name cannot be
-    /// decoded does it fall back to the lenient raw scan for that object.
+    /// Enumerates an object's properties from bounded raw token spans. The
+    /// token views preserve invalid UTF-16 names without copying the complete
+    /// object subtree.
     /// </summary>
     private static System.Collections.Generic.List<(string Name, bool NameValid, JsonElement Value)> EnumerateProperties(
         JsonElement element,
         int maxProperties)
     {
         var properties = new System.Collections.Generic.List<(string Name, bool NameValid, JsonElement Value)>();
-        var needsLenient = false;
-        foreach (var property in element.EnumerateObject())
-        {
-            string name;
-            bool nameValid;
-            try
-            {
-                name = property.Name;
-                nameValid = true;
-            }
-            catch (InvalidOperationException)
-            {
-                // A name cannot be decoded as valid UTF-16; fall back to the
-                // lenient raw scan for this whole object.
-                needsLenient = true;
-                break;
-            }
-
-            properties.Add((name, nameValid, property.Value));
-            if (properties.Count > maxProperties)
-            {
-                return properties;
-            }
-        }
-
-        if (!needsLenient)
-        {
-            return properties;
-        }
-
-        properties.Clear();
         foreach (var entry in LenientJsonObjectEnumerator.Enumerate(element, maxProperties + 1))
         {
             properties.Add((entry.Name, entry.NameValid, entry.Value));
