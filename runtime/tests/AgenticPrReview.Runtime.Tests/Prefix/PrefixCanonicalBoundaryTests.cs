@@ -181,4 +181,41 @@ public sealed class PrefixCanonicalBoundaryTests
         Assert.Equal("prefix_canonical_input_rejected", error?.Code);
         Assert.Equal("prefix_canonical_input_rejected:/definition/<invalid-utf16>", error?.Message);
     }
+    [Fact]
+    public void RelaxedParserWithTrailingCommaAndInvalidNameYieldsTypedFailure()
+    {
+        var options = new JsonDocumentOptions { AllowTrailingCommas = true };
+        using var doc = JsonDocument.Parse(
+            "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":{\"\\ud800\":1,},}",
+            options);
+        var error = PrefixEnvelopeValidator.Validate(
+            PrefixEnvelopeValidator.EnvelopeKind.Template, doc.RootElement, out _);
+        Assert.Equal("prefix_canonical_input_rejected", error?.Code);
+        Assert.Equal("prefix_canonical_input_rejected:/definition/<invalid-utf16>", error?.Message);
+    }
+
+    [Fact]
+    public void CommentSkippingParserWithInvalidNameYieldsTypedFailure()
+    {
+        var options = new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip };
+        using var doc = JsonDocument.Parse(
+            "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":{\"\\ud800\":1}/*c*/}",
+            options);
+        var error = PrefixEnvelopeValidator.Validate(
+            PrefixEnvelopeValidator.EnvelopeKind.Template, doc.RootElement, out _);
+        Assert.Equal("prefix_canonical_input_rejected", error?.Code);
+        Assert.Equal("prefix_canonical_input_rejected:/definition/<invalid-utf16>", error?.Message);
+    }
+
+    [Fact]
+    public void PublicHelpersDoNotThrowOnRelaxedInputs()
+    {
+        var options = new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip };
+        using var doc = JsonDocument.Parse(
+            "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":{\"\\ud800\":1,},}",
+            options);
+        var outcome = CacheContractDigests.ComputeTemplateId(doc.RootElement);
+        Assert.Null(outcome.Digest);
+        Assert.Equal("prefix_canonical_input_rejected", Assert.Single(outcome.Diagnostics).Code);
+    }
 }

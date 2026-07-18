@@ -45,6 +45,13 @@ internal static class PrefixEnvelopeValidator
             validated = null;
             return PrefixDiagnostic.Create(PrefixDiagnosticCodes.CanonicalInputRejected);
         }
+        catch (JsonException)
+        {
+            // Defensive: the lenient fallback reader must never leak a parser
+            // exception across the public boundary.
+            validated = null;
+            return PrefixDiagnostic.Create(PrefixDiagnosticCodes.CanonicalInputRejected);
+        }
     }
 
     /// <summary>Stage 2: envelope structure (root shape, key sets, required fields, field types).</summary>

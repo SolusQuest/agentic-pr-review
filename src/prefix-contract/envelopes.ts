@@ -124,11 +124,21 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
     }
   }
 
-  // Deep descriptor snapshot: the whole envelope graph is copied exactly
-  // once through descriptors. Accessor or non-enumerable own properties at
-  // the contract-owned root are structural rejections; nested anomalies are
-  // preserved as violation markers for the canonical-domain stage.
-  const snapshot = deepDescriptorSnapshot(raw) as Record<string, unknown>;
+  // Deep descriptor snapshot with inline structural bounds: the whole
+  // envelope graph is copied exactly once through descriptors, and an
+  // oversize graph is rejected before its size can be iterated or allocated.
+  const snapshotOutcome = deepDescriptorSnapshot(raw, {
+    maxDepth: MAX_JSON_DEPTH,
+    maxObjectProperties: MAX_OBJECT_PROPERTIES,
+    maxArrayItems: MAX_ARRAY_ITEMS,
+  });
+  if (!snapshotOutcome.ok) {
+    return fail(
+      PREFIX_CODES.envelopeInvalid,
+      encodePrefixPath(snapshotOutcome.violation.segments, kind, PREFIX_CODES.envelopeInvalid),
+    );
+  }
+  const snapshot = snapshotOutcome.value as Record<string, unknown>;
   const record: Record<string, unknown> = Object.create(null);
   for (const name of rawNames) {
     const value = snapshot[name];
@@ -166,11 +176,6 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
   const fieldError = checkKindFields(kind, record);
   if (fieldError !== null) {
     return fieldError;
-  }
-
-  const boundsError = checkStructuralBounds(kind, record);
-  if (boundsError !== null) {
-    return boundsError;
   }
 
   const identityError = checkEmbeddedIdentities(kind, record);
@@ -421,81 +426,6 @@ function checkToolDefinitions(
     }
   }
 
-  return null;
-}
-
-/** Structural bounds (structure stage): depth / object properties / array items. */
-function checkStructuralBounds(
-  kind: EnvelopeKind,
-  root: Record<string, unknown>,
-): PrefixResult<ValidatedEnvelope> | null {
-  interface Frame {
-    readonly value: unknown;
-    readonly depth: number;
-    readonly segments: readonly PrefixPathSegment[];
-  }
-  const stack: Frame[] = [{ value: root, depth: 0, segments: [] }];
-  while (stack.length > 0) {
-    const { value, depth, segments } = stack.pop()!;
-    if (Array.isArray(value)) {
-      if (depth > MAX_JSON_DEPTH) {
-        return fail(
-          PREFIX_CODES.envelopeInvalid,
-          encodePrefixPath(segments, kind, PREFIX_CODES.envelopeInvalid),
-        );
-      }
-      if (value.length > MAX_ARRAY_ITEMS) {
-        return fail(
-          PREFIX_CODES.envelopeInvalid,
-          encodePrefixPath(segments, kind, PREFIX_CODES.envelopeInvalid),
-        );
-      }
-      for (let i = 0; i < value.length; i++) {
-        const descriptor = Object.getOwnPropertyDescriptor(value, String(i));
-        if (
-          descriptor === undefined ||
-          'get' in descriptor ||
-          'set' in descriptor ||
-          !descriptor.enumerable
-        ) {
-          // Accessor holes are owned by the canonical-domain stage.
-          continue;
-        }
-        stack.push({
-          value: descriptor.value,
-          depth: depth + 1,
-          segments: [...segments, { name: String(i), isIndex: true }],
-        });
-      }
-      continue;
-    }
-    if (typeof value === 'object' && value !== null) {
-      if (depth > MAX_JSON_DEPTH) {
-        return fail(
-          PREFIX_CODES.envelopeInvalid,
-          encodePrefixPath(segments, kind, PREFIX_CODES.envelopeInvalid),
-        );
-      }
-      const names = Object.getOwnPropertyNames(value);
-      if (names.length > MAX_OBJECT_PROPERTIES) {
-        return fail(
-          PREFIX_CODES.envelopeInvalid,
-          encodePrefixPath(segments, kind, PREFIX_CODES.envelopeInvalid),
-        );
-      }
-      for (const name of names) {
-        const descriptor = Object.getOwnPropertyDescriptor(value, name)!;
-        if ('get' in descriptor || 'set' in descriptor || !descriptor.enumerable) {
-          continue;
-        }
-        stack.push({
-          value: descriptor.value,
-          depth: depth + 1,
-          segments: [...segments, { name }],
-        });
-      }
-    }
-  }
   return null;
 }
 

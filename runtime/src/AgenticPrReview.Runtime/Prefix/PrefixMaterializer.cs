@@ -62,6 +62,10 @@ public static class PrefixMaterializer
         {
             return Fail(PrefixDiagnostic.Create(PrefixDiagnosticCodes.CanonicalInputRejected));
         }
+        catch (System.Text.Json.JsonException)
+        {
+            return Fail(PrefixDiagnostic.Create(PrefixDiagnosticCodes.CanonicalInputRejected));
+        }
 
         // Stage: digest equality against host-declared identities.
         var mismatch = CompareDigests(input.ExpectedIdentities, template!, policy!, tools!, cacheConfig!, adapter!);

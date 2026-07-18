@@ -38,7 +38,12 @@ internal static class LenientJsonObjectEnumerator
         var reader = new Utf8JsonReader(
             Encoding.UTF8.GetBytes(json),
             isFinalBlock: true,
-            state: new JsonReaderState(new JsonReaderOptions { MaxDepth = 1024 }));
+            state: new JsonReaderState(new JsonReaderOptions
+            {
+                MaxDepth = 1024,
+                AllowTrailingCommas = true,
+                CommentHandling = JsonCommentHandling.Skip,
+            }));
         if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
         {
             return names;
