@@ -55,33 +55,63 @@ export type SnapshotOutcome =
   | { readonly ok: true; readonly value: unknown }
   | { readonly ok: false; readonly violation: SnapshotStructuralViolation };
 
-/** Iterative deep snapshot with inline structural bounds. */
-export function deepDescriptorSnapshot(root: unknown, bounds: SnapshotBounds): SnapshotOutcome {
+/**
+ * Iterative deep snapshot with inline structural bounds. When
+ * `rootEntriesOverride` is provided, the ROOT frame uses those pre-captured
+ * entries instead of re-reading the root object's own keys (single-capture
+ * contract for stateful proxies); nested values are still snapshotted.
+ */
+export function deepDescriptorSnapshot(
+  root: unknown,
+  bounds: SnapshotBounds,
+  rootEntriesOverride?: readonly { readonly name: string; readonly value: unknown }[],
+): SnapshotOutcome {
   interface ChildFrame {
     value: unknown;
     segments: import('./safe-path.js').PrefixPathSegment[];
     depth: number;
+    /** The exact ancestor chain of this node — never reconstructed from strings. */
+    ancestors: ReadonlySet<object>;
     assign: (child: unknown) => void;
   }
 
   const childStack: ChildFrame[] = [];
-  let rootValue: unknown;
-  const ancestorSets = new Map<string, Set<object>>();
 
-  childStack.push({
-    value: root,
-    segments: [],
-    depth: 0,
-    assign: (child) => {
-      rootValue = child;
-    },
-  });
+  let rootValue: unknown;
+
+  if (rootEntriesOverride === undefined) {
+    childStack.push({
+      value: root,
+      segments: [],
+      depth: 0,
+      ancestors: new Set<object>(),
+      assign: (child) => {
+        rootValue = child;
+      },
+    });
+  } else {
+    const rootOut: Record<string, unknown> = Object.create(null);
+    rootValue = rootOut;
+    const rootAncestors = new Set<object>([root as object]);
+    for (let i = rootEntriesOverride.length - 1; i >= 0; i--) {
+      const entry = rootEntriesOverride[i];
+      childStack.push({
+        value: entry.value,
+        segments: [{ name: entry.name }],
+        depth: 1,
+        ancestors: rootAncestors,
+        assign: (child) => {
+          Object.defineProperty(rootOut, entry.name, { value: child, enumerable: true });
+        },
+      });
+    }
+  }
 
   while (childStack.length > 0) {
     const frame = childStack.pop()!;
-    const { value, segments, depth, assign } = frame;
+    const { value, segments, depth, ancestors, assign } = frame;
 
-    const out = snapshotNode(value, segments, depth, assign);
+    const out = snapshotNode(value, segments, depth, ancestors, assign);
     if (out !== null) {
       // Fail-fast: the first structural violation wins.
       return { ok: false, violation: out };
@@ -94,6 +124,7 @@ export function deepDescriptorSnapshot(root: unknown, bounds: SnapshotBounds): S
     node: unknown,
     segments: import('./safe-path.js').PrefixPathSegment[],
     depth: number,
+    ancestors: ReadonlySet<object>,
     assign: (child: unknown) => void,
   ): SnapshotStructuralViolation | null {
     if (typeof node !== 'object' || node === null) {
@@ -108,7 +139,7 @@ export function deepDescriptorSnapshot(root: unknown, bounds: SnapshotBounds): S
       return null;
     }
 
-    if (ancestorsOf(segments).has(node)) {
+    if (ancestors.has(node)) {
       assign(marker('cyclic'));
       return null;
     }
@@ -118,7 +149,8 @@ export function deepDescriptorSnapshot(root: unknown, bounds: SnapshotBounds): S
         assign(marker('non-plain-object'));
         return null;
       }
-      if (Object.getOwnPropertySymbols(node).length > 0) {
+      const keys = Reflect.ownKeys(node);
+      if (keys.some((key) => typeof key === 'symbol')) {
         assign(marker('symbol-key'));
         return null;
       }
@@ -140,7 +172,7 @@ export function deepDescriptorSnapshot(root: unknown, bounds: SnapshotBounds): S
       if (arrayLength > bounds.maxArrayItems) {
         return { segments, reason: 'array-length-exceeded' };
       }
-      for (const name of Object.getOwnPropertyNames(node)) {
+      for (const name of keys as string[]) {
         if (name === 'length') {
           continue;
         }
@@ -152,7 +184,7 @@ export function deepDescriptorSnapshot(root: unknown, bounds: SnapshotBounds): S
 
       const out: unknown[] = new Array(arrayLength);
       assign(out);
-      ancestorsOf(segments).add(node);
+      const childAncestors: ReadonlySet<object> = new Set([...ancestors, node]);
       // Push children reversed so they pop in ascending index order.
       for (let i = arrayLength - 1; i >= 0; i--) {
         const index = i;
@@ -160,6 +192,7 @@ export function deepDescriptorSnapshot(root: unknown, bounds: SnapshotBounds): S
           value: arrayIndexDescriptorValue(node, index),
           segments: [...segments, { name: String(index), isIndex: true }],
           depth: depth + 1,
+          ancestors: childAncestors,
           assign: (child) => {
             out[index] = child;
           },
@@ -173,27 +206,29 @@ export function deepDescriptorSnapshot(root: unknown, bounds: SnapshotBounds): S
       assign(marker('non-plain-object'));
       return null;
     }
-    if (Object.getOwnPropertySymbols(node).length > 0) {
+    const keys = Reflect.ownKeys(node);
+    if (keys.some((key) => typeof key === 'symbol')) {
       assign(marker('symbol-key'));
       return null;
     }
     if (depth > bounds.maxDepth) {
       return { segments, reason: 'depth-exceeded' };
     }
-    const names = Object.getOwnPropertyNames(node);
+    const names = keys as string[];
     if (names.length > bounds.maxObjectProperties) {
       return { segments, reason: 'property-count-exceeded' };
     }
 
     const out: Record<string, unknown> = Object.create(null);
     assign(out);
-    ancestorsOf(segments).add(node);
+    const childAncestors: ReadonlySet<object> = new Set([...ancestors, node]);
     for (let i = names.length - 1; i >= 0; i--) {
       const name = names[i];
       childStack.push({
         value: propertyDescriptorValue(node, name),
         segments: [...segments, { name }],
         depth: depth + 1,
+        ancestors: childAncestors,
         assign: (child) => {
           Object.defineProperty(out, name, { value: child, enumerable: true });
         },
@@ -222,27 +257,5 @@ export function deepDescriptorSnapshot(root: unknown, bounds: SnapshotBounds): S
       return marker('accessor-property');
     }
     return descriptor.value;
-  }
-
-  // Ancestor chain keyed by the node's position segments. Since every node's
-  // path is unique in a tree walk, map segment-join to a Set of ancestors.
-  function ancestorsOf(
-    segments: readonly import('./safe-path.js').PrefixPathSegment[],
-  ): Set<object> {
-    const key = segments
-      .map((segment) => (segment.isIndex ? `#${segment.name}` : segment.name))
-      .join('/');
-    let set = ancestorSets.get(key);
-    if (set === undefined) {
-      set = new Set<object>();
-      if (segments.length > 0) {
-        const parent = ancestorsOf(segments.slice(0, -1));
-        for (const ancestor of parent) {
-          set.add(ancestor);
-        }
-      }
-      ancestorSets.set(key, set);
-    }
-    return set;
   }
 }

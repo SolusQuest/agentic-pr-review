@@ -8,6 +8,61 @@ import { computeTemplateId } from './index.js';
  */
 
 describe('deep snapshot eliminates validation/emission TOCTOU', () => {
+  it('does not confuse slash-delimited property paths with nested paths', () => {
+    const shared = { x: 1 };
+    const aliased = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { 'a/b': shared, a: { b: shared } },
+    });
+    const dealiased = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { 'a/b': { x: 1 }, a: { b: { x: 1 } } },
+    });
+
+    expect(aliased.ok).toBe(true);
+    expect(dealiased.ok).toBe(true);
+    if (aliased.ok && dealiased.ok) {
+      expect(aliased.value).toBe(dealiased.value);
+    }
+  });
+
+  it('does not confuse a hash-number property path with an array index path', () => {
+    const shared = { x: 1 };
+    const aliased = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { 'items/#0': shared, items: [shared] },
+    });
+    const dealiased = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { 'items/#0': { x: 1 }, items: [{ x: 1 }] },
+    });
+
+    expect(aliased.ok).toBe(true);
+    expect(dealiased.ok).toBe(true);
+    if (aliased.ok && dealiased.ok) {
+      expect(aliased.value).toBe(dealiased.value);
+    }
+  });
+
+  it('still rejects a true cycle inside a path-collision graph', () => {
+    const cyclic: Record<string, unknown> = { x: 1 };
+    cyclic.self = cyclic;
+    const result = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { 'a/b': cyclic, a: { b: cyclic } },
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors[0].code).toBe('prefix-canonical-input-rejected');
+    }
+  });
+
   it('a nested object proxy cannot present different content to emission', () => {
     let getInvoked = 0;
     const inner = new Proxy(
@@ -103,6 +158,100 @@ describe('deep snapshot eliminates validation/emission TOCTOU', () => {
     const result = computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition: proxy });
     expect(result.ok).toBe(true);
     expect(invoked).toBe(false);
+  });
+
+  it('captures nested own keys exactly once', () => {
+    let ownKeysCalls = 0;
+    const definition = new Proxy(
+      { benign: 1 },
+      {
+        ownKeys(target) {
+          ownKeysCalls++;
+          return Reflect.ownKeys(target);
+        },
+      },
+    );
+
+    expect(computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition }).ok).toBe(true);
+    expect(ownKeysCalls).toBe(1);
+  });
+});
+
+describe('root own-key capture is atomic', () => {
+  const legalKeys = ['schemaVersion', 'templateVersion', 'definition'];
+
+  it('does not make a second ownKeys observation that can add bogus', () => {
+    let ownKeysCalls = 0;
+    const target = { schemaVersion: 1, templateVersion: 1, definition: {}, bogus: 1 };
+    const envelope = new Proxy(target, {
+      ownKeys() {
+        ownKeysCalls++;
+        return ownKeysCalls === 1 ? legalKeys : [...legalKeys, 'bogus'];
+      },
+    });
+
+    expect(computeTemplateId(envelope).ok).toBe(true);
+    expect(ownKeysCalls).toBe(1);
+  });
+
+  it('does not make a second ownKeys observation that can add __proto__', () => {
+    let ownKeysCalls = 0;
+    const target: Record<string, unknown> = {
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: {},
+    };
+    Object.defineProperty(target, '__proto__', {
+      value: null,
+      enumerable: true,
+      configurable: true,
+    });
+    const envelope = new Proxy(target, {
+      ownKeys() {
+        ownKeysCalls++;
+        return ownKeysCalls === 1 ? legalKeys : [...legalKeys, '__proto__'];
+      },
+    });
+
+    expect(computeTemplateId(envelope).ok).toBe(true);
+    expect(ownKeysCalls).toBe(1);
+  });
+
+  it('rejects a changed key set on the next call instead of producing another digest', () => {
+    let ownKeysCalls = 0;
+    const target = { schemaVersion: 1, templateVersion: 1, definition: {}, bogus: 1 };
+    const envelope = new Proxy(target, {
+      ownKeys() {
+        ownKeysCalls++;
+        return ownKeysCalls === 1 ? legalKeys : [...legalKeys, 'bogus'];
+      },
+    });
+
+    const first = computeTemplateId(envelope);
+    const second = computeTemplateId(envelope);
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(false);
+    expect(ownKeysCalls).toBe(2);
+  });
+
+  it('produces the same digest when only captured key order changes', () => {
+    let ownKeysCalls = 0;
+    const target = { schemaVersion: 1, templateVersion: 1, definition: { x: 1 } };
+    const envelope = new Proxy(target, {
+      ownKeys() {
+        ownKeysCalls++;
+        return ownKeysCalls % 2 === 1 ? legalKeys : [...legalKeys].reverse();
+      },
+    });
+
+    const first = computeTemplateId(envelope);
+    const second = computeTemplateId(envelope);
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    if (first.ok && second.ok) {
+      expect(first.value).toBe(second.value);
+    }
+    expect(ownKeysCalls).toBe(2);
   });
 });
 

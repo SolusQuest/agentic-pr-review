@@ -93,30 +93,53 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
     return fail(PREFIX_CODES.envelopeInvalid);
   }
 
-  // Root domain: only plain objects without symbol keys enter the snapshot.
+  // Root domain: only plain objects without symbol keys enter validation.
   const proto = Object.getPrototypeOf(raw);
   if (proto !== Object.prototype && proto !== null) {
     return fail(PREFIX_CODES.envelopeInvalid);
   }
-  if (Object.getOwnPropertySymbols(raw).length > 0) {
+  // Capture every root own property exactly once (name + descriptor value).
+  // The exact-key-set check, the deep snapshot, and the validated record are
+  // all built from this single capture, so a stateful root Proxy cannot
+  // present different own-key sets to different stages. A "__proto__" own
+  // property is just another unknown field here.
+  interface RootEntry {
+    readonly name: string;
+    readonly value: unknown;
+  }
+  const rootEntries: RootEntry[] = [];
+  const rootKeys = Reflect.ownKeys(raw);
+  if (rootKeys.some((key) => typeof key === 'symbol')) {
     return fail(PREFIX_CODES.envelopeInvalid);
   }
-
-  // Exact key set is validated against the raw own-property names BEFORE any
-  // copying, so a "__proto__" own property can never slip past as a prototype
-  // mutation instead of an unknown-field rejection.
-  const rawNames = Object.getOwnPropertyNames(raw);
-  const allowed = new Set(REQUIRED_KEYS[kind]);
-  for (const key of rawNames) {
-    if (!allowed.has(key)) {
+  for (const name of rootKeys as string[]) {
+    const descriptor = Object.getOwnPropertyDescriptor(raw, name);
+    if (descriptor === undefined) {
       return fail(
         PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath([{ name: key }], kind, PREFIX_CODES.envelopeInvalid),
+        encodePrefixPath([{ name }], kind, PREFIX_CODES.envelopeInvalid),
+      );
+    }
+    if ('get' in descriptor || 'set' in descriptor || !descriptor.enumerable) {
+      return fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath([{ name }], kind, PREFIX_CODES.envelopeInvalid),
+      );
+    }
+    rootEntries.push({ name, value: descriptor.value });
+  }
+
+  const allowed = new Set(REQUIRED_KEYS[kind]);
+  for (const entry of rootEntries) {
+    if (!allowed.has(entry.name)) {
+      return fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath([{ name: entry.name }], kind, PREFIX_CODES.envelopeInvalid),
       );
     }
   }
   for (const required of REQUIRED_KEYS[kind]) {
-    if (!rawNames.includes(required)) {
+    if (!rootEntries.some((entry) => entry.name === required)) {
       return fail(
         PREFIX_CODES.envelopeInvalid,
         encodePrefixPath([{ name: required }], kind, PREFIX_CODES.envelopeInvalid),
@@ -127,11 +150,15 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
   // Deep descriptor snapshot with inline structural bounds: the whole
   // envelope graph is copied exactly once through descriptors, and an
   // oversize graph is rejected before its size can be iterated or allocated.
-  const snapshotOutcome = deepDescriptorSnapshot(raw, {
-    maxDepth: MAX_JSON_DEPTH,
-    maxObjectProperties: MAX_OBJECT_PROPERTIES,
-    maxArrayItems: MAX_ARRAY_ITEMS,
-  });
+  const snapshotOutcome = deepDescriptorSnapshot(
+    raw,
+    {
+      maxDepth: MAX_JSON_DEPTH,
+      maxObjectProperties: MAX_OBJECT_PROPERTIES,
+      maxArrayItems: MAX_ARRAY_ITEMS,
+    },
+    rootEntries,
+  );
   if (!snapshotOutcome.ok) {
     return fail(
       PREFIX_CODES.envelopeInvalid,
@@ -140,8 +167,8 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
   }
   const snapshot = snapshotOutcome.value as Record<string, unknown>;
   const record: Record<string, unknown> = Object.create(null);
-  for (const name of rawNames) {
-    const value = snapshot[name];
+  for (const entry of rootEntries) {
+    const value = snapshot[entry.name];
     if (
       isCanonicalViolationMarker(value) &&
       (canonicalViolationReason(value) === 'accessor-property' ||
@@ -152,10 +179,10 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
       // canonical-domain stage.
       return fail(
         PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath([{ name: name }], kind, PREFIX_CODES.envelopeInvalid),
+        encodePrefixPath([{ name: entry.name }], kind, PREFIX_CODES.envelopeInvalid),
       );
     }
-    Object.defineProperty(record, name, { value, enumerable: true });
+    Object.defineProperty(record, entry.name, { value, enumerable: true });
   }
 
   for (const versionField of VERSION_FIELDS[kind]) {

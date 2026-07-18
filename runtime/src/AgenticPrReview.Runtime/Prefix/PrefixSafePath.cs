@@ -130,7 +130,7 @@ internal static class PrefixSafePath
         var prefix = new StringBuilder();
         for (var i = 0; i < segments.Count - 1; i++)
         {
-            var candidate = prefix.ToString() + "/" + segments[i];
+            var candidate = prefix + "/" + segments[i];
             if (candidate.Length > charBudget - reserved
                 || Encoding.UTF8.GetByteCount(candidate) > byteBudget - reservedBytes)
             {
