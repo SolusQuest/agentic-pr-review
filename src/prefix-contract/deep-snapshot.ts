@@ -185,11 +185,9 @@ export function deepDescriptorSnapshot(
       const violation = visitNode(frame);
       if (violation !== null) return { ok: false, violation };
     } else if (frame.kind === 'array') {
-      const violation = continueArray(frame);
-      if (violation !== null) return { ok: false, violation };
+      continueArray(frame);
     } else {
-      const violation = continueObject(frame);
-      if (violation !== null) return { ok: false, violation };
+      continueObject(frame);
     }
   }
 
@@ -297,10 +295,10 @@ export function deepDescriptorSnapshot(
     return null;
   }
 
-  function continueArray(frame: ArrayFrame): SnapshotStructuralViolation | null {
+  function continueArray(frame: ArrayFrame): void {
     if (frame.index >= frame.length) {
       if (frame.out === undefined) validationOnlyDone.add(frame.node);
-      return null;
+      return;
     }
     const index = frame.index;
     const segments = [...frame.segments, { name: String(index), isIndex: true }];
@@ -310,12 +308,12 @@ export function deepDescriptorSnapshot(
       noteCanonical(segments);
       if (retaining && frame.out !== undefined)
         frame.out[index] = marker('non-enumerable-property');
-      return null;
+      return;
     }
     if ('get' in descriptor || 'set' in descriptor) {
       noteCanonical(segments);
       if (retaining && frame.out !== undefined) frame.out[index] = marker('accessor-property');
-      return null;
+      return;
     }
     frames.push({
       kind: 'node',
@@ -327,7 +325,6 @@ export function deepDescriptorSnapshot(
         if (frame.out !== undefined) frame.out[index] = child;
       },
     });
-    return null;
   }
 
   function startObject(node: object, frame: NodeFrame): SnapshotStructuralViolation | null {
@@ -368,10 +365,10 @@ export function deepDescriptorSnapshot(
     return null;
   }
 
-  function continueObject(frame: ObjectFrame): SnapshotStructuralViolation | null {
+  function continueObject(frame: ObjectFrame): void {
     if (frame.index >= frame.names.length) {
       if (frame.out === undefined) validationOnlyDone.add(frame.node);
-      return null;
+      return;
     }
     const name = frame.names[frame.index];
     const segments = [...frame.segments, { name }];
@@ -386,7 +383,7 @@ export function deepDescriptorSnapshot(
           enumerable: true,
         });
       }
-      return null;
+      return;
     }
     if ('get' in descriptor || 'set' in descriptor) {
       noteCanonical(segments);
@@ -396,7 +393,7 @@ export function deepDescriptorSnapshot(
           enumerable: true,
         });
       }
-      return null;
+      return;
     }
     frames.push({
       kind: 'node',
@@ -409,7 +406,6 @@ export function deepDescriptorSnapshot(
           Object.defineProperty(frame.out, name, { value: child, enumerable: true });
       },
     });
-    return null;
   }
 
   function addPrimitiveLowerBound(value: unknown): void {
