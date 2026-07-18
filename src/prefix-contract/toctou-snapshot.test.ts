@@ -105,3 +105,28 @@ describe('deep snapshot eliminates validation/emission TOCTOU', () => {
     expect(invoked).toBe(false);
   });
 });
+
+describe('marker brand never collides with legitimate open JSON', () => {
+  it('a caller object shaped like the old marker is plain data', () => {
+    for (const reason of ['cyclic', 'non-plain-object', 'arbitrary-user-string']) {
+      const result = computeTemplateId({
+        schemaVersion: 1,
+        templateVersion: 1,
+        definition: { __canonicalViolation__: reason },
+      });
+      expect(result.ok).toBe(true);
+    }
+  });
+
+  it('a nested class instance is a canonical-domain rejection, not a structure one', () => {
+    const result = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: new Date(0),
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors[0].code).toBe('prefix-canonical-input-rejected');
+    }
+  });
+});

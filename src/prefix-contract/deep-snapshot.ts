@@ -6,8 +6,6 @@
  * their exact positions — no later stage ever touches the caller's graph.
  */
 
-export const CANONICAL_VIOLATION_KEY = '__canonicalViolation__';
-
 export type CanonicalViolationReason =
   | 'cyclic'
   | 'non-plain-object'
@@ -15,27 +13,28 @@ export type CanonicalViolationReason =
   | 'accessor-property'
   | 'non-enumerable-property';
 
-export function isCanonicalViolationMarker(value: unknown): value is Record<string, string> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    Object.getPrototypeOf(value) === null &&
-    typeof (value as Record<string, unknown>)[CANONICAL_VIOLATION_KEY] === 'string' &&
-    Object.getOwnPropertyNames(value).length === 1
-  );
+/**
+ * Out-of-band marker identity: only marker objects created by the deep
+ * snapshot itself are recorded here, so caller data can never collide with
+ * the internal marker representation.
+ */
+const markerReasons = new WeakMap<object, CanonicalViolationReason>();
+
+export function isCanonicalViolationMarker(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && markerReasons.has(value);
 }
 
 export function canonicalViolationReason(value: unknown): CanonicalViolationReason {
-  return (value as Record<string, CanonicalViolationReason>)[CANONICAL_VIOLATION_KEY];
+  const reason = markerReasons.get(value as object);
+  if (reason === undefined) {
+    throw new Error('not a canonical violation marker');
+  }
+  return reason;
 }
 
-function marker(reason: CanonicalViolationReason): Record<string, string> {
-  const out: Record<string, string> = Object.create(null);
-  Object.defineProperty(out, CANONICAL_VIOLATION_KEY, {
-    value: reason,
-    enumerable: true,
-  });
+function marker(reason: CanonicalViolationReason): Record<string, never> {
+  const out: Record<string, never> = Object.create(null);
+  markerReasons.set(out, reason);
   return out;
 }
 

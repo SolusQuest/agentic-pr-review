@@ -68,33 +68,42 @@ internal static class LenientJsonObjectEnumerator
     /// <summary>Decodes a JSON string token's raw bytes, preserving lone surrogates.</summary>
     private static (string Name, bool Valid) DecodeStringToken(byte[] raw)
     {
-        // The token may be a plain UTF-8 string or one with \uXXXX / simple escapes.
-        // Plain UTF-8 without escapes cannot contain lone surrogates (UTF-8 cannot
-        // encode them), so only the escaped path needs lenient decoding.
-        if (System.Text.Encoding.UTF8.GetString(raw) is var text && !text.Contains('\\'))
-        {
-            return (text, IsWellFormedUtf16(text));
-        }
-
+        // The token may be plain UTF-8 or contain \uXXXX / simple escapes.
+        // Runs of non-escape bytes are decoded as UTF-8; escapes are decoded
+        // individually, preserving lone surrogates as code units.
         var builder = new StringBuilder(raw.Length);
         var valid = true;
         var i = 0;
+        var runStart = 0;
+
+        void FlushRun(int end)
+        {
+            if (end > runStart)
+            {
+                var run = System.Text.Encoding.UTF8.GetString(raw, runStart, end - runStart);
+                builder.Append(run);
+                if (!IsWellFormedUtf16(run))
+                {
+                    valid = false;
+                }
+            }
+        }
+
         while (i < raw.Length)
         {
-            var b = raw[i];
-            if (b != (byte)'\\')
+            if (raw[i] != (byte)'\\')
             {
-                // Plain ASCII inside a string token (escapes are the only
-                // non-direct content we expect here).
-                builder.Append((char)b);
                 i++;
                 continue;
             }
+
+            FlushRun(i);
 
             if (i + 1 >= raw.Length)
             {
                 valid = false;
                 i++;
+                runStart = i;
                 continue;
             }
 
@@ -103,82 +112,78 @@ internal static class LenientJsonObjectEnumerator
             {
                 case '"':
                     builder.Append('"');
-                    i += 2;
                     break;
                 case '\\':
                     builder.Append('\\');
-                    i += 2;
                     break;
                 case '/':
                     builder.Append('/');
-                    i += 2;
                     break;
                 case 'b':
                     builder.Append('\b');
-                    i += 2;
                     break;
                 case 'f':
                     builder.Append('\f');
-                    i += 2;
                     break;
                 case 'n':
                     builder.Append('\n');
-                    i += 2;
                     break;
                 case 'r':
                     builder.Append('\r');
-                    i += 2;
                     break;
                 case 't':
                     builder.Append('\t');
-                    i += 2;
                     break;
                 case 'u':
                 {
                     if (i + 5 >= raw.Length)
                     {
                         valid = false;
-                        i = raw.Length;
+                        i = raw.Length - 2;
                         break;
                     }
 
                     var unit = (char)ParseHex4(raw, i + 2);
-                    i += 6;
                     if (unit >= 0xD800 && unit <= 0xDBFF
-                        && i + 5 < raw.Length
-                        && raw[i] == (byte)'\\'
-                        && raw[i + 1] == (byte)'u')
+                        && i + 11 < raw.Length
+                        && raw[i + 6] == (byte)'\\'
+                        && raw[i + 7] == (byte)'u')
                     {
-                        var low = (char)ParseHex4(raw, i + 2);
+                        var low = (char)ParseHex4(raw, i + 8);
                         if (low >= 0xDC00 && low <= 0xDFFF)
                         {
                             builder.Append(unit);
                             builder.Append(low);
-                            i += 6;
+                            i += 10;
                             break;
                         }
                     }
 
-                    // Lone surrogate (or non-surrogate code unit) — preserved.
+                    // Lone surrogate (or a non-surrogate code unit) — preserved.
                     builder.Append(unit);
                     if (unit >= 0xD800 && unit <= 0xDFFF)
                     {
                         valid = false;
                     }
 
+                    i += 4;
                     break;
                 }
 
                 default:
                     builder.Append(esc);
-                    i += 2;
                     break;
             }
+
+            i += 2;
+            runStart = i;
         }
 
+        FlushRun(raw.Length);
         var result = builder.ToString();
         return (result, valid && IsWellFormedUtf16(result));
     }
+
 
     private static int ParseHex4(byte[] raw, int offset)
     {

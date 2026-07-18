@@ -60,6 +60,51 @@ internal static class JsonElementCanonicalizer
         return copy;
     }
 
+    /// <summary>
+    /// Enumerates an object's properties. Fast path: plain JsonElement
+    /// enumeration (no raw copies). Only when a property name cannot be
+    /// decoded does it fall back to the lenient raw scan for that object.
+    /// </summary>
+    private static System.Collections.Generic.List<(string Name, bool NameValid, JsonElement Value)> EnumerateProperties(
+        JsonElement element,
+        System.Collections.Generic.IReadOnlyList<CanonicalPathSegment> segments)
+    {
+        var properties = new System.Collections.Generic.List<(string Name, bool NameValid, JsonElement Value)>();
+        var needsLenient = false;
+        foreach (var property in element.EnumerateObject())
+        {
+            string name;
+            bool nameValid;
+            try
+            {
+                name = property.Name;
+                nameValid = true;
+            }
+            catch (InvalidOperationException)
+            {
+                // A name cannot be decoded as valid UTF-16; fall back to the
+                // lenient raw scan for this whole object.
+                needsLenient = true;
+                break;
+            }
+
+            properties.Add((name, nameValid, property.Value));
+        }
+
+        if (!needsLenient)
+        {
+            return properties;
+        }
+
+        properties.Clear();
+        foreach (var entry in LenientJsonObjectEnumerator.Enumerate(element))
+        {
+            properties.Add((entry.Name, entry.NameValid, entry.Value));
+        }
+
+        return properties;
+    }
+
     private static void WriteValue(
         ref Rfc8785Writer writer,
         JsonElement element,
@@ -83,7 +128,7 @@ internal static class JsonElementCanonicalizer
 
                 var seen = new HashSet<string>(StringComparer.Ordinal);
                 var properties = new List<(string Name, bool NameValid, JsonElement Value)>();
-                foreach (var entry in LenientJsonObjectEnumerator.Enumerate(element))
+                foreach (var entry in EnumerateProperties(element, segments))
                 {
                     // Duplicate detection uses the real (leniently decoded) name,
                     // so two distinct invalid names never collapse into one sentinel.

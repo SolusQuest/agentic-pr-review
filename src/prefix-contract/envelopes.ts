@@ -132,7 +132,14 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
   const record: Record<string, unknown> = Object.create(null);
   for (const name of rawNames) {
     const value = snapshot[name];
-    if (isCanonicalViolationMarker(value) && canonicalViolationReason(value) !== 'cyclic') {
+    if (
+      isCanonicalViolationMarker(value) &&
+      (canonicalViolationReason(value) === 'accessor-property' ||
+        canonicalViolationReason(value) === 'non-enumerable-property')
+    ) {
+      // Only a root-level accessor / non-enumerable own property is a
+      // structural rejection; every other anomaly belongs to the
+      // canonical-domain stage.
       return fail(
         PREFIX_CODES.envelopeInvalid,
         encodePrefixPath([{ name: name }], kind, PREFIX_CODES.envelopeInvalid),
