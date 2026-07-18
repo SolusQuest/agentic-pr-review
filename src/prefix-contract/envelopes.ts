@@ -3,6 +3,11 @@ import {
   CanonicalJsonByteCapError,
   CanonicalJsonInputError,
 } from '../canonical-json/index.js';
+import {
+  deepDescriptorSnapshot,
+  isCanonicalViolationMarker,
+  canonicalViolationReason,
+} from './deep-snapshot.js';
 import { isValidIdentity } from './identity.js';
 import { PREFIX_CODES, fail, ok, type PrefixResult } from './result.js';
 import {
@@ -119,31 +124,21 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
     }
   }
 
-  // Snapshot data properties into a null-prototype object via defineProperty
-  // so accessor getters are never invoked and "__proto__" cannot mutate the
-  // snapshot's prototype; accessor or non-enumerable own properties are
-  // rejected.
+  // Deep descriptor snapshot: the whole envelope graph is copied exactly
+  // once through descriptors. Accessor or non-enumerable own properties at
+  // the contract-owned root are structural rejections; nested anomalies are
+  // preserved as violation markers for the canonical-domain stage.
+  const snapshot = deepDescriptorSnapshot(raw) as Record<string, unknown>;
   const record: Record<string, unknown> = Object.create(null);
   for (const name of rawNames) {
-    const descriptor = Object.getOwnPropertyDescriptor(raw, name)!;
-    if ('get' in descriptor || 'set' in descriptor) {
+    const value = snapshot[name];
+    if (isCanonicalViolationMarker(value) && canonicalViolationReason(value) !== 'cyclic') {
       return fail(
         PREFIX_CODES.envelopeInvalid,
         encodePrefixPath([{ name: name }], kind, PREFIX_CODES.envelopeInvalid),
       );
     }
-    if (!descriptor.enumerable) {
-      return fail(
-        PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath([{ name: name }], kind, PREFIX_CODES.envelopeInvalid),
-      );
-    }
-    Object.defineProperty(record, name, {
-      value: descriptor.value,
-      enumerable: true,
-      writable: true,
-      configurable: true,
-    });
+    Object.defineProperty(record, name, { value, enumerable: true });
   }
 
   for (const versionField of VERSION_FIELDS[kind]) {

@@ -81,34 +81,21 @@ internal static class JsonElementCanonicalizer
                         segments);
                 }
 
-                var properties = new List<(string Name, bool NameValid, JsonElement Value)>();
                 var seen = new HashSet<string>(StringComparer.Ordinal);
-                foreach (var property in element.EnumerateObject())
+                var properties = new List<(string Name, bool NameValid, JsonElement Value)>();
+                foreach (var entry in LenientJsonObjectEnumerator.Enumerate(element))
                 {
-                    // Defer name-decode failures to the property's sorted position
-                    // so an earlier value defect wins per the frozen traversal.
-                    string name;
-                    bool nameValid;
-                    try
-                    {
-                        name = property.Name;
-                        nameValid = true;
-                    }
-                    catch (InvalidOperationException)
-                    {
-                        name = InvalidNameSentinel;
-                        nameValid = false;
-                    }
-
-                    if (!seen.Add(name))
+                    // Duplicate detection uses the real (leniently decoded) name,
+                    // so two distinct invalid names never collapse into one sentinel.
+                    if (!seen.Add(entry.Name))
                     {
                         throw new Rfc8785CanonicalizationException(
                             Rfc8785RejectionReason.DuplicateProperty,
                             "Duplicate JSON property name.",
-                            Append(segments, CanonicalPathSegment.Property(name)));
+                            Append(segments, CanonicalPathSegment.Property(entry.Name)));
                     }
 
-                    properties.Add((name, nameValid, property.Value));
+                    properties.Add((entry.Name, entry.NameValid, entry.Value));
                 }
 
                 if (properties.Count > maxProperties)
@@ -131,7 +118,7 @@ internal static class JsonElementCanonicalizer
                         throw new Rfc8785CanonicalizationException(
                             Rfc8785RejectionReason.UnpairedSurrogate,
                             "Unpaired UTF-16 surrogate in JSON property name.",
-                            Append(segments, CanonicalPathSegment.Property(InvalidNameSentinel)));
+                            Append(segments, CanonicalPathSegment.Property(properties[i].Name)));
                     }
 
                     // Property commas are handled by the writer's state machine;

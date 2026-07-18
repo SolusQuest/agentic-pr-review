@@ -399,13 +399,14 @@ describe('canonical traversal determinism and accepted domain', () => {
       templateVersion: 1,
       definition: cyclic,
     });
-    // Under the frozen stage order the structure-stage depth bound fires
-    // first for any cyclic structure (a cycle always exceeds the depth cap).
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.errors[0].code).toBe(PREFIX_CODES.envelopeInvalid);
-      expect(result.errors[0].path).toContain('<path-truncated>');
-    }
+    // The deep snapshot marks the cycle at its exact position; the
+    // canonical-domain scan rejects it there.
+    expect(result).toEqual({
+      ok: false,
+      errors: [
+        { code: PREFIX_CODES.canonicalInputRejected, path: '/definition/<untrusted-property>' },
+      ],
+    });
   });
 
   it('rejects class-instance roots', () => {

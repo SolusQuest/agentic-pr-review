@@ -3,6 +3,8 @@
  * Unknown property names are never echoed into diagnostics.
  */
 
+import { canonicalViolationReason, isCanonicalViolationMarker } from './deep-snapshot.js';
+
 const EMPTY_NAME = '<empty-name>';
 const INVALID_UTF16 = '<invalid-utf16>';
 const INVALID_NUL = '<invalid-nul>';
@@ -223,6 +225,9 @@ export function scanCanonicalDomainAndBounds(root: unknown): CanonicalScanViolat
 
     if (ancestors.has(value)) {
       return { segments, reason: 'cyclic' };
+    }
+    if (isCanonicalViolationMarker(value)) {
+      return { segments, reason: canonicalViolationReason(value) };
     }
     ancestors.add(value);
     try {

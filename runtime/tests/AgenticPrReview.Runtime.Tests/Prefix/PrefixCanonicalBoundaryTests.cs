@@ -139,4 +139,46 @@ public sealed class PrefixCanonicalBoundaryTests
         Assert.Equal("prefix_canonical_input_rejected", error?.Code);
         Assert.Equal("prefix_canonical_input_rejected:/definition/<invalid-utf16>", error?.Message);
     }
+
+    [Fact]
+    public void PrefixedSurrogateNameSortsBeforeAsciiValueDefect()
+    {
+        // Real UTF-16 order: "a\ud800" (0x61 prefix) sorts before "b", so the
+        // invalid name is the first defect.
+        var error = ValidateTemplate(
+            "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":{\"a\\ud800\":1,\"b\":1e999}}");
+        Assert.Equal("prefix_canonical_input_rejected", error?.Code);
+        Assert.Equal("prefix_canonical_input_rejected:/definition/<invalid-utf16>", error?.Message);
+    }
+
+    [Fact]
+    public void AstralKeyValueDefectBeatsLoneLowSurrogateName()
+    {
+        // Real UTF-16 order: the astral key's first unit (U+D83x) sorts before
+        // a lone low surrogate (U+DC00), so the astral key's defect wins.
+        var error = ValidateTemplate(
+            "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":{\"\\udc00\":1,\"\\ud83d\\ude00\":1e999}}");
+        Assert.Equal("prefix_canonical_input_rejected", error?.Code);
+        Assert.Equal("prefix_canonical_input_rejected:/definition/<untrusted-property>", error?.Message);
+    }
+
+    [Fact]
+    public void TwoDifferentInvalidNamesDoNotCollideAndEarlierValueWins()
+    {
+        var error = ValidateTemplate(
+            "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":{\"a\":1e999,\"x\\ud800\":1,\"y\\ud801\":2}}");
+        Assert.Equal("prefix_canonical_input_rejected", error?.Code);
+        Assert.Equal("prefix_canonical_input_rejected:/definition/<untrusted-property>", error?.Message);
+    }
+
+    [Fact]
+    public void TwoDifferentInvalidNamesAreNotFalseDuplicates()
+    {
+        // Without a leading valid defect, the first invalid name (sorted) is
+        // reported — proving the two names never collapsed into one sentinel.
+        var error = ValidateTemplate(
+            "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":{\"x\\ud800\":1,\"y\\ud801\":2}}");
+        Assert.Equal("prefix_canonical_input_rejected", error?.Code);
+        Assert.Equal("prefix_canonical_input_rejected:/definition/<invalid-utf16>", error?.Message);
+    }
 }
