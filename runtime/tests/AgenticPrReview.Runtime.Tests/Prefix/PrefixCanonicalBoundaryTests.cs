@@ -111,4 +111,32 @@ public sealed class PrefixCanonicalBoundaryTests
             "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":\"" + string.Concat(Enumerable.Repeat("\\u0001", 100_000)) + "\"}");
         Assert.Equal("prefix_envelope_too_large", error?.Code);
     }
+    [Fact]
+    public void EarlierNonFiniteValueBeatsLaterInvalidName()
+    {
+        var error = ValidateTemplate(
+            "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":{\"a\":1e999,\"\\ud800\":1}}");
+        Assert.Equal("prefix_canonical_input_rejected", error?.Code);
+        Assert.Equal("prefix_canonical_input_rejected:/definition/<untrusted-property>", error?.Message);
+    }
+
+    [Fact]
+    public void EarlierSurrogateValueBeatsLaterInvalidName()
+    {
+        var error = ValidateTemplate(
+            "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":{\"a\":\"\\ud800\",\"\\ud801\":1}}");
+        Assert.Equal("prefix_canonical_input_rejected", error?.Code);
+        Assert.Equal("prefix_canonical_input_rejected:/definition/<untrusted-property>", error?.Message);
+    }
+
+    [Fact]
+    public void InvalidNameWinsAtItsOwnSortedPosition()
+    {
+        // The invalid name (sentinel sorts at U+D800) precedes an astral key
+        // (first UTF-16 unit U+D83x) with a non-finite value.
+        var error = ValidateTemplate(
+            "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":{\"\\ud800\":1,\"\\ud83d\\ude00\":1e999}}");
+        Assert.Equal("prefix_canonical_input_rejected", error?.Code);
+        Assert.Equal("prefix_canonical_input_rejected:/definition/<invalid-utf16>", error?.Message);
+    }
 }

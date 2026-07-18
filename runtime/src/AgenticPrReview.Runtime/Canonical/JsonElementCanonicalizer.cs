@@ -48,29 +48,6 @@ internal static class JsonElementCanonicalizer
         WriteValue(ref writer, element, depth: 1, 64, 256, 1_024, segments: System.Array.Empty<CanonicalPathSegment>());
     }
 
-    /// <summary>
-    /// Reads a property name, converting a decode failure into a structured
-    /// UnpairedSurrogate rejection at the property-name position.
-    /// </summary>
-    internal static string ReadPropertyName(
-        JsonProperty property,
-        System.Collections.Generic.IReadOnlyList<CanonicalPathSegment> segments)
-    {
-        try
-        {
-            return property.Name;
-        }
-        catch (InvalidOperationException)
-        {
-            // System.Text.Json refuses to decode incomplete UTF-16. The sentinel
-            // maps to the terminal <invalid-utf16> marker in the safe-path encoder.
-            throw new Rfc8785CanonicalizationException(
-                Rfc8785RejectionReason.UnpairedSurrogate,
-                "Unpaired UTF-16 surrogate in JSON property name.",
-                Append(segments, CanonicalPathSegment.Property(InvalidNameSentinel)));
-        }
-    }
-
     private static CanonicalPathSegment[] Append(System.Collections.Generic.IReadOnlyList<CanonicalPathSegment> segments, CanonicalPathSegment next)
     {
         var copy = new CanonicalPathSegment[segments.Count + 1];
@@ -104,11 +81,25 @@ internal static class JsonElementCanonicalizer
                         segments);
                 }
 
-                var properties = new List<(string Name, JsonElement Value)>();
+                var properties = new List<(string Name, bool NameValid, JsonElement Value)>();
                 var seen = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var property in element.EnumerateObject())
                 {
-                    var name = ReadPropertyName(property, segments);
+                    // Defer name-decode failures to the property's sorted position
+                    // so an earlier value defect wins per the frozen traversal.
+                    string name;
+                    bool nameValid;
+                    try
+                    {
+                        name = property.Name;
+                        nameValid = true;
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        name = InvalidNameSentinel;
+                        nameValid = false;
+                    }
+
                     if (!seen.Add(name))
                     {
                         throw new Rfc8785CanonicalizationException(
@@ -117,7 +108,7 @@ internal static class JsonElementCanonicalizer
                             Append(segments, CanonicalPathSegment.Property(name)));
                     }
 
-                    properties.Add((name, property.Value));
+                    properties.Add((name, nameValid, property.Value));
                 }
 
                 if (properties.Count > maxProperties)
@@ -135,6 +126,14 @@ internal static class JsonElementCanonicalizer
                 writer.WriteObjectStart();
                 for (var i = 0; i < properties.Count; i++)
                 {
+                    if (!properties[i].NameValid)
+                    {
+                        throw new Rfc8785CanonicalizationException(
+                            Rfc8785RejectionReason.UnpairedSurrogate,
+                            "Unpaired UTF-16 surrogate in JSON property name.",
+                            Append(segments, CanonicalPathSegment.Property(InvalidNameSentinel)));
+                    }
+
                     // Property commas are handled by the writer's state machine;
                     // an explicit WriteComma here would double up.
                     writer.WriteProperty(properties[i].Name);

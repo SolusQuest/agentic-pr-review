@@ -59,10 +59,29 @@ function charge(budget: ByteBudget | undefined, text: string): void {
   if (budget === undefined) {
     return;
   }
-  budget.written += new TextEncoder().encode(text).byteLength;
+  budget.written += utf8ByteLength(text);
   if (budget.written > budget.limit) {
     throw new CanonicalJsonByteCapError(budget.limit);
   }
+}
+
+/** UTF-8 byte length computed by code-unit scan — never allocates. */
+function utf8ByteLength(value: string): number {
+  let length = 0;
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code < 0x80) {
+      length += 1;
+    } else if (code < 0x800) {
+      length += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff && i + 1 < value.length) {
+      length += 4;
+      i += 1;
+    } else {
+      length += 3;
+    }
+  }
+  return length;
 }
 
 /**
@@ -147,7 +166,7 @@ function escapeJsonString(value: string, path: string, budget: ByteBudget | unde
   // quotes, so a raw length that already exceeds the budget aborts before any
   // escaped bytes are built.
   if (budget !== undefined) {
-    const rawBytes = new TextEncoder().encode(value).byteLength + 2;
+    const rawBytes = utf8ByteLength(value) + 2;
     if (budget.written + rawBytes > budget.limit) {
       budget.written += rawBytes;
       throw new CanonicalJsonByteCapError(budget.limit);
@@ -172,9 +191,13 @@ function escapeJsonString(value: string, path: string, budget: ByteBudget | unde
   let byteLen = 1;
   for (let i = 0; i < value.length; i++) {
     const code = value.charCodeAt(i);
-    // Exact UTF-8 byte accounting: escapes are ASCII; a surrogate pair counts
-    // 2 + 2 = 4 bytes across the two code units.
+    // Exact UTF-8 byte accounting, mirroring the escape switch below: quote
+    // and backslash use 2-byte escapes; the five short escapes use 2 bytes;
+    // other C0 controls use a 6-byte \uXXXX escape; remaining ASCII is 1
+    // byte; non-ASCII UTF-8 is 2 / 3 / (2+2) bytes per code unit.
     if (code === 0x22 || code === 0x5c) {
+      byteLen += 2;
+    } else if (code === 0x08 || code === 0x09 || code === 0x0a || code === 0x0c || code === 0x0d) {
       byteLen += 2;
     } else if (code < 0x20) {
       byteLen += 6;
@@ -288,13 +311,16 @@ function encodeArray(
       }
     }
 
+    charge(budget, '[');
     const parts: string[] = [];
     for (let i = 0; i < array.length; i++) {
+      if (i > 0) {
+        charge(budget, ',');
+      }
       parts.push(encodeValue(array[i], `${path}[${i}]`, seen, budget));
     }
-    const joined = '[' + parts.join(',') + ']';
-    charge(budget, '[');
-    return joined;
+    charge(budget, ']');
+    return '[' + parts.join(',') + ']';
   } finally {
     seen.delete(array);
   }
@@ -334,13 +360,21 @@ function encodeObject(
     }
     // RFC 8785 sorts keys by UTF-16 code units.
     keys.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    charge(budget, '{');
     const parts: string[] = [];
+    let first = true;
     for (const key of keys) {
+      if (!first) {
+        charge(budget, ',');
+      }
+      first = false;
       const encodedKey = escapeJsonString(key, `${path}.${key}`, budget);
+      charge(budget, ':');
       const child = (value as Record<string, unknown>)[key];
       const encodedChild = encodeValue(child, `${path}.${key}`, seen, budget);
       parts.push(`${encodedKey}:${encodedChild}`);
     }
+    charge(budget, '}');
     return '{' + parts.join(',') + '}';
   } finally {
     seen.delete(value);
