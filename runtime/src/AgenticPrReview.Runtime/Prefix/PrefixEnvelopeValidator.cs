@@ -316,18 +316,8 @@ internal static class PrefixEnvelopeValidator
 
     private static string? MatchKnownName(
         LenientJsonObjectEnumerator.Entry entry,
-        IEnumerable<string> knownNames)
-    {
-        foreach (var name in knownNames)
-        {
-            if (LenientJsonObjectEnumerator.NameEquals(entry, name))
-            {
-                return name;
-            }
-        }
-
-        return null;
-    }
+        IEnumerable<string> knownNames) =>
+        knownNames.FirstOrDefault(name => LenientJsonObjectEnumerator.NameEquals(entry, name));
 
     private static PrefixDiagnostic? CheckExactKeySet(EnvelopeKind kind, JsonElement envelope)
     {

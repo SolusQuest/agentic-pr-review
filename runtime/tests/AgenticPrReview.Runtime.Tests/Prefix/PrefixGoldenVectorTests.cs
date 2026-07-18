@@ -157,9 +157,10 @@ public sealed class PrefixGoldenVectorTests
     [Fact]
     public void AppendVectorsMatch()
     {
-        foreach (var entry in PrefixFixtureLoader.OfKind("append-vector"))
+        foreach (var vector in PrefixFixtureLoader
+            .OfKind("append-vector")
+            .Select(entry => PrefixFixtureLoader.LoadVector(entry.File)))
         {
-            var vector = PrefixFixtureLoader.LoadVector(entry.File);
             var baseVector = PrefixFixtureLoader.LoadVector(FindById(vector.GetProperty("baseVectorId").GetString()!).File);
             var successorVector = PrefixFixtureLoader.LoadVector(FindById(vector.GetProperty("successorVectorId").GetString()!).File);
 
@@ -214,9 +215,10 @@ public sealed class PrefixGoldenVectorTests
     [Fact]
     public void InvalidationVectorsMatch()
     {
-        foreach (var entry in PrefixFixtureLoader.OfKind("invalidation-vector"))
+        foreach (var vector in PrefixFixtureLoader
+            .OfKind("invalidation-vector")
+            .Select(entry => PrefixFixtureLoader.LoadVector(entry.File)))
         {
-            var vector = PrefixFixtureLoader.LoadVector(entry.File);
             var mode = vector.GetProperty("mode").GetString()!;
             var expected = vector.GetProperty("expected");
 

@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Text.Json;
 using AgenticPrReview.Runtime.Prefix;
 using Xunit;
@@ -58,9 +59,8 @@ public sealed class PrefixPublicApiTests
     public void CanonicalNamespaceDoesNotDependOnLedgerOrPrefix()
     {
         var canonicalDir = Path.Combine(FindRepoRoot(), "runtime", "src", "AgenticPrReview.Runtime", "Canonical");
-        foreach (var file in Directory.GetFiles(canonicalDir, "*.cs"))
+        foreach (var text in Directory.GetFiles(canonicalDir, "*.cs").Select(File.ReadAllText))
         {
-            var text = File.ReadAllText(file);
             Assert.DoesNotContain("AgenticPrReview.Runtime.Ledger", text);
             Assert.DoesNotContain("AgenticPrReview.Runtime.Prefix", text);
         }
