@@ -431,15 +431,12 @@ internal static class PrefixFixtureLoader
         AssertExactObject(tools, $"{id}.input.envelopes.tools", ("schemaVersion", JsonValueKind.Number), ("toolsetVersion", JsonValueKind.Number), ("definitions", JsonValueKind.Array));
         AssertNonnegativeInteger(tools.GetProperty("schemaVersion"), $"{id}.input.envelopes.tools.schemaVersion");
         AssertNonnegativeInteger(tools.GetProperty("toolsetVersion"), $"{id}.input.envelopes.tools.toolsetVersion");
-        var toolIndex = 0;
         foreach (var tool in tools.GetProperty("definitions").EnumerateArray())
         {
-            var label = $"{id}.input.envelopes.tools.definitions[{toolIndex}]";
             AssertAllowedKeys(tool, "name", "description", "inputSchema", "policyMetadata");
             Assert.Equal(JsonValueKind.String, tool.GetProperty("name").ValueKind);
             Assert.Equal(JsonValueKind.String, tool.GetProperty("description").ValueKind);
             Assert.Equal(JsonValueKind.Object, tool.GetProperty("inputSchema").ValueKind);
-            toolIndex++;
         }
 
         var config = envelopes.GetProperty("cacheConfig");
@@ -756,16 +753,9 @@ internal static class PrefixFixtureLoader
             ["cacheConfig"] = "cacheConfigId",
             ["adapter"] = "adapterId",
         };
-        foreach (var pair in digestFields)
-        {
-            if (diffs.Any(path => PathEquals(path, "envelopes", pair.Key, "schemaVersion"))
-                && diffs.Any(path => PathEquals(path, "expectedIdentities", pair.Value)))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return digestFields.Any(pair =>
+            diffs.Any(path => PathEquals(path, "envelopes", pair.Key, "schemaVersion"))
+            && diffs.Any(path => PathEquals(path, "expectedIdentities", pair.Value)));
     }
 
     internal static void AssertSafeRelativePath(string file)
