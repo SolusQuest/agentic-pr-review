@@ -296,6 +296,23 @@ public sealed class PrefixEnvelopeValidatorTests
     }
 
     [Fact]
+    public void ClosedRootUsesFixedInvalidNameSentinelOrdering()
+    {
+        var error = ValidateTemplate(
+            "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":{},\"a\\ud800\":1,\"b\":2}");
+        Assert.Equal("prefix_envelope_invalid:/<untrusted-property>", error?.Message);
+    }
+
+    [Fact]
+    public void ClosedToolWrapperUsesFixedInvalidNameSentinelOrdering()
+    {
+        var error = ValidateToolsDeep(
+            "{\"schemaVersion\":1,\"toolsetVersion\":1,\"definitions\":[{" +
+            "\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{},\"a\\ud800\":1,\"b\":2}]}");
+        Assert.Equal("prefix_envelope_invalid:/definitions/0/<untrusted-property>", error?.Message);
+    }
+
+    [Fact]
     public void InvalidNameDoesNotCopyItsLargeSiblingSubtree()
     {
         var payload = new string('x', 1_000_000);

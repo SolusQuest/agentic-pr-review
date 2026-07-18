@@ -60,6 +60,19 @@ public sealed class CanonicalWriterTests
     }
 
     [Fact]
+    public void DiscardModeRemainsLatchedAfterTheFirstExceededAppend()
+    {
+        var writer = new Rfc8785Writer(8) { DiscardLimit = 1 };
+        writer.WriteBoolean(true);
+        Assert.True(writer.Exceeded);
+
+        writer.WriteArrayStart();
+
+        Assert.True(writer.Exceeded);
+        Assert.Equal(0, writer.WrittenCount);
+    }
+
+    [Fact]
     public void ObjectKeysSortByUtf16CodeUnits()
     {
         // U+10000 (first UTF-16 unit 0xD800 = 55296) sorts before U+E000 (57344)

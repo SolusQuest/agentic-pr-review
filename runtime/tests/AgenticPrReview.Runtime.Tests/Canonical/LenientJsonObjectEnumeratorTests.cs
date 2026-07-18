@@ -76,4 +76,45 @@ public sealed class LenientJsonObjectEnumeratorTests
             escapedDoc.RootElement, 64, 256, 1024, long.MaxValue, out _);
         Assert.Equal(Encoding.UTF8.GetString(direct.AsSpan()), Encoding.UTF8.GetString(escaped.AsSpan()));
     }
+
+    [Fact]
+    public void LongCommonPrefixSortingHasLinearDecodedWork()
+    {
+        const int entryCount = 64;
+        var prefix = new string('x', 20_000);
+        var names = Enumerable.Range(0, entryCount)
+            .Select(index => prefix + (char)(0x100 + index))
+            .Reverse()
+            .ToArray();
+        var json = "{" + string.Join(",", names.Select((name, index) =>
+            JsonSerializer.Serialize(name) + ":" + index)) + "}";
+        using var document = JsonDocument.Parse(json);
+        var counter = new LenientJsonObjectEnumerator.TokenWorkCounter();
+        var entries = LenientJsonObjectEnumerator.Enumerate(document.RootElement, workCounter: counter).ToArray();
+
+        var sorted = LenientJsonObjectEnumerator.SortEntries(entries, counter);
+
+        var expected = names.Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(expected.Length, sorted.Count);
+        for (var index = 0; index < expected.Length; index++)
+        {
+            Assert.Equal(0, LenientJsonObjectEnumerator.CompareNameTo(sorted[index], expected[index]));
+        }
+        var inputCodeUnits = names.Sum(static name => (long)name.Length);
+        Assert.True(counter.CodeUnitsRead <= inputCodeUnits * 3,
+            $"decoded work {counter.CodeUnitsRead} exceeded the linear bound for {inputCodeUnits} input units");
+    }
+
+    [Fact]
+    public void ClosedInvalidNamesUseOneFixedSentinelSortPosition()
+    {
+        var (document, entries) = Enumerate("{\"a\\ud800\":1,\"\\udc00z\":2,\"b\":3,\"😀\":4}");
+        using (document)
+        {
+            Assert.Equal(4, entries.Length);
+            Assert.Equal(0, LenientJsonObjectEnumerator.CompareClosedNames(entries[0], entries[1]));
+            Assert.True(LenientJsonObjectEnumerator.CompareClosedNames(entries[2], entries[0]) < 0);
+            Assert.True(LenientJsonObjectEnumerator.CompareClosedNames(entries[0], entries[3]) < 0);
+        }
+    }
 }

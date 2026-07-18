@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { computeTemplateId, computeToolDefinitionId } from './index.js';
+import { deepDescriptorSnapshot, type SnapshotStats } from './deep-snapshot.js';
 
 /**
  * TOCTOU coverage (round 7): validation and canonical emission must see
@@ -323,6 +324,57 @@ describe('root own-key capture is atomic', () => {
     }
     expect(ownKeysCalls).toBe(2);
   });
+
+  it('captures root descriptors in closed-key sort order', () => {
+    const reads: PropertyKey[] = [];
+    const target = { schemaVersion: 1, templateVersion: 1, definition: {} };
+    const envelope = new Proxy(target, {
+      ownKeys() {
+        return ['templateVersion', 'schemaVersion', 'definition'];
+      },
+      getOwnPropertyDescriptor(current, property) {
+        reads.push(property);
+        return Reflect.getOwnPropertyDescriptor(current, property);
+      },
+    });
+
+    expect(computeTemplateId(envelope).ok).toBe(true);
+    expect(reads).toEqual(['definition', 'schemaVersion', 'templateVersion']);
+  });
+});
+
+describe('nested descriptor capture order', () => {
+  it('captures object properties in unsigned UTF-16 order', () => {
+    const reads: PropertyKey[] = [];
+    const definition = new Proxy(
+      { z: 1, a: 2 },
+      {
+        ownKeys() {
+          return ['z', 'a'];
+        },
+        getOwnPropertyDescriptor(current, property) {
+          reads.push(property);
+          return Reflect.getOwnPropertyDescriptor(current, property);
+        },
+      },
+    );
+
+    expect(computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition }).ok).toBe(true);
+    expect(reads).toEqual(['a', 'z']);
+  });
+
+  it('captures array elements in ascending index order', () => {
+    const reads: PropertyKey[] = [];
+    const definition = new Proxy([1, 2], {
+      getOwnPropertyDescriptor(current, property) {
+        reads.push(property);
+        return Reflect.getOwnPropertyDescriptor(current, property);
+      },
+    });
+
+    expect(computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition }).ok).toBe(true);
+    expect(reads.filter((property) => property !== 'length')).toEqual(['0', '1']);
+  });
 });
 
 describe('bounded alias-preserving snapshots', () => {
@@ -387,6 +439,49 @@ describe('bounded alias-preserving snapshots', () => {
       ok: false,
       errors: [{ code: 'prefix-envelope-too-large', path: '' }],
     });
+  });
+
+  it('stops retaining wide dealiased slots after proving the canonical cap', () => {
+    const definition = Array.from({ length: 1024 }, () => new Array(1024).fill(0));
+    const stats: SnapshotStats = { retainedContainerSlots: 0 };
+    const outcome = deepDescriptorSnapshot(
+      definition,
+      {
+        maxDepth: 64,
+        maxObjectProperties: 256,
+        maxArrayItems: 1024,
+        maxRetainedCanonicalBytes: 262_144,
+      },
+      undefined,
+      undefined,
+      stats,
+    );
+
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) expect(outcome.retentionExceeded).toBe(true);
+    expect(stats.retainedContainerSlots).toBeLessThan(300_000);
+  });
+
+  it('reports a late canonical defect after entering validation-only mode', () => {
+    const definition = Array.from({ length: 1024 }, () => new Array(1024).fill(0));
+    definition[1023][1023] = Number.POSITIVE_INFINITY;
+
+    const result = computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors[0].code).toBe('prefix-canonical-input-rejected');
+  });
+
+  it('reports a late structural defect after entering validation-only mode', () => {
+    const definition: unknown[][] = Array.from({ length: 1024 }, () =>
+      new Array<unknown>(1024).fill(0),
+    );
+    let tooDeep: unknown = 0;
+    for (let index = 0; index < 65; index++) tooDeep = [tooDeep];
+    definition[1023][1023] = tooDeep;
+
+    const result = computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors[0].code).toBe('prefix-envelope-invalid');
   });
 });
 

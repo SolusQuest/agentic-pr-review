@@ -100,12 +100,11 @@ internal static class JsonElementCanonicalizer
                 }
 
                 var properties = new List<LenientJsonObjectEnumerator.Entry>();
+                var seen = new Dictionary<LenientJsonObjectEnumerator.TokenFingerprint, List<LenientJsonObjectEnumerator.Entry>>();
                 foreach (var entry in EnumerateProperties(element, maxProperties))
                 {
-                    // Preserve the input-occurrence duplicate check without
-                    // decoding any complete property name. The object bound
-                    // caps this comparison at 256 prior raw-token views.
-                    if (properties.Any(previous => LenientJsonObjectEnumerator.CompareNames(previous, entry) == 0))
+                    if (seen.TryGetValue(entry.Metadata.Fingerprint, out var candidates)
+                        && candidates.Any(previous => LenientJsonObjectEnumerator.CompareNames(previous, entry) == 0))
                     {
                         var diagnosticName = LenientJsonObjectEnumerator.DiagnosticName(entry);
                         throw new Rfc8785CanonicalizationException(
@@ -114,6 +113,13 @@ internal static class JsonElementCanonicalizer
                             Append(segments, CanonicalPathSegment.Property(diagnosticName)));
                     }
 
+                    if (candidates is null)
+                    {
+                        candidates = new List<LenientJsonObjectEnumerator.Entry>();
+                        seen.Add(entry.Metadata.Fingerprint, candidates);
+                    }
+
+                    candidates.Add(entry);
                     properties.Add(entry);
                 }
 
@@ -128,7 +134,7 @@ internal static class JsonElementCanonicalizer
                 // RFC 8785 orders keys by decoded UTF-16 code units. The raw
                 // comparer yields those units incrementally and retains no
                 // token-sized string.
-                properties.Sort(static (a, b) => LenientJsonObjectEnumerator.CompareNames(a, b));
+                properties = LenientJsonObjectEnumerator.SortEntries(properties);
 
                 writer.WriteObjectStart();
                 for (var i = 0; i < properties.Count; i++)

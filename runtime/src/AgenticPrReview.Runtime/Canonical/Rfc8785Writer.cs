@@ -36,6 +36,11 @@ internal struct Rfc8785Writer
 
     private void Append(ReadOnlySpan<byte> bytes)
     {
+        if (Exceeded)
+        {
+            return;
+        }
+
         if (DiscardLimit >= 0 && _writer.WrittenCount + bytes.Length > DiscardLimit)
         {
             Exceeded = true;

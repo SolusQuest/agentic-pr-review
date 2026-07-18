@@ -108,12 +108,13 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
     readonly name: string;
     readonly value: unknown;
   }
-  const rootEntries: RootEntry[] = [];
   const rootKeys = Reflect.ownKeys(raw);
   if (rootKeys.some((key) => typeof key === 'symbol')) {
     return fail(PREFIX_CODES.envelopeInvalid);
   }
-  for (const name of rootKeys as string[]) {
+  const rootEntries: RootEntry[] = [];
+  const rootNames = (rootKeys as string[]).sort(compareClosedKeys);
+  for (const name of rootNames) {
     const descriptor = Object.getOwnPropertyDescriptor(raw, name);
     if (descriptor === undefined) {
       return fail(
@@ -129,8 +130,6 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
     }
     rootEntries.push({ name, value: descriptor.value });
   }
-  rootEntries.sort((a, b) => compareClosedKeys(a.name, b.name));
-
   const allowed = new Set(REQUIRED_KEYS[kind]);
   for (const entry of rootEntries) {
     if (!allowed.has(entry.name)) {
@@ -199,6 +198,7 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
       maxDepth: MAX_JSON_DEPTH,
       maxObjectProperties: MAX_OBJECT_PROPERTIES,
       maxArrayItems: MAX_ARRAY_ITEMS,
+      maxRetainedCanonicalBytes: MAX_ENVELOPE_CANONICAL_BYTES,
     },
     snapshotRootEntries,
     snapshotReplacements,
@@ -211,8 +211,9 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
   }
   const snapshot = snapshotOutcome.value as Record<string, unknown>;
   const record: Record<string, unknown> = Object.create(null);
-  for (const entry of rootEntries) {
-    const value = snapshot[entry.name];
+  const retainedEntries = snapshotOutcome.retentionExceeded ? snapshotRootEntries : rootEntries;
+  for (const entry of retainedEntries) {
+    const value = snapshotOutcome.retentionExceeded ? entry.value : snapshot[entry.name];
     if (
       isCanonicalViolationMarker(value) &&
       (canonicalViolationReason(value) === 'accessor-property' ||
@@ -232,6 +233,21 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
   const identityError = checkEmbeddedIdentities(kind, record);
   if (identityError !== null) {
     return identityError;
+  }
+
+  if (snapshotOutcome.canonicalViolation !== undefined) {
+    return fail(
+      PREFIX_CODES.canonicalInputRejected,
+      encodePrefixPath(
+        snapshotOutcome.canonicalViolation.segments,
+        kind,
+        PREFIX_CODES.canonicalInputRejected,
+      ),
+    );
+  }
+
+  if (snapshotOutcome.retentionExceeded) {
+    return fail(PREFIX_CODES.envelopeTooLarge);
   }
 
   const violation = scanCanonicalDomainAndBounds(record);

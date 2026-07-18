@@ -1,5 +1,7 @@
 using System.Buffers;
+using System.Buffers.Binary;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -15,28 +17,62 @@ internal static class LenientJsonObjectEnumerator
 {
     private const int MaxDiagnosticNameCodeUnits = 128;
 
-    internal readonly record struct Entry(JsonProperty Property)
+    internal sealed class TokenWorkCounter
+    {
+        internal long CodeUnitsRead { get; set; }
+    }
+
+    internal readonly record struct TokenFingerprint(ulong High, ulong Low, int Utf16Length);
+
+    internal readonly record struct TokenMetadata(
+        TokenFingerprint Fingerprint,
+        bool WellFormed,
+        string DiagnosticName);
+
+    internal readonly record struct Entry(
+        JsonProperty Property,
+        JsonElement Container,
+        int RawNameOffset,
+        int RawNameLength,
+        TokenMetadata Metadata)
     {
         internal JsonElement Value => Property.Value;
     }
 
-    internal static IEnumerable<Entry> Enumerate(JsonElement element, int maxEntries = int.MaxValue)
+    internal static IEnumerable<Entry> Enumerate(
+        JsonElement element,
+        int maxEntries = int.MaxValue,
+        TokenWorkCounter? workCounter = null)
     {
+        var entries = new List<Entry>();
         var count = 0;
+        var containerRaw = JsonMarshal.GetRawUtf8Value(element);
         foreach (var property in element.EnumerateObject())
         {
             if (count >= maxEntries)
             {
-                yield break;
+                break;
             }
 
             count++;
-            yield return new Entry(property);
+            var rawName = JsonMarshal.GetRawUtf8PropertyName(property);
+            if (!containerRaw.Overlaps(rawName, out var rawNameOffset))
+            {
+                throw new JsonException("Property-name token is outside its containing object.");
+            }
+            entries.Add(new Entry(
+                property,
+                element,
+                rawNameOffset,
+                rawName.Length,
+                AnalyzeToken(rawName, workCounter)));
         }
+
+        return entries;
     }
 
     internal static ReadOnlySpan<byte> RawName(Entry entry) =>
-        JsonMarshal.GetRawUtf8PropertyName(entry.Property);
+        JsonMarshal.GetRawUtf8Value(entry.Container).Slice(entry.RawNameOffset, entry.RawNameLength);
 
     internal static ReadOnlySpan<byte> RawStringValue(JsonElement element)
     {
@@ -66,17 +102,72 @@ internal static class LenientJsonObjectEnumerator
     internal static bool StringValuesEqual(JsonElement left, JsonElement right) =>
         CompareRawTokens(RawStringValue(left), RawStringValue(right)) == 0;
 
-    internal static bool NameIsWellFormed(Entry entry) => IsWellFormedUtf16(RawName(entry));
+    internal static TokenMetadata AnalyzeStringValue(
+        JsonElement element,
+        TokenWorkCounter? workCounter = null) =>
+        AnalyzeToken(RawStringValue(element), workCounter);
+
+    internal static bool NameIsWellFormed(Entry entry) => entry.Metadata.WellFormed;
 
     /// <summary>
     /// Produces only the bounded information needed by the safe-path encoder.
     /// Known short schema names remain exact; long untrusted names never cause
     /// a proportional allocation.
     /// </summary>
-    internal static string DiagnosticName(Entry entry)
+    internal static string DiagnosticName(Entry entry) => entry.Metadata.DiagnosticName;
+
+    internal static int CompareClosedNames(Entry left, Entry right)
+    {
+        if (!left.Metadata.WellFormed)
+        {
+            return right.Metadata.WellFormed
+                ? -CompareRawTokenToString(RawName(right), "\uD800")
+                : 0;
+        }
+
+        if (!right.Metadata.WellFormed)
+        {
+            return CompareRawTokenToString(RawName(left), "\uD800");
+        }
+
+        return CompareNames(left, right);
+    }
+
+    internal static int CompareClosedNameTo(Entry left, string right)
+    {
+        if (!left.Metadata.WellFormed)
+        {
+            return string.CompareOrdinal("\uD800", right);
+        }
+
+        return CompareNameTo(left, right);
+    }
+
+    /// <summary>
+    /// Exact ordinal UTF-16 sort that advances every token cursor at most once
+    /// per code unit within its unresolved prefix group. Long common prefixes
+    /// are scanned linearly rather than once per comparison.
+    /// </summary>
+    internal static List<Entry> SortEntries(
+        IReadOnlyCollection<Entry> entries,
+        TokenWorkCounter? workCounter = null)
+    {
+        var output = new List<Entry>(entries.Count);
+        SortGroup(entries.Select(static entry => new TokenCursor(entry)).ToList(), output, workCounter);
+        return output;
+    }
+
+    internal static Utf16TokenEnumerator EnumerateRawToken(ReadOnlySpan<byte> raw) => new(raw);
+
+    private static TokenMetadata AnalyzeToken(
+        ReadOnlySpan<byte> raw,
+        TokenWorkCounter? workCounter)
     {
         Span<char> prefix = stackalloc char[MaxDiagnosticNameCodeUnits];
-        var enumerator = new Utf16TokenEnumerator(RawName(entry));
+        Span<byte> hashBuffer = stackalloc byte[256];
+        using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var hashBytes = 0;
+        var enumerator = new Utf16TokenEnumerator(raw);
         var count = 0;
         var valid = true;
         var sawNul = false;
@@ -85,12 +176,24 @@ internal static class LenientJsonObjectEnumerator
 
         while (enumerator.MoveNext(out var unit))
         {
+            if (workCounter is not null)
+            {
+                workCounter.CodeUnitsRead++;
+            }
             if (count < prefix.Length)
             {
                 prefix[count] = unit;
             }
 
             count++;
+            BinaryPrimitives.WriteUInt16BigEndian(hashBuffer[hashBytes..], unit);
+            hashBytes += 2;
+            if (hashBytes == hashBuffer.Length)
+            {
+                hasher.AppendData(hashBuffer);
+                hashBytes = 0;
+            }
+
             if (unit == '\0')
             {
                 sawNul = true;
@@ -122,31 +225,129 @@ internal static class LenientJsonObjectEnumerator
             }
         }
 
+        if (hashBytes > 0)
+        {
+            hasher.AppendData(hashBuffer[..hashBytes]);
+        }
+
         valid &= pendingHigh == '\0' && !enumerator.Malformed;
-        if (!valid)
-        {
-            return JsonElementCanonicalizer.InvalidNameSentinel;
-        }
-
-        if (sawNul)
-        {
-            return "\0";
-        }
-
-        if (sawControl)
-        {
-            return "\u0001";
-        }
-
-        if (count == 0)
-        {
-            return string.Empty;
-        }
-
-        return count <= prefix.Length ? new string(prefix[..count]) : "x";
+        var digest = hasher.GetHashAndReset();
+        var fingerprint = new TokenFingerprint(
+            BinaryPrimitives.ReadUInt64BigEndian(digest),
+            BinaryPrimitives.ReadUInt64BigEndian(digest.AsSpan(8)),
+            count);
+        var diagnosticName = !valid
+            ? JsonElementCanonicalizer.InvalidNameSentinel
+            : sawNul
+                ? "\0"
+                : sawControl
+                    ? "\u0001"
+                    : count == 0
+                        ? string.Empty
+                        : count <= prefix.Length
+                            ? new string(prefix[..count])
+                            : "x";
+        return new TokenMetadata(fingerprint, valid, diagnosticName);
     }
 
-    internal static Utf16TokenEnumerator EnumerateRawToken(ReadOnlySpan<byte> raw) => new(raw);
+    private static void SortGroup(
+        List<TokenCursor> group,
+        List<Entry> output,
+        TokenWorkCounter? workCounter)
+    {
+        if (group.Count == 0)
+        {
+            return;
+        }
+
+        if (group.Count == 1)
+        {
+            output.Add(group[0].Entry);
+            return;
+        }
+
+        while (true)
+        {
+            int? common = null;
+            var allSame = true;
+            for (var index = 0; index < group.Count; index++)
+            {
+                var cursor = group[index];
+                cursor.Current = cursor.MoveNext(out var unit) ? unit : -1;
+                if (cursor.Current >= 0)
+                {
+                    if (workCounter is not null)
+                    {
+                        workCounter.CodeUnitsRead++;
+                    }
+                }
+
+                group[index] = cursor;
+                common ??= cursor.Current;
+                allSame &= common.Value == cursor.Current;
+            }
+
+            if (allSame)
+            {
+                if (common == -1)
+                {
+                    output.AddRange(group.Select(static cursor => cursor.Entry));
+                    return;
+                }
+
+                continue;
+            }
+
+            var partitions = new SortedDictionary<int, List<TokenCursor>>();
+            foreach (var cursor in group)
+            {
+                if (!partitions.TryGetValue(cursor.Current, out var partition))
+                {
+                    partition = new List<TokenCursor>();
+                    partitions.Add(cursor.Current, partition);
+                }
+
+                partition.Add(cursor);
+            }
+
+            foreach (var partition in partitions)
+            {
+                if (partition.Key == -1)
+                {
+                    output.AddRange(partition.Value.Select(static cursor => cursor.Entry));
+                }
+                else
+                {
+                    SortGroup(partition.Value, output, workCounter);
+                }
+            }
+
+            return;
+        }
+    }
+
+    private struct TokenCursor
+    {
+        private int _offset;
+        private char _pendingLow;
+        private bool _malformed;
+
+        internal TokenCursor(Entry entry)
+        {
+            Entry = entry;
+            _offset = 0;
+            _pendingLow = '\0';
+            _malformed = false;
+            Current = -1;
+        }
+
+        internal Entry Entry { get; }
+
+        internal int Current { get; set; }
+
+        internal bool MoveNext(out char unit) =>
+            DecodeNext(RawName(Entry), ref _offset, ref _pendingLow, ref _malformed, out unit);
+    }
 
     private static int CompareRawTokens(ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
     {
@@ -192,34 +393,114 @@ internal static class LenientJsonObjectEnumerator
         return index == right.Length ? 0 : -1;
     }
 
-    private static bool IsWellFormedUtf16(ReadOnlySpan<byte> raw)
+    private static bool DecodeNext(
+        ReadOnlySpan<byte> raw,
+        ref int offset,
+        ref char pendingLow,
+        ref bool malformed,
+        out char unit)
     {
-        var enumerator = new Utf16TokenEnumerator(raw);
-        char pendingHigh = '\0';
-        while (enumerator.MoveNext(out var unit))
+        if (pendingLow != '\0')
         {
-            if (pendingHigh != '\0')
-            {
-                if (!char.IsLowSurrogate(unit))
-                {
-                    return false;
-                }
-
-                pendingHigh = '\0';
-                continue;
-            }
-
-            if (char.IsHighSurrogate(unit))
-            {
-                pendingHigh = unit;
-            }
-            else if (char.IsLowSurrogate(unit))
-            {
-                return false;
-            }
+            unit = pendingLow;
+            pendingLow = '\0';
+            return true;
         }
 
-        return pendingHigh == '\0' && !enumerator.Malformed;
+        if (offset >= raw.Length)
+        {
+            unit = default;
+            return false;
+        }
+
+        var first = raw[offset];
+        if (first == (byte)'\\')
+        {
+            if (offset + 1 >= raw.Length)
+            {
+                malformed = true;
+                offset = raw.Length;
+                unit = '\uFFFD';
+                return true;
+            }
+
+            var escape = raw[offset + 1];
+            offset += 2;
+            if (escape == (byte)'u')
+            {
+                if (offset + 4 > raw.Length)
+                {
+                    malformed = true;
+                    offset = raw.Length;
+                    unit = '\uFFFD';
+                    return true;
+                }
+
+                var value = 0;
+                for (var index = 0; index < 4; index++)
+                {
+                    var b = raw[offset + index];
+                    var nibble = b switch
+                    {
+                        >= (byte)'0' and <= (byte)'9' => b - (byte)'0',
+                        >= (byte)'a' and <= (byte)'f' => b - (byte)'a' + 10,
+                        >= (byte)'A' and <= (byte)'F' => b - (byte)'A' + 10,
+                        _ => -1,
+                    };
+                    if (nibble < 0)
+                    {
+                        malformed = true;
+                        nibble = 0;
+                    }
+
+                    value = (value << 4) | nibble;
+                }
+
+                offset += 4;
+                unit = (char)value;
+                return true;
+            }
+
+            unit = escape switch
+            {
+                (byte)'"' => '"',
+                (byte)'\\' => '\\',
+                (byte)'/' => '/',
+                (byte)'b' => '\b',
+                (byte)'f' => '\f',
+                (byte)'n' => '\n',
+                (byte)'r' => '\r',
+                (byte)'t' => '\t',
+                _ => '\uFFFD',
+            };
+            if (unit == '\uFFFD')
+            {
+                malformed = true;
+            }
+
+            return true;
+        }
+
+        var status = Rune.DecodeFromUtf8(raw[offset..], out var rune, out var consumed);
+        if (status != OperationStatus.Done || consumed <= 0)
+        {
+            malformed = true;
+            offset++;
+            unit = '\uFFFD';
+            return true;
+        }
+
+        offset += consumed;
+        if (rune.Value <= 0xFFFF)
+        {
+            unit = (char)rune.Value;
+            return true;
+        }
+
+        var scalar = rune.Value - 0x10000;
+        unit = (char)(0xD800 + (scalar >> 10));
+        pendingLow = (char)(0xDC00 + (scalar & 0x3FF));
+        return true;
     }
 
     internal ref struct Utf16TokenEnumerator
@@ -240,111 +521,10 @@ internal static class LenientJsonObjectEnumerator
 
         internal bool MoveNext(out char unit)
         {
-            if (_pendingLow != '\0')
-            {
-                unit = _pendingLow;
-                _pendingLow = '\0';
-                return true;
-            }
-
-            if (_offset >= _raw.Length)
-            {
-                unit = default;
-                return false;
-            }
-
-            var first = _raw[_offset];
-            if (first == (byte)'\\')
-            {
-                return DecodeEscape(out unit);
-            }
-
-            var status = Rune.DecodeFromUtf8(_raw[_offset..], out var rune, out var consumed);
-            if (status != OperationStatus.Done || consumed <= 0)
-            {
-                Malformed = true;
-                _offset++;
-                unit = '\uFFFD';
-                return true;
-            }
-
-            _offset += consumed;
-            if (rune.Value <= 0xFFFF)
-            {
-                unit = (char)rune.Value;
-                return true;
-            }
-
-            var scalar = rune.Value - 0x10000;
-            unit = (char)(0xD800 + (scalar >> 10));
-            _pendingLow = (char)(0xDC00 + (scalar & 0x3FF));
-            return true;
-        }
-
-        private bool DecodeEscape(out char unit)
-        {
-            if (_offset + 1 >= _raw.Length)
-            {
-                Malformed = true;
-                _offset = _raw.Length;
-                unit = '\uFFFD';
-                return true;
-            }
-
-            var escape = _raw[_offset + 1];
-            _offset += 2;
-            unit = escape switch
-            {
-                (byte)'"' => '"',
-                (byte)'\\' => '\\',
-                (byte)'/' => '/',
-                (byte)'b' => '\b',
-                (byte)'f' => '\f',
-                (byte)'n' => '\n',
-                (byte)'r' => '\r',
-                (byte)'t' => '\t',
-                (byte)'u' => DecodeHexEscape(),
-                _ => '\uFFFD',
-            };
-            if (escape is not ((byte)'"' or (byte)'\\' or (byte)'/' or (byte)'b' or (byte)'f' or (byte)'n' or (byte)'r' or (byte)'t' or (byte)'u'))
-            {
-                Malformed = true;
-            }
-
-            return true;
-        }
-
-        private char DecodeHexEscape()
-        {
-            if (_offset + 4 > _raw.Length)
-            {
-                Malformed = true;
-                _offset = _raw.Length;
-                return '\uFFFD';
-            }
-
-            var value = 0;
-            for (var i = 0; i < 4; i++)
-            {
-                var b = _raw[_offset + i];
-                var nibble = b switch
-                {
-                    >= (byte)'0' and <= (byte)'9' => b - (byte)'0',
-                    >= (byte)'a' and <= (byte)'f' => b - (byte)'a' + 10,
-                    >= (byte)'A' and <= (byte)'F' => b - (byte)'A' + 10,
-                    _ => -1,
-                };
-                if (nibble < 0)
-                {
-                    Malformed = true;
-                    nibble = 0;
-                }
-
-                value = (value << 4) | nibble;
-            }
-
-            _offset += 4;
-            return (char)value;
+            var malformed = Malformed;
+            var moved = DecodeNext(_raw, ref _offset, ref _pendingLow, ref malformed, out unit);
+            Malformed = malformed;
+            return moved;
         }
     }
 }

@@ -105,7 +105,7 @@ internal static class PrefixEnvelopeValidator
 
                     properties.Add(property);
                 }
-                properties.Sort(static (left, right) => LenientJsonObjectEnumerator.CompareNames(left, right));
+                properties = LenientJsonObjectEnumerator.SortEntries(properties);
                 // LIFO: push the reverse of the required unsigned UTF-16 order.
                 for (var i = properties.Count - 1; i >= 0; i--)
                 {
@@ -341,7 +341,7 @@ internal static class PrefixEnvelopeValidator
                 counts[propertyName] = counts.GetValueOrDefault(propertyName) + 1;
             }
             else if (firstUnknown is null
-                || LenientJsonObjectEnumerator.CompareNames(entry, firstUnknown.Value) < 0)
+                || LenientJsonObjectEnumerator.CompareClosedNames(entry, firstUnknown.Value) < 0)
             {
                 firstUnknown = entry;
             }
@@ -355,7 +355,7 @@ internal static class PrefixEnvelopeValidator
         var firstKeyDefect = firstUnknown is null
             ? firstDuplicate
             : firstDuplicate is null
-                || LenientJsonObjectEnumerator.CompareNameTo(firstUnknown.Value, firstDuplicate) < 0
+                || LenientJsonObjectEnumerator.CompareClosedNameTo(firstUnknown.Value, firstDuplicate) < 0
                 ? LenientJsonObjectEnumerator.DiagnosticName(firstUnknown.Value)
                 : firstDuplicate;
         if (firstKeyDefect is not null)
@@ -495,7 +495,7 @@ internal static class PrefixEnvelopeValidator
             return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions") }));
         }
 
-        var names = new List<JsonElement>();
+        var names = new Dictionary<LenientJsonObjectEnumerator.TokenFingerprint, List<JsonElement>>();
         var index = 0;
         foreach (var tool in definitions.EnumerateArray())
         {
@@ -516,7 +516,7 @@ internal static class PrefixEnvelopeValidator
                     wrapperCounts[wrapperName] = wrapperCounts.GetValueOrDefault(wrapperName) + 1;
                 }
                 else if (firstUnknown is null
-                    || LenientJsonObjectEnumerator.CompareNames(entry, firstUnknown.Value) < 0)
+                    || LenientJsonObjectEnumerator.CompareClosedNames(entry, firstUnknown.Value) < 0)
                 {
                     firstUnknown = entry;
                 }
@@ -530,7 +530,7 @@ internal static class PrefixEnvelopeValidator
             var firstKeyDefect = firstUnknown is null
                 ? firstDuplicate
                 : firstDuplicate is null
-                    || LenientJsonObjectEnumerator.CompareNameTo(firstUnknown.Value, firstDuplicate) < 0
+                    || LenientJsonObjectEnumerator.CompareClosedNameTo(firstUnknown.Value, firstDuplicate) < 0
                     ? LenientJsonObjectEnumerator.DiagnosticName(firstUnknown.Value)
                     : firstDuplicate;
             if (firstKeyDefect is not null)
@@ -549,11 +549,19 @@ internal static class PrefixEnvelopeValidator
                 return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions"), CanonicalPathSegment.Index(indexText), CanonicalPathSegment.Property("name") }));
             }
 
-            if (names.Any(previous => LenientJsonObjectEnumerator.StringValuesEqual(previous, name)))
+            var nameMetadata = LenientJsonObjectEnumerator.AnalyzeStringValue(name);
+            if (names.TryGetValue(nameMetadata.Fingerprint, out var nameCandidates)
+                && nameCandidates.Any(previous => LenientJsonObjectEnumerator.StringValuesEqual(previous, name)))
             {
                 return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions"), CanonicalPathSegment.Index(indexText), CanonicalPathSegment.Property("name") }));
             }
-            names.Add(name);
+            if (nameCandidates is null)
+            {
+                nameCandidates = new List<JsonElement>();
+                names.Add(nameMetadata.Fingerprint, nameCandidates);
+            }
+
+            nameCandidates.Add(name);
 
             if (tool.GetProperty("description").ValueKind != JsonValueKind.String)
             {
