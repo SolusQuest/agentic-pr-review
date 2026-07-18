@@ -58,7 +58,7 @@ public sealed class PrefixPublicApiTests
     [Fact]
     public void CanonicalNamespaceDoesNotDependOnLedgerOrPrefix()
     {
-        var canonicalDir = Path.Combine(FindRepoRoot(), "runtime", "src", "AgenticPrReview.Runtime", "Canonical");
+        var canonicalDir = Path.Join(FindRepoRoot(), "runtime", "src", "AgenticPrReview.Runtime", "Canonical");
         foreach (var text in Directory.GetFiles(canonicalDir, "*.cs").Select(File.ReadAllText))
         {
             Assert.DoesNotContain("AgenticPrReview.Runtime.Ledger", text);
@@ -69,7 +69,7 @@ public sealed class PrefixPublicApiTests
     [Fact]
     public void LedgerCanonicalizerUsesExtractedCanonicalNamespace()
     {
-        var ledgerFile = Path.Combine(
+        var ledgerFile = Path.Join(
             FindRepoRoot(), "runtime", "src", "AgenticPrReview.Runtime", "Ledger", "LedgerCanonicalizer.cs");
         Assert.Contains("using AgenticPrReview.Runtime.Canonical;", File.ReadAllText(ledgerFile));
     }
@@ -77,7 +77,7 @@ public sealed class PrefixPublicApiTests
     private static string FindRepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "global.json")))
+        while (dir is not null && !File.Exists(Path.Join(dir.FullName, "global.json")))
         {
             dir = dir.Parent;
         }

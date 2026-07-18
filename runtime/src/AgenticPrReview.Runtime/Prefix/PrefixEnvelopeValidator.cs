@@ -550,15 +550,14 @@ internal static class PrefixEnvelopeValidator
             }
 
             var nameMetadata = LenientJsonObjectEnumerator.AnalyzeStringValue(name);
-            if (names.TryGetValue(nameMetadata.Fingerprint, out var nameCandidates)
-                && nameCandidates.Any(previous => LenientJsonObjectEnumerator.StringValuesEqual(previous, name)))
-            {
-                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions"), CanonicalPathSegment.Index(indexText), CanonicalPathSegment.Property("name") }));
-            }
-            if (nameCandidates is null)
+            if (!names.TryGetValue(nameMetadata.Fingerprint, out var nameCandidates))
             {
                 nameCandidates = new List<JsonElement>();
                 names.Add(nameMetadata.Fingerprint, nameCandidates);
+            }
+            else if (nameCandidates.Any(previous => LenientJsonObjectEnumerator.StringValuesEqual(previous, name)))
+            {
+                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("definitions"), CanonicalPathSegment.Index(indexText), CanonicalPathSegment.Property("name") }));
             }
 
             nameCandidates.Add(name);

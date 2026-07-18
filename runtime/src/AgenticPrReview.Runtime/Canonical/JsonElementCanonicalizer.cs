@@ -103,20 +103,18 @@ internal static class JsonElementCanonicalizer
                 var seen = new Dictionary<LenientJsonObjectEnumerator.TokenFingerprint, List<LenientJsonObjectEnumerator.Entry>>();
                 foreach (var entry in EnumerateProperties(element, maxProperties))
                 {
-                    if (seen.TryGetValue(entry.Metadata.Fingerprint, out var candidates)
-                        && candidates.Any(previous => LenientJsonObjectEnumerator.CompareNames(previous, entry) == 0))
+                    if (!seen.TryGetValue(entry.Metadata.Fingerprint, out var candidates))
+                    {
+                        candidates = new List<LenientJsonObjectEnumerator.Entry>();
+                        seen.Add(entry.Metadata.Fingerprint, candidates);
+                    }
+                    else if (candidates.Any(previous => LenientJsonObjectEnumerator.CompareNames(previous, entry) == 0))
                     {
                         var diagnosticName = LenientJsonObjectEnumerator.DiagnosticName(entry);
                         throw new Rfc8785CanonicalizationException(
                             Rfc8785RejectionReason.DuplicateProperty,
                             "Duplicate JSON property name.",
                             Append(segments, CanonicalPathSegment.Property(diagnosticName)));
-                    }
-
-                    if (candidates is null)
-                    {
-                        candidates = new List<LenientJsonObjectEnumerator.Entry>();
-                        seen.Add(entry.Metadata.Fingerprint, candidates);
                     }
 
                     candidates.Add(entry);
