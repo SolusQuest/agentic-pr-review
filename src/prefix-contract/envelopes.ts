@@ -1,7 +1,12 @@
 import { canonicalJsonBytes, CanonicalJsonInputError } from '../canonical-json/index.js';
 import { isValidIdentity } from './identity.js';
 import { PREFIX_CODES, fail, ok, type PrefixResult } from './result.js';
-import { encodePrefixPath, scanCanonicalDomainAndBounds, type EnvelopeKind } from './safe-path.js';
+import {
+  encodePrefixPath,
+  scanCanonicalDomainAndBounds,
+  type EnvelopeKind,
+  type PrefixPathSegment,
+} from './safe-path.js';
 
 /**
  * Closed cache-contract envelope validation and canonicalization (issue #50,
@@ -88,10 +93,34 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
     return fail(PREFIX_CODES.envelopeInvalid);
   }
 
-  // Snapshot data properties via descriptors so accessor getters are never
-  // invoked; accessor or non-enumerable own properties are rejected.
-  const record: Record<string, unknown> = {};
-  for (const name of Object.getOwnPropertyNames(raw)) {
+  // Exact key set is validated against the raw own-property names BEFORE any
+  // copying, so a "__proto__" own property can never slip past as a prototype
+  // mutation instead of an unknown-field rejection.
+  const rawNames = Object.getOwnPropertyNames(raw);
+  const allowed = new Set(REQUIRED_KEYS[kind]);
+  for (const key of rawNames) {
+    if (!allowed.has(key)) {
+      return fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath([{ name: key }], kind, PREFIX_CODES.envelopeInvalid),
+      );
+    }
+  }
+  for (const required of REQUIRED_KEYS[kind]) {
+    if (!rawNames.includes(required)) {
+      return fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath([{ name: required }], kind, PREFIX_CODES.envelopeInvalid),
+      );
+    }
+  }
+
+  // Snapshot data properties into a null-prototype object via defineProperty
+  // so accessor getters are never invoked and "__proto__" cannot mutate the
+  // snapshot's prototype; accessor or non-enumerable own properties are
+  // rejected.
+  const record: Record<string, unknown> = Object.create(null);
+  for (const name of rawNames) {
     const descriptor = Object.getOwnPropertyDescriptor(raw, name)!;
     if ('get' in descriptor || 'set' in descriptor) {
       return fail(
@@ -105,25 +134,12 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
         encodePrefixPath([{ name: name }], kind, PREFIX_CODES.envelopeInvalid),
       );
     }
-    record[name] = descriptor.value;
-  }
-
-  const allowed = new Set(REQUIRED_KEYS[kind]);
-  for (const key of Object.keys(record)) {
-    if (!allowed.has(key)) {
-      return fail(
-        PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath([{ name: key }], kind, PREFIX_CODES.envelopeInvalid),
-      );
-    }
-  }
-  for (const required of REQUIRED_KEYS[kind]) {
-    if (!(required in record)) {
-      return fail(
-        PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath([{ name: required }], kind, PREFIX_CODES.envelopeInvalid),
-      );
-    }
+    Object.defineProperty(record, name, {
+      value: descriptor.value,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
   }
 
   for (const versionField of VERSION_FIELDS[kind]) {
@@ -146,24 +162,30 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
     return fieldError;
   }
 
+  const boundsError = checkStructuralBounds(kind, record);
+  if (boundsError !== null) {
+    return boundsError;
+  }
+
   const identityError = checkEmbeddedIdentities(kind, record);
   if (identityError !== null) {
     return identityError;
   }
 
-  const violation = scanCanonicalDomainAndBounds(record, {
-    maxDepth: MAX_JSON_DEPTH,
-    maxProperties: MAX_OBJECT_PROPERTIES,
-    maxArrayItems: MAX_ARRAY_ITEMS,
-  });
+  const violation = scanCanonicalDomainAndBounds(record);
   if (violation !== null) {
-    const code =
-      violation.reason === 'depth-exceeded' ||
-      violation.reason === 'property-count-exceeded' ||
-      violation.reason === 'array-length-exceeded'
-        ? PREFIX_CODES.envelopeInvalid
-        : PREFIX_CODES.canonicalInputRejected;
-    return fail(code, encodePrefixPath(violation.segments, kind, code));
+    return fail(
+      PREFIX_CODES.canonicalInputRejected,
+      encodePrefixPath(violation.segments, kind, PREFIX_CODES.canonicalInputRejected),
+    );
+  }
+
+  // Bounded-allocation cap check: for a canonical-domain-clean value,
+  // JSON.stringify has the same byte length as the canonical form, so an
+  // oversize envelope is rejected before the canonical copy is built.
+  const estimatedBytes = new TextEncoder().encode(JSON.stringify(record)).byteLength;
+  if (estimatedBytes > MAX_ENVELOPE_CANONICAL_BYTES) {
+    return fail(PREFIX_CODES.envelopeTooLarge);
   }
 
   let canonical: Uint8Array;
@@ -233,40 +255,113 @@ function checkKindFields(
   }
 }
 
+/** Snapshot an array's index values via descriptors (never invoking getters). */
+function snapshotArrayIndices(
+  kind: EnvelopeKind,
+  path: PrefixPathSegment[],
+  value: unknown,
+): { ok: true; items: unknown[] } | { ok: false; error: PrefixResult<ValidatedEnvelope> } {
+  if (!Array.isArray(value)) {
+    return {
+      ok: false,
+      error: fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath(path, kind, PREFIX_CODES.envelopeInvalid),
+      ),
+    };
+  }
+  const items: unknown[] = [];
+  for (let index = 0; index < value.length; index++) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (descriptor === undefined) {
+      return {
+        ok: false,
+        error: fail(
+          PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath(
+            [...path, { name: String(index), isIndex: true }],
+            kind,
+            PREFIX_CODES.envelopeInvalid,
+          ),
+        ),
+      };
+    }
+    if ('get' in descriptor || 'set' in descriptor || !descriptor.enumerable) {
+      return {
+        ok: false,
+        error: fail(
+          PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath(
+            [...path, { name: String(index), isIndex: true }],
+            kind,
+            PREFIX_CODES.envelopeInvalid,
+          ),
+        ),
+      };
+    }
+    items.push(descriptor.value);
+  }
+  return { ok: true, items };
+}
+
+/** Snapshot an object's own data properties via descriptors (never invoking getters). */
+function snapshotObjectData(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) {
+    return null;
+  }
+  if (Object.getOwnPropertySymbols(value).length > 0) {
+    return null;
+  }
+  const record: Record<string, unknown> = Object.create(null);
+  for (const name of Object.getOwnPropertyNames(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, name)!;
+    if ('get' in descriptor || 'set' in descriptor || !descriptor.enumerable) {
+      return null;
+    }
+    Object.defineProperty(record, name, { value: descriptor.value, enumerable: true });
+  }
+  return record;
+}
+
 function checkToolDefinitions(
   kind: EnvelopeKind,
   definitions: unknown,
 ): PrefixResult<ValidatedEnvelope> | null {
-  if (!Array.isArray(definitions)) {
-    return fail(
-      PREFIX_CODES.envelopeInvalid,
-      encodePrefixPath([{ name: 'definitions' }], kind, PREFIX_CODES.envelopeInvalid),
-    );
+  const arrayPath: PrefixPathSegment[] = [{ name: 'definitions' }];
+  const snapshot = snapshotArrayIndices(kind, arrayPath, definitions);
+  if (!snapshot.ok) {
+    return snapshot.error;
   }
-  if (definitions.length > MAX_TOOL_DEFINITIONS) {
+
+  const items = snapshot.items;
+  if (items.length > MAX_TOOL_DEFINITIONS) {
     return fail(
       PREFIX_CODES.envelopeInvalid,
-      encodePrefixPath([{ name: 'definitions' }], kind, PREFIX_CODES.envelopeInvalid),
+      encodePrefixPath(arrayPath, kind, PREFIX_CODES.envelopeInvalid),
     );
   }
 
   const names = new Set<string>();
-  for (let index = 0; index < definitions.length; index++) {
+  for (let index = 0; index < items.length; index++) {
     const indexText = String(index);
-    const tool = definitions[index] as unknown;
-    if (typeof tool !== 'object' || tool === null || Array.isArray(tool)) {
+    const wrapperPath: PrefixPathSegment[] = [
+      { name: 'definitions' },
+      { name: indexText, isIndex: true },
+    ];
+
+    const tool = snapshotObjectData(items[index]);
+    if (tool === null) {
       return fail(
         PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath(
-          [{ name: 'definitions' }, { name: indexText, isIndex: true }],
-          kind,
-          PREFIX_CODES.envelopeInvalid,
-        ),
+        encodePrefixPath(wrapperPath, kind, PREFIX_CODES.envelopeInvalid),
       );
     }
 
-    const record = tool as Record<string, unknown>;
-    for (const key of Object.keys(record)) {
+    for (const key of Object.keys(tool)) {
       if (
         key !== 'description' &&
         key !== 'inputSchema' &&
@@ -275,67 +370,51 @@ function checkToolDefinitions(
       ) {
         return fail(
           PREFIX_CODES.envelopeInvalid,
-          encodePrefixPath(
-            [{ name: 'definitions' }, { name: indexText, isIndex: true }, { name: key }],
-            kind,
-            PREFIX_CODES.envelopeInvalid,
-          ),
+          encodePrefixPath([...wrapperPath, { name: key }], kind, PREFIX_CODES.envelopeInvalid),
         );
       }
     }
-    if (!('name' in record) || !('description' in record) || !('inputSchema' in record)) {
+    if (!('name' in tool) || !('description' in tool) || !('inputSchema' in tool)) {
       return fail(
         PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath(
-          [{ name: 'definitions' }, { name: indexText, isIndex: true }],
-          kind,
-          PREFIX_CODES.envelopeInvalid,
-        ),
+        encodePrefixPath(wrapperPath, kind, PREFIX_CODES.envelopeInvalid),
       );
     }
 
-    const name = record.name;
+    const name = tool.name;
     if (typeof name !== 'string') {
       return fail(
         PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath(
-          [{ name: 'definitions' }, { name: indexText, isIndex: true }, { name: 'name' }],
-          kind,
-          PREFIX_CODES.envelopeInvalid,
-        ),
+        encodePrefixPath([...wrapperPath, { name: 'name' }], kind, PREFIX_CODES.envelopeInvalid),
       );
     }
     if (names.has(name)) {
       return fail(
         PREFIX_CODES.envelopeInvalid,
-        encodePrefixPath(
-          [{ name: 'definitions' }, { name: indexText, isIndex: true }, { name: 'name' }],
-          kind,
-          PREFIX_CODES.envelopeInvalid,
-        ),
+        encodePrefixPath([...wrapperPath, { name: 'name' }], kind, PREFIX_CODES.envelopeInvalid),
       );
     }
     names.add(name);
 
-    if (typeof record.description !== 'string') {
+    if (typeof tool.description !== 'string') {
       return fail(
         PREFIX_CODES.envelopeInvalid,
         encodePrefixPath(
-          [{ name: 'definitions' }, { name: indexText, isIndex: true }, { name: 'description' }],
+          [...wrapperPath, { name: 'description' }],
           kind,
           PREFIX_CODES.envelopeInvalid,
         ),
       );
     }
     if (
-      typeof record.inputSchema !== 'object' ||
-      record.inputSchema === null ||
-      Array.isArray(record.inputSchema)
+      typeof tool.inputSchema !== 'object' ||
+      tool.inputSchema === null ||
+      Array.isArray(tool.inputSchema)
     ) {
       return fail(
         PREFIX_CODES.envelopeInvalid,
         encodePrefixPath(
-          [{ name: 'definitions' }, { name: indexText, isIndex: true }, { name: 'inputSchema' }],
+          [...wrapperPath, { name: 'inputSchema' }],
           kind,
           PREFIX_CODES.envelopeInvalid,
         ),
@@ -343,6 +422,81 @@ function checkToolDefinitions(
     }
   }
 
+  return null;
+}
+
+/** Structural bounds (structure stage): depth / object properties / array items. */
+function checkStructuralBounds(
+  kind: EnvelopeKind,
+  root: Record<string, unknown>,
+): PrefixResult<ValidatedEnvelope> | null {
+  interface Frame {
+    readonly value: unknown;
+    readonly depth: number;
+    readonly segments: readonly PrefixPathSegment[];
+  }
+  const stack: Frame[] = [{ value: root, depth: 0, segments: [] }];
+  while (stack.length > 0) {
+    const { value, depth, segments } = stack.pop()!;
+    if (Array.isArray(value)) {
+      if (depth > MAX_JSON_DEPTH) {
+        return fail(
+          PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath(segments, kind, PREFIX_CODES.envelopeInvalid),
+        );
+      }
+      if (value.length > MAX_ARRAY_ITEMS) {
+        return fail(
+          PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath(segments, kind, PREFIX_CODES.envelopeInvalid),
+        );
+      }
+      for (let i = 0; i < value.length; i++) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(i));
+        if (
+          descriptor === undefined ||
+          'get' in descriptor ||
+          'set' in descriptor ||
+          !descriptor.enumerable
+        ) {
+          // Accessor holes are owned by the canonical-domain stage.
+          continue;
+        }
+        stack.push({
+          value: descriptor.value,
+          depth: depth + 1,
+          segments: [...segments, { name: String(i), isIndex: true }],
+        });
+      }
+      continue;
+    }
+    if (typeof value === 'object' && value !== null) {
+      if (depth > MAX_JSON_DEPTH) {
+        return fail(
+          PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath(segments, kind, PREFIX_CODES.envelopeInvalid),
+        );
+      }
+      const names = Object.getOwnPropertyNames(value);
+      if (names.length > MAX_OBJECT_PROPERTIES) {
+        return fail(
+          PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath(segments, kind, PREFIX_CODES.envelopeInvalid),
+        );
+      }
+      for (const name of names) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, name)!;
+        if ('get' in descriptor || 'set' in descriptor || !descriptor.enumerable) {
+          continue;
+        }
+        stack.push({
+          value: descriptor.value,
+          depth: depth + 1,
+          segments: [...segments, { name }],
+        });
+      }
+    }
+  }
   return null;
 }
 

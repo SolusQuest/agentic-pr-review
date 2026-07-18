@@ -8,6 +8,7 @@ internal enum Rfc8785RejectionReason
     DepthLimitExceeded,
     PropertyCountExceeded,
     ArrayLengthExceeded,
+    ByteCapExceeded,
 }
 
 /// <summary>

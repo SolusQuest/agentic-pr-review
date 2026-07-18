@@ -399,9 +399,12 @@ describe('canonical traversal determinism and accepted domain', () => {
       templateVersion: 1,
       definition: cyclic,
     });
+    // Under the frozen stage order the structure-stage depth bound fires
+    // first for any cyclic structure (a cycle always exceeds the depth cap).
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.errors[0].code).toBe(PREFIX_CODES.canonicalInputRejected);
+      expect(result.errors[0].code).toBe(PREFIX_CODES.envelopeInvalid);
+      expect(result.errors[0].path).toContain('<path-truncated>');
     }
   });
 
@@ -454,5 +457,157 @@ describe('canonical traversal determinism and accepted domain', () => {
     if (!result.ok) {
       expect(result.errors[0].code).toBe(PREFIX_CODES.canonicalInputRejected);
     }
+  });
+});
+describe('first-defect ordering and descriptor safety', () => {
+  it('earlier value defect beats a later property-name defect', () => {
+    const result = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { a: Number.NaN, ['b' + String.fromCharCode(0xd800)]: 1 },
+    });
+    expect(result).toEqual({
+      ok: false,
+      errors: [
+        {
+          code: PREFIX_CODES.canonicalInputRejected,
+          path: '/definition/<untrusted-property>',
+        },
+      ],
+    });
+  });
+
+  it('undefined is rejected before a later non-finite number', () => {
+    const result = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { a: undefined, b: Number.NaN },
+    });
+    expect(result).toEqual({
+      ok: false,
+      errors: [
+        {
+          code: PREFIX_CODES.canonicalInputRejected,
+          path: '/definition/<untrusted-property>',
+        },
+      ],
+    });
+  });
+
+  it('bigint is rejected before a later lone surrogate', () => {
+    const result = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { a: 1n, b: String.fromCharCode(0xd800) },
+    });
+    expect(result).toEqual({
+      ok: false,
+      errors: [
+        {
+          code: PREFIX_CODES.canonicalInputRejected,
+          path: '/definition/<untrusted-property>',
+        },
+      ],
+    });
+  });
+
+  it('reports nested function and symbol values at their exact positions', () => {
+    const result = computeTemplateId({
+      schemaVersion: 1,
+      templateVersion: 1,
+      definition: { nested: { fn: () => 1 } },
+    });
+    expect(result).toEqual({
+      ok: false,
+      errors: [
+        {
+          code: PREFIX_CODES.canonicalInputRejected,
+          path: '/definition/<untrusted-property>/<untrusted-property>',
+        },
+      ],
+    });
+  });
+
+  it('never invokes an array-index getter', () => {
+    let invoked = false;
+    const array = [0];
+    Object.defineProperty(array, '0', {
+      enumerable: true,
+      get() {
+        invoked = true;
+        throw new Error('getter invoked');
+      },
+    });
+    const result = computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition: array });
+    expect(invoked).toBe(false);
+    expect(result.ok).toBe(false);
+  });
+
+  it('never invokes tool-wrapper getters', () => {
+    let invoked = false;
+    const tool: Record<string, unknown> = { description: 'd', inputSchema: {} };
+    Object.defineProperty(tool, 'name', {
+      enumerable: true,
+      get() {
+        invoked = true;
+        throw new Error('getter invoked');
+      },
+    });
+    const result = computeToolDefinitionId({
+      schemaVersion: 1,
+      toolsetVersion: 1,
+      definitions: [tool],
+    });
+    expect(invoked).toBe(false);
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects a throwing definitions-array proxy without throwing', () => {
+    const proxy = new Proxy([{ name: 'a', description: 'd', inputSchema: {} }], {
+      get() {
+        throw new Error('proxy trap');
+      },
+    });
+    const result = computeToolDefinitionId({
+      schemaVersion: 1,
+      toolsetVersion: 1,
+      definitions: proxy,
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects arrays with a modified prototype or symbol keys', () => {
+    const weird: unknown[] = [1];
+    Object.setPrototypeOf(weird, { custom: true });
+    expect(computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition: weird }).ok).toBe(
+      false,
+    );
+
+    const symbolKeyed: unknown[] = [1];
+    (symbolKeyed as unknown as Record<symbol, unknown>)[Symbol('x')] = 1;
+    expect(
+      computeTemplateId({ schemaVersion: 1, templateVersion: 1, definition: symbolKeyed }).ok,
+    ).toBe(false);
+  });
+
+  it('rejects own __proto__ properties as unknown fields', () => {
+    const parsed = JSON.parse(
+      '{"schemaVersion":1,"templateVersion":1,"definition":{},"__proto__":null}',
+    );
+    const result = computeTemplateId(parsed);
+    expect(result).toEqual({
+      ok: false,
+      errors: [{ code: PREFIX_CODES.envelopeInvalid, path: '/<untrusted-property>' }],
+    });
+
+    const parsedObjectProto = JSON.parse(
+      '{"schemaVersion":1,"templateVersion":1,"definition":{},"__proto__":{}}',
+    );
+    expect(computeTemplateId(parsedObjectProto).ok).toBe(false);
+
+    const parsedWithBogus = JSON.parse(
+      '{"schemaVersion":1,"templateVersion":1,"definition":{},"__proto__":null,"bogus":1}',
+    );
+    expect(computeTemplateId(parsedWithBogus).ok).toBe(false);
   });
 });

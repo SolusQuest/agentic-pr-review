@@ -169,6 +169,7 @@ internal static class PrefixFixtureLoader
                         break;
                     case "canonical-json":
                         Assert.True(hasCsharp, $"{entry.Id}: canonical-json must carry csharpCode");
+                        Assert.True(hasTs || csharpOnlyScope, $"{entry.Id}: canonical-json must carry typescriptCode unless csharp-only");
                         break;
                     case "template-id":
                     case "policy-id":

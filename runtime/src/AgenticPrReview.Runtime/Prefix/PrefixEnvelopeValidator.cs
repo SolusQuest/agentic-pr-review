@@ -61,7 +61,72 @@ internal static class PrefixEnvelopeValidator
             return keyError;
         }
 
-        return CheckFields(kind, envelope);
+        var fieldError = CheckFields(kind, envelope);
+        if (fieldError is not null)
+        {
+            return fieldError;
+        }
+
+        return CheckStructuralBounds(kind, envelope);
+    }
+
+    /// <summary>Structural bounds (depth, object properties, array items) in the structure stage.</summary>
+    private static PrefixDiagnostic? CheckStructuralBounds(EnvelopeKind kind, JsonElement element)
+    {
+        var stack = new System.Collections.Generic.Stack<(JsonElement Value, int Depth, System.Collections.Generic.List<CanonicalPathSegment> Segments)>();
+        stack.Push((element, 0, new System.Collections.Generic.List<CanonicalPathSegment>()));
+        while (stack.Count > 0)
+        {
+            var (value, depth, segments) = stack.Pop();
+            if (value.ValueKind == JsonValueKind.Object)
+            {
+                if (depth > PrefixBounds.MaxEnvelopeJsonDepth)
+                {
+                    return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, segments));
+                }
+
+                var count = 0;
+                foreach (var property in value.EnumerateObject())
+                {
+                    count++;
+                    if (count > PrefixBounds.MaxEnvelopeObjectProperties)
+                    {
+                        return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, segments));
+                    }
+
+                    var child = new System.Collections.Generic.List<CanonicalPathSegment>(segments)
+                    {
+                        CanonicalPathSegment.Property(property.Name),
+                    };
+                    stack.Push((property.Value, depth + 1, child));
+                }
+            }
+            else if (value.ValueKind == JsonValueKind.Array)
+            {
+                if (depth > PrefixBounds.MaxEnvelopeJsonDepth)
+                {
+                    return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, segments));
+                }
+
+                var index = 0;
+                foreach (var item in value.EnumerateArray())
+                {
+                    if (index >= PrefixBounds.MaxEnvelopeArrayItems)
+                    {
+                        return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, segments));
+                    }
+
+                    var child = new System.Collections.Generic.List<CanonicalPathSegment>(segments)
+                    {
+                        CanonicalPathSegment.Index(index),
+                    };
+                    stack.Push((item, depth + 1, child));
+                    index++;
+                }
+            }
+        }
+
+        return null;
     }
 
     /// <summary>Stage 3: embedded identity semantics (tool names, adapterBuildVersion).</summary>
@@ -126,19 +191,28 @@ internal static class PrefixEnvelopeValidator
     internal static PrefixDiagnostic? Canonicalize(
         EnvelopeKind kind,
         JsonElement envelope,
-        out ImmutableArray<byte> canonicalBytes)
+        out ImmutableArray<byte> canonicalBytes,
+        out bool capExceeded)
     {
         canonicalBytes = ImmutableArray<byte>.Empty;
+        capExceeded = false;
         try
         {
             canonicalBytes = JsonElementCanonicalizer.Canonicalize(
                 envelope,
                 PrefixBounds.MaxEnvelopeJsonDepth,
                 PrefixBounds.MaxEnvelopeObjectProperties,
-                PrefixBounds.MaxEnvelopeArrayItems);
+                PrefixBounds.MaxEnvelopeArrayItems,
+                PrefixBounds.MaxEnvelopeCanonicalBytes);
         }
         catch (Rfc8785CanonicalizationException ex)
         {
+            if (ex.Reason == Rfc8785RejectionReason.ByteCapExceeded)
+            {
+                capExceeded = true;
+                return null;
+            }
+
             return ex.Reason switch
             {
                 Rfc8785RejectionReason.DuplicateProperty
@@ -155,10 +229,10 @@ internal static class PrefixEnvelopeValidator
     }
 
     /// <summary>Stage 5a: canonical byte cap.</summary>
-    internal static PrefixDiagnostic? CheckCanonicalCap(EnvelopeKind kind, ImmutableArray<byte> canonicalBytes)
+    internal static PrefixDiagnostic? CheckCanonicalCap(EnvelopeKind kind, bool capExceeded)
     {
         _ = kind;
-        return canonicalBytes.Length > PrefixBounds.MaxEnvelopeCanonicalBytes
+        return capExceeded
             ? PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeTooLarge)
             : null;
     }
@@ -192,14 +266,14 @@ internal static class PrefixEnvelopeValidator
             return identityError;
         }
 
-        var canonicalError = Canonicalize(kind, envelope, out var canonicalBytes);
+        var canonicalError = Canonicalize(kind, envelope, out var canonicalBytes, out var capExceeded);
         if (canonicalError is not null)
         {
             validated = null;
             return canonicalError;
         }
 
-        var capError = CheckCanonicalCap(kind, canonicalBytes);
+        var capError = CheckCanonicalCap(kind, capExceeded);
         if (capError is not null)
         {
             validated = null;

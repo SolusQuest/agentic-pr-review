@@ -15,10 +15,11 @@ internal static class JsonElementCanonicalizer
         JsonElement element,
         int maxDepth,
         int maxProperties,
-        int maxArrayItems)
+        int maxArrayItems,
+        long maxBytes = long.MaxValue)
     {
         var writer = new Rfc8785Writer(4096);
-        WriteValue(ref writer, element, depth: 0, maxDepth, maxProperties, maxArrayItems, segments: System.Array.Empty<CanonicalPathSegment>());
+        WriteValue(ref writer, element, depth: 0, maxDepth, maxProperties, maxArrayItems, maxBytes, segments: System.Array.Empty<CanonicalPathSegment>());
         return writer.ToImmutableArray();
     }
 
@@ -29,7 +30,7 @@ internal static class JsonElementCanonicalizer
     /// </summary>
     internal static void WriteCanonicalValue(ref Rfc8785Writer writer, JsonElement element)
     {
-        WriteValue(ref writer, element, depth: 1, 64, 256, 1_024, segments: System.Array.Empty<CanonicalPathSegment>());
+        WriteValue(ref writer, element, depth: 1, 64, 256, 1_024, long.MaxValue, segments: System.Array.Empty<CanonicalPathSegment>());
     }
 
     private static CanonicalPathSegment[] Append(System.Collections.Generic.IReadOnlyList<CanonicalPathSegment> segments, CanonicalPathSegment next)
@@ -44,6 +45,17 @@ internal static class JsonElementCanonicalizer
         return copy;
     }
 
+    private static void CheckBudget(ref Rfc8785Writer writer, long maxBytes, System.Collections.Generic.IReadOnlyList<CanonicalPathSegment> segments)
+    {
+        if (writer.WrittenCount > maxBytes)
+        {
+            throw new Rfc8785CanonicalizationException(
+                Rfc8785RejectionReason.ByteCapExceeded,
+                "Canonical output exceeds the byte cap.",
+                segments);
+        }
+    }
+
     private static void WriteValue(
         ref Rfc8785Writer writer,
         JsonElement element,
@@ -51,8 +63,10 @@ internal static class JsonElementCanonicalizer
         int maxDepth,
         int maxProperties,
         int maxArrayItems,
+        long maxBytes,
         System.Collections.Generic.IReadOnlyList<CanonicalPathSegment> segments)
     {
+        CheckBudget(ref writer, maxBytes, segments);
         switch (element.ValueKind)
         {
             case JsonValueKind.Object:
@@ -105,10 +119,12 @@ internal static class JsonElementCanonicalizer
                         maxDepth,
                         maxProperties,
                         maxArrayItems,
+                        maxBytes,
                         Append(segments, CanonicalPathSegment.Property(properties[i].Name)));
                 }
 
                 writer.WriteObjectEnd();
+                CheckBudget(ref writer, maxBytes, segments);
                 return;
             }
 
@@ -147,11 +163,13 @@ internal static class JsonElementCanonicalizer
                         maxDepth,
                         maxProperties,
                         maxArrayItems,
+                        maxBytes,
                         Append(segments, CanonicalPathSegment.Index(index)));
                     index++;
                 }
 
                 writer.WriteArrayEnd();
+                CheckBudget(ref writer, maxBytes, segments);
                 return;
             }
 
@@ -171,7 +189,16 @@ internal static class JsonElementCanonicalizer
                         segments);
                 }
 
+                if (writer.WrittenCount + System.Text.Encoding.UTF8.GetByteCount(value) + 2 > maxBytes)
+                {
+                    throw new Rfc8785CanonicalizationException(
+                        Rfc8785RejectionReason.ByteCapExceeded,
+                        "Canonical output exceeds the byte cap.",
+                        segments);
+                }
+
                 writer.WriteString(value);
+                CheckBudget(ref writer, maxBytes, segments);
                 return;
             }
 
@@ -186,19 +213,23 @@ internal static class JsonElementCanonicalizer
                 }
 
                 writer.WriteNumber(number);
+                CheckBudget(ref writer, maxBytes, segments);
                 return;
             }
 
             case JsonValueKind.True:
                 writer.WriteBoolean(true);
+                CheckBudget(ref writer, maxBytes, segments);
                 return;
 
             case JsonValueKind.False:
                 writer.WriteBoolean(false);
+                CheckBudget(ref writer, maxBytes, segments);
                 return;
 
             case JsonValueKind.Null:
                 writer.WriteNull();
+                CheckBudget(ref writer, maxBytes, segments);
                 return;
 
             default:

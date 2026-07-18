@@ -120,4 +120,98 @@ public sealed class PrefixStagePrecedenceTests
         var outcome = PrefixMaterializer.Materialize(input);
         Assert.Equal("prefix_canonical_input_rejected", Assert.Single(outcome.Diagnostics).Code);
     }
+    [Fact]
+    public void TemplateDepthOverflowBeatsToolsIdentityError()
+    {
+        // Structural bounds are part of the structure stage: a depth overflow in
+        // the template envelope must beat the tools embedded-identity error.
+        var vector = PrefixFixtureLoader.LoadVector("materialization/bootstrap.json");
+        var baseInput = PrefixFixtureLoader.BuildMaterializeInput(vector.GetProperty("input"));
+        string Nest(int depth) => depth == 0 ? "1" : $"[{Nest(depth - 1)}]";
+        var deepTemplate = JsonDocument.Parse(
+            "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":" + Nest(65) + "}",
+            new JsonDocumentOptions { MaxDepth = 256 }).RootElement;
+        var input = baseInput with
+        {
+            Envelopes = baseInput.Envelopes with
+            {
+                Template = deepTemplate,
+                Tools = ToolsEnvelope("""[{"name":"","description":"d","inputSchema":{}}]"""),
+            },
+        };
+        var outcome = PrefixMaterializer.Materialize(input);
+        Assert.Equal("prefix_envelope_invalid", Assert.Single(outcome.Diagnostics).Code);
+    }
+
+    [Fact]
+    public void TemplatePropertyCountOverflowBeatsAdapterIdentityError()
+    {
+        var vector = PrefixFixtureLoader.LoadVector("materialization/bootstrap.json");
+        var baseInput = PrefixFixtureLoader.BuildMaterializeInput(vector.GetProperty("input"));
+        var props = "{" + string.Join(",", Enumerable.Range(0, 257).Select(i => $"\"k{i}\":{i}")) + "}";
+        var fatTemplate = JsonDocument.Parse(
+            "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":" + props + "}").RootElement;
+        var adapterWithControl = JsonDocument.Parse(
+            "{\"schemaVersion\":1,\"capabilityProfileVersion\":1,\"adapterBuildVersion\":\"bad\\u0001\"}").RootElement;
+        var input = baseInput with
+        {
+            Envelopes = baseInput.Envelopes with
+            {
+                Template = fatTemplate,
+                Adapter = adapterWithControl,
+            },
+        };
+        var outcome = PrefixMaterializer.Materialize(input);
+        Assert.Equal("prefix_envelope_invalid", Assert.Single(outcome.Diagnostics).Code);
+    }
+
+    [Fact]
+    public void StructuralBoundBeatsCanonicalDefectRegardlessOfPosition()
+    {
+        // Earlier structural bound (template depth) + later canonical defect
+        // (tools lone surrogate): structural bound wins.
+        var vector = PrefixFixtureLoader.LoadVector("materialization/bootstrap.json");
+        var baseInput = PrefixFixtureLoader.BuildMaterializeInput(vector.GetProperty("input"));
+        string Nest(int depth) => depth == 0 ? "1" : $"[{Nest(depth - 1)}]";
+        var deepTemplate = JsonDocument.Parse(
+            "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":" + Nest(65) + "}",
+            new JsonDocumentOptions { MaxDepth = 256 }).RootElement;
+        var surrogateTools = JsonDocument.Parse(
+            "{\"schemaVersion\":1,\"toolsetVersion\":1,\"definitions\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"x\":\"bad\\ud800\"}}]}").RootElement;
+        var input = baseInput with
+        {
+            Envelopes = baseInput.Envelopes with
+            {
+                Template = deepTemplate,
+                Tools = surrogateTools,
+            },
+        };
+        var outcome = PrefixMaterializer.Materialize(input);
+        Assert.Equal("prefix_envelope_invalid", Assert.Single(outcome.Diagnostics).Code);
+    }
+
+    [Fact]
+    public void LaterStructuralBoundStillBeatsEarlierCanonicalDefect()
+    {
+        // Earlier canonical defect (template lone surrogate) + later structural
+        // bound (tools depth overflow): structural bound still wins (stage 2 < stage 4).
+        var vector = PrefixFixtureLoader.LoadVector("materialization/bootstrap.json");
+        var baseInput = PrefixFixtureLoader.BuildMaterializeInput(vector.GetProperty("input"));
+        string Nest(int depth) => depth == 0 ? "1" : $"[{Nest(depth - 1)}]";
+        var surrogateTemplate = JsonDocument.Parse(
+            "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":\"bad\\ud800\"}").RootElement;
+        var deepTools = JsonDocument.Parse(
+            "{\"schemaVersion\":1,\"toolsetVersion\":1,\"definitions\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":" + Nest(65) + "}]}",
+            new JsonDocumentOptions { MaxDepth = 256 }).RootElement;
+        var input = baseInput with
+        {
+            Envelopes = baseInput.Envelopes with
+            {
+                Template = surrogateTemplate,
+                Tools = deepTools,
+            },
+        };
+        var outcome = PrefixMaterializer.Materialize(input);
+        Assert.Equal("prefix_envelope_invalid", Assert.Single(outcome.Diagnostics).Code);
+    }
 }

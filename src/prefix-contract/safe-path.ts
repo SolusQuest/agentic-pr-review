@@ -180,10 +180,11 @@ function truncate(segments: readonly string[], code: string): string {
 }
 
 /**
- * Unified canonical-domain + structural-bounds scan (issue #50): a single
- * deterministic traversal (arrays ascending, object keys in unsigned UTF-16
- * order) with first-defect-wins semantics and an ancestor-only cycle guard,
- * mirroring the C# JsonElementCanonicalizer.
+ * Canonical-domain scan (issue #50): a single recursive depth-first
+ * traversal — arrays ascending, object keys in unsigned UTF-16 order,
+ * first-defect-wins — with an ancestor-only cycle guard, mirroring the C#
+ * JsonElementCanonicalizer. Structural bounds are owned by the structure
+ * stage; this scan owns only canonical-domain rejections.
  */
 export type CanonicalScanViolation = {
   readonly segments: readonly PrefixPathSegment[];
@@ -191,147 +192,127 @@ export type CanonicalScanViolation = {
     | 'lone-surrogate'
     | 'non-finite'
     | 'cyclic'
+    | 'non-json-type'
     | 'non-plain-object'
     | 'symbol-key'
     | 'accessor-property'
-    | 'non-enumerable-property'
-    | 'depth-exceeded'
-    | 'property-count-exceeded'
-    | 'array-length-exceeded';
+    | 'non-enumerable-property';
 };
 
-export interface CanonicalScanBounds {
-  readonly maxDepth: number;
-  readonly maxProperties: number;
-  readonly maxArrayItems: number;
-}
+export function scanCanonicalDomainAndBounds(root: unknown): CanonicalScanViolation | null {
+  return scan(root, [], new Set<object>());
 
-interface ScanFrame {
-  readonly value: unknown;
-  readonly segments: readonly PrefixPathSegment[];
-  readonly depth: number;
-  readonly exit: boolean;
-}
-
-export function scanCanonicalDomainAndBounds(
-  root: unknown,
-  bounds: CanonicalScanBounds,
-): CanonicalScanViolation | null {
-  const ancestors = new Set<object>();
-  const stack: ScanFrame[] = [{ value: root, segments: [], depth: 0, exit: false }];
-
-  while (stack.length > 0) {
-    const frame = stack.pop()!;
-    const { value, segments, depth, exit } = frame;
-
-    if (exit) {
-      ancestors.delete(value as object);
-      continue;
-    }
-
+  function scan(
+    value: unknown,
+    segments: PrefixPathSegment[],
+    ancestors: Set<object>,
+  ): CanonicalScanViolation | null {
     if (typeof value === 'string') {
-      if (hasUnpairedSurrogate(value)) {
-        return { segments, reason: 'lone-surrogate' };
-      }
-      continue;
+      return hasUnpairedSurrogate(value) ? { segments, reason: 'lone-surrogate' } : null;
     }
     if (typeof value === 'number') {
-      if (!Number.isFinite(value)) {
-        return { segments, reason: 'non-finite' };
-      }
-      continue;
+      return Number.isFinite(value) ? null : { segments, reason: 'non-finite' };
     }
-    if (typeof value !== 'object' || value === null) {
-      continue;
+    if (typeof value === 'boolean' || value === null) {
+      return null;
+    }
+    if (typeof value !== 'object') {
+      // undefined, bigint, symbol, function: outside the JSON domain.
+      return { segments, reason: 'non-json-type' };
     }
 
     if (ancestors.has(value)) {
       return { segments, reason: 'cyclic' };
     }
-
-    if (Array.isArray(value)) {
-      if (depth > bounds.maxDepth) {
-        return { segments, reason: 'depth-exceeded' };
-      }
-      if (value.length > bounds.maxArrayItems) {
-        return { segments, reason: 'array-length-exceeded' };
-      }
-      ancestors.add(value);
-      stack.push({ value, segments, depth, exit: true });
-      for (let i = value.length - 1; i >= 0; i--) {
-        stack.push({
-          value: value[i],
-          segments: [...segments, { name: String(i), isIndex: true }],
-          depth: depth + 1,
-          exit: false,
-        });
-      }
-      continue;
-    }
-
-    const proto = Object.getPrototypeOf(value);
-    if (proto !== Object.prototype && proto !== null) {
-      return { segments, reason: 'non-plain-object' };
-    }
-    if (Object.getOwnPropertySymbols(value).length > 0) {
-      return { segments, reason: 'symbol-key' };
-    }
-
-    if (depth > bounds.maxDepth) {
-      return { segments, reason: 'depth-exceeded' };
-    }
-    const names = Object.getOwnPropertyNames(value);
-    if (names.length > bounds.maxProperties) {
-      return { segments, reason: 'property-count-exceeded' };
-    }
-
-    // Recurse children in unsigned UTF-16 order; property-name defects are
-    // checked in that same order (first defect wins).
-    const sorted = [...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     ancestors.add(value);
-    stack.push({ value, segments, depth, exit: true });
+    try {
+      if (Array.isArray(value)) {
+        if (Object.getPrototypeOf(value) !== Array.prototype) {
+          return { segments, reason: 'non-plain-object' };
+        }
+        if (Object.getOwnPropertySymbols(value).length > 0) {
+          return { segments, reason: 'symbol-key' };
+        }
+        const ownNames = Object.getOwnPropertyNames(value);
+        for (const name of ownNames) {
+          if (name === 'length') {
+            continue;
+          }
+          if (!/^\d+$/.test(name) || Number(name) >= value.length) {
+            return { segments: [...segments, { name }], reason: 'non-enumerable-property' };
+          }
+        }
+        const lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length');
+        if (
+          lengthDescriptor === undefined ||
+          lengthDescriptor.enumerable ||
+          'get' in lengthDescriptor ||
+          'set' in lengthDescriptor
+        ) {
+          return { segments, reason: 'non-plain-object' };
+        }
+        for (let i = 0; i < value.length; i++) {
+          const descriptor = Object.getOwnPropertyDescriptor(value, String(i));
+          if (descriptor === undefined) {
+            return {
+              segments: [...segments, { name: String(i), isIndex: true }],
+              reason: 'non-enumerable-property',
+            };
+          }
+          if ('get' in descriptor || 'set' in descriptor) {
+            return {
+              segments: [...segments, { name: String(i), isIndex: true }],
+              reason: 'accessor-property',
+            };
+          }
+          if (!descriptor.enumerable) {
+            return {
+              segments: [...segments, { name: String(i), isIndex: true }],
+              reason: 'non-enumerable-property',
+            };
+          }
+          const child = scan(
+            descriptor.value,
+            [...segments, { name: String(i), isIndex: true }],
+            ancestors,
+          );
+          if (child !== null) {
+            return child;
+          }
+        }
+        return null;
+      }
 
-    // Exit children in reverse so they pop in UTF-16 order. A property-name
-    // violation must abort immediately, so evaluate names eagerly here and
-    // only push children when the whole key set is clean.
-    const childFrames: ScanFrame[] = [];
-    let nameViolation: CanonicalScanViolation | null = null;
-    for (const name of sorted) {
-      if (hasUnpairedSurrogate(name)) {
-        nameViolation = { segments: [...segments, { name }], reason: 'lone-surrogate' };
-        break;
+      const proto = Object.getPrototypeOf(value);
+      if (proto !== Object.prototype && proto !== null) {
+        return { segments, reason: 'non-plain-object' };
       }
-      const descriptor = Object.getOwnPropertyDescriptor(value, name);
-      if (descriptor === undefined) {
-        continue;
+      if (Object.getOwnPropertySymbols(value).length > 0) {
+        return { segments, reason: 'symbol-key' };
       }
-      if ('get' in descriptor || 'set' in descriptor) {
-        nameViolation = { segments: [...segments, { name }], reason: 'accessor-property' };
-        break;
+      const sorted = Object.getOwnPropertyNames(value).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+      for (const name of sorted) {
+        if (hasUnpairedSurrogate(name)) {
+          return { segments: [...segments, { name }], reason: 'lone-surrogate' };
+        }
+        const descriptor = Object.getOwnPropertyDescriptor(value, name);
+        if (descriptor === undefined) {
+          continue;
+        }
+        if ('get' in descriptor || 'set' in descriptor) {
+          return { segments: [...segments, { name }], reason: 'accessor-property' };
+        }
+        if (!descriptor.enumerable) {
+          return { segments: [...segments, { name }], reason: 'non-enumerable-property' };
+        }
+        const child = scan(descriptor.value, [...segments, { name }], ancestors);
+        if (child !== null) {
+          return child;
+        }
       }
-      if (!descriptor.enumerable) {
-        nameViolation = { segments: [...segments, { name }], reason: 'non-enumerable-property' };
-        break;
-      }
-      childFrames.push({
-        value: (value as Record<string, unknown>)[name],
-        segments: [...segments, { name }],
-        depth: depth + 1,
-        exit: false,
-      });
-    }
-
-    if (nameViolation !== null) {
+      return null;
+    } finally {
       ancestors.delete(value);
-      // Remove the exit frame we just pushed.
-      stack.pop();
-      return nameViolation;
-    }
-
-    for (let i = childFrames.length - 1; i >= 0; i--) {
-      stack.push(childFrames[i]);
     }
   }
-
-  return null;
 }

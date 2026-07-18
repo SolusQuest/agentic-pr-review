@@ -528,6 +528,7 @@ function validateInvalidExpected(
     'config-id',
     'adapter-id',
     'interaction-id',
+    'canonical-json',
   ];
 
   if (target === 'identity' || target === 'model-snapshot') {
@@ -734,6 +735,20 @@ describe('prefix-contract fixture manifest', () => {
       });
     });
     expect(validateCorpus(root)).toContain('unknown-mode:inv-x:sideways');
+  });
+
+  it('rejects canonical vectors missing typescriptCode', () => {
+    const root = buildCorpus(({ entries, vectors }) => {
+      entries.push({ id: 'invalid-c', kind: 'invalid-vector', file: 'm/c.json' });
+      vectors.set('m/c.json', {
+        id: 'invalid-c',
+        kind: 'invalid-vector',
+        target: 'canonical-json',
+        input: {},
+        expected: { csharpCode: 'prefix_canonical_input_rejected' },
+      });
+    });
+    expect(validateCorpus(root)).toContain('expected-union:invalid-c:typescriptCode');
   });
 
   it('rejects invalid expected union on invalid-vectors', () => {

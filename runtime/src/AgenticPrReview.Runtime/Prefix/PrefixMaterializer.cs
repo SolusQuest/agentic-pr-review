@@ -228,12 +228,13 @@ public static class PrefixMaterializer
         }
 
         return
-            CanonicalizeAll(input, out var templateBytes, out var policyBytes, out var toolsBytes, out var configBytes, out var adapterBytes)
-            ?? PrefixEnvelopeValidator.CheckCanonicalCap(PrefixEnvelopeValidator.EnvelopeKind.Template, templateBytes)
-            ?? PrefixEnvelopeValidator.CheckCanonicalCap(PrefixEnvelopeValidator.EnvelopeKind.Policy, policyBytes)
-            ?? PrefixEnvelopeValidator.CheckCanonicalCap(PrefixEnvelopeValidator.EnvelopeKind.Tools, toolsBytes)
-            ?? PrefixEnvelopeValidator.CheckCanonicalCap(PrefixEnvelopeValidator.EnvelopeKind.CacheConfig, configBytes)
-            ?? PrefixEnvelopeValidator.CheckCanonicalCap(PrefixEnvelopeValidator.EnvelopeKind.Adapter, adapterBytes)
+            CanonicalizeAll(input, out var templateBytes, out var policyBytes, out var toolsBytes, out var configBytes, out var adapterBytes,
+                out var templateCapped, out var policyCapped, out var toolsCapped, out var configCapped, out var adapterCapped)
+            ?? PrefixEnvelopeValidator.CheckCanonicalCap(PrefixEnvelopeValidator.EnvelopeKind.Template, templateCapped)
+            ?? PrefixEnvelopeValidator.CheckCanonicalCap(PrefixEnvelopeValidator.EnvelopeKind.Policy, policyCapped)
+            ?? PrefixEnvelopeValidator.CheckCanonicalCap(PrefixEnvelopeValidator.EnvelopeKind.Tools, toolsCapped)
+            ?? PrefixEnvelopeValidator.CheckCanonicalCap(PrefixEnvelopeValidator.EnvelopeKind.CacheConfig, configCapped)
+            ?? PrefixEnvelopeValidator.CheckCanonicalCap(PrefixEnvelopeValidator.EnvelopeKind.Adapter, adapterCapped)
             ?? SealAll(input, templateBytes, policyBytes, toolsBytes, configBytes, adapterBytes, ref template, ref policy, ref tools, ref cacheConfig, ref adapter);
     }
 
@@ -243,20 +244,30 @@ public static class PrefixMaterializer
         out ImmutableArray<byte> policyBytes,
         out ImmutableArray<byte> toolsBytes,
         out ImmutableArray<byte> configBytes,
-        out ImmutableArray<byte> adapterBytes)
+        out ImmutableArray<byte> adapterBytes,
+        out bool templateCapped,
+        out bool policyCapped,
+        out bool toolsCapped,
+        out bool configCapped,
+        out bool adapterCapped)
     {
         templateBytes = ImmutableArray<byte>.Empty;
         policyBytes = ImmutableArray<byte>.Empty;
         toolsBytes = ImmutableArray<byte>.Empty;
         configBytes = ImmutableArray<byte>.Empty;
         adapterBytes = ImmutableArray<byte>.Empty;
+        templateCapped = false;
+        policyCapped = false;
+        toolsCapped = false;
+        configCapped = false;
+        adapterCapped = false;
 
         var error = PrefixEnvelopeValidator.Canonicalize(
-            PrefixEnvelopeValidator.EnvelopeKind.Template, input.Envelopes.Template, out templateBytes)
-            ?? PrefixEnvelopeValidator.Canonicalize(PrefixEnvelopeValidator.EnvelopeKind.Policy, input.Envelopes.Policy, out policyBytes)
-            ?? PrefixEnvelopeValidator.Canonicalize(PrefixEnvelopeValidator.EnvelopeKind.Tools, input.Envelopes.Tools, out toolsBytes)
-            ?? PrefixEnvelopeValidator.Canonicalize(PrefixEnvelopeValidator.EnvelopeKind.CacheConfig, input.Envelopes.CacheConfig, out configBytes)
-            ?? PrefixEnvelopeValidator.Canonicalize(PrefixEnvelopeValidator.EnvelopeKind.Adapter, input.Envelopes.Adapter, out adapterBytes);
+            PrefixEnvelopeValidator.EnvelopeKind.Template, input.Envelopes.Template, out templateBytes, out templateCapped)
+            ?? PrefixEnvelopeValidator.Canonicalize(PrefixEnvelopeValidator.EnvelopeKind.Policy, input.Envelopes.Policy, out policyBytes, out policyCapped)
+            ?? PrefixEnvelopeValidator.Canonicalize(PrefixEnvelopeValidator.EnvelopeKind.Tools, input.Envelopes.Tools, out toolsBytes, out toolsCapped)
+            ?? PrefixEnvelopeValidator.Canonicalize(PrefixEnvelopeValidator.EnvelopeKind.CacheConfig, input.Envelopes.CacheConfig, out configBytes, out configCapped)
+            ?? PrefixEnvelopeValidator.Canonicalize(PrefixEnvelopeValidator.EnvelopeKind.Adapter, input.Envelopes.Adapter, out adapterBytes, out adapterCapped);
         return error;
     }
 
