@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { canonicalJsonBytes } from '../canonical-json/index.js';
 import { LiveRuntimeInvocationError } from './errors.js';
 import { copySensitiveValues, assertPrivateBytes } from './privacy.js';
 
@@ -33,5 +34,11 @@ describe('live runtime privacy barriers', () => {
     expect(() =>
       assertPrivateBytes([new TextEncoder().encode(`${'a'.repeat(63)}b`)], values),
     ).toThrow(LiveRuntimeInvocationError);
+  });
+
+  it('scans the canonical JSON-escaped form of sensitive values', () => {
+    const values = copySensitiveValues(['quote" and newline\n']);
+    const serialized = canonicalJsonBytes({ value: 'prefix quote" and newline\n suffix' });
+    expect(() => assertPrivateBytes([serialized], values)).toThrow(LiveRuntimeInvocationError);
   });
 });

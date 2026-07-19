@@ -17,7 +17,11 @@ export function copySensitiveValues(values: readonly string[] | undefined): read
       message: 'sensitiveValues exceeds its byte cap or contains duplicates.',
     });
   }
-  return encoded.map((value) => new Uint8Array(value));
+  const escaped = source.map((value) => {
+    const json = JSON.stringify(value);
+    return new TextEncoder().encode(json.slice(1, -1));
+  });
+  return [...encoded, ...escaped].map((value) => new Uint8Array(value));
 }
 
 export function assertPrivateBytes(
