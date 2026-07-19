@@ -95,7 +95,8 @@ internal static class LiveRuntimeApplication
         string expectedSubjectDigest;
         try
         {
-            var canonicalSubject = JsonElementCanonicalizer.Canonicalize(inputDocument.RootElement.GetProperty("subject"), int.MaxValue, int.MaxValue, int.MaxValue, long.MaxValue, out _);
+            using var subjectDocument = JsonDocument.Parse(inputDocument.RootElement.GetProperty("subject").GetRawText());
+            var canonicalSubject = JsonElementCanonicalizer.Canonicalize(subjectDocument.RootElement, int.MaxValue, int.MaxValue, int.MaxValue, long.MaxValue, out _);
             var tag = Encoding.UTF8.GetBytes("agentic-pr-review/review-subject/v1");
             var framed = new byte[tag.Length + 1 + canonicalSubject.Length];
             tag.CopyTo(framed, 0);

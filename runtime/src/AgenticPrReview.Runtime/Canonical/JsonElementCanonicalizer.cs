@@ -70,7 +70,8 @@ internal static class JsonElementCanonicalizer
         int maxProperties)
     {
         var properties = new System.Collections.Generic.List<LenientJsonObjectEnumerator.Entry>();
-        foreach (var entry in LenientJsonObjectEnumerator.Enumerate(element, maxProperties + 1))
+        var entryLimit = maxProperties == int.MaxValue ? int.MaxValue : maxProperties + 1;
+        foreach (var entry in LenientJsonObjectEnumerator.Enumerate(element, entryLimit))
         {
             properties.Add(entry);
         }
