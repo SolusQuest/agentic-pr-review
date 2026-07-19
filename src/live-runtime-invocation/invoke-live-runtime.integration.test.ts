@@ -332,12 +332,36 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
           producingRunAttempt: 1,
         },
       });
+      const mismatchedManifestHash = 'f'.repeat(64);
+      const mismatchedContinuationTransition = {
+        ...continuationContext.transition,
+        predecessorManifestSha256: mismatchedManifestHash as never,
+      };
+      await expect(
+        invokeLiveRuntime({
+          command: { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
+          input: reviewInput,
+          context: {
+            ...continuationContext,
+            transition: mismatchedContinuationTransition as never,
+          },
+          manifestInput: {
+            ...continuationManifest,
+            transition: mismatchedContinuationTransition as never,
+          },
+          predecessorLedgerBytes,
+          predecessorManifestBytes,
+          timeoutMs: 20_000,
+          trustedRoot: root,
+        }),
+      ).rejects.toMatchObject({ kind: 'restore-plan-invalid' });
       const continuationLease = await invokeLiveRuntime({
         command: { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
         input: reviewInput,
         context: continuationContext,
         manifestInput: continuationManifest,
         predecessorLedgerBytes,
+        predecessorManifestBytes,
         timeoutMs: 20_000,
         trustedRoot: root,
       });

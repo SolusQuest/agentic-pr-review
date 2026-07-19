@@ -21,7 +21,10 @@ import { canonicalJsonBytes } from '../canonical-json/index.js';
 import {
   buildStateBundleV2,
   classifyStateBundleV2,
+  MANIFEST_MAX_BYTES,
+  serializeStateManifestV2,
   type StateManifestV2Input,
+  validateStateManifestV2,
 } from '../state-v2/index.js';
 import {
   computeMetadataSemanticSha256,
@@ -66,6 +69,7 @@ export interface InvokeLiveRuntimeOptions {
   readonly trustedRoot?: string;
   readonly sensitiveValues?: readonly string[];
   readonly predecessorLedgerBytes?: Uint8Array;
+  readonly predecessorManifestBytes?: Uint8Array;
   readonly fs?: FsSeams;
 }
 
@@ -132,6 +136,9 @@ export async function invokeLiveRuntime(
   const predecessorSnapshot = options.predecessorLedgerBytes
     ? new Uint8Array(options.predecessorLedgerBytes)
     : undefined;
+  const predecessorManifestSnapshot = options.predecessorManifestBytes
+    ? new Uint8Array(options.predecessorManifestBytes)
+    : undefined;
   const sensitive = copySensitiveValues(options.sensitiveValues);
   let suppliedContextBytes: Uint8Array;
   try {
@@ -191,14 +198,19 @@ export async function invokeLiveRuntime(
       kind: 'options-invalid',
       message: 'Root live transitions must not receive predecessor ledger bytes.',
     });
-  if (!isRootTransition && !predecessorSnapshot)
+  if (isRootTransition && predecessorManifestSnapshot)
     throw new LiveRuntimeInvocationError({
       kind: 'options-invalid',
-      message: 'A non-root live transition requires predecessor ledger bytes.',
+      message: 'Root live transitions must not receive predecessor manifest bytes.',
+    });
+  if (!isRootTransition && (!predecessorSnapshot || !predecessorManifestSnapshot))
+    throw new LiveRuntimeInvocationError({
+      kind: 'options-invalid',
+      message: 'A non-root live transition requires predecessor ledger and manifest bytes.',
     });
   validateManifestPlan(manifestInputSnapshot, context);
   validateManifestProvenance(manifestInputSnapshot, context, inputSnapshot);
-  validateRestorePlan(context, predecessorSnapshot);
+  validateRestorePlan(context, predecessorSnapshot, predecessorManifestSnapshot);
   const derivedInteraction = deriveInteractionId(
     isRootTransition
       ? { kind: 'bootstrap' }
@@ -273,6 +285,7 @@ export async function invokeLiveRuntime(
       assertPrivateBytes([predecessorBytes], sensitive);
       await writePrivate(predecessorPath, predecessorBytes);
     }
+    if (predecessorManifestSnapshot) assertPrivateBytes([predecessorManifestSnapshot], sensitive);
     if (!(await isExecutableFile(commandSnapshot.executablePath, fs)))
       throw new LiveRuntimeInvocationError({
         kind: 'executable-invalid',
@@ -851,6 +864,7 @@ function validateManifestPlan(
 function validateRestorePlan(
   context: LiveRuntimeInvocationContextV1,
   predecessorBytes: Uint8Array | undefined,
+  predecessorManifestBytes: Uint8Array | undefined,
 ): void {
   const transition = context.transition;
   if (transition.kind === 'bootstrap' || transition.kind === 'recovery_root') {
@@ -861,11 +875,12 @@ function validateRestorePlan(
       });
     return;
   }
-  if (!predecessorBytes)
+  if (!predecessorBytes || !predecessorManifestBytes)
     throw new LiveRuntimeInvocationError({
       kind: 'options-invalid',
-      message: 'A non-root live transition requires predecessor ledger bytes.',
+      message: 'A non-root live transition requires predecessor ledger and manifest bytes.',
     });
+  validatePredecessorManifest(predecessorManifestBytes, context, predecessorBytes);
   const predecessor = validateCandidateLedgerForHost(predecessorBytes!);
   const header = predecessor.header as Record<string, unknown>;
   const generation = context.generation;
@@ -963,6 +978,59 @@ function equalJson(left: unknown, right: unknown): boolean {
   } catch {
     return false;
   }
+}
+
+function validatePredecessorManifest(
+  bytes: Uint8Array,
+  context: LiveRuntimeInvocationContextV1,
+  predecessorLedgerBytes: Uint8Array,
+): void {
+  if (bytes.byteLength > MANIFEST_MAX_BYTES)
+    throw new LiveRuntimeInvocationError({
+      kind: 'restore-plan-invalid',
+      message: 'Predecessor manifest exceeds its byte cap.',
+    });
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes));
+  } catch {
+    throw new LiveRuntimeInvocationError({
+      kind: 'restore-plan-invalid',
+      message: 'Predecessor manifest is not valid UTF-8 JSON.',
+    });
+  }
+  const validation = validateStateManifestV2(parsed);
+  if (!validation.ok)
+    throw new LiveRuntimeInvocationError({
+      kind: 'restore-plan-invalid',
+      message: 'Predecessor manifest failed host validation.',
+    });
+  let canonical: Uint8Array;
+  try {
+    canonical = serializeStateManifestV2(validation.manifest);
+  } catch {
+    throw new LiveRuntimeInvocationError({
+      kind: 'restore-plan-invalid',
+      message: 'Predecessor manifest could not be canonically serialized.',
+    });
+  }
+  const transition = context.transition;
+  const manifest = validation.manifest;
+  const predecessorLedgerHash = sha256Hex(predecessorLedgerBytes);
+  if (
+    !equalBytes(canonical, bytes) ||
+    sha256Hex(bytes) !== transition.predecessorManifestSha256 ||
+    !equalJson(manifest.stateKey, context.stateKey) ||
+    manifest.sessionEpoch !== context.sessionEpoch ||
+    manifest.generation.stateGeneration !== transition.predecessorStateGeneration ||
+    manifest.generation.ledgerEpoch !== transition.predecessorLedgerEpoch ||
+    manifest.ledger.sha256 !== predecessorLedgerHash ||
+    manifest.transaction.candidateLedgerSha256 !== predecessorLedgerHash
+  )
+    throw new LiveRuntimeInvocationError({
+      kind: 'restore-plan-invalid',
+      message: 'Predecessor manifest does not match the accepted predecessor ledger and context.',
+    });
 }
 
 interface ProcessResult {
