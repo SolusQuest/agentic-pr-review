@@ -140,7 +140,12 @@ function runIntegrationTests(env) {
   const vitest = path.join(repoRoot, 'node_modules/vitest/vitest.mjs');
   const result = spawnSync(
     process.execPath,
-    [vitest, 'run', 'src/runtime-integration/runtime-integration.test.ts'],
+    [
+      vitest,
+      'run',
+      'src/runtime-integration/runtime-integration.test.ts',
+      'src/live-runtime-invocation/invoke-live-runtime.integration.test.ts',
+    ],
     { cwd: repoRoot, env, stdio: 'inherit', windowsHide: true },
   );
   if (result.error) throw result.error;

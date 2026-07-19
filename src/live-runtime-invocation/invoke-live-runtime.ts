@@ -151,6 +151,13 @@ export async function invokeLiveRuntime(
       kind: 'options-invalid',
       message: 'Root live transitions must not receive predecessor ledger bytes.',
     });
+  if (!isRootTransition && !predecessorSnapshot)
+    throw new LiveRuntimeInvocationError({
+      kind: 'options-invalid',
+      message: 'A non-root live transition requires predecessor ledger bytes.',
+    });
+  validateManifestPlan(manifestInputSnapshot, context);
+  validateRestorePlan(context, predecessorSnapshot);
   const derivedInteraction = deriveInteractionId(
     isRootTransition
       ? { kind: 'bootstrap' }
@@ -303,7 +310,7 @@ export async function invokeLiveRuntime(
           ...context.currentInteraction,
           reviewedHeadSha: inputSnapshot.host.review.headSha,
           reviewedBaseSha: inputSnapshot.host.review.baseSha,
-          changedFiles: inputSnapshot.subject.changedFiles as unknown as Record<string, unknown>[],
+          changedFiles: projectChangedFiles(inputSnapshot.subject.changedFiles),
         },
         outcome: success.result,
       },
@@ -659,6 +666,7 @@ function withHostTransaction(
       kind: 'binding-mismatch',
       message: 'Manifest provenance does not match the host context and input facts.',
     });
+  validateManifestPlan(input, context);
   return {
     ...input,
     stateKey: context.stateKey as unknown as StateManifestV2Input['stateKey'],
@@ -686,18 +694,146 @@ function withHostTransaction(
   };
 }
 
+function validateManifestPlan(
+  input: StateManifestV2Input,
+  context: LiveRuntimeInvocationContextV1,
+): void {
+  if (
+    !equalJson(input.stateKey, context.stateKey) ||
+    !equalJson(input.sessionEpoch, context.sessionEpoch) ||
+    !equalJson(input.cacheContractIdentity, context.cacheContractIdentity) ||
+    !equalJson(input.generation, context.generation) ||
+    !equalJson(input.transition, context.transition)
+  )
+    throw new LiveRuntimeInvocationError({
+      kind: 'options-invalid',
+      message: 'Manifest restore plan does not match the frozen live context.',
+    });
+}
+
+function validateRestorePlan(
+  context: LiveRuntimeInvocationContextV1,
+  predecessorBytes: Uint8Array | undefined,
+): void {
+  const transition = context.transition;
+  if (transition.kind === 'bootstrap' || transition.kind === 'recovery_root') return;
+  if (!predecessorBytes)
+    throw new LiveRuntimeInvocationError({
+      kind: 'options-invalid',
+      message: 'A non-root live transition requires predecessor ledger bytes.',
+    });
+  const predecessor = validateCandidateLedgerForHost(predecessorBytes!);
+  const header = predecessor.header as Record<string, unknown>;
+  const generation = context.generation;
+  const state = context.stateKey;
+  const identity = context.cacheContractIdentity;
+  const predecessorHash = sha256Hex(predecessorBytes);
+  if (
+    transition.predecessorLedgerSha256 !== predecessorHash ||
+    header.sessionEpoch !== context.sessionEpoch ||
+    header.ledgerEpoch !== transition.predecessorLedgerEpoch ||
+    header.stateGeneration !== transition.predecessorStateGeneration ||
+    header.repository !== state.repository ||
+    header.headRepository !== state.headRepository ||
+    header.pullRequest !== state.pullRequest ||
+    header.workflowIdentity !== state.workflowIdentity ||
+    header.trustedExecutionDomain !== state.trustedExecutionDomain
+  )
+    throw new LiveRuntimeInvocationError({
+      kind: 'predecessor-ledger-invalid',
+      message: 'Predecessor ledger does not satisfy the host restore plan.',
+    });
+  const predecessorRecords = predecessor.records as unknown[];
+  const predecessorOrdinal = predecessorRecords.length / 2;
+  if (generation.stateGeneration !== Number(transition.predecessorStateGeneration) + 1)
+    throw new LiveRuntimeInvocationError({
+      kind: 'options-invalid',
+      message: 'Non-root state generation must advance exactly one step.',
+    });
+  if (transition.kind === 'continuation') {
+    if (
+      header.providerId !== identity.providerId ||
+      header.modelId !== identity.modelId ||
+      header.adapterId !== identity.adapterId ||
+      header.templateId !== identity.templateId ||
+      header.policyId !== identity.policyId ||
+      header.toolDefinitionId !== identity.toolDefinitionId ||
+      header.cacheConfigId !== identity.cacheConfigId ||
+      generation.ledgerEpoch !== header.ledgerEpoch ||
+      context.currentInteraction.interactionOrdinal !== predecessorOrdinal
+    )
+      throw new LiveRuntimeInvocationError({
+        kind: 'options-invalid',
+        message: 'Continuation restore plan does not preserve session identity or ordinal.',
+      });
+  } else if (
+    generation.ledgerEpoch === header.ledgerEpoch ||
+    context.currentInteraction.interactionOrdinal !== 0
+  )
+    throw new LiveRuntimeInvocationError({
+      kind: 'options-invalid',
+      message: 'Reset restore plan must use a fresh epoch and ordinal zero.',
+    });
+  if (
+    transition.kind === 'reset' &&
+    transition.reason !== 'cache_contract_change' &&
+    (header.providerId !== identity.providerId ||
+      header.modelId !== identity.modelId ||
+      header.adapterId !== identity.adapterId ||
+      header.templateId !== identity.templateId ||
+      header.policyId !== identity.policyId ||
+      header.toolDefinitionId !== identity.toolDefinitionId ||
+      header.cacheConfigId !== identity.cacheConfigId)
+  )
+    throw new LiveRuntimeInvocationError({
+      kind: 'options-invalid',
+      message: 'Reset restore plan changed cache identity without cache_contract_change.',
+    });
+}
+
+function projectChangedFiles(
+  files: ReviewInputV1['subject']['changedFiles'],
+): Record<string, unknown>[] {
+  return files.map((file) => ({
+    path: file.path,
+    ...(file.previousPath == null ? {} : { previousPath: file.previousPath }),
+    status: file.status,
+    additions: file.additions,
+    deletions: file.deletions,
+    changes: file.changes,
+    ...(file.patch === undefined
+      ? {}
+      : {
+          patch: {
+            sha256: file.patch.sha256,
+            truncated: file.patch.truncated,
+            maxChars: file.patch.maxChars,
+          },
+        }),
+  }));
+}
+
+function equalJson(left: unknown, right: unknown): boolean {
+  try {
+    return equalBytes(canonicalJsonBytes(left), canonicalJsonBytes(right));
+  } catch {
+    return false;
+  }
+}
+
 interface ProcessResult {
   readonly exitCode: number | null;
   readonly stdout: Uint8Array;
   readonly stderr: Uint8Array;
 }
 
-function runProcess(
+export function runProcess(
   command: RuntimeCommand,
   args: readonly string[],
   timeoutMs: number,
   signal: AbortSignal | undefined,
   cwd: string,
+  spawnFn: typeof spawn = spawn,
 ): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -711,7 +847,7 @@ function runProcess(
     }
     let child;
     try {
-      child = spawn(command.executablePath, [...(command.prefixArgs ?? []), ...args], {
+      child = spawnFn(command.executablePath, [...(command.prefixArgs ?? []), ...args], {
         stdio: ['ignore', 'pipe', 'pipe'],
         env: {
           PATH: process.env.PATH ?? '',
@@ -736,6 +872,7 @@ function runProcess(
     let stdoutBytes = 0,
       stderrBytes = 0,
       closeObserved = false,
+      naturalExitObserved = false,
       terminalError: LiveRuntimeInvocationError | undefined,
       completed = false,
       postKillTimer: ReturnType<typeof setTimeout> | undefined;
@@ -756,7 +893,7 @@ function runProcess(
       }, 100);
     };
     const fail = (error: LiveRuntimeInvocationError) => {
-      if (completed || terminalError) return;
+      if (completed || terminalError || naturalExitObserved) return;
       terminalError = error;
       killChild();
       postKillTimer ??= setTimeout(() => {
@@ -812,8 +949,14 @@ function runProcess(
       ),
     );
     let exitCode: number | null = null;
+    child.on('exit', (code: number | null) => {
+      if (!terminalError && !naturalExitObserved) {
+        naturalExitObserved = true;
+        exitCode = code;
+      }
+    });
     child.on('close', (code: number | null) => {
-      exitCode = code;
+      if (!naturalExitObserved) exitCode = code;
       closeObserved = true;
       finish();
     });

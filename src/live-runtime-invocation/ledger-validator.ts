@@ -77,6 +77,7 @@ function validateRaw(bytes: Uint8Array): Record<string, unknown> {
       kind: 'candidate-ledger-invalid',
       message: 'Candidate ledger is not canonical byte-for-byte.',
     });
+  validateLedgerRecordSemantics((value as Record<string, unknown>).records as unknown[]);
   return value as Record<string, unknown>;
 }
 
@@ -144,11 +145,53 @@ function validateHostProjection(
     )
       throw invalid('Candidate ledger predecessor binding does not match the context.');
     if (
+      header.sessionEpoch !== context.sessionEpoch ||
+      predecessorHeader.sessionEpoch !== context.sessionEpoch ||
+      predecessorHeader.repository !== context.stateKey.repository ||
+      predecessorHeader.headRepository !== context.stateKey.headRepository ||
+      predecessorHeader.pullRequest !== context.stateKey.pullRequest ||
+      predecessorHeader.workflowIdentity !== context.stateKey.workflowIdentity ||
+      predecessorHeader.trustedExecutionDomain !== context.stateKey.trustedExecutionDomain ||
+      Number(context.generation.stateGeneration) !==
+        Number(context.transition.predecessorStateGeneration) + 1
+    )
+      throw invalid('Predecessor session, scope, or generation binding is invalid.');
+    if (kind === 'continuation') {
+      if (
+        predecessorHeader.ledgerEpoch !== context.transition.predecessorLedgerEpoch ||
+        header.ledgerEpoch !== context.generation.ledgerEpoch ||
+        predecessorHeader.providerId !== identity.providerId ||
+        predecessorHeader.modelId !== identity.modelId ||
+        predecessorHeader.adapterId !== identity.adapterId ||
+        predecessorHeader.templateId !== identity.templateId ||
+        predecessorHeader.policyId !== identity.policyId ||
+        predecessorHeader.toolDefinitionId !== identity.toolDefinitionId ||
+        predecessorHeader.cacheConfigId !== identity.cacheConfigId
+      )
+        throw invalid('Continuation predecessor identity does not match the context.');
+    } else if (
+      header.ledgerEpoch === predecessorHeader.ledgerEpoch ||
+      context.currentInteraction.interactionOrdinal !== 0
+    )
+      throw invalid('Reset predecessor epoch or ordinal binding is invalid.');
+    if (
       kind === 'reset' &&
       (header.predecessorManifestSha256 !== context.transition.predecessorManifestSha256 ||
         header.resetReason !== context.transition.reason)
     )
       throw invalid('Reset predecessor or reason binding does not match the context.');
+    if (
+      kind === 'reset' &&
+      context.transition.reason !== 'cache_contract_change' &&
+      (predecessorHeader.providerId !== identity.providerId ||
+        predecessorHeader.modelId !== identity.modelId ||
+        predecessorHeader.adapterId !== identity.adapterId ||
+        predecessorHeader.templateId !== identity.templateId ||
+        predecessorHeader.policyId !== identity.policyId ||
+        predecessorHeader.toolDefinitionId !== identity.toolDefinitionId ||
+        predecessorHeader.cacheConfigId !== identity.cacheConfigId)
+    )
+      throw invalid('Reset predecessor cache identity does not match the context.');
     const predecessorRecords = predecessor.records as unknown[];
     const records = value.records as unknown[];
     validateLedgerRecordSemantics(predecessorRecords);

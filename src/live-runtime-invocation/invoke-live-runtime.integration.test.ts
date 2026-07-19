@@ -19,6 +19,7 @@ import { makeStateManifestV2Input } from '../state-v2/test-helpers.js';
 import type { ReviewInputV1 } from '../protocol/review-input.js';
 import { invokeLiveRuntime } from './invoke-live-runtime.js';
 
+const integrationEnabled = Boolean(process.env.APR_RUNTIME_INTEGRATION_ROOT);
 const epoch = 'S00000000000000000000A';
 const headSha = '0'.repeat(39) + '2';
 const baseSha = '0'.repeat(39) + '1';
@@ -87,7 +88,30 @@ function input(): ReviewInputV1 {
         headRef: 'feature',
         draft: false,
       },
-      changedFiles: [],
+      changedFiles: [
+        {
+          path: 'src/new.ts',
+          previousPath: null,
+          status: 'renamed',
+          additions: 2,
+          deletions: 1,
+          changes: 3,
+          patch: {
+            text: '@@ -1 +1 @@\n-old\n+new',
+            truncated: false,
+            sha256: sha256Hex(new TextEncoder().encode('@@ -1 +1 @@\n-old\n+new')),
+            maxChars: 2000,
+          },
+        },
+        {
+          path: 'docs/guide.md',
+          previousPath: 'docs/old-guide.md',
+          status: 'modified',
+          additions: 1,
+          deletions: 0,
+          changes: 1,
+        },
+      ],
     },
     previousState: { present: false, findingFingerprints: [] },
     commentEvidence: { existingFindingFingerprints: [] },
@@ -96,11 +120,21 @@ function input(): ReviewInputV1 {
 
 describe('invokeLiveRuntime bootstrap transaction', () => {
   it('runs the framework-dependent runtime, returns a valid lease, and releases twice', async () => {
-    if (process.platform === 'win32') return;
-    const runtimeDll = path.resolve(
-      'runtime/src/AgenticPrReview.Runtime/bin/Release/net10.0/AgenticPrReview.Runtime.dll',
-    );
-    if (!existsSync(runtimeDll)) return;
+    if (!integrationEnabled) return;
+    if (process.platform !== 'linux') {
+      console.log('LIVE_RUNTIME_INTEGRATION_SKIPPED_NON_LINUX: live sidecar seam is Linux-only');
+      return;
+    }
+    const runtimeExecutable = process.env.APR_RUNTIME_DOTNET;
+    const prefixArgs = JSON.parse(process.env.APR_RUNTIME_PREFIX_ARGS_JSON ?? 'null') as unknown;
+    if (
+      !runtimeExecutable ||
+      !path.isAbsolute(runtimeExecutable) ||
+      !existsSync(runtimeExecutable) ||
+      !Array.isArray(prefixArgs) ||
+      prefixArgs.some((arg) => typeof arg !== 'string')
+    )
+      throw new Error('Runtime CI must provide an absolute live runtime command');
     const reviewInput = input();
     const inputHash = sha256Hex(serializeInputBytes(reviewInput));
     const { envelopes, identity } = envelopeSet();
@@ -161,8 +195,8 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
     try {
       const lease = await invokeLiveRuntime({
         command: {
-          executablePath: process.env.DOTNET_HOST_PATH ?? 'dotnet',
-          prefixArgs: ['exec', runtimeDll],
+          executablePath: runtimeExecutable,
+          prefixArgs: prefixArgs as string[],
         },
         input: reviewInput,
         context,
@@ -180,11 +214,80 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
         ),
       };
       expect(classifyStateBundleV2(bundle).kind).toBe('valid');
+      const predecessorLedgerBytes = new Uint8Array(bundle.ledgerBytes);
+      const predecessorManifestBytes = new Uint8Array(bundle.manifestBytes);
+      const predecessorLedgerSha256 = sha256Hex(predecessorLedgerBytes);
+      const predecessorManifestSha256 = sha256Hex(predecessorManifestBytes);
+      const continuationInteraction = deriveInteractionId(
+        { kind: 'ledger', sha256Hex: predecessorLedgerSha256 },
+        inputHash,
+        headSha,
+        1,
+      );
+      if (!continuationInteraction.ok) throw new Error('invalid continuation interaction');
+      const continuationContext = {
+        ...context,
+        generation: { stateGeneration: 1, ledgerEpoch: epoch },
+        transition: {
+          kind: 'continuation' as const,
+          predecessorManifestSha256,
+          predecessorLedgerSha256,
+          predecessorLedgerEpoch: epoch,
+          predecessorStateGeneration: 0,
+        },
+        currentInteraction: {
+          ...context.currentInteraction,
+          interactionId: continuationInteraction.value,
+          interactionOrdinal: 1,
+        },
+      };
+      const continuationManifest = makeStateManifestV2Input({
+        sessionEpoch: epoch as never,
+        stateKey: continuationContext.stateKey,
+        cacheContractIdentity: identity as never,
+        generation: continuationContext.generation as never,
+        transition: continuationContext.transition as never,
+        provenance: {
+          reviewedHeadSha: headSha as never,
+          reviewedBaseSha: baseSha as never,
+          currentHeadSha: headSha as never,
+          currentBaseSha: baseSha as never,
+          producingRunId: '1',
+          producingRunAttempt: 1,
+        },
+      });
+      const continuationLease = await invokeLiveRuntime({
+        command: { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
+        input: reviewInput,
+        context: continuationContext,
+        manifestInput: continuationManifest,
+        predecessorLedgerBytes,
+        timeoutMs: 20_000,
+        trustedRoot: root,
+      });
+      expect(
+        classifyStateBundleV2({
+          entryListing: (await readdir(continuationLease.bundleDirectory)).map((name) => ({
+            name,
+            isRegularFile: true,
+          })),
+          manifestBytes: await readFile(
+            path.join(continuationLease.bundleDirectory, 'manifest.json'),
+          ),
+          ledgerBytes: await readFile(path.join(continuationLease.bundleDirectory, 'ledger.json')),
+          providerRunMetadataBytes: await readFile(
+            path.join(continuationLease.bundleDirectory, 'provider-run-metadata.json'),
+          ),
+        }).kind,
+      ).toBe('valid');
+      await continuationLease.release();
+      await continuationLease.release();
+      expect(existsSync(continuationLease.bundleDirectory)).toBe(false);
       await lease.release();
       await lease.release();
       expect(existsSync(lease.bundleDirectory)).toBe(false);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 60_000);
 });

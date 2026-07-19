@@ -122,12 +122,14 @@
       "additionalProperties": false,
       "required": [
         "kind",
+        "predecessorManifestSha256",
         "predecessorLedgerSha256",
         "predecessorLedgerEpoch",
         "predecessorStateGeneration"
       ],
       "properties": {
         "kind": { "const": "continuation" },
+        "predecessorManifestSha256": { "$ref": "#/$defs/hash" },
         "predecessorLedgerSha256": { "$ref": "#/$defs/hash" },
         "predecessorLedgerEpoch": { "$ref": "#/$defs/epoch" },
         "predecessorStateGeneration": { "type": "integer", "minimum": 0, "maximum": 1000000 }

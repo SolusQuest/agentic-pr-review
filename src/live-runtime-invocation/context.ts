@@ -135,7 +135,7 @@ function validateSemanticDomains(context: LiveRuntimeInvocationContextV1): boole
   } else if (
     typeof stateGeneration !== 'number' ||
     typeof transition.predecessorStateGeneration !== 'number' ||
-    stateGeneration <= transition.predecessorStateGeneration
+    stateGeneration !== transition.predecessorStateGeneration + 1
   ) {
     return false;
   }

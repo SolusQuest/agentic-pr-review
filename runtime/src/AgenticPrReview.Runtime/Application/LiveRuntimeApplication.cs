@@ -53,18 +53,16 @@ internal static class LiveRuntimeApplication
             throw new RuntimeFailure(10, "APR_LIVE_CONTEXT_SCHEMA_INVALID", "Live context exceeds its byte cap.");
         if (contextBytes.AsSpan().StartsWith(new byte[] { 0xEF, 0xBB, 0xBF }))
             throw new RuntimeFailure(10, "APR_LIVE_CONTEXT_BOM", "Live context must not contain a UTF-8 BOM.");
-        try
+        try { _ = new UTF8Encoding(false, true).GetString(contextBytes); }
+        catch (DecoderFallbackException)
         {
-            if (HasDuplicateJsonProperties(contextBytes))
-                throw new RuntimeFailure(10, "APR_LIVE_CONTEXT_DUPLICATE_PROPERTY", "Live context contains a duplicate property.");
-        }
-        catch (JsonException)
-        {
-            // ParseJson below owns syntax classification and precedence.
+            throw new RuntimeFailure(10, "APR_LIVE_CONTEXT_INVALID_UTF8", "Live context is not valid UTF-8.");
         }
 
         using var inputDocument = ParseJson(inputBytes, "APR_INPUT_JSON_INVALID", "Input is not valid JSON.");
         using var contextDocument = ParseJson(contextBytes, "APR_LIVE_CONTEXT_JSON_INVALID", "Live context is not valid JSON.");
+        if (HasDuplicateJsonProperties(contextBytes))
+            throw new RuntimeFailure(10, "APR_LIVE_CONTEXT_DUPLICATE_PROPERTY", "Live context contains a duplicate property.");
         if (!contextDocument.RootElement.TryGetProperty("schemaVersion", out var schemaVersion) ||
             !IsMathematicalInteger(schemaVersion, 1))
             throw new RuntimeFailure(10, "APR_LIVE_CONTEXT_VERSION", "Live context schema version is unsupported.");
@@ -353,7 +351,7 @@ internal static class LiveRuntimeApplication
         var kind = transition.GetProperty("kind").GetString();
         if (kind is "bootstrap" or "recovery_root") return stateGeneration == 0;
         var predecessorGeneration = NumberInt64(transition.GetProperty("predecessorStateGeneration"), "APR_LIVE_CONTEXT_SEMANTIC_INVALID", 0, 1_000_000);
-        return stateGeneration > predecessorGeneration;
+        return stateGeneration == predecessorGeneration + 1;
     }
 
     private static bool ValidRepository(JsonElement value, System.Text.RegularExpressions.Regex pattern) =>
