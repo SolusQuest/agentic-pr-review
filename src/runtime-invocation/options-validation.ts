@@ -14,7 +14,7 @@ function isStringArray(value: unknown): value is readonly string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
 }
 
-function isValidAbortSignal(value: unknown): value is AbortSignal {
+export function isValidAbortSignal(value: unknown): value is AbortSignal {
   if (!isNonNullObject(value)) return false;
   const candidate = value as {
     aborted?: unknown;

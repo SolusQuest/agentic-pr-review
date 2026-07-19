@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isWithinLedgerPathLength } from './invoke-live-runtime.js';
+import { invokeLiveRuntime, isWithinLedgerPathLength } from './invoke-live-runtime.js';
 
 describe('live changed-file path bounds', () => {
   const fields = ['path', 'previousPath'] as const;
@@ -25,4 +25,17 @@ describe('live changed-file path bounds', () => {
       });
     });
   }
+
+  it('rejects a malformed AbortSignal before any runtime work', async () => {
+    await expect(
+      invokeLiveRuntime({
+        command: { executablePath: process.execPath },
+        input: {} as never,
+        context: {} as never,
+        manifestInput: {} as never,
+        timeoutMs: 1,
+        signal: { aborted: false } as never,
+      }),
+    ).rejects.toMatchObject({ kind: 'options-invalid' });
+  });
 });

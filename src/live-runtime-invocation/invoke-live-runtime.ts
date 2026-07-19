@@ -46,6 +46,7 @@ import {
 } from '../runtime-invocation/runtime-files.js';
 import { validateSuccessAndBuildResultFromSnapshots } from './live-success-validator.js';
 import type { RuntimeCommand } from '../runtime-invocation/runtime-command.js';
+import { isValidAbortSignal } from '../runtime-invocation/options-validation.js';
 import { computeSubjectDigest } from '../prefix-contract/digest.js';
 import { deriveInteractionId } from '../prefix-contract/interaction-id.js';
 import {
@@ -66,6 +67,15 @@ import {
 const MAX_LEDGER_CHANGED_FILES = 200 as const;
 const MAX_LEDGER_CHANGED_FILE_PATH_LENGTH = 500 as const;
 const MAX_LEDGER_CHANGED_FILE_VALUE = 1_000_000 as const;
+const LEDGER_CHANGED_FILE_STATUSES = new Set([
+  'added',
+  'removed',
+  'modified',
+  'renamed',
+  'copied',
+  'changed',
+  'unchanged',
+]);
 const CACHE_CONTRACT_IDENTITY_HEADER_KEYS = [
   'providerId',
   'modelId',
@@ -162,6 +172,7 @@ export async function invokeLiveRuntime(
       (file) =>
         !isWithinLedgerPathLength(file.path) ||
         (file.previousPath != null && !isWithinLedgerPathLength(file.previousPath)) ||
+        !LEDGER_CHANGED_FILE_STATUSES.has(file.status) ||
         file.additions > MAX_LEDGER_CHANGED_FILE_VALUE ||
         file.deletions > MAX_LEDGER_CHANGED_FILE_VALUE ||
         file.changes > MAX_LEDGER_CHANGED_FILE_VALUE ||
@@ -683,6 +694,11 @@ function validateOptions(options: InvokeLiveRuntimeOptions): void {
       kind: 'options-invalid',
       message: 'Live runtime options are invalid.',
     });
+  if (options.signal !== undefined && !isValidAbortSignal(options.signal))
+    throw new LiveRuntimeInvocationError({
+      kind: 'options-invalid',
+      message: 'options.signal must be a valid AbortSignal.',
+    });
 }
 
 async function resolveTrustedRoot(root: string | undefined): Promise<string> {
@@ -1138,6 +1154,8 @@ function validatePredecessorManifest(
     manifest.transaction.interactionId !== predecessorOutcomeRecord.interactionId ||
     manifest.transaction.interactionOrdinal !== predecessorContextRecord.interactionOrdinal ||
     manifest.transaction.interactionOrdinal !== predecessorOutcomeRecord.interactionOrdinal ||
+    manifest.provenance.reviewedHeadSha !== predecessorContextRecord.reviewedHeadSha ||
+    manifest.provenance.reviewedBaseSha !== predecessorContextRecord.reviewedBaseSha ||
     !predecessorMetadataAgrees(metadata, manifest, predecessorLedgerHash, predecessorHeader)
   )
     throw new LiveRuntimeInvocationError({

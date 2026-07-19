@@ -301,6 +301,25 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
           trustedRoot: root,
         }),
       ).rejects.toMatchObject({ kind: 'options-invalid' });
+      const invalidStatusInput = {
+        ...reviewInput,
+        subject: {
+          ...reviewInput.subject,
+          changedFiles: reviewInput.subject.changedFiles.map((file, index) =>
+            index === 0 ? { ...file, status: 'unknown' } : file,
+          ),
+        },
+      };
+      await expect(
+        invokeLiveRuntime({
+          command: { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
+          input: invalidStatusInput,
+          context,
+          manifestInput,
+          timeoutMs: 20_000,
+          trustedRoot: root,
+        }),
+      ).rejects.toMatchObject({ kind: 'options-invalid' });
       const oversizedPatchInput = {
         ...reviewInput,
         subject: {
@@ -455,6 +474,36 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
           },
           predecessorLedgerBytes,
           predecessorManifestBytes,
+          predecessorProviderRunMetadataBytes,
+          timeoutMs: 20_000,
+          trustedRoot: root,
+        }),
+      ).rejects.toMatchObject({ kind: 'restore-plan-invalid' });
+      const inconsistentPredecessorProvenance = JSON.parse(
+        new TextDecoder().decode(predecessorManifestBytes),
+      ) as { provenance: Record<string, unknown> };
+      inconsistentPredecessorProvenance.provenance.reviewedHeadSha = '1'.repeat(40);
+      const inconsistentProvenanceManifestBytes = canonicalJsonBytes(
+        inconsistentPredecessorProvenance,
+      );
+      const inconsistentProvenanceTransition = {
+        ...continuationContext.transition,
+        predecessorManifestSha256: sha256Hex(inconsistentProvenanceManifestBytes) as never,
+      };
+      await expect(
+        invokeLiveRuntime({
+          command: { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
+          input: reviewInput,
+          context: {
+            ...continuationContext,
+            transition: inconsistentProvenanceTransition as never,
+          },
+          manifestInput: {
+            ...continuationManifest,
+            transition: inconsistentProvenanceTransition as never,
+          },
+          predecessorLedgerBytes,
+          predecessorManifestBytes: inconsistentProvenanceManifestBytes,
           predecessorProviderRunMetadataBytes,
           timeoutMs: 20_000,
           trustedRoot: root,
