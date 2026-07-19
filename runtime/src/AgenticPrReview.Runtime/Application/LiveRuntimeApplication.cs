@@ -35,7 +35,7 @@ internal static class LiveRuntimeApplication
             await WriteDiagnosticAsync(stderr, failure.Code, failure.Message);
             return failure.ExitCode;
         }
-        catch (Exception)
+        catch (Exception ex) when (!IsFatalException(ex))
         {
             await WriteDiagnosticAsync(stderr, "APR_RUNTIME_INTERNAL", "Live runtime execution failed.");
             return 20;
@@ -265,7 +265,10 @@ internal static class LiveRuntimeApplication
     private static async Task<StagedFile> StageAsync(IRuntimeFileSystem fileSystem, string path, byte[] bytes)
     {
         try { return await fileSystem.StageAsync(path, bytes); }
-        catch (Exception ex) { throw new IOException("stage failed", ex); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new IOException("stage failed", ex);
+        }
     }
 
     private static async Task<byte[]> ReadRequiredAsync(IRuntimeFileSystem fileSystem, string path, string code)
@@ -633,6 +636,15 @@ internal static class LiveRuntimeApplication
     }
 
     private static string Sha256(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+    private static bool IsFatalException(Exception ex) => ex is
+        OutOfMemoryException or
+        StackOverflowException or
+        AccessViolationException or
+        AppDomainUnloadedException or
+        BadImageFormatException or
+        CannotUnloadAppDomainException or
+        InvalidProgramException or
+        ThreadAbortException;
     private static Task WriteDiagnosticAsync(TextWriter stderr, string code, string message) => stderr.WriteLineAsync($"{code}: {message}");
     private static async Task TryDeleteAsync(IRuntimeFileSystem fileSystem, string path)
     {
