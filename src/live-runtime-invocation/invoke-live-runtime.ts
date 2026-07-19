@@ -43,6 +43,7 @@ import { computeSubjectDigest } from '../prefix-contract/digest.js';
 import { deriveInteractionId } from '../prefix-contract/interaction-id.js';
 import {
   LIVE_CONTEXT_FILENAME,
+  LIVE_CONTEXT_MAX_BYTES,
   LIVE_CLOSE_DEADLINE_MS,
   LIVE_OUTPUT_FILENAMES,
   LIVE_STREAM_MAX_BYTES,
@@ -132,7 +133,17 @@ export async function invokeLiveRuntime(
     ? new Uint8Array(options.predecessorLedgerBytes)
     : undefined;
   const sensitive = copySensitiveValues(options.sensitiveValues);
-  const suppliedContextBytes = new Uint8Array(canonicalJsonBytes(options.context));
+  let suppliedContextBytes: Uint8Array;
+  try {
+    suppliedContextBytes = new Uint8Array(
+      canonicalJsonBytes(options.context, LIVE_CONTEXT_MAX_BYTES),
+    );
+  } catch {
+    throw new LiveRuntimeInvocationError({
+      kind: 'context-invalid',
+      message: 'Live context could not be safely canonicalized within its byte cap.',
+    });
+  }
   const parsedContext = parseLiveRuntimeInvocationContext(suppliedContextBytes);
   if (!parsedContext.valid)
     throw new LiveRuntimeInvocationError({
