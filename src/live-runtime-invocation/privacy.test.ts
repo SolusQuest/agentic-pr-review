@@ -22,4 +22,16 @@ describe('live runtime privacy barriers', () => {
       expect(() => copySensitiveValues(values)).toThrow(LiveRuntimeInvocationError);
     }
   });
+
+  it('scans overlapping sensitive prefixes with one multi-pattern pass', () => {
+    const values = copySensitiveValues(
+      Array.from({ length: 64 }, (_, index) => `${'a'.repeat(index + 1)}b`),
+    );
+    expect(() =>
+      assertPrivateBytes([new TextEncoder().encode('a'.repeat(100_000))], values),
+    ).not.toThrow();
+    expect(() =>
+      assertPrivateBytes([new TextEncoder().encode(`${'a'.repeat(63)}b`)], values),
+    ).toThrow(LiveRuntimeInvocationError);
+  });
 });

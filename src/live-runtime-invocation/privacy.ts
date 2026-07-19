@@ -24,24 +24,68 @@ export function assertPrivateBytes(
   channels: readonly Uint8Array[],
   sensitiveValues: readonly Uint8Array[],
 ): void {
+  const matcher = buildMatcher(sensitiveValues);
   for (const channel of channels) {
-    for (const secret of sensitiveValues) {
-      if (secret.byteLength > 0 && contains(channel, secret)) {
-        throw new LiveRuntimeInvocationError({
-          kind: 'privacy-violation',
-          message: 'Sensitive content crossed the live runtime boundary.',
-        });
-      }
+    if (matcher.contains(channel)) {
+      throw new LiveRuntimeInvocationError({
+        kind: 'privacy-violation',
+        message: 'Sensitive content crossed the live runtime boundary.',
+      });
     }
   }
 }
 
-function contains(haystack: Uint8Array, needle: Uint8Array): boolean {
-  outer: for (let start = 0; start <= haystack.length - needle.length; start += 1) {
-    for (let offset = 0; offset < needle.length; offset += 1) {
-      if (haystack[start + offset] !== needle[offset]) continue outer;
+interface MatcherNode {
+  readonly next: Map<number, number>;
+  fail: number;
+  terminal: boolean;
+}
+
+interface ByteMatcher {
+  contains(channel: Uint8Array): boolean;
+}
+
+function buildMatcher(sensitiveValues: readonly Uint8Array[]): ByteMatcher {
+  const nodes: MatcherNode[] = [{ next: new Map(), fail: 0, terminal: false }];
+  for (const secret of sensitiveValues) {
+    if (secret.byteLength === 0) continue;
+    let node = 0;
+    for (const byte of secret) {
+      let next = nodes[node].next.get(byte);
+      if (next === undefined) {
+        next = nodes.length;
+        nodes[node].next.set(byte, next);
+        nodes.push({ next: new Map(), fail: 0, terminal: false });
+      }
+      node = next;
     }
-    return true;
+    nodes[node].terminal = true;
   }
-  return false;
+
+  const queue: number[] = [];
+  for (const child of nodes[0].next.values()) queue.push(child);
+  for (let head = 0; head < queue.length; head += 1) {
+    const node = queue[head];
+    for (const [byte, child] of nodes[node].next) {
+      let fallback = nodes[node].fail;
+      while (fallback !== 0 && !nodes[fallback].next.has(byte)) {
+        fallback = nodes[fallback].fail;
+      }
+      nodes[child].fail = nodes[fallback].next.get(byte) ?? 0;
+      nodes[child].terminal ||= nodes[nodes[child].fail].terminal;
+      queue.push(child);
+    }
+  }
+
+  return {
+    contains(channel) {
+      let node = 0;
+      for (const byte of channel) {
+        while (node !== 0 && !nodes[node].next.has(byte)) node = nodes[node].fail;
+        node = nodes[node].next.get(byte) ?? 0;
+        if (nodes[node].terminal) return true;
+      }
+      return false;
+    },
+  };
 }
