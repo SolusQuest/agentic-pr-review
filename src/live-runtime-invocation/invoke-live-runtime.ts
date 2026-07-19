@@ -143,6 +143,15 @@ export async function invokeLiveRuntime(
   const context = materializeHostEpochs(parsedContext.context);
   const contextBytes = new Uint8Array(canonicalJsonBytes(context));
   const manifestInputSnapshot = alignManifestEpochs(suppliedManifestInputSnapshot, context);
+  const inputRepository = `${inputSnapshot.host.repository.owner}/${inputSnapshot.host.repository.name}`;
+  if (
+    context.stateKey.repository !== inputRepository ||
+    context.stateKey.pullRequest !== inputSnapshot.subject.pullRequest.number
+  )
+    throw new LiveRuntimeInvocationError({
+      kind: 'binding-mismatch',
+      message: 'Context state key does not match the exact review input scope.',
+    });
   if (inputSnapshot.host.review.runtimeProvider !== 'test')
     throw new LiveRuntimeInvocationError({
       kind: 'options-invalid',
@@ -177,6 +186,7 @@ export async function invokeLiveRuntime(
       message: 'A non-root live transition requires predecessor ledger bytes.',
     });
   validateManifestPlan(manifestInputSnapshot, context);
+  validateManifestProvenance(manifestInputSnapshot, context, inputSnapshot);
   validateRestorePlan(context, predecessorSnapshot);
   const derivedInteraction = deriveInteractionId(
     isRootTransition
@@ -751,21 +761,8 @@ function withHostTransaction(
   success: Awaited<ReturnType<typeof validateSuccessAndBuildResultFromSnapshots>>,
   metadataSemanticSha256: string,
 ): StateManifestV2Input {
-  const hostHead = reviewInput.host.review.headSha;
-  const hostBase = reviewInput.host.review.baseSha;
   const provenance = input.provenance;
-  if (
-    provenance.producingRunId !== String(context.producingRun.producingRunId) ||
-    provenance.producingRunAttempt !== context.producingRun.runAttempt ||
-    provenance.reviewedHeadSha !== hostHead ||
-    provenance.currentHeadSha !== hostHead ||
-    provenance.reviewedBaseSha !== hostBase ||
-    provenance.currentBaseSha !== hostBase
-  )
-    throw new LiveRuntimeInvocationError({
-      kind: 'binding-mismatch',
-      message: 'Manifest provenance does not match the host context and input facts.',
-    });
+  validateManifestProvenance(input, context, reviewInput);
   validateManifestPlan(input, context);
   return {
     ...input,
@@ -792,6 +789,35 @@ function withHostTransaction(
         metadataSemanticSha256 as StateManifestV2Input['transaction']['metadataSemanticSha256'],
     },
   };
+}
+
+function validateManifestProvenance(
+  input: StateManifestV2Input,
+  context: LiveRuntimeInvocationContextV1,
+  reviewInput: ReviewInputV1,
+): void {
+  const hostHead = reviewInput.host.review.headSha;
+  const hostBase = reviewInput.host.review.baseSha;
+  const hostBaseRef = canonicalBaseRef(reviewInput.subject.pullRequest.baseRef);
+  const provenance = input.provenance;
+  if (
+    provenance.producingRunId !== String(context.producingRun.producingRunId) ||
+    provenance.producingRunAttempt !== context.producingRun.runAttempt ||
+    provenance.reviewedHeadSha !== hostHead ||
+    provenance.currentHeadSha !== hostHead ||
+    provenance.reviewedBaseSha !== hostBase ||
+    provenance.currentBaseSha !== hostBase ||
+    provenance.reviewedBaseRef !== hostBaseRef ||
+    provenance.currentBaseRef !== hostBaseRef
+  )
+    throw new LiveRuntimeInvocationError({
+      kind: 'binding-mismatch',
+      message: 'Manifest provenance does not match the host context and input facts.',
+    });
+}
+
+function canonicalBaseRef(baseRef: string): string {
+  return baseRef.startsWith('refs/') ? baseRef : `refs/heads/${baseRef}`;
 }
 
 function validateManifestPlan(
