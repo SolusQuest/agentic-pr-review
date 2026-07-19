@@ -14,7 +14,7 @@ import {
 } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { ReviewInputV1 } from '../protocol/review-input.js';
+import { validateReviewInputV1, type ReviewInputV1 } from '../protocol/review-input.js';
 import type { ReviewResultV1 } from '../protocol/review-result.js';
 import type { ReviewTraceV1 } from '../protocol/review-trace.js';
 import { canonicalJsonBytes } from '../canonical-json/index.js';
@@ -31,6 +31,7 @@ import {
 } from '../provider-metadata/index.js';
 import {
   defaultFsSeams,
+  BYTE_LIMITS,
   isExecutableFile,
   serializeInputBytes,
   sha256Hex,
@@ -106,7 +107,23 @@ export async function invokeLiveRuntime(
     executablePath: options.command.executablePath,
     prefixArgs: options.command.prefixArgs ? [...options.command.prefixArgs] : undefined,
   };
+  const inputValidation = validateReviewInputV1(options.input);
+  if (!inputValidation.ok) {
+    const count = inputValidation.errors?.length ?? 0;
+    throw new LiveRuntimeInvocationError({
+      kind: 'options-invalid',
+      message:
+        count > 0
+          ? `ReviewInputV1 schema validation failed (${count} errors).`
+          : 'ReviewInputV1 schema validation failed.',
+    });
+  }
   const inputBytes = serializeInputBytes(options.input);
+  if (inputBytes.length > BYTE_LIMITS.input)
+    throw new LiveRuntimeInvocationError({
+      kind: 'options-invalid',
+      message: 'Serialized input exceeds host byte cap.',
+    });
   const inputSnapshot = JSON.parse(new TextDecoder().decode(inputBytes)) as ReviewInputV1;
   const suppliedManifestInputSnapshot = JSON.parse(
     new TextDecoder().decode(canonicalJsonBytes(options.manifestInput)),
