@@ -704,6 +704,17 @@ function alignManifestEpochs(
     ...manifestInput,
     sessionEpoch: context.sessionEpoch as StateManifestV2Input['sessionEpoch'],
     generation: context.generation as unknown as StateManifestV2Input['generation'],
+    providerRunMetadata: {
+      ...manifestInput.providerRunMetadata,
+      producingGeneration: {
+        ...manifestInput.providerRunMetadata.producingGeneration,
+        sessionEpoch: context.sessionEpoch as StateManifestV2Input['sessionEpoch'],
+        stateGeneration: Number(context.generation.stateGeneration),
+        ledgerEpoch: String(
+          context.generation.ledgerEpoch,
+        ) as StateManifestV2Input['generation']['ledgerEpoch'],
+      },
+    },
   };
 }
 
