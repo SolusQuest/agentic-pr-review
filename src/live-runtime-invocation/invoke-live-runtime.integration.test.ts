@@ -422,6 +422,35 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
           trustedRoot: root,
         }),
       ).rejects.toMatchObject({ kind: 'restore-plan-invalid' });
+      const inconsistentPredecessorTransaction = JSON.parse(
+        new TextDecoder().decode(predecessorManifestBytes),
+      ) as { transaction: Record<string, unknown> };
+      inconsistentPredecessorTransaction.transaction.interactionOrdinal = 99;
+      const inconsistentPredecessorTransactionBytes = canonicalJsonBytes(
+        inconsistentPredecessorTransaction,
+      );
+      const inconsistentTransactionTransition = {
+        ...continuationContext.transition,
+        predecessorManifestSha256: sha256Hex(inconsistentPredecessorTransactionBytes) as never,
+      };
+      await expect(
+        invokeLiveRuntime({
+          command: { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
+          input: reviewInput,
+          context: {
+            ...continuationContext,
+            transition: inconsistentTransactionTransition as never,
+          },
+          manifestInput: {
+            ...continuationManifest,
+            transition: inconsistentTransactionTransition as never,
+          },
+          predecessorLedgerBytes,
+          predecessorManifestBytes: inconsistentPredecessorTransactionBytes,
+          timeoutMs: 20_000,
+          trustedRoot: root,
+        }),
+      ).rejects.toMatchObject({ kind: 'restore-plan-invalid' });
       const continuationLease = await invokeLiveRuntime({
         command: { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
         input: reviewInput,

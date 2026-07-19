@@ -1043,6 +1043,9 @@ function validatePredecessorManifest(
   const manifest = validation.manifest;
   const predecessorLedgerHash = sha256Hex(predecessorLedgerBytes);
   const predecessorHeader = predecessorLedger.header as Record<string, unknown>;
+  const predecessorRecords = predecessorLedger.records as Array<Record<string, unknown>>;
+  const predecessorContextRecord = predecessorRecords.at(-2);
+  const predecessorOutcomeRecord = predecessorRecords.at(-1);
   if (
     !equalBytes(canonical, bytes) ||
     sha256Hex(bytes) !== transition.predecessorManifestSha256 ||
@@ -1054,7 +1057,13 @@ function validatePredecessorManifest(
     manifest.transaction.candidateLedgerSha256 !== predecessorLedgerHash ||
     !CACHE_CONTRACT_IDENTITY_HEADER_KEYS.every(
       (key) => manifest.cacheContractIdentity[key] === predecessorHeader[key],
-    )
+    ) ||
+    !predecessorContextRecord ||
+    !predecessorOutcomeRecord ||
+    manifest.transaction.interactionId !== predecessorContextRecord.interactionId ||
+    manifest.transaction.interactionId !== predecessorOutcomeRecord.interactionId ||
+    manifest.transaction.interactionOrdinal !== predecessorContextRecord.interactionOrdinal ||
+    manifest.transaction.interactionOrdinal !== predecessorOutcomeRecord.interactionOrdinal
   )
     throw new LiveRuntimeInvocationError({
       kind: 'restore-plan-invalid',
@@ -1221,6 +1230,7 @@ export function runProcess(
       );
     };
     signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
     const timer = setTimeout(() => {
       fail(
         new LiveRuntimeInvocationError({

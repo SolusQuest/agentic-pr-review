@@ -14,20 +14,37 @@ class FakeChild extends EventEmitter {
   }
 }
 
-function start(fake: FakeChild, timeoutMs: number, signal?: AbortSignal) {
+function start(
+  fake: FakeChild,
+  timeoutMs: number,
+  signal?: AbortSignal,
+  beforeListeners?: () => void,
+) {
   const promise = runProcess(
     { executablePath: '/trusted/runtime' },
     [],
     timeoutMs,
     signal,
     '/private/invocation',
-    (() => fake as unknown as ChildProcess) as never,
+    (() => {
+      beforeListeners?.();
+      return fake as unknown as ChildProcess;
+    }) as never,
   );
   queueMicrotask(() => fake.emit('spawn'));
   return promise;
 }
 
 describe('live runtime process terminal ordering', () => {
+  it('cancels when abort occurs during spawn before listener registration', async () => {
+    const fake = new FakeChild();
+    const controller = new AbortController();
+    const resultPromise = start(fake, 1_000, controller.signal, () => controller.abort());
+    queueMicrotask(() => fake.emit('close', null, null));
+
+    await expect(resultPromise).rejects.toMatchObject({ kind: 'cancelled' });
+  });
+
   it('keeps natural exit when abort arrives before close', async () => {
     const fake = new FakeChild();
     const controller = new AbortController();
