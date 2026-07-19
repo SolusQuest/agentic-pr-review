@@ -70,6 +70,8 @@ The first M4 live path is experimental and explicit:
 
 The exact environment variable names, executable construction, SDK, and provider model snapshot are implementation decisions under the live adapter issue. The reference adapter must conform to the selected Messages-style capability profile; gateway-specific behavior is not implicitly covered. The trust category and fail-closed rules are design decisions in #29.
 
+The closed `ReviewInputV1.host.review.runtimeProvider` enum is not expanded by M4. The #55 synthetic live-process bridge uses the existing `"test"` value as a compatibility sentinel only; it is not a provider identity and must never be copied into `ProviderRunMetadataV1`, the ledger, the manifest cache-contract identity, or published host metadata. The live provider/model/adapter identity is authoritative only from `LiveRuntimeInvocationContextV1`, the provider metadata sidecar, and the v2 manifest. A future decision to represent a real provider in `ReviewInputV1` requires a separately versioned protocol change and is outside #55.
+
 ## StateManifestV2 And Legacy Policy
 
 The implementation-level contract library, exact schema `$id`, closed shape, byte caps, and classifier step order are documented in [`state-manifest-v2.md`](state-manifest-v2.md) (issue #48). That document is authoritative for JSON property names, diagnostic codes, and the composite ledger descriptor.
@@ -348,6 +350,31 @@ This entire section, including every current subsection under it, is the single 
 Any change to a shared item requires a docs PR to this file first, followed by coordinated updates to the referencing workstream issues before any dependent implementation PR may be re-approved.
 
 This section is normative for the first foundational M4 implementation batch (issues #48, #49, #51) and inherited by later follow-ups (#50, #52-#55). It freezes exactly those cross-workstream contract values that must not diverge between the host (TypeScript) and the runtime (C#). Fields not explicitly listed here remain workstream-scoped. For any field that is duplicated across manifest / ledger / metadata boundaries, the accepted domain, pattern, and equality semantics default to shared: sibling workstreams may only diverge with an explicit note in this section.
+
+### Review subject and record cache-contract digests
+
+The M4 `review_context` record carries two derived digests whose algorithms are shared between the TypeScript host and the C# runtime:
+
+```text
+subjectDigest = SHA256(
+  UTF8("agentic-pr-review/review-subject/v1") || 0x00
+  || RFC8785(ReviewInputV1.subject)
+)
+
+cacheContractDigest = SHA256(
+  RFC8785({
+    adapterId,
+    cacheConfigId,
+    modelId,
+    policyId,
+    providerId,
+    templateId,
+    toolDefinitionId
+  })
+)
+```
+
+`subjectDigest` canonicalizes the complete `ReviewInputV1.subject` object, including only the subject subtree and no host metadata, previous state, comment evidence, provider data, or transient live context. The subject object is the parsed JSON value; RFC 8785 emits canonical UTF-8 bytes and the domain tag ends with exactly one NUL octet. `cacheContractDigest` canonicalizes exactly the seven lower-camel-case identity fields shown above, with no additional fields and no domain tag; this preserves the existing C# ledger algorithm while making its field set and byte framing normative. Both hashes are lowercase hexadecimal SHA-256 values. A change to either preimage or domain/version requires a shared-contract revision and coordinated fixture updates before dependent work is re-approved.
 
 ### Epoch identity encoding and lifecycle
 

@@ -1,0 +1,210 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentic-pr-review/protocol/schemas/live-runtime-invocation-context.v1.json",
+  "title": "LiveRuntimeInvocationContextV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "stateKey",
+    "sessionEpoch",
+    "cacheContractIdentity",
+    "generation",
+    "transition",
+    "currentInteraction",
+    "cacheContractEnvelopes",
+    "providerMode",
+    "producingRun"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "stateKey": { "$ref": "#/$defs/stateKey" },
+    "sessionEpoch": { "$ref": "#/$defs/epoch" },
+    "cacheContractIdentity": { "$ref": "#/$defs/cacheContractIdentity" },
+    "generation": { "$ref": "#/$defs/generation" },
+    "transition": { "$ref": "#/$defs/transition" },
+    "currentInteraction": { "$ref": "#/$defs/currentInteraction" },
+    "cacheContractEnvelopes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["template", "policy", "tools", "cacheConfig", "adapter"],
+      "properties": {
+        "template": { "$ref": "#/$defs/openJson" },
+        "policy": { "$ref": "#/$defs/openJson" },
+        "tools": { "$ref": "#/$defs/openJson" },
+        "cacheConfig": { "$ref": "#/$defs/openJson" },
+        "adapter": { "$ref": "#/$defs/openJson" }
+      }
+    },
+    "providerMode": { "enum": ["synthetic", "live"] },
+    "producingRun": { "$ref": "#/$defs/producingRun" }
+  },
+  "$defs": {
+    "identity": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "epoch": { "type": "string", "pattern": "^[A-Za-z0-9_-]{22}$" },
+    "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "stateKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "namespace",
+        "repository",
+        "headRepository",
+        "pullRequest",
+        "workflowIdentity",
+        "trustedExecutionDomain"
+      ],
+      "properties": {
+        "namespace": { "const": "m4-ledger-v2" },
+        "repository": { "type": "string", "minLength": 3, "maxLength": 200 },
+        "headRepository": { "type": "string", "minLength": 3, "maxLength": 200 },
+        "pullRequest": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        "workflowIdentity": { "$ref": "#/$defs/identity" },
+        "trustedExecutionDomain": { "$ref": "#/$defs/identity" }
+      }
+    },
+    "cacheContractIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ledgerSchemaVersion",
+        "prefixContractVersion",
+        "providerId",
+        "modelId",
+        "adapterId",
+        "templateId",
+        "policyId",
+        "toolDefinitionId",
+        "cacheConfigId"
+      ],
+      "properties": {
+        "ledgerSchemaVersion": { "const": 1 },
+        "prefixContractVersion": { "const": 1 },
+        "providerId": { "$ref": "#/$defs/identity" },
+        "modelId": { "$ref": "#/$defs/identity" },
+        "adapterId": { "$ref": "#/$defs/hash" },
+        "templateId": { "$ref": "#/$defs/hash" },
+        "policyId": { "$ref": "#/$defs/hash" },
+        "toolDefinitionId": { "$ref": "#/$defs/hash" },
+        "cacheConfigId": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stateGeneration", "ledgerEpoch"],
+      "properties": {
+        "stateGeneration": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "ledgerEpoch": { "$ref": "#/$defs/epoch" }
+      }
+    },
+    "transition": {
+      "oneOf": [
+        { "$ref": "#/$defs/bootstrapTransition" },
+        { "$ref": "#/$defs/continuationTransition" },
+        { "$ref": "#/$defs/resetTransition" },
+        { "$ref": "#/$defs/recoveryRootTransition" }
+      ]
+    },
+    "bootstrapTransition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "reason", "predecessorLedgerSha256", "predecessorManifestSha256"],
+      "properties": {
+        "kind": { "const": "bootstrap" },
+        "reason": { "const": "new_session" },
+        "predecessorLedgerSha256": { "const": "bootstrap" },
+        "predecessorManifestSha256": { "const": "bootstrap" }
+      }
+    },
+    "continuationTransition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "predecessorManifestSha256",
+        "predecessorLedgerSha256",
+        "predecessorLedgerEpoch",
+        "predecessorStateGeneration"
+      ],
+      "properties": {
+        "kind": { "const": "continuation" },
+        "predecessorManifestSha256": { "$ref": "#/$defs/hash" },
+        "predecessorLedgerSha256": { "$ref": "#/$defs/hash" },
+        "predecessorLedgerEpoch": { "$ref": "#/$defs/epoch" },
+        "predecessorStateGeneration": { "type": "integer", "minimum": 0, "maximum": 1000000 }
+      }
+    },
+    "resetTransition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "predecessorLedgerSha256",
+        "predecessorManifestSha256",
+        "predecessorLedgerEpoch",
+        "predecessorStateGeneration",
+        "reason"
+      ],
+      "properties": {
+        "kind": { "const": "reset" },
+        "predecessorLedgerSha256": { "$ref": "#/$defs/hash" },
+        "predecessorManifestSha256": { "$ref": "#/$defs/hash" },
+        "predecessorLedgerEpoch": { "$ref": "#/$defs/epoch" },
+        "predecessorStateGeneration": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "reason": { "enum": ["base_change", "head_history_discontinuity", "cache_contract_change"] }
+      }
+    },
+    "recoveryRootTransition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "predecessorLedgerSha256", "predecessorManifestSha256", "reason"],
+      "properties": {
+        "kind": { "const": "recovery_root" },
+        "predecessorLedgerSha256": { "const": "bootstrap" },
+        "predecessorManifestSha256": { "const": "bootstrap" },
+        "reason": {
+          "enum": [
+            "corrupt_accepted_artifact",
+            "integrity_mismatch",
+            "unsafe_provenance",
+            "state_key_mismatch",
+            "contract_version_incompatible",
+            "over_bound_ledger",
+            "unavailable_accepted_artifact"
+          ]
+        }
+      }
+    },
+    "currentInteraction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "interactionId",
+        "interactionOrdinal",
+        "consumedInputSha256",
+        "subjectDigest",
+        "cacheContractDigest"
+      ],
+      "properties": {
+        "interactionId": { "$ref": "#/$defs/hash" },
+        "interactionOrdinal": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "consumedInputSha256": { "$ref": "#/$defs/hash" },
+        "subjectDigest": { "$ref": "#/$defs/hash" },
+        "cacheContractDigest": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "producingRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["producingRunId", "runAttempt"],
+      "properties": {
+        "producingRunId": { "type": "string", "pattern": "^[1-9][0-9]{0,18}$" },
+        "runAttempt": { "type": "integer", "minimum": 1, "maximum": 2147483647 }
+      }
+    },
+    "openJson": {
+      "type": ["object", "array", "string", "number", "boolean", "null"]
+    }
+  }
+}

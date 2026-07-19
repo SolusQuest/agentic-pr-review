@@ -9,7 +9,7 @@ namespace AgenticPrReview.Runtime;
 
 public sealed class RuntimeApplication
 {
-    private static readonly string RuntimeVersion = GetRuntimeVersion();
+    internal static readonly string RuntimeVersion = GetRuntimeVersion();
     private const string Summary = "Deterministic fixture runtime completed without findings.";
     private const string Limitation = "No live provider was invoked.";
     private readonly IRuntimeFileSystem fileSystem;
@@ -31,6 +31,10 @@ public sealed class RuntimeApplication
         _ = stdout;
         try
         {
+            if (args.Length > 0 && StringComparer.Ordinal.Equals(args[0], "review-live"))
+            {
+                return await LiveRuntimeApplication.RunAsync(args, fileSystem, schemas, stderr);
+            }
             var invocation = ParseInvocation(args);
             return await RunInvocationAsync(invocation, stderr);
         }
