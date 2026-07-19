@@ -76,6 +76,10 @@ const CACHE_CONTRACT_IDENTITY_HEADER_KEYS = [
   'cacheConfigId',
 ] as const;
 
+export function isWithinLedgerPathLength(value: string): boolean {
+  return Array.from(value).length <= MAX_LEDGER_CHANGED_FILE_PATH_LENGTH;
+}
+
 export interface InvokeLiveRuntimeOptions {
   readonly command: RuntimeCommand;
   readonly input: ReviewInputV1;
@@ -156,8 +160,8 @@ export async function invokeLiveRuntime(
   if (
     inputSnapshot.subject.changedFiles.some(
       (file) =>
-        file.path.length > MAX_LEDGER_CHANGED_FILE_PATH_LENGTH ||
-        (file.previousPath?.length ?? 0) > MAX_LEDGER_CHANGED_FILE_PATH_LENGTH ||
+        !isWithinLedgerPathLength(file.path) ||
+        (file.previousPath != null && !isWithinLedgerPathLength(file.previousPath)) ||
         file.additions > MAX_LEDGER_CHANGED_FILE_VALUE ||
         file.deletions > MAX_LEDGER_CHANGED_FILE_VALUE ||
         file.changes > MAX_LEDGER_CHANGED_FILE_VALUE ||
