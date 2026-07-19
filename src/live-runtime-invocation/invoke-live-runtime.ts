@@ -27,6 +27,7 @@ import {
   serializeStateManifestV2,
   type StateManifestV2,
   type StateManifestV2Input,
+  type StateManifestV2Transition,
   validateStateManifestV2,
 } from '../state-v2/index.js';
 import {
@@ -1130,7 +1131,7 @@ function validatePredecessorManifest(
     manifest.transaction.interactionId !== predecessorOutcomeRecord.interactionId ||
     manifest.transaction.interactionOrdinal !== predecessorContextRecord.interactionOrdinal ||
     manifest.transaction.interactionOrdinal !== predecessorOutcomeRecord.interactionOrdinal ||
-    !predecessorMetadataAgrees(metadata, manifest, predecessorLedgerHash)
+    !predecessorMetadataAgrees(metadata, manifest, predecessorLedgerHash, predecessorHeader)
   )
     throw new LiveRuntimeInvocationError({
       kind: 'restore-plan-invalid',
@@ -1142,6 +1143,7 @@ function predecessorMetadataAgrees(
   result: ReturnType<typeof parseProviderRunMetadata>,
   manifest: StateManifestV2,
   predecessorLedgerHash: string,
+  predecessorHeader: Record<string, unknown>,
 ): boolean {
   if (!result.valid) return false;
   try {
@@ -1161,12 +1163,43 @@ function predecessorMetadataAgrees(
       metadata.candidateLedgerSha256 === manifest.transaction.candidateLedgerSha256 &&
       metadata.candidateLedgerSha256 === predecessorLedgerHash &&
       metadata.predecessorLedgerSha256 === manifest.transition.predecessorLedgerSha256 &&
+      metadata.predecessorLedgerSha256 === predecessorHeader.predecessorLedgerSha256 &&
+      predecessorTransitionAgrees(manifest.transition, predecessorHeader) &&
       computeMetadataSemanticSha256(metadata) === manifest.transaction.metadataSemanticSha256 &&
       !/^0+$/.test(metadata.logicalPrefixSha256) &&
       !/^0+$/.test(metadata.prefixSha256)
     );
   } catch {
     return false;
+  }
+}
+
+function predecessorTransitionAgrees(
+  transition: StateManifestV2Transition,
+  header: Record<string, unknown>,
+): boolean {
+  if (
+    header.kind !== transition.kind ||
+    header.predecessorLedgerSha256 !== transition.predecessorLedgerSha256
+  )
+    return false;
+  switch (transition.kind) {
+    case 'bootstrap':
+      return header.stateGeneration === 0;
+    case 'recovery_root':
+      return header.stateGeneration === 0 && header.recoveryReason === transition.reason;
+    case 'continuation':
+      return (
+        header.predecessorLedgerEpoch === transition.predecessorLedgerEpoch &&
+        header.predecessorStateGeneration === transition.predecessorStateGeneration
+      );
+    case 'reset':
+      return (
+        header.predecessorManifestSha256 === transition.predecessorManifestSha256 &&
+        header.predecessorLedgerEpoch === transition.predecessorLedgerEpoch &&
+        header.predecessorStateGeneration === transition.predecessorStateGeneration &&
+        header.resetReason === transition.reason
+      );
   }
 }
 

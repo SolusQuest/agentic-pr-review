@@ -14,6 +14,10 @@ import {
 } from '../prefix-contract/digest.js';
 import { canonicalJsonBytes } from '../canonical-json/index.js';
 import { deriveInteractionId } from '../prefix-contract/interaction-id.js';
+import {
+  computeMetadataSemanticSha256,
+  parseProviderRunMetadata,
+} from '../provider-metadata/index.js';
 import { serializeInputBytes, sha256Hex } from '../runtime-invocation/runtime-files.js';
 import { classifyStateBundleV2, LEDGER_MAX_BYTES, METADATA_MAX_BYTES } from '../state-v2/index.js';
 import { makeStateManifestV2Input } from '../state-v2/test-helpers.js';
@@ -677,6 +681,94 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
         timeoutMs: 20_000,
         trustedRoot: root,
       });
+      const tamperedHistoricalLedger = JSON.parse(
+        new TextDecoder().decode(continuationLease.ledgerBytes),
+      ) as { header: Record<string, unknown> };
+      tamperedHistoricalLedger.header.predecessorLedgerSha256 = 'd'.repeat(64);
+      const tamperedHistoricalLedgerBytes = canonicalJsonBytes(tamperedHistoricalLedger);
+      const tamperedHistoricalLedgerSha256 = sha256Hex(tamperedHistoricalLedgerBytes);
+      const tamperedHistoricalMetadata = JSON.parse(
+        new TextDecoder().decode(continuationLease.providerRunMetadataBytes),
+      ) as { candidateLedgerSha256: string };
+      tamperedHistoricalMetadata.candidateLedgerSha256 = tamperedHistoricalLedgerSha256;
+      const tamperedHistoricalMetadataBytes = canonicalJsonBytes(tamperedHistoricalMetadata);
+      const parsedTamperedHistoricalMetadata = parseProviderRunMetadata(
+        tamperedHistoricalMetadataBytes,
+      );
+      if (!parsedTamperedHistoricalMetadata.valid)
+        throw new Error('tampered historical metadata should remain schema-valid');
+      const tamperedHistoricalManifest = JSON.parse(
+        new TextDecoder().decode(continuationLease.manifestBytes),
+      ) as {
+        ledger: Record<string, unknown>;
+        providerRunMetadata: Record<string, unknown>;
+        transaction: Record<string, unknown>;
+      };
+      tamperedHistoricalManifest.ledger.bytes = tamperedHistoricalLedgerBytes.byteLength;
+      tamperedHistoricalManifest.ledger.sha256 = tamperedHistoricalLedgerSha256;
+      tamperedHistoricalManifest.transaction.candidateLedgerSha256 = tamperedHistoricalLedgerSha256;
+      tamperedHistoricalManifest.providerRunMetadata.bytes =
+        tamperedHistoricalMetadataBytes.byteLength;
+      tamperedHistoricalManifest.providerRunMetadata.sha256 = sha256Hex(
+        tamperedHistoricalMetadataBytes,
+      );
+      tamperedHistoricalManifest.transaction.metadataSemanticSha256 = computeMetadataSemanticSha256(
+        parsedTamperedHistoricalMetadata.metadata,
+      );
+      const tamperedHistoricalManifestBytes = canonicalJsonBytes(tamperedHistoricalManifest);
+      const tamperedHistoricalManifestSha256 = sha256Hex(tamperedHistoricalManifestBytes);
+      const nextInteraction = deriveInteractionId(
+        { kind: 'ledger', sha256Hex: tamperedHistoricalLedgerSha256 },
+        inputHash,
+        headSha,
+        2,
+      );
+      if (!nextInteraction.ok) throw new Error('invalid next continuation interaction');
+      const nextTransition = {
+        kind: 'continuation' as const,
+        predecessorManifestSha256: tamperedHistoricalManifestSha256,
+        predecessorLedgerSha256: tamperedHistoricalLedgerSha256,
+        predecessorLedgerEpoch: ledgerEpoch,
+        predecessorStateGeneration: 1,
+      };
+      const nextContext = {
+        ...continuationContext,
+        generation: { stateGeneration: 2, ledgerEpoch },
+        transition: nextTransition,
+        currentInteraction: {
+          ...continuationContext.currentInteraction,
+          interactionId: nextInteraction.value,
+          interactionOrdinal: 2,
+        },
+      };
+      const nextManifest = makeStateManifestV2Input({
+        sessionEpoch: sessionEpoch as never,
+        stateKey: nextContext.stateKey,
+        cacheContractIdentity: identity as never,
+        generation: nextContext.generation as never,
+        transition: nextTransition as never,
+        provenance: {
+          reviewedHeadSha: headSha as never,
+          reviewedBaseSha: baseSha as never,
+          currentHeadSha: headSha as never,
+          currentBaseSha: baseSha as never,
+          producingRunId: '1',
+          producingRunAttempt: 1,
+        },
+      });
+      await expect(
+        invokeLiveRuntime({
+          command: { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
+          input: reviewInput,
+          context: nextContext,
+          manifestInput: nextManifest,
+          predecessorLedgerBytes: tamperedHistoricalLedgerBytes,
+          predecessorManifestBytes: tamperedHistoricalManifestBytes,
+          predecessorProviderRunMetadataBytes: tamperedHistoricalMetadataBytes,
+          timeoutMs: 20_000,
+          trustedRoot: root,
+        }),
+      ).rejects.toMatchObject({ kind: 'restore-plan-invalid' });
       expect(
         classifyStateBundleV2({
           entryListing: (await readdir(continuationLease.bundleDirectory)).map((name) => ({
