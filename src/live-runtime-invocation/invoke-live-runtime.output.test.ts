@@ -1,5 +1,5 @@
 import { execFile as execFileCallback } from 'node:child_process';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -57,6 +57,21 @@ describe('live runtime output acceptance', () => {
       await expect(readOutput(socketPath, 'result-invalid')).rejects.toBeInstanceOf(Error);
     } finally {
       server.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('bounds the descriptor read when the file grows after the first stat', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'agentic-live-output-'));
+    const file = path.join(root, 'result.json');
+    await writeFile(file, 'x', { mode: 0o600 });
+    try {
+      await expect(
+        readOutput(file, 'result-invalid', async () => {
+          await writeFile(file, Buffer.alloc(1024 * 1024), { flag: 'a' });
+        }),
+      ).rejects.toMatchObject({ kind: 'unsafe-output-file' });
+    } finally {
       await rm(root, { recursive: true, force: true });
     }
   });

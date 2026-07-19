@@ -580,7 +580,11 @@ async function writePrivate(file: string, bytes: Uint8Array): Promise<void> {
   await writeFile(file, bytes, { flag: 'wx', mode: 0o600 });
 }
 
-export async function readOutput(file: string, kind: LiveRuntimeErrorKind): Promise<Uint8Array> {
+export async function readOutput(
+  file: string,
+  kind: LiveRuntimeErrorKind,
+  beforeRead?: () => Promise<void>,
+): Promise<Uint8Array> {
   let handle;
   try {
     handle = await open(
@@ -589,7 +593,18 @@ export async function readOutput(file: string, kind: LiveRuntimeErrorKind): Prom
     );
     const before = await handle.stat();
     if (!before.isFile() || before.size > 8 * 1024 * 1024) throw new Error('unsafe');
-    const bytes = new Uint8Array(await handle.readFile());
+    await beforeRead?.();
+    const expectedSize = before.size;
+    const bytes = Buffer.allocUnsafe(expectedSize);
+    let offset = 0;
+    while (offset < expectedSize) {
+      const { bytesRead } = await handle.read(bytes, offset, expectedSize - offset, offset);
+      if (bytesRead === 0) throw new Error('unstable');
+      offset += bytesRead;
+    }
+    const probe = Buffer.allocUnsafe(1);
+    const { bytesRead: probeBytes } = await handle.read(probe, 0, 1, expectedSize);
+    if (probeBytes !== 0) throw new Error('unstable');
     const after = await handle.stat();
     if (
       !after.isFile() ||
