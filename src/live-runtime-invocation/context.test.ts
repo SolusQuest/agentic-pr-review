@@ -145,4 +145,12 @@ describe('LiveRuntimeInvocationContextV1 parser', () => {
       code: 'live-context-semantic',
     });
   });
+
+  it('does not throw while scanning deeply nested open-envelope content', () => {
+    const value = context();
+    (value.cacheContractEnvelopes as Record<string, unknown>).template = null;
+    const nested = `${'['.repeat(2_000)}null${']'.repeat(2_000)}`;
+    const text = JSON.stringify(value).replace('"template":null', `"template":${nested}`);
+    expect(() => parseLiveRuntimeInvocationContext(bytes(text))).not.toThrow();
+  });
 });

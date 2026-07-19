@@ -15,7 +15,7 @@ import {
 import { canonicalJsonBytes } from '../canonical-json/index.js';
 import { deriveInteractionId } from '../prefix-contract/interaction-id.js';
 import { serializeInputBytes, sha256Hex } from '../runtime-invocation/runtime-files.js';
-import { classifyStateBundleV2 } from '../state-v2/index.js';
+import { classifyStateBundleV2, LEDGER_MAX_BYTES, METADATA_MAX_BYTES } from '../state-v2/index.js';
 import { makeStateManifestV2Input } from '../state-v2/test-helpers.js';
 import type { ReviewInputV1 } from '../protocol/review-input.js';
 import { invokeLiveRuntime, runProcess } from './invoke-live-runtime.js';
@@ -360,6 +360,7 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
       expect(classifyStateBundleV2(bundle).kind).toBe('valid');
       const predecessorLedgerBytes = new Uint8Array(bundle.ledgerBytes);
       const predecessorManifestBytes = new Uint8Array(bundle.manifestBytes);
+      const predecessorProviderRunMetadataBytes = new Uint8Array(bundle.providerRunMetadataBytes);
       const predecessorLedgerSha256 = sha256Hex(predecessorLedgerBytes);
       const predecessorManifestSha256 = sha256Hex(predecessorManifestBytes);
       const continuationInteraction = deriveInteractionId(
@@ -422,6 +423,7 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
           },
           predecessorLedgerBytes,
           predecessorManifestBytes,
+          predecessorProviderRunMetadataBytes,
           timeoutMs: 20_000,
           trustedRoot: root,
         }),
@@ -452,6 +454,7 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
           },
           predecessorLedgerBytes,
           predecessorManifestBytes: inconsistentPredecessorManifestBytes,
+          predecessorProviderRunMetadataBytes,
           timeoutMs: 20_000,
           trustedRoot: root,
         }),
@@ -481,6 +484,7 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
           },
           predecessorLedgerBytes,
           predecessorManifestBytes: inconsistentPredecessorTransactionBytes,
+          predecessorProviderRunMetadataBytes,
           timeoutMs: 20_000,
           trustedRoot: root,
         }),
@@ -510,6 +514,80 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
           },
           predecessorLedgerBytes,
           predecessorManifestBytes: inconsistentPredecessorLedgerDescriptorBytes,
+          predecessorProviderRunMetadataBytes,
+          timeoutMs: 20_000,
+          trustedRoot: root,
+        }),
+      ).rejects.toMatchObject({ kind: 'restore-plan-invalid' });
+      await expect(
+        invokeLiveRuntime({
+          command: { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
+          input: reviewInput,
+          context: continuationContext,
+          manifestInput: continuationManifest,
+          predecessorLedgerBytes,
+          predecessorManifestBytes,
+          timeoutMs: 20_000,
+          trustedRoot: root,
+        }),
+      ).rejects.toMatchObject({ kind: 'options-invalid' });
+      await expect(
+        invokeLiveRuntime({
+          command: { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
+          input: reviewInput,
+          context: continuationContext,
+          manifestInput: continuationManifest,
+          predecessorLedgerBytes: new Uint8Array(LEDGER_MAX_BYTES + 1),
+          predecessorManifestBytes,
+          predecessorProviderRunMetadataBytes,
+          timeoutMs: 20_000,
+          trustedRoot: root,
+        }),
+      ).rejects.toMatchObject({ kind: 'restore-plan-invalid' });
+      await expect(
+        invokeLiveRuntime({
+          command: { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
+          input: reviewInput,
+          context: continuationContext,
+          manifestInput: continuationManifest,
+          predecessorLedgerBytes,
+          predecessorManifestBytes,
+          predecessorProviderRunMetadataBytes: new Uint8Array(METADATA_MAX_BYTES + 1),
+          timeoutMs: 20_000,
+          trustedRoot: root,
+        }),
+      ).rejects.toMatchObject({ kind: 'restore-plan-invalid' });
+      const invalidPredecessorMetadataBytes = new TextEncoder().encode('{');
+      const inconsistentPredecessorMetadataManifest = JSON.parse(
+        new TextDecoder().decode(predecessorManifestBytes),
+      ) as { providerRunMetadata: Record<string, unknown> };
+      inconsistentPredecessorMetadataManifest.providerRunMetadata.bytes =
+        invalidPredecessorMetadataBytes.byteLength;
+      inconsistentPredecessorMetadataManifest.providerRunMetadata.sha256 = sha256Hex(
+        invalidPredecessorMetadataBytes,
+      );
+      const inconsistentPredecessorMetadataManifestBytes = canonicalJsonBytes(
+        inconsistentPredecessorMetadataManifest,
+      );
+      const inconsistentMetadataTransition = {
+        ...continuationContext.transition,
+        predecessorManifestSha256: sha256Hex(inconsistentPredecessorMetadataManifestBytes) as never,
+      };
+      await expect(
+        invokeLiveRuntime({
+          command: { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
+          input: reviewInput,
+          context: {
+            ...continuationContext,
+            transition: inconsistentMetadataTransition as never,
+          },
+          manifestInput: {
+            ...continuationManifest,
+            transition: inconsistentMetadataTransition as never,
+          },
+          predecessorLedgerBytes,
+          predecessorManifestBytes: inconsistentPredecessorMetadataManifestBytes,
+          predecessorProviderRunMetadataBytes: invalidPredecessorMetadataBytes,
           timeoutMs: 20_000,
           trustedRoot: root,
         }),
@@ -521,6 +599,7 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
         manifestInput: continuationManifest,
         predecessorLedgerBytes,
         predecessorManifestBytes,
+        predecessorProviderRunMetadataBytes,
         timeoutMs: 20_000,
         trustedRoot: root,
       });

@@ -77,19 +77,23 @@ export function parseLiveRuntimeInvocationContext(bytes: Uint8Array): LiveContex
   } catch {
     return { valid: false, code: 'live-context-invalid-json' };
   }
-  if (hasDuplicateJsonProperty(text))
-    return { valid: false, code: 'live-context-duplicate-property' };
-  if (
-    value === null ||
-    typeof value !== 'object' ||
-    Array.isArray(value) ||
-    (value as { schemaVersion?: unknown }).schemaVersion !== 1
-  )
-    return { valid: false, code: 'live-context-version' };
-  if (hasLoneSurrogate(value)) return { valid: false, code: 'live-context-unicode' };
-  if (!validateSchema(value)) return { valid: false, code: 'live-context-schema' };
-  if (!validateSemanticDomains(value as unknown as LiveRuntimeInvocationContextV1))
+  try {
+    if (hasDuplicateJsonProperty(text))
+      return { valid: false, code: 'live-context-duplicate-property' };
+    if (
+      value === null ||
+      typeof value !== 'object' ||
+      Array.isArray(value) ||
+      (value as { schemaVersion?: unknown }).schemaVersion !== 1
+    )
+      return { valid: false, code: 'live-context-version' };
+    if (hasLoneSurrogate(value)) return { valid: false, code: 'live-context-unicode' };
+    if (!validateSchema(value)) return { valid: false, code: 'live-context-schema' };
+    if (!validateSemanticDomains(value as unknown as LiveRuntimeInvocationContextV1))
+      return { valid: false, code: 'live-context-semantic' };
+  } catch {
     return { valid: false, code: 'live-context-semantic' };
+  }
   return { valid: true, context: value as unknown as LiveRuntimeInvocationContextV1, bytes: owned };
 }
 
@@ -164,39 +168,41 @@ function validateSemanticDomains(context: LiveRuntimeInvocationContextV1): boole
 }
 
 function containsForbiddenControl(value: unknown): boolean {
-  if (typeof value === 'string') {
-    for (let index = 0; index < value.length; index += 1) {
-      const code = value.charCodeAt(index);
-      if (code === 0x7f || code < 0x20) return true;
+  const pending: unknown[] = [value];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (typeof current === 'string') {
+      for (let index = 0; index < current.length; index += 1) {
+        const code = current.charCodeAt(index);
+        if (code === 0x7f || code < 0x20) return true;
+      }
+    } else if (Array.isArray(current)) {
+      pending.push(...current);
+    } else if (current !== null && typeof current === 'object') {
+      for (const [key, child] of Object.entries(current)) pending.push(key, child);
     }
-    return false;
-  }
-  if (Array.isArray(value)) return value.some(containsForbiddenControl);
-  if (value !== null && typeof value === 'object') {
-    return Object.entries(value).some(
-      ([key, child]) => containsForbiddenControl(key) || containsForbiddenControl(child),
-    );
   }
   return false;
 }
 
 function hasLoneSurrogate(value: unknown): boolean {
-  if (typeof value === 'string') {
-    for (let index = 0; index < value.length; index += 1) {
-      const code = value.charCodeAt(index);
-      if (code >= 0xd800 && code <= 0xdbff) {
-        const next = index + 1 < value.length ? value.charCodeAt(index + 1) : 0;
-        if (next < 0xdc00 || next > 0xdfff) return true;
-        index += 1;
-      } else if (code >= 0xdc00 && code <= 0xdfff) return true;
+  const pending: unknown[] = [value];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (typeof current === 'string') {
+      for (let index = 0; index < current.length; index += 1) {
+        const code = current.charCodeAt(index);
+        if (code >= 0xd800 && code <= 0xdbff) {
+          const next = index + 1 < current.length ? current.charCodeAt(index + 1) : 0;
+          if (next < 0xdc00 || next > 0xdfff) return true;
+          index += 1;
+        } else if (code >= 0xdc00 && code <= 0xdfff) return true;
+      }
+    } else if (Array.isArray(current)) {
+      pending.push(...current);
+    } else if (current !== null && typeof current === 'object') {
+      for (const [key, child] of Object.entries(current)) pending.push(key, child);
     }
-    return false;
-  }
-  if (Array.isArray(value)) return value.some(hasLoneSurrogate);
-  if (value !== null && typeof value === 'object') {
-    return Object.entries(value).some(
-      ([key, child]) => hasLoneSurrogate(key) || hasLoneSurrogate(child),
-    );
   }
   return false;
 }

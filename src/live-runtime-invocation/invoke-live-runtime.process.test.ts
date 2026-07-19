@@ -70,6 +70,16 @@ describe('live runtime process terminal ordering', () => {
     await expect(resultPromise).resolves.toMatchObject({ exitCode: 0 });
   });
 
+  it('preserves signal-only natural exits for host termination classification', async () => {
+    const fake = new FakeChild();
+    const resultPromise = start(fake, 1_000);
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    fake.emit('exit', null, 'SIGKILL');
+    fake.emit('close', null, 'SIGKILL');
+
+    await expect(resultPromise).resolves.toMatchObject({ exitCode: null, signal: 'SIGKILL' });
+  });
+
   it('rejects when natural exit is not followed by close before the deadline', async () => {
     const fake = new FakeChild();
     const resultPromise = runProcess(

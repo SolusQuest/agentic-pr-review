@@ -21,7 +21,9 @@ import { canonicalJsonBytes } from '../canonical-json/index.js';
 import {
   buildStateBundleV2,
   classifyStateBundleV2,
+  LEDGER_MAX_BYTES,
   MANIFEST_MAX_BYTES,
+  METADATA_MAX_BYTES,
   serializeStateManifestV2,
   type StateManifestV2Input,
   validateStateManifestV2,
@@ -82,6 +84,7 @@ export interface InvokeLiveRuntimeOptions {
   readonly sensitiveValues?: readonly string[];
   readonly predecessorLedgerBytes?: Uint8Array;
   readonly predecessorManifestBytes?: Uint8Array;
+  readonly predecessorProviderRunMetadataBytes?: Uint8Array;
   readonly fs?: FsSeams;
 }
 
@@ -171,12 +174,6 @@ export async function invokeLiveRuntime(
       message: 'Manifest input could not be safely canonicalized within its byte cap.',
     });
   }
-  const predecessorSnapshot = options.predecessorLedgerBytes
-    ? new Uint8Array(options.predecessorLedgerBytes)
-    : undefined;
-  const predecessorManifestSnapshot = options.predecessorManifestBytes
-    ? new Uint8Array(options.predecessorManifestBytes)
-    : undefined;
   const sensitive = copySensitiveValues(options.sensitiveValues);
   let suppliedContextBytes: Uint8Array;
   try {
@@ -209,6 +206,52 @@ export async function invokeLiveRuntime(
       kind: 'binding-mismatch',
       message: 'Context state key does not match the exact review input scope.',
     });
+  const isRootTransition =
+    context.transition.kind === 'bootstrap' || context.transition.kind === 'recovery_root';
+  if (isRootTransition && options.predecessorLedgerBytes)
+    throw new LiveRuntimeInvocationError({
+      kind: 'options-invalid',
+      message: 'Root live transitions must not receive predecessor ledger bytes.',
+    });
+  if (isRootTransition && options.predecessorManifestBytes)
+    throw new LiveRuntimeInvocationError({
+      kind: 'options-invalid',
+      message: 'Root live transitions must not receive predecessor manifest bytes.',
+    });
+  if (isRootTransition && options.predecessorProviderRunMetadataBytes)
+    throw new LiveRuntimeInvocationError({
+      kind: 'options-invalid',
+      message: 'Root live transitions must not receive predecessor metadata bytes.',
+    });
+  if (
+    !isRootTransition &&
+    (!options.predecessorLedgerBytes ||
+      !options.predecessorManifestBytes ||
+      !options.predecessorProviderRunMetadataBytes)
+  )
+    throw new LiveRuntimeInvocationError({
+      kind: 'options-invalid',
+      message:
+        'A non-root live transition requires predecessor ledger, manifest, and metadata bytes.',
+    });
+  if (
+    (options.predecessorLedgerBytes?.byteLength ?? 0) > LEDGER_MAX_BYTES ||
+    (options.predecessorManifestBytes?.byteLength ?? 0) > MANIFEST_MAX_BYTES ||
+    (options.predecessorProviderRunMetadataBytes?.byteLength ?? 0) > METADATA_MAX_BYTES
+  )
+    throw new LiveRuntimeInvocationError({
+      kind: 'restore-plan-invalid',
+      message: 'Predecessor restore artifacts exceed their byte caps.',
+    });
+  const predecessorSnapshot = options.predecessorLedgerBytes
+    ? new Uint8Array(options.predecessorLedgerBytes)
+    : undefined;
+  const predecessorManifestSnapshot = options.predecessorManifestBytes
+    ? new Uint8Array(options.predecessorManifestBytes)
+    : undefined;
+  const predecessorMetadataSnapshot = options.predecessorProviderRunMetadataBytes
+    ? new Uint8Array(options.predecessorProviderRunMetadataBytes)
+    : undefined;
   if (inputSnapshot.host.review.runtimeProvider !== 'test')
     throw new LiveRuntimeInvocationError({
       kind: 'options-invalid',
@@ -230,26 +273,14 @@ export async function invokeLiveRuntime(
       kind: 'binding-mismatch',
       message: 'Context subject digest does not match the exact input snapshot.',
     });
-  const isRootTransition =
-    context.transition.kind === 'bootstrap' || context.transition.kind === 'recovery_root';
-  if (isRootTransition && predecessorSnapshot)
-    throw new LiveRuntimeInvocationError({
-      kind: 'options-invalid',
-      message: 'Root live transitions must not receive predecessor ledger bytes.',
-    });
-  if (isRootTransition && predecessorManifestSnapshot)
-    throw new LiveRuntimeInvocationError({
-      kind: 'options-invalid',
-      message: 'Root live transitions must not receive predecessor manifest bytes.',
-    });
-  if (!isRootTransition && (!predecessorSnapshot || !predecessorManifestSnapshot))
-    throw new LiveRuntimeInvocationError({
-      kind: 'options-invalid',
-      message: 'A non-root live transition requires predecessor ledger and manifest bytes.',
-    });
   validateManifestPlan(manifestInputSnapshot, context);
   validateManifestProvenance(manifestInputSnapshot, context, inputSnapshot);
-  validateRestorePlan(context, predecessorSnapshot, predecessorManifestSnapshot);
+  validateRestorePlan(
+    context,
+    predecessorSnapshot,
+    predecessorManifestSnapshot,
+    predecessorMetadataSnapshot,
+  );
   const derivedInteraction = deriveInteractionId(
     isRootTransition
       ? { kind: 'bootstrap' }
@@ -325,6 +356,7 @@ export async function invokeLiveRuntime(
       await writePrivate(predecessorPath, predecessorBytes);
     }
     if (predecessorManifestSnapshot) assertPrivateBytes([predecessorManifestSnapshot], sensitive);
+    if (predecessorMetadataSnapshot) assertPrivateBytes([predecessorMetadataSnapshot], sensitive);
     if (!(await isExecutableFile(commandSnapshot.executablePath, fs)))
       throw new LiveRuntimeInvocationError({
         kind: 'executable-invalid',
@@ -340,7 +372,12 @@ export async function invokeLiveRuntime(
     assertPrivateBytes([processResult.stdout, processResult.stderr], sensitive);
     if (processResult.exitCode !== 0)
       throw new LiveRuntimeInvocationError({
-        kind: processResult.exitCode === null ? 'unknown-exit' : 'runtime-exit',
+        kind:
+          processResult.signal !== null
+            ? 'host-terminated'
+            : processResult.exitCode === null
+              ? 'unknown-exit'
+              : 'runtime-exit',
         message: 'review-live did not complete successfully.',
         exitCode: processResult.exitCode ?? undefined,
       });
@@ -904,6 +941,7 @@ function validateRestorePlan(
   context: LiveRuntimeInvocationContextV1,
   predecessorBytes: Uint8Array | undefined,
   predecessorManifestBytes: Uint8Array | undefined,
+  predecessorMetadataBytes: Uint8Array | undefined,
 ): void {
   const transition = context.transition;
   if (transition.kind === 'bootstrap' || transition.kind === 'recovery_root') {
@@ -914,13 +952,20 @@ function validateRestorePlan(
       });
     return;
   }
-  if (!predecessorBytes || !predecessorManifestBytes)
+  if (!predecessorBytes || !predecessorManifestBytes || !predecessorMetadataBytes)
     throw new LiveRuntimeInvocationError({
       kind: 'options-invalid',
-      message: 'A non-root live transition requires predecessor ledger and manifest bytes.',
+      message:
+        'A non-root live transition requires predecessor ledger, manifest, and metadata bytes.',
     });
   const predecessor = validateCandidateLedgerForHost(predecessorBytes);
-  validatePredecessorManifest(predecessorManifestBytes, context, predecessorBytes, predecessor);
+  validatePredecessorManifest(
+    predecessorManifestBytes,
+    context,
+    predecessorBytes,
+    predecessorMetadataBytes,
+    predecessor,
+  );
   const header = predecessor.header as Record<string, unknown>;
   const generation = context.generation;
   const state = context.stateKey;
@@ -1023,6 +1068,7 @@ function validatePredecessorManifest(
   bytes: Uint8Array,
   context: LiveRuntimeInvocationContextV1,
   predecessorLedgerBytes: Uint8Array,
+  predecessorMetadataBytes: Uint8Array,
   predecessorLedger: Record<string, unknown>,
 ): void {
   if (bytes.byteLength > MANIFEST_MAX_BYTES)
@@ -1056,6 +1102,7 @@ function validatePredecessorManifest(
   }
   const transition = context.transition;
   const manifest = validation.manifest;
+  const metadata = parseProviderRunMetadata(predecessorMetadataBytes);
   const predecessorLedgerHash = sha256Hex(predecessorLedgerBytes);
   const predecessorHeader = predecessorLedger.header as Record<string, unknown>;
   const predecessorRecords = predecessorLedger.records as Array<Record<string, unknown>>;
@@ -1070,6 +1117,9 @@ function validatePredecessorManifest(
     manifest.generation.ledgerEpoch !== transition.predecessorLedgerEpoch ||
     manifest.ledger.sha256 !== predecessorLedgerHash ||
     manifest.ledger.bytes !== predecessorLedgerBytes.byteLength ||
+    !metadata.valid ||
+    manifest.providerRunMetadata.bytes !== predecessorMetadataBytes.byteLength ||
+    manifest.providerRunMetadata.sha256 !== sha256Hex(predecessorMetadataBytes) ||
     manifest.transaction.candidateLedgerSha256 !== predecessorLedgerHash ||
     !CACHE_CONTRACT_IDENTITY_HEADER_KEYS.every(
       (key) => manifest.cacheContractIdentity[key] === predecessorHeader[key],
@@ -1089,6 +1139,7 @@ function validatePredecessorManifest(
 
 interface ProcessResult {
   readonly exitCode: number | null;
+  readonly signal: NodeJS.Signals | null;
   readonly stdout: Uint8Array;
   readonly stderr: Uint8Array;
 }
@@ -1140,6 +1191,7 @@ export function runProcess(
       stderrBytes = 0,
       closeObserved = false,
       naturalExitObserved = false,
+      exitSignal: NodeJS.Signals | null = null,
       terminalError: LiveRuntimeInvocationError | undefined,
       completed = false,
       postKillTimer: ReturnType<typeof setTimeout> | undefined,
@@ -1195,7 +1247,13 @@ export function runProcess(
       if (postExitTimer) clearTimeout(postExitTimer);
       signal?.removeEventListener('abort', abort);
       if (terminalError) reject(terminalError);
-      else resolve({ exitCode, stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr) });
+      else
+        resolve({
+          exitCode,
+          signal: exitSignal,
+          stdout: Buffer.concat(stdout),
+          stderr: Buffer.concat(stderr),
+        });
     };
     const append = (target: Buffer[], chunk: Buffer, stream: 'stdout' | 'stderr') => {
       const bytes =
@@ -1225,15 +1283,19 @@ export function runProcess(
       ),
     );
     let exitCode: number | null = null;
-    child.on('exit', (code: number | null) => {
+    child.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
       if (!terminalError && !naturalExitObserved) {
         naturalExitObserved = true;
         exitCode = code;
+        exitSignal = signal;
         startCloseDeadline();
       }
     });
-    child.on('close', (code: number | null) => {
-      if (!naturalExitObserved) exitCode = code;
+    child.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
+      if (!naturalExitObserved) {
+        exitCode = code;
+        exitSignal = signal;
+      }
       closeObserved = true;
       finish();
     });
