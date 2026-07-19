@@ -9,7 +9,7 @@ namespace AgenticPrReview.Runtime;
 
 public sealed class RuntimeApplication
 {
-    private static readonly string RuntimeVersion = GetRuntimeVersion();
+    internal static readonly string RuntimeVersion = GetRuntimeVersion();
     private const string Summary = "Deterministic fixture runtime completed without findings.";
     private const string Limitation = "No live provider was invoked.";
     private readonly IRuntimeFileSystem fileSystem;

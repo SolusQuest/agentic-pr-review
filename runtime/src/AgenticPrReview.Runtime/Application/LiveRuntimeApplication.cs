@@ -35,7 +35,7 @@ internal static class LiveRuntimeApplication
             await WriteDiagnosticAsync(stderr, failure.Code, failure.Message);
             return failure.ExitCode;
         }
-        catch
+        catch (Exception)
         {
             await WriteDiagnosticAsync(stderr, "APR_RUNTIME_INTERNAL", "Live runtime execution failed.");
             return 20;
@@ -83,7 +83,7 @@ internal static class LiveRuntimeApplication
         if (!StringComparer.Ordinal.Equals(input.Host.Review.RuntimeProvider, "test"))
             throw new RuntimeFailure(10, "APR_INPUT_RUNTIME_PROVIDER_INVALID", "The #55 live seam requires the host test runtime provider.");
         if (input.RequestedRuntimeVersion is not null &&
-            !StringComparer.Ordinal.Equals(input.RequestedRuntimeVersion, GetRuntimeVersion()))
+            !StringComparer.Ordinal.Equals(input.RequestedRuntimeVersion, RuntimeApplication.RuntimeVersion))
             throw new RuntimeFailure(10, "APR_RUNTIME_VERSION_MISMATCH", "Requested runtime version does not match this binary.");
 
         var inputHash = Sha256(inputBytes);
@@ -110,7 +110,7 @@ internal static class LiveRuntimeApplication
             canonicalSubject.CopyTo(framed, tag.Length + 1);
             expectedSubjectDigest = Sha256(framed);
         }
-        catch
+        catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException or ArgumentException or FormatException or OverflowException)
         {
             throw new RuntimeFailure(10, "APR_LIVE_CONTEXT_SCHEMA_INVALID", "Review subject could not be canonicalized.");
         }
@@ -176,7 +176,7 @@ internal static class LiveRuntimeApplication
         var observation = executor.Execute(input, inputHash, identities);
         var result = new ReviewResult(
             1,
-            GetRuntimeVersion(),
+            RuntimeApplication.RuntimeVersion,
             inputHash,
             observation.Summary,
             [],
@@ -184,7 +184,7 @@ internal static class LiveRuntimeApplication
             [],
             [],
             new ReviewTraceReference(null, ZeroHash));
-        var trace = new ReviewTrace(1, GetRuntimeVersion(), inputHash, observation.Mode, null, [], [], []);
+        var trace = new ReviewTrace(1, RuntimeApplication.RuntimeVersion, inputHash, observation.Mode, null, [], [], []);
         var traceBytes = RuntimeJson.SerializeTrace(trace);
         var resultWithTrace = result with { Trace = new ReviewTraceReference(null, Sha256(traceBytes)) };
         var resultBytes = RuntimeJson.SerializeResult(resultWithTrace);
@@ -252,7 +252,7 @@ internal static class LiveRuntimeApplication
             }
             return 0;
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             foreach (var file in staged)
             {
@@ -265,13 +265,16 @@ internal static class LiveRuntimeApplication
     private static async Task<StagedFile> StageAsync(IRuntimeFileSystem fileSystem, string path, byte[] bytes)
     {
         try { return await fileSystem.StageAsync(path, bytes); }
-        catch { throw new IOException("stage failed"); }
+        catch (Exception ex) { throw new IOException("stage failed", ex); }
     }
 
     private static async Task<byte[]> ReadRequiredAsync(IRuntimeFileSystem fileSystem, string path, string code)
     {
         try { return await fileSystem.ReadAllBytesAsync(path); }
-        catch { throw new RuntimeFailure(40, code, "Required live invocation file could not be read."); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new RuntimeFailure(40, code, "Required live invocation file could not be read.");
+        }
     }
 
     private static JsonDocument ParseJson(byte[] bytes, string code, string message)
@@ -335,23 +338,17 @@ internal static class LiveRuntimeApplication
         var repositoryPattern = new System.Text.RegularExpressions.Regex("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
         if (!ValidRepository(state.GetProperty("repository"), repositoryPattern) ||
             !ValidRepository(state.GetProperty("headRepository"), repositoryPattern)) return false;
-        foreach (var field in new[] { "workflowIdentity", "trustedExecutionDomain" })
-        {
-            if (!ValidUtf8Bound(state.GetProperty(field), 256)) return false;
-        }
-        foreach (var field in new[] { "providerId", "modelId" })
-        {
-            if (!ValidUtf8Bound(cache.GetProperty(field), 256)) return false;
-        }
+        if (!new[] { "workflowIdentity", "trustedExecutionDomain" }
+            .All(field => ValidUtf8Bound(state.GetProperty(field), 256))) return false;
+        if (!new[] { "providerId", "modelId" }
+            .All(field => ValidUtf8Bound(cache.GetProperty(field), 256))) return false;
         if (cache.GetProperty("modelId").GetString() == "latest") return false;
         var generation = root.GetProperty("generation");
         var stateGeneration = NumberInt64(generation.GetProperty("stateGeneration"), "APR_LIVE_CONTEXT_SEMANTIC_INVALID", 0, 1_000_000);
         var transition = root.GetProperty("transition");
         var kind = transition.GetProperty("kind").GetString();
-        foreach (var field in new[] { "sessionEpoch", "stateKey", "cacheContractIdentity", "generation", "transition", "currentInteraction", "providerMode", "producingRun" })
-        {
-            if (ContainsForbiddenControl(root.GetProperty(field))) return false;
-        }
+        if (new[] { "sessionEpoch", "stateKey", "cacheContractIdentity", "generation", "transition", "currentInteraction", "providerMode", "producingRun" }
+            .Any(field => ContainsForbiddenControl(root.GetProperty(field)))) return false;
         var currentInteraction = root.GetProperty("currentInteraction");
         if (kind is "bootstrap" or "recovery_root")
             return stateGeneration == 0 && NumberInt64(currentInteraction.GetProperty("interactionOrdinal"), "APR_LIVE_CONTEXT_SEMANTIC_INVALID", 0, 1_000_000) == 0;
@@ -636,9 +633,18 @@ internal static class LiveRuntimeApplication
     }
 
     private static string Sha256(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-    private static string GetRuntimeVersion() => typeof(LiveRuntimeApplication).Assembly.GetName().Version?.ToString() ?? "0.1.0-dev";
     private static Task WriteDiagnosticAsync(TextWriter stderr, string code, string message) => stderr.WriteLineAsync($"{code}: {message}");
-    private static async Task TryDeleteAsync(IRuntimeFileSystem fileSystem, string path) { try { await fileSystem.DeleteIfExistsAsync(path); } catch { } }
+    private static async Task TryDeleteAsync(IRuntimeFileSystem fileSystem, string path)
+    {
+        try
+        {
+            await fileSystem.DeleteIfExistsAsync(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Cleanup is best effort after a failed commit.
+        }
+    }
 }
 
 internal sealed record LiveInvocation(
