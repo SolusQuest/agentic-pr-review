@@ -60,6 +60,7 @@ import {
 } from './context.js';
 
 const MAX_LEDGER_CHANGED_FILES = 200 as const;
+const MAX_LEDGER_CHANGED_FILE_VALUE = 1_000_000 as const;
 const CACHE_CONTRACT_IDENTITY_HEADER_KEYS = [
   'providerId',
   'modelId',
@@ -146,6 +147,19 @@ export async function invokeLiveRuntime(
       kind: 'options-invalid',
       message: `Live runtime accepts at most ${MAX_LEDGER_CHANGED_FILES} changed files.`,
     });
+  if (
+    inputSnapshot.subject.changedFiles.some(
+      (file) =>
+        file.additions > MAX_LEDGER_CHANGED_FILE_VALUE ||
+        file.deletions > MAX_LEDGER_CHANGED_FILE_VALUE ||
+        file.changes > MAX_LEDGER_CHANGED_FILE_VALUE ||
+        (file.patch?.maxChars ?? 0) > MAX_LEDGER_CHANGED_FILE_VALUE,
+    )
+  )
+    throw new LiveRuntimeInvocationError({
+      kind: 'options-invalid',
+      message: 'Live changed-file metadata exceeds its ledger bounds.',
+    });
   let suppliedManifestInputSnapshot: StateManifestV2Input;
   try {
     suppliedManifestInputSnapshot = JSON.parse(
@@ -188,6 +202,7 @@ export async function invokeLiveRuntime(
   const inputRepository = `${inputSnapshot.host.repository.owner}/${inputSnapshot.host.repository.name}`;
   if (
     context.stateKey.repository !== inputRepository ||
+    context.stateKey.headRepository !== inputRepository ||
     context.stateKey.pullRequest !== inputSnapshot.subject.pullRequest.number
   )
     throw new LiveRuntimeInvocationError({
@@ -1054,6 +1069,7 @@ function validatePredecessorManifest(
     manifest.generation.stateGeneration !== transition.predecessorStateGeneration ||
     manifest.generation.ledgerEpoch !== transition.predecessorLedgerEpoch ||
     manifest.ledger.sha256 !== predecessorLedgerHash ||
+    manifest.ledger.bytes !== predecessorLedgerBytes.byteLength ||
     manifest.transaction.candidateLedgerSha256 !== predecessorLedgerHash ||
     !CACHE_CONTRACT_IDENTITY_HEADER_KEYS.every(
       (key) => manifest.cacheContractIdentity[key] === predecessorHeader[key],

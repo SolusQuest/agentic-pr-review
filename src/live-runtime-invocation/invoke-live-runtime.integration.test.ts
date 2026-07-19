@@ -265,6 +265,19 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
       recursive: true,
     });
     try {
+      const foreignHeadRepositoryContext = structuredClone(context);
+      (foreignHeadRepositoryContext.stateKey as Record<string, unknown>).headRepository =
+        'other/widgets';
+      await expect(
+        invokeLiveRuntime({
+          command: { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
+          input: reviewInput,
+          context: foreignHeadRepositoryContext,
+          manifestInput,
+          timeoutMs: 20_000,
+          trustedRoot: root,
+        }),
+      ).rejects.toMatchObject({ kind: 'binding-mismatch' });
       const tooManyChangedFiles = Array.from({ length: 201 }, (_, index) => ({
         ...reviewInput.subject.changedFiles[0]!,
         path: `src/generated-${index}.ts`,
@@ -278,6 +291,27 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
             ...reviewInput,
             subject: { ...reviewInput.subject, changedFiles: tooManyChangedFiles },
           },
+          context,
+          manifestInput,
+          timeoutMs: 20_000,
+          trustedRoot: root,
+        }),
+      ).rejects.toMatchObject({ kind: 'options-invalid' });
+      const oversizedPatchInput = {
+        ...reviewInput,
+        subject: {
+          ...reviewInput.subject,
+          changedFiles: reviewInput.subject.changedFiles.map((file, index) =>
+            index === 0 && file.patch
+              ? { ...file, patch: { ...file.patch, maxChars: 1_000_001 } }
+              : file,
+          ),
+        },
+      };
+      await expect(
+        invokeLiveRuntime({
+          command: { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
+          input: oversizedPatchInput,
           context,
           manifestInput,
           timeoutMs: 20_000,
@@ -447,6 +481,35 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
           },
           predecessorLedgerBytes,
           predecessorManifestBytes: inconsistentPredecessorTransactionBytes,
+          timeoutMs: 20_000,
+          trustedRoot: root,
+        }),
+      ).rejects.toMatchObject({ kind: 'restore-plan-invalid' });
+      const inconsistentPredecessorLedgerDescriptor = JSON.parse(
+        new TextDecoder().decode(predecessorManifestBytes),
+      ) as { ledger: Record<string, unknown> };
+      inconsistentPredecessorLedgerDescriptor.ledger.bytes = predecessorLedgerBytes.byteLength + 1;
+      const inconsistentPredecessorLedgerDescriptorBytes = canonicalJsonBytes(
+        inconsistentPredecessorLedgerDescriptor,
+      );
+      const inconsistentLedgerDescriptorTransition = {
+        ...continuationContext.transition,
+        predecessorManifestSha256: sha256Hex(inconsistentPredecessorLedgerDescriptorBytes) as never,
+      };
+      await expect(
+        invokeLiveRuntime({
+          command: { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
+          input: reviewInput,
+          context: {
+            ...continuationContext,
+            transition: inconsistentLedgerDescriptorTransition as never,
+          },
+          manifestInput: {
+            ...continuationManifest,
+            transition: inconsistentLedgerDescriptorTransition as never,
+          },
+          predecessorLedgerBytes,
+          predecessorManifestBytes: inconsistentPredecessorLedgerDescriptorBytes,
           timeoutMs: 20_000,
           trustedRoot: root,
         }),
