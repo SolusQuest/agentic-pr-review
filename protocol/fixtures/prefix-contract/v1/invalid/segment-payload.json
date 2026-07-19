@@ -1,0 +1,12 @@
+{
+  "id": "invalid-segment-payload",
+  "kind": "invalid-vector",
+  "target": "stream-guard",
+  "input": {
+    "stream": "logical-segment",
+    "totalBytes": 262145
+  },
+  "expected": {
+    "csharpCode": "prefix_segment_too_large"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "digest-config",
+  "kind": "digest-vector",
+  "tag": "agentic-pr-review/cache-contract/config/v1",
+  "envelope": {
+    "schemaVersion": 1,
+    "cacheConfigVersion": 1,
+    "markerPolicy": "stable-boundary",
+    "eligibility": "min-prefix-1024",
+    "statelessMode": false
+  },
+  "expected": {
+    "preimageHex": "6167656e7469632d70722d7265766965772f63616368652d636f6e74726163742f636f6e6669672f7631007b226361636865436f6e66696756657273696f6e223a312c22656c69676962696c697479223a226d696e2d7072656669782d31303234222c226d61726b6572506f6c696379223a22737461626c652d626f756e64617279222c22736368656d6156657273696f6e223a312c2273746174656c6573734d6f6465223a66616c73657d",
+    "digestHex": "d5d1e7d93a8fac3ec89b896c771e92301d8cae17fe39fb7e63a42ebe3b35bfe9"
+  }
+}

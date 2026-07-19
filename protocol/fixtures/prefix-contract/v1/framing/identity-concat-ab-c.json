@@ -1,0 +1,13 @@
+{
+  "id": "framing-identity-concat-ab-c",
+  "kind": "framing-vector",
+  "input": {
+    "values": [
+      "ab",
+      "c"
+    ]
+  },
+  "expected": {
+    "framedHex": "0000000261620000000163"
+  }
+}

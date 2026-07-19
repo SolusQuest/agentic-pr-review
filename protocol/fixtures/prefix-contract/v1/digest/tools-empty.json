@@ -1,0 +1,14 @@
+{
+  "id": "digest-tools-empty",
+  "kind": "digest-vector",
+  "tag": "agentic-pr-review/cache-contract/tools/v1",
+  "envelope": {
+    "schemaVersion": 1,
+    "toolsetVersion": 1,
+    "definitions": []
+  },
+  "expected": {
+    "preimageHex": "6167656e7469632d70722d7265766965772f63616368652d636f6e74726163742f746f6f6c732f7631007b22646566696e6974696f6e73223a5b5d2c22736368656d6156657273696f6e223a312c22746f6f6c73657456657273696f6e223a317d",
+    "digestHex": "528302a1284dfac91ceebf178d5b6ff8cde047c065cf4b2eaef1a46c17dbcd0d"
+  }
+}

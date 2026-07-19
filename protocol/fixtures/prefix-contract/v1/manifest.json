@@ -1,0 +1,524 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": {
+    "tool": "src/prefix-contract/generate-fixtures.testhelper.ts",
+    "version": 1
+  },
+  "creationCrossCheck": {
+    "tool": "node",
+    "version": "v23.8.0",
+    "checkedAt": "2026-07-17T00:00:00Z"
+  },
+  "vectors": [
+    {
+      "id": "digest-template",
+      "kind": "digest-vector",
+      "file": "digest/template.json"
+    },
+    {
+      "id": "digest-policy",
+      "kind": "digest-vector",
+      "file": "digest/policy.json"
+    },
+    {
+      "id": "digest-tools",
+      "kind": "digest-vector",
+      "file": "digest/tools.json"
+    },
+    {
+      "id": "digest-config",
+      "kind": "digest-vector",
+      "file": "digest/config.json"
+    },
+    {
+      "id": "digest-adapter",
+      "kind": "digest-vector",
+      "file": "digest/adapter.json"
+    },
+    {
+      "id": "digest-tools-empty",
+      "kind": "digest-vector",
+      "file": "digest/tools-empty.json"
+    },
+    {
+      "id": "digest-template-nul-content",
+      "kind": "digest-vector",
+      "file": "digest/template-nul-content.json"
+    },
+    {
+      "id": "digest-policy-number-domain",
+      "kind": "digest-vector",
+      "file": "digest/policy-number-domain.json"
+    },
+    {
+      "id": "framing-tag-template",
+      "kind": "framing-vector",
+      "file": "framing/tag-template.json"
+    },
+    {
+      "id": "framing-tag-policy",
+      "kind": "framing-vector",
+      "file": "framing/tag-policy.json"
+    },
+    {
+      "id": "framing-tag-tools",
+      "kind": "framing-vector",
+      "file": "framing/tag-tools.json"
+    },
+    {
+      "id": "framing-tag-config",
+      "kind": "framing-vector",
+      "file": "framing/tag-config.json"
+    },
+    {
+      "id": "framing-tag-adapter",
+      "kind": "framing-vector",
+      "file": "framing/tag-adapter.json"
+    },
+    {
+      "id": "framing-tag-logicalPrefix",
+      "kind": "framing-vector",
+      "file": "framing/tag-logicalPrefix.json"
+    },
+    {
+      "id": "framing-tag-providerPrefix",
+      "kind": "framing-vector",
+      "file": "framing/tag-providerPrefix.json"
+    },
+    {
+      "id": "framing-tag-interaction",
+      "kind": "framing-vector",
+      "file": "framing/tag-interaction.json"
+    },
+    {
+      "id": "framing-identity-ascii",
+      "kind": "framing-vector",
+      "file": "framing/identity-ascii.json"
+    },
+    {
+      "id": "framing-identity-multibyte",
+      "kind": "framing-vector",
+      "file": "framing/identity-multibyte.json"
+    },
+    {
+      "id": "framing-identity-surrogate-pair",
+      "kind": "framing-vector",
+      "file": "framing/identity-surrogate-pair.json"
+    },
+    {
+      "id": "framing-identity-256-bytes",
+      "kind": "framing-vector",
+      "file": "framing/identity-256-bytes.json"
+    },
+    {
+      "id": "framing-identity-concat-ab-c",
+      "kind": "framing-vector",
+      "file": "framing/identity-concat-ab-c.json"
+    },
+    {
+      "id": "framing-identity-concat-a-bc",
+      "kind": "framing-vector",
+      "file": "framing/identity-concat-a-bc.json"
+    },
+    {
+      "id": "framing-frame-segment",
+      "kind": "framing-vector",
+      "file": "framing/frame-segment.json"
+    },
+    {
+      "id": "framing-empty-stream-logical-hash",
+      "kind": "framing-vector",
+      "file": "framing/empty-stream-logical-hash.json"
+    },
+    {
+      "id": "interaction-bootstrap",
+      "kind": "interaction-vector",
+      "file": "interaction/bootstrap.json"
+    },
+    {
+      "id": "interaction-reset",
+      "kind": "interaction-vector",
+      "file": "interaction/reset.json"
+    },
+    {
+      "id": "interaction-continuation",
+      "kind": "interaction-vector",
+      "file": "interaction/continuation.json"
+    },
+    {
+      "id": "interaction-head-sha-64",
+      "kind": "interaction-vector",
+      "file": "interaction/head-sha-64.json"
+    },
+    {
+      "id": "materialization-bootstrap",
+      "kind": "materialization-vector",
+      "file": "materialization/bootstrap.json"
+    },
+    {
+      "id": "materialization-continuation",
+      "kind": "materialization-vector",
+      "file": "materialization/continuation.json"
+    },
+    {
+      "id": "materialization-reset",
+      "kind": "materialization-vector",
+      "file": "materialization/reset.json"
+    },
+    {
+      "id": "materialization-append-successor",
+      "kind": "materialization-vector",
+      "file": "materialization/append-successor.json"
+    },
+    {
+      "id": "append-bootstrap-continuation",
+      "kind": "append-vector",
+      "file": "append/bootstrap-continuation.json"
+    },
+    {
+      "id": "materialization-provider-id",
+      "kind": "materialization-vector",
+      "file": "materialization/provider-id.json"
+    },
+    {
+      "id": "invalidation-provider-id",
+      "kind": "invalidation-vector",
+      "file": "invalidation/provider-id.json"
+    },
+    {
+      "id": "materialization-model-id",
+      "kind": "materialization-vector",
+      "file": "materialization/model-id.json"
+    },
+    {
+      "id": "invalidation-model-id",
+      "kind": "invalidation-vector",
+      "file": "invalidation/model-id.json"
+    },
+    {
+      "id": "materialization-adapter-envelope",
+      "kind": "materialization-vector",
+      "file": "materialization/adapter-envelope.json"
+    },
+    {
+      "id": "invalidation-adapter-envelope",
+      "kind": "invalidation-vector",
+      "file": "invalidation/adapter-envelope.json"
+    },
+    {
+      "id": "materialization-cache-config-envelope",
+      "kind": "materialization-vector",
+      "file": "materialization/cache-config-envelope.json"
+    },
+    {
+      "id": "invalidation-cache-config-envelope",
+      "kind": "invalidation-vector",
+      "file": "invalidation/cache-config-envelope.json"
+    },
+    {
+      "id": "materialization-template-content",
+      "kind": "materialization-vector",
+      "file": "materialization/template-content.json"
+    },
+    {
+      "id": "invalidation-template-content",
+      "kind": "invalidation-vector",
+      "file": "invalidation/template-content.json"
+    },
+    {
+      "id": "materialization-template-version",
+      "kind": "materialization-vector",
+      "file": "materialization/template-version.json"
+    },
+    {
+      "id": "invalidation-template-version",
+      "kind": "invalidation-vector",
+      "file": "invalidation/template-version.json"
+    },
+    {
+      "id": "materialization-policy-content",
+      "kind": "materialization-vector",
+      "file": "materialization/policy-content.json"
+    },
+    {
+      "id": "invalidation-policy-content",
+      "kind": "invalidation-vector",
+      "file": "invalidation/policy-content.json"
+    },
+    {
+      "id": "materialization-tools-order",
+      "kind": "materialization-vector",
+      "file": "materialization/tools-order.json"
+    },
+    {
+      "id": "invalidation-tools-order",
+      "kind": "invalidation-vector",
+      "file": "invalidation/tools-order.json"
+    },
+    {
+      "id": "materialization-tools-content",
+      "kind": "materialization-vector",
+      "file": "materialization/tools-content.json"
+    },
+    {
+      "id": "invalidation-tools-content",
+      "kind": "invalidation-vector",
+      "file": "invalidation/tools-content.json"
+    },
+    {
+      "id": "materialization-schema-version",
+      "kind": "materialization-vector",
+      "file": "materialization/schema-version.json"
+    },
+    {
+      "id": "invalidation-schema-version",
+      "kind": "invalidation-vector",
+      "file": "invalidation/schema-version.json"
+    },
+    {
+      "id": "materialization-run-metadata",
+      "kind": "materialization-vector",
+      "file": "materialization/run-metadata.json"
+    },
+    {
+      "id": "invalidation-run-metadata",
+      "kind": "invalidation-vector",
+      "file": "invalidation/run-metadata.json"
+    },
+    {
+      "id": "invalidation-ledger-schema-version",
+      "kind": "invalidation-vector",
+      "file": "invalidation/ledger-schema-version.json"
+    },
+    {
+      "id": "invalidation-prefix-contract-version",
+      "kind": "invalidation-vector",
+      "file": "invalidation/prefix-contract-version.json"
+    },
+    {
+      "id": "invalid-template-unknown-field",
+      "kind": "invalid-vector",
+      "file": "invalid/template-unknown-field.json"
+    },
+    {
+      "id": "invalid-template-missing-field",
+      "kind": "invalid-vector",
+      "file": "invalid/template-missing-field.json"
+    },
+    {
+      "id": "invalid-template-version-zero",
+      "kind": "invalid-vector",
+      "file": "invalid/template-version-zero.json"
+    },
+    {
+      "id": "invalid-template-version-fraction",
+      "kind": "invalid-vector",
+      "file": "invalid/template-version-fraction.json"
+    },
+    {
+      "id": "invalid-template-version-string",
+      "kind": "invalid-vector",
+      "file": "invalid/template-version-string.json"
+    },
+    {
+      "id": "invalid-policy-instructions-type",
+      "kind": "invalid-vector",
+      "file": "invalid/policy-instructions-type.json"
+    },
+    {
+      "id": "invalid-tools-duplicate-name",
+      "kind": "invalid-vector",
+      "file": "invalid/tools-duplicate-name.json"
+    },
+    {
+      "id": "invalid-tools-empty-name",
+      "kind": "invalid-vector",
+      "file": "invalid/tools-empty-name.json"
+    },
+    {
+      "id": "invalid-tools-unknown-wrapper-field",
+      "kind": "invalid-vector",
+      "file": "invalid/tools-unknown-wrapper-field.json"
+    },
+    {
+      "id": "invalid-tools-inputschema-not-object",
+      "kind": "invalid-vector",
+      "file": "invalid/tools-inputschema-not-object.json"
+    },
+    {
+      "id": "invalid-tools-too-many",
+      "kind": "invalid-vector",
+      "file": "invalid/tools-too-many.json"
+    },
+    {
+      "id": "invalid-config-stateless-type",
+      "kind": "invalid-vector",
+      "file": "invalid/config-stateless-type.json"
+    },
+    {
+      "id": "invalid-adapter-build-version-control",
+      "kind": "invalid-vector",
+      "file": "invalid/adapter-build-version-control.json"
+    },
+    {
+      "id": "invalid-envelope-too-large",
+      "kind": "invalid-vector",
+      "file": "invalid/envelope-too-large.json"
+    },
+    {
+      "id": "invalid-envelope-duplicate-root",
+      "kind": "invalid-vector",
+      "file": "invalid/envelope-duplicate-root.json"
+    },
+    {
+      "id": "invalid-tools-duplicate-wrapper-property",
+      "kind": "invalid-vector",
+      "file": "invalid/tools-duplicate-wrapper-property.json"
+    },
+    {
+      "id": "invalid-canonical-duplicate-open-json",
+      "kind": "invalid-vector",
+      "file": "invalid/canonical-duplicate-open-json.json"
+    },
+    {
+      "id": "invalid-canonical-lone-surrogate",
+      "kind": "invalid-vector",
+      "file": "invalid/canonical-lone-surrogate.json"
+    },
+    {
+      "id": "invalid-canonical-non-finite",
+      "kind": "invalid-vector",
+      "file": "invalid/canonical-non-finite.json"
+    },
+    {
+      "id": "invalid-canonical-unknown-ancestor",
+      "kind": "invalid-vector",
+      "file": "invalid/canonical-unknown-ancestor.json"
+    },
+    {
+      "id": "invalid-canonical-deep-truncation",
+      "kind": "invalid-vector",
+      "file": "invalid/canonical-deep-truncation.json"
+    },
+    {
+      "id": "invalid-canonical-numeric-property-name",
+      "kind": "invalid-vector",
+      "file": "invalid/canonical-numeric-property-name.json"
+    },
+    {
+      "id": "invalid-canonical-dotted-property-name",
+      "kind": "invalid-vector",
+      "file": "invalid/canonical-dotted-property-name.json"
+    },
+    {
+      "id": "invalid-interaction-predecessor-uppercase",
+      "kind": "invalid-vector",
+      "file": "invalid/interaction-predecessor-uppercase.json"
+    },
+    {
+      "id": "invalid-interaction-bootstrap-as-hash",
+      "kind": "invalid-vector",
+      "file": "invalid/interaction-bootstrap-as-hash.json"
+    },
+    {
+      "id": "invalid-interaction-consumed-short",
+      "kind": "invalid-vector",
+      "file": "invalid/interaction-consumed-short.json"
+    },
+    {
+      "id": "invalid-interaction-head-39",
+      "kind": "invalid-vector",
+      "file": "invalid/interaction-head-39.json"
+    },
+    {
+      "id": "invalid-interaction-ordinal-negative",
+      "kind": "invalid-vector",
+      "file": "invalid/interaction-ordinal-negative.json"
+    },
+    {
+      "id": "invalid-identity-empty",
+      "kind": "invalid-vector",
+      "file": "invalid/identity-empty.json"
+    },
+    {
+      "id": "invalid-identity-control",
+      "kind": "invalid-vector",
+      "file": "invalid/identity-control.json"
+    },
+    {
+      "id": "invalid-identity-too-long",
+      "kind": "invalid-vector",
+      "file": "invalid/identity-too-long.json"
+    },
+    {
+      "id": "invalid-model-alias",
+      "kind": "invalid-vector",
+      "file": "invalid/model-alias.json"
+    },
+    {
+      "id": "invalid-materialize-model-alias",
+      "kind": "invalid-vector",
+      "file": "invalid/materialize-model-alias.json"
+    },
+    {
+      "id": "invalid-materialize-epoch",
+      "kind": "invalid-vector",
+      "file": "invalid/materialize-epoch.json"
+    },
+    {
+      "id": "invalid-materialize-digest-invalid",
+      "kind": "invalid-vector",
+      "file": "invalid/materialize-digest-invalid.json"
+    },
+    {
+      "id": "invalid-materialize-cache-mismatch",
+      "kind": "invalid-vector",
+      "file": "invalid/materialize-cache-mismatch.json"
+    },
+    {
+      "id": "invalid-materialize-continuation-mismatch",
+      "kind": "invalid-vector",
+      "file": "invalid/materialize-continuation-mismatch.json"
+    },
+    {
+      "id": "invalid-materialize-reset-scope-mismatch",
+      "kind": "invalid-vector",
+      "file": "invalid/materialize-reset-scope-mismatch.json"
+    },
+    {
+      "id": "invalid-materialize-current-context",
+      "kind": "invalid-vector",
+      "file": "invalid/materialize-current-context.json"
+    },
+    {
+      "id": "invalid-stream-logical-stable",
+      "kind": "invalid-vector",
+      "file": "invalid/stream-logical-stable.json"
+    },
+    {
+      "id": "invalid-stream-logical-dynamic",
+      "kind": "invalid-vector",
+      "file": "invalid/stream-logical-dynamic.json"
+    },
+    {
+      "id": "invalid-stream-provider-stable",
+      "kind": "invalid-vector",
+      "file": "invalid/stream-provider-stable.json"
+    },
+    {
+      "id": "invalid-stream-provider-dynamic",
+      "kind": "invalid-vector",
+      "file": "invalid/stream-provider-dynamic.json"
+    },
+    {
+      "id": "invalid-segment-payload",
+      "kind": "invalid-vector",
+      "file": "invalid/segment-payload.json"
+    },
+    {
+      "id": "invalid-length-overflow",
+      "kind": "invalid-vector",
+      "file": "invalid/length-overflow.json"
+    }
+  ]
+}

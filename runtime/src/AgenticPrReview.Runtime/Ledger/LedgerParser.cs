@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
+using AgenticPrReview.Runtime.Canonical;
 using Json.Schema;
 
 namespace AgenticPrReview.Runtime.Ledger;

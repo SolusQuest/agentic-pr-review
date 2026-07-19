@@ -2,6 +2,7 @@ node_modules/
 dist/
 .github/actions/agentic-pr-review/dist/
 runtime/tests/fixtures/deterministic/**
+runtime/tests/fixtures/prefix-contract/**
 .codex/
 
 # State v2 fixtures are byte-stable golden artifacts and must not be re-formatted.
@@ -10,6 +11,9 @@ protocol/fixtures/state-manifest-v2-compat/**
 
 # Ledger fixtures are byte-stable golden artifacts and must not be re-formatted.
 protocol/fixtures/v1/provider-session-ledger/**
+
+# Prefix-contract fixtures are byte-stable golden artifacts and must not be re-formatted.
+protocol/fixtures/prefix-contract/**
 
 # Agent-local scratch (never committed)
 .scratch/

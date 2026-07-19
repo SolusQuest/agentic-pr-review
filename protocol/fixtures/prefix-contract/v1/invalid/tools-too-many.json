@@ -1,0 +1,1188 @@
+{
+  "id": "invalid-tools-too-many",
+  "kind": "invalid-vector",
+  "target": "tools-id",
+  "input": {
+    "envelope": {
+      "schemaVersion": 1,
+      "toolsetVersion": 1,
+      "definitions": [
+        {
+          "name": "tool-0",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-1",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-2",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-3",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-4",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-5",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-6",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-7",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-8",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-9",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-10",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-11",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-12",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-13",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-14",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-15",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-16",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-17",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-18",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-19",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-20",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-21",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-22",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-23",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-24",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-25",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-26",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-27",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-28",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-29",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-30",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-31",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-32",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-33",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-34",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-35",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-36",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-37",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-38",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-39",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-40",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-41",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-42",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-43",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-44",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-45",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-46",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-47",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-48",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-49",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-50",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-51",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-52",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-53",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-54",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-55",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-56",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-57",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-58",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-59",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-60",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-61",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-62",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-63",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        },
+        {
+          "name": "tool-64",
+          "description": "Submit the structured review.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          },
+          "policyMetadata": {
+            "risk": "low"
+          }
+        }
+      ]
+    }
+  },
+  "expected": {
+    "csharpCode": "prefix_envelope_invalid",
+    "typescriptCode": "prefix-envelope-invalid",
+    "path": "/definitions"
+  }
+}

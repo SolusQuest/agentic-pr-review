@@ -98,6 +98,8 @@ The ledger must not be raw API request storage. See `docs/20_architecture/securi
 
 The v2 state-bundle manifest for the M4 live-ledger path is defined by `docs/20_architecture/state-manifest-v2.md` (contract library, issue #48). Filesystem I/O, manifest-last local commit, and cross-workflow artifact selection remain out of scope for that library.
 
+The canonical logical projection, append-safe provider-block materialization, hash framing, and golden fixtures for the M4 prefix contract are defined by `docs/20_architecture/prefix-materialization.md` (issue #50).
+
 ## Non-Goals
 
 Do not build these in the initial architecture:

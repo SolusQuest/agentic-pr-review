@@ -1,0 +1,14 @@
+{
+  "id": "digest-template-nul-content",
+  "kind": "digest-vector",
+  "tag": "agentic-pr-review/cache-contract/template/v1",
+  "envelope": {
+    "schemaVersion": 1,
+    "templateVersion": 1,
+    "definition": "line1\u0000line2"
+  },
+  "expected": {
+    "preimageHex": "6167656e7469632d70722d7265766965772f63616368652d636f6e74726163742f74656d706c6174652f7631007b22646566696e6974696f6e223a226c696e65315c75303030306c696e6532222c22736368656d6156657273696f6e223a312c2274656d706c61746556657273696f6e223a317d",
+    "digestHex": "fadf7744a5b5aaf35cc1889aff5cf8ee5137f7ad1cbea6a8b1ff60ed3aafe421"
+  }
+}

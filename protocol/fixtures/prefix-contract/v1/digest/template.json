@@ -1,0 +1,17 @@
+{
+  "id": "digest-template",
+  "kind": "digest-vector",
+  "tag": "agentic-pr-review/cache-contract/template/v1",
+  "envelope": {
+    "schemaVersion": 1,
+    "templateVersion": 3,
+    "definition": {
+      "role": "system",
+      "text": "You are a precise code reviewer."
+    }
+  },
+  "expected": {
+    "preimageHex": "6167656e7469632d70722d7265766965772f63616368652d636f6e74726163742f74656d706c6174652f7631007b22646566696e6974696f6e223a7b22726f6c65223a2273797374656d222c2274657874223a22596f75206172652061207072656369736520636f64652072657669657765722e227d2c22736368656d6156657273696f6e223a312c2274656d706c61746556657273696f6e223a337d",
+    "digestHex": "d5c87b69a0d5d89d58e8c7209b0cbcc9624a3f0646fc19f3cebc7c3f93a5b6cf"
+  }
+}

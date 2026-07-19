@@ -1,0 +1,10 @@
+{
+  "id": "framing-frame-segment",
+  "kind": "framing-vector",
+  "input": {
+    "payloadHex": "7b226b696e64223a2274656d706c617465227d"
+  },
+  "expected": {
+    "framedHex": "000000137b226b696e64223a2274656d706c617465227d"
+  }
+}

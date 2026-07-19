@@ -1,0 +1,14 @@
+{
+  "id": "invalidation-run-metadata",
+  "kind": "invalidation-vector",
+  "mode": "materializer",
+  "baseVectorId": "materialization-bootstrap",
+  "successorVectorId": "materialization-run-metadata",
+  "mutation": "run/provenance metadata",
+  "expected": {
+    "logicalStreamChanged": false,
+    "providerStreamChanged": false,
+    "logicalHashChanged": false,
+    "prefixHashChanged": false
+  }
+}

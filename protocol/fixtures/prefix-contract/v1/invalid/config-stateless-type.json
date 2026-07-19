@@ -1,0 +1,19 @@
+{
+  "id": "invalid-config-stateless-type",
+  "kind": "invalid-vector",
+  "target": "config-id",
+  "input": {
+    "envelope": {
+      "schemaVersion": 1,
+      "cacheConfigVersion": 1,
+      "markerPolicy": "stable-boundary",
+      "eligibility": "min-prefix-1024",
+      "statelessMode": "yes"
+    }
+  },
+  "expected": {
+    "csharpCode": "prefix_envelope_invalid",
+    "typescriptCode": "prefix-envelope-invalid",
+    "path": "/statelessMode"
+  }
+}

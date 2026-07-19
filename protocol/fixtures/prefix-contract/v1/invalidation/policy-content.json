@@ -1,0 +1,14 @@
+{
+  "id": "invalidation-policy-content",
+  "kind": "invalidation-vector",
+  "mode": "materializer",
+  "baseVectorId": "materialization-bootstrap",
+  "successorVectorId": "materialization-policy-content",
+  "mutation": "policy envelope content/version",
+  "expected": {
+    "logicalStreamChanged": true,
+    "providerStreamChanged": true,
+    "logicalHashChanged": true,
+    "prefixHashChanged": true
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "id": "invalid-canonical-unknown-ancestor",
+  "kind": "invalid-vector",
+  "target": "canonical-json",
+  "input": {
+    "envelopeKind": "template",
+    "envelope": {
+      "schemaVersion": 1,
+      "templateVersion": 1,
+      "definition": {
+        "secretToken": {
+          "x": "bad\ud800"
+        }
+      }
+    }
+  },
+  "expected": {
+    "csharpCode": "prefix_canonical_input_rejected",
+    "typescriptCode": "prefix-canonical-input-rejected",
+    "path": "/definition/<untrusted-property>/<untrusted-property>"
+  }
+}

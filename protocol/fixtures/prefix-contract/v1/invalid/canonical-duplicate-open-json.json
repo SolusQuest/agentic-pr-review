@@ -1,0 +1,13 @@
+{
+  "id": "invalid-canonical-duplicate-open-json",
+  "kind": "invalid-vector",
+  "target": "canonical-json",
+  "input": {
+    "envelopeKind": "template",
+    "envelopeJson": "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":{\"a\":1,\"a\":2}}"
+  },
+  "scope": "csharp-only",
+  "expected": {
+    "csharpCode": "prefix_canonical_input_rejected"
+  }
+}

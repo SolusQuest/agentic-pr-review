@@ -1,0 +1,13 @@
+{
+  "id": "invalid-stream-provider-dynamic",
+  "kind": "invalid-vector",
+  "target": "stream-guard",
+  "input": {
+    "stream": "provider-dynamic",
+    "totalBytes": 524357
+  },
+  "expected": {
+    "csharpCode": "prefix_stream_too_large",
+    "causeCode": "provider-dynamic"
+  }
+}

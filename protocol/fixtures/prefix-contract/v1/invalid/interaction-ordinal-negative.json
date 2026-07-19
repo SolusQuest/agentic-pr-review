@@ -1,0 +1,18 @@
+{
+  "id": "invalid-interaction-ordinal-negative",
+  "kind": "invalid-vector",
+  "target": "interaction-id",
+  "input": {
+    "predecessor": {
+      "ledgerSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    "consumedInputSha256": "e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5",
+    "currentHeadSha": "7777777777777777777777777777777777777777",
+    "interactionOrdinal": -1
+  },
+  "expected": {
+    "csharpCode": "prefix_ordinal_invalid",
+    "typescriptCode": "prefix-ordinal-invalid",
+    "path": "/interactionOrdinal"
+  }
+}

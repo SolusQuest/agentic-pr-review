@@ -1,0 +1,10 @@
+{
+  "id": "framing-identity-surrogate-pair",
+  "kind": "framing-vector",
+  "input": {
+    "value": "😀"
+  },
+  "expected": {
+    "framedHex": "00000004f09f9880"
+  }
+}

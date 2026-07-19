@@ -1,0 +1,14 @@
+{
+  "id": "invalidation-adapter-envelope",
+  "kind": "invalidation-vector",
+  "mode": "materializer",
+  "baseVectorId": "materialization-bootstrap",
+  "successorVectorId": "materialization-adapter-envelope",
+  "mutation": "adapter envelope content/version",
+  "expected": {
+    "logicalStreamChanged": false,
+    "providerStreamChanged": false,
+    "logicalHashChanged": false,
+    "prefixHashChanged": true
+  }
+}

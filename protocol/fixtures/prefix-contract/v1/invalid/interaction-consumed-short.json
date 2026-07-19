@@ -1,0 +1,18 @@
+{
+  "id": "invalid-interaction-consumed-short",
+  "kind": "invalid-vector",
+  "target": "interaction-id",
+  "input": {
+    "predecessor": {
+      "ledgerSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    "consumedInputSha256": "e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5",
+    "currentHeadSha": "7777777777777777777777777777777777777777",
+    "interactionOrdinal": 0
+  },
+  "expected": {
+    "csharpCode": "prefix_digest_invalid",
+    "typescriptCode": "prefix-digest-invalid",
+    "path": "/consumedInputSha256"
+  }
+}

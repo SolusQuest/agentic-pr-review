@@ -1,0 +1,13 @@
+{
+  "id": "invalid-canonical-non-finite",
+  "kind": "invalid-vector",
+  "target": "canonical-json",
+  "input": {
+    "envelopeKind": "template",
+    "envelopeJson": "{\"schemaVersion\":1,\"templateVersion\":1,\"definition\":1e999}"
+  },
+  "expected": {
+    "csharpCode": "prefix_canonical_input_rejected",
+    "typescriptCode": "prefix-canonical-input-rejected"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "id": "framing-empty-stream-logical-hash",
+  "kind": "framing-vector",
+  "input": {
+    "ledgerSchemaVersion": 1,
+    "prefixContractVersion": 1
+  },
+  "expected": {
+    "logicalPrefixSha256": "2b0038ca635a03838bfb44604a1131d85b40b3033cfb0fd7ceb9739e9520fd9c"
+  }
+}

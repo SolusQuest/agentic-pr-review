@@ -1,0 +1,17 @@
+{
+  "id": "invalid-canonical-lone-surrogate",
+  "kind": "invalid-vector",
+  "target": "canonical-json",
+  "input": {
+    "envelopeKind": "template",
+    "envelope": {
+      "schemaVersion": 1,
+      "templateVersion": 1,
+      "definition": "bad\ud800"
+    }
+  },
+  "expected": {
+    "csharpCode": "prefix_canonical_input_rejected",
+    "typescriptCode": "prefix-canonical-input-rejected"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "id": "digest-tools",
+  "kind": "digest-vector",
+  "tag": "agentic-pr-review/cache-contract/tools/v1",
+  "envelope": {
+    "schemaVersion": 1,
+    "toolsetVersion": 1,
+    "definitions": [
+      {
+        "name": "submit_review",
+        "description": "Submit the structured review.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "summary": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "summary"
+          ]
+        },
+        "policyMetadata": {
+          "risk": "low"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "preimageHex": "6167656e7469632d70722d7265766965772f63616368652d636f6e74726163742f746f6f6c732f7631007b22646566696e6974696f6e73223a5b7b226465736372697074696f6e223a225375626d6974207468652073747275637475726564207265766965772e222c22696e707574536368656d61223a7b2270726f70657274696573223a7b2273756d6d617279223a7b2274797065223a22737472696e67227d7d2c227265717569726564223a5b2273756d6d617279225d2c2274797065223a226f626a656374227d2c226e616d65223a227375626d69745f726576696577222c22706f6c6963794d65746164617461223a7b227269736b223a226c6f77227d7d5d2c22736368656d6156657273696f6e223a312c22746f6f6c73657456657273696f6e223a317d",
+    "digestHex": "e58c02b21ad200207ab6ae1e8665c2c6c7d2c1413d947b8dd26f7ef14cc1bd48"
+  }
+}

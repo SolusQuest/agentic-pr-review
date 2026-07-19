@@ -1,0 +1,18 @@
+{
+  "id": "invalid-interaction-head-39",
+  "kind": "invalid-vector",
+  "target": "interaction-id",
+  "input": {
+    "predecessor": {
+      "ledgerSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    "consumedInputSha256": "e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5",
+    "currentHeadSha": "777777777777777777777777777777777777777",
+    "interactionOrdinal": 0
+  },
+  "expected": {
+    "csharpCode": "prefix_git_sha_invalid",
+    "typescriptCode": "prefix-git-sha-invalid",
+    "path": "/currentHeadSha"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "framing-tag-logicalPrefix",
+  "kind": "framing-vector",
+  "input": {
+    "tag": "agentic-pr-review/logical-prefix/v1"
+  },
+  "expected": {
+    "preimageHex": "6167656e7469632d70722d7265766965772f6c6f676963616c2d7072656669782f763100"
+  }
+}

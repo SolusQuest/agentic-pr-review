@@ -1,0 +1,13 @@
+{
+  "id": "invalid-stream-logical-stable",
+  "kind": "invalid-vector",
+  "target": "stream-guard",
+  "input": {
+    "stream": "logical-stable",
+    "totalBytes": 1048577
+  },
+  "expected": {
+    "csharpCode": "prefix_stream_too_large",
+    "causeCode": "logical-stable"
+  }
+}
