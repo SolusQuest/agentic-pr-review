@@ -64,6 +64,7 @@ import {
 } from './context.js';
 
 const MAX_LEDGER_CHANGED_FILES = 200 as const;
+const MAX_LEDGER_CHANGED_FILE_PATH_LENGTH = 500 as const;
 const MAX_LEDGER_CHANGED_FILE_VALUE = 1_000_000 as const;
 const CACHE_CONTRACT_IDENTITY_HEADER_KEYS = [
   'providerId',
@@ -155,6 +156,8 @@ export async function invokeLiveRuntime(
   if (
     inputSnapshot.subject.changedFiles.some(
       (file) =>
+        file.path.length > MAX_LEDGER_CHANGED_FILE_PATH_LENGTH ||
+        (file.previousPath?.length ?? 0) > MAX_LEDGER_CHANGED_FILE_PATH_LENGTH ||
         file.additions > MAX_LEDGER_CHANGED_FILE_VALUE ||
         file.deletions > MAX_LEDGER_CHANGED_FILE_VALUE ||
         file.changes > MAX_LEDGER_CHANGED_FILE_VALUE ||

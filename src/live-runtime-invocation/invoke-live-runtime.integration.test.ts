@@ -322,6 +322,34 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
           trustedRoot: root,
         }),
       ).rejects.toMatchObject({ kind: 'options-invalid' });
+      const oversizedPathInputs = [
+        {
+          ...reviewInput.subject.changedFiles[0]!,
+          path: 'x'.repeat(501),
+        },
+        {
+          ...reviewInput.subject.changedFiles[0]!,
+          previousPath: 'x'.repeat(501),
+        },
+      ];
+      for (const oversizedFile of oversizedPathInputs) {
+        await expect(
+          invokeLiveRuntime({
+            command: { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
+            input: {
+              ...reviewInput,
+              subject: {
+                ...reviewInput.subject,
+                changedFiles: [oversizedFile],
+              },
+            },
+            context,
+            manifestInput,
+            timeoutMs: 20_000,
+            trustedRoot: root,
+          }),
+        ).rejects.toMatchObject({ kind: 'options-invalid' });
+      }
       const oversizedManifestInput = {
         ...manifestInput,
         provenance: {
