@@ -23,6 +23,9 @@ export interface SuccessValidationInput {
   input: ReviewInputV1;
   inputSha256: string;
   seams: FsSeams;
+  /** Optional descriptor-backed snapshots supplied by a stronger caller. */
+  resultBytesSnapshot?: Uint8Array;
+  traceBytesSnapshot?: Uint8Array;
 }
 
 /**
@@ -55,15 +58,14 @@ export async function validateSuccessAndBuildResult(
 ): Promise<RuntimeInvocationSuccess> {
   const { resultPath, tracePath, input, inputSha256, seams } = args;
 
-  await statSafeOutputFile('result', resultPath, seams, { silentOnFailure: false });
-  await statSafeOutputFile('trace', tracePath, seams, { silentOnFailure: false });
-
-  const resultBytes = await readSafeOutputBytes('result', resultPath, seams, {
-    silentOnFailure: false,
-  });
-  const traceBytes = await readSafeOutputBytes('trace', tracePath, seams, {
-    silentOnFailure: false,
-  });
+  const resultBytes = args.resultBytesSnapshot
+    ? new Uint8Array(args.resultBytesSnapshot)
+    : (await statSafeOutputFile('result', resultPath, seams, { silentOnFailure: false }),
+      await readSafeOutputBytes('result', resultPath, seams, { silentOnFailure: false }));
+  const traceBytes = args.traceBytesSnapshot
+    ? new Uint8Array(args.traceBytesSnapshot)
+    : (await statSafeOutputFile('trace', tracePath, seams, { silentOnFailure: false }),
+      await readSafeOutputBytes('trace', tracePath, seams, { silentOnFailure: false }));
 
   let resultText: string;
   let traceText: string;

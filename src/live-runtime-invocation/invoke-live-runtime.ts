@@ -1,11 +1,12 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { constants as fsConstants } from 'node:fs';
 import {
   chmod,
-  lstat,
+  open,
   mkdir,
   mkdtemp,
-  readFile,
+  readdir,
   realpath,
   rename,
   rm,
@@ -17,7 +18,11 @@ import type { ReviewInputV1 } from '../protocol/review-input.js';
 import type { ReviewResultV1 } from '../protocol/review-result.js';
 import type { ReviewTraceV1 } from '../protocol/review-trace.js';
 import { canonicalJsonBytes } from '../canonical-json/index.js';
-import { buildStateBundleV2, type StateManifestV2Input } from '../state-v2/index.js';
+import {
+  buildStateBundleV2,
+  classifyStateBundleV2,
+  type StateManifestV2Input,
+} from '../state-v2/index.js';
 import {
   computeMetadataSemanticSha256,
   identityAgrees,
@@ -94,8 +99,19 @@ export async function invokeLiveRuntime(
       message: 'Live runtime invocation was cancelled before preflight.',
     });
 
-  const sensitive = copySensitiveValues(options.sensitiveValues);
+  const commandSnapshot: RuntimeCommand = {
+    executablePath: options.command.executablePath,
+    prefixArgs: options.command.prefixArgs ? [...options.command.prefixArgs] : undefined,
+  };
   const inputBytes = serializeInputBytes(options.input);
+  const inputSnapshot = JSON.parse(new TextDecoder().decode(inputBytes)) as ReviewInputV1;
+  const manifestInputSnapshot = JSON.parse(
+    new TextDecoder().decode(canonicalJsonBytes(options.manifestInput)),
+  ) as StateManifestV2Input;
+  const predecessorSnapshot = options.predecessorLedgerBytes
+    ? new Uint8Array(options.predecessorLedgerBytes)
+    : undefined;
+  const sensitive = copySensitiveValues(options.sensitiveValues);
   const contextBytes = new Uint8Array(canonicalJsonBytes(options.context));
   const parsedContext = parseLiveRuntimeInvocationContext(contextBytes);
   if (!parsedContext.valid)
@@ -104,7 +120,13 @@ export async function invokeLiveRuntime(
       message: `Live context rejected (${parsedContext.code}).`,
     });
   const inputSha256 = sha256Hex(inputBytes);
-  if (options.context.currentInteraction.consumedInputSha256 !== inputSha256)
+  const context = parsedContext.context;
+  if (context.providerMode !== 'synthetic')
+    throw new LiveRuntimeInvocationError({
+      kind: 'options-invalid',
+      message: 'The #55 synthetic executor does not accept live provider mode.',
+    });
+  if (context.currentInteraction.consumedInputSha256 !== inputSha256)
     throw new LiveRuntimeInvocationError({
       kind: 'binding-mismatch',
       message: 'Context consumed-input hash does not match the exact input snapshot.',
@@ -117,8 +139,7 @@ export async function invokeLiveRuntime(
     const inputPath = path.join(invocationDirectory, LIVE_OUTPUT_FILENAMES.input);
     const contextPath = path.join(invocationDirectory, LIVE_CONTEXT_FILENAME);
     const predecessorPath =
-      options.context.transition.kind === 'bootstrap' ||
-      options.context.transition.kind === 'recovery_root'
+      context.transition.kind === 'bootstrap' || context.transition.kind === 'recovery_root'
         ? undefined
         : path.join(invocationDirectory, LIVE_OUTPUT_FILENAMES.predecessorLedger);
     const outputPaths = {
@@ -149,8 +170,8 @@ export async function invokeLiveRuntime(
     assertPrivateBytes([inputBytes, contextBytes], sensitive);
     assertPrivateBytes(
       [
-        ...(options.command.prefixArgs?.map((arg) => new TextEncoder().encode(arg)) ?? []),
-        new TextEncoder().encode(options.command.executablePath),
+        ...(commandSnapshot.prefixArgs?.map((arg) => new TextEncoder().encode(arg)) ?? []),
+        new TextEncoder().encode(commandSnapshot.executablePath),
         ...cliArgs.map((arg) => new TextEncoder().encode(arg)),
       ],
       sensitive,
@@ -158,7 +179,7 @@ export async function invokeLiveRuntime(
     await writePrivate(inputPath, inputBytes);
     await writePrivate(contextPath, contextBytes);
     if (predecessorPath) {
-      const predecessorBytes = options.predecessorLedgerBytes;
+      const predecessorBytes = predecessorSnapshot;
       if (!predecessorBytes)
         throw new LiveRuntimeInvocationError({
           kind: 'options-invalid',
@@ -167,13 +188,13 @@ export async function invokeLiveRuntime(
       assertPrivateBytes([predecessorBytes], sensitive);
       await writePrivate(predecessorPath, predecessorBytes);
     }
-    if (!(await isExecutableFile(options.command.executablePath, fs)))
+    if (!(await isExecutableFile(commandSnapshot.executablePath, fs)))
       throw new LiveRuntimeInvocationError({
         kind: 'executable-invalid',
         message: 'The trusted runtime executable is not executable.',
       });
     const processResult = await runProcess(
-      options.command,
+      commandSnapshot,
       cliArgs,
       options.timeoutMs,
       options.signal,
@@ -205,9 +226,11 @@ export async function invokeLiveRuntime(
       success = await validateSuccessAndBuildResult({
         resultPath: outputPaths.result,
         tracePath: outputPaths.trace,
-        input: options.input,
+        input: inputSnapshot,
         inputSha256,
         seams: fs,
+        resultBytesSnapshot: resultBytes,
+        traceBytesSnapshot: traceBytes,
       });
     } catch (error) {
       const kind =
@@ -229,14 +252,18 @@ export async function invokeLiveRuntime(
         message: 'Live result/trace validation failed.',
       });
     }
-    if (success.trace.mode !== 'live-provider' || success.trace.fixture !== null)
+    if (success.trace.mode !== 'live-provider' || success.trace.fixture !== undefined)
       throw new LiveRuntimeInvocationError({
         kind: 'trace-invalid',
         message: 'Live trace must use live-provider mode without a fixture.',
       });
-    const ledger = validateCandidateLedgerForHost(ledgerBytes);
+    const ledger = validateCandidateLedgerForHost(
+      ledgerBytes,
+      { ...context, outcome: success.result },
+      predecessorSnapshot,
+    );
     const ledgerHeader = ledger.header as { kind?: unknown };
-    if (ledgerHeader.kind !== options.context.transition.kind)
+    if (ledgerHeader.kind !== context.transition.kind)
       throw new LiveRuntimeInvocationError({
         kind: 'binding-mismatch',
         message: 'Candidate ledger transition does not match the host context.',
@@ -249,17 +276,18 @@ export async function invokeLiveRuntime(
       });
     const metadata = metadataResult.metadata;
     validateBindings(
-      options.context,
+      context,
       metadata,
       inputSha256,
       success.resultBytes,
       success.traceBytes,
       ledgerBytes,
+      predecessorSnapshot,
     );
     const metadataSemanticSha256 = computeMetadataSemanticSha256(metadata);
     const manifestInput = withHostTransaction(
-      options.manifestInput,
-      options.context,
+      manifestInputSnapshot,
+      context,
       inputSha256,
       success,
       metadataSemanticSha256,
@@ -279,34 +307,59 @@ export async function invokeLiveRuntime(
       built.providerRunMetadataBytes,
     );
     await writePrivate(path.join(staging, 'manifest.json'), built.manifestBytes);
+    const entries = await readdir(staging, { withFileTypes: true });
+    const stagedLedger = await readOutput(
+      path.join(staging, 'ledger.json'),
+      'candidate-ledger-invalid',
+    );
+    const stagedMetadata = await readOutput(
+      path.join(staging, 'provider-run-metadata.json'),
+      'provider-metadata-invalid',
+    );
+    const stagedManifest = await readOutput(path.join(staging, 'manifest.json'), 'result-invalid');
+    if (
+      !equalBytes(stagedLedger, built.ledgerBytes) ||
+      !equalBytes(stagedMetadata, built.providerRunMetadataBytes) ||
+      !equalBytes(stagedManifest, built.manifestBytes)
+    )
+      throw new LiveRuntimeInvocationError({
+        kind: 'local-commit-failed',
+        message: 'Staged state-bundle bytes changed before publication.',
+      });
+    const classification = classifyStateBundleV2({
+      entryListing: entries.map((entry) => ({ name: entry.name, isRegularFile: entry.isFile() })),
+      manifestBytes: stagedManifest,
+      ledgerBytes: stagedLedger,
+      providerRunMetadataBytes: stagedMetadata,
+    });
+    if (classification.kind !== 'valid')
+      throw new LiveRuntimeInvocationError({
+        kind: 'local-commit-failed',
+        message: 'Staged state bundle failed final classification.',
+      });
     if (options.signal?.aborted)
       throw new LiveRuntimeInvocationError({
         kind: 'cancelled',
         message: 'Live invocation was cancelled before local commit.',
       });
     await rename(staging, bundle);
-    const warnings: string[] = [];
-    const lease: ValidatedLocalCandidateLease = {
+    return new LocalCandidateLease({
       bundleDirectory: bundle,
-      manifest: structuredClone(built.manifest),
-      manifestBytes: new Uint8Array(built.manifestBytes),
-      ledgerBytes: new Uint8Array(built.ledgerBytes),
-      providerRunMetadataBytes: new Uint8Array(built.providerRunMetadataBytes),
+      manifest: built.manifest,
+      manifestBytes: built.manifestBytes,
+      ledgerBytes: built.ledgerBytes,
+      providerRunMetadataBytes: built.providerRunMetadataBytes,
       result: success.result,
       trace: success.trace,
-      resultBytes: new Uint8Array(success.resultBytes),
-      traceBytes: new Uint8Array(success.traceBytes),
+      resultBytes: success.resultBytes,
+      traceBytes: success.traceBytes,
       inputSha256,
       resultSha256: sha256Hex(success.resultBytes),
       traceSha256: sha256Hex(success.traceBytes),
       candidateLedgerSha256: sha256Hex(ledgerBytes),
       metadataSemanticSha256,
-      cleanupWarnings: warnings,
-      release: async () => {
-        await rm(leaseContainer!, { recursive: true, force: true });
-      },
-    };
-    return lease;
+      releaseDirectory: leaseContainer!,
+    });
   } catch (error) {
     if (leaseContainer)
       await rm(leaseContainer, { recursive: true, force: true }).catch(() => undefined);
@@ -317,6 +370,101 @@ export async function invokeLiveRuntime(
     });
   } finally {
     await rm(invocationDirectory, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
+  return a.byteLength === b.byteLength && a.every((value, index) => value === b[index]);
+}
+
+class LocalCandidateLease implements ValidatedLocalCandidateLease {
+  private readonly manifestValue: ValidatedLocalCandidateLease['manifest'];
+  private readonly manifestBytesValue: Uint8Array;
+  private readonly ledgerBytesValue: Uint8Array;
+  private readonly metadataBytesValue: Uint8Array;
+  private readonly resultValue: ReviewResultV1;
+  private readonly traceValue: ReviewTraceV1;
+  private readonly resultBytesValue: Uint8Array;
+  private readonly traceBytesValue: Uint8Array;
+  private readonly releaseDirectory: string;
+  private releasePromise: Promise<void> | undefined;
+  private readonly warnings: string[] = [];
+
+  constructor(args: {
+    bundleDirectory: string;
+    manifest: ValidatedLocalCandidateLease['manifest'];
+    manifestBytes: Uint8Array;
+    ledgerBytes: Uint8Array;
+    providerRunMetadataBytes: Uint8Array;
+    result: ReviewResultV1;
+    trace: ReviewTraceV1;
+    resultBytes: Uint8Array;
+    traceBytes: Uint8Array;
+    inputSha256: string;
+    resultSha256: string;
+    traceSha256: string;
+    candidateLedgerSha256: string;
+    metadataSemanticSha256: string;
+    releaseDirectory: string;
+  }) {
+    this.bundleDirectory = args.bundleDirectory;
+    this.manifestValue = structuredClone(args.manifest);
+    this.manifestBytesValue = new Uint8Array(args.manifestBytes);
+    this.ledgerBytesValue = new Uint8Array(args.ledgerBytes);
+    this.metadataBytesValue = new Uint8Array(args.providerRunMetadataBytes);
+    this.resultValue = structuredClone(args.result);
+    this.traceValue = structuredClone(args.trace);
+    this.resultBytesValue = new Uint8Array(args.resultBytes);
+    this.traceBytesValue = new Uint8Array(args.traceBytes);
+    this.inputSha256 = args.inputSha256;
+    this.resultSha256 = args.resultSha256;
+    this.traceSha256 = args.traceSha256;
+    this.candidateLedgerSha256 = args.candidateLedgerSha256;
+    this.metadataSemanticSha256 = args.metadataSemanticSha256;
+    this.releaseDirectory = args.releaseDirectory;
+  }
+
+  readonly bundleDirectory: string;
+  readonly inputSha256: string;
+  readonly resultSha256: string;
+  readonly traceSha256: string;
+  readonly candidateLedgerSha256: string;
+  readonly metadataSemanticSha256: string;
+  get manifest() {
+    return structuredClone(this.manifestValue);
+  }
+  get manifestBytes() {
+    return new Uint8Array(this.manifestBytesValue);
+  }
+  get ledgerBytes() {
+    return new Uint8Array(this.ledgerBytesValue);
+  }
+  get providerRunMetadataBytes() {
+    return new Uint8Array(this.metadataBytesValue);
+  }
+  get result() {
+    return structuredClone(this.resultValue);
+  }
+  get trace() {
+    return structuredClone(this.traceValue);
+  }
+  get resultBytes() {
+    return new Uint8Array(this.resultBytesValue);
+  }
+  get traceBytes() {
+    return new Uint8Array(this.traceBytesValue);
+  }
+  get cleanupWarnings() {
+    return [...this.warnings];
+  }
+
+  release(): Promise<void> {
+    this.releasePromise ??= rm(this.releaseDirectory, { recursive: true, force: true }).catch(
+      () => {
+        this.warnings.push('candidate cleanup failed');
+      },
+    );
+    return this.releasePromise;
   }
 }
 
@@ -367,27 +515,29 @@ async function writePrivate(file: string, bytes: Uint8Array): Promise<void> {
 }
 
 async function readOutput(file: string, kind: LiveRuntimeErrorKind): Promise<Uint8Array> {
-  let stats;
+  let handle;
   try {
-    stats = await lstat(file);
-  } catch {
-    throw new LiveRuntimeInvocationError({
-      kind: 'missing-output',
-      message: 'review-live output is missing.',
-    });
-  }
-  if (!stats.isFile() || stats.isSymbolicLink() || stats.size > 8 * 1024 * 1024)
-    throw new LiveRuntimeInvocationError({
-      kind: 'unsafe-output-file',
-      message: 'review-live output is not a bounded regular file.',
-    });
-  try {
-    return new Uint8Array(await readFile(file));
+    handle = await open(file, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    const before = await handle.stat();
+    if (!before.isFile() || before.size > 8 * 1024 * 1024) throw new Error('unsafe');
+    const bytes = new Uint8Array(await handle.readFile());
+    const after = await handle.stat();
+    if (
+      !after.isFile() ||
+      after.size !== before.size ||
+      after.dev !== before.dev ||
+      after.ino !== before.ino ||
+      after.mtimeMs !== before.mtimeMs
+    )
+      throw new Error('unstable');
+    return bytes;
   } catch {
     throw new LiveRuntimeInvocationError({
       kind,
-      message: 'review-live output could not be read.',
+      message: 'review-live output could not be safely read.',
     });
+  } finally {
+    await handle?.close().catch(() => undefined);
   }
 }
 
@@ -398,6 +548,7 @@ function validateBindings(
   resultBytes: Uint8Array,
   traceBytes: Uint8Array,
   ledgerBytes: Uint8Array,
+  predecessorBytes: Uint8Array | undefined,
 ): void {
   const expected = {
     providerId: context.cacheContractIdentity.providerId as string,
@@ -412,7 +563,13 @@ function validateBindings(
     metadata.consumedInputSha256 !== inputHash ||
     metadata.resultSha256 !== sha256Hex(resultBytes) ||
     metadata.traceSha256 !== sha256Hex(traceBytes) ||
-    metadata.candidateLedgerSha256 !== sha256Hex(ledgerBytes)
+    metadata.candidateLedgerSha256 !== sha256Hex(ledgerBytes) ||
+    metadata.predecessorLedgerSha256 !==
+      (context.transition.kind === 'bootstrap' || context.transition.kind === 'recovery_root'
+        ? 'bootstrap'
+        : sha256Hex(predecessorBytes!)) ||
+    /^0+$/.test(metadata.logicalPrefixSha256) ||
+    /^0+$/.test(metadata.prefixSha256)
   )
     throw new LiveRuntimeInvocationError({
       kind: 'binding-mismatch',
@@ -466,6 +623,15 @@ function runProcess(
   signal: AbortSignal | undefined,
 ): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(
+        new LiveRuntimeInvocationError({
+          kind: 'cancelled',
+          message: 'Live runtime invocation was cancelled before spawn.',
+        }),
+      );
+      return;
+    }
     let child;
     try {
       child = spawn(command.executablePath, [...(command.prefixArgs ?? []), ...args], {
@@ -491,23 +657,38 @@ function runProcess(
       stderr: Buffer[] = [];
     let stdoutBytes = 0,
       stderrBytes = 0,
-      settled = false;
-    const finish = (result: ProcessResult) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        signal?.removeEventListener('abort', abort);
-        resolve(result);
+      closeObserved = false,
+      terminalError: LiveRuntimeInvocationError | undefined,
+      completed = false;
+    const killChild = () => {
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        /* process may already be gone */
       }
+      setTimeout(() => {
+        if (!closeObserved) {
+          try {
+            child.kill('SIGKILL');
+          } catch {
+            /* process may already be gone */
+          }
+        }
+      }, 100);
     };
     const fail = (error: LiveRuntimeInvocationError) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        signal?.removeEventListener('abort', abort);
-        child.kill('SIGKILL');
-        reject(error);
-      }
+      if (completed || terminalError) return;
+      terminalError = error;
+      killChild();
+      if (closeObserved) finish();
+    };
+    const finish = () => {
+      if (completed || !closeObserved) return;
+      completed = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      if (terminalError) reject(terminalError);
+      else resolve({ exitCode, stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr) });
     };
     const append = (target: Buffer[], chunk: Buffer, stream: 'stdout' | 'stderr') => {
       const bytes =
@@ -535,11 +716,13 @@ function runProcess(
         }),
       ),
     );
-    child.on('close', (code: number | null) =>
-      finish({ exitCode: code, stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr) }),
-    );
+    let exitCode: number | null = null;
+    child.on('close', (code: number | null) => {
+      exitCode = code;
+      closeObserved = true;
+      finish();
+    });
     const abort = () => {
-      child.kill('SIGKILL');
       fail(
         new LiveRuntimeInvocationError({
           kind: 'cancelled',
@@ -549,7 +732,6 @@ function runProcess(
     };
     signal?.addEventListener('abort', abort, { once: true });
     const timer = setTimeout(() => {
-      child.kill('SIGKILL');
       fail(
         new LiveRuntimeInvocationError({
           kind: 'timed-out',

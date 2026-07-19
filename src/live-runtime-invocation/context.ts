@@ -1,6 +1,14 @@
 import { Ajv } from 'ajv';
 import schema from '../../protocol/schemas/live-runtime-invocation-context.v1.json' with { type: 'json' };
 import { LIVE_CONTEXT_MAX_BYTES } from './constants.js';
+import {
+  computeAdapterId,
+  computeCacheContractDigest,
+  computeCacheConfigId,
+  computePolicyId,
+  computeTemplateId,
+  computeToolDefinitionId,
+} from '../prefix-contract/digest.js';
 
 export type LiveContextErrorCode =
   | 'live-context-over-bound'
@@ -8,6 +16,7 @@ export type LiveContextErrorCode =
   | 'live-context-invalid-utf8'
   | 'live-context-invalid-json'
   | 'live-context-duplicate-property'
+  | 'live-context-version'
   | 'live-context-unicode'
   | 'live-context-schema'
   | 'live-context-semantic';
@@ -70,6 +79,13 @@ export function parseLiveRuntimeInvocationContext(bytes: Uint8Array): LiveContex
   }
   if (hasDuplicateJsonProperty(text))
     return { valid: false, code: 'live-context-duplicate-property' };
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    (value as { schemaVersion?: unknown }).schemaVersion !== 1
+  )
+    return { valid: false, code: 'live-context-version' };
   if (hasLoneSurrogate(value)) return { valid: false, code: 'live-context-unicode' };
   if (!validateSchema(value)) return { valid: false, code: 'live-context-schema' };
   if (!validateSemanticDomains(value as unknown as LiveRuntimeInvocationContextV1))
@@ -88,7 +104,30 @@ function validateSemanticDomains(context: LiveRuntimeInvocationContextV1): boole
     context.providerMode,
     context.producingRun,
   ];
-  return !controlFields.some((value) => containsForbiddenControl(value));
+  if (controlFields.some((value) => containsForbiddenControl(value))) return false;
+  const identity = context.cacheContractIdentity;
+  const envelopes = context.cacheContractEnvelopes;
+  const computed = [
+    [computeTemplateId(envelopes.template), identity.templateId],
+    [computePolicyId(envelopes.policy), identity.policyId],
+    [computeToolDefinitionId(envelopes.tools), identity.toolDefinitionId],
+    [computeCacheConfigId(envelopes.cacheConfig), identity.cacheConfigId],
+    [computeAdapterId(envelopes.adapter), identity.adapterId],
+  ] as const;
+  const cacheDigest = computeCacheContractDigest({
+    adapterId: String(identity.adapterId),
+    cacheConfigId: String(identity.cacheConfigId),
+    modelId: String(identity.modelId),
+    policyId: String(identity.policyId),
+    providerId: String(identity.providerId),
+    templateId: String(identity.templateId),
+    toolDefinitionId: String(identity.toolDefinitionId),
+  });
+  return (
+    computed.every(([result, expected]) => result.ok && result.value === expected) &&
+    cacheDigest.ok &&
+    cacheDigest.value === context.currentInteraction.cacheContractDigest
+  );
 }
 
 function containsForbiddenControl(value: unknown): boolean {
@@ -199,7 +238,8 @@ function hasDuplicateJsonProperty(text: string): boolean {
       }
       return false;
     }
-    while (index < text.length && !',]}\s'.includes(text[index])) index += 1;
+    while (index < text.length && !',]}'.includes(text[index]) && !/\s/.test(text[index] ?? ''))
+      index += 1;
     return false;
   };
   return skipValue();

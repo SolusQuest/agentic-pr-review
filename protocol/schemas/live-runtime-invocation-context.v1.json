@@ -99,18 +99,70 @@
       }
     },
     "transition": {
+      "oneOf": [
+        { "$ref": "#/$defs/bootstrapTransition" },
+        { "$ref": "#/$defs/continuationTransition" },
+        { "$ref": "#/$defs/resetTransition" },
+        { "$ref": "#/$defs/recoveryRootTransition" }
+      ]
+    },
+    "bootstrapTransition": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind"],
+      "required": ["kind", "reason", "predecessorLedgerSha256", "predecessorManifestSha256"],
       "properties": {
-        "kind": { "enum": ["bootstrap", "continuation", "reset", "recovery_root"] },
+        "kind": { "const": "bootstrap" },
+        "reason": { "const": "new_session" },
+        "predecessorLedgerSha256": { "const": "bootstrap" },
+        "predecessorManifestSha256": { "const": "bootstrap" }
+      }
+    },
+    "continuationTransition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "predecessorLedgerSha256",
+        "predecessorLedgerEpoch",
+        "predecessorStateGeneration"
+      ],
+      "properties": {
+        "kind": { "const": "continuation" },
+        "predecessorLedgerSha256": { "$ref": "#/$defs/hash" },
+        "predecessorLedgerEpoch": { "$ref": "#/$defs/epoch" },
+        "predecessorStateGeneration": { "type": "integer", "minimum": 0, "maximum": 1000000 }
+      }
+    },
+    "resetTransition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "predecessorLedgerSha256",
+        "predecessorManifestSha256",
+        "predecessorLedgerEpoch",
+        "predecessorStateGeneration",
+        "reason"
+      ],
+      "properties": {
+        "kind": { "const": "reset" },
+        "predecessorLedgerSha256": { "$ref": "#/$defs/hash" },
+        "predecessorManifestSha256": { "$ref": "#/$defs/hash" },
+        "predecessorLedgerEpoch": { "$ref": "#/$defs/epoch" },
+        "predecessorStateGeneration": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "reason": { "enum": ["base_change", "head_history_discontinuity", "cache_contract_change"] }
+      }
+    },
+    "recoveryRootTransition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "predecessorLedgerSha256", "predecessorManifestSha256", "reason"],
+      "properties": {
+        "kind": { "const": "recovery_root" },
+        "predecessorLedgerSha256": { "const": "bootstrap" },
+        "predecessorManifestSha256": { "const": "bootstrap" },
         "reason": {
-          "type": "string",
           "enum": [
-            "new_session",
-            "base_change",
-            "head_history_discontinuity",
-            "cache_contract_change",
             "corrupt_accepted_artifact",
             "integrity_mismatch",
             "unsafe_provenance",
@@ -119,15 +171,7 @@
             "over_bound_ledger",
             "unavailable_accepted_artifact"
           ]
-        },
-        "predecessorLedgerSha256": {
-          "anyOf": [{ "$ref": "#/$defs/hash" }, { "const": "bootstrap" }]
-        },
-        "predecessorManifestSha256": {
-          "anyOf": [{ "$ref": "#/$defs/hash" }, { "const": "bootstrap" }]
-        },
-        "predecessorLedgerEpoch": { "$ref": "#/$defs/epoch" },
-        "predecessorStateGeneration": { "type": "integer", "minimum": 0, "maximum": 1000000 }
+        }
       }
     },
     "currentInteraction": {

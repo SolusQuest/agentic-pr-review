@@ -4,7 +4,7 @@ using Json.Schema;
 
 namespace AgenticPrReview.Runtime;
 
-public enum SchemaKind { Input, Result, Trace, Ledger, LiveContext }
+public enum SchemaKind { Input, Result, Trace, Ledger, LiveContext, ProviderRunMetadata }
 
 public sealed class SchemaContracts
 {
@@ -14,14 +14,16 @@ public sealed class SchemaContracts
     private readonly JsonSchema trace;
     private readonly JsonSchema ledger;
     private readonly JsonSchema liveContext;
+    private readonly JsonSchema providerRunMetadata;
 
-    private SchemaContracts(JsonSchema input, JsonSchema result, JsonSchema trace, JsonSchema ledger, JsonSchema liveContext)
+    private SchemaContracts(JsonSchema input, JsonSchema result, JsonSchema trace, JsonSchema ledger, JsonSchema liveContext, JsonSchema providerRunMetadata)
     {
         this.input = input;
         this.result = result;
         this.trace = trace;
         this.ledger = ledger;
         this.liveContext = liveContext;
+        this.providerRunMetadata = providerRunMetadata;
     }
 
     public static SchemaContracts Load(Assembly assembly)
@@ -39,7 +41,8 @@ public sealed class SchemaContracts
         ReadSchema(assembly, "AgenticPrReview.Protocol.review-result.v1.json"),
         ReadSchema(assembly, "AgenticPrReview.Protocol.review-trace.v1.json"),
         ReadSchema(assembly, "AgenticPrReview.Protocol.provider-session-ledger.v1.json"),
-        ReadSchema(assembly, "AgenticPrReview.Protocol.live-runtime-invocation-context.v1.json"));
+        ReadSchema(assembly, "AgenticPrReview.Protocol.live-runtime-invocation-context.v1.json"),
+        ReadSchema(assembly, "AgenticPrReview.Protocol.provider-run-metadata.v1.json"));
 
     public bool IsValid(SchemaKind kind, JsonElement instance) =>
         GetSchema(kind).Evaluate(instance, new EvaluationOptions { OutputFormat = OutputFormat.List }).IsValid;
@@ -52,6 +55,7 @@ public sealed class SchemaContracts
             SchemaKind.Trace => trace,
             SchemaKind.Ledger => ledger,
             SchemaKind.LiveContext => liveContext,
+            SchemaKind.ProviderRunMetadata => providerRunMetadata,
             _ => throw new ArgumentOutOfRangeException(nameof(kind)),
         };
 

@@ -15,8 +15,6 @@ namespace AgenticPrReview.Runtime;
 /// </summary>
 internal static class LiveRuntimeApplication
 {
-    private const string Summary = "Synthetic live runtime completed without findings.";
-    private const string Limitation = "No live provider was invoked.";
     private const string ZeroHash = "0000000000000000000000000000000000000000000000000000000000000000";
 
     public static async Task<int> RunAsync(
@@ -52,11 +50,24 @@ internal static class LiveRuntimeApplication
         var contextBytes = await ReadRequiredAsync(fileSystem, invocation.ContextPath, "APR_LIVE_CONTEXT_READ_FAILED");
         if (contextBytes.Length > 2_097_152)
             throw new RuntimeFailure(10, "APR_LIVE_CONTEXT_SCHEMA_INVALID", "Live context exceeds its byte cap.");
+        if (contextBytes.AsSpan().StartsWith(new byte[] { 0xEF, 0xBB, 0xBF }))
+            throw new RuntimeFailure(10, "APR_LIVE_CONTEXT_BOM", "Live context must not contain a UTF-8 BOM.");
+        try
+        {
+            if (HasDuplicateJsonProperties(contextBytes))
+                throw new RuntimeFailure(10, "APR_LIVE_CONTEXT_DUPLICATE_PROPERTY", "Live context contains a duplicate property.");
+        }
+        catch (JsonException)
+        {
+            // ParseJson below owns syntax classification and precedence.
+        }
 
         using var inputDocument = ParseJson(inputBytes, "APR_INPUT_JSON_INVALID", "Input is not valid JSON.");
         using var contextDocument = ParseJson(contextBytes, "APR_LIVE_CONTEXT_JSON_INVALID", "Live context is not valid JSON.");
         if (!schemas.IsValid(SchemaKind.LiveContext, contextDocument.RootElement))
             throw new RuntimeFailure(10, "APR_LIVE_CONTEXT_SCHEMA_INVALID", "Live context does not satisfy LiveRuntimeInvocationContextV1.");
+        if (contextDocument.RootElement.GetProperty("providerMode").GetString() != "synthetic")
+            throw new RuntimeFailure(10, "APR_LIVE_PROVIDER_UNAVAILABLE", "The #55 executor does not accept live provider mode.");
 
         if (!schemas.IsValid(SchemaKind.Input, inputDocument.RootElement))
             throw new RuntimeFailure(10, "APR_INPUT_SCHEMA_INVALID", "Input does not satisfy ReviewInputV1.");
@@ -78,7 +89,7 @@ internal static class LiveRuntimeApplication
         string expectedSubjectDigest;
         try
         {
-            var canonicalSubject = JsonElementCanonicalizer.Canonicalize(inputDocument.RootElement.GetProperty("subject"), 64, 512, 4_096, long.MaxValue, out _);
+            var canonicalSubject = JsonElementCanonicalizer.Canonicalize(inputDocument.RootElement.GetProperty("subject"), int.MaxValue, int.MaxValue, int.MaxValue, long.MaxValue, out _);
             var tag = Encoding.UTF8.GetBytes("agentic-pr-review/review-subject/v1");
             var framed = new byte[tag.Length + 1 + canonicalSubject.Length];
             tag.CopyTo(framed, 0);
@@ -93,6 +104,10 @@ internal static class LiveRuntimeApplication
         if (!StringComparer.Ordinal.Equals(expectedSubjectDigest, currentInteraction.GetProperty("subjectDigest").GetString()))
             throw new RuntimeFailure(10, "APR_LIVE_TRANSITION_INVALID", "Context subject digest does not match ReviewInputV1.subject.");
         var transition = ReadTransition(contextDocument.RootElement, identities);
+        var transitionKind = contextDocument.RootElement.GetProperty("transition").GetProperty("kind").GetString();
+        var rootTransition = transitionKind is "bootstrap" or "recovery_root";
+        if (rootTransition != (invocation.PredecessorLedgerPath is null))
+            throw new RuntimeFailure(10, "APR_LIVE_TRANSITION_INVALID", "Predecessor path presence does not match the transition kind.");
         ValidatedLedger? predecessor = null;
         byte[] predecessorBytes = [];
         if (invocation.PredecessorLedgerPath is not null)
@@ -125,21 +140,49 @@ internal static class LiveRuntimeApplication
         var contextOutcome = LedgerBuilder.BuildReviewContext(source, identities, interaction);
         if (contextOutcome.Value is null)
             throw new RuntimeFailure(20, "APR_CANDIDATE_LEDGER_SELF_VALIDATION_FAILED", "Candidate context record failed self-validation.");
+        var envelopes = contextDocument.RootElement.GetProperty("cacheContractEnvelopes");
+        var sessionEpoch = contextDocument.RootElement.GetProperty("sessionEpoch").GetString()!;
+        var prefixOutcome = PrefixMaterializer.Materialize(new PrefixMaterializationInput(
+            predecessor is null || transition is BootstrapTransition or RecoveryRootTransition
+                ? MaterializationHistory.BootstrapHistory.Instance
+                : transition is ContinuationTransition
+                    ? new MaterializationHistory.ContinuationHistory(predecessor!)
+                    : new MaterializationHistory.ResetHistory(predecessor!),
+            source,
+            interaction,
+            identities,
+            sessionEpoch,
+            new RawCacheContractEnvelopes(
+                envelopes.GetProperty("template"), envelopes.GetProperty("policy"),
+                envelopes.GetProperty("tools"), envelopes.GetProperty("cacheConfig"),
+                envelopes.GetProperty("adapter"))));
+        if (prefixOutcome.Value is null)
+            throw new RuntimeFailure(20, "APR_LIVE_CONTEXT_SEMANTIC_INVALID", "Cache-contract envelopes failed independent validation.");
 
+        ILiveProviderExecutor executor = new SyntheticLiveProviderExecutor();
+        var observation = executor.Execute(input, inputHash);
         var result = new ReviewResult(
             1,
             GetRuntimeVersion(),
             inputHash,
-            Summary,
+            observation.Summary,
             [],
-            [Limitation],
+            observation.Limitations,
             [],
             [],
             new ReviewTraceReference(null, ZeroHash));
-        var trace = new ReviewTrace(1, GetRuntimeVersion(), inputHash, "live-provider", null, [], [], []);
+        var trace = new ReviewTrace(1, GetRuntimeVersion(), inputHash, observation.Mode, null, [], [], []);
         var traceBytes = RuntimeJson.SerializeTrace(trace);
         var resultWithTrace = result with { Trace = new ReviewTraceReference(null, Sha256(traceBytes)) };
         var resultBytes = RuntimeJson.SerializeResult(resultWithTrace);
+        using (var resultDocument = ParseJson(resultBytes, "APR_RESULT_JSON_INVALID", "Live result is not valid JSON."))
+        using (var traceDocument = ParseJson(traceBytes, "APR_TRACE_JSON_INVALID", "Live trace is not valid JSON."))
+        {
+            if (!schemas.IsValid(SchemaKind.Result, resultDocument.RootElement) ||
+                !SemanticValidation.HasValidFindingLocations(resultDocument.RootElement) ||
+                !schemas.IsValid(SchemaKind.Trace, traceDocument.RootElement))
+                throw new RuntimeFailure(20, "APR_LIVE_OUTPUT_SELF_VALIDATION_FAILED", "Live result or trace failed self-validation.");
+        }
 
         var outcomeSource = new ValidatedOutcomeSource
         {
@@ -171,7 +214,14 @@ internal static class LiveRuntimeApplication
             predecessor is null ? "bootstrap" : Sha256(predecessorBytes),
             Sha256(candidateLedgerBytes),
             producingRunId,
-            producingRunAttempt);
+            producingRunAttempt,
+            prefixOutcome.Value.LogicalPrefixSha256,
+            prefixOutcome.Value.PrefixSha256);
+        using (var metadataDocument = ParseJson(metadataBytes, "APR_METADATA_JSON_INVALID", "Live provider metadata is not valid JSON."))
+        {
+            if (!schemas.IsValid(SchemaKind.ProviderRunMetadata, metadataDocument.RootElement))
+                throw new RuntimeFailure(20, "APR_LIVE_OUTPUT_SELF_VALIDATION_FAILED", "Live provider metadata failed schema validation.");
+        }
 
         var staged = new List<StagedFile>();
         try
@@ -213,6 +263,28 @@ internal static class LiveRuntimeApplication
     {
         try { return JsonDocument.Parse(bytes); }
         catch (JsonException) { throw new RuntimeFailure(10, code, message); }
+    }
+
+    private static bool HasDuplicateJsonProperties(byte[] bytes)
+    {
+        var reader = new Utf8JsonReader(bytes, isFinalBlock: true, state: default);
+        var scopes = new Stack<HashSet<string>>();
+        while (reader.Read())
+        {
+            switch (reader.TokenType)
+            {
+                case JsonTokenType.StartObject:
+                    scopes.Push(new HashSet<string>(StringComparer.Ordinal));
+                    break;
+                case JsonTokenType.EndObject:
+                    scopes.Pop();
+                    break;
+                case JsonTokenType.PropertyName:
+                    if (!scopes.Peek().Add(reader.GetString()!)) return true;
+                    break;
+            }
+        }
+        return false;
     }
 
     private static ExpectedIdentities ReadIdentities(JsonElement stateKey, JsonElement cache)
@@ -284,7 +356,16 @@ internal static class LiveRuntimeApplication
         }).ToImmutableArray();
     }
 
-    private static long Number(JsonElement value) => value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var number) ? number : 0;
+    private static long Number(JsonElement value)
+    {
+        if (value.ValueKind != JsonValueKind.Number)
+            throw new RuntimeFailure(10, "APR_INPUT_SCHEMA_INVALID", "A changed-file count is not numeric.");
+        if (value.TryGetInt64(out var integer)) return integer;
+        if (value.TryGetDecimal(out var decimalValue) && decimalValue == decimal.Truncate(decimalValue) &&
+            decimalValue >= long.MinValue && decimalValue <= long.MaxValue)
+            return (long)decimalValue;
+        throw new RuntimeFailure(10, "APR_INPUT_SCHEMA_INVALID", "A changed-file count is not a mathematical integer.");
+    }
 
     private static byte[] BuildMetadata(
         ExpectedIdentities identities,
@@ -295,7 +376,9 @@ internal static class LiveRuntimeApplication
         string predecessorHash,
         string candidateHash,
         string producingRunId,
-        int producingRunAttempt)
+        int producingRunAttempt,
+        string logicalPrefixSha256,
+        string prefixSha256)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
@@ -306,14 +389,14 @@ internal static class LiveRuntimeApplication
             writer.WriteString("observedProviderId", identities.ProviderId);
             writer.WriteString("resolvedModelId", identities.ModelId);
             writer.WriteString("adapterId", identities.AdapterId);
-            writer.WriteString("logicalPrefixSha256", ZeroHash);
-            writer.WriteString("prefixSha256", ZeroHash);
+            writer.WriteString("logicalPrefixSha256", logicalPrefixSha256);
+            writer.WriteString("prefixSha256", prefixSha256);
             writer.WriteStartObject("capability");
             writer.WriteString("mode", "standard");
-            writer.WriteString("aggregate", "eligible");
+            writer.WriteString("aggregate", "unknown");
             writer.WriteNull("statelessProof");
             writer.WriteEndObject();
-            writer.WriteString("cacheStatus", "miss");
+            writer.WriteString("cacheStatus", "unknown");
             writer.WriteStartObject("normalizedUsage");
             writer.WriteStartArray("attempts"); writer.WriteEndArray();
             writer.WriteStartArray("requests"); writer.WriteEndArray();
@@ -327,7 +410,7 @@ internal static class LiveRuntimeApplication
             writer.WriteEndObject(); writer.WriteEndObject();
             writer.WriteStartArray("errorCodes"); writer.WriteEndArray();
             writer.WriteStartObject("telemetryCompleteness");
-            writer.WriteString("usage", "missing"); writer.WriteString("cache", "unknown"); writer.WriteString("statelessProof", "notApplicable"); writer.WriteString("aggregate", "missing");
+            writer.WriteString("usage", "missing"); writer.WriteString("cache", "missing"); writer.WriteString("statelessProof", "notApplicable"); writer.WriteString("aggregate", "missing");
             writer.WriteEndObject();
             writer.WriteString("producingRunId", producingRunId); writer.WriteNumber("runAttempt", producingRunAttempt);
             writer.WriteString("interactionId", interaction.InteractionId);

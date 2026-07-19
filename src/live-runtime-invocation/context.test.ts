@@ -1,11 +1,49 @@
 import { describe, expect, it } from 'vitest';
 import { LIVE_CONTEXT_MAX_BYTES } from './constants.js';
 import { parseLiveRuntimeInvocationContext } from './context.js';
+import {
+  computeAdapterId,
+  computeCacheContractDigest,
+  computeCacheConfigId,
+  computePolicyId,
+  computeTemplateId,
+  computeToolDefinitionId,
+} from '../prefix-contract/digest.js';
 
 const HASH = 'a'.repeat(64);
 const EPOCH = 'A'.repeat(22);
 
 function context(): Record<string, unknown> {
+  const cacheContractEnvelopes = {
+    template: { definition: {}, schemaVersion: 1, templateVersion: 1 },
+    policy: { constraints: {}, instructions: '', policyVersion: 1, schemaVersion: 1 },
+    tools: { definitions: [], schemaVersion: 1, toolsetVersion: 1 },
+    cacheConfig: {
+      cacheConfigVersion: 1,
+      eligibility: 'unknown',
+      markerPolicy: 'none',
+      schemaVersion: 1,
+      statelessMode: false,
+    },
+    adapter: { adapterBuildVersion: 'test', capabilityProfileVersion: 1, schemaVersion: 1 },
+  };
+  const templateId = computeTemplateId(cacheContractEnvelopes.template);
+  const policyId = computePolicyId(cacheContractEnvelopes.policy);
+  const toolDefinitionId = computeToolDefinitionId(cacheContractEnvelopes.tools);
+  const cacheConfigId = computeCacheConfigId(cacheContractEnvelopes.cacheConfig);
+  const adapterId = computeAdapterId(cacheContractEnvelopes.adapter);
+  if (!templateId.ok || !policyId.ok || !toolDefinitionId.ok || !cacheConfigId.ok || !adapterId.ok)
+    throw new Error('test envelope setup failed');
+  const cacheContractDigest = computeCacheContractDigest({
+    adapterId: adapterId.value,
+    cacheConfigId: cacheConfigId.value,
+    modelId: 'synthetic-model',
+    policyId: policyId.value,
+    providerId: 'synthetic',
+    templateId: templateId.value,
+    toolDefinitionId: toolDefinitionId.value,
+  });
+  if (!cacheContractDigest.ok) throw new Error('test digest setup failed');
   return {
     schemaVersion: 1,
     stateKey: {
@@ -22,28 +60,27 @@ function context(): Record<string, unknown> {
       prefixContractVersion: 1,
       providerId: 'synthetic',
       modelId: 'synthetic-model',
-      adapterId: HASH,
-      templateId: HASH,
-      policyId: HASH,
-      toolDefinitionId: HASH,
-      cacheConfigId: HASH,
+      adapterId: adapterId.value,
+      templateId: templateId.value,
+      policyId: policyId.value,
+      toolDefinitionId: toolDefinitionId.value,
+      cacheConfigId: cacheConfigId.value,
     },
     generation: { stateGeneration: 0, ledgerEpoch: EPOCH },
-    transition: { kind: 'bootstrap', reason: 'new_session' },
+    transition: {
+      kind: 'bootstrap',
+      reason: 'new_session',
+      predecessorLedgerSha256: 'bootstrap',
+      predecessorManifestSha256: 'bootstrap',
+    },
     currentInteraction: {
       interactionId: HASH,
       interactionOrdinal: 0,
       consumedInputSha256: HASH,
       subjectDigest: HASH,
-      cacheContractDigest: HASH,
+      cacheContractDigest: cacheContractDigest.value,
     },
-    cacheContractEnvelopes: {
-      template: { version: 1, content: '\u0000 is valid open content' },
-      policy: {},
-      tools: [],
-      cacheConfig: null,
-      adapter: { mode: 'synthetic' },
-    },
+    cacheContractEnvelopes,
     providerMode: 'synthetic',
     producingRun: { producingRunId: '1', runAttempt: 1 },
   };
