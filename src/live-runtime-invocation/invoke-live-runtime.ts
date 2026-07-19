@@ -42,6 +42,7 @@ import { computeSubjectDigest } from '../prefix-contract/digest.js';
 import { deriveInteractionId } from '../prefix-contract/interaction-id.js';
 import {
   LIVE_CONTEXT_FILENAME,
+  LIVE_CLOSE_DEADLINE_MS,
   LIVE_OUTPUT_FILENAMES,
   LIVE_STREAM_MAX_BYTES,
 } from './constants.js';
@@ -255,6 +256,12 @@ export async function invokeLiveRuntime(
       throw new LiveRuntimeInvocationError({
         kind: 'runtime-exit',
         message: 'review-live stdout was not empty.',
+        exitCode: 0,
+      });
+    if (processResult.stderr.byteLength !== 0)
+      throw new LiveRuntimeInvocationError({
+        kind: 'runtime-exit',
+        message: 'review-live stderr was not empty.',
         exitCode: 0,
       });
 
@@ -573,10 +580,13 @@ async function writePrivate(file: string, bytes: Uint8Array): Promise<void> {
   await writeFile(file, bytes, { flag: 'wx', mode: 0o600 });
 }
 
-async function readOutput(file: string, kind: LiveRuntimeErrorKind): Promise<Uint8Array> {
+export async function readOutput(file: string, kind: LiveRuntimeErrorKind): Promise<Uint8Array> {
   let handle;
   try {
-    handle = await open(file, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    handle = await open(
+      file,
+      fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK,
+    );
     const before = await handle.stat();
     if (!before.isFile() || before.size > 8 * 1024 * 1024) throw new Error('unsafe');
     const bytes = new Uint8Array(await handle.readFile());
@@ -716,7 +726,14 @@ function validateRestorePlan(
   predecessorBytes: Uint8Array | undefined,
 ): void {
   const transition = context.transition;
-  if (transition.kind === 'bootstrap' || transition.kind === 'recovery_root') return;
+  if (transition.kind === 'bootstrap' || transition.kind === 'recovery_root') {
+    if (context.currentInteraction.interactionOrdinal !== 0)
+      throw new LiveRuntimeInvocationError({
+        kind: 'options-invalid',
+        message: 'Root restore plans must use interaction ordinal zero.',
+      });
+    return;
+  }
   if (!predecessorBytes)
     throw new LiveRuntimeInvocationError({
       kind: 'options-invalid',
@@ -834,6 +851,7 @@ export function runProcess(
   signal: AbortSignal | undefined,
   cwd: string,
   spawnFn: typeof spawn = spawn,
+  closeDeadlineMs: number = LIVE_CLOSE_DEADLINE_MS,
 ): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -875,7 +893,8 @@ export function runProcess(
       naturalExitObserved = false,
       terminalError: LiveRuntimeInvocationError | undefined,
       completed = false,
-      postKillTimer: ReturnType<typeof setTimeout> | undefined;
+      postKillTimer: ReturnType<typeof setTimeout> | undefined,
+      postExitTimer: ReturnType<typeof setTimeout> | undefined;
     const killChild = () => {
       try {
         child.kill('SIGTERM');
@@ -892,25 +911,31 @@ export function runProcess(
         }
       }, 100);
     };
-    const fail = (error: LiveRuntimeInvocationError) => {
-      if (completed || terminalError || naturalExitObserved) return;
+    const closeTimeout = () => {
+      if (completed || closeObserved) return;
+      completed = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      const error = terminalError;
+      reject(
+        new LiveRuntimeInvocationError({
+          kind: error?.kind ?? 'runtime-exit',
+          message: `${error?.message ?? 'Live runtime child close was not observed.'} (child close was not observed).`,
+          exitCode: error?.exitCode ?? exitCode ?? undefined,
+          closeObserved: false,
+        }),
+      );
+    };
+    const startCloseDeadline = () => {
+      postExitTimer ??= setTimeout(closeTimeout, closeDeadlineMs);
+    };
+    const fail = (error: LiveRuntimeInvocationError, allowAfterNaturalExit = false) => {
+      if (completed || terminalError || (naturalExitObserved && !allowAfterNaturalExit)) return;
       terminalError = error;
-      killChild();
-      postKillTimer ??= setTimeout(() => {
-        if (!closeObserved && !completed) {
-          completed = true;
-          clearTimeout(timer);
-          signal?.removeEventListener('abort', abort);
-          reject(
-            new LiveRuntimeInvocationError({
-              kind: error.kind,
-              message: `${error.message} (child close was not observed).`,
-              exitCode: error.exitCode,
-              closeObserved: false,
-            }),
-          );
-        }
-      }, 2_000);
+      if (!naturalExitObserved) {
+        killChild();
+        postKillTimer ??= setTimeout(closeTimeout, 2_000);
+      }
       if (closeObserved) finish();
     };
     const finish = () => {
@@ -918,6 +943,7 @@ export function runProcess(
       completed = true;
       clearTimeout(timer);
       if (postKillTimer) clearTimeout(postKillTimer);
+      if (postExitTimer) clearTimeout(postExitTimer);
       signal?.removeEventListener('abort', abort);
       if (terminalError) reject(terminalError);
       else resolve({ exitCode, stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr) });
@@ -931,6 +957,7 @@ export function runProcess(
             kind: 'stream-limit-exceeded',
             message: 'Live runtime stream exceeded its cap.',
           }),
+          true,
         );
         return;
       }
@@ -953,6 +980,7 @@ export function runProcess(
       if (!terminalError && !naturalExitObserved) {
         naturalExitObserved = true;
         exitCode = code;
+        startCloseDeadline();
       }
     });
     child.on('close', (code: number | null) => {

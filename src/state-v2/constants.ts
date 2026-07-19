@@ -8,6 +8,7 @@
 
 export const MANIFEST_MAX_BYTES = 65536 as const;
 export const LEDGER_MAX_BYTES = 524288 as const;
+export const LEDGER_CANONICAL_MAX_BYTES = 262144 as const;
 export const METADATA_MAX_BYTES = 32768 as const;
 
 export const LEDGER_FILENAME = 'ledger.json' as const;

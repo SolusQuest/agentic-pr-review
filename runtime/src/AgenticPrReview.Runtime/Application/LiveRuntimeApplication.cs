@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Immutable;
 using System.Globalization;
 using System.Security.Cryptography;
@@ -66,7 +67,7 @@ internal static class LiveRuntimeApplication
         if (!contextDocument.RootElement.TryGetProperty("schemaVersion", out var schemaVersion) ||
             !IsMathematicalInteger(schemaVersion, 1))
             throw new RuntimeFailure(10, "APR_LIVE_CONTEXT_VERSION", "Live context schema version is unsupported.");
-        if (ContainsLoneSurrogate(contextDocument.RootElement))
+        if (ContainsLoneSurrogate(contextBytes))
             throw new RuntimeFailure(10, "APR_LIVE_CONTEXT_UNICODE", "Live context contains an unpaired surrogate.");
         if (!schemas.IsValid(SchemaKind.LiveContext, contextDocument.RootElement))
             throw new RuntimeFailure(10, "APR_LIVE_CONTEXT_SCHEMA_INVALID", "Live context does not satisfy LiveRuntimeInvocationContextV1.");
@@ -79,6 +80,11 @@ internal static class LiveRuntimeApplication
             throw new RuntimeFailure(10, "APR_INPUT_SCHEMA_INVALID", "Input does not satisfy ReviewInputV1.");
         var input = JsonSerializer.Deserialize(inputDocument.RootElement, RuntimeJsonContext.Default.ReviewInput)
             ?? throw new RuntimeFailure(10, "APR_INPUT_SCHEMA_INVALID", "Input does not satisfy ReviewInputV1.");
+        if (!StringComparer.Ordinal.Equals(input.Host.Review.RuntimeProvider, "test"))
+            throw new RuntimeFailure(10, "APR_INPUT_RUNTIME_PROVIDER_INVALID", "The #55 live seam requires the host test runtime provider.");
+        if (input.RequestedRuntimeVersion is not null &&
+            !StringComparer.Ordinal.Equals(input.RequestedRuntimeVersion, GetRuntimeVersion()))
+            throw new RuntimeFailure(10, "APR_RUNTIME_VERSION_MISMATCH", "Requested runtime version does not match this binary.");
 
         var inputHash = Sha256(inputBytes);
         var currentInteraction = contextDocument.RootElement.GetProperty("currentInteraction");
@@ -289,30 +295,22 @@ internal static class LiveRuntimeApplication
                     scopes.Pop();
                     break;
                 case JsonTokenType.PropertyName:
-                    if (!scopes.Peek().Add(reader.GetString()!)) return true;
+                    if (!scopes.Peek().Add(DecodeJsonStringToken(reader))) return true;
                     break;
             }
         }
         return false;
     }
 
-    private static bool ContainsLoneSurrogate(JsonElement value)
+    private static bool ContainsLoneSurrogate(ReadOnlySpan<byte> bytes)
     {
-        switch (value.ValueKind)
+        var reader = new Utf8JsonReader(bytes, isFinalBlock: true, state: default);
+        while (reader.Read())
         {
-            case JsonValueKind.String:
-                return ContainsLoneSurrogate(value.GetString() ?? string.Empty);
-            case JsonValueKind.Object:
-                foreach (var property in value.EnumerateObject())
-                {
-                    if (ContainsLoneSurrogate(property.Name) || ContainsLoneSurrogate(property.Value)) return true;
-                }
-                return false;
-            case JsonValueKind.Array:
-                return value.EnumerateArray().Any(ContainsLoneSurrogate);
-            default:
-                return false;
+            if ((reader.TokenType is JsonTokenType.String or JsonTokenType.PropertyName) &&
+                ContainsLoneSurrogate(DecodeJsonStringToken(reader))) return true;
         }
+        return false;
     }
 
     private static bool ContainsLoneSurrogate(string value)
@@ -350,10 +348,70 @@ internal static class LiveRuntimeApplication
         var stateGeneration = NumberInt64(generation.GetProperty("stateGeneration"), "APR_LIVE_CONTEXT_SEMANTIC_INVALID", 0, 1_000_000);
         var transition = root.GetProperty("transition");
         var kind = transition.GetProperty("kind").GetString();
-        if (kind is "bootstrap" or "recovery_root") return stateGeneration == 0;
+        foreach (var field in new[] { "sessionEpoch", "stateKey", "cacheContractIdentity", "generation", "transition", "currentInteraction", "providerMode", "producingRun" })
+        {
+            if (ContainsForbiddenControl(root.GetProperty(field))) return false;
+        }
+        var currentInteraction = root.GetProperty("currentInteraction");
+        if (kind is "bootstrap" or "recovery_root")
+            return stateGeneration == 0 && NumberInt64(currentInteraction.GetProperty("interactionOrdinal"), "APR_LIVE_CONTEXT_SEMANTIC_INVALID", 0, 1_000_000) == 0;
         var predecessorGeneration = NumberInt64(transition.GetProperty("predecessorStateGeneration"), "APR_LIVE_CONTEXT_SEMANTIC_INVALID", 0, 1_000_000);
         return stateGeneration == predecessorGeneration + 1;
     }
+
+    private static bool ContainsForbiddenControl(JsonElement value)
+    {
+        var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(value.GetRawText()), isFinalBlock: true, state: default);
+        while (reader.Read())
+        {
+            if (reader.TokenType is not (JsonTokenType.String or JsonTokenType.PropertyName)) continue;
+            var text = DecodeJsonStringToken(reader);
+            if (text.Any(character => character < '\u0020' || character == '\u007F')) return true;
+        }
+        return false;
+    }
+
+    private static string DecodeJsonStringToken(Utf8JsonReader reader)
+    {
+        var bytes = reader.HasValueSequence ? reader.ValueSequence.ToArray() : reader.ValueSpan.ToArray();
+        var builder = new StringBuilder();
+        var segmentStart = 0;
+        for (var index = 0; index < bytes.Length; index++)
+        {
+            if (bytes[index] != (byte)'\\') continue;
+            if (index > segmentStart) builder.Append(new UTF8Encoding(false, true).GetString(bytes, segmentStart, index - segmentStart));
+            if (++index >= bytes.Length) break;
+            switch (bytes[index])
+            {
+                case (byte)'"': builder.Append('"'); break;
+                case (byte)'\\': builder.Append('\\'); break;
+                case (byte)'/': builder.Append('/'); break;
+                case (byte)'b': builder.Append('\b'); break;
+                case (byte)'f': builder.Append('\f'); break;
+                case (byte)'n': builder.Append('\n'); break;
+                case (byte)'r': builder.Append('\r'); break;
+                case (byte)'t': builder.Append('\t'); break;
+                case (byte)'u':
+                    if (index + 4 >= bytes.Length) throw new JsonException();
+                    var code = (char)((HexValue(bytes[index + 1]) << 12) | (HexValue(bytes[index + 2]) << 8) | (HexValue(bytes[index + 3]) << 4) | HexValue(bytes[index + 4]));
+                    builder.Append(code);
+                    index += 4;
+                    break;
+                default: throw new JsonException();
+            }
+            segmentStart = index + 1;
+        }
+        if (segmentStart < bytes.Length) builder.Append(new UTF8Encoding(false, true).GetString(bytes, segmentStart, bytes.Length - segmentStart));
+        return builder.ToString();
+    }
+
+    private static int HexValue(byte value) => value switch
+    {
+        >= (byte)'0' and <= (byte)'9' => value - (byte)'0',
+        >= (byte)'a' and <= (byte)'f' => value - (byte)'a' + 10,
+        >= (byte)'A' and <= (byte)'F' => value - (byte)'A' + 10,
+        _ => throw new JsonException()
+    };
 
     private static bool ValidRepository(JsonElement value, System.Text.RegularExpressions.Regex pattern) =>
         value.ValueKind == JsonValueKind.String && value.GetString() is { } text &&

@@ -131,7 +131,7 @@ function validateSemanticDomains(context: LiveRuntimeInvocationContextV1): boole
   const generation = context.generation as Record<string, unknown>;
   const stateGeneration = generation.stateGeneration;
   if (transition.kind === 'bootstrap' || transition.kind === 'recovery_root') {
-    if (stateGeneration !== 0) return false;
+    if (stateGeneration !== 0 || context.currentInteraction.interactionOrdinal !== 0) return false;
   } else if (
     typeof stateGeneration !== 'number' ||
     typeof transition.predecessorStateGeneration !== 'number' ||

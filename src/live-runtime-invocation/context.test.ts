@@ -136,4 +136,13 @@ describe('LiveRuntimeInvocationContextV1 parser', () => {
       code: 'live-context-over-bound',
     });
   });
+
+  it('rejects a root interaction with a nonzero ordinal before execution', () => {
+    const value = context();
+    (value.currentInteraction as Record<string, unknown>).interactionOrdinal = 1;
+    expect(parseLiveRuntimeInvocationContext(bytes(JSON.stringify(value)))).toEqual({
+      valid: false,
+      code: 'live-context-semantic',
+    });
+  });
 });

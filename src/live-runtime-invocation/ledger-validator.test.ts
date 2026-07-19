@@ -71,4 +71,66 @@ describe('host ledger acceptance', () => {
       /outcome record/i,
     );
   });
+
+  it.each([262143, 262144])('accepts a canonical ledger at %i bytes', (target) => {
+    const mutated = structuredClone(ledgerFixture);
+    const findings = Array.from({ length: 50 }, () => ({
+      severity: 'low',
+      confidence: 'high',
+      category: 'maintainability',
+      title: 't',
+      body: '',
+      evidence: 'e'.repeat(2000),
+      suggestedAction: 's'.repeat(1600),
+      path: 'src/a.ts',
+      startLine: 1,
+      endLine: 1,
+    }));
+    const base = structuredClone(mutated);
+    base.records[1].findings = findings;
+    const baseLength = canonicalJsonBytes(base).byteLength;
+    const delta = target - baseLength;
+    expect(delta).toBeGreaterThan(50);
+    const perFinding = Math.floor(delta / findings.length);
+    const remainder = delta - perFinding * findings.length;
+    mutated.records[1].findings = findings.map((finding, index) => ({
+      ...finding,
+      body: 'b'.repeat(perFinding + (index === 0 ? remainder : 0)),
+    }));
+    const candidateContext = context();
+    candidateContext.outcome!.findings = mutated.records[1].findings;
+    expect(canonicalJsonBytes(mutated).byteLength).toBe(target);
+    expect(() => validateCandidateLedgerForHost(bytes(mutated), candidateContext)).not.toThrow();
+  });
+
+  it('rejects the first byte over the canonical ledger cap', () => {
+    const mutated = structuredClone(ledgerFixture);
+    const findings = Array.from({ length: 50 }, () => ({
+      severity: 'low',
+      confidence: 'high',
+      category: 'maintainability',
+      title: 't',
+      body: '',
+      evidence: 'e'.repeat(2000),
+      suggestedAction: 's'.repeat(1600),
+      path: 'src/a.ts',
+      startLine: 1,
+      endLine: 1,
+    }));
+    const base = structuredClone(mutated);
+    base.records[1].findings = findings;
+    const delta = 262145 - canonicalJsonBytes(base).byteLength;
+    const perFinding = Math.floor(delta / findings.length);
+    const remainder = delta - perFinding * findings.length;
+    mutated.records[1].findings = findings.map((finding, index) => ({
+      ...finding,
+      body: 'b'.repeat(perFinding + (index === 0 ? remainder : 0)),
+    }));
+    const candidateContext = context();
+    candidateContext.outcome!.findings = mutated.records[1].findings;
+    expect(canonicalJsonBytes(mutated).byteLength).toBe(262145);
+    expect(() => validateCandidateLedgerForHost(bytes(mutated), candidateContext)).toThrowError(
+      /canonical byte cap/i,
+    );
+  });
 });

@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -17,7 +17,7 @@ import { serializeInputBytes, sha256Hex } from '../runtime-invocation/runtime-fi
 import { classifyStateBundleV2 } from '../state-v2/index.js';
 import { makeStateManifestV2Input } from '../state-v2/test-helpers.js';
 import type { ReviewInputV1 } from '../protocol/review-input.js';
-import { invokeLiveRuntime } from './invoke-live-runtime.js';
+import { invokeLiveRuntime, runProcess } from './invoke-live-runtime.js';
 
 const integrationEnabled = Boolean(process.env.APR_RUNTIME_INTEGRATION_ROOT);
 const epoch = 'S00000000000000000000A';
@@ -189,6 +189,77 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
       },
     });
     const root = path.join(os.tmpdir(), `apr-live-test-${Date.now()}`);
+    const runDirectReviewLive = async (directInput: ReviewInputV1, directContext = context) => {
+      const directory = path.join(root, 'direct-cli');
+      await mkdir(directory, { recursive: true });
+      const inputPath = path.join(directory, 'input.json');
+      const contextPath = path.join(directory, 'live-context.json');
+      const outputPaths = [
+        path.join(directory, 'result.json'),
+        path.join(directory, 'trace.json'),
+        path.join(directory, 'candidate-ledger.json'),
+        path.join(directory, 'provider-run-metadata.json'),
+      ];
+      await writeFile(inputPath, serializeInputBytes(directInput), { flag: 'wx', mode: 0o600 });
+      await writeFile(contextPath, new TextEncoder().encode(JSON.stringify(directContext)), {
+        flag: 'wx',
+        mode: 0o600,
+      });
+      const directResult = await runProcess(
+        { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
+        [
+          'review-live',
+          '--input',
+          inputPath,
+          '--context',
+          contextPath,
+          '--output',
+          outputPaths[0],
+          '--trace',
+          outputPaths[1],
+          '--candidate-ledger',
+          outputPaths[2],
+          '--provider-run-metadata',
+          outputPaths[3],
+        ],
+        20_000,
+        undefined,
+        directory,
+      );
+      await rm(directory, { recursive: true, force: true });
+      return new TextDecoder().decode(directResult.stderr);
+    };
+    await expect(
+      runDirectReviewLive({
+        ...reviewInput,
+        host: {
+          ...reviewInput.host,
+          review: { ...reviewInput.host.review, runtimeProvider: 'claude-code-cli' },
+        },
+      }),
+    ).resolves.toContain('APR_INPUT_RUNTIME_PROVIDER_INVALID');
+    await expect(
+      runDirectReviewLive({ ...reviewInput, requestedRuntimeVersion: 'not-this-runtime' }),
+    ).resolves.toContain('APR_RUNTIME_VERSION_MISMATCH');
+    const surrogateContext = structuredClone(context);
+    (surrogateContext.stateKey as Record<string, unknown>).workflowIdentity = '\ud800';
+    await expect(runDirectReviewLive(reviewInput, surrogateContext)).resolves.toContain(
+      'APR_LIVE_CONTEXT_UNICODE',
+    );
+    const surrogatePropertyContext = structuredClone(context);
+    (
+      surrogatePropertyContext.cacheContractEnvelopes.template as Record<string, unknown>
+    ).definition = {
+      '\ud800': 'value',
+    };
+    await expect(runDirectReviewLive(reviewInput, surrogatePropertyContext)).resolves.toContain(
+      'APR_LIVE_CONTEXT_UNICODE',
+    );
+    const controlContext = structuredClone(context);
+    (controlContext.stateKey as Record<string, unknown>).workflowIdentity = 'bad\u0000identity';
+    await expect(runDirectReviewLive(reviewInput, controlContext)).resolves.toContain(
+      'APR_LIVE_CONTEXT_SEMANTIC_INVALID',
+    );
     await mkdir(root, {
       recursive: true,
     });

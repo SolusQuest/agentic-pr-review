@@ -52,4 +52,36 @@ describe('live runtime process terminal ordering', () => {
 
     await expect(resultPromise).resolves.toMatchObject({ exitCode: 0 });
   });
+
+  it('rejects when natural exit is not followed by close before the deadline', async () => {
+    const fake = new FakeChild();
+    const resultPromise = runProcess(
+      { executablePath: '/trusted/runtime' },
+      [],
+      1_000,
+      undefined,
+      '/private/invocation',
+      (() => fake as unknown as ChildProcess) as never,
+      20,
+    );
+    queueMicrotask(() => fake.emit('spawn'));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    fake.emit('exit', 0, null);
+
+    await expect(resultPromise).rejects.toMatchObject({
+      kind: 'runtime-exit',
+      closeObserved: false,
+    });
+  });
+
+  it('preserves a stream contract failure after natural exit', async () => {
+    const fake = new FakeChild();
+    const resultPromise = start(fake, 1_000);
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    fake.emit('exit', 0, null);
+    fake.stdout.emit('data', Buffer.alloc(1_048_577));
+    fake.emit('close', 0, null);
+
+    await expect(resultPromise).rejects.toMatchObject({ kind: 'stream-limit-exceeded' });
+  });
 });

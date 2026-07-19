@@ -2,7 +2,7 @@ import { Ajv } from 'ajv';
 import { createHash } from 'node:crypto';
 import schema from '../../protocol/schemas/provider-session-ledger.v1.json' with { type: 'json' };
 import { canonicalJsonBytes } from '../canonical-json/index.js';
-import { LEDGER_MAX_BYTES } from '../state-v2/constants.js';
+import { LEDGER_CANONICAL_MAX_BYTES, LEDGER_MAX_BYTES } from '../state-v2/constants.js';
 import { LiveRuntimeInvocationError } from './errors.js';
 import type { ReviewResultV1 } from '../protocol/review-result.js';
 
@@ -76,6 +76,11 @@ function validateRaw(bytes: Uint8Array): Record<string, unknown> {
     throw new LiveRuntimeInvocationError({
       kind: 'candidate-ledger-invalid',
       message: 'Candidate ledger is not canonical byte-for-byte.',
+    });
+  if (canonical.byteLength > LEDGER_CANONICAL_MAX_BYTES)
+    throw new LiveRuntimeInvocationError({
+      kind: 'candidate-ledger-invalid',
+      message: 'Candidate ledger exceeds the canonical byte cap.',
     });
   validateLedgerRecordSemantics((value as Record<string, unknown>).records as unknown[]);
   return value as Record<string, unknown>;
