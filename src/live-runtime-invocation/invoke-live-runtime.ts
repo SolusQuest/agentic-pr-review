@@ -36,8 +36,10 @@ import {
   sha256Hex,
   type FsSeams,
 } from '../runtime-invocation/runtime-files.js';
-import { validateSuccessAndBuildResult } from '../runtime-invocation/success-validator.js';
+import { validateSuccessAndBuildResultFromSnapshots } from './live-success-validator.js';
 import type { RuntimeCommand } from '../runtime-invocation/runtime-command.js';
+import { computeSubjectDigest } from '../prefix-contract/digest.js';
+import { deriveInteractionId } from '../prefix-contract/interaction-id.js';
 import {
   LIVE_CONTEXT_FILENAME,
   LIVE_OUTPUT_FILENAMES,
@@ -121,6 +123,11 @@ export async function invokeLiveRuntime(
     });
   const inputSha256 = sha256Hex(inputBytes);
   const context = parsedContext.context;
+  if (inputSnapshot.host.review.runtimeProvider !== 'test')
+    throw new LiveRuntimeInvocationError({
+      kind: 'options-invalid',
+      message: 'The #55 live seam requires the host test runtime provider.',
+    });
   if (context.providerMode !== 'synthetic')
     throw new LiveRuntimeInvocationError({
       kind: 'options-invalid',
@@ -131,10 +138,40 @@ export async function invokeLiveRuntime(
       kind: 'binding-mismatch',
       message: 'Context consumed-input hash does not match the exact input snapshot.',
     });
+  const subjectDigest = computeSubjectDigest(inputSnapshot.subject);
+  if (!subjectDigest.ok || subjectDigest.value !== context.currentInteraction.subjectDigest)
+    throw new LiveRuntimeInvocationError({
+      kind: 'binding-mismatch',
+      message: 'Context subject digest does not match the exact input snapshot.',
+    });
+  const isRootTransition =
+    context.transition.kind === 'bootstrap' || context.transition.kind === 'recovery_root';
+  if (isRootTransition && predecessorSnapshot)
+    throw new LiveRuntimeInvocationError({
+      kind: 'options-invalid',
+      message: 'Root live transitions must not receive predecessor ledger bytes.',
+    });
+  const derivedInteraction = deriveInteractionId(
+    isRootTransition
+      ? { kind: 'bootstrap' }
+      : { kind: 'ledger', sha256Hex: sha256Hex(predecessorSnapshot!) },
+    inputSha256,
+    inputSnapshot.host.review.headSha,
+    context.currentInteraction.interactionOrdinal,
+  );
+  if (
+    !derivedInteraction.ok ||
+    derivedInteraction.value !== context.currentInteraction.interactionId
+  )
+    throw new LiveRuntimeInvocationError({
+      kind: 'binding-mismatch',
+      message: 'Context interaction id does not match the exact host facts.',
+    });
 
   const trustedRoot = await resolveTrustedRoot(options.trustedRoot);
   const invocationDirectory = await makePrivateDirectory(trustedRoot, 'agentic-pr-review-live-');
   let leaseContainer: string | undefined;
+  let retainInvocationDirectory = false;
   try {
     const inputPath = path.join(invocationDirectory, LIVE_OUTPUT_FILENAMES.input);
     const contextPath = path.join(invocationDirectory, LIVE_CONTEXT_FILENAME);
@@ -198,6 +235,7 @@ export async function invokeLiveRuntime(
       cliArgs,
       options.timeoutMs,
       options.signal,
+      invocationDirectory,
     );
     assertPrivateBytes([processResult.stdout, processResult.stderr], sensitive);
     if (processResult.exitCode !== 0)
@@ -221,9 +259,9 @@ export async function invokeLiveRuntime(
       'provider-metadata-invalid',
     );
     assertPrivateBytes([resultBytes, traceBytes, ledgerBytes, metadataBytes], sensitive);
-    let success: Awaited<ReturnType<typeof validateSuccessAndBuildResult>>;
+    let success: Awaited<ReturnType<typeof validateSuccessAndBuildResultFromSnapshots>>;
     try {
-      success = await validateSuccessAndBuildResult({
+      success = await validateSuccessAndBuildResultFromSnapshots({
         resultPath: outputPaths.result,
         tracePath: outputPaths.trace,
         input: inputSnapshot,
@@ -259,7 +297,16 @@ export async function invokeLiveRuntime(
       });
     const ledger = validateCandidateLedgerForHost(
       ledgerBytes,
-      { ...context, outcome: success.result },
+      {
+        ...context,
+        currentInteraction: {
+          ...context.currentInteraction,
+          reviewedHeadSha: inputSnapshot.host.review.headSha,
+          reviewedBaseSha: inputSnapshot.host.review.baseSha,
+          changedFiles: inputSnapshot.subject.changedFiles as unknown as Record<string, unknown>[],
+        },
+        outcome: success.result,
+      },
       predecessorSnapshot,
     );
     const ledgerHeader = ledger.header as { kind?: unknown };
@@ -288,6 +335,7 @@ export async function invokeLiveRuntime(
     const manifestInput = withHostTransaction(
       manifestInputSnapshot,
       context,
+      inputSnapshot,
       inputSha256,
       success,
       metadataSemanticSha256,
@@ -363,13 +411,17 @@ export async function invokeLiveRuntime(
   } catch (error) {
     if (leaseContainer)
       await rm(leaseContainer, { recursive: true, force: true }).catch(() => undefined);
-    if (error instanceof LiveRuntimeInvocationError) throw error;
+    if (error instanceof LiveRuntimeInvocationError) {
+      retainInvocationDirectory = error.closeObserved === false;
+      throw error;
+    }
     throw new LiveRuntimeInvocationError({
       kind: 'local-commit-failed',
       message: 'Live candidate publication failed.',
     });
   } finally {
-    await rm(invocationDirectory, { recursive: true, force: true }).catch(() => undefined);
+    if (!retainInvocationDirectory)
+      await rm(invocationDirectory, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
@@ -531,9 +583,16 @@ async function readOutput(file: string, kind: LiveRuntimeErrorKind): Promise<Uin
     )
       throw new Error('unstable');
     return bytes;
-  } catch {
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+    const classifiedKind: LiveRuntimeErrorKind =
+      code === 'ENOENT'
+        ? 'missing-output'
+        : code === 'ELOOP' || (error instanceof Error && /unsafe|unstable/i.test(error.message))
+          ? 'unsafe-output-file'
+          : kind;
     throw new LiveRuntimeInvocationError({
-      kind,
+      kind: classifiedKind,
       message: 'review-live output could not be safely read.',
     });
   } finally {
@@ -580,10 +639,26 @@ function validateBindings(
 function withHostTransaction(
   input: StateManifestV2Input,
   context: LiveRuntimeInvocationContextV1,
+  reviewInput: ReviewInputV1,
   inputHash: string,
-  success: Awaited<ReturnType<typeof validateSuccessAndBuildResult>>,
+  success: Awaited<ReturnType<typeof validateSuccessAndBuildResultFromSnapshots>>,
   metadataSemanticSha256: string,
 ): StateManifestV2Input {
+  const hostHead = reviewInput.host.review.headSha;
+  const hostBase = reviewInput.host.review.baseSha;
+  const provenance = input.provenance;
+  if (
+    provenance.producingRunId !== String(context.producingRun.producingRunId) ||
+    provenance.producingRunAttempt !== context.producingRun.runAttempt ||
+    provenance.reviewedHeadSha !== hostHead ||
+    provenance.currentHeadSha !== hostHead ||
+    provenance.reviewedBaseSha !== hostBase ||
+    provenance.currentBaseSha !== hostBase
+  )
+    throw new LiveRuntimeInvocationError({
+      kind: 'binding-mismatch',
+      message: 'Manifest provenance does not match the host context and input facts.',
+    });
   return {
     ...input,
     stateKey: context.stateKey as unknown as StateManifestV2Input['stateKey'],
@@ -592,6 +667,7 @@ function withHostTransaction(
       context.cacheContractIdentity as unknown as StateManifestV2Input['cacheContractIdentity'],
     generation: context.generation as unknown as StateManifestV2Input['generation'],
     transition: context.transition as unknown as StateManifestV2Input['transition'],
+    provenance,
     transaction: {
       ...input.transaction,
       interactionId: context.currentInteraction
@@ -621,6 +697,7 @@ function runProcess(
   args: readonly string[],
   timeoutMs: number,
   signal: AbortSignal | undefined,
+  cwd: string,
 ): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -643,6 +720,7 @@ function runProcess(
           DOTNET_NOLOGO: '1',
           DOTNET_CLI_TELEMETRY_OPTOUT: '1',
         },
+        cwd,
       });
     } catch {
       reject(
@@ -659,7 +737,8 @@ function runProcess(
       stderrBytes = 0,
       closeObserved = false,
       terminalError: LiveRuntimeInvocationError | undefined,
-      completed = false;
+      completed = false,
+      postKillTimer: ReturnType<typeof setTimeout> | undefined;
     const killChild = () => {
       try {
         child.kill('SIGTERM');
@@ -680,12 +759,28 @@ function runProcess(
       if (completed || terminalError) return;
       terminalError = error;
       killChild();
+      postKillTimer ??= setTimeout(() => {
+        if (!closeObserved && !completed) {
+          completed = true;
+          clearTimeout(timer);
+          signal?.removeEventListener('abort', abort);
+          reject(
+            new LiveRuntimeInvocationError({
+              kind: error.kind,
+              message: `${error.message} (child close was not observed).`,
+              exitCode: error.exitCode,
+              closeObserved: false,
+            }),
+          );
+        }
+      }, 2_000);
       if (closeObserved) finish();
     };
     const finish = () => {
       if (completed || !closeObserved) return;
       completed = true;
       clearTimeout(timer);
+      if (postKillTimer) clearTimeout(postKillTimer);
       signal?.removeEventListener('abort', abort);
       if (terminalError) reject(terminalError);
       else resolve({ exitCode, stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr) });

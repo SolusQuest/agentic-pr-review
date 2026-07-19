@@ -105,7 +105,40 @@ function validateSemanticDomains(context: LiveRuntimeInvocationContextV1): boole
     context.producingRun,
   ];
   if (controlFields.some((value) => containsForbiddenControl(value))) return false;
+  const stateKey = context.stateKey;
   const identity = context.cacheContractIdentity;
+  const repositoryPattern = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/u;
+  const boundedIdentity = [
+    stateKey.workflowIdentity,
+    stateKey.trustedExecutionDomain,
+    identity.providerId,
+    identity.modelId,
+  ];
+  if (
+    ![stateKey.repository, stateKey.headRepository].every(
+      (repository) =>
+        typeof repository === 'string' &&
+        repositoryPattern.test(repository) &&
+        new TextEncoder().encode(repository).byteLength <= 200,
+    ) ||
+    boundedIdentity.some(
+      (value) => typeof value !== 'string' || new TextEncoder().encode(value).byteLength > 256,
+    ) ||
+    identity.modelId === 'latest'
+  )
+    return false;
+  const transition = context.transition as Record<string, unknown>;
+  const generation = context.generation as Record<string, unknown>;
+  const stateGeneration = generation.stateGeneration;
+  if (transition.kind === 'bootstrap' || transition.kind === 'recovery_root') {
+    if (stateGeneration !== 0) return false;
+  } else if (
+    typeof stateGeneration !== 'number' ||
+    typeof transition.predecessorStateGeneration !== 'number' ||
+    stateGeneration <= transition.predecessorStateGeneration
+  ) {
+    return false;
+  }
   const envelopes = context.cacheContractEnvelopes;
   const computed = [
     [computeTemplateId(envelopes.template), identity.templateId],

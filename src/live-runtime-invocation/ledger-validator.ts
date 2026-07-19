@@ -17,6 +17,9 @@ export interface HostLedgerValidationContext {
     readonly interactionOrdinal: number;
     readonly subjectDigest: string;
     readonly cacheContractDigest: string;
+    readonly reviewedHeadSha: string;
+    readonly reviewedBaseSha: string;
+    readonly changedFiles: readonly Record<string, unknown>[];
   };
   readonly outcome?: Pick<ReviewResultV1, 'summary' | 'findings' | 'limitations'>;
 }
@@ -112,10 +115,18 @@ function validateHostProjection(
   if (kind === 'bootstrap' || kind === 'recovery_root') {
     if (
       header.predecessorLedgerSha256 !== 'bootstrap' ||
-      header.predecessorManifestSha256 !== 'bootstrap' ||
+      Object.hasOwn(header, 'predecessorManifestSha256') ||
       (value.records as unknown[]).length !== 2
     )
       throw invalid('Root candidate ledger has an invalid predecessor or record shape.');
+    const expectedReason = context.transition.reason;
+    const reasonKey = kind === 'bootstrap' ? 'resetReason' : 'recoveryReason';
+    if (header[reasonKey] !== undefined && header[reasonKey] !== expectedReason)
+      throw invalid('Root candidate ledger transition reason does not match the context.');
+    if (kind === 'bootstrap' && header.resetReason !== undefined)
+      throw invalid('Bootstrap candidate ledger must not contain resetReason.');
+    if (kind === 'recovery_root' && header.recoveryReason !== expectedReason)
+      throw invalid('Recovery-root candidate ledger reason does not match the context.');
   } else {
     if (!predecessorBytes)
       throw invalid('A non-root candidate ledger requires a predecessor snapshot.');
@@ -134,11 +145,13 @@ function validateHostProjection(
       throw invalid('Candidate ledger predecessor binding does not match the context.');
     if (
       kind === 'reset' &&
-      header.predecessorManifestSha256 !== context.transition.predecessorManifestSha256
+      (header.predecessorManifestSha256 !== context.transition.predecessorManifestSha256 ||
+        header.resetReason !== context.transition.reason)
     )
-      throw invalid('Reset predecessor manifest binding does not match the context.');
+      throw invalid('Reset predecessor or reason binding does not match the context.');
     const predecessorRecords = predecessor.records as unknown[];
     const records = value.records as unknown[];
+    validateLedgerRecordSemantics(predecessorRecords);
     if (kind === 'continuation') {
       if (records.length !== predecessorRecords.length + 2)
         throw invalid('Continuation record count is invalid.');
@@ -156,27 +169,27 @@ function validateHostProjection(
     }
   }
   const records = value.records as Array<Record<string, unknown>>;
-  const contextRecord = records.find(
-    (record) =>
-      record.role === 'review_context' &&
-      record.interactionId === context.currentInteraction.interactionId,
-  );
+  validateLedgerRecordSemantics(records);
+  const contextRecord = records.at(-2);
+  const outcomeRecord = records.at(-1);
   if (
     !contextRecord ||
+    contextRecord.role !== 'review_context' ||
     contextRecord.interactionId !== context.currentInteraction.interactionId ||
     contextRecord.interactionOrdinal !== context.currentInteraction.interactionOrdinal ||
     contextRecord.subjectDigest !== context.currentInteraction.subjectDigest ||
-    contextRecord.cacheContractDigest !== context.currentInteraction.cacheContractDigest
+    contextRecord.cacheContractDigest !== context.currentInteraction.cacheContractDigest ||
+    contextRecord.reviewedHeadSha !== context.currentInteraction.reviewedHeadSha ||
+    contextRecord.reviewedBaseSha !== context.currentInteraction.reviewedBaseSha ||
+    !equalJson(contextRecord.changedFiles, context.currentInteraction.changedFiles)
   )
     throw invalid('Candidate context record does not project the frozen interaction.');
   if (context.outcome) {
-    const outcomeRecord = records.find(
-      (record) =>
-        record.role === 'review_outcome' &&
-        record.interactionId === context.currentInteraction.interactionId,
-    );
     if (
       !outcomeRecord ||
+      outcomeRecord.role !== 'review_outcome' ||
+      outcomeRecord.interactionId !== context.currentInteraction.interactionId ||
+      outcomeRecord.interactionOrdinal !== context.currentInteraction.interactionOrdinal ||
       outcomeRecord.summary !== context.outcome.summary ||
       !equalJson(outcomeRecord.limitations, context.outcome.limitations) ||
       !equalFindings(outcomeRecord.findings, context.outcome.findings)
@@ -195,6 +208,24 @@ function equalFindings(left: unknown, right: ReviewResultV1['findings']): boolea
     const expected = right[index];
     if (!candidate || typeof candidate !== 'object' || !expected) return false;
     const actual = candidate as Record<string, unknown>;
+    const expectedOptional = {
+      ...(expected.evidence === undefined ? {} : { evidence: expected.evidence }),
+      ...(expected.suggestedAction === undefined
+        ? {}
+        : { suggestedAction: expected.suggestedAction }),
+      ...(expected.inlinePreference === undefined
+        ? {}
+        : { inlinePreference: expected.inlinePreference }),
+    };
+    const actualOptional = {
+      ...(Object.hasOwn(actual, 'evidence') ? { evidence: actual.evidence } : {}),
+      ...(Object.hasOwn(actual, 'suggestedAction')
+        ? { suggestedAction: actual.suggestedAction }
+        : {}),
+      ...(Object.hasOwn(actual, 'inlinePreference')
+        ? { inlinePreference: actual.inlinePreference }
+        : {}),
+    };
     return (
       actual.severity === expected.severity &&
       actual.confidence === expected.confidence &&
@@ -203,9 +234,33 @@ function equalFindings(left: unknown, right: ReviewResultV1['findings']): boolea
       actual.body === expected.body &&
       (actual.path ?? null) === (expected.path ?? null) &&
       (actual.startLine ?? null) === (expected.startLine ?? null) &&
-      (actual.endLine ?? null) === (expected.endLine ?? null)
+      (actual.endLine ?? null) === (expected.endLine ?? null) &&
+      equalJson(actualOptional, expectedOptional)
     );
   });
+}
+
+function validateLedgerRecordSemantics(records: unknown[]): void {
+  if (records.length < 2 || records.length % 2 !== 0)
+    throw invalid('Candidate ledger records must contain complete context/outcome pairs.');
+  for (let index = 0; index < records.length; index += 2) {
+    const context = records[index];
+    const outcome = records[index + 1];
+    if (
+      !context ||
+      typeof context !== 'object' ||
+      !outcome ||
+      typeof outcome !== 'object' ||
+      (context as Record<string, unknown>).role !== 'review_context' ||
+      (outcome as Record<string, unknown>).role !== 'review_outcome' ||
+      (context as Record<string, unknown>).interactionId !==
+        (outcome as Record<string, unknown>).interactionId ||
+      (context as Record<string, unknown>).interactionOrdinal !==
+        (outcome as Record<string, unknown>).interactionOrdinal ||
+      (context as Record<string, unknown>).interactionOrdinal !== index / 2
+    )
+      throw invalid('Candidate ledger record pairing or ordinal continuity is invalid.');
+  }
 }
 
 function invalid(message: string): LiveRuntimeInvocationError {

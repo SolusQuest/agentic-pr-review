@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.Ledger;
 using AgenticPrReview.Runtime.Canonical;
 using AgenticPrReview.Runtime.Prefix;
@@ -64,8 +65,15 @@ internal static class LiveRuntimeApplication
 
         using var inputDocument = ParseJson(inputBytes, "APR_INPUT_JSON_INVALID", "Input is not valid JSON.");
         using var contextDocument = ParseJson(contextBytes, "APR_LIVE_CONTEXT_JSON_INVALID", "Live context is not valid JSON.");
+        if (!contextDocument.RootElement.TryGetProperty("schemaVersion", out var schemaVersion) ||
+            !IsMathematicalInteger(schemaVersion, 1))
+            throw new RuntimeFailure(10, "APR_LIVE_CONTEXT_VERSION", "Live context schema version is unsupported.");
+        if (ContainsLoneSurrogate(contextDocument.RootElement))
+            throw new RuntimeFailure(10, "APR_LIVE_CONTEXT_UNICODE", "Live context contains an unpaired surrogate.");
         if (!schemas.IsValid(SchemaKind.LiveContext, contextDocument.RootElement))
             throw new RuntimeFailure(10, "APR_LIVE_CONTEXT_SCHEMA_INVALID", "Live context does not satisfy LiveRuntimeInvocationContextV1.");
+        if (!ValidateContextSemanticDomains(contextDocument.RootElement))
+            throw new RuntimeFailure(10, "APR_LIVE_CONTEXT_SEMANTIC_INVALID", "Live context identity or lifecycle domains are invalid.");
         if (contextDocument.RootElement.GetProperty("providerMode").GetString() != "synthetic")
             throw new RuntimeFailure(10, "APR_LIVE_PROVIDER_UNAVAILABLE", "The #55 executor does not accept live provider mode.");
 
@@ -82,7 +90,7 @@ internal static class LiveRuntimeApplication
         var identities = ReadIdentities(contextDocument.RootElement.GetProperty("stateKey"), contextDocument.RootElement.GetProperty("cacheContractIdentity"));
         var producingRun = contextDocument.RootElement.GetProperty("producingRun");
         var producingRunId = producingRun.GetProperty("producingRunId").GetString()!;
-        var producingRunAttempt = producingRun.GetProperty("runAttempt").GetInt32();
+        var producingRunAttempt = NumberInt32(producingRun.GetProperty("runAttempt"), "APR_LIVE_CONTEXT_SCHEMA_INVALID", 1, int.MaxValue);
         var expectedCacheContractDigest = LedgerCanonicalizer.ComputeCacheContractDigest(identities);
         if (!StringComparer.Ordinal.Equals(expectedCacheContractDigest, currentInteraction.GetProperty("cacheContractDigest").GetString()))
             throw new RuntimeFailure(10, "APR_LIVE_TRANSITION_INVALID", "Context cache-contract digest does not match the identity fields.");
@@ -123,13 +131,13 @@ internal static class LiveRuntimeApplication
             predecessor is null ? PredecessorLedgerReference.Bootstrap.Instance : new PredecessorLedgerReference.LedgerHash(Sha256(predecessorBytes)),
             inputHash,
             input.Host.Review.HeadSha,
-            currentInteraction.GetProperty("interactionOrdinal").GetInt64());
+            NumberInt64(currentInteraction.GetProperty("interactionOrdinal"), "APR_LIVE_CONTEXT_SCHEMA_INVALID", 0, 1_000_000));
         if (derivedInteraction.InteractionId is null || !StringComparer.Ordinal.Equals(derivedInteraction.InteractionId, currentInteraction.GetProperty("interactionId").GetString()))
             throw new RuntimeFailure(10, "APR_LIVE_TRANSITION_INVALID", "Context interaction id does not match the host facts.");
 
         var interaction = new InteractionIdentity(
             currentInteraction.GetProperty("interactionId").GetString() ?? throw new RuntimeFailure(10, "APR_LIVE_TRANSITION_INVALID", "Interaction id is missing."),
-            currentInteraction.GetProperty("interactionOrdinal").GetInt64());
+            NumberInt64(currentInteraction.GetProperty("interactionOrdinal"), "APR_LIVE_CONTEXT_SCHEMA_INVALID", 0, 1_000_000));
         var source = new ValidatedContextSource
         {
             SubjectDigest = currentInteraction.GetProperty("subjectDigest").GetString() ?? ZeroHash,
@@ -160,7 +168,7 @@ internal static class LiveRuntimeApplication
             throw new RuntimeFailure(20, "APR_LIVE_CONTEXT_SEMANTIC_INVALID", "Cache-contract envelopes failed independent validation.");
 
         ILiveProviderExecutor executor = new SyntheticLiveProviderExecutor();
-        var observation = executor.Execute(input, inputHash);
+        var observation = executor.Execute(input, inputHash, identities);
         var result = new ReviewResult(
             1,
             GetRuntimeVersion(),
@@ -216,10 +224,12 @@ internal static class LiveRuntimeApplication
             producingRunId,
             producingRunAttempt,
             prefixOutcome.Value.LogicalPrefixSha256,
-            prefixOutcome.Value.PrefixSha256);
+            prefixOutcome.Value.PrefixSha256,
+            observation);
         using (var metadataDocument = ParseJson(metadataBytes, "APR_METADATA_JSON_INVALID", "Live provider metadata is not valid JSON."))
         {
-            if (!schemas.IsValid(SchemaKind.ProviderRunMetadata, metadataDocument.RootElement))
+            if (!schemas.IsValid(SchemaKind.ProviderRunMetadata, metadataDocument.RootElement) ||
+                !HasValidSyntheticMetadataSemantics(metadataDocument.RootElement, observation))
                 throw new RuntimeFailure(20, "APR_LIVE_OUTPUT_SELF_VALIDATION_FAILED", "Live provider metadata failed schema validation.");
         }
 
@@ -287,12 +297,84 @@ internal static class LiveRuntimeApplication
         return false;
     }
 
+    private static bool ContainsLoneSurrogate(JsonElement value)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.String:
+                return ContainsLoneSurrogate(value.GetString() ?? string.Empty);
+            case JsonValueKind.Object:
+                foreach (var property in value.EnumerateObject())
+                {
+                    if (ContainsLoneSurrogate(property.Name) || ContainsLoneSurrogate(property.Value)) return true;
+                }
+                return false;
+            case JsonValueKind.Array:
+                return value.EnumerateArray().Any(ContainsLoneSurrogate);
+            default:
+                return false;
+        }
+    }
+
+    private static bool ContainsLoneSurrogate(string value)
+    {
+        for (var index = 0; index < value.Length; index++)
+        {
+            var current = value[index];
+            if (current is >= '\uD800' and <= '\uDBFF')
+            {
+                if (index + 1 >= value.Length || value[index + 1] is < '\uDC00' or > '\uDFFF') return true;
+                index++;
+            }
+            else if (current is >= '\uDC00' and <= '\uDFFF') return true;
+        }
+        return false;
+    }
+
+    private static bool ValidateContextSemanticDomains(JsonElement root)
+    {
+        var state = root.GetProperty("stateKey");
+        var cache = root.GetProperty("cacheContractIdentity");
+        var repositoryPattern = new System.Text.RegularExpressions.Regex("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        if (!ValidRepository(state.GetProperty("repository"), repositoryPattern) ||
+            !ValidRepository(state.GetProperty("headRepository"), repositoryPattern)) return false;
+        foreach (var field in new[] { "workflowIdentity", "trustedExecutionDomain" })
+        {
+            if (!ValidUtf8Bound(state.GetProperty(field), 256)) return false;
+        }
+        foreach (var field in new[] { "providerId", "modelId" })
+        {
+            if (!ValidUtf8Bound(cache.GetProperty(field), 256)) return false;
+        }
+        if (cache.GetProperty("modelId").GetString() == "latest") return false;
+        var generation = root.GetProperty("generation");
+        var stateGeneration = NumberInt64(generation.GetProperty("stateGeneration"), "APR_LIVE_CONTEXT_SEMANTIC_INVALID", 0, 1_000_000);
+        var transition = root.GetProperty("transition");
+        var kind = transition.GetProperty("kind").GetString();
+        if (kind is "bootstrap" or "recovery_root") return stateGeneration == 0;
+        var predecessorGeneration = NumberInt64(transition.GetProperty("predecessorStateGeneration"), "APR_LIVE_CONTEXT_SEMANTIC_INVALID", 0, 1_000_000);
+        return stateGeneration > predecessorGeneration;
+    }
+
+    private static bool ValidRepository(JsonElement value, System.Text.RegularExpressions.Regex pattern) =>
+        value.ValueKind == JsonValueKind.String && value.GetString() is { } text &&
+        text.Length >= 3 && Encoding.UTF8.GetByteCount(text) <= 200 && pattern.IsMatch(text);
+
+    private static bool ValidUtf8Bound(JsonElement value, int maximumBytes) =>
+        value.ValueKind == JsonValueKind.String && Encoding.UTF8.GetByteCount(value.GetString() ?? string.Empty) <= maximumBytes;
+
+    private static bool IsMathematicalInteger(JsonElement value, long expected)
+    {
+        return value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var number) &&
+            number == decimal.Truncate(number) && number == expected;
+    }
+
     private static ExpectedIdentities ReadIdentities(JsonElement stateKey, JsonElement cache)
     {
         return new ExpectedIdentities(
             stateKey.GetProperty("repository").GetString()!,
             stateKey.GetProperty("headRepository").GetString()!,
-            stateKey.GetProperty("pullRequest").GetInt32(),
+            NumberInt32(stateKey.GetProperty("pullRequest"), "APR_LIVE_CONTEXT_SCHEMA_INVALID", 1, int.MaxValue),
             stateKey.GetProperty("workflowIdentity").GetString()!,
             stateKey.GetProperty("trustedExecutionDomain").GetString()!,
             cache.GetProperty("providerId").GetString()!,
@@ -311,7 +393,7 @@ internal static class LiveRuntimeApplication
         var kind = transition.GetProperty("kind").GetString();
         var sessionEpoch = root.GetProperty("sessionEpoch").GetString()!;
         var ledgerEpoch = generation.GetProperty("ledgerEpoch").GetString()!;
-        var stateGeneration = generation.GetProperty("stateGeneration").GetInt64();
+        var stateGeneration = NumberInt64(generation.GetProperty("stateGeneration"), "APR_LIVE_CONTEXT_SCHEMA_INVALID", 0, 1_000_000);
         return kind switch
         {
             "bootstrap" => new BootstrapTransition(identities, sessionEpoch, ledgerEpoch, stateGeneration),
@@ -333,8 +415,8 @@ internal static class LiveRuntimeApplication
             : throw new RuntimeFailure(10, "APR_LIVE_TRANSITION_INVALID", "Live transition field is missing.");
 
     private static long RequiredInt64(JsonElement value, string name) =>
-        value.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.Number && property.TryGetInt64(out var result)
-            ? result
+        value.TryGetProperty(name, out var property)
+            ? NumberInt64(property, "APR_LIVE_TRANSITION_INVALID", 0, 1_000_000)
             : throw new RuntimeFailure(10, "APR_LIVE_TRANSITION_INVALID", "Live transition number is missing.");
 
     private static ImmutableArray<LedgerChangedFile> ReadChangedFiles(IEnumerable<RuntimeChangedFile> files)
@@ -358,13 +440,20 @@ internal static class LiveRuntimeApplication
 
     private static long Number(JsonElement value)
     {
-        if (value.ValueKind != JsonValueKind.Number)
-            throw new RuntimeFailure(10, "APR_INPUT_SCHEMA_INVALID", "A changed-file count is not numeric.");
-        if (value.TryGetInt64(out var integer)) return integer;
-        if (value.TryGetDecimal(out var decimalValue) && decimalValue == decimal.Truncate(decimalValue) &&
-            decimalValue >= long.MinValue && decimalValue <= long.MaxValue)
-            return (long)decimalValue;
-        throw new RuntimeFailure(10, "APR_INPUT_SCHEMA_INVALID", "A changed-file count is not a mathematical integer.");
+        return NumberInt64(value, "APR_INPUT_SCHEMA_INVALID", 0, 1_000_000);
+    }
+
+    private static int NumberInt32(JsonElement value, string code, long minimum, long maximum) =>
+        checked((int)NumberInt64(value, code, minimum, maximum));
+
+    private static long NumberInt64(JsonElement value, string code, long minimum, long maximum)
+    {
+        if (value.ValueKind != JsonValueKind.Number ||
+            !value.TryGetDecimal(out var decimalValue) ||
+            decimalValue != decimal.Truncate(decimalValue) ||
+            decimalValue < minimum || decimalValue > maximum)
+            throw new RuntimeFailure(10, code, "A live integer is not a bounded mathematical integer.");
+        return (long)decimalValue;
     }
 
     private static byte[] BuildMetadata(
@@ -378,40 +467,27 @@ internal static class LiveRuntimeApplication
         string producingRunId,
         int producingRunAttempt,
         string logicalPrefixSha256,
-        string prefixSha256)
+        string prefixSha256,
+        ProviderExecutionObservation observation)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
         {
             writer.WriteStartObject();
             writer.WriteNumber("schemaVersion", 1);
-            writer.WriteString("selectedProviderId", identities.ProviderId);
-            writer.WriteString("observedProviderId", identities.ProviderId);
-            writer.WriteString("resolvedModelId", identities.ModelId);
-            writer.WriteString("adapterId", identities.AdapterId);
+            writer.WriteString("selectedProviderId", observation.SelectedProviderId);
+            writer.WriteString("observedProviderId", observation.ObservedProviderId);
+            writer.WriteString("resolvedModelId", observation.ResolvedModelId);
+            writer.WriteString("adapterId", observation.AdapterId);
             writer.WriteString("logicalPrefixSha256", logicalPrefixSha256);
             writer.WriteString("prefixSha256", prefixSha256);
-            writer.WriteStartObject("capability");
-            writer.WriteString("mode", "standard");
-            writer.WriteString("aggregate", "unknown");
-            writer.WriteNull("statelessProof");
-            writer.WriteEndObject();
-            writer.WriteString("cacheStatus", "unknown");
-            writer.WriteStartObject("normalizedUsage");
-            writer.WriteStartArray("attempts"); writer.WriteEndArray();
-            writer.WriteStartArray("requests"); writer.WriteEndArray();
-            WriteEmptyAggregate(writer);
-            writer.WriteEndObject();
-            writer.WriteStartObject("retryObservations");
-            writer.WriteStartArray("requests"); writer.WriteEndArray();
-            writer.WriteStartObject("aggregate");
-            writer.WriteNumber("requestCount", 0); writer.WriteNumber("attemptCount", 0);
-            writer.WriteNumber("succeededCount", 0); writer.WriteNumber("failedCount", 0); writer.WriteNumber("cancelledCount", 0);
-            writer.WriteEndObject(); writer.WriteEndObject();
-            writer.WriteStartArray("errorCodes"); writer.WriteEndArray();
-            writer.WriteStartObject("telemetryCompleteness");
-            writer.WriteString("usage", "missing"); writer.WriteString("cache", "missing"); writer.WriteString("statelessProof", "notApplicable"); writer.WriteString("aggregate", "missing");
-            writer.WriteEndObject();
+            WriteNode(writer, "capability", observation.Capability);
+            writer.WriteString("cacheStatus", observation.CacheStatus);
+            WriteNode(writer, "normalizedUsage", observation.NormalizedUsage);
+            WriteNode(writer, "retryObservations", observation.RetryObservations);
+            writer.WritePropertyName("errorCodes");
+            writer.WriteStartArray(); foreach (var code in observation.ErrorCodes) writer.WriteStringValue(code); writer.WriteEndArray();
+            WriteNode(writer, "telemetryCompleteness", observation.TelemetryCompleteness);
             writer.WriteString("producingRunId", producingRunId); writer.WriteNumber("runAttempt", producingRunAttempt);
             writer.WriteString("interactionId", interaction.InteractionId);
             writer.WriteString("consumedInputSha256", inputHash);
@@ -422,6 +498,37 @@ internal static class LiveRuntimeApplication
             writer.WriteEndObject();
         }
         return stream.ToArray();
+    }
+
+    private static void WriteNode(Utf8JsonWriter writer, string property, JsonObject node)
+    {
+        writer.WritePropertyName(property);
+        node.WriteTo(writer);
+    }
+
+    private static bool HasValidSyntheticMetadataSemantics(JsonElement metadata, ProviderExecutionObservation observation)
+    {
+        if (metadata.GetProperty("selectedProviderId").GetString() != observation.SelectedProviderId ||
+            metadata.GetProperty("observedProviderId").GetString() != observation.ObservedProviderId ||
+            metadata.GetProperty("resolvedModelId").GetString() != observation.ResolvedModelId ||
+            metadata.GetProperty("adapterId").GetString() != observation.AdapterId ||
+            metadata.GetProperty("cacheStatus").GetString() != "unknown" ||
+            metadata.GetProperty("errorCodes").GetArrayLength() != 0)
+            return false;
+        var capability = metadata.GetProperty("capability");
+        if (capability.GetProperty("aggregate").GetString() != "unknown" ||
+            capability.GetProperty("statelessProof").ValueKind != JsonValueKind.Null)
+            return false;
+        var usage = metadata.GetProperty("normalizedUsage");
+        var aggregate = usage.GetProperty("aggregate");
+        return usage.GetProperty("attempts").GetArrayLength() == 0 &&
+            usage.GetProperty("requests").GetArrayLength() == 0 &&
+            NumberInt64(aggregate.GetProperty("requestCount"), "APR_LIVE_OUTPUT_SELF_VALIDATION_FAILED", 0, 0) == 0 &&
+            NumberInt64(aggregate.GetProperty("attemptCount"), "APR_LIVE_OUTPUT_SELF_VALIDATION_FAILED", 0, 0) == 0 &&
+            metadata.GetProperty("retryObservations").GetProperty("requests").GetArrayLength() == 0 &&
+            metadata.GetProperty("telemetryCompleteness").GetProperty("usage").GetString() == "missing" &&
+            metadata.GetProperty("telemetryCompleteness").GetProperty("cache").GetString() == "missing" &&
+            metadata.GetProperty("telemetryCompleteness").GetProperty("aggregate").GetString() == "missing";
     }
 
     private static void WriteEmptyAggregate(Utf8JsonWriter writer)

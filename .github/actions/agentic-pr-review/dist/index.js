@@ -108635,8 +108635,14 @@ function formatError3(err) {
 // src/runtime-invocation/success-validator.ts
 async function validateSuccessAndBuildResult(args) {
   const { resultPath, tracePath, input, inputSha256, seams } = args;
-  const resultBytes = args.resultBytesSnapshot ? new Uint8Array(args.resultBytesSnapshot) : (await statSafeOutputFile("result", resultPath, seams, { silentOnFailure: false }), await readSafeOutputBytes("result", resultPath, seams, { silentOnFailure: false }));
-  const traceBytes = args.traceBytesSnapshot ? new Uint8Array(args.traceBytesSnapshot) : (await statSafeOutputFile("trace", tracePath, seams, { silentOnFailure: false }), await readSafeOutputBytes("trace", tracePath, seams, { silentOnFailure: false }));
+  await statSafeOutputFile("result", resultPath, seams, { silentOnFailure: false });
+  await statSafeOutputFile("trace", tracePath, seams, { silentOnFailure: false });
+  const resultBytes = await readSafeOutputBytes("result", resultPath, seams, {
+    silentOnFailure: false
+  });
+  const traceBytes = await readSafeOutputBytes("trace", tracePath, seams, {
+    silentOnFailure: false
+  });
   let resultText;
   let traceText;
   try {

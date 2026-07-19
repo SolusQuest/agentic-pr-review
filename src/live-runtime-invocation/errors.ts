@@ -26,18 +26,21 @@ export type LiveRuntimeErrorKind =
 export class LiveRuntimeInvocationError extends Error {
   readonly kind: LiveRuntimeErrorKind;
   readonly exitCode?: number;
+  readonly closeObserved?: boolean;
   readonly cleanupWarnings: readonly string[];
 
   constructor(init: {
     kind: LiveRuntimeErrorKind;
     message: string;
     exitCode?: number;
+    closeObserved?: boolean;
     cleanupWarnings?: readonly string[];
   }) {
     super(init.message);
     this.name = 'LiveRuntimeInvocationError';
     this.kind = init.kind;
     this.exitCode = init.exitCode;
+    this.closeObserved = init.closeObserved;
     this.cleanupWarnings = [...(init.cleanupWarnings ?? [])];
   }
 }
