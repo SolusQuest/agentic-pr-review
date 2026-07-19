@@ -288,7 +288,7 @@ export async function invokeLiveRuntime(
     const warnings: string[] = [];
     const lease: ValidatedLocalCandidateLease = {
       bundleDirectory: bundle,
-      manifest: built.manifest,
+      manifest: structuredClone(built.manifest),
       manifestBytes: new Uint8Array(built.manifestBytes),
       ledgerBytes: new Uint8Array(built.ledgerBytes),
       providerRunMetadataBytes: new Uint8Array(built.providerRunMetadataBytes),
@@ -406,6 +406,8 @@ function validateBindings(
   };
   if (
     !identityAgrees(metadata, expected) ||
+    metadata.producingRunId !== String(context.producingRun.producingRunId) ||
+    metadata.runAttempt !== context.producingRun.runAttempt ||
     metadata.interactionId !== context.currentInteraction.interactionId ||
     metadata.consumedInputSha256 !== inputHash ||
     metadata.resultSha256 !== sha256Hex(resultBytes) ||

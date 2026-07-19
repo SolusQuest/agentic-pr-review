@@ -69,6 +69,9 @@ internal static class LiveRuntimeApplication
             throw new RuntimeFailure(10, "APR_LIVE_TRANSITION_INVALID", "Context consumed-input hash does not match input bytes.");
 
         var identities = ReadIdentities(contextDocument.RootElement.GetProperty("stateKey"), contextDocument.RootElement.GetProperty("cacheContractIdentity"));
+        var producingRun = contextDocument.RootElement.GetProperty("producingRun");
+        var producingRunId = producingRun.GetProperty("producingRunId").GetString()!;
+        var producingRunAttempt = producingRun.GetProperty("runAttempt").GetInt32();
         var expectedCacheContractDigest = LedgerCanonicalizer.ComputeCacheContractDigest(identities);
         if (!StringComparer.Ordinal.Equals(expectedCacheContractDigest, currentInteraction.GetProperty("cacheContractDigest").GetString()))
             throw new RuntimeFailure(10, "APR_LIVE_TRANSITION_INVALID", "Context cache-contract digest does not match the identity fields.");
@@ -166,7 +169,9 @@ internal static class LiveRuntimeApplication
             Sha256(resultBytes),
             Sha256(traceBytes),
             predecessor is null ? "bootstrap" : Sha256(predecessorBytes),
-            Sha256(candidateLedgerBytes));
+            Sha256(candidateLedgerBytes),
+            producingRunId,
+            producingRunAttempt);
 
         var staged = new List<StagedFile>();
         try
@@ -288,7 +293,9 @@ internal static class LiveRuntimeApplication
         string resultHash,
         string traceHash,
         string predecessorHash,
-        string candidateHash)
+        string candidateHash,
+        string producingRunId,
+        int producingRunAttempt)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
@@ -322,7 +329,7 @@ internal static class LiveRuntimeApplication
             writer.WriteStartObject("telemetryCompleteness");
             writer.WriteString("usage", "missing"); writer.WriteString("cache", "unknown"); writer.WriteString("statelessProof", "notApplicable"); writer.WriteString("aggregate", "missing");
             writer.WriteEndObject();
-            writer.WriteString("producingRunId", "1"); writer.WriteNumber("runAttempt", 1);
+            writer.WriteString("producingRunId", producingRunId); writer.WriteNumber("runAttempt", producingRunAttempt);
             writer.WriteString("interactionId", interaction.InteractionId);
             writer.WriteString("consumedInputSha256", inputHash);
             writer.WriteString("resultSha256", resultHash);
