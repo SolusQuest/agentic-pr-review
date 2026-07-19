@@ -429,6 +429,7 @@ export async function invokeLiveRuntime(
       await rm(leaseContainer, { recursive: true, force: true }).catch(() => undefined);
     if (error instanceof LiveRuntimeInvocationError) {
       retainInvocationDirectory = error.closeObserved === false;
+      if (retainInvocationDirectory) scheduleInvocationDirectoryCleanup(invocationDirectory);
       throw error;
     }
     throw new LiveRuntimeInvocationError({
@@ -576,6 +577,13 @@ async function makePrivateDirectory(root: string, prefix: string): Promise<strin
   const directory = await mkdtemp(path.join(root, prefix));
   await chmod(directory, 0o700);
   return directory;
+}
+
+function scheduleInvocationDirectoryCleanup(directory: string): void {
+  const cleanupTimer = setTimeout(() => {
+    void rm(directory, { recursive: true, force: true }).catch(() => undefined);
+  }, LIVE_CLOSE_DEADLINE_MS);
+  cleanupTimer.unref?.();
 }
 
 async function writePrivate(file: string, bytes: Uint8Array): Promise<void> {
