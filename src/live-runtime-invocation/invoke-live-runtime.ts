@@ -25,6 +25,7 @@ import {
   MANIFEST_MAX_BYTES,
   METADATA_MAX_BYTES,
   serializeStateManifestV2,
+  type StateManifestV2,
   type StateManifestV2Input,
   validateStateManifestV2,
 } from '../state-v2/index.js';
@@ -1117,7 +1118,6 @@ function validatePredecessorManifest(
     manifest.generation.ledgerEpoch !== transition.predecessorLedgerEpoch ||
     manifest.ledger.sha256 !== predecessorLedgerHash ||
     manifest.ledger.bytes !== predecessorLedgerBytes.byteLength ||
-    !metadata.valid ||
     manifest.providerRunMetadata.bytes !== predecessorMetadataBytes.byteLength ||
     manifest.providerRunMetadata.sha256 !== sha256Hex(predecessorMetadataBytes) ||
     manifest.transaction.candidateLedgerSha256 !== predecessorLedgerHash ||
@@ -1129,12 +1129,45 @@ function validatePredecessorManifest(
     manifest.transaction.interactionId !== predecessorContextRecord.interactionId ||
     manifest.transaction.interactionId !== predecessorOutcomeRecord.interactionId ||
     manifest.transaction.interactionOrdinal !== predecessorContextRecord.interactionOrdinal ||
-    manifest.transaction.interactionOrdinal !== predecessorOutcomeRecord.interactionOrdinal
+    manifest.transaction.interactionOrdinal !== predecessorOutcomeRecord.interactionOrdinal ||
+    !predecessorMetadataAgrees(metadata, manifest, predecessorLedgerHash)
   )
     throw new LiveRuntimeInvocationError({
       kind: 'restore-plan-invalid',
       message: 'Predecessor manifest does not match the accepted predecessor ledger and context.',
     });
+}
+
+function predecessorMetadataAgrees(
+  result: ReturnType<typeof parseProviderRunMetadata>,
+  manifest: StateManifestV2,
+  predecessorLedgerHash: string,
+): boolean {
+  if (!result.valid) return false;
+  try {
+    const metadata = result.metadata;
+    return (
+      identityAgrees(metadata, {
+        providerId: manifest.cacheContractIdentity.providerId,
+        resolvedModelId: manifest.cacheContractIdentity.modelId,
+        adapterId: manifest.cacheContractIdentity.adapterId,
+      }) &&
+      metadata.producingRunId === manifest.provenance.producingRunId &&
+      metadata.runAttempt === manifest.provenance.producingRunAttempt &&
+      metadata.interactionId === manifest.transaction.interactionId &&
+      metadata.consumedInputSha256 === manifest.transaction.consumedInputSha256 &&
+      metadata.resultSha256 === manifest.transaction.resultSha256 &&
+      metadata.traceSha256 === manifest.transaction.traceSha256 &&
+      metadata.candidateLedgerSha256 === manifest.transaction.candidateLedgerSha256 &&
+      metadata.candidateLedgerSha256 === predecessorLedgerHash &&
+      metadata.predecessorLedgerSha256 === manifest.transition.predecessorLedgerSha256 &&
+      computeMetadataSemanticSha256(metadata) === manifest.transaction.metadataSemanticSha256 &&
+      !/^0+$/.test(metadata.logicalPrefixSha256) &&
+      !/^0+$/.test(metadata.prefixSha256)
+    );
+  } catch {
+    return false;
+  }
 }
 
 interface ProcessResult {

@@ -592,6 +592,80 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
           trustedRoot: root,
         }),
       ).rejects.toMatchObject({ kind: 'restore-plan-invalid' });
+      const semanticallyTamperedMetadata = JSON.parse(
+        new TextDecoder().decode(predecessorProviderRunMetadataBytes),
+      ) as { logicalPrefixSha256: string };
+      semanticallyTamperedMetadata.logicalPrefixSha256 = 'f'.repeat(64);
+      const semanticallyTamperedMetadataBytes = canonicalJsonBytes(semanticallyTamperedMetadata);
+      const semanticallyTamperedManifest = JSON.parse(
+        new TextDecoder().decode(predecessorManifestBytes),
+      ) as { providerRunMetadata: Record<string, unknown> };
+      semanticallyTamperedManifest.providerRunMetadata.bytes =
+        semanticallyTamperedMetadataBytes.byteLength;
+      semanticallyTamperedManifest.providerRunMetadata.sha256 = sha256Hex(
+        semanticallyTamperedMetadataBytes,
+      );
+      const semanticallyTamperedManifestBytes = canonicalJsonBytes(semanticallyTamperedManifest);
+      const semanticallyTamperedTransition = {
+        ...continuationContext.transition,
+        predecessorManifestSha256: sha256Hex(semanticallyTamperedManifestBytes) as never,
+      };
+      await expect(
+        invokeLiveRuntime({
+          command: { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
+          input: reviewInput,
+          context: {
+            ...continuationContext,
+            transition: semanticallyTamperedTransition as never,
+          },
+          manifestInput: {
+            ...continuationManifest,
+            transition: semanticallyTamperedTransition as never,
+          },
+          predecessorLedgerBytes,
+          predecessorManifestBytes: semanticallyTamperedManifestBytes,
+          predecessorProviderRunMetadataBytes: semanticallyTamperedMetadataBytes,
+          timeoutMs: 20_000,
+          trustedRoot: root,
+        }),
+      ).rejects.toMatchObject({ kind: 'restore-plan-invalid' });
+      const transactionTamperedMetadata = JSON.parse(
+        new TextDecoder().decode(predecessorProviderRunMetadataBytes),
+      ) as { candidateLedgerSha256: string };
+      transactionTamperedMetadata.candidateLedgerSha256 = 'e'.repeat(64);
+      const transactionTamperedMetadataBytes = canonicalJsonBytes(transactionTamperedMetadata);
+      const transactionTamperedManifest = JSON.parse(
+        new TextDecoder().decode(predecessorManifestBytes),
+      ) as { providerRunMetadata: Record<string, unknown> };
+      transactionTamperedManifest.providerRunMetadata.bytes =
+        transactionTamperedMetadataBytes.byteLength;
+      transactionTamperedManifest.providerRunMetadata.sha256 = sha256Hex(
+        transactionTamperedMetadataBytes,
+      );
+      const transactionTamperedManifestBytes = canonicalJsonBytes(transactionTamperedManifest);
+      const transactionTamperedTransition = {
+        ...continuationContext.transition,
+        predecessorManifestSha256: sha256Hex(transactionTamperedManifestBytes) as never,
+      };
+      await expect(
+        invokeLiveRuntime({
+          command: { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
+          input: reviewInput,
+          context: {
+            ...continuationContext,
+            transition: transactionTamperedTransition as never,
+          },
+          manifestInput: {
+            ...continuationManifest,
+            transition: transactionTamperedTransition as never,
+          },
+          predecessorLedgerBytes,
+          predecessorManifestBytes: transactionTamperedManifestBytes,
+          predecessorProviderRunMetadataBytes: transactionTamperedMetadataBytes,
+          timeoutMs: 20_000,
+          trustedRoot: root,
+        }),
+      ).rejects.toMatchObject({ kind: 'restore-plan-invalid' });
       const continuationLease = await invokeLiveRuntime({
         command: { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
         input: reviewInput,
