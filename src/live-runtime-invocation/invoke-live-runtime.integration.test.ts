@@ -276,6 +276,8 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
         trustedRoot: root,
       });
       const names = await readdir(lease.bundleDirectory);
+      expect(lease.manifest.sessionEpoch).not.toBe(epoch);
+      expect(lease.manifest.generation.ledgerEpoch).not.toBe(epoch);
       const bundle = {
         entryListing: names.map((name) => ({ name, isRegularFile: true })),
         manifestBytes: await readFile(path.join(lease.bundleDirectory, 'manifest.json')),
@@ -296,14 +298,17 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
         1,
       );
       if (!continuationInteraction.ok) throw new Error('invalid continuation interaction');
+      const sessionEpoch = lease.manifest.sessionEpoch;
+      const ledgerEpoch = lease.manifest.generation.ledgerEpoch;
       const continuationContext = {
         ...context,
-        generation: { stateGeneration: 1, ledgerEpoch: epoch },
+        sessionEpoch,
+        generation: { stateGeneration: 1, ledgerEpoch },
         transition: {
           kind: 'continuation' as const,
           predecessorManifestSha256,
           predecessorLedgerSha256,
-          predecessorLedgerEpoch: epoch,
+          predecessorLedgerEpoch: ledgerEpoch,
           predecessorStateGeneration: 0,
         },
         currentInteraction: {
@@ -313,7 +318,7 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
         },
       };
       const continuationManifest = makeStateManifestV2Input({
-        sessionEpoch: epoch as never,
+        sessionEpoch: sessionEpoch as never,
         stateKey: continuationContext.stateKey,
         cacheContractIdentity: identity as never,
         generation: continuationContext.generation as never,

@@ -108,22 +108,24 @@ export async function invokeLiveRuntime(
   };
   const inputBytes = serializeInputBytes(options.input);
   const inputSnapshot = JSON.parse(new TextDecoder().decode(inputBytes)) as ReviewInputV1;
-  const manifestInputSnapshot = JSON.parse(
+  const suppliedManifestInputSnapshot = JSON.parse(
     new TextDecoder().decode(canonicalJsonBytes(options.manifestInput)),
   ) as StateManifestV2Input;
   const predecessorSnapshot = options.predecessorLedgerBytes
     ? new Uint8Array(options.predecessorLedgerBytes)
     : undefined;
   const sensitive = copySensitiveValues(options.sensitiveValues);
-  const contextBytes = new Uint8Array(canonicalJsonBytes(options.context));
-  const parsedContext = parseLiveRuntimeInvocationContext(contextBytes);
+  const suppliedContextBytes = new Uint8Array(canonicalJsonBytes(options.context));
+  const parsedContext = parseLiveRuntimeInvocationContext(suppliedContextBytes);
   if (!parsedContext.valid)
     throw new LiveRuntimeInvocationError({
       kind: 'context-invalid',
       message: `Live context rejected (${parsedContext.code}).`,
     });
   const inputSha256 = sha256Hex(inputBytes);
-  const context = parsedContext.context;
+  const context = materializeHostEpochs(parsedContext.context);
+  const contextBytes = new Uint8Array(canonicalJsonBytes(context));
+  const manifestInputSnapshot = alignManifestEpochs(suppliedManifestInputSnapshot, context);
   if (inputSnapshot.host.review.runtimeProvider !== 'test')
     throw new LiveRuntimeInvocationError({
       kind: 'options-invalid',
@@ -666,6 +668,43 @@ function validateBindings(
       kind: 'binding-mismatch',
       message: 'Live sidecar transaction bindings disagree.',
     });
+}
+
+function materializeHostEpochs(
+  context: LiveRuntimeInvocationContextV1,
+): LiveRuntimeInvocationContextV1 {
+  if (context.transition.kind === 'continuation') return context;
+  const predecessorEpoch =
+    context.transition.kind === 'reset'
+      ? String(context.transition.predecessorLedgerEpoch)
+      : undefined;
+  let ledgerEpoch: string;
+  do {
+    ledgerEpoch = freshEpochId();
+  } while (ledgerEpoch === predecessorEpoch);
+  return {
+    ...context,
+    sessionEpoch: context.transition.kind === 'reset' ? context.sessionEpoch : freshEpochId(),
+    generation: {
+      ...context.generation,
+      ledgerEpoch,
+    },
+  };
+}
+
+function freshEpochId(): string {
+  return randomBytes(16).toString('base64url');
+}
+
+function alignManifestEpochs(
+  manifestInput: StateManifestV2Input,
+  context: LiveRuntimeInvocationContextV1,
+): StateManifestV2Input {
+  return {
+    ...manifestInput,
+    sessionEpoch: context.sessionEpoch as StateManifestV2Input['sessionEpoch'],
+    generation: context.generation as unknown as StateManifestV2Input['generation'],
+  };
 }
 
 function withHostTransaction(
