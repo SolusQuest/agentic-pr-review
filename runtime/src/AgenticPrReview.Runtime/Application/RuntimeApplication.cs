@@ -31,6 +31,10 @@ public sealed class RuntimeApplication
         _ = stdout;
         try
         {
+            if (args.Length > 0 && StringComparer.Ordinal.Equals(args[0], "review-live"))
+            {
+                return await LiveRuntimeApplication.RunAsync(args, fileSystem, schemas, stderr);
+            }
             var invocation = ParseInvocation(args);
             return await RunInvocationAsync(invocation, stderr);
         }

@@ -20,5 +20,6 @@
     <EmbeddedResource Include="..\..\..\protocol\schemas\review-result.v1.json" LogicalName="AgenticPrReview.Protocol.review-result.v1.json" />
     <EmbeddedResource Include="..\..\..\protocol\schemas\review-trace.v1.json" LogicalName="AgenticPrReview.Protocol.review-trace.v1.json" />
     <EmbeddedResource Include="..\..\..\protocol\schemas\provider-session-ledger.v1.json" LogicalName="AgenticPrReview.Protocol.provider-session-ledger.v1.json" />
+    <EmbeddedResource Include="..\..\..\protocol\schemas\live-runtime-invocation-context.v1.json" LogicalName="AgenticPrReview.Protocol.live-runtime-invocation-context.v1.json" />
   </ItemGroup>
 </Project>
