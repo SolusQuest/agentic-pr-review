@@ -12,6 +12,7 @@ import {
   computeTemplateId,
   computeToolDefinitionId,
 } from '../prefix-contract/digest.js';
+import { canonicalJsonBytes } from '../canonical-json/index.js';
 import { deriveInteractionId } from '../prefix-contract/interaction-id.js';
 import { serializeInputBytes, sha256Hex } from '../runtime-invocation/runtime-files.js';
 import { classifyStateBundleV2 } from '../state-v2/index.js';
@@ -264,6 +265,42 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
       recursive: true,
     });
     try {
+      const tooManyChangedFiles = Array.from({ length: 201 }, (_, index) => ({
+        ...reviewInput.subject.changedFiles[0]!,
+        path: `src/generated-${index}.ts`,
+        previousPath: null,
+        status: 'added' as const,
+      }));
+      await expect(
+        invokeLiveRuntime({
+          command: { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
+          input: {
+            ...reviewInput,
+            subject: { ...reviewInput.subject, changedFiles: tooManyChangedFiles },
+          },
+          context,
+          manifestInput,
+          timeoutMs: 20_000,
+          trustedRoot: root,
+        }),
+      ).rejects.toMatchObject({ kind: 'options-invalid' });
+      const oversizedManifestInput = {
+        ...manifestInput,
+        provenance: {
+          ...manifestInput.provenance,
+          producingWorkflowRef: 'x'.repeat(70_000),
+        },
+      };
+      await expect(
+        invokeLiveRuntime({
+          command: { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
+          input: reviewInput,
+          context,
+          manifestInput: oversizedManifestInput,
+          timeoutMs: 20_000,
+          trustedRoot: root,
+        }),
+      ).rejects.toMatchObject({ kind: 'options-invalid' });
       const lease = await invokeLiveRuntime({
         command: {
           executablePath: runtimeExecutable,
@@ -351,6 +388,36 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
           },
           predecessorLedgerBytes,
           predecessorManifestBytes,
+          timeoutMs: 20_000,
+          trustedRoot: root,
+        }),
+      ).rejects.toMatchObject({ kind: 'restore-plan-invalid' });
+      const inconsistentPredecessorManifest = JSON.parse(
+        new TextDecoder().decode(predecessorManifestBytes),
+      ) as { cacheContractIdentity: Record<string, unknown> };
+      inconsistentPredecessorManifest.cacheContractIdentity.modelId = 'different-model';
+      const inconsistentPredecessorManifestBytes = canonicalJsonBytes(
+        inconsistentPredecessorManifest,
+      );
+      const inconsistentPredecessorManifestSha256 = sha256Hex(inconsistentPredecessorManifestBytes);
+      const inconsistentIdentityTransition = {
+        ...continuationContext.transition,
+        predecessorManifestSha256: inconsistentPredecessorManifestSha256 as never,
+      };
+      await expect(
+        invokeLiveRuntime({
+          command: { executablePath: runtimeExecutable, prefixArgs: prefixArgs as string[] },
+          input: reviewInput,
+          context: {
+            ...continuationContext,
+            transition: inconsistentIdentityTransition as never,
+          },
+          manifestInput: {
+            ...continuationManifest,
+            transition: inconsistentIdentityTransition as never,
+          },
+          predecessorLedgerBytes,
+          predecessorManifestBytes: inconsistentPredecessorManifestBytes,
           timeoutMs: 20_000,
           trustedRoot: root,
         }),

@@ -59,6 +59,17 @@ import {
   type LiveRuntimeInvocationContextV1,
 } from './context.js';
 
+const MAX_LEDGER_CHANGED_FILES = 200 as const;
+const CACHE_CONTRACT_IDENTITY_HEADER_KEYS = [
+  'providerId',
+  'modelId',
+  'adapterId',
+  'templateId',
+  'policyId',
+  'toolDefinitionId',
+  'cacheConfigId',
+] as const;
+
 export interface InvokeLiveRuntimeOptions {
   readonly command: RuntimeCommand;
   readonly input: ReviewInputV1;
@@ -130,9 +141,22 @@ export async function invokeLiveRuntime(
       message: 'Serialized input exceeds host byte cap.',
     });
   const inputSnapshot = JSON.parse(new TextDecoder().decode(inputBytes)) as ReviewInputV1;
-  const suppliedManifestInputSnapshot = JSON.parse(
-    new TextDecoder().decode(canonicalJsonBytes(options.manifestInput)),
-  ) as StateManifestV2Input;
+  if (inputSnapshot.subject.changedFiles.length > MAX_LEDGER_CHANGED_FILES)
+    throw new LiveRuntimeInvocationError({
+      kind: 'options-invalid',
+      message: `Live runtime accepts at most ${MAX_LEDGER_CHANGED_FILES} changed files.`,
+    });
+  let suppliedManifestInputSnapshot: StateManifestV2Input;
+  try {
+    suppliedManifestInputSnapshot = JSON.parse(
+      new TextDecoder().decode(canonicalJsonBytes(options.manifestInput, MANIFEST_MAX_BYTES)),
+    ) as StateManifestV2Input;
+  } catch {
+    throw new LiveRuntimeInvocationError({
+      kind: 'options-invalid',
+      message: 'Manifest input could not be safely canonicalized within its byte cap.',
+    });
+  }
   const predecessorSnapshot = options.predecessorLedgerBytes
     ? new Uint8Array(options.predecessorLedgerBytes)
     : undefined;
@@ -880,8 +904,8 @@ function validateRestorePlan(
       kind: 'options-invalid',
       message: 'A non-root live transition requires predecessor ledger and manifest bytes.',
     });
-  validatePredecessorManifest(predecessorManifestBytes, context, predecessorBytes);
-  const predecessor = validateCandidateLedgerForHost(predecessorBytes!);
+  const predecessor = validateCandidateLedgerForHost(predecessorBytes);
+  validatePredecessorManifest(predecessorManifestBytes, context, predecessorBytes, predecessor);
   const header = predecessor.header as Record<string, unknown>;
   const generation = context.generation;
   const state = context.stateKey;
@@ -984,6 +1008,7 @@ function validatePredecessorManifest(
   bytes: Uint8Array,
   context: LiveRuntimeInvocationContextV1,
   predecessorLedgerBytes: Uint8Array,
+  predecessorLedger: Record<string, unknown>,
 ): void {
   if (bytes.byteLength > MANIFEST_MAX_BYTES)
     throw new LiveRuntimeInvocationError({
@@ -1017,6 +1042,7 @@ function validatePredecessorManifest(
   const transition = context.transition;
   const manifest = validation.manifest;
   const predecessorLedgerHash = sha256Hex(predecessorLedgerBytes);
+  const predecessorHeader = predecessorLedger.header as Record<string, unknown>;
   if (
     !equalBytes(canonical, bytes) ||
     sha256Hex(bytes) !== transition.predecessorManifestSha256 ||
@@ -1025,7 +1051,10 @@ function validatePredecessorManifest(
     manifest.generation.stateGeneration !== transition.predecessorStateGeneration ||
     manifest.generation.ledgerEpoch !== transition.predecessorLedgerEpoch ||
     manifest.ledger.sha256 !== predecessorLedgerHash ||
-    manifest.transaction.candidateLedgerSha256 !== predecessorLedgerHash
+    manifest.transaction.candidateLedgerSha256 !== predecessorLedgerHash ||
+    !CACHE_CONTRACT_IDENTITY_HEADER_KEYS.every(
+      (key) => manifest.cacheContractIdentity[key] === predecessorHeader[key],
+    )
   )
     throw new LiveRuntimeInvocationError({
       kind: 'restore-plan-invalid',
