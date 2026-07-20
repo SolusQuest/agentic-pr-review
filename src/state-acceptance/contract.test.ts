@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,7 +9,9 @@ import {
   acceptLocalCandidate,
   RecordCodecError,
   ReferenceStateStore,
+  RECORD_CODEC_CODES,
   SelectionSnapshotLimitError,
+  StickyCallbackOutcomeUnknownError,
   candidateLocator,
   computeCandidateId,
   computeSelectionSnapshotId,
@@ -198,6 +200,33 @@ describe('M4 state acceptance contract', () => {
     );
   });
 
+  it('exposes stable codec diagnostics for every validated record kind', () => {
+    expect(RECORD_CODEC_CODES).toEqual([
+      'byte_limit_exceeded',
+      'bom',
+      'invalid_utf8',
+      'invalid_json',
+      'duplicate_key',
+      'invalid_unicode',
+      'non_canonical',
+    ]);
+    const decoders = [decodeValidatedRegistration, decodeValidatedMarker, decodeValidatedSelector];
+    const bom = new Uint8Array([0xef, 0xbb, 0xbf, 0x7b, 0x7d]);
+    const cases = [
+      [new Uint8Array(32 * 1024 + 1), 'byte_limit_exceeded'],
+      [bom, 'bom'],
+      [new Uint8Array([0xc3, 0x28]), 'invalid_utf8'],
+      [new TextEncoder().encode('{"schemaVersion":1,"schemaVersion":1}'), 'duplicate_key'],
+    ] as const;
+    for (const decode of decoders) {
+      for (const [bytes, code] of cases) {
+        expect(() => decode(bytes)).toThrowError(
+          expect.objectContaining({ code, path: expect.any(String) }),
+        );
+      }
+    }
+  });
+
   it('freezes identity domains and the non-circular marker-to-selector order', () => {
     const candidateDraft = draft();
     const registration = materializeRegistration(candidateDraft, '1', '2026-07-20T00:00:00.000Z');
@@ -282,6 +311,28 @@ describe('M4 state acceptance contract', () => {
       selectionSnapshotId: sha as never,
     });
     expect(first).not.toBe(second);
+  });
+
+  it('cancels before store mutation and reports lease cleanup failures', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const result = await acceptLocalCandidate(
+      {} as never,
+      {
+        signal: controller.signal,
+        selectionSnapshot: {} as never,
+        candidate: {
+          release: async () => {
+            throw new Error('lease release failed');
+          },
+        } as never,
+      } as never,
+    );
+    expect(result).toMatchObject({
+      acceptance: 'not_accepted',
+      reason: 'cancelled_before_acceptance',
+      cleanupWarnings: ['lease_release_failed'],
+    });
   });
 });
 
@@ -424,6 +475,38 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
           bundleDiagnostic: 'manifest_unknown_field',
         });
       }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects oversized and unsafe candidate filesystem objects before acceptance', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'm4-state-acceptance-files-'));
+    try {
+      const store = new ReferenceStateStore(root);
+      await store.close();
+      const oversizedId = 'f'.repeat(64) as never;
+      expect(
+        (
+          await store.uploadCandidate(oversizedId, {
+            manifestBytes: new Uint8Array(65_537),
+            ledgerBytes: new Uint8Array(),
+            providerRunMetadataBytes: new Uint8Array(),
+          })
+        ).kind,
+      ).toBe('existing_content_conflict');
+      await expect(
+        readFile(path.join(root, 'candidates', oversizedId, 'manifest.json')),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+
+      const unsafeId = 'e'.repeat(64) as never;
+      const unsafeDirectory = path.join(root, 'candidates', unsafeId);
+      await mkdir(unsafeDirectory, { mode: 0o700 });
+      await chmod(unsafeDirectory, 0o755);
+      expect((await store.readCandidate(unsafeId)).status).toBe('unsafe');
+      await rm(unsafeDirectory, { recursive: true, force: true });
+      await symlink(path.join(root, 'states'), unsafeDirectory, 'dir');
+      expect((await store.readCandidate(unsafeId)).status).toBe('unsafe');
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -609,27 +692,41 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
         selectionSnapshotId: '' as never,
       };
       selection.selectionSnapshotId = computeSelectionSnapshotId(selection) as never;
-      const store = new ReferenceStateStore(root);
+      const store = new ReferenceStateStore(root, {
+        afterCandidateCommit: () => {
+          throw new Error('candidate commit outcome unknown');
+        },
+        afterRegistrationCommit: () => {
+          throw new Error('registration commit outcome unknown');
+        },
+        afterMarkerCommit: () => {
+          throw new Error('marker commit outcome unknown');
+        },
+        afterSelectorCommit: () => {
+          throw new Error('selector commit outcome unknown');
+        },
+      });
       await store.close();
       let publishedMarkerId: string | undefined;
-      const result = await acceptLocalCandidate(store, {
-        selectionSnapshot: selection,
-        candidate: {
-          manifest: manifest as never,
-          manifestBytes,
-          ledgerBytes,
-          providerRunMetadataBytes,
-          resultBytes,
-          traceBytes,
-          inputSha256,
-          resultSha256: sha256Hex(resultBytes),
-          traceSha256: sha256Hex(traceBytes),
-          candidateLedgerSha256: sha256Hex(ledgerBytes),
-          metadataSemanticSha256: manifest.transaction.metadataSemanticSha256,
-          release: async () => {
-            releaseCount += 1;
-          },
+      const candidate = {
+        manifest: manifest as never,
+        manifestBytes,
+        ledgerBytes,
+        providerRunMetadataBytes,
+        resultBytes,
+        traceBytes,
+        inputSha256,
+        resultSha256: sha256Hex(resultBytes),
+        traceSha256: sha256Hex(traceBytes),
+        candidateLedgerSha256: sha256Hex(ledgerBytes),
+        metadataSemanticSha256: manifest.transaction.metadataSemanticSha256,
+        release: async () => {
+          releaseCount += 1;
         },
+      };
+      const acceptanceOptions = {
+        selectionSnapshot: selection,
+        candidate,
         interactionId: manifest.transaction.interactionId,
         interactionOrdinal: manifest.transaction.interactionOrdinal,
         producingRunId: manifest.provenance.producingRunId,
@@ -638,10 +735,11 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
         acceptingRunAttempt: 1,
         consumedInputSha256: inputSha256,
         transition: manifest.transition,
-        publishSticky: async (markerId) => {
+        publishSticky: async (markerId: string) => {
           publishedMarkerId = markerId;
         },
-      });
+      };
+      const result = await acceptLocalCandidate(store, acceptanceOptions);
       expect(result.acceptance).toBe('accepted');
       expect(result.publication).toEqual({ status: 'succeeded' });
       const { ledgerSchemaVersion, prefixContractVersion, ...cacheContractIdentity } =
@@ -666,7 +764,47 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       if (result.acceptance === 'accepted' || result.acceptance === 'already_accepted') {
         expect(publishedMarkerId).toBe(result.markerId);
       }
-      expect(releaseCount).toBe(1);
+
+      const unknownRoot = await mkdtemp(
+        path.join(os.tmpdir(), 'm4-state-acceptance-sticky-unknown-'),
+      );
+      try {
+        const unknownStore = new ReferenceStateStore(unknownRoot);
+        await unknownStore.close();
+        const unknownPublication = await acceptLocalCandidate(unknownStore, {
+          ...acceptanceOptions,
+          publishSticky: async () => {
+            throw new StickyCallbackOutcomeUnknownError();
+          },
+        });
+        expect(unknownPublication.publication).toEqual({
+          status: 'unknown',
+          code: 'sticky_callback_outcome_unknown',
+        });
+      } finally {
+        await rm(unknownRoot, { recursive: true, force: true });
+      }
+
+      const failedRoot = await mkdtemp(
+        path.join(os.tmpdir(), 'm4-state-acceptance-sticky-failed-'),
+      );
+      try {
+        const failedStore = new ReferenceStateStore(failedRoot);
+        await failedStore.close();
+        const failedPublication = await acceptLocalCandidate(failedStore, {
+          ...acceptanceOptions,
+          publishSticky: async () => {
+            throw new Error('sticky publication failed');
+          },
+        });
+        expect(failedPublication.publication).toEqual({
+          status: 'failed',
+          code: 'sticky_callback_failed',
+        });
+      } finally {
+        await rm(failedRoot, { recursive: true, force: true });
+      }
+      expect(releaseCount).toBe(3);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

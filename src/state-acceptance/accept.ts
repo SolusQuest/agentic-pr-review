@@ -16,9 +16,9 @@ import {
   materializeSelector,
 } from './validation.js';
 import {
-  ReferenceStateStore,
   SelectionSnapshotLimitError,
   SelectorRevisionMismatchError,
+  type StateAcceptanceStore,
 } from './store.js';
 import type {
   AcceptanceOptions,
@@ -32,6 +32,7 @@ import type {
   CompetingScope,
   NotAcceptedReason,
   PublicationOutcome,
+  StateSelectorV1,
   StateSelectionSnapshot,
 } from './types.js';
 
@@ -79,7 +80,7 @@ export function candidateIdentity(lease: AcceptanceOptions['candidate']): Candid
 }
 
 export async function acceptLocalCandidate(
-  store: ReferenceStateStore,
+  store: StateAcceptanceStore,
   options: AcceptanceOptions,
 ): Promise<AcceptanceResult> {
   const warnings: CleanupWarningCode[] = [];
@@ -103,7 +104,7 @@ export async function acceptLocalCandidate(
 }
 
 async function acceptWithoutCleanup(
-  store: ReferenceStateStore,
+  store: StateAcceptanceStore,
   options: AcceptanceOptions,
 ): Promise<AcceptanceResult> {
   if (options.signal?.aborted) return notAccepted('cancelled_before_acceptance');
@@ -527,7 +528,42 @@ function selectionFactsAreConsistent(options: AcceptanceOptions): boolean {
   )
     return false;
   if (!observedRevisionMatchesBytes(snapshot)) return false;
+  const observedSelector = observedSelectorForSnapshot(snapshot);
+  if (snapshot.observedSelectorBytes !== null && observedSelector === undefined) {
+    if (snapshot.kind !== 'recovery_root_selected') return false;
+  }
+  if (
+    observedSelector !== null &&
+    observedSelector !== undefined &&
+    (snapshot.kind === 'continuation_selected' || snapshot.kind === 'reset_selected') &&
+    !selectorPredecessorMatchesSnapshot(observedSelector, snapshot)
+  )
+    return false;
   return selectionPlanMatchesManifest(snapshot, options.candidate.manifest);
+}
+
+function observedSelectorForSnapshot(
+  snapshot: StateSelectionSnapshot,
+): StateSelectorV1 | null | undefined {
+  if (snapshot.observedSelectorBytes === null) return null;
+  try {
+    return decodeValidatedSelector(snapshot.observedSelectorBytes);
+  } catch {
+    return undefined;
+  }
+}
+
+function selectorPredecessorMatchesSnapshot(
+  selector: StateSelectorV1,
+  snapshot: Extract<StateSelectionSnapshot, { kind: 'continuation_selected' | 'reset_selected' }>,
+): boolean {
+  return (
+    selector.acceptedMarkerId === snapshot.markerId &&
+    selector.manifestSha256 === sha256Hex(snapshot.predecessorBytes.manifestBytes) &&
+    selector.candidateLedgerSha256 === sha256Hex(snapshot.predecessorBytes.ledgerBytes) &&
+    selector.providerRunMetadataSha256 ===
+      sha256Hex(snapshot.predecessorBytes.providerRunMetadataBytes)
+  );
 }
 
 function observedRevisionMatchesBytes(snapshot: StateSelectionSnapshot): boolean {
@@ -553,27 +589,61 @@ function selectionPlanMatchesManifest(
     case 'bootstrap_selected':
       return manifest.transition.kind === 'bootstrap';
     case 'recovery_root_selected':
-      return manifest.transition.kind === 'recovery_root';
-    case 'continuation_selected':
       return (
+        manifest.transition.kind === 'recovery_root' &&
+        manifest.transition.reason === snapshot.recoveryReason
+      );
+    case 'continuation_selected': {
+      const predecessor = predecessorFacts(snapshot.predecessorBytes);
+      return (
+        predecessor !== null &&
         manifest.transition.kind === 'continuation' &&
         manifest.transition.predecessorManifestSha256 ===
           sha256Hex(snapshot.predecessorBytes.manifestBytes) &&
         manifest.transition.predecessorLedgerSha256 ===
-          sha256Hex(snapshot.predecessorBytes.ledgerBytes)
+          sha256Hex(snapshot.predecessorBytes.ledgerBytes) &&
+        manifest.transition.predecessorStateGeneration === predecessor.stateGeneration &&
+        manifest.transition.predecessorLedgerEpoch === predecessor.ledgerEpoch
       );
-    case 'reset_selected':
+    }
+    case 'reset_selected': {
+      const predecessor = predecessorFacts(snapshot.predecessorBytes);
       return (
+        predecessor !== null &&
         manifest.transition.kind === 'reset' &&
         manifest.transition.reason === snapshot.resetReason &&
         manifest.transition.predecessorManifestSha256 ===
           sha256Hex(snapshot.predecessorBytes.manifestBytes) &&
         manifest.transition.predecessorLedgerSha256 ===
-          sha256Hex(snapshot.predecessorBytes.ledgerBytes)
+          sha256Hex(snapshot.predecessorBytes.ledgerBytes) &&
+        manifest.transition.predecessorStateGeneration === predecessor.stateGeneration &&
+        manifest.transition.predecessorLedgerEpoch === predecessor.ledgerEpoch
       );
+    }
     case 'explicit_restore_invalid':
       return false;
   }
+}
+
+function predecessorFacts(
+  bytes: CandidateBundleBytes,
+): { readonly stateGeneration: number; readonly ledgerEpoch: string } | null {
+  const classification = classifyStateBundleV2({
+    entryListing: [
+      { name: 'manifest.json', isRegularFile: true },
+      { name: 'ledger.json', isRegularFile: true },
+      { name: 'provider-run-metadata.json', isRegularFile: true },
+    ],
+    manifestBytes: bytes.manifestBytes,
+    ledgerBytes: bytes.ledgerBytes,
+    providerRunMetadataBytes: bytes.providerRunMetadataBytes,
+  });
+  return classification.kind === 'valid'
+    ? {
+        stateGeneration: classification.manifest.generation.stateGeneration,
+        ledgerEpoch: classification.manifest.generation.ledgerEpoch,
+      }
+    : null;
 }
 
 function winnerManifestMatchesRegistration(

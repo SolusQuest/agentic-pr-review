@@ -45,13 +45,16 @@ export {
   bytesEqual,
   decodeRecord,
   encodeRecord,
+  RECORD_CODEC_CODES,
   RecordCodecError,
   RECORD_MAX_BYTES,
+  type RecordCodecCode,
 } from './codec.js';
 export {
   MAX_ACCEPTANCE_SNAPSHOT_REGISTRATION_BYTES,
   MAX_ACCEPTANCE_SNAPSHOT_REGISTRATIONS,
   ReferenceStateStore,
+  type StateAcceptanceStore,
   SelectionSnapshotLimitError,
   SelectorRevisionMismatchError,
   StoreTransactionError,

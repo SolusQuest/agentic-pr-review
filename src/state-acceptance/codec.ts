@@ -8,20 +8,27 @@ import { sha256Hex } from './hash.js';
 
 export const RECORD_MAX_BYTES = 32 * 1024;
 
-export class RecordCodecError extends Error {
-  readonly code:
-    | 'byte_limit_exceeded'
-    | 'bom'
-    | 'invalid_utf8'
-    | 'invalid_json'
-    | 'duplicate_key'
-    | 'invalid_unicode'
-    | 'non_canonical';
+export const RECORD_CODEC_CODES = [
+  'byte_limit_exceeded',
+  'bom',
+  'invalid_utf8',
+  'invalid_json',
+  'duplicate_key',
+  'invalid_unicode',
+  'non_canonical',
+] as const;
 
-  constructor(code: RecordCodecError['code']) {
+export type RecordCodecCode = (typeof RECORD_CODEC_CODES)[number];
+
+export class RecordCodecError extends Error {
+  readonly code: RecordCodecCode;
+  readonly path: string;
+
+  constructor(code: RecordCodecCode, path = '') {
     super(`state acceptance record rejected: ${code}`);
     this.name = 'RecordCodecError';
     this.code = code;
+    this.path = path;
   }
 }
 

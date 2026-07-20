@@ -33,6 +33,7 @@ import {
 } from './validation.js';
 import type {
   AcceptedStateMarkerV1,
+  AcceptanceSnapshot,
   CandidateBundleBytes,
   CandidateId,
   CandidateRegistrationDraft,
@@ -129,12 +130,43 @@ export interface RegistrationWriteResult {
   readonly registration?: CandidateRegistrationV1;
 }
 
+export interface StateAcceptanceStore {
+  uploadCandidate(
+    candidateId: CandidateId,
+    bundle: CandidateBundleBytes,
+  ): Promise<CandidateUploadOutcome>;
+  readCandidate(candidateId: CandidateId): Promise<CandidateReadResult>;
+  registerCandidate(draft: CandidateRegistrationDraft): Promise<RegistrationWriteResult>;
+  createAcceptanceSnapshot(
+    expectedObservedSelectorRevision: SelectorRevision,
+    competingScope: CompetingScope,
+    selectionSnapshotId: string,
+  ): Promise<AcceptanceSnapshot>;
+  readSelector(stateKey: StateKeyV2): Promise<{
+    readonly bytes: Uint8Array | null;
+    readonly selector: StateSelectorV1 | null;
+  }>;
+  writeMarker(marker: AcceptedStateMarkerV1): Promise<WriteOutcome<AcceptedStateMarkerV1>>;
+  readMarker(
+    stateKey: StateKeyV2,
+    markerId: MarkerId,
+  ): Promise<{
+    readonly bytes: Uint8Array | null;
+    readonly marker: AcceptedStateMarkerV1 | null;
+  }>;
+  casSelector(
+    expectedRevision: SelectorRevision,
+    selector: StateSelectorV1,
+  ): Promise<SelectorCasOutcome>;
+  selectAcceptedState(options: SelectionOptions): Promise<SelectionOutcome>;
+}
+
 interface LockHandle {
   readonly server: net.Server;
   readonly release: () => Promise<void>;
 }
 
-export class ReferenceStateStore {
+export class ReferenceStateStore implements StateAcceptanceStore {
   readonly root: string;
   private readonly hooks: ReferenceStoreHooks;
   private readonly initialized: Promise<void>;
@@ -156,6 +188,12 @@ export class ReferenceStateStore {
     await this.initialized;
     const locator = candidateLocator(candidateId);
     if (!/^[a-f0-9]{64}$/.test(candidateId)) return { kind: 'existing_content_conflict' };
+    if (
+      bundle.manifestBytes.byteLength > MANIFEST_MAX_BYTES ||
+      bundle.ledgerBytes.byteLength > LEDGER_MAX_BYTES ||
+      bundle.providerRunMetadataBytes.byteLength > METADATA_MAX_BYTES
+    )
+      return { kind: 'existing_content_conflict' };
     const candidatesRoot = path.join(this.root, 'candidates');
     const target = path.join(candidatesRoot, candidateId);
     try {
@@ -205,7 +243,11 @@ export class ReferenceStateStore {
     const directory = path.join(this.root, 'candidates', candidateId);
     try {
       const directoryStat = await lstat(directory);
-      if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) {
+      if (
+        !directoryStat.isDirectory() ||
+        directoryStat.isSymbolicLink() ||
+        (directoryStat.mode & 0o777) !== 0o700
+      ) {
         return {
           status: 'unsafe',
           diagnostic: 'bundle_listing_mismatch',
@@ -399,7 +441,7 @@ export class ReferenceStateStore {
     expectedObservedSelectorRevision: SelectorRevision,
     competingScope: CompetingScope,
     selectionSnapshotId: string,
-  ) {
+  ): Promise<AcceptanceSnapshot> {
     await this.initialized;
     return this.withStateKeyLock(competingScope.stateKey, async () => {
       const stateDirectory = await this.stateDirectory(competingScope.stateKey);
@@ -743,6 +785,24 @@ export class ReferenceStateStore {
       );
     }
     if (!manifestRegistrationBindingMatches(classification.manifest, registration, hashes)) {
+      return this.recoveryOrExplicit(
+        options,
+        selectorBytes,
+        'integrity_mismatch',
+        'candidate_invalid',
+        [
+          { kind: 'selector_bytes', sha256: sha256Hex(selectorBytes) },
+          { kind: 'marker_bytes', markerId: marker.markerId, sha256: sha256Hex(markerBytes) },
+          { kind: 'candidate_reference', candidateId: marker.candidateId },
+        ],
+        observedRevision,
+      );
+    }
+
+    if (
+      selector.currentHeadSha !== classification.manifest.provenance.currentHeadSha ||
+      selector.currentBaseSha !== classification.manifest.provenance.currentBaseSha
+    ) {
       return this.recoveryOrExplicit(
         options,
         selectorBytes,
