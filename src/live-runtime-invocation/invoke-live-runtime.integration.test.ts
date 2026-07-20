@@ -21,6 +21,13 @@ import {
 import { serializeInputBytes, sha256Hex } from '../runtime-invocation/runtime-files.js';
 import { classifyStateBundleV2, LEDGER_MAX_BYTES, METADATA_MAX_BYTES } from '../state-v2/index.js';
 import { makeStateManifestV2Input } from '../state-v2/test-helpers.js';
+import {
+  acceptLocalCandidate,
+  candidateIdentity,
+  computeSelectionSnapshotId,
+  observedSelectorSnapshotSha256,
+  ReferenceStateStore,
+} from '../state-acceptance/index.js';
 import type { ReviewInputV1 } from '../protocol/review-input.js';
 import { invokeLiveRuntime, runProcess } from './invoke-live-runtime.js';
 
@@ -409,6 +416,43 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
         ),
       };
       expect(classifyStateBundleV2(bundle).kind).toBe('valid');
+      const acceptanceIdentity = candidateIdentity(lease);
+      expect(acceptanceIdentity.bundle.manifestBytes).toEqual(new Uint8Array(bundle.manifestBytes));
+      expect(acceptanceIdentity.bundle.ledgerBytes).toEqual(new Uint8Array(bundle.ledgerBytes));
+      expect(acceptanceIdentity.bundle.providerRunMetadataBytes).toEqual(
+        new Uint8Array(bundle.providerRunMetadataBytes),
+      );
+      const selectionSnapshotDraft = {
+        schemaVersion: 1 as const,
+        kind: 'bootstrap_selected' as const,
+        stateKey: lease.manifest.stateKey,
+        observedSelectorBytes: null,
+        observedSelectorRevision: 'bootstrap' as const,
+        observedSelectorSnapshotSha256: observedSelectorSnapshotSha256(null),
+        transitionPlan: 'bootstrap' as const,
+        selectionSnapshotId: '' as never,
+      };
+      const selectionSnapshot = {
+        ...selectionSnapshotDraft,
+        selectionSnapshotId: computeSelectionSnapshotId(selectionSnapshotDraft),
+      };
+      const acceptanceStore = new ReferenceStateStore(path.join(root, 'state-acceptance'));
+      const acceptance = await acceptLocalCandidate(acceptanceStore, {
+        selectionSnapshot,
+        candidate: lease,
+        interactionId: lease.manifest.transaction.interactionId,
+        interactionOrdinal: lease.manifest.transaction.interactionOrdinal,
+        producingRunId: lease.manifest.provenance.producingRunId,
+        producingRunAttempt: lease.manifest.provenance.producingRunAttempt,
+        acceptingRunId: '2',
+        acceptingRunAttempt: 1,
+        consumedInputSha256: lease.manifest.transaction.consumedInputSha256,
+        transition: lease.manifest.transition,
+        publishSticky: async (markerId) => {
+          expect(markerId).toMatch(/^[a-f0-9]{64}$/);
+        },
+      });
+      expect(acceptance.acceptance).toBe('accepted');
       const predecessorLedgerBytes = new Uint8Array(bundle.ledgerBytes);
       const predecessorManifestBytes = new Uint8Array(bundle.manifestBytes);
       const predecessorProviderRunMetadataBytes = new Uint8Array(bundle.providerRunMetadataBytes);

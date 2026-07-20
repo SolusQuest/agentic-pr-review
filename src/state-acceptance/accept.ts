@@ -1,7 +1,7 @@
 import { canonicalJsonBytes } from '../canonical-json/index.js';
 import { bytesEqual } from './codec.js';
 import { candidateBundleSha256, compareDecimalIds, computeCandidateId, sha256Hex } from './hash.js';
-import { materializeMarker, materializeSelector } from './validation.js';
+import { encodeValidatedRecord, materializeMarker, materializeSelector } from './validation.js';
 import {
   ReferenceStateStore,
   SelectionSnapshotLimitError,
@@ -97,6 +97,7 @@ async function acceptWithoutCleanup(
   if (options.selectionSnapshot.kind === 'explicit_restore_invalid')
     return notAccepted('selector_invalid');
 
+  if (!leaseIdentityIsConsistent(options.candidate)) return notAccepted('candidate_invalid');
   const identity = candidateIdentity(options.candidate);
   const upload = await store.uploadCandidate(identity.candidateId, identity.bundle);
   if (upload.kind === 'existing_content_conflict')
@@ -104,9 +105,11 @@ async function acceptWithoutCleanup(
   if (upload.kind === 'outcome_unknown') {
     const readBack = await store.readCandidate(identity.candidateId);
     if (readBack.status !== 'present') {
-      return readBack.status === 'unsafe'
-        ? notAccepted('candidate_readback_mismatch')
-        : unknownAcceptance();
+      if (readBack.status === 'unsafe') return notAccepted('candidate_readback_mismatch');
+      if (readBack.status === 'missing' && allCandidateEntriesMissing(readBack.evidence)) {
+        return notAccepted('candidate_upload_failed');
+      }
+      return unknownAcceptance();
     }
     if (!bundlesEqual(readBack.bundle, identity.bundle))
       return notAccepted('candidate_readback_mismatch');
@@ -116,6 +119,8 @@ async function acceptWithoutCleanup(
   const registrationResult = await store.registerCandidate(draft);
   if (registrationResult.kind === 'registration_write_conflict')
     return notAccepted('registration_write_conflict');
+  if (registrationResult.kind === 'registration_write_failed')
+    return notAccepted('registration_write_failed');
   if (registrationResult.kind === 'registration_sequence_overflow')
     return notAccepted('registration_sequence_overflow');
   if (registrationResult.kind === 'outcome_unknown') {
@@ -149,13 +154,24 @@ async function acceptWithoutCleanup(
 
   if (options.signal?.aborted) return notAccepted('cancelled_before_acceptance');
   const marker = materializeMarker(markerInput(winner, options));
-  const markerWrite = await store.writeMarker(marker);
+  const markerBytes = encodeValidatedRecord(marker);
+  let markerWrite;
+  try {
+    markerWrite = await store.writeMarker(marker);
+  } catch {
+    return notAccepted('marker_write_failed');
+  }
   let acceptedMarker: AcceptedStateMarkerV1;
   if (markerWrite.kind === 'created' || markerWrite.kind === 'already_exists_same') {
     acceptedMarker = markerWrite.value;
   } else if (markerWrite.kind === 'outcome_unknown') {
     const readBack = await store.readMarker(options.selectionSnapshot.stateKey, marker.markerId);
-    if (readBack.marker === null) return unknownAcceptance();
+    if (
+      readBack.marker === null ||
+      readBack.bytes === null ||
+      !bytesEqual(readBack.bytes, markerBytes)
+    )
+      return unknownAcceptance();
     acceptedMarker = readBack.marker;
   } else {
     return notAccepted('marker_write_conflict');
@@ -163,13 +179,24 @@ async function acceptWithoutCleanup(
 
   if (options.signal?.aborted) return notAccepted('cancelled_before_acceptance');
   const selector = materializeSelector(selectorInput(acceptedMarker, options));
-  const cas = await store.casSelector(options.selectionSnapshot.observedSelectorRevision, selector);
+  const selectorBytes = encodeValidatedRecord(selector);
+  let cas;
+  try {
+    cas = await store.casSelector(options.selectionSnapshot.observedSelectorRevision, selector);
+  } catch {
+    return notAccepted('store_transaction_failed');
+  }
   let selected: 'accepted' | 'already_accepted';
   if (cas.kind === 'applied') selected = 'accepted';
   else if (cas.kind === 'already_applied_same_target') selected = 'already_accepted';
   else if (cas.kind === 'outcome_unknown') {
     const readBack = await store.readSelector(options.selectionSnapshot.stateKey);
-    if (readBack.selector?.selectorId !== selector.selectorId) return unknownAcceptance();
+    if (
+      readBack.selector?.selectorId !== selector.selectorId ||
+      readBack.bytes === null ||
+      !bytesEqual(readBack.bytes, selectorBytes)
+    )
+      return unknownAcceptance();
     selected = 'accepted';
   } else return notAccepted('selector_cas_rejected');
 
@@ -387,5 +414,36 @@ function bundlesEqual(left: CandidateBundleBytes, right: CandidateBundleBytes): 
     left.providerRunMetadataBytes.every(
       (value, index) => value === right.providerRunMetadataBytes[index],
     )
+  );
+}
+
+function allCandidateEntriesMissing(evidence: {
+  readonly manifest: { readonly status: string };
+  readonly ledger: { readonly status: string };
+  readonly providerRunMetadata: { readonly status: string };
+}): boolean {
+  return (
+    evidence.manifest.status === 'missing' &&
+    evidence.ledger.status === 'missing' &&
+    evidence.providerRunMetadata.status === 'missing'
+  );
+}
+
+function leaseIdentityIsConsistent(lease: AcceptanceOptions['candidate']): boolean {
+  const manifestBytes = new Uint8Array(lease.manifestBytes);
+  const expectedManifestBytes = canonicalJsonBytes(lease.manifest);
+  if (!bytesEqual(manifestBytes, expectedManifestBytes)) return false;
+  const bundleHashes = candidateBundleSha256(lease);
+  const transaction = lease.manifest.transaction;
+  return (
+    bundleHashes.candidateLedgerSha256 === transaction.candidateLedgerSha256 &&
+    bundleHashes.candidateLedgerSha256 === lease.candidateLedgerSha256 &&
+    bundleHashes.providerRunMetadataSha256 === lease.manifest.providerRunMetadata.sha256 &&
+    lease.metadataSemanticSha256 === transaction.metadataSemanticSha256 &&
+    lease.inputSha256 === transaction.consumedInputSha256 &&
+    sha256Hex(lease.resultBytes) === transaction.resultSha256 &&
+    lease.resultSha256 === transaction.resultSha256 &&
+    sha256Hex(lease.traceBytes) === transaction.traceSha256 &&
+    lease.traceSha256 === transaction.traceSha256
   );
 }

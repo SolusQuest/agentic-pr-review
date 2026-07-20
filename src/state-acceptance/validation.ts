@@ -166,6 +166,7 @@ export function validateCandidateRegistration(
   boundedInt(record.stateGeneration, 0, 1_000_000, '/stateGeneration');
   epoch(record.ledgerEpoch, '/ledgerEpoch');
   validateTransition(record.transition);
+  validateRecordPredecessorBinding(record);
   sha(record.interactionId, '/interactionId');
   boundedInt(record.interactionOrdinal, 0, 1_000_000, '/interactionOrdinal');
   runId(record.producingRunId, '/producingRunId');
@@ -206,6 +207,7 @@ export function validateAcceptedStateMarker(
   boundedInt(record.stateGeneration, 0, 1_000_000, '/stateGeneration');
   epoch(record.ledgerEpoch, '/ledgerEpoch');
   validateTransition(record.transition);
+  validateRecordPredecessorBinding(record);
   predecessor(record.predecessorMarkerId, '/predecessorMarkerId');
   predecessor(record.predecessorManifestSha256, '/predecessorManifestSha256');
   predecessor(record.predecessorLedgerSha256, '/predecessorLedgerSha256');
@@ -447,6 +449,30 @@ function validateLocator(value: unknown, candidateId: CandidateId): void {
     locator.objectId.length !== 74
   ) {
     throw new ContractValidationError('locator_invalid', '/candidateArtifactLocator/objectId');
+  }
+}
+
+function validateRecordPredecessorBinding(record: Record<string, unknown>): void {
+  const transition = record.transition as Record<string, unknown>;
+  const predecessorFields = [
+    'predecessorMarkerId',
+    'predecessorManifestSha256',
+    'predecessorLedgerSha256',
+  ];
+  if (transition.kind === 'bootstrap' || transition.kind === 'recovery_root') {
+    for (const field of predecessorFields) {
+      if (record[field] !== 'bootstrap') {
+        throw new ContractValidationError('predecessor_binding_invalid', `/${field}`);
+      }
+    }
+  } else {
+    if (
+      record.predecessorManifestSha256 !== transition.predecessorManifestSha256 ||
+      record.predecessorLedgerSha256 !== transition.predecessorLedgerSha256 ||
+      record.predecessorMarkerId === 'bootstrap'
+    ) {
+      throw new ContractValidationError('predecessor_binding_invalid', '/predecessor');
+    }
   }
 }
 

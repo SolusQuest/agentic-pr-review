@@ -335,6 +335,7 @@ export interface SelectionOptions {
   readonly currentBaseSha: GitSha;
   readonly workflowIdentity: string;
   readonly trustedExecutionDomain: string;
+  readonly headRelationship?: 'same' | 'descendant' | 'non_descendant' | 'unknown';
   readonly explicitRestore?: boolean;
 }
 

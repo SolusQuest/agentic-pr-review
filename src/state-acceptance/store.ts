@@ -1,8 +1,9 @@
 import net from 'node:net';
 import path from 'node:path';
-import { mkdir, readdir, rename, rm, writeFile, open } from 'node:fs/promises';
+import { lstat, mkdir, readdir, rename, rm, writeFile, open } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { canonicalJsonBytes } from '../canonical-json/index.js';
+import { classifyStateBundleV2 } from '../state-v2/index.js';
 import { bytesEqual, recordSha256 } from './codec.js';
 import {
   candidateBundleSha256,
@@ -84,9 +85,13 @@ export class SelectorRevisionMismatchError extends Error {
 }
 
 export interface ReferenceStoreHooks {
+  readonly beforeCandidateCommit?: () => void | Promise<void>;
   readonly afterCandidateCommit?: () => void | Promise<void>;
+  readonly beforeRegistrationCommit?: () => void | Promise<void>;
   readonly afterRegistrationCommit?: () => void | Promise<void>;
+  readonly beforeMarkerCommit?: () => void | Promise<void>;
   readonly afterMarkerCommit?: () => void | Promise<void>;
+  readonly beforeSelectorCommit?: () => void | Promise<void>;
   readonly afterSelectorCommit?: () => void | Promise<void>;
 }
 
@@ -111,6 +116,7 @@ export interface RegistrationWriteResult {
     | 'created'
     | 'already_exists_same'
     | 'registration_write_conflict'
+    | 'registration_write_failed'
     | 'outcome_unknown'
     | 'registration_sequence_overflow';
   readonly registration?: CandidateRegistrationV1;
@@ -152,6 +158,7 @@ export class ReferenceStateStore {
       );
       await mkdir(temporary, { mode: 0o700 });
       try {
+        await this.hooks.beforeCandidateCommit?.();
         await writePrivate(path.join(temporary, 'manifest.json'), bundle.manifestBytes);
         await writePrivate(path.join(temporary, 'ledger.json'), bundle.ledgerBytes);
         await writePrivate(
@@ -190,6 +197,14 @@ export class ReferenceStateStore {
       };
     const directory = path.join(this.root, 'candidates', candidateId);
     try {
+      const directoryStat = await lstat(directory);
+      if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) {
+        return {
+          status: 'unsafe',
+          diagnostic: 'bundle_listing_mismatch',
+          evidence: unsafeCandidateEvidence(),
+        };
+      }
       const entries = await readdir(directory);
       const expected = new Set(['manifest.json', 'ledger.json', 'provider-run-metadata.json']);
       const evidence = {
@@ -253,15 +268,31 @@ export class ReferenceStateStore {
         if (maximum >= 1_000_000) return { kind: 'registration_sequence_overflow' };
         const registration = materializeRegistration(draft, String(maximum + 1));
         const bytes = encodeValidatedRecord(registration);
-        await writePrivateAtomic(registrationPath, bytes);
-        await writePrivateAtomic(
-          path.join(registrationsDirectory, 'sequence.txt'),
-          new TextEncoder().encode(registration.registrationSequence),
-        );
         try {
+          await this.hooks.beforeRegistrationCommit?.();
+          await writePrivateAtomic(registrationPath, bytes);
+          await writePrivateAtomic(
+            path.join(registrationsDirectory, 'sequence.txt'),
+            new TextEncoder().encode(registration.registrationSequence),
+          );
           await this.hooks.afterRegistrationCommit?.();
         } catch {
-          return { kind: 'outcome_unknown', registration };
+          const readBack = await readOptionalPrivate(registrationPath).catch(() => null);
+          if (readBack !== null) {
+            try {
+              const reconciled = decodeValidatedRegistration(readBack);
+              if (
+                reconciled.registrationId === registration.registrationId &&
+                bytesEqual(readBack, bytes)
+              ) {
+                return { kind: 'already_exists_same', registration: reconciled };
+              }
+              return { kind: 'outcome_unknown', registration };
+            } catch {
+              return { kind: 'outcome_unknown', registration };
+            }
+          }
+          return { kind: 'registration_write_failed' };
         }
         return { kind: 'created', registration };
       });
@@ -295,6 +326,7 @@ export class ReferenceStateStore {
         return { kind: 'already_exists_same', value: current };
       }
       const bytes = encodeValidatedRecord(marker);
+      await this.hooks.beforeMarkerCommit?.();
       await writePrivateAtomic(target, bytes);
       try {
         await this.hooks.afterMarkerCommit?.();
@@ -337,6 +369,7 @@ export class ReferenceStateStore {
         if (current.selectorId === selector.selectorId)
           return { kind: 'already_applied_same_target', selector: current };
       }
+      await this.hooks.beforeSelectorCommit?.();
       await writePrivateAtomic(target, encodeValidatedRecord(selector));
       try {
         await this.hooks.afterSelectorCommit?.();
@@ -542,11 +575,7 @@ export class ReferenceStateStore {
         observedRevision,
       );
     }
-    if (
-      marker.markerId !== selector.acceptedMarkerId ||
-      marker.candidateId !== selector.candidateId ||
-      marker.stateKey.workflowIdentity !== selector.stateKey.workflowIdentity
-    ) {
+    if (!selectorMarkerBindingMatches(selector, marker)) {
       return this.recoveryOrExplicit(
         options,
         selectorBytes,
@@ -607,6 +636,46 @@ export class ReferenceStateStore {
         observedRevision,
       );
     }
+    const classification = classifyStateBundleV2({
+      entryListing: [
+        { name: 'manifest.json', isRegularFile: true },
+        { name: 'ledger.json', isRegularFile: true },
+        { name: 'provider-run-metadata.json', isRegularFile: true },
+      ],
+      manifestBytes: candidate.bundle.manifestBytes,
+      ledgerBytes: candidate.bundle.ledgerBytes,
+      providerRunMetadataBytes: candidate.bundle.providerRunMetadataBytes,
+    });
+    if (classification.kind !== 'valid') {
+      const diagnostic =
+        classification.kind === 'invalid' ? classification.diagnostic : 'manifest_unknown_version';
+      const reason =
+        diagnostic === 'manifest_unknown_version' || classification.kind === 'unsupported_legacy_v1'
+          ? 'contract_version_incompatible'
+          : diagnostic === 'ledger_byte_limit_exceeded' ||
+              diagnostic === 'provider_run_metadata_byte_limit_exceeded'
+            ? 'over_bound_ledger'
+            : 'corrupt_accepted_artifact';
+      return this.recoveryOrExplicit(
+        options,
+        selectorBytes,
+        reason,
+        'candidate_invalid',
+        [
+          { kind: 'selector_bytes', sha256: sha256Hex(selectorBytes) },
+          { kind: 'marker_bytes', markerId: marker.markerId, sha256: sha256Hex(markerBytes) },
+          {
+            kind: 'candidate_bundle',
+            candidateId: marker.candidateId,
+            manifest: { status: 'present', sha256: hashes.manifestSha256 },
+            ledger: { status: 'present', sha256: hashes.candidateLedgerSha256 },
+            providerRunMetadata: { status: 'present', sha256: hashes.providerRunMetadataSha256 },
+            bundleDiagnostic: diagnostic,
+          },
+        ],
+        observedRevision,
+      );
+    }
 
     const predecessorBytes = {
       manifestBytes: new Uint8Array(candidate.bundle.manifestBytes),
@@ -624,7 +693,8 @@ export class ReferenceStateStore {
       selector.sessionEpoch === options.sessionEpoch &&
       selector.ledgerEpoch === options.ledgerEpoch &&
       selector.currentBaseSha === options.currentBaseSha &&
-      selector.currentHeadSha === options.currentHeadSha
+      (selector.currentHeadSha === options.currentHeadSha ||
+        options.headRelationship === 'descendant')
     ) {
       return {
         selection: 'selected',
@@ -796,6 +866,31 @@ function matchesScope(registration: CandidateRegistrationV1, scope: CompetingSco
   );
 }
 
+function selectorMarkerBindingMatches(
+  selector: StateSelectorV1,
+  marker: AcceptedStateMarkerV1,
+): boolean {
+  return (
+    marker.markerId === selector.acceptedMarkerId &&
+    marker.candidateId === selector.candidateId &&
+    bytesEqual(canonicalJsonBytes(marker.stateKey), canonicalJsonBytes(selector.stateKey)) &&
+    marker.sessionEpoch === selector.sessionEpoch &&
+    marker.stateGeneration === selector.stateGeneration &&
+    marker.ledgerEpoch === selector.ledgerEpoch &&
+    bytesEqual(canonicalJsonBytes(marker.transition), canonicalJsonBytes(selector.transition)) &&
+    marker.observedSelectorRevision === selector.previousSelectorRevision &&
+    marker.manifestSha256 === selector.manifestSha256 &&
+    marker.candidateLedgerSha256 === selector.candidateLedgerSha256 &&
+    marker.providerRunMetadataSha256 === selector.providerRunMetadataSha256 &&
+    marker.metadataSemanticSha256 === selector.metadataSemanticSha256 &&
+    marker.consumedInputSha256 === selector.consumedInputSha256 &&
+    marker.resultSha256 === selector.resultSha256 &&
+    marker.traceSha256 === selector.traceSha256 &&
+    marker.stateKey.workflowIdentity === selector.workflowIdentity &&
+    marker.stateKey.trustedExecutionDomain === selector.trustedExecutionDomain
+  );
+}
+
 function selectorRevisionFromBytes(bytes: Uint8Array): SelectorRevision {
   try {
     return decodeValidatedSelector(bytes).selectorRevision;
@@ -868,9 +963,18 @@ async function writePrivateAtomic(filePath: string, bytes: Uint8Array): Promise<
 async function readPrivate(filePath: string): Promise<Uint8Array> {
   const handle = await open(filePath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
   try {
-    const stat = await handle.stat();
-    if (!stat.isFile()) throw new Error('unsafe file');
-    return new Uint8Array(await handle.readFile());
+    const before = await handle.stat();
+    if (!before.isFile()) throw new Error('unsafe file');
+    const bytes = new Uint8Array(await handle.readFile());
+    const after = await handle.stat();
+    if (
+      before.ino !== after.ino ||
+      before.size !== after.size ||
+      before.mtimeMs !== after.mtimeMs
+    ) {
+      throw new Error('unstable file');
+    }
+    return bytes;
   } finally {
     await handle.close();
   }

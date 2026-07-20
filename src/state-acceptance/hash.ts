@@ -71,9 +71,9 @@ export function candidateLocator(candidateId: CandidateId) {
 }
 
 export function candidateBundleSha256(bundle: CandidateBundleBytes): {
-  readonly manifestSha256: string;
-  readonly candidateLedgerSha256: string;
-  readonly providerRunMetadataSha256: string;
+  readonly manifestSha256: Sha256Hex;
+  readonly candidateLedgerSha256: Sha256Hex;
+  readonly providerRunMetadataSha256: Sha256Hex;
 } {
   return {
     manifestSha256: sha256Hex(bundle.manifestBytes),
