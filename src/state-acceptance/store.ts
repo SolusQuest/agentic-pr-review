@@ -92,6 +92,13 @@ export class SelectorRevisionMismatchError extends Error {
   }
 }
 
+class UnsafePrivateFileError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnsafePrivateFileError';
+  }
+}
+
 export interface ReferenceStoreHooks {
   readonly beforeCandidateCommit?: () => void | Promise<void>;
   readonly afterCandidateCommit?: () => void | Promise<void>;
@@ -271,11 +278,14 @@ export class ReferenceStateStore implements StateAcceptanceStore {
         return { status: 'unsafe', diagnostic: 'bundle_extra_entry', evidence };
       if (entries.length !== expected.size)
         return { status: 'unsafe', diagnostic: 'bundle_listing_mismatch', evidence };
-      if (
-        evidence.manifest.status !== 'present' ||
-        evidence.ledger.status !== 'present' ||
-        evidence.providerRunMetadata.status !== 'present'
-      ) {
+      const evidenceEntries = [evidence.manifest, evidence.ledger, evidence.providerRunMetadata];
+      if (evidenceEntries.some((entry) => entry.status === 'failed')) {
+        return { status: 'failed' };
+      }
+      if (evidenceEntries.some((entry) => entry.status === 'unsafe')) {
+        return { status: 'unsafe', diagnostic: 'bundle_listing_mismatch', evidence };
+      }
+      if (evidenceEntries.some((entry) => entry.status === 'missing')) {
         return { status: 'missing', evidence };
       }
       const manifestBytes = await readPrivate(
@@ -1217,11 +1227,21 @@ async function writePrivateAtomic(filePath: string, bytes: Uint8Array): Promise<
 }
 
 async function readPrivate(filePath: string, maxBytes = RECORD_MAX_BYTES): Promise<Uint8Array> {
-  const handle = await open(filePath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+  let handle;
+  try {
+    handle = await open(
+      filePath,
+      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0),
+    );
+  } catch (error) {
+    if (isUnsafeFileSystemError(error)) throw new UnsafePrivateFileError('unsafe file');
+    throw error;
+  }
   try {
     const before = await handle.stat();
-    if (!before.isFile() || (before.mode & 0o777) !== 0o600) throw new Error('unsafe file');
-    if (before.size > maxBytes) throw new Error('file size limit');
+    if (!before.isFile() || (before.mode & 0o777) !== 0o600)
+      throw new UnsafePrivateFileError('unsafe file');
+    if (before.size > maxBytes) throw new UnsafePrivateFileError('file size limit');
     const buffer = Buffer.allocUnsafe(maxBytes + 1);
     let offset = 0;
     while (offset < buffer.byteLength) {
@@ -1229,7 +1249,7 @@ async function readPrivate(filePath: string, maxBytes = RECORD_MAX_BYTES): Promi
       offset += read.bytesRead;
       if (read.bytesRead === 0) break;
     }
-    if (offset > maxBytes) throw new Error('file size limit');
+    if (offset > maxBytes) throw new UnsafePrivateFileError('file size limit');
     const bytes = new Uint8Array(buffer.subarray(0, offset));
     const after = await handle.stat();
     if (
@@ -1238,7 +1258,7 @@ async function readPrivate(filePath: string, maxBytes = RECORD_MAX_BYTES): Promi
       before.size !== after.size ||
       before.mtimeMs !== after.mtimeMs
     ) {
-      throw new Error('unstable file');
+      throw new UnsafePrivateFileError('unstable file');
     }
     return bytes;
   } finally {
@@ -1265,7 +1285,9 @@ async function readObservedEntry(
   try {
     return { status: 'present', sha256: sha256Hex(await readPrivate(filePath, maxBytes)) };
   } catch (error) {
-    return isMissing(error) ? { status: 'missing' } : { status: 'unsafe' };
+    if (isMissing(error)) return { status: 'missing' };
+    if (error instanceof UnsafePrivateFileError) return { status: 'unsafe' };
+    return { status: 'failed' };
   }
 }
 
@@ -1295,6 +1317,11 @@ function bundlesEqual(left: CandidateBundleBytes, right: CandidateBundleBytes): 
 
 function isMissing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
+}
+
+function isUnsafeFileSystemError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return code === 'ELOOP' || code === 'EISDIR' || code === 'ENXIO' || code === 'ENOTDIR';
 }
 
 function isAlreadyExists(error: unknown): boolean {

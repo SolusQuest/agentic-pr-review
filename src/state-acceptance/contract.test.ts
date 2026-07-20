@@ -1,10 +1,15 @@
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Ajv } from 'ajv';
 import { canonicalJsonBytes } from '../canonical-json/index.js';
 import { describe, expect, it } from 'vitest';
+import registrationSchema from '../../protocol/schemas/candidate-registration.v1.json' with { type: 'json' };
+import markerSchema from '../../protocol/schemas/accepted-state-marker.v1.json' with { type: 'json' };
+import selectorSchema from '../../protocol/schemas/state-selector.v1.json' with { type: 'json' };
+import { classifyCandidateRegistrations } from './accept.js';
 import {
   acceptLocalCandidate,
   RecordCodecError,
@@ -108,13 +113,14 @@ function markerFor(
     providerRunMetadataSha256: sha,
   },
   registrationId = sha,
+  markerStateKey = stateKey,
 ) {
   return materializeMarker(
     {
       schemaVersion: 1,
       candidateId: candidateId as never,
       registrationId: registrationId as never,
-      stateKey,
+      stateKey: markerStateKey,
       sessionEpoch: epoch,
       stateGeneration: 0,
       ledgerEpoch: epoch,
@@ -139,11 +145,11 @@ function markerFor(
   );
 }
 
-function selectorFor(marker: ReturnType<typeof markerFor>) {
+function selectorFor(marker: ReturnType<typeof markerFor>, selectorStateKey = stateKey) {
   return materializeSelector(
     {
       schemaVersion: 1,
-      stateKey,
+      stateKey: selectorStateKey,
       previousSelectorRevision: 'bootstrap',
       acceptedMarkerId: marker.markerId,
       candidateId: marker.candidateId,
@@ -192,7 +198,7 @@ describe('M4 state acceptance contract', () => {
         expect.objectContaining({ code: 'invalid_unicode' }),
       );
       expect(() => decode(new TextEncoder().encode('{"schemaVersion":1, "bad": 1}'))).toThrowError(
-        expect.objectContaining({ code: 'non_canonical' }),
+        expect.objectContaining({ code: 'unknown_or_missing_field' }),
       );
     }
     expect(() => decodeValidatedRegistration(new TextEncoder().encode('null'))).toThrowError(
@@ -225,6 +231,73 @@ describe('M4 state acceptance contract', () => {
         );
       }
     }
+  });
+
+  it('keeps schema and runtime state-key domains in parity', () => {
+    const ajv = new Ajv({ strict: true, allErrors: true });
+    const marker = markerFor('e'.repeat(64));
+    const records = [
+      {
+        schema: registrationSchema,
+        decode: decodeValidatedRegistration,
+        value: materializeRegistration(draft(), '1'),
+      },
+      {
+        schema: markerSchema,
+        decode: decodeValidatedMarker,
+        value: marker,
+      },
+      {
+        schema: selectorSchema,
+        decode: decodeValidatedSelector,
+        value: selectorFor(marker),
+      },
+    ] as const;
+    for (const { schema, decode, value } of records) {
+      const validate = ajv.compile(schema);
+      const validBytes = canonicalJsonBytes(value);
+      expect(validate(value)).toBe(true);
+      expect(() => decode(validBytes)).not.toThrow();
+
+      const invalidRepository = structuredClone(value) as Record<string, any>;
+      invalidRepository.stateKey.repository = 'invalid repository';
+      const invalidRepositoryBytes = canonicalJsonBytes(invalidRepository);
+      expect(validate(invalidRepository)).toBe(false);
+      expect(() => decode(invalidRepositoryBytes)).toThrowError(
+        expect.objectContaining({ code: 'state_key_invalid', path: '/stateKey/repository' }),
+      );
+
+      const overBoundRepository = structuredClone(value) as Record<string, any>;
+      overBoundRepository.stateKey.repository = `${'a'.repeat(100)}/${'b'.repeat(100)}`;
+      const overBoundRepositoryBytes = canonicalJsonBytes(overBoundRepository);
+      expect(validate(overBoundRepository)).toBe(false);
+      expect(() => decode(overBoundRepositoryBytes)).toThrowError(
+        expect.objectContaining({ code: 'state_key_invalid', path: '/stateKey/repository' }),
+      );
+    }
+  });
+
+  it('orders duplicate winners and distinguishes semantic conflicts from stale candidates', () => {
+    const first = materializeRegistration(draft({ producingRunId: '10' }), '1');
+    const laterDuplicate = materializeRegistration(draft({ producingRunId: '11' }), '2');
+    expect(classifyCandidateRegistrations(first, [first, laterDuplicate])).toBe(first);
+    expect(classifyCandidateRegistrations(laterDuplicate, [first, laterDuplicate])).toBe('stale');
+
+    const conflictResultSha = 'b'.repeat(64) as never;
+    const conflictCandidateId = computeCandidateId({
+      manifestSha256: sha,
+      candidateLedgerSha256: sha,
+      providerRunMetadataSha256: sha,
+      metadataSemanticSha256: sha,
+      consumedInputSha256: sha,
+      resultSha256: conflictResultSha,
+      traceSha256: sha,
+    });
+    const conflict = materializeRegistration(
+      draft({ candidateId: conflictCandidateId, resultSha256: conflictResultSha }),
+      '3',
+    );
+    expect(classifyCandidateRegistrations(conflict, [first, conflict])).toBe('conflict');
   });
 
   it('freezes identity domains and the non-circular marker-to-selector order', () => {
@@ -512,6 +585,69 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
     }
   });
 
+  it('classifies unsafe expected candidate files instead of treating them as missing', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'm4-state-acceptance-file-matrix-'));
+    const candidateId = 'd'.repeat(64) as never;
+    const directory = path.join(root, 'candidates', candidateId);
+    const fileCases = [
+      ['manifest.json', 65_537],
+      ['ledger.json', 524_289],
+      ['provider-run-metadata.json', 32_769],
+    ] as const;
+    try {
+      const store = new ReferenceStateStore(root);
+      await store.close();
+      for (const [fileName, oversizedBytes] of fileCases) {
+        await mkdir(directory, { mode: 0o700 });
+        for (const sibling of ['manifest.json', 'ledger.json', 'provider-run-metadata.json']) {
+          await writeFile(path.join(directory, sibling), new Uint8Array([0x7b, 0x7d]), {
+            mode: 0o600,
+          });
+        }
+        await writeFile(path.join(directory, fileName), new Uint8Array(oversizedBytes), {
+          mode: 0o600,
+        });
+        const oversized = await store.readCandidate(candidateId);
+        expect(oversized).toMatchObject({
+          status: 'unsafe',
+          evidence: {
+            [fileName === 'manifest.json'
+              ? 'manifest'
+              : fileName === 'ledger.json'
+                ? 'ledger'
+                : 'providerRunMetadata']: { status: 'unsafe' },
+          },
+        });
+        await rm(directory, { recursive: true, force: true });
+
+        await mkdir(directory, { mode: 0o700 });
+        for (const sibling of ['manifest.json', 'ledger.json', 'provider-run-metadata.json']) {
+          await writeFile(path.join(directory, sibling), new Uint8Array([0x7b, 0x7d]), {
+            mode: 0o600,
+          });
+        }
+        await chmod(path.join(directory, fileName), 0o644);
+        const wrongMode = await store.readCandidate(candidateId);
+        expect(wrongMode).toMatchObject({ status: 'unsafe' });
+        await rm(directory, { recursive: true, force: true });
+
+        await mkdir(directory, { mode: 0o700 });
+        for (const sibling of ['manifest.json', 'ledger.json', 'provider-run-metadata.json']) {
+          await writeFile(path.join(directory, sibling), new Uint8Array([0x7b, 0x7d]), {
+            mode: 0o600,
+          });
+        }
+        await rm(path.join(directory, fileName), { force: true });
+        await symlink(path.join(root, 'states'), path.join(directory, fileName), 'dir');
+        const symlinked = await store.readCandidate(candidateId);
+        expect(symlinked).toMatchObject({ status: 'unsafe' });
+        await rm(directory, { recursive: true, force: true });
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('reopens and retains candidate bytes and registration cutoff', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'm4-state-acceptance-'));
     try {
@@ -765,6 +901,70 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
         expect(publishedMarkerId).toBe(result.markerId);
       }
 
+      const staleRoot = await mkdtemp(path.join(os.tmpdir(), 'm4-state-acceptance-stale-'));
+      try {
+        const staleStore = new ReferenceStateStore(staleRoot);
+        await staleStore.close();
+        const staleSelector = selectorFor(
+          markerFor('e'.repeat(64), undefined, sha, manifest.stateKey),
+          manifest.stateKey,
+        );
+        expect((await staleStore.casSelector('bootstrap', staleSelector)).kind).toBe('applied');
+        const staleResult = await acceptLocalCandidate(staleStore, acceptanceOptions);
+        expect(staleResult).toMatchObject({
+          acceptance: 'not_accepted',
+          reason: 'stale_candidate',
+        });
+      } finally {
+        await rm(staleRoot, { recursive: true, force: true });
+      }
+
+      const markerCancellationRoot = await mkdtemp(
+        path.join(os.tmpdir(), 'm4-state-acceptance-cancel-marker-'),
+      );
+      try {
+        const markerController = new AbortController();
+        const markerCancellationStore = new ReferenceStateStore(markerCancellationRoot, {
+          beforeMarkerCommit: () => {
+            markerController.abort();
+          },
+        });
+        await markerCancellationStore.close();
+        const markerCancellation = await acceptLocalCandidate(markerCancellationStore, {
+          ...acceptanceOptions,
+          signal: markerController.signal,
+        });
+        expect(markerCancellation).toMatchObject({
+          acceptance: 'not_accepted',
+          reason: 'cancelled_before_acceptance',
+        });
+      } finally {
+        await rm(markerCancellationRoot, { recursive: true, force: true });
+      }
+
+      const casCancellationRoot = await mkdtemp(
+        path.join(os.tmpdir(), 'm4-state-acceptance-cancel-cas-'),
+      );
+      try {
+        const casController = new AbortController();
+        const casCancellationStore = new ReferenceStateStore(casCancellationRoot, {
+          beforeSelectorCommit: () => {
+            casController.abort();
+          },
+        });
+        await casCancellationStore.close();
+        const casCancellation = await acceptLocalCandidate(casCancellationStore, {
+          ...acceptanceOptions,
+          signal: casController.signal,
+        });
+        expect(casCancellation).toMatchObject({
+          acceptance: 'accepted',
+          publication: { status: 'pending', code: 'cancelled_after_acceptance' },
+        });
+      } finally {
+        await rm(casCancellationRoot, { recursive: true, force: true });
+      }
+
       const unknownRoot = await mkdtemp(
         path.join(os.tmpdir(), 'm4-state-acceptance-sticky-unknown-'),
       );
@@ -804,7 +1004,7 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       } finally {
         await rm(failedRoot, { recursive: true, force: true });
       }
-      expect(releaseCount).toBe(3);
+      expect(releaseCount).toBe(6);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -156,7 +156,8 @@ export type ExplicitRestoreInvalidReason =
 export type ObservedCandidateEntry =
   | { readonly status: 'present'; readonly sha256: Sha256Hex }
   | { readonly status: 'missing' }
-  | { readonly status: 'unsafe' };
+  | { readonly status: 'unsafe' }
+  | { readonly status: 'failed' };
 
 export type RecoveryEvidence =
   | { readonly kind: 'selector_bytes'; readonly sha256: Sha256Hex }

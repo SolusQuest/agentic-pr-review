@@ -42,12 +42,14 @@ export {
   type ContractValidationCode,
 } from './validation.js';
 export {
+  assertCanonicalRecord,
   bytesEqual,
   decodeRecord,
   encodeRecord,
   RECORD_CODEC_CODES,
   RecordCodecError,
   RECORD_MAX_BYTES,
+  validateRecordUnicode,
   type RecordCodecCode,
 } from './codec.js';
 export {

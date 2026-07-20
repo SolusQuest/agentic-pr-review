@@ -1,5 +1,6 @@
 import { canonicalJsonBytes } from '../canonical-json/index.js';
 import { classifyStateBundleV2 } from '../state-v2/index.js';
+import type { StateManifestV2 } from '../state-v2/index.js';
 import { bytesEqual } from './codec.js';
 import {
   candidateBundleSha256,
@@ -155,11 +156,11 @@ async function acceptWithoutCleanup(
   } catch (error) {
     if (error instanceof SelectionSnapshotLimitError)
       return notAccepted('candidate_snapshot_limit_exceeded');
-    if (error instanceof SelectorRevisionMismatchError) return notAccepted('selector_cas_rejected');
+    if (error instanceof SelectorRevisionMismatchError) return notAccepted('stale_candidate');
     return unknownAcceptance();
   }
 
-  const classification = classify(
+  const classification = classifyCandidateRegistrations(
     registration,
     snapshot.registrations.map((entry) => entry.registration),
   );
@@ -328,7 +329,7 @@ function competingScope(registration: CandidateRegistrationV1): CompetingScope {
   };
 }
 
-function classify(
+export function classifyCandidateRegistrations(
   current: CandidateRegistrationV1,
   registrations: readonly CandidateRegistrationV1[],
 ): CandidateRegistrationV1 | 'stale' | 'conflict' {
@@ -535,8 +536,31 @@ function selectionFactsAreConsistent(options: AcceptanceOptions): boolean {
   if (
     observedSelector !== null &&
     observedSelector !== undefined &&
+    !bytesEqual(
+      canonicalJsonBytes(observedSelector.stateKey),
+      canonicalJsonBytes(snapshot.stateKey),
+    )
+  )
+    return false;
+  const predecessor =
+    snapshot.kind === 'continuation_selected' || snapshot.kind === 'reset_selected'
+      ? predecessorFacts(snapshot.predecessorBytes)
+      : null;
+  if (
     (snapshot.kind === 'continuation_selected' || snapshot.kind === 'reset_selected') &&
-    !selectorPredecessorMatchesSnapshot(observedSelector, snapshot)
+    (predecessor === null ||
+      observedSelector === null ||
+      observedSelector === undefined ||
+      !selectorPredecessorMatchesSnapshot(observedSelector, snapshot, predecessor) ||
+      options.candidate.manifest.sessionEpoch !== predecessor.manifest.sessionEpoch)
+  )
+    return false;
+  if (
+    observedSelector !== null &&
+    observedSelector !== undefined &&
+    snapshot.kind === 'recovery_root_selected' &&
+    (options.candidate.manifest.sessionEpoch === observedSelector.sessionEpoch ||
+      options.candidate.manifest.generation.ledgerEpoch === observedSelector.ledgerEpoch)
   )
     return false;
   return selectionPlanMatchesManifest(snapshot, options.candidate.manifest);
@@ -556,13 +580,35 @@ function observedSelectorForSnapshot(
 function selectorPredecessorMatchesSnapshot(
   selector: StateSelectorV1,
   snapshot: Extract<StateSelectionSnapshot, { kind: 'continuation_selected' | 'reset_selected' }>,
+  predecessor: PredecessorFacts,
 ): boolean {
   return (
     selector.acceptedMarkerId === snapshot.markerId &&
+    bytesEqual(
+      canonicalJsonBytes(selector.stateKey),
+      canonicalJsonBytes(predecessor.manifest.stateKey),
+    ) &&
+    selector.sessionEpoch === predecessor.manifest.sessionEpoch &&
+    selector.stateGeneration === predecessor.manifest.generation.stateGeneration &&
+    selector.ledgerEpoch === predecessor.manifest.generation.ledgerEpoch &&
+    bytesEqual(
+      canonicalJsonBytes(selector.transition),
+      canonicalJsonBytes(predecessor.manifest.transition),
+    ) &&
     selector.manifestSha256 === sha256Hex(snapshot.predecessorBytes.manifestBytes) &&
     selector.candidateLedgerSha256 === sha256Hex(snapshot.predecessorBytes.ledgerBytes) &&
     selector.providerRunMetadataSha256 ===
-      sha256Hex(snapshot.predecessorBytes.providerRunMetadataBytes)
+      sha256Hex(snapshot.predecessorBytes.providerRunMetadataBytes) &&
+    selector.candidateLedgerSha256 === predecessor.manifest.transaction.candidateLedgerSha256 &&
+    selector.providerRunMetadataSha256 === predecessor.manifest.providerRunMetadata.sha256 &&
+    selector.metadataSemanticSha256 === predecessor.manifest.transaction.metadataSemanticSha256 &&
+    selector.consumedInputSha256 === predecessor.manifest.transaction.consumedInputSha256 &&
+    selector.resultSha256 === predecessor.manifest.transaction.resultSha256 &&
+    selector.traceSha256 === predecessor.manifest.transaction.traceSha256 &&
+    selector.currentHeadSha === predecessor.manifest.provenance.currentHeadSha &&
+    selector.currentBaseSha === predecessor.manifest.provenance.currentBaseSha &&
+    selector.workflowIdentity === predecessor.manifest.stateKey.workflowIdentity &&
+    selector.trustedExecutionDomain === predecessor.manifest.stateKey.trustedExecutionDomain
   );
 }
 
@@ -598,6 +644,7 @@ function selectionPlanMatchesManifest(
       return (
         predecessor !== null &&
         manifest.transition.kind === 'continuation' &&
+        manifest.sessionEpoch === predecessor.manifest.sessionEpoch &&
         manifest.transition.predecessorManifestSha256 ===
           sha256Hex(snapshot.predecessorBytes.manifestBytes) &&
         manifest.transition.predecessorLedgerSha256 ===
@@ -611,6 +658,7 @@ function selectionPlanMatchesManifest(
       return (
         predecessor !== null &&
         manifest.transition.kind === 'reset' &&
+        manifest.sessionEpoch === predecessor.manifest.sessionEpoch &&
         manifest.transition.reason === snapshot.resetReason &&
         manifest.transition.predecessorManifestSha256 ===
           sha256Hex(snapshot.predecessorBytes.manifestBytes) &&
@@ -625,9 +673,13 @@ function selectionPlanMatchesManifest(
   }
 }
 
-function predecessorFacts(
-  bytes: CandidateBundleBytes,
-): { readonly stateGeneration: number; readonly ledgerEpoch: string } | null {
+type PredecessorFacts = {
+  readonly manifest: StateManifestV2;
+  readonly stateGeneration: number;
+  readonly ledgerEpoch: string;
+};
+
+function predecessorFacts(bytes: CandidateBundleBytes): PredecessorFacts | null {
   const classification = classifyStateBundleV2({
     entryListing: [
       { name: 'manifest.json', isRegularFile: true },
@@ -640,6 +692,7 @@ function predecessorFacts(
   });
   return classification.kind === 'valid'
     ? {
+        manifest: classification.manifest,
         stateGeneration: classification.manifest.generation.stateGeneration,
         ledgerEpoch: classification.manifest.generation.ledgerEpoch,
       }

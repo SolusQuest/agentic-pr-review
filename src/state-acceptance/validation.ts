@@ -10,7 +10,12 @@ import {
   computeSelectorRevision,
   isSelectorRevision,
 } from './hash.js';
-import { encodeRecord, finalizeRecord, parseRecord } from './codec.js';
+import {
+  assertCanonicalRecord,
+  encodeRecord,
+  parseRecord,
+  validateRecordUnicode,
+} from './codec.js';
 import type {
   AcceptedStateMarkerV1,
   CandidateId,
@@ -311,7 +316,7 @@ export function encodeValidatedRecord(
   return encodeRecord(value);
 }
 
-function decodeVersionedRecord(bytes: Uint8Array): unknown {
+function decodeVersionedRecord(bytes: Uint8Array, keys: readonly string[]): unknown {
   const parsed = parseRecord(bytes);
   if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
     const schemaVersion = (parsed as Record<string, unknown>).schemaVersion;
@@ -324,23 +329,27 @@ function decodeVersionedRecord(bytes: Uint8Array): unknown {
       }
     }
   }
-  return finalizeRecord(bytes, parsed);
+  validateRecordUnicode(parsed);
+  const record = object(parsed);
+  exactKeys(record, keys);
+  assertCanonicalRecord(bytes, parsed);
+  return parsed;
 }
 
 export function decodeValidatedRegistration(bytes: Uint8Array): CandidateRegistrationV1 {
-  const value = decodeVersionedRecord(bytes);
+  const value = decodeVersionedRecord(bytes, REGISTRATION_KEYS);
   validateCandidateRegistration(value);
   return value;
 }
 
 export function decodeValidatedMarker(bytes: Uint8Array): AcceptedStateMarkerV1 {
-  const value = decodeVersionedRecord(bytes);
+  const value = decodeVersionedRecord(bytes, MARKER_KEYS);
   validateAcceptedStateMarker(value);
   return value;
 }
 
 export function decodeValidatedSelector(bytes: Uint8Array): StateSelectorV1 {
-  const value = decodeVersionedRecord(bytes);
+  const value = decodeVersionedRecord(bytes, SELECTOR_KEYS);
   validateStateSelector(value);
   return value;
 }
@@ -484,6 +493,17 @@ function nonEmptyString(value: unknown, path: string): void {
   }
 }
 
+function repositoryName(value: unknown, path: string): void {
+  if (
+    typeof value !== 'string' ||
+    value.length < 3 ||
+    value.length > 200 ||
+    !/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(value)
+  ) {
+    throw new ContractValidationError('state_key_invalid', path);
+  }
+}
+
 function validateLocator(value: unknown, candidateId: CandidateId): void {
   const locator = object(value);
   exactKeys(locator, ['kind', 'namespace', 'objectId']);
@@ -528,14 +548,10 @@ export function validateStateKey(value: unknown): asserts value is StateKeyV2 {
   exactKeys(key, STATE_KEY_KEYS);
   if (key.namespace !== 'm4-ledger-v2')
     throw new ContractValidationError('state_key_invalid', '/stateKey/namespace');
-  for (const property of [
-    'repository',
-    'headRepository',
-    'workflowIdentity',
-    'trustedExecutionDomain',
-  ]) {
-    nonEmptyString(key[property], `/stateKey/${property}`);
-  }
+  repositoryName(key.repository, '/stateKey/repository');
+  repositoryName(key.headRepository, '/stateKey/headRepository');
+  nonEmptyString(key.workflowIdentity, '/stateKey/workflowIdentity');
+  nonEmptyString(key.trustedExecutionDomain, '/stateKey/trustedExecutionDomain');
   boundedInt(key.pullRequest, 1, 2_147_483_647, '/stateKey/pullRequest');
 }
 

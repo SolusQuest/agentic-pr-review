@@ -77,7 +77,20 @@ export function finalizeRecord<T>(
   value: unknown,
   maxBytes = RECORD_MAX_BYTES,
 ): T {
+  validateRecordUnicode(value);
+  assertCanonicalRecord(bytes, value, maxBytes);
+  return value as T;
+}
+
+export function validateRecordUnicode(value: unknown): void {
   if (findUnsafeString(value)) throw new RecordCodecError('invalid_unicode');
+}
+
+export function assertCanonicalRecord(
+  bytes: Uint8Array,
+  value: unknown,
+  maxBytes = RECORD_MAX_BYTES,
+): void {
   let canonical: Uint8Array;
   try {
     canonical = canonicalJsonBytes(value, maxBytes);
@@ -86,7 +99,6 @@ export function finalizeRecord<T>(
     throw new RecordCodecError('byte_limit_exceeded');
   }
   if (!bytesEqual(bytes, canonical)) throw new RecordCodecError('non_canonical');
-  return value as T;
 }
 
 export function recordSha256(bytes: Uint8Array): string {
