@@ -39,6 +39,10 @@ export function encodeRecord(value: unknown, maxBytes = RECORD_MAX_BYTES): Uint8
 }
 
 export function decodeRecord<T>(bytes: Uint8Array, maxBytes = RECORD_MAX_BYTES): T {
+  return finalizeRecord<T>(bytes, parseRecord(bytes, maxBytes), maxBytes);
+}
+
+export function parseRecord(bytes: Uint8Array, maxBytes = RECORD_MAX_BYTES): unknown {
   if (bytes.byteLength > maxBytes) throw new RecordCodecError('byte_limit_exceeded');
   if (bytes.byteLength >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
     throw new RecordCodecError('bom');
@@ -58,6 +62,14 @@ export function decodeRecord<T>(bytes: Uint8Array, maxBytes = RECORD_MAX_BYTES):
     if (error instanceof RecordCodecError) throw error;
     throw new RecordCodecError('invalid_json');
   }
+  return value;
+}
+
+export function finalizeRecord<T>(
+  bytes: Uint8Array,
+  value: unknown,
+  maxBytes = RECORD_MAX_BYTES,
+): T {
   if (findUnsafeString(value)) throw new RecordCodecError('invalid_unicode');
   let canonical: Uint8Array;
   try {

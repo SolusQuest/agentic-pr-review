@@ -13,7 +13,11 @@ import {
   candidateLocator,
   computeCandidateId,
   computeSelectionSnapshotId,
+  ContractValidationError,
   decodeRecord,
+  decodeValidatedMarker,
+  decodeValidatedRegistration,
+  decodeValidatedSelector,
   encodeRecord,
   materializeMarker,
   materializeRegistration,
@@ -101,12 +105,13 @@ function markerFor(
     candidateLedgerSha256: sha,
     providerRunMetadataSha256: sha,
   },
+  registrationId = sha,
 ) {
   return materializeMarker(
     {
       schemaVersion: 1,
       candidateId: candidateId as never,
-      registrationId: sha as never,
+      registrationId: registrationId as never,
       stateKey,
       sessionEpoch: epoch,
       stateGeneration: 0,
@@ -170,6 +175,26 @@ describe('M4 state acceptance contract', () => {
     );
     expect(() => decodeRecord(new TextEncoder().encode('{ "a": 1 }'))).toThrowError(
       expect.objectContaining({ code: 'non_canonical' }),
+    );
+  });
+
+  it('routes schema versions before unicode and canonical stages for every record kind', () => {
+    const decoders = [decodeValidatedRegistration, decodeValidatedMarker, decodeValidatedSelector];
+    const unknownVersionWithUnsafeString = JSON.stringify({ schemaVersion: 2, bad: '\u0000' });
+    const currentVersionWithUnsafeString = JSON.stringify({ schemaVersion: 1, bad: '\u0000' });
+    for (const decode of decoders) {
+      expect(() => decode(new TextEncoder().encode(unknownVersionWithUnsafeString))).toThrowError(
+        expect.objectContaining({ code: 'schema_version_unsupported', path: '/schemaVersion' }),
+      );
+      expect(() => decode(new TextEncoder().encode(currentVersionWithUnsafeString))).toThrowError(
+        expect.objectContaining({ code: 'invalid_unicode' }),
+      );
+      expect(() => decode(new TextEncoder().encode('{"schemaVersion":1, "bad": 1}'))).toThrowError(
+        expect.objectContaining({ code: 'non_canonical' }),
+      );
+    }
+    expect(() => decodeValidatedRegistration(new TextEncoder().encode('null'))).toThrowError(
+      ContractValidationError,
     );
   });
 
@@ -268,10 +293,21 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       await store.close();
       const options = {
         stateKey,
-        sessionEpoch: epoch,
-        ledgerEpoch: epoch,
+        expectedLedgerSchemaVersion: 1,
+        expectedPrefixContractVersion: 1,
+        cacheContractIdentity: {
+          providerId: 'synthetic',
+          modelId: 'synthetic-model',
+          adapterId: sha as never,
+          templateId: sha as never,
+          policyId: sha as never,
+          toolDefinitionId: sha as never,
+          cacheConfigId: sha as never,
+        },
         currentHeadSha: gitSha,
         currentBaseSha: gitSha,
+        currentBaseRef: 'refs/heads/main',
+        provenanceTrusted: true,
         workflowIdentity: stateKey.workflowIdentity,
         trustedExecutionDomain: stateKey.trustedExecutionDomain,
       } as const;
@@ -302,28 +338,72 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
     }
   });
 
+  it('recognizes a retry of an already committed selector target', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'm4-state-acceptance-cas-retry-'));
+    try {
+      const store = new ReferenceStateStore(root);
+      await store.close();
+      const marker = markerFor('e'.repeat(64));
+      const selector = selectorFor(marker);
+      expect((await store.casSelector('bootstrap', selector)).kind).toBe('applied');
+      expect((await store.casSelector('bootstrap', selector)).kind).toBe(
+        'already_applied_same_target',
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('classifies a present but invalid candidate bundle as corruption with per-file hashes', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'm4-state-acceptance-corrupt-'));
     try {
       const store = new ReferenceStateStore(root);
       await store.close();
-      const candidateId = 'e'.repeat(64) as never;
       const candidateBytes = bundle();
-      expect((await store.uploadCandidate(candidateId, candidateBytes)).kind).toBe('created');
-      const marker = markerFor(candidateId, {
+      const candidateHashes = {
         manifestSha256: sha256Hex(candidateBytes.manifestBytes),
         candidateLedgerSha256: sha256Hex(candidateBytes.ledgerBytes),
         providerRunMetadataSha256: sha256Hex(candidateBytes.providerRunMetadataBytes),
+      };
+      const candidateId = computeCandidateId({
+        ...candidateHashes,
+        metadataSemanticSha256: sha,
+        consumedInputSha256: sha,
+        resultSha256: sha,
+        traceSha256: sha,
       });
+      expect((await store.uploadCandidate(candidateId, candidateBytes)).kind).toBe('created');
+      const candidateRegistration = materializeRegistration(
+        draft({
+          candidateId,
+          ...candidateHashes,
+        }),
+        '1',
+      );
+      expect((await store.registerCandidate(draft({ candidateId, ...candidateHashes }))).kind).toBe(
+        'created',
+      );
+      const marker = markerFor(candidateId, candidateHashes, candidateRegistration.registrationId);
       const selector = selectorFor(marker);
       expect((await store.writeMarker(marker)).kind).toBe('created');
       expect((await store.casSelector('bootstrap', selector)).kind).toBe('applied');
       const result = await store.selectAcceptedState({
         stateKey,
-        sessionEpoch: epoch,
-        ledgerEpoch: epoch,
+        expectedLedgerSchemaVersion: 1,
+        expectedPrefixContractVersion: 1,
+        cacheContractIdentity: {
+          providerId: 'synthetic',
+          modelId: 'synthetic-model',
+          adapterId: sha as never,
+          templateId: sha as never,
+          policyId: sha as never,
+          toolDefinitionId: sha as never,
+          cacheConfigId: sha as never,
+        },
         currentHeadSha: gitSha,
         currentBaseSha: gitSha,
+        currentBaseRef: 'refs/heads/main',
+        provenanceTrusted: true,
         workflowIdentity: stateKey.workflowIdentity,
         trustedExecutionDomain: stateKey.trustedExecutionDomain,
       });
@@ -564,6 +644,25 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       });
       expect(result.acceptance).toBe('accepted');
       expect(result.publication).toEqual({ status: 'succeeded' });
+      const { ledgerSchemaVersion, prefixContractVersion, ...cacheContractIdentity } =
+        manifest.cacheContractIdentity;
+      const restored = await store.selectAcceptedState({
+        stateKey: manifest.stateKey,
+        expectedLedgerSchemaVersion: ledgerSchemaVersion,
+        expectedPrefixContractVersion: prefixContractVersion,
+        cacheContractIdentity,
+        currentHeadSha: manifest.provenance.currentHeadSha,
+        currentBaseSha: manifest.provenance.currentBaseSha,
+        currentBaseRef: manifest.provenance.currentBaseRef,
+        provenanceTrusted: true,
+        workflowIdentity: manifest.stateKey.workflowIdentity,
+        trustedExecutionDomain: manifest.stateKey.trustedExecutionDomain,
+        headRelationship: 'same',
+      });
+      expect(restored).toMatchObject({
+        selection: 'selected',
+        snapshot: { kind: 'continuation_selected', transitionPlan: 'continuation' },
+      });
       if (result.acceptance === 'accepted' || result.acceptance === 'already_accepted') {
         expect(publishedMarkerId).toBe(result.markerId);
       }

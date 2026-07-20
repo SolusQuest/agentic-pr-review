@@ -1,4 +1,5 @@
 import type {
+  CacheContractIdentityV2,
   EpochId,
   GitSha,
   Sha256Hex,
@@ -329,10 +330,16 @@ export type AcceptanceResult =
 
 export interface SelectionOptions {
   readonly stateKey: StateKeyV2;
-  readonly sessionEpoch: EpochId;
-  readonly ledgerEpoch: EpochId;
+  readonly expectedLedgerSchemaVersion: number;
+  readonly expectedPrefixContractVersion: number;
+  readonly cacheContractIdentity: Omit<
+    CacheContractIdentityV2,
+    'ledgerSchemaVersion' | 'prefixContractVersion'
+  >;
   readonly currentHeadSha: GitSha;
   readonly currentBaseSha: GitSha;
+  readonly currentBaseRef: string;
+  readonly provenanceTrusted: boolean;
   readonly workflowIdentity: string;
   readonly trustedExecutionDomain: string;
   readonly headRelationship?: 'same' | 'descendant' | 'non_descendant' | 'unknown';

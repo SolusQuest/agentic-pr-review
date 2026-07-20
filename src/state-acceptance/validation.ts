@@ -10,7 +10,7 @@ import {
   computeSelectorRevision,
   isSelectorRevision,
 } from './hash.js';
-import { decodeRecord, encodeRecord } from './codec.js';
+import { encodeRecord, finalizeRecord, parseRecord } from './codec.js';
 import type {
   AcceptedStateMarkerV1,
   CandidateId,
@@ -134,11 +134,39 @@ const SELECTOR_KEYS = [
   'updatedAt',
 ] as const;
 
+export const CONTRACT_VALIDATION_CODES = [
+  'candidate_id_mismatch',
+  'epoch_invalid',
+  'git_sha_invalid',
+  'integer_out_of_range',
+  'locator_invalid',
+  'marker_id_mismatch',
+  'object_required',
+  'predecessor_binding_invalid',
+  'predecessor_invalid',
+  'registration_id_mismatch',
+  'run_id_invalid',
+  'schema_version_invalid',
+  'schema_version_unsupported',
+  'selector_id_mismatch',
+  'selector_revision_invalid',
+  'selector_revision_mismatch',
+  'sequence_invalid',
+  'sequence_out_of_range',
+  'sha256_invalid',
+  'state_key_invalid',
+  'string_invalid',
+  'timestamp_invalid',
+  'transition_invalid',
+  'unknown_or_missing_field',
+] as const;
+export type ContractValidationCode = (typeof CONTRACT_VALIDATION_CODES)[number];
+
 export class ContractValidationError extends Error {
-  readonly code: string;
+  readonly code: ContractValidationCode;
   readonly path: string;
 
-  constructor(code: string, path = '') {
+  constructor(code: ContractValidationCode, path = '') {
     super(`state acceptance contract invalid: ${code}${path ? ` at ${path}` : ''}`);
     this.name = 'ContractValidationError';
     this.code = code;
@@ -151,7 +179,7 @@ export function validateCandidateRegistration(
 ): asserts value is CandidateRegistrationV1 {
   const record = object(value);
   exactKeys(record, REGISTRATION_KEYS);
-  integerConst(record.schemaVersion, 1, '/schemaVersion');
+  schemaVersion(record.schemaVersion, '/schemaVersion');
   sha(record.registrationId, '/registrationId');
   sequence(record.registrationSequence, '/registrationSequence');
   sha(record.candidateId, '/candidateId');
@@ -198,7 +226,7 @@ export function validateAcceptedStateMarker(
 ): asserts value is AcceptedStateMarkerV1 {
   const record = object(value);
   exactKeys(record, MARKER_KEYS);
-  integerConst(record.schemaVersion, 1, '/schemaVersion');
+  schemaVersion(record.schemaVersion, '/schemaVersion');
   sha(record.markerId, '/markerId');
   sha(record.candidateId, '/candidateId');
   sha(record.registrationId, '/registrationId');
@@ -235,7 +263,7 @@ export function validateAcceptedStateMarker(
 export function validateStateSelector(value: unknown): asserts value is StateSelectorV1 {
   const record = object(value);
   exactKeys(record, SELECTOR_KEYS);
-  integerConst(record.schemaVersion, 1, '/schemaVersion');
+  schemaVersion(record.schemaVersion, '/schemaVersion');
   sha(record.selectorId, '/selectorId');
   validateStateKey(record.stateKey);
   selectorRevision(record.previousSelectorRevision, '/previousSelectorRevision');
@@ -283,20 +311,36 @@ export function encodeValidatedRecord(
   return encodeRecord(value);
 }
 
+function decodeVersionedRecord(bytes: Uint8Array): unknown {
+  const parsed = parseRecord(bytes);
+  if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const schemaVersion = (parsed as Record<string, unknown>).schemaVersion;
+    if (schemaVersion !== undefined) {
+      if (typeof schemaVersion !== 'number' || !Number.isInteger(schemaVersion)) {
+        throw new ContractValidationError('schema_version_invalid', '/schemaVersion');
+      }
+      if (schemaVersion !== 1) {
+        throw new ContractValidationError('schema_version_unsupported', '/schemaVersion');
+      }
+    }
+  }
+  return finalizeRecord(bytes, parsed);
+}
+
 export function decodeValidatedRegistration(bytes: Uint8Array): CandidateRegistrationV1 {
-  const value = decodeRecord<unknown>(bytes);
+  const value = decodeVersionedRecord(bytes);
   validateCandidateRegistration(value);
   return value;
 }
 
 export function decodeValidatedMarker(bytes: Uint8Array): AcceptedStateMarkerV1 {
-  const value = decodeRecord<unknown>(bytes);
+  const value = decodeVersionedRecord(bytes);
   validateAcceptedStateMarker(value);
   return value;
 }
 
 export function decodeValidatedSelector(bytes: Uint8Array): StateSelectorV1 {
-  const value = decodeRecord<unknown>(bytes);
+  const value = decodeVersionedRecord(bytes);
   validateStateSelector(value);
   return value;
 }
@@ -366,8 +410,11 @@ function exactKeys(record: Record<string, unknown>, keys: readonly string[]): vo
   }
 }
 
-function integerConst(value: unknown, expected: number, path: string): void {
-  if (value !== expected) throw new ContractValidationError('integer_constant_invalid', path);
+function schemaVersion(value: unknown, path: string): void {
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new ContractValidationError('schema_version_invalid', path);
+  }
+  if (value !== 1) throw new ContractValidationError('schema_version_unsupported', path);
 }
 
 function boundedInt(value: unknown, min: number, max: number, path: string): void {

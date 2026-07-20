@@ -1,7 +1,20 @@
 import { canonicalJsonBytes } from '../canonical-json/index.js';
+import { classifyStateBundleV2 } from '../state-v2/index.js';
 import { bytesEqual } from './codec.js';
-import { candidateBundleSha256, compareDecimalIds, computeCandidateId, sha256Hex } from './hash.js';
-import { encodeValidatedRecord, materializeMarker, materializeSelector } from './validation.js';
+import {
+  candidateBundleSha256,
+  compareDecimalIds,
+  computeCandidateId,
+  computeSelectionSnapshotId,
+  observedSelectorSnapshotSha256,
+  sha256Hex,
+} from './hash.js';
+import {
+  decodeValidatedSelector,
+  encodeValidatedRecord,
+  materializeMarker,
+  materializeSelector,
+} from './validation.js';
 import {
   ReferenceStateStore,
   SelectionSnapshotLimitError,
@@ -97,7 +110,8 @@ async function acceptWithoutCleanup(
   if (options.selectionSnapshot.kind === 'explicit_restore_invalid')
     return notAccepted('selector_invalid');
 
-  if (!leaseIdentityIsConsistent(options.candidate)) return notAccepted('candidate_invalid');
+  if (!leaseIdentityIsConsistent(options.candidate) || !selectionFactsAreConsistent(options))
+    return notAccepted('candidate_invalid');
   const identity = candidateIdentity(options.candidate);
   const upload = await store.uploadCandidate(identity.candidateId, identity.bundle);
   if (upload.kind === 'existing_content_conflict')
@@ -151,6 +165,28 @@ async function acceptWithoutCleanup(
   if (classification === 'stale') return notAccepted('stale_candidate');
   if (classification === 'conflict') return notAccepted('semantic_conflict');
   const winner = classification;
+  const winnerCandidate = await store.readCandidate(winner.candidateId);
+  if (winnerCandidate.status !== 'present') return notAccepted('candidate_invalid');
+  const winnerClassification = classifyStateBundleV2({
+    entryListing: [
+      { name: 'manifest.json', isRegularFile: true },
+      { name: 'ledger.json', isRegularFile: true },
+      { name: 'provider-run-metadata.json', isRegularFile: true },
+    ],
+    manifestBytes: winnerCandidate.bundle.manifestBytes,
+    ledgerBytes: winnerCandidate.bundle.ledgerBytes,
+    providerRunMetadataBytes: winnerCandidate.bundle.providerRunMetadataBytes,
+  });
+  if (
+    winnerClassification.kind !== 'valid' ||
+    !winnerManifestMatchesRegistration(
+      winnerClassification.manifest,
+      winner,
+      candidateBundleSha256(winnerCandidate.bundle),
+    )
+  )
+    return notAccepted('candidate_invalid');
+  const winnerManifest = winnerClassification.manifest;
 
   if (options.signal?.aborted) return notAccepted('cancelled_before_acceptance');
   const marker = materializeMarker(markerInput(winner, options));
@@ -178,7 +214,7 @@ async function acceptWithoutCleanup(
   }
 
   if (options.signal?.aborted) return notAccepted('cancelled_before_acceptance');
-  const selector = materializeSelector(selectorInput(acceptedMarker, options));
+  const selector = materializeSelector(selectorInput(acceptedMarker, options, winnerManifest));
   const selectorBytes = encodeValidatedRecord(selector);
   let cas;
   try {
@@ -241,12 +277,12 @@ function registrationDraft(
     sessionEpoch: options.candidate.manifest.sessionEpoch,
     stateGeneration: options.candidate.manifest.generation.stateGeneration,
     ledgerEpoch: options.candidate.manifest.generation.ledgerEpoch,
-    transition: options.transition,
-    interactionId: options.interactionId,
-    interactionOrdinal: options.interactionOrdinal,
-    producingRunId: options.producingRunId,
-    producingRunAttempt: options.producingRunAttempt,
-    consumedInputSha256: options.consumedInputSha256,
+    transition: options.candidate.manifest.transition,
+    interactionId: options.candidate.manifest.transaction.interactionId,
+    interactionOrdinal: options.candidate.manifest.transaction.interactionOrdinal,
+    producingRunId: options.candidate.manifest.provenance.producingRunId,
+    producingRunAttempt: options.candidate.manifest.provenance.producingRunAttempt,
+    consumedInputSha256: options.candidate.manifest.transaction.consumedInputSha256,
     manifestSha256: identity.manifestSha256 as CandidateRegistrationDraft['manifestSha256'],
     candidateLedgerSha256:
       identity.candidateLedgerSha256 as CandidateRegistrationDraft['candidateLedgerSha256'],
@@ -352,8 +388,12 @@ function markerInput(
   };
 }
 
-function selectorInput(marker: AcceptedStateMarkerV1, options: AcceptanceOptions) {
-  const provenance = options.candidate.manifest.provenance;
+function selectorInput(
+  marker: AcceptedStateMarkerV1,
+  options: AcceptanceOptions,
+  manifest: AcceptanceOptions['candidate']['manifest'],
+) {
+  const provenance = manifest.provenance;
   return {
     schemaVersion: 1 as const,
     stateKey: marker.stateKey,
@@ -433,6 +473,17 @@ function leaseIdentityIsConsistent(lease: AcceptanceOptions['candidate']): boole
   const manifestBytes = new Uint8Array(lease.manifestBytes);
   const expectedManifestBytes = canonicalJsonBytes(lease.manifest);
   if (!bytesEqual(manifestBytes, expectedManifestBytes)) return false;
+  const classification = classifyStateBundleV2({
+    entryListing: [
+      { name: 'manifest.json', isRegularFile: true },
+      { name: 'ledger.json', isRegularFile: true },
+      { name: 'provider-run-metadata.json', isRegularFile: true },
+    ],
+    manifestBytes: lease.manifestBytes,
+    ledgerBytes: lease.ledgerBytes,
+    providerRunMetadataBytes: lease.providerRunMetadataBytes,
+  });
+  if (classification.kind !== 'valid') return false;
   const bundleHashes = candidateBundleSha256(lease);
   const transaction = lease.manifest.transaction;
   return (
@@ -445,5 +496,113 @@ function leaseIdentityIsConsistent(lease: AcceptanceOptions['candidate']): boole
     lease.resultSha256 === transaction.resultSha256 &&
     sha256Hex(lease.traceBytes) === transaction.traceSha256 &&
     lease.traceSha256 === transaction.traceSha256
+  );
+}
+
+function selectionFactsAreConsistent(options: AcceptanceOptions): boolean {
+  const snapshot = options.selectionSnapshot;
+  if (computeSelectionSnapshotId(snapshot) !== snapshot.selectionSnapshotId) return false;
+  if (
+    observedSelectorSnapshotSha256(snapshot.observedSelectorBytes) !==
+    snapshot.observedSelectorSnapshotSha256
+  )
+    return false;
+  if (
+    !bytesEqual(
+      canonicalJsonBytes(snapshot.stateKey),
+      canonicalJsonBytes(options.candidate.manifest.stateKey),
+    )
+  )
+    return false;
+  if (
+    !bytesEqual(
+      canonicalJsonBytes(options.transition),
+      canonicalJsonBytes(options.candidate.manifest.transition),
+    ) ||
+    options.interactionId !== options.candidate.manifest.transaction.interactionId ||
+    options.interactionOrdinal !== options.candidate.manifest.transaction.interactionOrdinal ||
+    options.producingRunId !== options.candidate.manifest.provenance.producingRunId ||
+    options.producingRunAttempt !== options.candidate.manifest.provenance.producingRunAttempt ||
+    options.consumedInputSha256 !== options.candidate.manifest.transaction.consumedInputSha256
+  )
+    return false;
+  if (!observedRevisionMatchesBytes(snapshot)) return false;
+  return selectionPlanMatchesManifest(snapshot, options.candidate.manifest);
+}
+
+function observedRevisionMatchesBytes(snapshot: StateSelectionSnapshot): boolean {
+  if (snapshot.observedSelectorBytes === null)
+    return snapshot.observedSelectorRevision === 'bootstrap';
+  try {
+    return (
+      decodeValidatedSelector(snapshot.observedSelectorBytes).selectorRevision ===
+      snapshot.observedSelectorRevision
+    );
+  } catch {
+    return (
+      snapshot.observedSelectorRevision === `invalid:${sha256Hex(snapshot.observedSelectorBytes)}`
+    );
+  }
+}
+
+function selectionPlanMatchesManifest(
+  snapshot: StateSelectionSnapshot,
+  manifest: AcceptanceOptions['candidate']['manifest'],
+): boolean {
+  switch (snapshot.kind) {
+    case 'bootstrap_selected':
+      return manifest.transition.kind === 'bootstrap';
+    case 'recovery_root_selected':
+      return manifest.transition.kind === 'recovery_root';
+    case 'continuation_selected':
+      return (
+        manifest.transition.kind === 'continuation' &&
+        manifest.transition.predecessorManifestSha256 ===
+          sha256Hex(snapshot.predecessorBytes.manifestBytes) &&
+        manifest.transition.predecessorLedgerSha256 ===
+          sha256Hex(snapshot.predecessorBytes.ledgerBytes)
+      );
+    case 'reset_selected':
+      return (
+        manifest.transition.kind === 'reset' &&
+        manifest.transition.reason === snapshot.resetReason &&
+        manifest.transition.predecessorManifestSha256 ===
+          sha256Hex(snapshot.predecessorBytes.manifestBytes) &&
+        manifest.transition.predecessorLedgerSha256 ===
+          sha256Hex(snapshot.predecessorBytes.ledgerBytes)
+      );
+    case 'explicit_restore_invalid':
+      return false;
+  }
+}
+
+function winnerManifestMatchesRegistration(
+  manifest: AcceptanceOptions['candidate']['manifest'],
+  registration: CandidateRegistrationV1,
+  hashes: ReturnType<typeof candidateBundleSha256>,
+): boolean {
+  return (
+    bytesEqual(canonicalJsonBytes(manifest.stateKey), canonicalJsonBytes(registration.stateKey)) &&
+    manifest.sessionEpoch === registration.sessionEpoch &&
+    manifest.generation.stateGeneration === registration.stateGeneration &&
+    manifest.generation.ledgerEpoch === registration.ledgerEpoch &&
+    bytesEqual(
+      canonicalJsonBytes(manifest.transition),
+      canonicalJsonBytes(registration.transition),
+    ) &&
+    manifest.transaction.interactionId === registration.interactionId &&
+    manifest.transaction.interactionOrdinal === registration.interactionOrdinal &&
+    manifest.provenance.producingRunId === registration.producingRunId &&
+    manifest.provenance.producingRunAttempt === registration.producingRunAttempt &&
+    manifest.transaction.consumedInputSha256 === registration.consumedInputSha256 &&
+    hashes.manifestSha256 === registration.manifestSha256 &&
+    hashes.candidateLedgerSha256 === registration.candidateLedgerSha256 &&
+    hashes.providerRunMetadataSha256 === registration.providerRunMetadataSha256 &&
+    manifest.ledger.sha256 === registration.candidateLedgerSha256 &&
+    manifest.providerRunMetadata.sha256 === registration.providerRunMetadataSha256 &&
+    manifest.transaction.candidateLedgerSha256 === registration.candidateLedgerSha256 &&
+    manifest.transaction.metadataSemanticSha256 === registration.metadataSemanticSha256 &&
+    manifest.transaction.resultSha256 === registration.resultSha256 &&
+    manifest.transaction.traceSha256 === registration.traceSha256
   );
 }

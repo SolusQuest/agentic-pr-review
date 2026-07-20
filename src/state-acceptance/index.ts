@@ -26,6 +26,7 @@ export {
 } from './hash.js';
 export {
   ContractValidationError,
+  CONTRACT_VALIDATION_CODES,
   decodeValidatedMarker,
   decodeValidatedRegistration,
   decodeValidatedSelector,
@@ -38,6 +39,7 @@ export {
   validateStateKey,
   validateStateSelector,
   validateTransition,
+  type ContractValidationCode,
 } from './validation.js';
 export {
   bytesEqual,

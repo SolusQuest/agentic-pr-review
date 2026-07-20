@@ -3,8 +3,15 @@ import path from 'node:path';
 import { lstat, mkdir, readdir, rename, rm, writeFile, open } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { canonicalJsonBytes } from '../canonical-json/index.js';
-import { classifyStateBundleV2 } from '../state-v2/index.js';
-import { bytesEqual, recordSha256 } from './codec.js';
+import {
+  checkStateManifestV2Compatibility,
+  classifyStateBundleV2,
+  LEDGER_MAX_BYTES,
+  MANIFEST_MAX_BYTES,
+  METADATA_MAX_BYTES,
+} from '../state-v2/index.js';
+import type { StateManifestV2 } from '../state-v2/index.js';
+import { bytesEqual, RECORD_MAX_BYTES, recordSha256 } from './codec.js';
 import {
   candidateBundleSha256,
   candidateLocator,
@@ -208,10 +215,14 @@ export class ReferenceStateStore {
       const entries = await readdir(directory);
       const expected = new Set(['manifest.json', 'ledger.json', 'provider-run-metadata.json']);
       const evidence = {
-        manifest: await readObservedEntry(path.join(directory, 'manifest.json')),
-        ledger: await readObservedEntry(path.join(directory, 'ledger.json')),
+        manifest: await readObservedEntry(
+          path.join(directory, 'manifest.json'),
+          MANIFEST_MAX_BYTES,
+        ),
+        ledger: await readObservedEntry(path.join(directory, 'ledger.json'), LEDGER_MAX_BYTES),
         providerRunMetadata: await readObservedEntry(
           path.join(directory, 'provider-run-metadata.json'),
+          METADATA_MAX_BYTES,
         ),
       } satisfies CandidateEvidence;
       if (entries.some((entry) => !expected.has(entry)))
@@ -225,10 +236,14 @@ export class ReferenceStateStore {
       ) {
         return { status: 'missing', evidence };
       }
-      const manifestBytes = await readPrivate(path.join(directory, 'manifest.json'));
-      const ledgerBytes = await readPrivate(path.join(directory, 'ledger.json'));
+      const manifestBytes = await readPrivate(
+        path.join(directory, 'manifest.json'),
+        MANIFEST_MAX_BYTES,
+      );
+      const ledgerBytes = await readPrivate(path.join(directory, 'ledger.json'), LEDGER_MAX_BYTES);
       const providerRunMetadataBytes = await readPrivate(
         path.join(directory, 'provider-run-metadata.json'),
+        METADATA_MAX_BYTES,
       );
       return {
         status: 'present',
@@ -361,13 +376,13 @@ export class ReferenceStateStore {
       const currentBytes = await readOptionalPrivate(target);
       const currentRevision =
         currentBytes === null ? 'bootstrap' : selectorRevisionFromBytes(currentBytes);
-      if (currentRevision !== expectedRevision) {
-        return { kind: 'rejected_with_current_revision', currentRevision };
-      }
       if (currentBytes !== null) {
         const current = decodeValidatedSelector(currentBytes);
         if (current.selectorId === selector.selectorId)
           return { kind: 'already_applied_same_target', selector: current };
+      }
+      if (currentRevision !== expectedRevision) {
+        return { kind: 'rejected_with_current_revision', currentRevision };
       }
       await this.hooks.beforeSelectorCommit?.();
       await writePrivateAtomic(target, encodeValidatedRecord(selector));
@@ -588,6 +603,57 @@ export class ReferenceStateStore {
         observedRevision,
       );
     }
+    const registrationBytes = await readOptionalPrivate(
+      path.join(
+        await this.registrationsDirectory(options.stateKey),
+        `${marker.registrationId}.json`,
+      ),
+    );
+    if (registrationBytes === null) {
+      return this.recoveryOrExplicit(
+        options,
+        selectorBytes,
+        'integrity_mismatch',
+        'candidate_invalid',
+        [
+          { kind: 'selector_bytes', sha256: sha256Hex(selectorBytes) },
+          { kind: 'marker_bytes', markerId: marker.markerId, sha256: sha256Hex(markerBytes) },
+          { kind: 'candidate_reference', candidateId: marker.candidateId },
+        ],
+        observedRevision,
+      );
+    }
+    let registration: CandidateRegistrationV1;
+    try {
+      registration = decodeValidatedRegistration(registrationBytes);
+    } catch {
+      return this.recoveryOrExplicit(
+        options,
+        selectorBytes,
+        'integrity_mismatch',
+        'candidate_invalid',
+        [
+          { kind: 'selector_bytes', sha256: sha256Hex(selectorBytes) },
+          { kind: 'marker_bytes', markerId: marker.markerId, sha256: sha256Hex(markerBytes) },
+          { kind: 'candidate_reference', candidateId: marker.candidateId },
+        ],
+        observedRevision,
+      );
+    }
+    if (!registrationMarkerBindingMatches(registration, marker)) {
+      return this.recoveryOrExplicit(
+        options,
+        selectorBytes,
+        'integrity_mismatch',
+        'candidate_invalid',
+        [
+          { kind: 'selector_bytes', sha256: sha256Hex(selectorBytes) },
+          { kind: 'marker_bytes', markerId: marker.markerId, sha256: sha256Hex(markerBytes) },
+          { kind: 'candidate_reference', candidateId: marker.candidateId },
+        ],
+        observedRevision,
+      );
+    }
     const candidate = await this.readCandidate(marker.candidateId);
     if (candidate.status === 'failed') {
       return { selection: 'failed', reason: 'candidate_read_failed' };
@@ -676,6 +742,47 @@ export class ReferenceStateStore {
         observedRevision,
       );
     }
+    if (!manifestRegistrationBindingMatches(classification.manifest, registration, hashes)) {
+      return this.recoveryOrExplicit(
+        options,
+        selectorBytes,
+        'integrity_mismatch',
+        'candidate_invalid',
+        [
+          { kind: 'selector_bytes', sha256: sha256Hex(selectorBytes) },
+          { kind: 'marker_bytes', markerId: marker.markerId, sha256: sha256Hex(markerBytes) },
+          { kind: 'candidate_reference', candidateId: marker.candidateId },
+        ],
+        observedRevision,
+      );
+    }
+
+    const compatibility = checkStateManifestV2Compatibility(classification.manifest, {
+      stateKey: options.stateKey,
+      expectedLedgerSchemaVersion: options.expectedLedgerSchemaVersion,
+      expectedPrefixContractVersion: options.expectedPrefixContractVersion,
+      cacheContractIdentity: options.cacheContractIdentity,
+      currentBaseSha: options.currentBaseSha,
+      currentBaseRef: options.currentBaseRef,
+      headRelationship: options.headRelationship ?? 'unknown',
+      provenanceTrusted: options.provenanceTrusted,
+    });
+    if (compatibility.kind === 'incompatible') {
+      const reason = compatibility.code;
+      const explicitReason = reason === 'unsafe_provenance' ? 'provenance_invalid' : reason;
+      return this.recoveryOrExplicit(
+        options,
+        selectorBytes,
+        reason,
+        explicitReason,
+        [
+          { kind: 'selector_bytes', sha256: sha256Hex(selectorBytes) },
+          { kind: 'marker_bytes', markerId: marker.markerId, sha256: sha256Hex(markerBytes) },
+          { kind: 'candidate_reference', candidateId: marker.candidateId },
+        ],
+        observedRevision,
+      );
+    }
 
     const predecessorBytes = {
       manifestBytes: new Uint8Array(candidate.bundle.manifestBytes),
@@ -690,8 +797,7 @@ export class ReferenceStateStore {
       observedSelectorSnapshotSha256: observedHash,
     };
     if (
-      selector.sessionEpoch === options.sessionEpoch &&
-      selector.ledgerEpoch === options.ledgerEpoch &&
+      compatibility.kind === 'compatible_continuation' &&
       selector.currentBaseSha === options.currentBaseSha &&
       (selector.currentHeadSha === options.currentHeadSha ||
         options.headRelationship === 'descendant')
@@ -708,11 +814,13 @@ export class ReferenceStateStore {
       };
     }
     const resetReason =
-      selector.currentBaseSha !== options.currentBaseSha
-        ? 'base_change'
-        : selector.currentHeadSha !== options.currentHeadSha
-          ? 'head_history_discontinuity'
-          : 'cache_contract_change';
+      compatibility.kind === 'expected_invalidation'
+        ? compatibility.code
+        : selector.currentBaseSha !== options.currentBaseSha
+          ? 'base_change'
+          : selector.currentHeadSha !== options.currentHeadSha
+            ? 'head_history_discontinuity'
+            : 'cache_contract_change';
     return {
       selection: 'selected',
       snapshot: this.finalizeSnapshot({
@@ -742,6 +850,7 @@ export class ReferenceStateStore {
       | 'selector_invalid'
       | 'marker_invalid'
       | 'candidate_invalid'
+      | 'provenance_invalid'
       | 'state_key_mismatch'
       | 'contract_version_incompatible'
       | 'over_bound_ledger',
@@ -789,24 +898,28 @@ export class ReferenceStateStore {
 
   private async initialize(): Promise<void> {
     await mkdir(this.root, { recursive: true, mode: 0o700 });
-    await mkdir(path.join(this.root, 'candidates'), { recursive: true, mode: 0o700 });
+    await ensurePrivateDirectory(this.root);
+    await ensurePrivateDirectory(path.join(this.root, 'candidates'));
+    await ensurePrivateDirectory(path.join(this.root, 'states'));
   }
 
   private async stateDirectory(stateKey: StateKeyV2): Promise<string> {
-    const directory = path.join(this.root, 'states', sha256Hex(canonicalJsonBytes(stateKey)));
-    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const statesRoot = path.join(this.root, 'states');
+    await ensurePrivateDirectory(statesRoot);
+    const directory = path.join(statesRoot, sha256Hex(canonicalJsonBytes(stateKey)));
+    await ensurePrivateDirectory(directory);
     return directory;
   }
 
   private async registrationsDirectory(stateKey: StateKeyV2): Promise<string> {
     const directory = path.join(await this.stateDirectory(stateKey), 'registrations');
-    await mkdir(directory, { recursive: true, mode: 0o700 });
+    await ensurePrivateDirectory(directory);
     return directory;
   }
 
   private async markersDirectory(stateKey: StateKeyV2): Promise<string> {
     const directory = path.join(await this.stateDirectory(stateKey), 'markers');
-    await mkdir(directory, { recursive: true, mode: 0o700 });
+    await ensurePrivateDirectory(directory);
     return directory;
   }
 
@@ -891,6 +1004,68 @@ function selectorMarkerBindingMatches(
   );
 }
 
+function registrationMarkerBindingMatches(
+  registration: CandidateRegistrationV1,
+  marker: AcceptedStateMarkerV1,
+): boolean {
+  return (
+    registration.registrationId === marker.registrationId &&
+    registration.candidateId === marker.candidateId &&
+    bytesEqual(canonicalJsonBytes(registration.stateKey), canonicalJsonBytes(marker.stateKey)) &&
+    registration.sessionEpoch === marker.sessionEpoch &&
+    registration.stateGeneration === marker.stateGeneration &&
+    registration.ledgerEpoch === marker.ledgerEpoch &&
+    bytesEqual(
+      canonicalJsonBytes(registration.transition),
+      canonicalJsonBytes(marker.transition),
+    ) &&
+    registration.predecessorMarkerId === marker.predecessorMarkerId &&
+    registration.predecessorManifestSha256 === marker.predecessorManifestSha256 &&
+    registration.predecessorLedgerSha256 === marker.predecessorLedgerSha256 &&
+    registration.observedSelectorRevision === marker.observedSelectorRevision &&
+    registration.manifestSha256 === marker.manifestSha256 &&
+    registration.candidateLedgerSha256 === marker.candidateLedgerSha256 &&
+    registration.providerRunMetadataSha256 === marker.providerRunMetadataSha256 &&
+    registration.metadataSemanticSha256 === marker.metadataSemanticSha256 &&
+    registration.consumedInputSha256 === marker.consumedInputSha256 &&
+    registration.resultSha256 === marker.resultSha256 &&
+    registration.traceSha256 === marker.traceSha256 &&
+    registration.producingRunId === marker.producingRunId &&
+    registration.producingRunAttempt === marker.producingRunAttempt
+  );
+}
+
+function manifestRegistrationBindingMatches(
+  manifest: StateManifestV2,
+  registration: CandidateRegistrationV1,
+  hashes: ReturnType<typeof candidateBundleSha256>,
+): boolean {
+  return (
+    bytesEqual(canonicalJsonBytes(manifest.stateKey), canonicalJsonBytes(registration.stateKey)) &&
+    manifest.sessionEpoch === registration.sessionEpoch &&
+    manifest.generation.stateGeneration === registration.stateGeneration &&
+    manifest.generation.ledgerEpoch === registration.ledgerEpoch &&
+    bytesEqual(
+      canonicalJsonBytes(manifest.transition),
+      canonicalJsonBytes(registration.transition),
+    ) &&
+    manifest.transaction.interactionId === registration.interactionId &&
+    manifest.transaction.interactionOrdinal === registration.interactionOrdinal &&
+    manifest.provenance.producingRunId === registration.producingRunId &&
+    manifest.provenance.producingRunAttempt === registration.producingRunAttempt &&
+    manifest.transaction.consumedInputSha256 === registration.consumedInputSha256 &&
+    hashes.manifestSha256 === registration.manifestSha256 &&
+    hashes.candidateLedgerSha256 === registration.candidateLedgerSha256 &&
+    hashes.providerRunMetadataSha256 === registration.providerRunMetadataSha256 &&
+    manifest.ledger.sha256 === registration.candidateLedgerSha256 &&
+    manifest.providerRunMetadata.sha256 === registration.providerRunMetadataSha256 &&
+    manifest.transaction.candidateLedgerSha256 === registration.candidateLedgerSha256 &&
+    manifest.transaction.metadataSemanticSha256 === registration.metadataSemanticSha256 &&
+    manifest.transaction.resultSha256 === registration.resultSha256 &&
+    manifest.transaction.traceSha256 === registration.traceSha256
+  );
+}
+
 function selectorRevisionFromBytes(bytes: Uint8Array): SelectorRevision {
   try {
     return decodeValidatedSelector(bytes).selectorRevision;
@@ -945,6 +1120,27 @@ function closeServer(server: net.Server): Promise<void> {
   );
 }
 
+async function ensurePrivateDirectory(directory: string): Promise<void> {
+  try {
+    const current = await lstat(directory);
+    if (!current.isDirectory() || current.isSymbolicLink() || (current.mode & 0o777) !== 0o700) {
+      throw new Error('unsafe directory');
+    }
+    return;
+  } catch (error) {
+    if (!isMissing(error)) throw error;
+  }
+  try {
+    await mkdir(directory, { mode: 0o700 });
+  } catch (error) {
+    if (!isAlreadyExists(error)) throw error;
+  }
+  const created = await lstat(directory);
+  if (!created.isDirectory() || created.isSymbolicLink() || (created.mode & 0o777) !== 0o700) {
+    throw new Error('unsafe directory');
+  }
+}
+
 async function writePrivate(filePath: string, bytes: Uint8Array): Promise<void> {
   await writeFile(filePath, bytes, { mode: 0o600, flag: 'wx' });
 }
@@ -960,14 +1156,24 @@ async function writePrivateAtomic(filePath: string, bytes: Uint8Array): Promise<
   }
 }
 
-async function readPrivate(filePath: string): Promise<Uint8Array> {
+async function readPrivate(filePath: string, maxBytes = RECORD_MAX_BYTES): Promise<Uint8Array> {
   const handle = await open(filePath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
   try {
     const before = await handle.stat();
-    if (!before.isFile()) throw new Error('unsafe file');
-    const bytes = new Uint8Array(await handle.readFile());
+    if (!before.isFile() || (before.mode & 0o777) !== 0o600) throw new Error('unsafe file');
+    if (before.size > maxBytes) throw new Error('file size limit');
+    const buffer = Buffer.allocUnsafe(maxBytes + 1);
+    let offset = 0;
+    while (offset < buffer.byteLength) {
+      const read = await handle.read(buffer, offset, buffer.byteLength - offset, null);
+      offset += read.bytesRead;
+      if (read.bytesRead === 0) break;
+    }
+    if (offset > maxBytes) throw new Error('file size limit');
+    const bytes = new Uint8Array(buffer.subarray(0, offset));
     const after = await handle.stat();
     if (
+      bytes.byteLength > maxBytes ||
       before.ino !== after.ino ||
       before.size !== after.size ||
       before.mtimeMs !== after.mtimeMs
@@ -980,18 +1186,24 @@ async function readPrivate(filePath: string): Promise<Uint8Array> {
   }
 }
 
-async function readOptionalPrivate(filePath: string): Promise<Uint8Array | null> {
+async function readOptionalPrivate(
+  filePath: string,
+  maxBytes = RECORD_MAX_BYTES,
+): Promise<Uint8Array | null> {
   try {
-    return await readPrivate(filePath);
+    return await readPrivate(filePath, maxBytes);
   } catch (error) {
     if (isMissing(error)) return null;
     throw error;
   }
 }
 
-async function readObservedEntry(filePath: string): Promise<ObservedCandidateEntry> {
+async function readObservedEntry(
+  filePath: string,
+  maxBytes: number,
+): Promise<ObservedCandidateEntry> {
   try {
-    return { status: 'present', sha256: sha256Hex(await readPrivate(filePath)) };
+    return { status: 'present', sha256: sha256Hex(await readPrivate(filePath, maxBytes)) };
   } catch (error) {
     return isMissing(error) ? { status: 'missing' } : { status: 'unsafe' };
   }

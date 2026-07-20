@@ -432,13 +432,13 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
         transitionPlan: 'bootstrap' as const,
         selectionSnapshotId: '' as never,
       };
-      const selectionSnapshot = {
+      const bootstrapSelectionSnapshot = {
         ...selectionSnapshotDraft,
         selectionSnapshotId: computeSelectionSnapshotId(selectionSnapshotDraft),
       };
       const acceptanceStore = new ReferenceStateStore(path.join(root, 'state-acceptance'));
       const acceptance = await acceptLocalCandidate(acceptanceStore, {
-        selectionSnapshot,
+        selectionSnapshot: bootstrapSelectionSnapshot,
         candidate: lease,
         interactionId: lease.manifest.transaction.interactionId,
         interactionOrdinal: lease.manifest.transaction.interactionOrdinal,
@@ -453,9 +453,33 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
         },
       });
       expect(acceptance.acceptance).toBe('accepted');
-      const predecessorLedgerBytes = new Uint8Array(bundle.ledgerBytes);
-      const predecessorManifestBytes = new Uint8Array(bundle.manifestBytes);
-      const predecessorProviderRunMetadataBytes = new Uint8Array(bundle.providerRunMetadataBytes);
+      await acceptanceStore.close();
+      const reopenedAcceptanceStore = new ReferenceStateStore(path.join(root, 'state-acceptance'));
+      const { ledgerSchemaVersion, prefixContractVersion, ...cacheContractIdentity } =
+        lease.manifest.cacheContractIdentity;
+      const restored = await reopenedAcceptanceStore.selectAcceptedState({
+        stateKey: lease.manifest.stateKey,
+        expectedLedgerSchemaVersion: ledgerSchemaVersion,
+        expectedPrefixContractVersion: prefixContractVersion,
+        cacheContractIdentity,
+        currentHeadSha: lease.manifest.provenance.currentHeadSha,
+        currentBaseSha: lease.manifest.provenance.currentBaseSha,
+        currentBaseRef: lease.manifest.provenance.currentBaseRef,
+        provenanceTrusted: true,
+        workflowIdentity: lease.manifest.stateKey.workflowIdentity,
+        trustedExecutionDomain: lease.manifest.stateKey.trustedExecutionDomain,
+        headRelationship: 'same',
+      });
+      expect(restored.selection).toBe('selected');
+      if (restored.selection !== 'selected' || restored.snapshot.kind !== 'continuation_selected')
+        throw new Error('accepted bootstrap must restore as continuation');
+      const predecessorLedgerBytes = new Uint8Array(restored.snapshot.predecessorBytes.ledgerBytes);
+      const predecessorManifestBytes = new Uint8Array(
+        restored.snapshot.predecessorBytes.manifestBytes,
+      );
+      const predecessorProviderRunMetadataBytes = new Uint8Array(
+        restored.snapshot.predecessorBytes.providerRunMetadataBytes,
+      );
       const predecessorLedgerSha256 = sha256Hex(predecessorLedgerBytes);
       const predecessorManifestSha256 = sha256Hex(predecessorManifestBytes);
       const continuationInteraction = deriveInteractionId(
@@ -802,6 +826,22 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
         timeoutMs: 20_000,
         trustedRoot: root,
       });
+      const continuationAcceptance = await acceptLocalCandidate(reopenedAcceptanceStore, {
+        selectionSnapshot: restored.snapshot,
+        candidate: continuationLease,
+        interactionId: continuationLease.manifest.transaction.interactionId,
+        interactionOrdinal: continuationLease.manifest.transaction.interactionOrdinal,
+        producingRunId: continuationLease.manifest.provenance.producingRunId,
+        producingRunAttempt: continuationLease.manifest.provenance.producingRunAttempt,
+        acceptingRunId: '3',
+        acceptingRunAttempt: 1,
+        consumedInputSha256: continuationLease.manifest.transaction.consumedInputSha256,
+        transition: continuationLease.manifest.transition,
+        publishSticky: async (markerId) => {
+          expect(markerId).toMatch(/^[a-f0-9]{64}$/);
+        },
+      });
+      expect(continuationAcceptance.acceptance).toBe('accepted');
       const tamperedHistoricalLedger = JSON.parse(
         new TextDecoder().decode(continuationLease.ledgerBytes),
       ) as { header: Record<string, unknown> };
