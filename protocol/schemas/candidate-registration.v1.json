@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/SolusQuest/agentic-pr-review/schemas/candidate-registration.v1.json",
+  "title": "CandidateRegistrationV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "registrationId",
+    "registrationSequence",
+    "candidateId",
+    "candidateArtifactLocator",
+    "observedSelectorRevision",
+    "observedSelectorSnapshotSha256",
+    "predecessorMarkerId",
+    "predecessorManifestSha256",
+    "predecessorLedgerSha256",
+    "stateKey",
+    "sessionEpoch",
+    "stateGeneration",
+    "ledgerEpoch",
+    "transition",
+    "interactionId",
+    "interactionOrdinal",
+    "producingRunId",
+    "producingRunAttempt",
+    "consumedInputSha256",
+    "manifestSha256",
+    "candidateLedgerSha256",
+    "providerRunMetadataSha256",
+    "metadataSemanticSha256",
+    "resultSha256",
+    "traceSha256",
+    "registeredAt"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "registrationId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "registrationSequence": { "type": "string", "pattern": "^(?:0|[1-9][0-9]*)$" },
+    "candidateId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "candidateArtifactLocator": { "$ref": "#/$defs/locator" },
+    "observedSelectorRevision": { "$ref": "#/$defs/selectorRevision" },
+    "observedSelectorSnapshotSha256": { "$ref": "#/$defs/sha" },
+    "predecessorMarkerId": { "$ref": "#/$defs/predecessor" },
+    "predecessorManifestSha256": { "$ref": "#/$defs/predecessor" },
+    "predecessorLedgerSha256": { "$ref": "#/$defs/predecessor" },
+    "stateKey": { "type": "object" },
+    "sessionEpoch": { "$ref": "#/$defs/epoch" },
+    "stateGeneration": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+    "ledgerEpoch": { "$ref": "#/$defs/epoch" },
+    "transition": { "type": "object" },
+    "interactionId": { "$ref": "#/$defs/sha" },
+    "interactionOrdinal": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+    "producingRunId": { "type": "string", "pattern": "^[1-9][0-9]{0,18}$" },
+    "producingRunAttempt": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+    "consumedInputSha256": { "$ref": "#/$defs/sha" },
+    "manifestSha256": { "$ref": "#/$defs/sha" },
+    "candidateLedgerSha256": { "$ref": "#/$defs/sha" },
+    "providerRunMetadataSha256": { "$ref": "#/$defs/sha" },
+    "metadataSemanticSha256": { "$ref": "#/$defs/sha" },
+    "resultSha256": { "$ref": "#/$defs/sha" },
+    "traceSha256": { "$ref": "#/$defs/sha" },
+    "registeredAt": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    }
+  },
+  "$defs": {
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "epoch": { "type": "string", "pattern": "^[A-Za-z0-9_-]{22}$" },
+    "predecessor": { "anyOf": [{ "const": "bootstrap" }, { "$ref": "#/$defs/sha" }] },
+    "selectorRevision": {
+      "type": "string",
+      "pattern": "^(bootstrap|sha256:[a-f0-9]{64}|invalid:[a-f0-9]{64})$"
+    },
+    "locator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "namespace", "objectId"],
+      "properties": {
+        "kind": { "const": "store-object" },
+        "namespace": { "const": "m4-state-v1" },
+        "objectId": {
+          "type": "string",
+          "pattern": "^candidate-[a-f0-9]{64}$",
+          "minLength": 74,
+          "maxLength": 74
+        }
+      }
+    }
+  }
+}
