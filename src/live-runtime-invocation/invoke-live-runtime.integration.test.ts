@@ -826,22 +826,6 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
         timeoutMs: 20_000,
         trustedRoot: root,
       });
-      const continuationAcceptance = await acceptLocalCandidate(reopenedAcceptanceStore, {
-        selectionSnapshot: restored.snapshot,
-        candidate: continuationLease,
-        interactionId: continuationLease.manifest.transaction.interactionId,
-        interactionOrdinal: continuationLease.manifest.transaction.interactionOrdinal,
-        producingRunId: continuationLease.manifest.provenance.producingRunId,
-        producingRunAttempt: continuationLease.manifest.provenance.producingRunAttempt,
-        acceptingRunId: '3',
-        acceptingRunAttempt: 1,
-        consumedInputSha256: continuationLease.manifest.transaction.consumedInputSha256,
-        transition: continuationLease.manifest.transition,
-        publishSticky: async (markerId) => {
-          expect(markerId).toMatch(/^[a-f0-9]{64}$/);
-        },
-      });
-      expect(continuationAcceptance.acceptance).toBe('accepted');
       const tamperedHistoricalLedger = JSON.parse(
         new TextDecoder().decode(continuationLease.ledgerBytes),
       ) as { header: Record<string, unknown> };
@@ -945,6 +929,22 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
           ),
         }).kind,
       ).toBe('valid');
+      const continuationAcceptance = await acceptLocalCandidate(reopenedAcceptanceStore, {
+        selectionSnapshot: restored.snapshot,
+        candidate: continuationLease,
+        interactionId: continuationLease.manifest.transaction.interactionId,
+        interactionOrdinal: continuationLease.manifest.transaction.interactionOrdinal,
+        producingRunId: continuationLease.manifest.provenance.producingRunId,
+        producingRunAttempt: continuationLease.manifest.provenance.producingRunAttempt,
+        acceptingRunId: '3',
+        acceptingRunAttempt: 1,
+        consumedInputSha256: continuationLease.manifest.transaction.consumedInputSha256,
+        transition: continuationLease.manifest.transition,
+        publishSticky: async (markerId) => {
+          expect(markerId).toMatch(/^[a-f0-9]{64}$/);
+        },
+      });
+      expect(continuationAcceptance.acceptance).toBe('accepted');
       await continuationLease.release();
       await continuationLease.release();
       expect(existsSync(continuationLease.bundleDirectory)).toBe(false);
