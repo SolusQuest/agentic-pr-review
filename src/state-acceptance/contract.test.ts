@@ -390,7 +390,18 @@ describe('M4 state acceptance contract', () => {
       nestedUnknown.stateKey.extra = true;
       const nestedUnknownBytes = new Uint8Array([0x20, ...canonicalJsonBytes(nestedUnknown), 0x20]);
       expect(() => decode(nestedUnknownBytes)).toThrowError(
-        expect.objectContaining({ code: 'unknown_or_missing_field', path: '/stateKey/extra' }),
+        expect.objectContaining({
+          code: 'unknown_or_missing_field',
+          path: '/stateKey/<untrusted-property>',
+        }),
+      );
+      const controlUnknown = structuredClone(value) as Record<string, any>;
+      controlUnknown.stateKey['bad\u0001'] = true;
+      expect(() => decode(canonicalJsonBytes(controlUnknown))).toThrowError(
+        expect.objectContaining({
+          code: 'unknown_or_missing_field',
+          path: '/stateKey/<invalid-control>',
+        }),
       );
 
       const wrongNestedTypes = [
@@ -692,6 +703,10 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       expect((await store.casSelector('bootstrap', selector)).kind).toBe(
         'already_applied_same_target',
       );
+      expect(await store.casSelector(selector.selectorRevision, selector)).toEqual({
+        kind: 'rejected_with_current_revision',
+        currentRevision: selector.selectorRevision,
+      });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -729,6 +744,11 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       const marker = markerFor(candidateId, candidateHashes, candidateRegistration.registrationId);
       const selector = selectorFor(marker);
       expect((await store.writeMarker(marker)).kind).toBe('created');
+      await expect(
+        store.readMarker(stateKey, `../${marker.markerId}` as never),
+      ).rejects.toThrowError(
+        expect.objectContaining({ code: 'sha256_invalid', path: '/markerId' }),
+      );
       expect((await store.casSelector('bootstrap', selector)).kind).toBe('applied');
       const result = await store.selectAcceptedState({
         stateKey,
@@ -909,6 +929,7 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
           predecessorMarkerId: 'bootstrap',
           predecessorManifestSha256: 'bootstrap',
           predecessorLedgerSha256: 'bootstrap',
+          ledgerEpoch: epoch,
           targetStateGeneration: 0,
           interactionId: sha as never,
         },
@@ -959,6 +980,7 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
           predecessorMarkerId: 'bootstrap',
           predecessorManifestSha256: 'bootstrap',
           predecessorLedgerSha256: 'bootstrap',
+          ledgerEpoch: epoch,
           targetStateGeneration: 0,
           interactionId: sha as never,
         },
@@ -1005,6 +1027,7 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
               predecessorMarkerId: 'bootstrap',
               predecessorManifestSha256: 'bootstrap',
               predecessorLedgerSha256: 'bootstrap',
+              ledgerEpoch: epoch,
               targetStateGeneration: 0,
               interactionId: sha,
             },
@@ -1099,6 +1122,7 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
           predecessorMarkerId: 'bootstrap',
           predecessorManifestSha256: 'bootstrap',
           predecessorLedgerSha256: 'bootstrap',
+          ledgerEpoch: epoch,
           targetStateGeneration: 0,
           interactionId: sha as never,
         },
@@ -1180,6 +1204,7 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
             predecessorMarkerId: 'bootstrap',
             predecessorManifestSha256: 'bootstrap',
             predecessorLedgerSha256: 'bootstrap',
+            ledgerEpoch: epoch,
             targetStateGeneration: 0,
             interactionId: sha as never,
           },
@@ -1345,7 +1370,7 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       try {
         const snapshotStore = new ReferenceStateStore(snapshotRoot);
         await snapshotStore.close();
-        let corruption: 'registration' | 'digest' = 'registration';
+        let corruption: 'registration' | 'count' | 'bytes' | 'digest' = 'registration';
         const corruptingStore = {
           uploadCandidate: snapshotStore.uploadCandidate.bind(snapshotStore),
           readCandidate: snapshotStore.readCandidate.bind(snapshotStore),
@@ -1366,6 +1391,19 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
                 ],
               };
             }
+            if (corruption === 'count') {
+              return {
+                ...snapshot,
+                registrations: Array.from({ length: 65 }, () => snapshot.registrations[0]!),
+              };
+            }
+            if (corruption === 'bytes') {
+              const first = snapshot.registrations[0]!;
+              return {
+                ...snapshot,
+                registrations: [{ ...first, registrationBytes: new Uint8Array(2_097_153) }],
+              };
+            }
             return { ...snapshot, candidateSetDigest: 'f'.repeat(64) as never };
           },
           readSelector: snapshotStore.readSelector.bind(snapshotStore),
@@ -1382,6 +1420,16 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
         expect(await acceptLocalCandidate(corruptingStore, acceptanceOptions)).toMatchObject({
           acceptance: 'not_accepted',
           reason: 'candidate_set_digest_mismatch',
+        });
+        corruption = 'count';
+        expect(await acceptLocalCandidate(corruptingStore, acceptanceOptions)).toMatchObject({
+          acceptance: 'not_accepted',
+          reason: 'candidate_snapshot_limit_exceeded',
+        });
+        corruption = 'bytes';
+        expect(await acceptLocalCandidate(corruptingStore, acceptanceOptions)).toMatchObject({
+          acceptance: 'not_accepted',
+          reason: 'candidate_snapshot_limit_exceeded',
         });
       } finally {
         await rm(snapshotRoot, { recursive: true, force: true });

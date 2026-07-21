@@ -20,6 +20,15 @@ import {
   parseRecord,
   validateRecordUnicode,
 } from './codec.js';
+import {
+  normalizePosition,
+  resolveArrayItem,
+  resolveProperty,
+  sanitizeSegment,
+  UNKNOWN_POSITION,
+  type SchemaNode,
+  type SchemaPosition,
+} from '../state-v2/shared-safe-path.js';
 import type {
   AcceptedStateMarkerV1,
   CandidateId,
@@ -145,6 +154,11 @@ const SELECTOR_KEYS = [
 
 type RecordKind = 'registration' | 'marker' | 'selector';
 const closedSchemaAjv = new Ajv({ strict: true, allErrors: true });
+const CLOSED_SCHEMAS = {
+  registration: registrationSchema,
+  marker: markerSchema,
+  selector: selectorSchema,
+} as const;
 const CLOSED_SCHEMA_VALIDATORS: Record<RecordKind, ValidateFunction<unknown>> = {
   registration: closedSchemaAjv.compile(registrationSchema),
   marker: closedSchemaAjv.compile(markerSchema),
@@ -370,18 +384,62 @@ function validateClosedSchema(record: Record<string, unknown>, kind: RecordKind)
       candidate.keyword === 'enum',
   );
   if (!error) return;
-  const path = schemaErrorPath(error);
+  const path = schemaErrorPath(error, kind);
   throw new ContractValidationError(schemaErrorCode(error, path), path);
 }
 
-function schemaErrorPath(error: ErrorObject | undefined): string {
+function schemaErrorPath(error: ErrorObject | undefined, kind: RecordKind): string {
   if (!error) return '';
-  const base = error.instancePath ?? '';
+  let position: SchemaPosition = normalizePosition(CLOSED_SCHEMAS[kind] as unknown as SchemaNode);
+  let trusted = true;
+  const segments: string[] = [];
+  const rawSegments =
+    error.instancePath === '' ? [] : (error.instancePath ?? '').slice(1).split('/');
+  for (const rawSegment of rawSegments) {
+    const decoded = decodeJsonPointerSegment(rawSegment);
+    const advanced = advanceSchemaPath(position, decoded, trusted);
+    segments.push(advanced.segment);
+    position = advanced.position;
+    trusted = advanced.trusted;
+  }
   const params = error.params as Record<string, unknown>;
   const property = params?.missingProperty ?? params?.additionalProperty;
-  return typeof property === 'string'
-    ? `${base}/${property.replaceAll('~', '~0').replaceAll('/', '~1')}`
-    : base;
+  if (typeof property === 'string') {
+    const result = resolveProperty(position, property);
+    segments.push(sanitizeSegment(property, trusted && result.schemaKnown));
+  }
+  return segments.length === 0 ? '' : `/${segments.join('/')}`;
+}
+
+function advanceSchemaPath(
+  position: SchemaPosition,
+  decoded: string,
+  trusted: boolean,
+): { readonly position: SchemaPosition; readonly trusted: boolean; readonly segment: string } {
+  if (position.kind === 'array' || position.kind === 'composite') {
+    const index = Number(decoded);
+    if (Number.isInteger(index) && index >= 0 && String(index) === decoded) {
+      const result = resolveArrayItem(position);
+      if (result.schemaKnown) {
+        return {
+          position: trusted ? result.childSchemaPosition : UNKNOWN_POSITION,
+          trusted,
+          segment: decoded,
+        };
+      }
+    }
+  }
+  const result = resolveProperty(position, decoded);
+  const nextTrusted = trusted && result.schemaKnown;
+  return {
+    position: nextTrusted ? result.childSchemaPosition : UNKNOWN_POSITION,
+    trusted: nextTrusted,
+    segment: sanitizeSegment(decoded, nextTrusted),
+  };
+}
+
+function decodeJsonPointerSegment(segment: string): string {
+  return segment.replace(/~1/g, '/').replace(/~0/g, '~');
 }
 
 function schemaErrorCode(error: ErrorObject | undefined, path: string): ContractValidationCode {

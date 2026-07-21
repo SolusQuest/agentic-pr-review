@@ -225,6 +225,7 @@ export interface CompetingScope {
   readonly predecessorMarkerId: PredecessorDigest;
   readonly predecessorManifestSha256: PredecessorDigest;
   readonly predecessorLedgerSha256: PredecessorDigest;
+  readonly ledgerEpoch: EpochId;
   readonly targetStateGeneration: number;
   readonly interactionId: Sha256Hex;
 }

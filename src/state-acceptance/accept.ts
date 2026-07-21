@@ -19,6 +19,8 @@ import {
   materializeSelector,
 } from './validation.js';
 import {
+  MAX_ACCEPTANCE_SNAPSHOT_REGISTRATION_BYTES,
+  MAX_ACCEPTANCE_SNAPSHOT_REGISTRATIONS,
   SelectionSnapshotLimitError,
   SelectorRevisionMismatchError,
   StoreTransactionError,
@@ -353,6 +355,7 @@ function competingScope(registration: CandidateRegistrationV1): CompetingScope {
     predecessorMarkerId: registration.predecessorMarkerId,
     predecessorManifestSha256: registration.predecessorManifestSha256,
     predecessorLedgerSha256: registration.predecessorLedgerSha256,
+    ledgerEpoch: registration.ledgerEpoch,
     targetStateGeneration: registration.stateGeneration,
     interactionId: registration.interactionId,
   };
@@ -614,6 +617,9 @@ function validateAcceptanceSnapshot(
     ) {
       return 'candidate_snapshot_invalid';
     }
+    if (snapshot.registrations.length > MAX_ACCEPTANCE_SNAPSHOT_REGISTRATIONS) {
+      return 'candidate_snapshot_limit_exceeded';
+    }
 
     const registrationIdentities: Array<{
       registrationSequence: string;
@@ -623,6 +629,7 @@ function validateAcceptanceSnapshot(
     const seenIds = new Set<string>();
     const seenSequences = new Set<string>();
     let currentRegistrationPresent = false;
+    let totalRegistrationBytes = 0;
     let previous: { registrationSequence: string; registrationId: string } | undefined;
     for (const frozen of snapshot.registrations) {
       if (
@@ -632,6 +639,16 @@ function validateAcceptanceSnapshot(
       ) {
         return 'candidate_snapshot_invalid';
       }
+      if (frozen.registrationBytes.byteLength > MAX_ACCEPTANCE_SNAPSHOT_REGISTRATION_BYTES) {
+        return 'candidate_snapshot_limit_exceeded';
+      }
+      if (
+        frozen.registrationBytes.byteLength >
+        MAX_ACCEPTANCE_SNAPSHOT_REGISTRATION_BYTES - totalRegistrationBytes
+      ) {
+        return 'candidate_snapshot_limit_exceeded';
+      }
+      totalRegistrationBytes += frozen.registrationBytes.byteLength;
       const decoded = decodeValidatedRegistration(frozen.registrationBytes);
       if (
         !bytesEqual(canonicalJsonBytes(decoded), canonicalJsonBytes(frozen.registration)) ||

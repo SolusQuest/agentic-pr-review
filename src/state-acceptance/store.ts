@@ -20,6 +20,7 @@ import {
   computeRegistrationId,
   computeSelectionSnapshotId,
   observedSelectorSnapshotSha256,
+  SHA256_HEX,
   sha256Hex,
 } from './hash.js';
 import {
@@ -480,6 +481,9 @@ export class ReferenceStateStore implements StateAcceptanceStore {
     markerId: MarkerId,
   ): Promise<{ readonly bytes: Uint8Array | null; readonly marker: AcceptedStateMarkerV1 | null }> {
     await this.initialized;
+    if (typeof markerId !== 'string' || !SHA256_HEX.test(markerId)) {
+      throw new ContractValidationError('sha256_invalid', '/markerId');
+    }
     return this.withStateKeyLock(stateKey, async () => {
       const bytes = await readOptionalPrivate(
         path.join(await this.markersDirectory(stateKey), `${markerId}.json`),
@@ -499,6 +503,9 @@ export class ReferenceStateStore implements StateAcceptanceStore {
       const currentBytes = await readOptionalPrivate(target);
       const currentRevision =
         currentBytes === null ? 'bootstrap' : selectorRevisionFromBytes(currentBytes);
+      if (selector.previousSelectorRevision !== expectedRevision) {
+        return { kind: 'rejected_with_current_revision', currentRevision };
+      }
       if (currentBytes !== null) {
         try {
           const current = decodeValidatedSelector(currentBytes);
@@ -1130,6 +1137,7 @@ function matchesScope(registration: CandidateRegistrationV1, scope: CompetingSco
       predecessorMarkerId: registration.predecessorMarkerId,
       predecessorManifestSha256: registration.predecessorManifestSha256,
       predecessorLedgerSha256: registration.predecessorLedgerSha256,
+      ledgerEpoch: registration.ledgerEpoch,
       targetStateGeneration: registration.stateGeneration,
       interactionId: registration.interactionId,
     }),

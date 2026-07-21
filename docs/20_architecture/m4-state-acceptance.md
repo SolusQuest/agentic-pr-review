@@ -16,7 +16,7 @@ Selection occurs before the #55 invocation. `StateSelectionSnapshot` retains the
 
 Acceptance creates an immutable snapshot while holding the per-state-key transaction. It verifies the observed selector revision, captures a decimal sequence cutoff, freezes every matching registration at or below that cutoff, and computes the candidate-set digest from the compact ordered projection. The hard limits are exactly 64 matching registrations and 2,097,152 aggregate registration bytes. Exceeding either limit returns `candidate_snapshot_limit_exceeded` with no partial snapshot or digest. Duplicate IDs, duplicate sequences, incomplete enumeration, invalid sequence fields, and sequence overflow fail closed; numeric gaps are allowed.
 
-The competing scope excludes the candidate-owned ledger epoch and includes state key, session epoch, observed selector revision, predecessor marker/manifest/ledger identities, target generation, and interaction ID. Same-snapshot semantic duplicates use exact decimal producing-run ordering; semantic conflicts, stale candidates, CAS rejection, infrastructure failure, and accepted-but-unpublished are separate typed outcomes.
+The competing scope includes the candidate-owned ledger epoch, state key, session epoch, observed selector revision, predecessor marker/manifest/ledger identities, target generation, and interaction ID. Same-snapshot semantic duplicates use exact decimal producing-run ordering; semantic conflicts, stale candidates, CAS rejection, infrastructure failure, and accepted-but-unpublished are separate typed outcomes.
 
 ## Reference store
 
