@@ -597,6 +597,31 @@ function nonEmptyString(value: unknown, path: string): void {
   if (typeof value !== 'string' || value.length === 0 || Array.from(value).length > 256) {
     throw new ContractValidationError('string_invalid', path);
   }
+  let utf8Bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f) {
+      throw new ContractValidationError('string_invalid', path);
+    }
+    if (code <= 0x7f) utf8Bytes += 1;
+    else if (code <= 0x7ff) utf8Bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff) {
+      if (index + 1 >= value.length) {
+        throw new ContractValidationError('string_invalid', path);
+      }
+      const low = value.charCodeAt(index + 1);
+      if (low < 0xdc00 || low > 0xdfff) {
+        throw new ContractValidationError('string_invalid', path);
+      }
+      utf8Bytes += 4;
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      throw new ContractValidationError('string_invalid', path);
+    } else utf8Bytes += 3;
+    if (utf8Bytes > 256) {
+      throw new ContractValidationError('string_invalid', path);
+    }
+  }
 }
 
 function repositoryName(value: unknown, path: string): void {

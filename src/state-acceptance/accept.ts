@@ -1,16 +1,18 @@
 import { canonicalJsonBytes } from '../canonical-json/index.js';
 import { classifyStateBundleV2 } from '../state-v2/index.js';
 import type { StateManifestV2 } from '../state-v2/index.js';
-import { bytesEqual } from './codec.js';
+import { bytesEqual, recordSha256 } from './codec.js';
 import {
   candidateBundleSha256,
   compareDecimalIds,
   computeCandidateId,
+  computeCandidateSetDigest,
   computeSelectionSnapshotId,
   observedSelectorSnapshotSha256,
   sha256Hex,
 } from './hash.js';
 import {
+  decodeValidatedRegistration,
   decodeValidatedSelector,
   encodeValidatedRecord,
   materializeMarker,
@@ -24,6 +26,7 @@ import {
 } from './store.js';
 import type {
   AcceptanceOptions,
+  AcceptanceSnapshot,
   AcceptanceResult,
   AcceptedStateMarkerV1,
   CandidateBundleBytes,
@@ -168,6 +171,12 @@ async function acceptWithoutCleanup(
     return unknownAcceptance();
   }
 
+  const snapshotError = validateAcceptanceSnapshot(
+    snapshot,
+    registration,
+    options.selectionSnapshot.selectionSnapshotId,
+  );
+  if (snapshotError !== null) return notAccepted(snapshotError);
   const classification = classifyCandidateRegistrations(
     registration,
     snapshot.registrations.map((entry) => entry.registration),
@@ -584,6 +593,97 @@ function selectionFactsAreConsistent(options: AcceptanceOptions): boolean {
   )
     return false;
   return selectionPlanMatchesManifest(snapshot, options.candidate.manifest);
+}
+
+function validateAcceptanceSnapshot(
+  snapshot: AcceptanceSnapshot,
+  currentRegistration: CandidateRegistrationV1,
+  expectedSelectionSnapshotId: string,
+): NotAcceptedReason | null {
+  try {
+    const expectedScope = competingScope(currentRegistration);
+    if (
+      snapshot.schemaVersion !== 1 ||
+      snapshot.selectionSnapshotId !== expectedSelectionSnapshotId ||
+      snapshot.expectedObservedSelectorRevision !== currentRegistration.observedSelectorRevision ||
+      snapshot.currentSelectorRevision !== currentRegistration.observedSelectorRevision ||
+      !validDecimalSequence(snapshot.cutoff) ||
+      !bytesEqual(canonicalJsonBytes(snapshot.competingScope), canonicalJsonBytes(expectedScope)) ||
+      compareDecimalIds(currentRegistration.registrationSequence, snapshot.cutoff) > 0 ||
+      !Array.isArray(snapshot.registrations)
+    ) {
+      return 'candidate_snapshot_invalid';
+    }
+
+    const registrationIdentities: Array<{
+      registrationSequence: string;
+      registrationId: string;
+      registrationRecordSha256: string;
+    }> = [];
+    const seenIds = new Set<string>();
+    const seenSequences = new Set<string>();
+    let currentRegistrationPresent = false;
+    let previous: { registrationSequence: string; registrationId: string } | undefined;
+    for (const frozen of snapshot.registrations) {
+      if (
+        frozen === null ||
+        typeof frozen !== 'object' ||
+        !(frozen.registrationBytes instanceof Uint8Array)
+      ) {
+        return 'candidate_snapshot_invalid';
+      }
+      const decoded = decodeValidatedRegistration(frozen.registrationBytes);
+      if (
+        !bytesEqual(canonicalJsonBytes(decoded), canonicalJsonBytes(frozen.registration)) ||
+        frozen.registrationSequence !== decoded.registrationSequence ||
+        frozen.registrationId !== decoded.registrationId ||
+        frozen.registrationRecordSha256 !== recordSha256(frozen.registrationBytes) ||
+        !bytesEqual(
+          canonicalJsonBytes(competingScope(decoded)),
+          canonicalJsonBytes(expectedScope),
+        ) ||
+        compareDecimalIds(decoded.registrationSequence, snapshot.cutoff) > 0 ||
+        seenIds.has(decoded.registrationId) ||
+        seenSequences.has(decoded.registrationSequence) ||
+        (previous !== undefined &&
+          (compareDecimalIds(previous.registrationSequence, decoded.registrationSequence) > 0 ||
+            (previous.registrationSequence === decoded.registrationSequence &&
+              previous.registrationId.localeCompare(decoded.registrationId) > 0)))
+      ) {
+        return 'candidate_snapshot_invalid';
+      }
+      seenIds.add(decoded.registrationId);
+      seenSequences.add(decoded.registrationSequence);
+      previous = {
+        registrationSequence: decoded.registrationSequence,
+        registrationId: decoded.registrationId,
+      };
+      if (decoded.registrationId === currentRegistration.registrationId) {
+        currentRegistrationPresent = true;
+      }
+      registrationIdentities.push({
+        registrationSequence: decoded.registrationSequence,
+        registrationId: decoded.registrationId,
+        registrationRecordSha256: frozen.registrationRecordSha256,
+      });
+    }
+    if (!currentRegistrationPresent) return 'candidate_snapshot_invalid';
+    if (
+      computeCandidateSetDigest(expectedScope, snapshot.cutoff, registrationIdentities) !==
+      snapshot.candidateSetDigest
+    ) {
+      return 'candidate_set_digest_mismatch';
+    }
+    return null;
+  } catch {
+    return 'candidate_snapshot_invalid';
+  }
+}
+
+function validDecimalSequence(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^(?:0|[1-9][0-9]*)$/.test(value)) return false;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= 1_000_000;
 }
 
 function observedSelectorForSnapshot(

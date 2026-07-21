@@ -105,9 +105,12 @@ export class SelectorRevisionMismatchError extends Error {
 }
 
 class UnsafePrivateFileError extends Error {
-  constructor(message: string) {
+  readonly reason: 'unsafe_file' | 'size_limit' | 'unstable_file';
+
+  constructor(reason: UnsafePrivateFileError['reason'], message: string = reason) {
     super(message);
     this.name = 'UnsafePrivateFileError';
+    this.reason = reason;
   }
 }
 
@@ -128,7 +131,11 @@ export type CandidateReadResult =
   | { readonly status: 'missing'; readonly evidence: CandidateEvidence }
   | {
       readonly status: 'unsafe';
-      readonly diagnostic: 'bundle_extra_entry' | 'bundle_listing_mismatch';
+      readonly diagnostic:
+        | 'bundle_extra_entry'
+        | 'bundle_listing_mismatch'
+        | 'ledger_byte_limit_exceeded'
+        | 'provider_run_metadata_byte_limit_exceeded';
       readonly evidence: CandidateEvidence;
     }
   | { readonly status: 'failed' };
@@ -139,7 +146,15 @@ export interface CandidateEvidence {
   readonly providerRunMetadata: ObservedCandidateEntry;
 }
 
-type CandidateObservation = ObservedCandidateEntry | { readonly status: 'failed' };
+type CandidateObservation =
+  | ObservedCandidateEntry
+  | { readonly status: 'failed' }
+  | {
+      readonly status: 'over_bound';
+      readonly diagnostic:
+        | 'ledger_byte_limit_exceeded'
+        | 'provider_run_metadata_byte_limit_exceeded';
+    };
 type CandidateEvidenceInternal = {
   readonly manifest: CandidateObservation;
   readonly ledger: CandidateObservation;
@@ -288,10 +303,15 @@ export class ReferenceStateStore implements StateAcceptanceStore {
           path.join(directory, 'manifest.json'),
           MANIFEST_MAX_BYTES,
         ),
-        ledger: await readObservedEntry(path.join(directory, 'ledger.json'), LEDGER_MAX_BYTES),
+        ledger: await readObservedEntry(
+          path.join(directory, 'ledger.json'),
+          LEDGER_MAX_BYTES,
+          'ledger_byte_limit_exceeded',
+        ),
         providerRunMetadata: await readObservedEntry(
           path.join(directory, 'provider-run-metadata.json'),
           METADATA_MAX_BYTES,
+          'provider_run_metadata_byte_limit_exceeded',
         ),
       } satisfies CandidateEvidenceInternal;
       const evidenceEntries = [evidence.manifest, evidence.ledger, evidence.providerRunMetadata];
@@ -304,6 +324,14 @@ export class ReferenceStateStore implements StateAcceptanceStore {
           diagnostic: 'bundle_extra_entry',
           evidence: publicCandidateEvidence(evidence),
         };
+      const overBound = evidenceEntries.find((entry) => entry.status === 'over_bound');
+      if (overBound?.status === 'over_bound') {
+        return {
+          status: 'unsafe',
+          diagnostic: overBound.diagnostic,
+          evidence: publicCandidateEvidence(evidence),
+        };
+      }
       if (evidenceEntries.some((entry) => entry.status === 'unsafe')) {
         return {
           status: 'unsafe',
@@ -773,7 +801,10 @@ export class ReferenceStateStore implements StateAcceptanceStore {
         selectorBytes,
         candidate.status === 'missing'
           ? 'unavailable_accepted_artifact'
-          : 'corrupt_accepted_artifact',
+          : candidate.diagnostic === 'ledger_byte_limit_exceeded' ||
+              candidate.diagnostic === 'provider_run_metadata_byte_limit_exceeded'
+            ? 'over_bound_ledger'
+            : 'corrupt_accepted_artifact',
         'candidate_invalid',
         evidence,
         observedRevision,
@@ -1296,14 +1327,15 @@ async function readPrivate(filePath: string, maxBytes = RECORD_MAX_BYTES): Promi
       fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0),
     );
   } catch (error) {
-    if (isUnsafeFileSystemError(error)) throw new UnsafePrivateFileError('unsafe file');
+    if (isUnsafeFileSystemError(error))
+      throw new UnsafePrivateFileError('unsafe_file', 'unsafe file');
     throw error;
   }
   try {
     const before = await handle.stat();
     if (!before.isFile() || (before.mode & 0o777) !== 0o600)
-      throw new UnsafePrivateFileError('unsafe file');
-    if (before.size > maxBytes) throw new UnsafePrivateFileError('file size limit');
+      throw new UnsafePrivateFileError('unsafe_file', 'unsafe file');
+    if (before.size > maxBytes) throw new UnsafePrivateFileError('size_limit', 'file size limit');
     const buffer = Buffer.allocUnsafe(maxBytes + 1);
     let offset = 0;
     while (offset < buffer.byteLength) {
@@ -1311,7 +1343,7 @@ async function readPrivate(filePath: string, maxBytes = RECORD_MAX_BYTES): Promi
       offset += read.bytesRead;
       if (read.bytesRead === 0) break;
     }
-    if (offset > maxBytes) throw new UnsafePrivateFileError('file size limit');
+    if (offset > maxBytes) throw new UnsafePrivateFileError('size_limit', 'file size limit');
     const bytes = new Uint8Array(buffer.subarray(0, offset));
     const after = await handle.stat();
     if (
@@ -1320,7 +1352,7 @@ async function readPrivate(filePath: string, maxBytes = RECORD_MAX_BYTES): Promi
       before.size !== after.size ||
       before.mtimeMs !== after.mtimeMs
     ) {
-      throw new UnsafePrivateFileError('unstable file');
+      throw new UnsafePrivateFileError('unstable_file', 'unstable file');
     }
     return bytes;
   } finally {
@@ -1343,12 +1375,18 @@ async function readOptionalPrivate(
 async function readObservedEntry(
   filePath: string,
   maxBytes: number,
+  overBoundDiagnostic?: 'ledger_byte_limit_exceeded' | 'provider_run_metadata_byte_limit_exceeded',
 ): Promise<CandidateObservation> {
   try {
     return { status: 'present', sha256: sha256Hex(await readPrivate(filePath, maxBytes)) };
   } catch (error) {
     if (isMissing(error)) return { status: 'missing' };
-    if (error instanceof UnsafePrivateFileError) return { status: 'unsafe' };
+    if (error instanceof UnsafePrivateFileError) {
+      if (error.reason === 'size_limit' && overBoundDiagnostic !== undefined) {
+        return { status: 'over_bound', diagnostic: overBoundDiagnostic };
+      }
+      return { status: 'unsafe' };
+    }
     return { status: 'failed' };
   }
 }
@@ -1379,6 +1417,7 @@ function publicCandidateEvidence(evidence: CandidateEvidenceInternal): Candidate
 
 function publicCandidateObservation(observation: CandidateObservation): ObservedCandidateEntry {
   if (observation.status === 'failed') throw new Error('failed observation is not public evidence');
+  if (observation.status === 'over_bound') return { status: 'unsafe' };
   return observation;
 }
 

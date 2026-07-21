@@ -329,12 +329,17 @@ describe('M4 state acceptance contract', () => {
     const ajv = new Ajv({ strict: true, allErrors: true });
     const validateStateKeySchema = ajv.compile(registrationSchema.$defs?.stateKey);
     for (const property of ['workflowIdentity', 'trustedExecutionDomain'] as const) {
-      const atLimit = { ...stateKey, [property]: '😀'.repeat(256) };
+      const atLimit = { ...stateKey, [property]: 'x'.repeat(256) };
       expect(validateStateKeySchema(atLimit)).toBe(true);
       expect(() => validateStateKey(atLimit)).not.toThrow();
-      const overLimit = { ...stateKey, [property]: '😀'.repeat(257) };
-      expect(validateStateKeySchema(overLimit)).toBe(false);
+      const overLimit = { ...stateKey, [property]: `${'x'.repeat(253)}😀` };
+      expect(validateStateKeySchema(overLimit)).toBe(true);
       expect(() => validateStateKey(overLimit)).toThrowError(
+        expect.objectContaining({ code: 'string_invalid', path: `/stateKey/${property}` }),
+      );
+      const control = { ...stateKey, [property]: 'safe\u0001identity' };
+      expect(validateStateKeySchema(control)).toBe(true);
+      expect(() => validateStateKey(control)).toThrowError(
         expect.objectContaining({ code: 'string_invalid', path: `/stateKey/${property}` }),
       );
     }
@@ -1336,6 +1341,51 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
           publishedMarkerId = markerId;
         },
       };
+      const snapshotRoot = await mkdtemp(path.join(os.tmpdir(), 'm4-state-acceptance-snapshot-'));
+      try {
+        const snapshotStore = new ReferenceStateStore(snapshotRoot);
+        await snapshotStore.close();
+        let corruption: 'registration' | 'digest' = 'registration';
+        const corruptingStore = {
+          uploadCandidate: snapshotStore.uploadCandidate.bind(snapshotStore),
+          readCandidate: snapshotStore.readCandidate.bind(snapshotStore),
+          registerCandidate: snapshotStore.registerCandidate.bind(snapshotStore),
+          createAcceptanceSnapshot: async (
+            ...args: Parameters<ReferenceStateStore['createAcceptanceSnapshot']>
+          ) => {
+            const snapshot = await snapshotStore.createAcceptanceSnapshot(...args);
+            if (corruption === 'registration') {
+              const first = snapshot.registrations[0]!;
+              return {
+                ...snapshot,
+                registrations: [
+                  {
+                    ...first,
+                    registration: { ...first.registration, registrationSequence: '999' as never },
+                  },
+                ],
+              };
+            }
+            return { ...snapshot, candidateSetDigest: 'f'.repeat(64) as never };
+          },
+          readSelector: snapshotStore.readSelector.bind(snapshotStore),
+          writeMarker: snapshotStore.writeMarker.bind(snapshotStore),
+          readMarker: snapshotStore.readMarker.bind(snapshotStore),
+          casSelector: snapshotStore.casSelector.bind(snapshotStore),
+          selectAcceptedState: snapshotStore.selectAcceptedState.bind(snapshotStore),
+        };
+        expect(await acceptLocalCandidate(corruptingStore, acceptanceOptions)).toMatchObject({
+          acceptance: 'not_accepted',
+          reason: 'candidate_snapshot_invalid',
+        });
+        corruption = 'digest';
+        expect(await acceptLocalCandidate(corruptingStore, acceptanceOptions)).toMatchObject({
+          acceptance: 'not_accepted',
+          reason: 'candidate_set_digest_mismatch',
+        });
+      } finally {
+        await rm(snapshotRoot, { recursive: true, force: true });
+      }
       const result = await acceptLocalCandidate(store, acceptanceOptions);
       expect(result.acceptance).toBe('accepted');
       expect(result.publication).toEqual({ status: 'succeeded' });
@@ -1361,6 +1411,38 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       if (result.acceptance === 'accepted' || result.acceptance === 'already_accepted') {
         expect(publishedMarkerId).toBe(result.markerId);
       }
+      const acceptedCandidateId = computeCandidateId({
+        manifestSha256: sha256Hex(manifestBytes),
+        candidateLedgerSha256: sha256Hex(ledgerBytes),
+        providerRunMetadataSha256: sha256Hex(providerRunMetadataBytes),
+        metadataSemanticSha256: manifest.transaction.metadataSemanticSha256,
+        consumedInputSha256: inputSha256,
+        resultSha256: sha256Hex(resultBytes),
+        traceSha256: sha256Hex(traceBytes),
+      });
+      await writeFile(
+        path.join(root, 'candidates', acceptedCandidateId, 'ledger.json'),
+        new Uint8Array(524_289),
+        { mode: 0o600 },
+      );
+      expect(
+        await store.selectAcceptedState({
+          stateKey: manifest.stateKey,
+          expectedLedgerSchemaVersion: ledgerSchemaVersion,
+          expectedPrefixContractVersion: prefixContractVersion,
+          cacheContractIdentity,
+          currentHeadSha: manifest.provenance.currentHeadSha,
+          currentBaseSha: manifest.provenance.currentBaseSha,
+          currentBaseRef: manifest.provenance.currentBaseRef,
+          provenanceTrusted: true,
+          workflowIdentity: manifest.stateKey.workflowIdentity,
+          trustedExecutionDomain: manifest.stateKey.trustedExecutionDomain,
+          headRelationship: 'same',
+        }),
+      ).toMatchObject({
+        selection: 'selected',
+        snapshot: { kind: 'recovery_root_selected', recoveryReason: 'over_bound_ledger' },
+      });
 
       const staleRoot = await mkdtemp(path.join(os.tmpdir(), 'm4-state-acceptance-stale-'));
       try {
@@ -1568,7 +1650,7 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       } finally {
         await rm(failedRoot, { recursive: true, force: true });
       }
-      expect(releaseCount).toBe(9);
+      expect(releaseCount).toBe(11);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
