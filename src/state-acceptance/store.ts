@@ -376,7 +376,12 @@ export class ReferenceStateStore implements StateAcceptanceStore {
           );
           await this.hooks.afterRegistrationCommit?.();
         } catch {
-          const readBack = await readOptionalPrivate(registrationPath).catch(() => null);
+          let readBack: Uint8Array | null;
+          try {
+            readBack = await readOptionalPrivate(registrationPath);
+          } catch {
+            return { kind: 'outcome_unknown', registration };
+          }
           if (readBack !== null) {
             try {
               const reconciled = decodeValidatedRegistration(readBack);

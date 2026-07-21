@@ -254,10 +254,10 @@ export function validateAcceptedStateMarker(
   boundedInt(record.stateGeneration, 0, 1_000_000, '/stateGeneration');
   epoch(record.ledgerEpoch, '/ledgerEpoch');
   validateTransition(record.transition);
-  validateRecordPredecessorBinding(record);
   predecessor(record.predecessorMarkerId, '/predecessorMarkerId');
   predecessor(record.predecessorManifestSha256, '/predecessorManifestSha256');
   predecessor(record.predecessorLedgerSha256, '/predecessorLedgerSha256');
+  validateRecordPredecessorBinding(record);
   selectorRevision(record.observedSelectorRevision, '/observedSelectorRevision');
   for (const key of [
     'manifestSha256',
@@ -388,23 +388,50 @@ function schemaErrorCode(error: ErrorObject | undefined, path: string): Contract
   if (error?.keyword === 'additionalProperties' || error?.keyword === 'required') {
     return 'unknown_or_missing_field';
   }
-  if (path === '/candidateArtifactLocator' || path.startsWith('/candidateArtifactLocator/')) {
-    return 'locator_invalid';
+  if (path === '/candidateArtifactLocator') return 'object_required';
+  if (path.startsWith('/candidateArtifactLocator/')) return 'locator_invalid';
+  if (path === '/stateKey') return 'object_required';
+  if (path === '/stateKey/namespace' || path === '/stateKey/repository') {
+    return 'state_key_invalid';
   }
-  if (path === '/stateKey' || path.startsWith('/stateKey/')) return 'state_key_invalid';
-  if (path === '/transition' || path.startsWith('/transition/')) return 'transition_invalid';
+  if (path === '/stateKey/headRepository') return 'state_key_invalid';
+  if (path === '/stateKey/pullRequest') return 'integer_out_of_range';
+  if (path === '/stateKey/workflowIdentity' || path === '/stateKey/trustedExecutionDomain') {
+    return 'string_invalid';
+  }
+  if (path === '/transition') return 'object_required';
+  if (path === '/transition/kind' || path === '/transition/reason') return 'transition_invalid';
+  if (path === '/transition/predecessorManifestSha256') return 'sha256_invalid';
+  if (path === '/transition/predecessorLedgerSha256') return 'sha256_invalid';
+  if (path === '/transition/predecessorStateGeneration') return 'integer_out_of_range';
+  if (path === '/transition/predecessorLedgerEpoch') return 'epoch_invalid';
+  if (path.startsWith('/transition/')) return 'transition_invalid';
   if (path === '/schemaVersion') return 'schema_version_invalid';
   if (path === '/registrationSequence') return 'sequence_invalid';
   if (path === '/previousSelectorRevision' || path === '/observedSelectorRevision') {
     return 'selector_revision_invalid';
   }
+  if (path === '/selectorRevision') return 'selector_revision_invalid';
+  if (
+    path === '/stateGeneration' ||
+    path === '/interactionOrdinal' ||
+    path === '/producingRunAttempt' ||
+    path === '/acceptingRunAttempt'
+  ) {
+    return 'integer_out_of_range';
+  }
+  if (path === '/sessionEpoch' || path === '/ledgerEpoch') return 'epoch_invalid';
+  if (path === '/currentHeadSha' || path === '/currentBaseSha') return 'git_sha_invalid';
+  if (
+    path === '/predecessorMarkerId' ||
+    path === '/predecessorManifestSha256' ||
+    path === '/predecessorLedgerSha256'
+  ) {
+    return 'predecessor_invalid';
+  }
   if (path.endsWith('At')) return 'timestamp_invalid';
   if (path.endsWith('RunId')) return 'run_id_invalid';
   if (path.endsWith('Sha256') || path.endsWith('Id')) return 'sha256_invalid';
-  if (path === '/stateKey/repository' || path === '/stateKey/headRepository') {
-    return 'state_key_invalid';
-  }
-  if (path.startsWith('/stateKey/')) return 'string_invalid';
   if (path.endsWith('/schemaVersion')) return 'schema_version_invalid';
   if (error?.keyword === 'type' || error?.keyword === 'pattern' || error?.keyword === 'const') {
     return 'string_invalid';
@@ -483,9 +510,9 @@ export function materializeSelector(
   return value;
 }
 
-function object(value: unknown): Record<string, unknown> {
+function object(value: unknown, path = ''): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new ContractValidationError('object_required');
+    throw new ContractValidationError('object_required', path);
   }
   return value as Record<string, unknown>;
 }
@@ -584,7 +611,7 @@ function repositoryName(value: unknown, path: string): void {
 }
 
 function validateLocator(value: unknown, candidateId: CandidateId): void {
-  const locator = object(value);
+  const locator = object(value, '/candidateArtifactLocator');
   exactKeys(locator, ['kind', 'namespace', 'objectId']);
   if (locator.kind !== 'store-object' || locator.namespace !== 'm4-state-v1') {
     throw new ContractValidationError('locator_invalid', '/candidateArtifactLocator');
@@ -623,7 +650,7 @@ function validateRecordPredecessorBinding(record: Record<string, unknown>): void
 }
 
 export function validateStateKey(value: unknown): asserts value is StateKeyV2 {
-  const key = object(value);
+  const key = object(value, '/stateKey');
   exactKeys(key, STATE_KEY_KEYS);
   if (key.namespace !== 'm4-ledger-v2')
     throw new ContractValidationError('state_key_invalid', '/stateKey/namespace');
@@ -635,7 +662,7 @@ export function validateStateKey(value: unknown): asserts value is StateKeyV2 {
 }
 
 export function validateTransition(value: unknown): asserts value is StateManifestV2Transition {
-  const transition = object(value);
+  const transition = object(value, '/transition');
   if (typeof transition.kind !== 'string' || !(transition.kind in TRANSITION_KEYS)) {
     throw new ContractValidationError('transition_invalid', '/transition/kind');
   }

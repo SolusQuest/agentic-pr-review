@@ -35,7 +35,10 @@ import {
   materializeSelector,
   observedSelectorSnapshotSha256,
   sha256Hex,
+  validateAcceptedStateMarker,
+  validateCandidateRegistration,
   validateStateKey,
+  validateStateSelector,
   type AcceptedStateMarkerV1,
   type CandidateBundleBytes,
   type CandidateRegistrationDraft,
@@ -50,6 +53,14 @@ const stateKey: StateKeyV2 = {
   pullRequest: 67,
   workflowIdentity: 'm4-state',
   trustedExecutionDomain: 'trusted-default',
+};
+const fixtureStateKey: StateKeyV2 = {
+  namespace: 'm4-ledger-v2',
+  repository: 'SolusQuest/agentic-pr-review',
+  headRepository: 'SolusQuest/agentic-pr-review',
+  pullRequest: 48,
+  workflowIdentity: 'agentic-pr-review',
+  trustedExecutionDomain: 'trusted',
 };
 const epoch = 'A'.repeat(22) as never;
 const sha = 'a'.repeat(64);
@@ -332,20 +343,23 @@ describe('M4 state acceptance contract', () => {
       {
         schema: registrationSchema,
         decode: decodeValidatedRegistration,
+        validate: validateCandidateRegistration,
         value: materializeRegistration(draft(), '1'),
       },
       {
         schema: markerSchema,
         decode: decodeValidatedMarker,
+        validate: validateAcceptedStateMarker,
         value: marker,
       },
       {
         schema: selectorSchema,
         decode: decodeValidatedSelector,
+        validate: validateStateSelector,
         value: selectorFor(marker),
       },
     ] as const;
-    for (const { schema, decode, value } of records) {
+    for (const { schema, decode, validate: contractValidate, value } of records) {
       const validate = ajv.compile(schema);
       const validBytes = canonicalJsonBytes(value);
       expect(validate(value)).toBe(true);
@@ -375,10 +389,10 @@ describe('M4 state acceptance contract', () => {
       );
 
       const wrongNestedTypes = [
-        ['stateKey', 'state_key_invalid'],
-        ['transition', 'transition_invalid'],
+        ['stateKey', 'object_required'],
+        ['transition', 'object_required'],
         ...('candidateArtifactLocator' in value
-          ? [['candidateArtifactLocator', 'locator_invalid'] as const]
+          ? [['candidateArtifactLocator', 'object_required'] as const]
           : []),
       ] as const;
       for (const [property, code] of wrongNestedTypes) {
@@ -390,6 +404,28 @@ describe('M4 state acceptance contract', () => {
           0x20,
         ]);
         expect(() => decode(wrongNestedTypeBytes)).toThrowError(expect.objectContaining({ code }));
+      }
+
+      const scalarWrongTypes = [
+        ['stateGeneration', '0', 'integer_out_of_range'],
+        ['sessionEpoch', 1, 'epoch_invalid'],
+        ['currentHeadSha', 1, 'git_sha_invalid'],
+        ['predecessorMarkerId', 1, 'predecessor_invalid'],
+        ['producingRunId', 1, 'run_id_invalid'],
+        ['registeredAt', 1, 'timestamp_invalid'],
+        ['candidateId', 1, 'sha256_invalid'],
+      ] as const;
+      for (const [property, invalidValue, code] of scalarWrongTypes) {
+        if (!(property in value)) continue;
+        const invalidScalar = structuredClone(value) as Record<string, any>;
+        invalidScalar[property] = invalidValue;
+        const invalidScalarBytes = canonicalJsonBytes(invalidScalar);
+        expect(() => decode(invalidScalarBytes)).toThrowError(
+          expect.objectContaining({ code, path: `/${property}` }),
+        );
+        expect(() => contractValidate(invalidScalar)).toThrowError(
+          expect.objectContaining({ code, path: `/${property}` }),
+        );
       }
 
       const overBoundGeneration = structuredClone(value) as Record<string, any>;
@@ -931,8 +967,8 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
 
   it('proves registration, reopen, snapshot, marker, and CAS across child processes', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'm4-state-acceptance-child-proof-'));
-    const competitionRoot = await mkdtemp(
-      path.join(os.tmpdir(), 'm4-state-acceptance-child-cas-race-'),
+    const validRoot = await mkdtemp(
+      path.join(os.tmpdir(), 'm4-state-acceptance-child-valid-restore-'),
     );
     try {
       const bundlePath = await buildStoreChildBundle(root);
@@ -987,21 +1023,44 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
         (await runStoreChild(bundlePath, 'read-selector', { root, stateKey })).result,
       ).toMatchObject({ hasBytes: true, selector: { selectorId: selector.selectorId } });
 
-      const competitionBundle = await buildStoreChildBundle(competitionRoot);
+      const validBundle = await buildStoreChildBundle(validRoot);
+      expect((await runStoreChild(validBundle, 'init', { root: validRoot })).result).toEqual({
+        kind: 'initialized',
+      });
       expect(
-        (await runStoreChild(competitionBundle, 'init', { root: competitionRoot })).result,
-      ).toEqual({ kind: 'initialized' });
-      const leftSelector = selectorFor(markerFor('a'.repeat(64)));
-      const rightSelector = selectorFor(markerFor('b'.repeat(64)));
+        (await runStoreChild(validBundle, 'accept-fixture', { root: validRoot })).result,
+      ).toEqual(expect.objectContaining({ acceptance: 'accepted' }));
+      const restored = (
+        await runStoreChild(validBundle, 'restore-and-accept-fixture', {
+          root: validRoot,
+        })
+      ).result;
+      expect(restored).toMatchObject({
+        selection: 'selected',
+        snapshotKind: 'continuation_selected',
+        predecessorBytesMatch: true,
+        acceptance: { acceptance: 'accepted' },
+      });
+      const successorRevision = restored?.acceptance?.selectorRevision;
+      const leftSelector = selectorFor(
+        markerFor('a'.repeat(64), undefined, sha, fixtureStateKey),
+        fixtureStateKey,
+        successorRevision,
+      );
+      const rightSelector = selectorFor(
+        markerFor('b'.repeat(64), undefined, sha, fixtureStateKey),
+        fixtureStateKey,
+        successorRevision,
+      );
       const [left, right] = await Promise.all([
-        runStoreChild(competitionBundle, 'cas', {
-          root: competitionRoot,
-          expectedRevision: 'bootstrap',
+        runStoreChild(validBundle, 'cas', {
+          root: validRoot,
+          expectedRevision: successorRevision,
           selector: leftSelector,
         }),
-        runStoreChild(competitionBundle, 'cas', {
-          root: competitionRoot,
-          expectedRevision: 'bootstrap',
+        runStoreChild(validBundle, 'cas', {
+          root: validRoot,
+          expectedRevision: successorRevision,
           selector: rightSelector,
         }),
       ]);
@@ -1011,7 +1070,7 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       ]);
     } finally {
       await rm(root, { recursive: true, force: true });
-      await rm(competitionRoot, { recursive: true, force: true });
+      await rm(validRoot, { recursive: true, force: true });
     }
   }, 30_000);
 
@@ -1387,6 +1446,49 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
         await rm(unknownRoot, { recursive: true, force: true });
       }
 
+      const registrationReadbackFailureRoot = await mkdtemp(
+        path.join(os.tmpdir(), 'm4-state-acceptance-registration-readback-failure-'),
+      );
+      try {
+        const registrationDirectory = path.join(
+          registrationReadbackFailureRoot,
+          'states',
+          sha256Hex(canonicalJsonBytes(acceptanceOptions.selectionSnapshot.stateKey)),
+          'registrations',
+        );
+        const registrationReadbackFailureStore = new ReferenceStateStore(
+          registrationReadbackFailureRoot,
+          {
+            afterRegistrationCommit: async () => {
+              const entries = await readdir(registrationDirectory);
+              const registrationEntry = entries.find((entry) => entry.endsWith('.json'));
+              if (!registrationEntry) throw new Error('registration file missing');
+              await chmod(path.join(registrationDirectory, registrationEntry), 0o644);
+              throw new Error('registration commit outcome unknown');
+            },
+          },
+        );
+        await registrationReadbackFailureStore.close();
+        let called = false;
+        const registrationReadbackFailure = await acceptLocalCandidate(
+          registrationReadbackFailureStore,
+          {
+            ...acceptanceOptions,
+            publishSticky: async () => {
+              called = true;
+            },
+          },
+        );
+        expect(registrationReadbackFailure).toMatchObject({
+          acceptance: 'unknown',
+          reason: 'acceptance_outcome_unknown',
+          publication: { status: 'not_attempted' },
+        });
+        expect(called).toBe(false);
+      } finally {
+        await rm(registrationReadbackFailureRoot, { recursive: true, force: true });
+      }
+
       const markerReadbackFailureRoot = await mkdtemp(
         path.join(os.tmpdir(), 'm4-state-acceptance-marker-readback-failure-'),
       );
@@ -1466,7 +1568,7 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       } finally {
         await rm(failedRoot, { recursive: true, force: true });
       }
-      expect(releaseCount).toBe(8);
+      expect(releaseCount).toBe(9);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
