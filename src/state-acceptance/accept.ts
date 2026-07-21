@@ -19,6 +19,7 @@ import {
 import {
   SelectionSnapshotLimitError,
   SelectorRevisionMismatchError,
+  StoreTransactionError,
   type StateAcceptanceStore,
 } from './store.js';
 import type {
@@ -132,7 +133,13 @@ async function acceptWithoutCleanup(
   }
 
   const draft = registrationDraft(options, identity);
-  const registrationResult = await store.registerCandidate(draft);
+  let registrationResult: Awaited<ReturnType<StateAcceptanceStore['registerCandidate']>>;
+  try {
+    registrationResult = await store.registerCandidate(draft);
+  } catch (error) {
+    if (error instanceof StoreTransactionError) return notAccepted(error.reason);
+    throw error;
+  }
   if (registrationResult.kind === 'registration_write_conflict')
     return notAccepted('registration_write_conflict');
   if (registrationResult.kind === 'registration_write_failed')
@@ -157,6 +164,7 @@ async function acceptWithoutCleanup(
     if (error instanceof SelectionSnapshotLimitError)
       return notAccepted('candidate_snapshot_limit_exceeded');
     if (error instanceof SelectorRevisionMismatchError) return notAccepted('stale_candidate');
+    if (error instanceof StoreTransactionError) return notAccepted(error.reason);
     return unknownAcceptance();
   }
 
@@ -196,14 +204,21 @@ async function acceptWithoutCleanup(
   let markerWrite;
   try {
     markerWrite = await store.writeMarker(marker);
-  } catch {
+  } catch (error) {
+    if (error instanceof StoreTransactionError) return notAccepted(error.reason);
     return notAccepted('marker_write_failed');
   }
   let acceptedMarker: AcceptedStateMarkerV1;
   if (markerWrite.kind === 'created' || markerWrite.kind === 'already_exists_same') {
     acceptedMarker = markerWrite.value;
   } else if (markerWrite.kind === 'outcome_unknown') {
-    const readBack = await store.readMarker(options.selectionSnapshot.stateKey, marker.markerId);
+    let readBack: Awaited<ReturnType<StateAcceptanceStore['readMarker']>>;
+    try {
+      readBack = await store.readMarker(options.selectionSnapshot.stateKey, marker.markerId);
+    } catch (error) {
+      if (error instanceof StoreTransactionError) return notAccepted(error.reason);
+      return unknownAcceptance();
+    }
     if (
       readBack.marker === null ||
       readBack.bytes === null ||
@@ -221,14 +236,21 @@ async function acceptWithoutCleanup(
   let cas;
   try {
     cas = await store.casSelector(options.selectionSnapshot.observedSelectorRevision, selector);
-  } catch {
+  } catch (error) {
+    if (error instanceof StoreTransactionError) return notAccepted(error.reason);
     return notAccepted('store_transaction_failed');
   }
   let selected: 'accepted' | 'already_accepted';
   if (cas.kind === 'applied') selected = 'accepted';
   else if (cas.kind === 'already_applied_same_target') selected = 'already_accepted';
   else if (cas.kind === 'outcome_unknown') {
-    const readBack = await store.readSelector(options.selectionSnapshot.stateKey);
+    let readBack: Awaited<ReturnType<StateAcceptanceStore['readSelector']>>;
+    try {
+      readBack = await store.readSelector(options.selectionSnapshot.stateKey);
+    } catch (error) {
+      if (error instanceof StoreTransactionError) return notAccepted(error.reason);
+      return unknownAcceptance();
+    }
     if (
       readBack.selector?.selectorId !== selector.selectorId ||
       readBack.bytes === null ||

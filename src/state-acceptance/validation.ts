@@ -194,6 +194,7 @@ export class ContractValidationError extends Error {
 export function validateCandidateRegistration(
   value: unknown,
 ): asserts value is CandidateRegistrationV1 {
+  validateRecordUnicode(value);
   const record = object(value);
   exactKeys(record, REGISTRATION_KEYS);
   schemaVersion(record.schemaVersion, '/schemaVersion');
@@ -241,6 +242,7 @@ export function validateCandidateRegistration(
 export function validateAcceptedStateMarker(
   value: unknown,
 ): asserts value is AcceptedStateMarkerV1 {
+  validateRecordUnicode(value);
   const record = object(value);
   exactKeys(record, MARKER_KEYS);
   schemaVersion(record.schemaVersion, '/schemaVersion');
@@ -278,6 +280,7 @@ export function validateAcceptedStateMarker(
 }
 
 export function validateStateSelector(value: unknown): asserts value is StateSelectorV1 {
+  validateRecordUnicode(value);
   const record = object(value);
   exactKeys(record, SELECTOR_KEYS);
   schemaVersion(record.schemaVersion, '/schemaVersion');
@@ -356,7 +359,10 @@ function decodeVersionedRecord(
 function validateClosedSchema(record: Record<string, unknown>, kind: RecordKind): void {
   const validate = CLOSED_SCHEMA_VALIDATORS[kind];
   if (validate(record)) return;
-  const error = validate.errors?.[0];
+  const error = validate.errors?.find(
+    (candidate) => candidate.keyword === 'additionalProperties' || candidate.keyword === 'required',
+  );
+  if (!error) return;
   const path = schemaErrorPath(error);
   throw new ContractValidationError(schemaErrorCode(error, path), path);
 }
@@ -409,6 +415,7 @@ export function materializeRegistration(
   registrationSequence: DecimalSequence,
   now = new Date().toISOString(),
 ): CandidateRegistrationV1 {
+  validateRecordUnicode(draft);
   const value = {
     ...draft,
     registrationId: computeRegistrationId(draft) as CandidateRegistrationV1['registrationId'],
@@ -424,6 +431,7 @@ export function materializeMarker(
   input: Omit<AcceptedStateMarkerV1, 'markerId' | 'acceptedAt'>,
   now = new Date().toISOString(),
 ): AcceptedStateMarkerV1 {
+  validateRecordUnicode(input);
   const semantic = {
     ...input,
     acceptedAt: now,
@@ -440,6 +448,7 @@ export function materializeSelector(
   input: Omit<StateSelectorV1, 'selectorId' | 'selectorRevision' | 'updatedAt'>,
   now = new Date().toISOString(),
 ): StateSelectorV1 {
+  validateRecordUnicode(input);
   const semantic = {
     ...input,
     updatedAt: now,

@@ -115,6 +115,7 @@ export interface ReferenceStoreHooks {
   readonly beforeCandidateCommit?: () => void | Promise<void>;
   readonly afterCandidateCommit?: () => void | Promise<void>;
   readonly beforeRegistrationCommit?: () => void | Promise<void>;
+  readonly afterRegistrationTempWrite?: (temporaryPath: string) => void | Promise<void>;
   readonly afterRegistrationCommit?: () => void | Promise<void>;
   readonly beforeMarkerCommit?: () => void | Promise<void>;
   readonly afterMarkerCommit?: () => void | Promise<void>;
@@ -293,16 +294,16 @@ export class ReferenceStateStore implements StateAcceptanceStore {
           METADATA_MAX_BYTES,
         ),
       } satisfies CandidateEvidenceInternal;
+      const evidenceEntries = [evidence.manifest, evidence.ledger, evidence.providerRunMetadata];
+      if (evidenceEntries.some((entry) => entry.status === 'failed')) {
+        return { status: 'failed' };
+      }
       if (entries.some((entry) => !expected.has(entry)))
         return {
           status: 'unsafe',
           diagnostic: 'bundle_extra_entry',
           evidence: publicCandidateEvidence(evidence),
         };
-      const evidenceEntries = [evidence.manifest, evidence.ledger, evidence.providerRunMetadata];
-      if (evidenceEntries.some((entry) => entry.status === 'failed')) {
-        return { status: 'failed' };
-      }
       if (evidenceEntries.some((entry) => entry.status === 'unsafe')) {
         return {
           status: 'unsafe',
@@ -368,7 +369,7 @@ export class ReferenceStateStore implements StateAcceptanceStore {
         const bytes = encodeValidatedRecord(registration);
         try {
           await this.hooks.beforeRegistrationCommit?.();
-          await writePrivateAtomic(registrationPath, bytes);
+          await writePrivateAtomic(registrationPath, bytes, this.hooks.afterRegistrationTempWrite);
           await writePrivateAtomic(
             path.join(registrationsDirectory, 'sequence.txt'),
             new TextEncoder().encode(registration.registrationSequence),
@@ -509,10 +510,10 @@ export class ReferenceStateStore implements StateAcceptanceStore {
       const frozen: FrozenRegistration[] = [];
       let totalBytes = 0;
       for (const item of matching) {
-        totalBytes += item.bytes.byteLength;
         if (acceptanceSnapshotLimitExceeded(frozen.length, totalBytes, item.bytes.byteLength)) {
           throw new SelectionSnapshotLimitError();
         }
+        totalBytes += item.bytes.byteLength;
         frozen.push({
           registrationSequence: item.registration.registrationSequence,
           registrationId: item.registration.registrationId,
@@ -1031,7 +1032,16 @@ export class ReferenceStateStore implements StateAcceptanceStore {
     const result: Array<{ registration: CandidateRegistrationV1; bytes: Uint8Array }> = [];
     const ids = new Set<string>();
     const sequences = new Set<string>();
-    if (entries.some((entry) => entry !== 'sequence.txt' && !entry.endsWith('.json'))) {
+    const staleTemporaryEntries = entries.filter(isAtomicTempEntry);
+    for (const entry of staleTemporaryEntries) {
+      await rm(path.join(directory, entry), { force: true });
+    }
+    if (
+      entries.some(
+        (entry) =>
+          entry !== 'sequence.txt' && !entry.endsWith('.json') && !isAtomicTempEntry(entry),
+      )
+    ) {
       throw new StoreTransactionError('store_transaction_failed');
     }
     for (const entry of entries.filter((name) => name.endsWith('.json'))) {
@@ -1248,9 +1258,14 @@ async function writePrivate(filePath: string, bytes: Uint8Array): Promise<void> 
   await writeFile(filePath, bytes, { mode: 0o600, flag: 'wx' });
 }
 
-async function writePrivateAtomic(filePath: string, bytes: Uint8Array): Promise<void> {
+async function writePrivateAtomic(
+  filePath: string,
+  bytes: Uint8Array,
+  afterTemporaryWrite?: (temporaryPath: string) => void | Promise<void>,
+): Promise<void> {
   const temporary = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   await writePrivate(temporary, bytes);
+  await afterTemporaryWrite?.(temporary);
   try {
     await rename(temporary, filePath);
   } catch (error) {
@@ -1349,7 +1364,8 @@ function publicCandidateEvidence(evidence: CandidateEvidenceInternal): Candidate
 }
 
 function publicCandidateObservation(observation: CandidateObservation): ObservedCandidateEntry {
-  return observation.status === 'failed' ? { status: 'unsafe' } : observation;
+  if (observation.status === 'failed') throw new Error('failed observation is not public evidence');
+  return observation;
 }
 
 function bundlesEqual(left: CandidateBundleBytes, right: CandidateBundleBytes): boolean {
@@ -1371,4 +1387,8 @@ function isUnsafeFileSystemError(error: unknown): boolean {
 
 function isAlreadyExists(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | undefined)?.code === 'EEXIST';
+}
+
+function isAtomicTempEntry(entry: string): boolean {
+  return /^(?:[a-f0-9]{64}\.json|sequence\.txt)\.tmp-[0-9]+-[0-9]+-[0-9a-f]+$/.test(entry);
 }

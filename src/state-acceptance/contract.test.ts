@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -169,8 +169,8 @@ function selectorFor(marker: ReturnType<typeof markerFor>, selectorStateKey = st
       traceSha256: marker.traceSha256,
       currentHeadSha: gitSha,
       currentBaseSha: gitSha,
-      workflowIdentity: stateKey.workflowIdentity,
-      trustedExecutionDomain: stateKey.trustedExecutionDomain,
+      workflowIdentity: selectorStateKey.workflowIdentity,
+      trustedExecutionDomain: selectorStateKey.trustedExecutionDomain,
     },
     '2026-07-20T00:00:02.000Z',
   );
@@ -300,7 +300,32 @@ describe('M4 state acceptance contract', () => {
       expect(() => decode(nestedUnknownBytes)).toThrowError(
         expect.objectContaining({ code: 'unknown_or_missing_field', path: '/stateKey/extra' }),
       );
+
+      const overBoundGeneration = structuredClone(value) as Record<string, any>;
+      overBoundGeneration.stateGeneration = 1_000_001;
+      const overBoundGenerationBytes = canonicalJsonBytes(overBoundGeneration);
+      expect(validate(overBoundGeneration)).toBe(false);
+      expect(() => decode(overBoundGenerationBytes)).toThrowError(
+        expect.objectContaining({ code: 'integer_out_of_range', path: '/stateGeneration' }),
+      );
     }
+  });
+
+  it('rejects NULs and lone surrogates before materialization or encoding', () => {
+    const nulStateKey = { ...stateKey, workflowIdentity: 'm4\u0000state' };
+    const surrogateStateKey = { ...stateKey, trustedExecutionDomain: '\ud800' };
+    expect(() => materializeRegistration(draft({ stateKey: nulStateKey }), '1')).toThrowError(
+      expect.objectContaining({ code: 'invalid_unicode' }),
+    );
+    expect(() => markerFor('e'.repeat(64), undefined, sha, nulStateKey)).toThrowError(
+      expect.objectContaining({ code: 'invalid_unicode' }),
+    );
+    expect(() => selectorFor(markerFor('e'.repeat(64)), nulStateKey)).toThrowError(
+      expect.objectContaining({ code: 'invalid_unicode' }),
+    );
+    expect(() => materializeRegistration(draft({ stateKey: surrogateStateKey }), '1')).toThrowError(
+      expect.objectContaining({ code: 'invalid_unicode' }),
+    );
   });
 
   it('orders duplicate winners and distinguishes semantic conflicts from stale candidates', () => {
@@ -732,6 +757,83 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       expect(snapshot.registrations[0].registrationRecordSha256).toBe(
         sha256Hex(snapshot.registrations[0].registrationBytes),
       );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('reopens after a registration temp-file crash residue', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'm4-state-acceptance-registration-crash-'));
+    try {
+      const interrupted = new ReferenceStateStore(root, {
+        afterRegistrationTempWrite: () => {
+          throw new Error('simulated process termination after temp write');
+        },
+      });
+      await interrupted.close();
+      expect((await interrupted.registerCandidate(draft())).kind).toBe('registration_write_failed');
+      const registrationsDirectory = path.join(
+        root,
+        'states',
+        sha256Hex(canonicalJsonBytes(stateKey)),
+        'registrations',
+      );
+      expect((await readdir(registrationsDirectory)).some((entry) => entry.includes('.tmp-'))).toBe(
+        true,
+      );
+
+      const reopened = new ReferenceStateStore(root);
+      await reopened.close();
+      expect((await reopened.registerCandidate(draft())).kind).toBe('created');
+      expect((await readdir(registrationsDirectory)).some((entry) => entry.includes('.tmp-'))).toBe(
+        false,
+      );
+      const snapshot = await reopened.createAcceptanceSnapshot(
+        'bootstrap',
+        {
+          stateKey,
+          sessionEpoch: epoch,
+          observedSelectorRevision: 'bootstrap',
+          predecessorMarkerId: 'bootstrap',
+          predecessorManifestSha256: 'bootstrap',
+          predecessorLedgerSha256: 'bootstrap',
+          targetStateGeneration: 0,
+          interactionId: sha as never,
+        },
+        sha,
+      );
+      expect(snapshot.registrations).toHaveLength(1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts the real snapshot path at the 64-registration count boundary', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'm4-state-acceptance-count-boundary-'));
+    try {
+      const store = new ReferenceStateStore(root);
+      await store.close();
+      for (let index = 0; index < 64; index += 1) {
+        expect(
+          (await store.registerCandidate(draft({ producingRunId: String(index + 1) as never })))
+            .kind,
+        ).toBe('created');
+      }
+      const snapshot = await store.createAcceptanceSnapshot(
+        'bootstrap',
+        {
+          stateKey,
+          sessionEpoch: epoch,
+          observedSelectorRevision: 'bootstrap',
+          predecessorMarkerId: 'bootstrap',
+          predecessorManifestSha256: 'bootstrap',
+          predecessorLedgerSha256: 'bootstrap',
+          targetStateGeneration: 0,
+          interactionId: sha as never,
+        },
+        sha,
+      );
+      expect(snapshot.registrations).toHaveLength(64);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
