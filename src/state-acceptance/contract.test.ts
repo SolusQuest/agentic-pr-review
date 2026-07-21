@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Ajv } from 'ajv';
+import { build } from 'esbuild';
 import { canonicalJsonBytes } from '../canonical-json/index.js';
 import { describe, expect, it } from 'vitest';
 import registrationSchema from '../../protocol/schemas/candidate-registration.v1.json' with { type: 'json' };
@@ -18,6 +19,7 @@ import {
   RECORD_CODEC_CODES,
   RECORD_CODEC_DIAGNOSTIC_VECTORS,
   SelectionSnapshotLimitError,
+  StoreTransactionError,
   StickyCallbackOutcomeUnknownError,
   candidateLocator,
   computeCandidateId,
@@ -37,6 +39,7 @@ import {
   type AcceptedStateMarkerV1,
   type CandidateBundleBytes,
   type CandidateRegistrationDraft,
+  type SelectorRevision,
   type StateKeyV2,
 } from './index.js';
 
@@ -148,12 +151,16 @@ function markerFor(
   );
 }
 
-function selectorFor(marker: ReturnType<typeof markerFor>, selectorStateKey = stateKey) {
+function selectorFor(
+  marker: ReturnType<typeof markerFor>,
+  selectorStateKey = stateKey,
+  previousSelectorRevision: SelectorRevision = 'bootstrap',
+) {
   return materializeSelector(
     {
       schemaVersion: 1,
       stateKey: selectorStateKey,
-      previousSelectorRevision: 'bootstrap',
+      previousSelectorRevision,
       acceptedMarkerId: marker.markerId,
       candidateId: marker.candidateId,
       sessionEpoch: marker.sessionEpoch,
@@ -174,6 +181,53 @@ function selectorFor(marker: ReturnType<typeof markerFor>, selectorStateKey = st
     },
     '2026-07-20T00:00:02.000Z',
   );
+}
+
+async function buildStoreChildBundle(root: string): Promise<string> {
+  const outfile = path.join(root, '.m4-state-acceptance-child.mjs');
+  await build({
+    entryPoints: [fileURLToPath(new URL('./index.ts', import.meta.url))],
+    bundle: true,
+    format: 'esm',
+    outfile,
+    platform: 'node',
+    logLevel: 'silent',
+  });
+  return outfile;
+}
+
+function runStoreChild(
+  bundlePath: string,
+  command: string,
+  payload: Record<string, unknown>,
+): Promise<{
+  readonly code: number | null;
+  readonly signal: NodeJS.Signals | null;
+  readonly result: Record<string, any> | null;
+}> {
+  const childScript = fileURLToPath(new URL('./store-child.mjs', import.meta.url));
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      [childScript, bundlePath, command, JSON.stringify(payload)],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    let output = '';
+    let errors = '';
+    child.stdout.on('data', (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      errors += chunk.toString();
+    });
+    child.once('error', reject);
+    child.once('exit', (code, signal) => {
+      if (errors && code === 0) reject(new Error(errors));
+      let result: Record<string, any> | null = null;
+      if (output.trim()) result = JSON.parse(output.trim()) as Record<string, any>;
+      resolve({ code, signal, result });
+    });
+  });
 }
 
 describe('M4 state acceptance contract', () => {
@@ -241,6 +295,25 @@ describe('M4 state acceptance contract', () => {
     }
   });
 
+  it('exercises the published unicode and canonical diagnostics for every decoder', () => {
+    const records = [
+      [decodeValidatedRegistration, materializeRegistration(draft(), '1')],
+      [decodeValidatedMarker, markerFor('e'.repeat(64))],
+      [decodeValidatedSelector, selectorFor(markerFor('e'.repeat(64)))],
+    ] as const;
+    const invalidUnicode = new TextEncoder().encode('{"schemaVersion":1,"bad":"\\u0000"}');
+    for (const [decode, value] of records) {
+      expect(() => decode(invalidUnicode)).toThrowError(
+        expect.objectContaining({ code: 'invalid_unicode', path: '' }),
+      );
+      const canonical = canonicalJsonBytes(value);
+      const nonCanonical = new Uint8Array([0x20, ...canonical, 0x20]);
+      expect(() => decode(nonCanonical)).toThrowError(
+        expect.objectContaining({ code: 'non_canonical', path: '' }),
+      );
+    }
+  });
+
   it('keeps schema and runtime state-key domains in parity', () => {
     const ajv = new Ajv({ strict: true, allErrors: true });
     const validateStateKeySchema = ajv.compile(registrationSchema.$defs?.stateKey);
@@ -300,6 +373,24 @@ describe('M4 state acceptance contract', () => {
       expect(() => decode(nestedUnknownBytes)).toThrowError(
         expect.objectContaining({ code: 'unknown_or_missing_field', path: '/stateKey/extra' }),
       );
+
+      const wrongNestedTypes = [
+        ['stateKey', 'state_key_invalid'],
+        ['transition', 'transition_invalid'],
+        ...('candidateArtifactLocator' in value
+          ? [['candidateArtifactLocator', 'locator_invalid'] as const]
+          : []),
+      ] as const;
+      for (const [property, code] of wrongNestedTypes) {
+        const wrongNestedType = structuredClone(value) as Record<string, any>;
+        wrongNestedType[property] = property === 'stateKey' ? 'not-an-object' : [];
+        const wrongNestedTypeBytes = new Uint8Array([
+          0x20,
+          ...canonicalJsonBytes(wrongNestedType),
+          0x20,
+        ]);
+        expect(() => decode(wrongNestedTypeBytes)).toThrowError(expect.objectContaining({ code }));
+      }
 
       const overBoundGeneration = structuredClone(value) as Record<string, any>;
       overBoundGeneration.stateGeneration = 1_000_001;
@@ -497,6 +588,36 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
         selection: 'selected',
         snapshot: { kind: 'bootstrap_selected' },
       });
+      const malformedSelectorBytes = new TextEncoder().encode('{"schemaVersion":1,"stateKey":[]}');
+      const malformedSelectorPath = path.join(
+        root,
+        'states',
+        sha256Hex(canonicalJsonBytes(stateKey)),
+        'selector.json',
+      );
+      await writeFile(malformedSelectorPath, malformedSelectorBytes, { mode: 0o600 });
+      const malformedSelection = await store.selectAcceptedState(options);
+      expect(malformedSelection).toMatchObject({
+        selection: 'selected',
+        snapshot: {
+          kind: 'recovery_root_selected',
+          observedSelectorRevision: `invalid:${sha256Hex(malformedSelectorBytes)}`,
+        },
+      });
+      if (malformedSelection.selection === 'selected') {
+        const recoverySelector = selectorFor(
+          markerFor('e'.repeat(64)),
+          stateKey,
+          malformedSelection.snapshot.observedSelectorRevision,
+        );
+        expect(
+          await store.casSelector(
+            malformedSelection.snapshot.observedSelectorRevision,
+            recoverySelector,
+          ),
+        ).toMatchObject({ kind: 'applied' });
+      }
+      await rm(malformedSelectorPath, { force: true });
       const marker = markerFor('e'.repeat(64));
       const selector = selectorFor(marker);
       expect((await store.casSelector('bootstrap', selector)).kind).toBe('applied');
@@ -808,6 +929,92 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
     }
   });
 
+  it('proves registration, reopen, snapshot, marker, and CAS across child processes', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'm4-state-acceptance-child-proof-'));
+    const competitionRoot = await mkdtemp(
+      path.join(os.tmpdir(), 'm4-state-acceptance-child-cas-race-'),
+    );
+    try {
+      const bundlePath = await buildStoreChildBundle(root);
+      const registrationDraft = draft();
+      const registration = materializeRegistration(registrationDraft, '1');
+      const marker = markerFor('e'.repeat(64), undefined, registration.registrationId);
+      const selector = selectorFor(marker);
+      expect((await runStoreChild(bundlePath, 'init', { root })).result).toEqual({
+        kind: 'initialized',
+      });
+
+      const killed = await runStoreChild(bundlePath, 'register-kill-after-temp', {
+        root,
+        draft: registrationDraft,
+      });
+      expect(killed).toMatchObject({ code: null, signal: 'SIGKILL' });
+      expect(
+        (await runStoreChild(bundlePath, 'register', { root, draft: registrationDraft })).result,
+      ).toMatchObject({ kind: 'created' });
+      expect(
+        (
+          await runStoreChild(bundlePath, 'snapshot', {
+            root,
+            expectedObservedSelectorRevision: 'bootstrap',
+            competingScope: {
+              stateKey,
+              sessionEpoch: epoch,
+              observedSelectorRevision: 'bootstrap',
+              predecessorMarkerId: 'bootstrap',
+              predecessorManifestSha256: 'bootstrap',
+              predecessorLedgerSha256: 'bootstrap',
+              targetStateGeneration: 0,
+              interactionId: sha,
+            },
+            selectionSnapshotId: sha,
+          })
+        ).result,
+      ).toEqual({ cutoff: '1', registrations: 1 });
+      expect((await runStoreChild(bundlePath, 'marker', { root, marker })).result).toMatchObject({
+        kind: 'created',
+      });
+      expect(
+        (
+          await runStoreChild(bundlePath, 'cas', {
+            root,
+            expectedRevision: 'bootstrap',
+            selector,
+          })
+        ).result,
+      ).toMatchObject({ kind: 'applied' });
+      expect(
+        (await runStoreChild(bundlePath, 'read-selector', { root, stateKey })).result,
+      ).toMatchObject({ hasBytes: true, selector: { selectorId: selector.selectorId } });
+
+      const competitionBundle = await buildStoreChildBundle(competitionRoot);
+      expect(
+        (await runStoreChild(competitionBundle, 'init', { root: competitionRoot })).result,
+      ).toEqual({ kind: 'initialized' });
+      const leftSelector = selectorFor(markerFor('a'.repeat(64)));
+      const rightSelector = selectorFor(markerFor('b'.repeat(64)));
+      const [left, right] = await Promise.all([
+        runStoreChild(competitionBundle, 'cas', {
+          root: competitionRoot,
+          expectedRevision: 'bootstrap',
+          selector: leftSelector,
+        }),
+        runStoreChild(competitionBundle, 'cas', {
+          root: competitionRoot,
+          expectedRevision: 'bootstrap',
+          selector: rightSelector,
+        }),
+      ]);
+      expect([left.result?.kind, right.result?.kind].sort()).toEqual([
+        'applied',
+        'rejected_with_current_revision',
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(competitionRoot, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it('accepts the real snapshot path at the 64-registration count boundary', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'm4-state-acceptance-count-boundary-'));
     try {
@@ -874,6 +1081,12 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       await writeFile(
         path.join(markersDirectory, `${marker.markerId}.json`),
         canonicalJsonBytes(differentMarker),
+        { mode: 0o600 },
+      );
+      expect((await store.writeMarker(marker)).kind).toBe('existing_content_conflict');
+      await writeFile(
+        path.join(markersDirectory, `${marker.markerId}.json`),
+        new TextEncoder().encode('{'),
         { mode: 0o600 },
       );
       expect((await store.writeMarker(marker)).kind).toBe('existing_content_conflict');
@@ -1174,6 +1387,66 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
         await rm(unknownRoot, { recursive: true, force: true });
       }
 
+      const markerReadbackFailureRoot = await mkdtemp(
+        path.join(os.tmpdir(), 'm4-state-acceptance-marker-readback-failure-'),
+      );
+      try {
+        const markerReadbackFailureStore = new ReferenceStateStore(markerReadbackFailureRoot, {
+          afterMarkerCommit: () => {
+            throw new Error('marker commit outcome unknown');
+          },
+        });
+        await markerReadbackFailureStore.close();
+        markerReadbackFailureStore.readMarker = async () => {
+          throw new StoreTransactionError('store_transaction_failed');
+        };
+        let called = false;
+        const markerReadbackFailure = await acceptLocalCandidate(markerReadbackFailureStore, {
+          ...acceptanceOptions,
+          publishSticky: async () => {
+            called = true;
+          },
+        });
+        expect(markerReadbackFailure).toMatchObject({
+          acceptance: 'unknown',
+          reason: 'acceptance_outcome_unknown',
+          publication: { status: 'not_attempted' },
+        });
+        expect(called).toBe(false);
+      } finally {
+        await rm(markerReadbackFailureRoot, { recursive: true, force: true });
+      }
+
+      const selectorReadbackFailureRoot = await mkdtemp(
+        path.join(os.tmpdir(), 'm4-state-acceptance-selector-readback-failure-'),
+      );
+      try {
+        const selectorReadbackFailureStore = new ReferenceStateStore(selectorReadbackFailureRoot, {
+          afterSelectorCommit: () => {
+            throw new Error('selector commit outcome unknown');
+          },
+        });
+        await selectorReadbackFailureStore.close();
+        selectorReadbackFailureStore.readSelector = async () => {
+          throw new StoreTransactionError('store_transaction_failed');
+        };
+        let called = false;
+        const selectorReadbackFailure = await acceptLocalCandidate(selectorReadbackFailureStore, {
+          ...acceptanceOptions,
+          publishSticky: async () => {
+            called = true;
+          },
+        });
+        expect(selectorReadbackFailure).toMatchObject({
+          acceptance: 'unknown',
+          reason: 'acceptance_outcome_unknown',
+          publication: { status: 'not_attempted' },
+        });
+        expect(called).toBe(false);
+      } finally {
+        await rm(selectorReadbackFailureRoot, { recursive: true, force: true });
+      }
+
       const failedRoot = await mkdtemp(
         path.join(os.tmpdir(), 'm4-state-acceptance-sticky-failed-'),
       );
@@ -1193,7 +1466,7 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       } finally {
         await rm(failedRoot, { recursive: true, force: true });
       }
-      expect(releaseCount).toBe(6);
+      expect(releaseCount).toBe(8);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

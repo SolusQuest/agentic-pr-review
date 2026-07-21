@@ -421,7 +421,12 @@ export class ReferenceStateStore implements StateAcceptanceStore {
       const target = path.join(directory, `${marker.markerId}.json`);
       const existing = await readOptionalPrivate(target);
       if (existing !== null) {
-        const current = decodeValidatedMarker(existing);
+        let current: AcceptedStateMarkerV1;
+        try {
+          current = decodeValidatedMarker(existing);
+        } catch {
+          return { kind: 'existing_content_conflict' };
+        }
         if (current.markerId !== marker.markerId) return { kind: 'existing_content_conflict' };
         return { kind: 'already_exists_same', value: current };
       }
@@ -462,9 +467,13 @@ export class ReferenceStateStore implements StateAcceptanceStore {
       const currentRevision =
         currentBytes === null ? 'bootstrap' : selectorRevisionFromBytes(currentBytes);
       if (currentBytes !== null) {
-        const current = decodeValidatedSelector(currentBytes);
-        if (current.selectorId === selector.selectorId)
-          return { kind: 'already_applied_same_target', selector: current };
+        try {
+          const current = decodeValidatedSelector(currentBytes);
+          if (current.selectorId === selector.selectorId)
+            return { kind: 'already_applied_same_target', selector: current };
+        } catch {
+          // A malformed selector is represented by currentRevision and can be replaced by CAS.
+        }
       }
       if (currentRevision !== expectedRevision) {
         return { kind: 'rejected_with_current_revision', currentRevision };

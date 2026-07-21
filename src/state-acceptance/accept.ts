@@ -215,8 +215,7 @@ async function acceptWithoutCleanup(
     let readBack: Awaited<ReturnType<StateAcceptanceStore['readMarker']>>;
     try {
       readBack = await store.readMarker(options.selectionSnapshot.stateKey, marker.markerId);
-    } catch (error) {
-      if (error instanceof StoreTransactionError) return notAccepted(error.reason);
+    } catch {
       return unknownAcceptance();
     }
     if (
@@ -247,8 +246,7 @@ async function acceptWithoutCleanup(
     let readBack: Awaited<ReturnType<StateAcceptanceStore['readSelector']>>;
     try {
       readBack = await store.readSelector(options.selectionSnapshot.stateKey);
-    } catch (error) {
-      if (error instanceof StoreTransactionError) return notAccepted(error.reason);
+    } catch {
       return unknownAcceptance();
     }
     if (

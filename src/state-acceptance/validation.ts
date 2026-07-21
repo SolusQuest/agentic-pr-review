@@ -360,7 +360,14 @@ function validateClosedSchema(record: Record<string, unknown>, kind: RecordKind)
   const validate = CLOSED_SCHEMA_VALIDATORS[kind];
   if (validate(record)) return;
   const error = validate.errors?.find(
-    (candidate) => candidate.keyword === 'additionalProperties' || candidate.keyword === 'required',
+    (candidate) =>
+      candidate.keyword === 'additionalProperties' ||
+      candidate.keyword === 'required' ||
+      candidate.keyword === 'type' ||
+      candidate.keyword === 'oneOf' ||
+      candidate.keyword === 'anyOf' ||
+      candidate.keyword === 'const' ||
+      candidate.keyword === 'enum',
   );
   if (!error) return;
   const path = schemaErrorPath(error);
@@ -381,6 +388,19 @@ function schemaErrorCode(error: ErrorObject | undefined, path: string): Contract
   if (error?.keyword === 'additionalProperties' || error?.keyword === 'required') {
     return 'unknown_or_missing_field';
   }
+  if (path === '/candidateArtifactLocator' || path.startsWith('/candidateArtifactLocator/')) {
+    return 'locator_invalid';
+  }
+  if (path === '/stateKey' || path.startsWith('/stateKey/')) return 'state_key_invalid';
+  if (path === '/transition' || path.startsWith('/transition/')) return 'transition_invalid';
+  if (path === '/schemaVersion') return 'schema_version_invalid';
+  if (path === '/registrationSequence') return 'sequence_invalid';
+  if (path === '/previousSelectorRevision' || path === '/observedSelectorRevision') {
+    return 'selector_revision_invalid';
+  }
+  if (path.endsWith('At')) return 'timestamp_invalid';
+  if (path.endsWith('RunId')) return 'run_id_invalid';
+  if (path.endsWith('Sha256') || path.endsWith('Id')) return 'sha256_invalid';
   if (path === '/stateKey/repository' || path === '/stateKey/headRepository') {
     return 'state_key_invalid';
   }
