@@ -47,6 +47,7 @@ export {
   decodeRecord,
   encodeRecord,
   RECORD_CODEC_CODES,
+  RECORD_CODEC_DIAGNOSTIC_VECTORS,
   RecordCodecError,
   RECORD_MAX_BYTES,
   validateRecordUnicode,
@@ -55,6 +56,7 @@ export {
 export {
   MAX_ACCEPTANCE_SNAPSHOT_REGISTRATION_BYTES,
   MAX_ACCEPTANCE_SNAPSHOT_REGISTRATIONS,
+  acceptanceSnapshotLimitExceeded,
   ReferenceStateStore,
   type StateAcceptanceStore,
   SelectionSnapshotLimitError,

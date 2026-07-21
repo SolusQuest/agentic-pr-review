@@ -20,6 +20,16 @@ export const RECORD_CODEC_CODES = [
 
 export type RecordCodecCode = (typeof RECORD_CODEC_CODES)[number];
 
+export const RECORD_CODEC_DIAGNOSTIC_VECTORS = [
+  { code: 'byte_limit_exceeded', path: '' },
+  { code: 'bom', path: '' },
+  { code: 'invalid_utf8', path: '' },
+  { code: 'invalid_json', path: '' },
+  { code: 'duplicate_key', path: '' },
+  { code: 'invalid_unicode', path: '' },
+  { code: 'non_canonical', path: '' },
+] as const satisfies readonly { code: RecordCodecCode; path: string }[];
+
 export class RecordCodecError extends Error {
   readonly code: RecordCodecCode;
   readonly path: string;

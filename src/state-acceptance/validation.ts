@@ -10,6 +10,10 @@ import {
   computeSelectorRevision,
   isSelectorRevision,
 } from './hash.js';
+import { Ajv, type ErrorObject, type ValidateFunction } from 'ajv';
+import registrationSchema from '../../protocol/schemas/candidate-registration.v1.json' with { type: 'json' };
+import markerSchema from '../../protocol/schemas/accepted-state-marker.v1.json' with { type: 'json' };
+import selectorSchema from '../../protocol/schemas/state-selector.v1.json' with { type: 'json' };
 import {
   assertCanonicalRecord,
   encodeRecord,
@@ -138,6 +142,14 @@ const SELECTOR_KEYS = [
   'trustedExecutionDomain',
   'updatedAt',
 ] as const;
+
+type RecordKind = 'registration' | 'marker' | 'selector';
+const closedSchemaAjv = new Ajv({ strict: true, allErrors: true });
+const CLOSED_SCHEMA_VALIDATORS: Record<RecordKind, ValidateFunction<unknown>> = {
+  registration: closedSchemaAjv.compile(registrationSchema),
+  marker: closedSchemaAjv.compile(markerSchema),
+  selector: closedSchemaAjv.compile(selectorSchema),
+};
 
 export const CONTRACT_VALIDATION_CODES = [
   'candidate_id_mismatch',
@@ -316,7 +328,11 @@ export function encodeValidatedRecord(
   return encodeRecord(value);
 }
 
-function decodeVersionedRecord(bytes: Uint8Array, keys: readonly string[]): unknown {
+function decodeVersionedRecord(
+  bytes: Uint8Array,
+  keys: readonly string[],
+  kind: RecordKind,
+): unknown {
   const parsed = parseRecord(bytes);
   if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
     const schemaVersion = (parsed as Record<string, unknown>).schemaVersion;
@@ -332,24 +348,58 @@ function decodeVersionedRecord(bytes: Uint8Array, keys: readonly string[]): unkn
   validateRecordUnicode(parsed);
   const record = object(parsed);
   exactKeys(record, keys);
+  validateClosedSchema(record, kind);
   assertCanonicalRecord(bytes, parsed);
   return parsed;
 }
 
+function validateClosedSchema(record: Record<string, unknown>, kind: RecordKind): void {
+  const validate = CLOSED_SCHEMA_VALIDATORS[kind];
+  if (validate(record)) return;
+  const error = validate.errors?.[0];
+  const path = schemaErrorPath(error);
+  throw new ContractValidationError(schemaErrorCode(error, path), path);
+}
+
+function schemaErrorPath(error: ErrorObject | undefined): string {
+  if (!error) return '';
+  const base = error.instancePath ?? '';
+  const params = error.params as Record<string, unknown>;
+  const property = params?.missingProperty ?? params?.additionalProperty;
+  return typeof property === 'string'
+    ? `${base}/${property.replaceAll('~', '~0').replaceAll('/', '~1')}`
+    : base;
+}
+
+function schemaErrorCode(error: ErrorObject | undefined, path: string): ContractValidationCode {
+  if (error?.keyword === 'additionalProperties' || error?.keyword === 'required') {
+    return 'unknown_or_missing_field';
+  }
+  if (path === '/stateKey/repository' || path === '/stateKey/headRepository') {
+    return 'state_key_invalid';
+  }
+  if (path.startsWith('/stateKey/')) return 'string_invalid';
+  if (path.endsWith('/schemaVersion')) return 'schema_version_invalid';
+  if (error?.keyword === 'type' || error?.keyword === 'pattern' || error?.keyword === 'const') {
+    return 'string_invalid';
+  }
+  return 'unknown_or_missing_field';
+}
+
 export function decodeValidatedRegistration(bytes: Uint8Array): CandidateRegistrationV1 {
-  const value = decodeVersionedRecord(bytes, REGISTRATION_KEYS);
+  const value = decodeVersionedRecord(bytes, REGISTRATION_KEYS, 'registration');
   validateCandidateRegistration(value);
   return value;
 }
 
 export function decodeValidatedMarker(bytes: Uint8Array): AcceptedStateMarkerV1 {
-  const value = decodeVersionedRecord(bytes, MARKER_KEYS);
+  const value = decodeVersionedRecord(bytes, MARKER_KEYS, 'marker');
   validateAcceptedStateMarker(value);
   return value;
 }
 
 export function decodeValidatedSelector(bytes: Uint8Array): StateSelectorV1 {
-  const value = decodeVersionedRecord(bytes, SELECTOR_KEYS);
+  const value = decodeVersionedRecord(bytes, SELECTOR_KEYS, 'selector');
   validateStateSelector(value);
   return value;
 }
@@ -488,7 +538,7 @@ function timestamp(value: unknown, path: string): void {
 }
 
 function nonEmptyString(value: unknown, path: string): void {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 256) {
+  if (typeof value !== 'string' || value.length === 0 || Array.from(value).length > 256) {
     throw new ContractValidationError('string_invalid', path);
   }
 }

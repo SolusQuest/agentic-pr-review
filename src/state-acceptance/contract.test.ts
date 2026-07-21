@@ -12,9 +12,11 @@ import selectorSchema from '../../protocol/schemas/state-selector.v1.json' with 
 import { classifyCandidateRegistrations } from './accept.js';
 import {
   acceptLocalCandidate,
+  acceptanceSnapshotLimitExceeded,
   RecordCodecError,
   ReferenceStateStore,
   RECORD_CODEC_CODES,
+  RECORD_CODEC_DIAGNOSTIC_VECTORS,
   SelectionSnapshotLimitError,
   StickyCallbackOutcomeUnknownError,
   candidateLocator,
@@ -31,6 +33,7 @@ import {
   materializeSelector,
   observedSelectorSnapshotSha256,
   sha256Hex,
+  validateStateKey,
   type AcceptedStateMarkerV1,
   type CandidateBundleBytes,
   type CandidateRegistrationDraft,
@@ -216,25 +219,41 @@ describe('M4 state acceptance contract', () => {
       'invalid_unicode',
       'non_canonical',
     ]);
+    expect(RECORD_CODEC_DIAGNOSTIC_VECTORS).toEqual(
+      RECORD_CODEC_CODES.map((code) => ({ code, path: '' })),
+    );
     const decoders = [decodeValidatedRegistration, decodeValidatedMarker, decodeValidatedSelector];
     const bom = new Uint8Array([0xef, 0xbb, 0xbf, 0x7b, 0x7d]);
     const cases = [
       [new Uint8Array(32 * 1024 + 1), 'byte_limit_exceeded'],
       [bom, 'bom'],
       [new Uint8Array([0xc3, 0x28]), 'invalid_utf8'],
+      [new TextEncoder().encode('{'), 'invalid_json'],
       [new TextEncoder().encode('{"schemaVersion":1,"schemaVersion":1}'), 'duplicate_key'],
     ] as const;
     for (const decode of decoders) {
       for (const [bytes, code] of cases) {
-        expect(() => decode(bytes)).toThrowError(
-          expect.objectContaining({ code, path: expect.any(String) }),
-        );
+        expect(() => decode(bytes)).toThrowError(expect.objectContaining({ code, path: '' }));
       }
+      expect(() => decode(new TextEncoder().encode('{}'))).toThrowError(
+        expect.objectContaining({ code: 'unknown_or_missing_field', path: '' }),
+      );
     }
   });
 
   it('keeps schema and runtime state-key domains in parity', () => {
     const ajv = new Ajv({ strict: true, allErrors: true });
+    const validateStateKeySchema = ajv.compile(registrationSchema.$defs?.stateKey);
+    for (const property of ['workflowIdentity', 'trustedExecutionDomain'] as const) {
+      const atLimit = { ...stateKey, [property]: '😀'.repeat(256) };
+      expect(validateStateKeySchema(atLimit)).toBe(true);
+      expect(() => validateStateKey(atLimit)).not.toThrow();
+      const overLimit = { ...stateKey, [property]: '😀'.repeat(257) };
+      expect(validateStateKeySchema(overLimit)).toBe(false);
+      expect(() => validateStateKey(overLimit)).toThrowError(
+        expect.objectContaining({ code: 'string_invalid', path: `/stateKey/${property}` }),
+      );
+    }
     const marker = markerFor('e'.repeat(64));
     const records = [
       {
@@ -274,6 +293,13 @@ describe('M4 state acceptance contract', () => {
       expect(() => decode(overBoundRepositoryBytes)).toThrowError(
         expect.objectContaining({ code: 'state_key_invalid', path: '/stateKey/repository' }),
       );
+
+      const nestedUnknown = structuredClone(value) as Record<string, any>;
+      nestedUnknown.stateKey.extra = true;
+      const nestedUnknownBytes = new Uint8Array([0x20, ...canonicalJsonBytes(nestedUnknown), 0x20]);
+      expect(() => decode(nestedUnknownBytes)).toThrowError(
+        expect.objectContaining({ code: 'unknown_or_missing_field', path: '/stateKey/extra' }),
+      );
     }
   });
 
@@ -298,6 +324,12 @@ describe('M4 state acceptance contract', () => {
       '3',
     );
     expect(classifyCandidateRegistrations(conflict, [first, conflict])).toBe('conflict');
+  });
+
+  it('freezes the exact aggregate acceptance snapshot byte boundary', () => {
+    expect(acceptanceSnapshotLimitExceeded(63, 2_097_151, 1)).toBe(false);
+    expect(acceptanceSnapshotLimitExceeded(63, 2_097_151, 2)).toBe(true);
+    expect(acceptanceSnapshotLimitExceeded(64, 2_097_152, 0)).toBe(true);
   });
 
   it('freezes identity domains and the non-circular marker-to-selector order', () => {
@@ -642,6 +674,18 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
         const symlinked = await store.readCandidate(candidateId);
         expect(symlinked).toMatchObject({ status: 'unsafe' });
         await rm(directory, { recursive: true, force: true });
+
+        await mkdir(directory, { mode: 0o700 });
+        for (const sibling of ['manifest.json', 'ledger.json', 'provider-run-metadata.json']) {
+          if (sibling !== fileName) {
+            await writeFile(path.join(directory, sibling), new Uint8Array([0x7b, 0x7d]), {
+              mode: 0o600,
+            });
+          }
+        }
+        const missing = await store.readCandidate(candidateId);
+        expect(missing).toMatchObject({ status: 'missing' });
+        await rm(directory, { recursive: true, force: true });
       }
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -688,6 +732,49 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       expect(snapshot.registrations[0].registrationRecordSha256).toBe(
         sha256Hex(snapshot.registrations[0].registrationBytes),
       );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed on valid records stored under a different immutable target id', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'm4-state-acceptance-target-id-'));
+    try {
+      const store = new ReferenceStateStore(root);
+      await store.close();
+      const firstDraft = draft({ producingRunId: '10' });
+      const secondDraft = draft({ producingRunId: '11' });
+      const secondRegistration = materializeRegistration(secondDraft, '1');
+      expect((await store.registerCandidate(secondDraft)).kind).toBe('created');
+      const registrationsDirectory = path.join(
+        root,
+        'states',
+        sha256Hex(canonicalJsonBytes(stateKey)),
+        'registrations',
+      );
+      const firstRegistration = materializeRegistration(firstDraft, '2');
+      await writeFile(
+        path.join(registrationsDirectory, `${firstRegistration.registrationId}.json`),
+        canonicalJsonBytes(secondRegistration),
+        { mode: 0o600 },
+      );
+      expect((await store.registerCandidate(firstDraft)).kind).toBe('registration_write_conflict');
+
+      const marker = markerFor('e'.repeat(64));
+      const differentMarker = markerFor('f'.repeat(64), undefined, 'c'.repeat(64));
+      expect((await store.writeMarker(marker)).kind).toBe('created');
+      const markersDirectory = path.join(
+        root,
+        'states',
+        sha256Hex(canonicalJsonBytes(stateKey)),
+        'markers',
+      );
+      await writeFile(
+        path.join(markersDirectory, `${marker.markerId}.json`),
+        canonicalJsonBytes(differentMarker),
+        { mode: 0o600 },
+      );
+      expect((await store.writeMarker(marker)).kind).toBe('existing_content_conflict');
     } finally {
       await rm(root, { recursive: true, force: true });
     }

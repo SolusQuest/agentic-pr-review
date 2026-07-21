@@ -17,6 +17,7 @@ import {
   candidateLocator,
   compareDecimalIds,
   computeCandidateSetDigest,
+  computeRegistrationId,
   computeSelectionSnapshotId,
   observedSelectorSnapshotSha256,
   sha256Hex,
@@ -57,6 +58,17 @@ import type {
 
 export const MAX_ACCEPTANCE_SNAPSHOT_REGISTRATIONS = 64 as const;
 export const MAX_ACCEPTANCE_SNAPSHOT_REGISTRATION_BYTES = 2_097_152 as const;
+
+export function acceptanceSnapshotLimitExceeded(
+  currentCount: number,
+  currentBytes: number,
+  nextRegistrationBytes: number,
+): boolean {
+  return (
+    currentCount + 1 > MAX_ACCEPTANCE_SNAPSHOT_REGISTRATIONS ||
+    currentBytes + nextRegistrationBytes > MAX_ACCEPTANCE_SNAPSHOT_REGISTRATION_BYTES
+  );
+}
 
 type SnapshotDraft = {
   [K in StateSelectionSnapshot['kind']]: Omit<
@@ -125,6 +137,13 @@ export interface CandidateEvidence {
   readonly ledger: ObservedCandidateEntry;
   readonly providerRunMetadata: ObservedCandidateEntry;
 }
+
+type CandidateObservation = ObservedCandidateEntry | { readonly status: 'failed' };
+type CandidateEvidenceInternal = {
+  readonly manifest: CandidateObservation;
+  readonly ledger: CandidateObservation;
+  readonly providerRunMetadata: CandidateObservation;
+};
 
 export interface RegistrationWriteResult {
   readonly kind:
@@ -263,7 +282,7 @@ export class ReferenceStateStore implements StateAcceptanceStore {
       }
       const entries = await readdir(directory);
       const expected = new Set(['manifest.json', 'ledger.json', 'provider-run-metadata.json']);
-      const evidence = {
+      const evidence: CandidateEvidenceInternal = {
         manifest: await readObservedEntry(
           path.join(directory, 'manifest.json'),
           MANIFEST_MAX_BYTES,
@@ -273,20 +292,26 @@ export class ReferenceStateStore implements StateAcceptanceStore {
           path.join(directory, 'provider-run-metadata.json'),
           METADATA_MAX_BYTES,
         ),
-      } satisfies CandidateEvidence;
+      } satisfies CandidateEvidenceInternal;
       if (entries.some((entry) => !expected.has(entry)))
-        return { status: 'unsafe', diagnostic: 'bundle_extra_entry', evidence };
-      if (entries.length !== expected.size)
-        return { status: 'unsafe', diagnostic: 'bundle_listing_mismatch', evidence };
+        return {
+          status: 'unsafe',
+          diagnostic: 'bundle_extra_entry',
+          evidence: publicCandidateEvidence(evidence),
+        };
       const evidenceEntries = [evidence.manifest, evidence.ledger, evidence.providerRunMetadata];
       if (evidenceEntries.some((entry) => entry.status === 'failed')) {
         return { status: 'failed' };
       }
       if (evidenceEntries.some((entry) => entry.status === 'unsafe')) {
-        return { status: 'unsafe', diagnostic: 'bundle_listing_mismatch', evidence };
+        return {
+          status: 'unsafe',
+          diagnostic: 'bundle_listing_mismatch',
+          evidence: publicCandidateEvidence(evidence),
+        };
       }
       if (evidenceEntries.some((entry) => entry.status === 'missing')) {
-        return { status: 'missing', evidence };
+        return { status: 'missing', evidence: publicCandidateEvidence(evidence) };
       }
       const manifestBytes = await readPrivate(
         path.join(directory, 'manifest.json'),
@@ -316,12 +341,18 @@ export class ReferenceStateStore implements StateAcceptanceStore {
     try {
       return await this.withStateKeyLock(draft.stateKey, async () => {
         const registrationsDirectory = await this.registrationsDirectory(draft.stateKey);
-        const registrationId = (await import('./hash.js')).computeRegistrationId(draft);
+        const registrationId = computeRegistrationId(draft);
         const registrationPath = path.join(registrationsDirectory, `${registrationId}.json`);
         const existingBytes = await readOptionalPrivate(registrationPath);
         if (existingBytes !== null) {
           try {
             const existing = decodeValidatedRegistration(existingBytes);
+            if (
+              existing.registrationId !== registrationId ||
+              computeRegistrationId(existing) !== registrationId
+            ) {
+              return { kind: 'registration_write_conflict' };
+            }
             return { kind: 'already_exists_same', registration: existing };
           } catch {
             return { kind: 'registration_write_conflict' };
@@ -390,6 +421,7 @@ export class ReferenceStateStore implements StateAcceptanceStore {
       const existing = await readOptionalPrivate(target);
       if (existing !== null) {
         const current = decodeValidatedMarker(existing);
+        if (current.markerId !== marker.markerId) return { kind: 'existing_content_conflict' };
         return { kind: 'already_exists_same', value: current };
       }
       const bytes = encodeValidatedRecord(marker);
@@ -478,10 +510,7 @@ export class ReferenceStateStore implements StateAcceptanceStore {
       let totalBytes = 0;
       for (const item of matching) {
         totalBytes += item.bytes.byteLength;
-        if (
-          frozen.length + 1 > MAX_ACCEPTANCE_SNAPSHOT_REGISTRATIONS ||
-          totalBytes > MAX_ACCEPTANCE_SNAPSHOT_REGISTRATION_BYTES
-        ) {
+        if (acceptanceSnapshotLimitExceeded(frozen.length, totalBytes, item.bytes.byteLength)) {
           throw new SelectionSnapshotLimitError();
         }
         frozen.push({
@@ -1008,6 +1037,10 @@ export class ReferenceStateStore implements StateAcceptanceStore {
     for (const entry of entries.filter((name) => name.endsWith('.json'))) {
       const bytes = await readPrivate(path.join(directory, entry));
       const registration = decodeValidatedRegistration(bytes);
+      const filenameId = entry.slice(0, -'.json'.length);
+      if (!/^[a-f0-9]{64}$/.test(filenameId) || registration.registrationId !== filenameId) {
+        throw new StoreTransactionError('store_transaction_failed');
+      }
       if (
         ids.has(registration.registrationId) ||
         sequences.has(registration.registrationSequence)
@@ -1281,7 +1314,7 @@ async function readOptionalPrivate(
 async function readObservedEntry(
   filePath: string,
   maxBytes: number,
-): Promise<ObservedCandidateEntry> {
+): Promise<CandidateObservation> {
   try {
     return { status: 'present', sha256: sha256Hex(await readPrivate(filePath, maxBytes)) };
   } catch (error) {
@@ -1305,6 +1338,18 @@ function unsafeCandidateEvidence(): CandidateEvidence {
     ledger: { status: 'unsafe' },
     providerRunMetadata: { status: 'unsafe' },
   };
+}
+
+function publicCandidateEvidence(evidence: CandidateEvidenceInternal): CandidateEvidence {
+  return {
+    manifest: publicCandidateObservation(evidence.manifest),
+    ledger: publicCandidateObservation(evidence.ledger),
+    providerRunMetadata: publicCandidateObservation(evidence.providerRunMetadata),
+  };
+}
+
+function publicCandidateObservation(observation: CandidateObservation): ObservedCandidateEntry {
+  return observation.status === 'failed' ? { status: 'unsafe' } : observation;
 }
 
 function bundlesEqual(left: CandidateBundleBytes, right: CandidateBundleBytes): boolean {
