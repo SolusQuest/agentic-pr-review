@@ -1698,7 +1698,7 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       } finally {
         await rm(failedRoot, { recursive: true, force: true });
       }
-      expect(releaseCount).toBe(11);
+      expect(releaseCount).toBe(13);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
