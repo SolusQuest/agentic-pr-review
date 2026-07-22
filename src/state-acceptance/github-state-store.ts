@@ -82,6 +82,14 @@ interface RegistrationCounterV1 {
   readonly lastCompetingScopeDigest?: string;
 }
 
+/** The public state ref has an invalid control-plane shape and must fail closed. */
+export class StoreCorruptionError extends Error {
+  constructor() {
+    super('m4 state store control plane is corrupt');
+    this.name = 'StoreCorruptionError';
+  }
+}
+
 export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
   private readonly transport: GitDataStateTransport;
 
@@ -124,13 +132,12 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
       const state = await this.requireState();
       const existing = await this.readPath(state, gitStatePaths.sentinel);
       if (existing === null && hasM4NamespaceEntries(state)) {
-        throw new StoreTransactionError('store_transaction_failed');
+        throw new StoreCorruptionError();
       }
-      if (existing !== null && !bytesEqual(existing, sentinel))
-        throw new StoreTransactionError('store_transaction_failed');
+      if (existing !== null && !bytesEqual(existing, sentinel)) throw new StoreCorruptionError();
       const existingProbe = await this.readPath(state, probePath);
       if (existingProbe !== null && !bytesEqual(existingProbe, probe))
-        throw new StoreTransactionError('store_transaction_failed');
+        throw new StoreCorruptionError();
       if (existing !== null && existingProbe !== null) return;
       const result = await this.transport.commit(
         state,
@@ -859,15 +866,15 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
     for (const [path, entry] of state.entries) {
       if (path === 'm4-state') {
         if (entry.type === 'tree' && entry.mode === '040000') continue;
-        throw new StoreTransactionError('store_transaction_failed');
+        throw new StoreCorruptionError();
       }
       if (!path.startsWith('m4-state/')) continue;
       if (isM4TreePath(path)) {
         if (entry.type === 'tree' && entry.mode === '040000') continue;
-        throw new StoreTransactionError('store_transaction_failed');
+        throw new StoreCorruptionError();
       }
       if (!isAllowedGitStatePath(path) || entry.type !== 'blob' || entry.mode !== '100644') {
-        throw new StoreTransactionError('store_transaction_failed');
+        throw new StoreCorruptionError();
       }
     }
   }

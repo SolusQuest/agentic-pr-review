@@ -14,7 +14,11 @@ import {
   type CandidateRegistrationDraft,
 } from './index.js';
 import type { GitDataClient } from './github-git-data.js';
-import { GitHubGitStateAcceptanceStore, manifestProvenanceMatches } from './github-state-store.js';
+import {
+  GitHubGitStateAcceptanceStore,
+  manifestProvenanceMatches,
+  StoreCorruptionError,
+} from './github-state-store.js';
 import { gitStatePaths } from './github-state-paths.js';
 
 function client(): GitDataClient {
@@ -373,7 +377,151 @@ describe('GitHubGitStateAcceptanceStore durable receipts', () => {
   });
 });
 
+describe('GitHubGitStateAcceptanceStore control plane', () => {
+  it('classifies a noncanonical state sentinel as typed store corruption', async () => {
+    const transport = new MemoryGitDataClient();
+    const store = new GitHubGitStateAcceptanceStore(transport, 'owner', 'repo');
+    await store.ensureInitialized({
+      defaultBranchCommitSha: 'c'.repeat(40),
+      stateKey,
+      runId: '10',
+      runAttempt: 1,
+    });
+    const replacement = await transport.createBlob({
+      contentBase64: Buffer.from('{"invalid":true}').toString('base64'),
+    });
+    const entries = transport.snapshot() as Map<
+      string,
+      { mode: string; type: 'blob'; sha: string }
+    >;
+    entries.set(gitStatePaths.sentinel, { mode: '100644', type: 'blob', sha: replacement.sha });
+
+    await expect(
+      store.ensureInitialized({
+        defaultBranchCommitSha: 'c'.repeat(40),
+        stateKey,
+        runId: '11',
+        runAttempt: 1,
+      }),
+    ).rejects.toBeInstanceOf(StoreCorruptionError);
+  });
+});
+
 describe('GitHubGitStateAcceptanceStore acceptance integration', () => {
+  it('accepts at most one competing selector successor and suppresses loser sticky publication', async () => {
+    const transport = new MemoryGitDataClient();
+    const left = new GitHubGitStateAcceptanceStore(transport, 'owner', 'repo');
+    const right = new GitHubGitStateAcceptanceStore(transport, 'owner', 'repo');
+    const candidate = (suffix: string) => {
+      const resultBytes = new TextEncoder().encode(`{"result":"${suffix}"}`);
+      const traceBytes = new TextEncoder().encode(`{"trace":"${suffix}"}`);
+      const inputBytes = new TextEncoder().encode(`{"input":"${suffix}"}`);
+      const bundle = buildStateBundleV2(
+        makeStateManifestV2Input({
+          transaction: {
+            interactionId: sha256Hex(`race-interaction-${suffix}`),
+            consumedInputSha256: sha256Hex(inputBytes),
+            resultSha256: sha256Hex(resultBytes),
+            traceSha256: sha256Hex(traceBytes),
+          },
+          provenance: { producingRunId: suffix === 'left' ? '10' : '11' },
+        }),
+        new TextEncoder().encode(`ledger-${suffix}`),
+        new TextEncoder().encode(`metadata-${suffix}`),
+      );
+      return {
+        bundle,
+        lease: {
+          ...bundle,
+          resultBytes,
+          traceBytes,
+          inputSha256: sha256Hex(inputBytes),
+          resultSha256: sha256Hex(resultBytes),
+          traceSha256: sha256Hex(traceBytes),
+          candidateLedgerSha256: sha256Hex(bundle.ledgerBytes),
+          metadataSemanticSha256: bundle.manifest.transaction.metadataSemanticSha256,
+          release: async () => undefined,
+        },
+      };
+    };
+    const leftCandidate = candidate('left');
+    const rightCandidate = candidate('right');
+    await left.ensureInitialized({
+      defaultBranchCommitSha: 'c'.repeat(40),
+      stateKey: leftCandidate.bundle.manifest.stateKey,
+      runId: '1',
+      runAttempt: 1,
+    });
+    const { ledgerSchemaVersion, prefixContractVersion, ...cacheContractIdentity } =
+      leftCandidate.bundle.manifest.cacheContractIdentity;
+    const select = (store: GitHubGitStateAcceptanceStore) =>
+      store.selectAcceptedState({
+        stateKey: leftCandidate.bundle.manifest.stateKey,
+        expectedLedgerSchemaVersion: ledgerSchemaVersion,
+        expectedPrefixContractVersion: prefixContractVersion,
+        cacheContractIdentity,
+        currentHeadSha: leftCandidate.bundle.manifest.provenance.currentHeadSha,
+        currentBaseSha: leftCandidate.bundle.manifest.provenance.currentBaseSha,
+        currentBaseRef: leftCandidate.bundle.manifest.provenance.currentBaseRef,
+        provenanceTrusted: true,
+        workflowIdentity: leftCandidate.bundle.manifest.stateKey.workflowIdentity,
+        trustedExecutionDomain: leftCandidate.bundle.manifest.stateKey.trustedExecutionDomain,
+      });
+    const [leftSelection, rightSelection] = await Promise.all([select(left), select(right)]);
+    expect(leftSelection).toMatchObject({
+      selection: 'selected',
+      snapshot: { kind: 'bootstrap_selected' },
+    });
+    expect(rightSelection).toMatchObject({
+      selection: 'selected',
+      snapshot: { kind: 'bootstrap_selected' },
+    });
+    if (
+      leftSelection.selection !== 'selected' ||
+      rightSelection.selection !== 'selected' ||
+      leftSelection.snapshot.kind !== 'bootstrap_selected' ||
+      rightSelection.snapshot.kind !== 'bootstrap_selected'
+    )
+      return;
+    let leftPublished = 0;
+    let rightPublished = 0;
+    const accept = (
+      store: GitHubGitStateAcceptanceStore,
+      selection: typeof leftSelection.snapshot,
+      current: typeof leftCandidate,
+      acceptingRunId: string,
+      publish: () => void,
+    ) =>
+      acceptLocalCandidate(store, {
+        selectionSnapshot: selection,
+        candidate: current.lease,
+        interactionId: current.bundle.manifest.transaction.interactionId,
+        interactionOrdinal: current.bundle.manifest.transaction.interactionOrdinal,
+        producingRunId: current.bundle.manifest.provenance.producingRunId,
+        producingRunAttempt: current.bundle.manifest.provenance.producingRunAttempt,
+        acceptingRunId,
+        acceptingRunAttempt: 1,
+        consumedInputSha256: current.lease.inputSha256,
+        transition: current.bundle.manifest.transition,
+        publishSticky: async () => publish(),
+      });
+    const [leftResult, rightResult] = await Promise.all([
+      accept(left, leftSelection.snapshot, leftCandidate, '1', () => {
+        leftPublished += 1;
+      }),
+      accept(right, rightSelection.snapshot, rightCandidate, '2', () => {
+        rightPublished += 1;
+      }),
+    ]);
+    expect(
+      [leftResult.acceptance, rightResult.acceptance].filter((value) => value === 'accepted'),
+    ).toHaveLength(1);
+    expect([leftResult, rightResult]).toContainEqual(
+      expect.objectContaining({ acceptance: 'not_accepted', reason: 'stale_candidate' }),
+    );
+    expect(leftPublished + rightPublished).toBe(1);
+  });
+
   it('persists a bootstrap acceptance and restores its exact predecessor bytes for continuation', async () => {
     const transport = new MemoryGitDataClient();
     const store = new GitHubGitStateAcceptanceStore(transport, 'owner', 'repo');

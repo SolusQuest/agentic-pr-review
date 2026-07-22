@@ -41,8 +41,18 @@ import { mapReviewResultV1ToRuntimeContent } from './protocol/map-review-result.
 import { validateReviewInputV1 } from './protocol/review-input.js';
 import { invokeRuntime } from './runtime-invocation/invoke-runtime.js';
 import { resolveTrustedRuntimeCommand } from './runtime-invocation/command-resolver.js';
-import { LedgerRunFailure, runLedgerCsharp, type LedgerRunResult } from './ledger-csharp.js';
+import {
+  LedgerBoundaryError,
+  LedgerRunFailure,
+  runLedgerCsharp,
+  type LedgerRunResult,
+} from './ledger-csharp.js';
 import { RuntimeInvocationError } from './runtime-invocation/runtime-errors.js';
+import {
+  ContractValidationError,
+  StoreCorruptionError,
+  StoreTransactionError,
+} from './state-acceptance/index.js';
 import {
   deriveStateKey,
   diffPullRequestDiffSnapshots,
@@ -1724,8 +1734,7 @@ function setDeterministicErrorOutputs(error: unknown): void {
 }
 
 function setLedgerErrorOutputs(error: unknown): void {
-  const message = messageOf(error);
-  const kind = ledgerEntrypointErrorKind(message);
+  const kind = ledgerEntrypointErrorKind(error);
   core.setOutput('runtime_backend', 'ledger-csharp');
   core.setOutput('runtime_version', '');
   core.setOutput('runtime_trace_sha256', '');
@@ -1749,7 +1758,7 @@ function setLedgerErrorOutputs(error: unknown): void {
 }
 
 function ledgerEntrypointErrorKind(
-  message: string,
+  error: unknown,
 ):
   | 'event_rejected'
   | 'trust_rejected'
@@ -1764,6 +1773,11 @@ function ledgerEntrypointErrorKind(
   | 'publication_observation_invalid'
   | 'receipt_write_failed'
   | 'outcome_unknown' {
+  if (error instanceof LedgerBoundaryError) return error.errorKind;
+  if (error instanceof StoreCorruptionError || error instanceof ContractValidationError)
+    return 'store_corrupt';
+  if (error instanceof StoreTransactionError) return error.reason;
+  const message = messageOf(error);
   if (message.includes('repository administrator')) return 'permission_denied';
   if (message.includes('workflow source') || message.includes('workflow_run provenance'))
     return 'workflow_provenance_invalid';

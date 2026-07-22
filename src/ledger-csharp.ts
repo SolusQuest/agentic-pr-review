@@ -143,7 +143,7 @@ export type LedgerErrorKind =
   | 'receipt_write_failed'
   | 'outcome_unknown';
 
-class LedgerBoundaryError extends Error {
+export class LedgerBoundaryError extends Error {
   constructor(
     readonly errorKind: LedgerErrorKind,
     message: string,
