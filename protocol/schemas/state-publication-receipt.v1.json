@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic-pr-review.dev/protocol/state-publication-receipt.v1.json",
+  "title": "StatePublicationReceiptV1",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/notAttempted" },
+    { "$ref": "#/$defs/succeeded" },
+    { "$ref": "#/$defs/failed" },
+    { "$ref": "#/$defs/unknown" }
+  ],
+  "$defs": {
+    "common": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "markerId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "stateKeyDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "selectorRevision": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "acceptingRunId": { "type": "string", "pattern": "^[1-9][0-9]{0,18}$" },
+        "acceptingRunAttempt": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        "publicationStatus": { "enum": ["not_attempted", "succeeded", "failed", "unknown"] },
+        "recordedAt": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "markerId",
+        "stateKeyDigest",
+        "selectorRevision",
+        "acceptingRunId",
+        "acceptingRunAttempt",
+        "publicationStatus",
+        "recordedAt"
+      ]
+    },
+    "notAttempted": {
+      "allOf": [{ "$ref": "#/$defs/common" }],
+      "properties": { "publicationStatus": { "const": "not_attempted" } },
+      "unevaluatedProperties": false
+    },
+    "succeeded": {
+      "allOf": [{ "$ref": "#/$defs/common" }],
+      "properties": {
+        "publicationStatus": { "const": "succeeded" },
+        "commentId": { "type": "string", "pattern": "^[1-9][0-9]{0,18}$" },
+        "bodySha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      },
+      "required": ["commentId", "bodySha256"],
+      "unevaluatedProperties": false
+    },
+    "failed": {
+      "allOf": [{ "$ref": "#/$defs/common" }],
+      "properties": {
+        "publicationStatus": { "const": "failed" },
+        "failureCode": {
+          "enum": ["comment_create_failed", "comment_update_failed", "comment_readback_failed"]
+        }
+      },
+      "required": ["failureCode"],
+      "unevaluatedProperties": false
+    },
+    "unknown": {
+      "allOf": [{ "$ref": "#/$defs/common" }],
+      "properties": {
+        "publicationStatus": { "const": "unknown" },
+        "failureCode": { "const": "comment_outcome_unknown" }
+      },
+      "required": ["failureCode"],
+      "unevaluatedProperties": false
+    }
+  }
+}
