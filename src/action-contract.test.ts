@@ -61,6 +61,20 @@ describe('action contract', () => {
       'runtime_error_kind',
       'runtime_error_class',
       'usage_budget_status',
+      'state_transition',
+      'state_reason',
+      'state_candidate_id',
+      'state_marker_id',
+      'state_selector_revision',
+      'state_session_epoch',
+      'state_generation',
+      'state_ledger_epoch',
+      'state_acceptance_status',
+      'state_acceptance_reason',
+      'state_publication_status',
+      'state_receipt_status',
+      'state_cleanup_warnings',
+      'state_error_kind',
     ]) {
       expect(action).toContain(name);
     }
