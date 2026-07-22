@@ -194,7 +194,12 @@ export async function runLedgerCsharp(input: {
     assembled.envelope,
     input.config.maxReviewChars,
   );
-  if (!(await targetStillMatches(input.target, input.octokit))) {
+  const revalidation = await targetStillMatches(input.target, input.octokit);
+  if (revalidation === 'failed') {
+    await lease.release();
+    throw new Error('state-invalid: target revalidation failed');
+  }
+  if (revalidation === 'changed') {
     await lease.release();
     return {
       stateKey: stateKey.workflowIdentity,
@@ -383,23 +388,26 @@ async function resolveHeadRelationship(
   }
 }
 
-async function targetStillMatches(target: ReviewTarget, octokit: any): Promise<boolean> {
-  if (target.mode !== 'pull-request' || target.prNumber === undefined) return false;
+async function targetStillMatches(
+  target: ReviewTarget,
+  octokit: any,
+): Promise<'matching' | 'changed' | 'failed'> {
+  if (target.mode !== 'pull-request' || target.prNumber === undefined) return 'failed';
   try {
     const current = await octokit.rest.pulls.get({
       owner: github.context.repo.owner,
       repo: github.context.repo.repo,
       pull_number: target.prNumber,
     });
-    return (
-      current.data.state === 'open' &&
+    return current.data.state === 'open' &&
       String(current.data.base.ref) === target.baseRef &&
       String(current.data.base.sha) === target.baseSha &&
       String(current.data.head.sha) === target.headSha &&
       String(current.data.head.repo?.full_name ?? '') === target.headRepoFullName
-    );
+      ? 'matching'
+      : 'changed';
   } catch {
-    return false;
+    return 'failed';
   }
 }
 
