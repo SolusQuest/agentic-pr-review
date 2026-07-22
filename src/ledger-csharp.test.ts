@@ -4,6 +4,7 @@ import {
   type StateSelectionSnapshot,
 } from './state-acceptance/index.js';
 import {
+  actionSourceIsTrustedDefaultBranchAncestor,
   ledgerStateKey,
   LEDGER_TRUSTED_EXECUTION_DOMAIN,
   LEDGER_WORKFLOW_IDENTITY,
@@ -57,6 +58,30 @@ const target: ReviewTarget = {
 };
 
 describe('ledger-csharp host plan', () => {
+  it('accepts only an action source that is an ancestor of the trusted default branch', async () => {
+    const compareCommits = async ({ base }: { base: string }) => ({
+      data: { status: base === 'a'.repeat(40) ? 'ahead' : 'diverged' },
+    });
+    const octokit = { rest: { repos: { compareCommits } } };
+
+    await expect(
+      actionSourceIsTrustedDefaultBranchAncestor(
+        octokit,
+        'owner/repo',
+        'a'.repeat(40),
+        'b'.repeat(40),
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      actionSourceIsTrustedDefaultBranchAncestor(
+        octokit,
+        'owner/repo',
+        'c'.repeat(40),
+        'b'.repeat(40),
+      ),
+    ).resolves.toBe(false);
+  });
+
   it('uses the frozen M4 state identity and bootstrap transition', () => {
     const stateKey = ledgerStateKey('owner/repo', 53);
     const draft = {

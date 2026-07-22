@@ -193,6 +193,18 @@ export async function runLedgerCsharp(input: {
   if (selection.snapshot.kind === 'explicit_restore_invalid') {
     throw new Error(`state-invalid: explicit restore rejected: ${selection.snapshot.failure}`);
   }
+  if (
+    (selection.snapshot.kind === 'continuation_selected' ||
+      selection.snapshot.kind === 'reset_selected') &&
+    !(await actionSourceIsTrustedDefaultBranchAncestor(
+      input.octokit,
+      repository,
+      predecessorManifest(selection.snapshot.predecessorBytes).provenance.producingActionSourceSha,
+      input.defaultBranchCommitSha,
+    ))
+  ) {
+    throw new Error('state-invalid: accepted predecessor action source is not trusted');
+  }
   const plan = planLedgerInvocation({
     config: input.config,
     target: input.target,
@@ -241,11 +253,16 @@ export async function runLedgerCsharp(input: {
       );
       const revalidation = await targetStillMatches(input.target, input.octokit);
       if (revalidation === 'failed') {
-        await lease.release();
         throw new Error('state-invalid: target revalidation failed');
       }
       if (revalidation === 'changed') {
-        await lease.release();
+        let cleanupWarnings = '';
+        try {
+          await lease.release();
+        } catch {
+          cleanupWarnings = 'lease_release_failed';
+        }
+        leaseOwnershipTransferred = true;
         return {
           stateKey: stateKey.workflowIdentity,
           phase: plan.phase,
@@ -264,7 +281,7 @@ export async function runLedgerCsharp(input: {
           sessionEpoch: '',
           stateGeneration: '',
           ledgerEpoch: '',
-          cleanupWarnings: '',
+          cleanupWarnings,
         };
       }
       let commentUrl = '';
@@ -341,9 +358,6 @@ export async function runLedgerCsharp(input: {
       const acceptanceStatus = acceptance.acceptance;
       const acceptanceReason = 'reason' in acceptance ? acceptance.reason : '';
       const publicationStatus = acceptance.publication.status;
-      if (acceptance.acceptance === 'unknown') {
-        throw new Error('state-invalid: acceptance outcome unknown');
-      }
       const receiptStatus =
         (acceptance.acceptance === 'accepted' || acceptance.acceptance === 'already_accepted') &&
         publicationStatus !== 'pending'
@@ -407,6 +421,13 @@ export async function runLedgerCsharp(input: {
         ledgerEpoch: lease.manifest.generation.ledgerEpoch,
         cleanupWarnings: [...acceptance.cleanupWarnings].sort().join(','),
       };
+      if (acceptance.acceptance === 'unknown') {
+        throw new LedgerRunFailure(
+          'state-invalid: acceptance outcome unknown',
+          result,
+          'state-invalid',
+        );
+      }
       if (acceptance.acceptance === 'not_accepted' && !isNeutralNotAccepted(acceptance.reason)) {
         throw new LedgerRunFailure(
           `state-invalid: acceptance ${acceptance.reason}`,
@@ -567,9 +588,34 @@ async function resolveHeadRelationship(
       base: predecessorHeadSha,
       head: currentHeadSha,
     });
-    return result.data.status === 'ahead' ? 'descendant' : 'non_descendant';
+    return result.data.status === 'ahead' || result.data.status === 'identical'
+      ? 'descendant'
+      : 'non_descendant';
   } catch {
     return 'unknown';
+  }
+}
+
+export async function actionSourceIsTrustedDefaultBranchAncestor(
+  octokit: any,
+  repository: string,
+  sourceSha: string,
+  defaultBranchCommitSha: string,
+): Promise<boolean> {
+  if (!/^[a-f0-9]{40}$/i.test(sourceSha) || !/^[a-f0-9]{40}$/i.test(defaultBranchCommitSha)) {
+    return false;
+  }
+  const [owner, repo] = repository.split('/');
+  try {
+    const comparison = await octokit.rest.repos.compareCommits({
+      owner,
+      repo,
+      base: sourceSha,
+      head: defaultBranchCommitSha,
+    });
+    return comparison.data.status === 'ahead' || comparison.data.status === 'identical';
+  } catch {
+    return false;
   }
 }
 

@@ -1745,8 +1745,8 @@ function setLedgerErrorOutputs(error: unknown): void {
   core.setOutput('state_session_epoch', '');
   core.setOutput('state_generation', '');
   core.setOutput('state_ledger_epoch', '');
-  core.setOutput('state_acceptance_status', 'failed');
-  core.setOutput('state_acceptance_reason', sanitizeRuntimeDiagnosticForHost(message));
+  core.setOutput('state_acceptance_status', 'not_started');
+  core.setOutput('state_acceptance_reason', '');
   core.setOutput('state_publication_status', 'not_attempted');
   core.setOutput('state_receipt_status', 'not_attempted');
   core.setOutput('state_cleanup_warnings', '');
