@@ -212,23 +212,22 @@ interface LockHandle {
 export class ReferenceStateStore implements StateAcceptanceStore {
   readonly root: string;
   private readonly hooks: ReferenceStoreHooks;
-  private readonly initialized: Promise<void>;
+  private initialized?: Promise<void>;
 
   constructor(root: string, hooks: ReferenceStoreHooks = {}) {
     this.root = path.resolve(root);
     this.hooks = hooks;
-    this.initialized = this.initialize();
   }
 
   async close(): Promise<void> {
-    await this.initialized;
+    await this.ensureInitialized();
   }
 
   async uploadCandidate(
     candidateId: CandidateId,
     bundle: CandidateBundleBytes,
   ): Promise<CandidateUploadOutcome> {
-    await this.initialized;
+    await this.ensureInitialized();
     const locator = candidateLocator(candidateId);
     if (!/^[a-f0-9]{64}$/.test(candidateId)) return { kind: 'existing_content_conflict' };
     if (
@@ -276,7 +275,7 @@ export class ReferenceStateStore implements StateAcceptanceStore {
   }
 
   async readCandidate(candidateId: CandidateId): Promise<CandidateReadResult> {
-    await this.initialized;
+    await this.ensureInitialized();
     if (!/^[a-f0-9]{64}$/.test(candidateId))
       return {
         status: 'unsafe',
@@ -367,7 +366,7 @@ export class ReferenceStateStore implements StateAcceptanceStore {
   }
 
   async registerCandidate(draft: CandidateRegistrationDraft): Promise<RegistrationWriteResult> {
-    await this.initialized;
+    await this.ensureInitialized();
     try {
       return await this.withStateKeyLock(draft.stateKey, async () => {
         const registrationsDirectory = await this.registrationsDirectory(draft.stateKey);
@@ -438,7 +437,7 @@ export class ReferenceStateStore implements StateAcceptanceStore {
   async readSelector(
     stateKey: StateKeyV2,
   ): Promise<{ readonly bytes: Uint8Array | null; readonly selector: StateSelectorV1 | null }> {
-    await this.initialized;
+    await this.ensureInitialized();
     return this.withStateKeyLock(stateKey, async () => {
       const bytes = await readOptionalPrivate(
         path.join(await this.stateDirectory(stateKey), 'selector.json'),
@@ -448,7 +447,7 @@ export class ReferenceStateStore implements StateAcceptanceStore {
   }
 
   async writeMarker(marker: AcceptedStateMarkerV1): Promise<WriteOutcome<AcceptedStateMarkerV1>> {
-    await this.initialized;
+    await this.ensureInitialized();
     validateAcceptedStateMarker(marker);
     return this.withStateKeyLock(marker.stateKey, async () => {
       const directory = await this.markersDirectory(marker.stateKey);
@@ -480,7 +479,7 @@ export class ReferenceStateStore implements StateAcceptanceStore {
     stateKey: StateKeyV2,
     markerId: MarkerId,
   ): Promise<{ readonly bytes: Uint8Array | null; readonly marker: AcceptedStateMarkerV1 | null }> {
-    await this.initialized;
+    await this.ensureInitialized();
     if (typeof markerId !== 'string' || !SHA256_HEX.test(markerId)) {
       throw new ContractValidationError('sha256_invalid', '/markerId');
     }
@@ -496,7 +495,7 @@ export class ReferenceStateStore implements StateAcceptanceStore {
     expectedRevision: SelectorRevision,
     selector: StateSelectorV1,
   ): Promise<SelectorCasOutcome> {
-    await this.initialized;
+    await this.ensureInitialized();
     validateStateSelector(selector);
     return this.withStateKeyLock(selector.stateKey, async () => {
       const target = path.join(await this.stateDirectory(selector.stateKey), 'selector.json');
@@ -534,7 +533,7 @@ export class ReferenceStateStore implements StateAcceptanceStore {
     competingScope: CompetingScope,
     selectionSnapshotId: string,
   ): Promise<AcceptanceSnapshot> {
-    await this.initialized;
+    await this.ensureInitialized();
     return this.withStateKeyLock(competingScope.stateKey, async () => {
       const stateDirectory = await this.stateDirectory(competingScope.stateKey);
       const selectorBytes = await readOptionalPrivate(path.join(stateDirectory, 'selector.json'));
@@ -609,7 +608,7 @@ export class ReferenceStateStore implements StateAcceptanceStore {
       options.trustedExecutionDomain !== options.stateKey.trustedExecutionDomain
     )
       return { selection: 'failed', reason: 'state_key_mismatch' };
-    await this.initialized;
+    await this.ensureInitialized();
     if (process.platform !== 'linux')
       return { selection: 'failed', reason: 'store_capability_unsupported' };
     try {
@@ -1051,6 +1050,10 @@ export class ReferenceStateStore implements StateAcceptanceStore {
       ...value,
       selectionSnapshotId: computeSelectionSnapshotId(value),
     } as StateSelectionSnapshot;
+  }
+
+  private ensureInitialized(): Promise<void> {
+    return (this.initialized ??= this.initialize());
   }
 
   private async initialize(): Promise<void> {

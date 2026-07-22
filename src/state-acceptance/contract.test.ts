@@ -618,18 +618,25 @@ describe('M4 state acceptance contract', () => {
   });
 
   it('rejects standalone selection identities that disagree with the state key', async () => {
-    const store = Object.create(ReferenceStateStore.prototype) as ReferenceStateStore;
-    for (const property of ['workflowIdentity', 'trustedExecutionDomain'] as const) {
-      const options = {
-        stateKey,
-        workflowIdentity: stateKey.workflowIdentity,
-        trustedExecutionDomain: stateKey.trustedExecutionDomain,
-        [property]: 'mismatched',
-      } as never;
-      await expect(store.selectAcceptedState(options)).resolves.toEqual({
-        selection: 'failed',
-        reason: 'state_key_mismatch',
-      });
+    const parent = await mkdtemp(path.join(os.tmpdir(), 'm4-state-acceptance-identity-'));
+    const root = path.join(parent, 'store');
+    const store = new ReferenceStateStore(root);
+    try {
+      for (const property of ['workflowIdentity', 'trustedExecutionDomain'] as const) {
+        const options = {
+          stateKey,
+          workflowIdentity: stateKey.workflowIdentity,
+          trustedExecutionDomain: stateKey.trustedExecutionDomain,
+          [property]: 'mismatched',
+        } as never;
+        await expect(store.selectAcceptedState(options)).resolves.toEqual({
+          selection: 'failed',
+          reason: 'state_key_mismatch',
+        });
+      }
+      await expect(readdir(root)).rejects.toThrow();
+    } finally {
+      await rm(parent, { recursive: true, force: true });
     }
   });
 });
