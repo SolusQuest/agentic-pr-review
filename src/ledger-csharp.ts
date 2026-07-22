@@ -11,6 +11,7 @@ import { resolveTrustedRuntimeCommand } from './runtime-invocation/command-resol
 import { serializeInputBytes, sha256Hex } from './runtime-invocation/runtime-files.js';
 import {
   acceptLocalCandidate,
+  computeCandidateId,
   GitHubGitStateAcceptanceStore,
   OctokitGitDataClient,
   type StateAcceptanceStore,
@@ -96,6 +97,14 @@ export interface LedgerRunResult {
   readonly runtimeVersion: string;
   readonly traceSha256: string;
   readonly commentUrl: string;
+  readonly stateReason: string;
+  readonly candidateId: string;
+  readonly markerId: string;
+  readonly selectorRevision: string;
+  readonly sessionEpoch: string;
+  readonly stateGeneration: string;
+  readonly ledgerEpoch: string;
+  readonly cleanupWarnings: string;
 }
 
 export async function runLedgerCsharp(input: {
@@ -212,6 +221,14 @@ export async function runLedgerCsharp(input: {
       runtimeVersion: lease.result.runtimeVersion,
       traceSha256: lease.traceSha256,
       commentUrl: '',
+      stateReason: transitionReason(lease.manifest.transition),
+      candidateId: '',
+      markerId: '',
+      selectorRevision: '',
+      sessionEpoch: '',
+      stateGeneration: '',
+      ledgerEpoch: '',
+      cleanupWarnings: '',
     };
   }
   let commentUrl = '';
@@ -303,7 +320,33 @@ export async function runLedgerCsharp(input: {
     runtimeVersion: lease.result.runtimeVersion,
     traceSha256: lease.traceSha256,
     commentUrl,
+    stateReason: transitionReason(lease.manifest.transition),
+    candidateId: computeCandidateId({
+      manifestSha256: sha256Hex(lease.manifestBytes),
+      candidateLedgerSha256: lease.candidateLedgerSha256,
+      providerRunMetadataSha256: sha256Hex(lease.providerRunMetadataBytes),
+      metadataSemanticSha256: lease.metadataSemanticSha256,
+      consumedInputSha256: lease.inputSha256,
+      resultSha256: lease.resultSha256,
+      traceSha256: lease.traceSha256,
+    }),
+    markerId:
+      acceptance.acceptance === 'accepted' || acceptance.acceptance === 'already_accepted'
+        ? acceptance.markerId
+        : '',
+    selectorRevision:
+      acceptance.acceptance === 'accepted' || acceptance.acceptance === 'already_accepted'
+        ? acceptance.selectorRevision
+        : '',
+    sessionEpoch: lease.manifest.sessionEpoch,
+    stateGeneration: String(lease.manifest.generation.stateGeneration),
+    ledgerEpoch: lease.manifest.generation.ledgerEpoch,
+    cleanupWarnings: [...acceptance.cleanupWarnings].sort().join(','),
   };
+}
+
+function transitionReason(transition: StateManifestV2Transition): string {
+  return 'reason' in transition ? transition.reason : '';
 }
 
 async function validateLedgerInvocationEvent(
