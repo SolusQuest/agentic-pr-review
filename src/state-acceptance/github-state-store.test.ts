@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalJsonBytes } from '../canonical-json/index.js';
-import { makeCacheContract, makeStateKey } from '../state-v2/test-helpers.js';
-import { computeCandidateId, decodeRecord, type CandidateRegistrationDraft } from './index.js';
+import { buildStateBundleV2 } from '../state-v2/index.js';
+import {
+  makeCacheContract,
+  makeStateKey,
+  makeStateManifestV2Input,
+  sha256Hex,
+} from '../state-v2/test-helpers.js';
+import {
+  acceptLocalCandidate,
+  computeCandidateId,
+  decodeRecord,
+  type CandidateRegistrationDraft,
+} from './index.js';
 import type { GitDataClient } from './github-git-data.js';
 import { GitHubGitStateAcceptanceStore, manifestProvenanceMatches } from './github-state-store.js';
 import { gitStatePaths } from './github-state-paths.js';
@@ -359,6 +370,106 @@ describe('GitHubGitStateAcceptanceStore durable receipts', () => {
       }),
     ).resolves.toBe('created');
     expect(transport.updateAttempts).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('GitHubGitStateAcceptanceStore acceptance integration', () => {
+  it('persists a bootstrap acceptance and restores its exact predecessor bytes for continuation', async () => {
+    const transport = new MemoryGitDataClient();
+    const store = new GitHubGitStateAcceptanceStore(transport, 'owner', 'repo');
+    const resultBytes = new TextEncoder().encode('{"summary":"bootstrap"}');
+    const traceBytes = new TextEncoder().encode('{"trace":true}');
+    const inputBytes = new TextEncoder().encode('{"input":true}');
+    const input = makeStateManifestV2Input({
+      transaction: {
+        consumedInputSha256: sha256Hex(inputBytes),
+        resultSha256: sha256Hex(resultBytes),
+        traceSha256: sha256Hex(traceBytes),
+      },
+    });
+    const bundle = buildStateBundleV2(
+      input,
+      new TextEncoder().encode('ledger-bytes'),
+      new TextEncoder().encode('metadata-bytes'),
+    );
+    await store.ensureInitialized({
+      defaultBranchCommitSha: 'c'.repeat(40),
+      stateKey: bundle.manifest.stateKey,
+      runId: '1',
+      runAttempt: 1,
+    });
+    const { ledgerSchemaVersion, prefixContractVersion, ...cacheContractIdentity } =
+      bundle.manifest.cacheContractIdentity;
+    const selection = await store.selectAcceptedState({
+      stateKey: bundle.manifest.stateKey,
+      expectedLedgerSchemaVersion: ledgerSchemaVersion,
+      expectedPrefixContractVersion: prefixContractVersion,
+      cacheContractIdentity,
+      currentHeadSha: bundle.manifest.provenance.currentHeadSha,
+      currentBaseSha: bundle.manifest.provenance.currentBaseSha,
+      currentBaseRef: bundle.manifest.provenance.currentBaseRef,
+      provenanceTrusted: true,
+      workflowIdentity: bundle.manifest.stateKey.workflowIdentity,
+      trustedExecutionDomain: bundle.manifest.stateKey.trustedExecutionDomain,
+    });
+    expect(selection).toMatchObject({
+      selection: 'selected',
+      snapshot: { kind: 'bootstrap_selected' },
+    });
+    if (selection.selection !== 'selected' || selection.snapshot.kind !== 'bootstrap_selected')
+      return;
+    const acceptance = await acceptLocalCandidate(store, {
+      selectionSnapshot: selection.snapshot,
+      candidate: {
+        ...bundle,
+        resultBytes,
+        traceBytes,
+        inputSha256: sha256Hex(inputBytes),
+        resultSha256: sha256Hex(resultBytes),
+        traceSha256: sha256Hex(traceBytes),
+        candidateLedgerSha256: sha256Hex(bundle.ledgerBytes),
+        metadataSemanticSha256: bundle.manifest.transaction.metadataSemanticSha256,
+        release: async () => undefined,
+      },
+      interactionId: bundle.manifest.transaction.interactionId,
+      interactionOrdinal: bundle.manifest.transaction.interactionOrdinal,
+      producingRunId: bundle.manifest.provenance.producingRunId,
+      producingRunAttempt: bundle.manifest.provenance.producingRunAttempt,
+      acceptingRunId: '1',
+      acceptingRunAttempt: 1,
+      consumedInputSha256: sha256Hex(inputBytes),
+      transition: bundle.manifest.transition,
+    });
+    expect(acceptance.acceptance).toBe('accepted');
+
+    const reopened = new GitHubGitStateAcceptanceStore(transport, 'owner', 'repo');
+    const continuation = await reopened.selectAcceptedState({
+      stateKey: bundle.manifest.stateKey,
+      expectedLedgerSchemaVersion: ledgerSchemaVersion,
+      expectedPrefixContractVersion: prefixContractVersion,
+      cacheContractIdentity,
+      currentHeadSha: bundle.manifest.provenance.currentHeadSha,
+      currentBaseSha: bundle.manifest.provenance.currentBaseSha,
+      currentBaseRef: bundle.manifest.provenance.currentBaseRef,
+      provenanceTrusted: true,
+      workflowIdentity: bundle.manifest.stateKey.workflowIdentity,
+      trustedExecutionDomain: bundle.manifest.stateKey.trustedExecutionDomain,
+      headRelationship: 'same',
+    });
+    expect(continuation).toMatchObject({
+      selection: 'selected',
+      snapshot: { kind: 'continuation_selected' },
+    });
+    if (
+      continuation.selection !== 'selected' ||
+      continuation.snapshot.kind !== 'continuation_selected'
+    )
+      return;
+    expect(continuation.snapshot.predecessorBytes.manifestBytes).toEqual(bundle.manifestBytes);
+    expect(continuation.snapshot.predecessorBytes.ledgerBytes).toEqual(bundle.ledgerBytes);
+    expect(continuation.snapshot.predecessorBytes.providerRunMetadataBytes).toEqual(
+      bundle.providerRunMetadataBytes,
+    );
   });
 });
 
