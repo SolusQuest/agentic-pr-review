@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   computeSelectionSnapshotId,
   ContractValidationError,
+  StoreCorruptionError,
   StoreTransactionError,
   type StateSelectionSnapshot,
 } from './state-acceptance/index.js';
@@ -71,6 +72,7 @@ describe('ledger-csharp host plan', () => {
     expect(ledgerErrorKindFor(new ContractValidationError('schema_version_invalid'))).toBe(
       'store_corrupt',
     );
+    expect(ledgerErrorKindFor(new StoreCorruptionError())).toBe('store_corrupt');
     expect(ledgerErrorKindFor(new Error('unclassified runtime failure'))).toBe('runtime_failed');
   });
 

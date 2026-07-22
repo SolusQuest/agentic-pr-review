@@ -17,6 +17,7 @@ import {
   StickyCallbackOutcomeUnknownError,
   StickyCallbackKnownFailureError,
   ContractValidationError,
+  StoreCorruptionError,
   StoreTransactionError,
   type StateAcceptanceStore,
   type StateSelectionSnapshot,
@@ -713,6 +714,7 @@ function preAcceptanceFailureResult(input: {
 export function ledgerErrorKindFor(error: unknown): LedgerErrorKind {
   if (error instanceof LedgerBoundaryError) return error.errorKind;
   if (error instanceof StoreTransactionError) return error.reason;
+  if (error instanceof StoreCorruptionError) return 'store_corrupt';
   if (error instanceof ContractValidationError) return 'store_corrupt';
   return 'runtime_failed';
 }

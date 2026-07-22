@@ -21,6 +21,7 @@ import {
   materializeSelector,
   validateCandidateRegistration,
 } from './validation.js';
+import { StoreCorruptionError } from './github-state-store.js';
 import {
   MAX_ACCEPTANCE_SNAPSHOT_REGISTRATION_BYTES,
   MAX_ACCEPTANCE_SNAPSHOT_REGISTRATIONS,
@@ -104,22 +105,25 @@ export async function acceptLocalCandidate(
 ): Promise<AcceptanceResult> {
   const warnings: CleanupWarningCode[] = [];
   let result: AcceptanceResult;
+  let corruption: StoreCorruptionError | undefined;
   try {
     result = await acceptWithoutCleanup(store, options);
-  } catch {
-    result = {
-      acceptance: 'unknown',
-      reason: 'acceptance_outcome_unknown',
-      publication: { status: 'not_attempted' },
-      cleanupWarnings: [],
-    };
+  } catch (error) {
+    if (error instanceof StoreCorruptionError) {
+      corruption = error;
+      result = unknownAcceptance();
+    } else {
+      result = unknownAcceptance();
+    }
   }
   try {
     await options.candidate.release();
   } catch {
     warnings.push('lease_release_failed');
   }
-  return addCleanupWarnings(result, warnings);
+  const withWarnings = addCleanupWarnings(result, warnings);
+  if (corruption) throw corruption;
+  return withWarnings;
 }
 
 async function acceptWithoutCleanup(
@@ -314,7 +318,8 @@ async function reconcileAlreadyAccepted(
   let observed: Awaited<ReturnType<StateAcceptanceStore['readSelector']>>;
   try {
     observed = await store.readSelector(options.selectionSnapshot.stateKey);
-  } catch {
+  } catch (error) {
+    if (error instanceof StoreCorruptionError) throw error;
     return unknownAcceptance();
   }
   if (
@@ -322,6 +327,43 @@ async function reconcileAlreadyAccepted(
     observed.selector.candidateId !== registration.candidateId ||
     observed.selector.previousSelectorRevision !==
       options.selectionSnapshot.observedSelectorRevision
+  )
+    return notAccepted('stale_candidate');
+  const manifest = options.candidate.manifest;
+  const { ledgerSchemaVersion, prefixContractVersion, ...cacheContractIdentity } =
+    manifest.cacheContractIdentity;
+  let restored: Awaited<ReturnType<StateAcceptanceStore['selectAcceptedState']>>;
+  try {
+    restored = await store.selectAcceptedState({
+      stateKey: options.selectionSnapshot.stateKey,
+      expectedLedgerSchemaVersion: ledgerSchemaVersion,
+      expectedPrefixContractVersion: prefixContractVersion,
+      cacheContractIdentity,
+      currentHeadSha: options.selectionSnapshot.currentHeadSha,
+      currentBaseSha: options.selectionSnapshot.currentBaseSha,
+      currentBaseRef: options.selectionSnapshot.currentBaseRef,
+      provenanceTrusted: true,
+      workflowIdentity: options.selectionSnapshot.stateKey.workflowIdentity,
+      trustedExecutionDomain: options.selectionSnapshot.stateKey.trustedExecutionDomain,
+      headRelationship: 'same',
+    });
+  } catch (error) {
+    if (error instanceof StoreCorruptionError) throw error;
+    return unknownAcceptance();
+  }
+  if (
+    restored.selection !== 'selected' ||
+    restored.snapshot.kind !== 'continuation_selected' ||
+    restored.snapshot.markerId !== observed.selector.acceptedMarkerId ||
+    !bytesEqual(
+      restored.snapshot.predecessorBytes.manifestBytes,
+      options.candidate.manifestBytes,
+    ) ||
+    !bytesEqual(restored.snapshot.predecessorBytes.ledgerBytes, options.candidate.ledgerBytes) ||
+    !bytesEqual(
+      restored.snapshot.predecessorBytes.providerRunMetadataBytes,
+      options.candidate.providerRunMetadataBytes,
+    )
   )
     return notAccepted('stale_candidate');
   let publication: PublicationOutcome = { status: 'not_attempted' };

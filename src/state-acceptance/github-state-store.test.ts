@@ -810,6 +810,38 @@ describe('GitHubGitStateAcceptanceStore acceptance integration', () => {
       ledgerEpoch: successor.manifest.generation.ledgerEpoch,
       transition: { kind: 'continuation' },
     });
+    if (persistedSelector.selector === null) return;
+    (transport.snapshot() as Map<string, { mode: string; type: 'blob'; sha: string }>).delete(
+      gitStatePaths.marker(persistedSelector.selector.acceptedMarkerId),
+    );
+    let republished = false;
+    const invalidRetry = await acceptLocalCandidate(reopened, {
+      selectionSnapshot: continuation.snapshot,
+      candidate: {
+        ...successor,
+        resultBytes: successorResultBytes,
+        traceBytes: successorTraceBytes,
+        inputSha256: sha256Hex(successorInputBytes),
+        resultSha256: sha256Hex(successorResultBytes),
+        traceSha256: sha256Hex(successorTraceBytes),
+        candidateLedgerSha256: sha256Hex(successor.ledgerBytes),
+        metadataSemanticSha256: successor.manifest.transaction.metadataSemanticSha256,
+        release: async () => undefined,
+      },
+      interactionId: successor.manifest.transaction.interactionId,
+      interactionOrdinal: successor.manifest.transaction.interactionOrdinal,
+      producingRunId: successor.manifest.provenance.producingRunId,
+      producingRunAttempt: successor.manifest.provenance.producingRunAttempt,
+      acceptingRunId: '2',
+      acceptingRunAttempt: 1,
+      consumedInputSha256: sha256Hex(successorInputBytes),
+      transition: successor.manifest.transition,
+      publishSticky: async () => {
+        republished = true;
+      },
+    });
+    expect(invalidRetry).toMatchObject({ acceptance: 'not_accepted', reason: 'stale_candidate' });
+    expect(republished).toBe(false);
   });
 });
 
