@@ -616,6 +616,22 @@ describe('M4 state acceptance contract', () => {
       cleanupWarnings: ['lease_release_failed'],
     });
   });
+
+  it('rejects standalone selection identities that disagree with the state key', async () => {
+    const store = Object.create(ReferenceStateStore.prototype) as ReferenceStateStore;
+    for (const property of ['workflowIdentity', 'trustedExecutionDomain'] as const) {
+      const options = {
+        stateKey,
+        workflowIdentity: stateKey.workflowIdentity,
+        trustedExecutionDomain: stateKey.trustedExecutionDomain,
+        [property]: 'mismatched',
+      } as never;
+      await expect(store.selectAcceptedState(options)).resolves.toEqual({
+        selection: 'failed',
+        reason: 'state_key_mismatch',
+      });
+    }
+  });
 });
 
 describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {

@@ -604,6 +604,11 @@ export class ReferenceStateStore implements StateAcceptanceStore {
   }
 
   async selectAcceptedState(options: SelectionOptions): Promise<SelectionOutcome> {
+    if (
+      options.workflowIdentity !== options.stateKey.workflowIdentity ||
+      options.trustedExecutionDomain !== options.stateKey.trustedExecutionDomain
+    )
+      return { selection: 'failed', reason: 'state_key_mismatch' };
     await this.initialized;
     if (process.platform !== 'linux')
       return { selection: 'failed', reason: 'store_capability_unsupported' };

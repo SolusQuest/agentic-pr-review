@@ -263,6 +263,7 @@ export type SelectionFailureReason =
   | 'store_capability_unsupported'
   | 'store_transaction_failed'
   | 'selector_read_failed'
+  | 'state_key_mismatch'
   | 'marker_read_failed'
   | 'candidate_read_failed'
   | 'selection_snapshot_limit_exceeded';
