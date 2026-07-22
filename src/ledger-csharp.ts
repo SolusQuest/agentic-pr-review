@@ -17,6 +17,7 @@ import {
   StickyCallbackOutcomeUnknownError,
   StickyCallbackKnownFailureError,
   ContractValidationError,
+  StoreTransactionError,
   type StateAcceptanceStore,
   type StateSelectionSnapshot,
   type StateKeyV2,
@@ -127,7 +128,30 @@ export class LedgerRunFailure extends Error {
   }
 }
 
-export type LedgerErrorKind = 'state-invalid' | 'state-unknown' | 'store-corrupt';
+export type LedgerErrorKind =
+  | 'event_rejected'
+  | 'trust_rejected'
+  | 'workflow_provenance_invalid'
+  | 'permission_denied'
+  | 'store_capability_unsupported'
+  | 'store_transaction_failed'
+  | 'store_corrupt'
+  | 'state_restore_invalid'
+  | 'runtime_failed'
+  | 'target_revalidation_failed'
+  | 'publication_observation_invalid'
+  | 'receipt_write_failed'
+  | 'outcome_unknown';
+
+class LedgerBoundaryError extends Error {
+  constructor(
+    readonly errorKind: LedgerErrorKind,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'LedgerBoundaryError';
+  }
+}
 
 export async function runLedgerCsharp(input: {
   readonly config: ActionConfig;
@@ -189,12 +213,19 @@ export async function runLedgerCsharp(input: {
     });
     if (selection.selection !== 'failed' || selection.reason !== 'selector_read_failed') break;
   }
-  if (!selection) throw new Error('state-invalid: selector selection unavailable');
+  if (!selection)
+    throw new LedgerBoundaryError('outcome_unknown', 'selector selection unavailable');
   if (selection.selection !== 'selected') {
-    throw new Error(`state-invalid: state selection ${selection.selection}:${selection.reason}`);
+    throw new LedgerBoundaryError(
+      selection.selection === 'unknown' ? 'outcome_unknown' : 'store_transaction_failed',
+      `state selection ${selection.selection}:${selection.reason}`,
+    );
   }
   if (selection.snapshot.kind === 'explicit_restore_invalid') {
-    throw new Error(`state-invalid: explicit restore rejected: ${selection.snapshot.failure}`);
+    throw new LedgerBoundaryError(
+      'state_restore_invalid',
+      `explicit restore rejected: ${selection.snapshot.failure}`,
+    );
   }
   if (
     selection.snapshot.kind === 'continuation_selected' ||
@@ -207,10 +238,16 @@ export async function runLedgerCsharp(input: {
       input.defaultBranchCommitSha,
     );
     if (actionSourceTrust === 'unknown') {
-      throw new Error('state-unknown: accepted predecessor action source could not be verified');
+      throw new LedgerBoundaryError(
+        'outcome_unknown',
+        'accepted predecessor action source could not be verified',
+      );
     }
     if (actionSourceTrust === 'untrusted') {
-      throw new Error('state-invalid: accepted predecessor action source is not trusted');
+      throw new LedgerBoundaryError(
+        'state_restore_invalid',
+        'accepted predecessor action source is not trusted',
+      );
     }
   }
   const plan = planLedgerInvocation({
@@ -262,7 +299,7 @@ export async function runLedgerCsharp(input: {
       );
       const revalidation = await targetStillMatches(input.target, input.octokit);
       if (revalidation === 'failed') {
-        throw new Error('state-invalid: target revalidation failed');
+        throw new LedgerBoundaryError('target_revalidation_failed', 'target revalidation failed');
       }
       if (revalidation === 'changed') {
         const cleanupWarnings = await releaseLease(lease);
@@ -426,31 +463,27 @@ export async function runLedgerCsharp(input: {
         cleanupWarnings: [...acceptance.cleanupWarnings].sort().join(','),
       };
       if (acceptance.acceptance === 'unknown') {
-        throw new LedgerRunFailure(
-          'state-invalid: acceptance outcome unknown',
-          result,
-          'state-invalid',
-        );
+        throw new LedgerRunFailure('acceptance outcome unknown', result, 'outcome_unknown');
       }
       if (acceptance.acceptance === 'not_accepted' && !isNeutralNotAccepted(acceptance.reason)) {
         throw new LedgerRunFailure(
-          `state-invalid: acceptance ${acceptance.reason}`,
+          `acceptance ${acceptance.reason}`,
           result,
-          'state-invalid',
+          'store_transaction_failed',
         );
       }
       if (receiptStatus === 'failed' || receiptStatus === 'unknown') {
         throw new LedgerRunFailure(
-          'state-invalid: publication receipt outcome unknown',
+          'publication receipt write failed',
           result,
-          'state-invalid',
+          'receipt_write_failed',
         );
       }
       if (input.config.postComment && publicationStatus !== 'succeeded') {
         throw new LedgerRunFailure(
-          `state-invalid: sticky publication ${publicationStatus}`,
+          `sticky publication ${publicationStatus}`,
           result,
-          'state-invalid',
+          publicationStatus === 'unknown' ? 'outcome_unknown' : 'publication_observation_invalid',
         );
       }
       return result;
@@ -459,14 +492,14 @@ export async function runLedgerCsharp(input: {
       const cleanupWarnings = await releaseLease(lease);
       leaseReleased = true;
       throw new LedgerRunFailure(
-        'state-invalid: pre-acceptance execution failed',
+        'pre-acceptance execution failed',
         preAcceptanceFailureResult({
           stateKey,
           plan,
           lease,
           cleanupWarnings,
         }),
-        errorKindFor(error),
+        ledgerErrorKindFor(error),
       );
     } finally {
       if (!leaseOwnershipTransferred && !leaseReleased)
@@ -677,11 +710,11 @@ function preAcceptanceFailureResult(input: {
   };
 }
 
-function errorKindFor(error: unknown): LedgerErrorKind {
-  if (error instanceof ContractValidationError) return 'store-corrupt';
-  return error instanceof Error && error.message.startsWith('state-unknown:')
-    ? 'state-unknown'
-    : 'state-invalid';
+export function ledgerErrorKindFor(error: unknown): LedgerErrorKind {
+  if (error instanceof LedgerBoundaryError) return error.errorKind;
+  if (error instanceof StoreTransactionError) return error.reason;
+  if (error instanceof ContractValidationError) return 'store_corrupt';
+  return 'runtime_failed';
 }
 
 async function targetStillMatches(

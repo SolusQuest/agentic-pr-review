@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeSelectionSnapshotId,
+  ContractValidationError,
+  StoreTransactionError,
   type StateSelectionSnapshot,
 } from './state-acceptance/index.js';
 import {
@@ -8,6 +10,7 @@ import {
   ledgerStateKey,
   LEDGER_TRUSTED_EXECUTION_DOMAIN,
   LEDGER_WORKFLOW_IDENTITY,
+  ledgerErrorKindFor,
   planLedgerInvocation,
   VERIFICATION_TRUSTED_EXECUTION_DOMAIN,
   VERIFICATION_WORKFLOW_IDENTITY,
@@ -58,6 +61,19 @@ const target: ReviewTarget = {
 };
 
 describe('ledger-csharp host plan', () => {
+  it('maps store, corruption, and unknown failures to the frozen state_error_kind vocabulary', () => {
+    expect(ledgerErrorKindFor(new StoreTransactionError('store_capability_unsupported'))).toBe(
+      'store_capability_unsupported',
+    );
+    expect(ledgerErrorKindFor(new StoreTransactionError('store_transaction_failed'))).toBe(
+      'store_transaction_failed',
+    );
+    expect(ledgerErrorKindFor(new ContractValidationError('schema_version_invalid'))).toBe(
+      'store_corrupt',
+    );
+    expect(ledgerErrorKindFor(new Error('unclassified runtime failure'))).toBe('runtime_failed');
+  });
+
   it('accepts only an action source that is an ancestor of the trusted default branch', async () => {
     const compareCommits = async ({ base }: { base: string }) => ({
       data: { status: base === 'a'.repeat(40) ? 'ahead' : 'diverged' },

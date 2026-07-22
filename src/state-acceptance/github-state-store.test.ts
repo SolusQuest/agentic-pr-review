@@ -470,6 +470,69 @@ describe('GitHubGitStateAcceptanceStore acceptance integration', () => {
     expect(continuation.snapshot.predecessorBytes.providerRunMetadataBytes).toEqual(
       bundle.providerRunMetadataBytes,
     );
+
+    const successorResultBytes = new TextEncoder().encode('{"summary":"continuation"}');
+    const successorTraceBytes = new TextEncoder().encode('{"trace":"continuation"}');
+    const successorInputBytes = new TextEncoder().encode('{"input":"continuation"}');
+    const successor = buildStateBundleV2(
+      makeStateManifestV2Input({
+        stateKey: bundle.manifest.stateKey,
+        cacheContractIdentity: bundle.manifest.cacheContractIdentity,
+        sessionEpoch: bundle.manifest.sessionEpoch,
+        generation: {
+          stateGeneration: bundle.manifest.generation.stateGeneration + 1,
+          ledgerEpoch: bundle.manifest.generation.ledgerEpoch,
+        },
+        transition: {
+          kind: 'continuation',
+          predecessorManifestSha256: sha256Hex(
+            continuation.snapshot.predecessorBytes.manifestBytes,
+          ),
+          predecessorLedgerSha256: sha256Hex(continuation.snapshot.predecessorBytes.ledgerBytes),
+          predecessorStateGeneration: bundle.manifest.generation.stateGeneration,
+          predecessorLedgerEpoch: bundle.manifest.generation.ledgerEpoch,
+        },
+        provenance: { producingRunId: '2' },
+        transaction: {
+          interactionId: sha256Hex('continuation-interaction'),
+          interactionOrdinal: 1,
+          consumedInputSha256: sha256Hex(successorInputBytes),
+          resultSha256: sha256Hex(successorResultBytes),
+          traceSha256: sha256Hex(successorTraceBytes),
+        },
+      }),
+      new TextEncoder().encode('continuation-ledger-bytes'),
+      new TextEncoder().encode('continuation-metadata-bytes'),
+    );
+    const continuationAcceptance = await acceptLocalCandidate(reopened, {
+      selectionSnapshot: continuation.snapshot,
+      candidate: {
+        ...successor,
+        resultBytes: successorResultBytes,
+        traceBytes: successorTraceBytes,
+        inputSha256: sha256Hex(successorInputBytes),
+        resultSha256: sha256Hex(successorResultBytes),
+        traceSha256: sha256Hex(successorTraceBytes),
+        candidateLedgerSha256: sha256Hex(successor.ledgerBytes),
+        metadataSemanticSha256: successor.manifest.transaction.metadataSemanticSha256,
+        release: async () => undefined,
+      },
+      interactionId: successor.manifest.transaction.interactionId,
+      interactionOrdinal: successor.manifest.transaction.interactionOrdinal,
+      producingRunId: successor.manifest.provenance.producingRunId,
+      producingRunAttempt: successor.manifest.provenance.producingRunAttempt,
+      acceptingRunId: '2',
+      acceptingRunAttempt: 1,
+      consumedInputSha256: sha256Hex(successorInputBytes),
+      transition: successor.manifest.transition,
+    });
+    expect(continuationAcceptance.acceptance).toBe('accepted');
+    const persistedSelector = await reopened.readSelector(bundle.manifest.stateKey);
+    expect(persistedSelector.selector).toMatchObject({
+      stateGeneration: successor.manifest.generation.stateGeneration,
+      ledgerEpoch: successor.manifest.generation.ledgerEpoch,
+      transition: { kind: 'continuation' },
+    });
   });
 });
 

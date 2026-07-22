@@ -1725,12 +1725,7 @@ function setDeterministicErrorOutputs(error: unknown): void {
 
 function setLedgerErrorOutputs(error: unknown): void {
   const message = messageOf(error);
-  const prefix = message.split(':', 1)[0];
-  const kind = ['config-invalid', 'command-unavailable', 'input-invalid', 'state-invalid'].includes(
-    prefix,
-  )
-    ? prefix
-    : 'state-invalid';
+  const kind = ledgerEntrypointErrorKind(message);
   core.setOutput('runtime_backend', 'ledger-csharp');
   core.setOutput('runtime_version', '');
   core.setOutput('runtime_trace_sha256', '');
@@ -1751,6 +1746,36 @@ function setLedgerErrorOutputs(error: unknown): void {
   core.setOutput('state_receipt_status', 'not_written');
   core.setOutput('state_cleanup_warnings', '');
   core.setOutput('state_error_kind', kind);
+}
+
+function ledgerEntrypointErrorKind(
+  message: string,
+):
+  | 'event_rejected'
+  | 'trust_rejected'
+  | 'workflow_provenance_invalid'
+  | 'permission_denied'
+  | 'store_capability_unsupported'
+  | 'store_transaction_failed'
+  | 'store_corrupt'
+  | 'state_restore_invalid'
+  | 'runtime_failed'
+  | 'target_revalidation_failed'
+  | 'publication_observation_invalid'
+  | 'receipt_write_failed'
+  | 'outcome_unknown' {
+  if (message.includes('repository administrator')) return 'permission_denied';
+  if (message.includes('workflow source') || message.includes('workflow_run provenance'))
+    return 'workflow_provenance_invalid';
+  if (
+    message.includes('requires workflow_run') ||
+    message.includes('requires workflow_dispatch') ||
+    message.includes('resolved pull request') ||
+    message.includes('initially open pull request')
+  )
+    return 'event_rejected';
+  if (message.includes('default branch ref')) return 'trust_rejected';
+  return 'runtime_failed';
 }
 
 export function sanitizeRuntimeDiagnostic(value: string, secrets: readonly string[] = []): string {
