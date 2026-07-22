@@ -175,6 +175,9 @@ export type RecoveryEvidence =
 export interface SelectionSnapshotCommon {
   readonly schemaVersion: 1;
   readonly stateKey: StateKeyV2;
+  readonly currentHeadSha: GitSha;
+  readonly currentBaseSha: GitSha;
+  readonly currentBaseRef: string;
   readonly observedSelectorBytes: Uint8Array | null;
   readonly observedSelectorRevision: SelectorRevision;
   readonly observedSelectorSnapshotSha256: Sha256Hex;
@@ -238,6 +241,11 @@ export interface AcceptanceSnapshot {
   readonly competingScope: CompetingScope;
   readonly cutoff: DecimalSequence;
   readonly registrations: readonly FrozenRegistration[];
+  readonly enumeration: {
+    readonly kind: 'complete';
+    readonly matchingRegistrationCount: number;
+    readonly matchingRegistrationBytes: number;
+  };
   readonly candidateSetDigest: Sha256Hex;
 }
 

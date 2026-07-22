@@ -139,11 +139,16 @@ export function computeCandidateSetDigest(
     registrationId: string;
     registrationRecordSha256: string;
   }[],
+  enumeration: {
+    matchingRegistrationCount: number;
+    matchingRegistrationBytes: number;
+  },
 ): Sha256Hex {
   return digestId('agentic-pr-review/m4/candidate-set/v1', {
     competingScope: scope,
     cutoff,
     registrations,
+    enumeration,
   });
 }
 
@@ -152,6 +157,9 @@ export function computeSelectionSnapshotId(snapshot: StateSelectionSnapshot): Sh
     schemaVersion: snapshot.schemaVersion,
     kind: snapshot.kind,
     stateKey: snapshot.stateKey,
+    currentHeadSha: snapshot.currentHeadSha,
+    currentBaseSha: snapshot.currentBaseSha,
+    currentBaseRef: snapshot.currentBaseRef,
     observedSelectorRevision: snapshot.observedSelectorRevision,
     observedSelectorSnapshotSha256: snapshot.observedSelectorSnapshotSha256,
   };

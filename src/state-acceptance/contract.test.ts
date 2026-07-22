@@ -23,6 +23,7 @@ import {
   StickyCallbackOutcomeUnknownError,
   candidateLocator,
   computeCandidateId,
+  computeCandidateSetDigest,
   computeSelectionSnapshotId,
   ContractValidationError,
   decodeRecord,
@@ -579,6 +580,9 @@ describe('M4 state acceptance contract', () => {
       schemaVersion: 1 as const,
       kind: 'continuation_selected' as const,
       stateKey,
+      currentHeadSha: gitSha,
+      currentBaseSha: gitSha,
+      currentBaseRef: 'refs/heads/main',
       observedSelectorBytes: new Uint8Array([1]),
       observedSelectorRevision: 'bootstrap' as const,
       observedSelectorSnapshotSha256: sha as never,
@@ -593,6 +597,14 @@ describe('M4 state acceptance contract', () => {
       selectionSnapshotId: sha as never,
     });
     expect(first).not.toBe(second);
+    for (const field of ['currentHeadSha', 'currentBaseSha', 'currentBaseRef'] as const) {
+      const changed = computeSelectionSnapshotId({
+        ...base,
+        [field]: field === 'currentBaseRef' ? 'refs/heads/other' : ('e'.repeat(40) as never),
+        selectionSnapshotId: sha as never,
+      });
+      expect(first).not.toBe(changed);
+    }
   });
 
   it('cancels before store mutation and reports lease cleanup failures', async () => {
@@ -744,12 +756,15 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
     }
   });
 
-  it('classifies a present but invalid candidate bundle as corruption with per-file hashes', async () => {
+  it.each([
+    { label: 'legacy v1', manifestBytes: new TextEncoder().encode('{"version":1}') },
+    { label: 'unknown version', manifestBytes: new TextEncoder().encode('{"version":3}') },
+  ])('preserves explicit contract-version failure for $label', async ({ manifestBytes }) => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'm4-state-acceptance-corrupt-'));
     try {
       const store = new ReferenceStateStore(root);
       await store.close();
-      const candidateBytes = bundle();
+      const candidateBytes = { ...bundle(), manifestBytes };
       const candidateHashes = {
         manifestSha256: sha256Hex(candidateBytes.manifestBytes),
         candidateLedgerSha256: sha256Hex(candidateBytes.ledgerBytes),
@@ -782,7 +797,7 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
         expect.objectContaining({ code: 'sha256_invalid', path: '/markerId' }),
       );
       expect((await store.casSelector('bootstrap', selector)).kind).toBe('applied');
-      const result = await store.selectAcceptedState({
+      const selectionOptions = {
         stateKey,
         expectedLedgerSchemaVersion: 1,
         expectedPrefixContractVersion: 1,
@@ -801,10 +816,14 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
         provenanceTrusted: true,
         workflowIdentity: stateKey.workflowIdentity,
         trustedExecutionDomain: stateKey.trustedExecutionDomain,
-      });
+      } as const;
+      const result = await store.selectAcceptedState(selectionOptions);
       expect(result).toMatchObject({
         selection: 'selected',
-        snapshot: { kind: 'recovery_root_selected', recoveryReason: 'corrupt_accepted_artifact' },
+        snapshot: {
+          kind: 'recovery_root_selected',
+          recoveryReason: 'contract_version_incompatible',
+        },
       });
       if (result.selection === 'selected' && result.snapshot.kind === 'recovery_root_selected') {
         expect(result.snapshot.recoveryEvidence).toContainEqual({
@@ -816,9 +835,15 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
             status: 'present',
             sha256: sha256Hex(candidateBytes.providerRunMetadataBytes),
           },
-          bundleDiagnostic: 'manifest_unknown_field',
+          bundleDiagnostic: 'manifest_unknown_version',
         });
       }
+      expect(
+        await store.selectAcceptedState({ ...selectionOptions, explicitRestore: true }),
+      ).toMatchObject({
+        selection: 'selected',
+        snapshot: { kind: 'explicit_restore_invalid', failure: 'contract_version_incompatible' },
+      });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -945,6 +970,15 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       const candidate = bundle();
       const upload = await store.uploadCandidate(registration.candidateId, candidate);
       expect(['created', 'already_exists_same']).toContain(upload.kind);
+      expect(await store.uploadCandidate(registration.candidateId, candidate)).toMatchObject({
+        kind: 'already_exists_same',
+      });
+      expect(
+        await store.uploadCandidate(registration.candidateId, {
+          ...candidate,
+          ledgerBytes: new TextEncoder().encode('{"different":true}'),
+        }),
+      ).toMatchObject({ kind: 'existing_content_conflict' });
       const written = await store.registerCandidate(registrationDraft);
       expect(written.kind).toBe('created');
       const reopened = new ReferenceStateStore(root);
@@ -1344,6 +1378,9 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
         schemaVersion: 1 as const,
         kind: 'bootstrap_selected' as const,
         stateKey: manifest.stateKey,
+        currentHeadSha: manifest.provenance.currentHeadSha,
+        currentBaseSha: manifest.provenance.currentBaseSha,
+        currentBaseRef: manifest.provenance.currentBaseRef,
         observedSelectorBytes: null,
         observedSelectorRevision: 'bootstrap' as const,
         observedSelectorSnapshotSha256: observedSelectorSnapshotSha256(null),
@@ -1394,15 +1431,95 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
         acceptingRunAttempt: 1,
         consumedInputSha256: inputSha256,
         transition: manifest.transition,
+        now: () => '2026-07-20T00:00:03.000Z',
         publishSticky: async (markerId: string) => {
           publishedMarkerId = markerId;
         },
       };
+      const provenanceRoot = await mkdtemp(
+        path.join(os.tmpdir(), 'm4-state-acceptance-provenance-'),
+      );
+      try {
+        let uploadAttempts = 0;
+        let registrationAttempts = 0;
+        let markerAttempts = 0;
+        let selectorAttempts = 0;
+        const provenanceStore = new ReferenceStateStore(provenanceRoot, {
+          beforeCandidateCommit: () => {
+            uploadAttempts += 1;
+          },
+          beforeRegistrationCommit: () => {
+            registrationAttempts += 1;
+          },
+          beforeMarkerCommit: () => {
+            markerAttempts += 1;
+          },
+          beforeSelectorCommit: () => {
+            selectorAttempts += 1;
+          },
+        });
+        await provenanceStore.close();
+        for (const property of ['currentHeadSha', 'currentBaseSha', 'currentBaseRef'] as const) {
+          const mismatchedValue =
+            property === 'currentBaseRef'
+              ? 'refs/heads/other'
+              : manifest.provenance[property] === ('f'.repeat(40) as never)
+                ? ('e'.repeat(40) as never)
+                : ('f'.repeat(40) as never);
+          const mismatchedCandidate = {
+            ...candidate,
+            manifest: {
+              ...manifest,
+              provenance: { ...manifest.provenance, [property]: mismatchedValue },
+            } as never,
+          };
+          expect(
+            await acceptLocalCandidate(provenanceStore, {
+              ...acceptanceOptions,
+              candidate: mismatchedCandidate,
+            }),
+          ).toMatchObject({
+            acceptance: 'not_accepted',
+            reason: 'candidate_invalid',
+          });
+        }
+        expect(uploadAttempts).toBe(0);
+        expect(registrationAttempts).toBe(0);
+        expect(markerAttempts).toBe(0);
+        expect(selectorAttempts).toBe(0);
+      } finally {
+        await rm(provenanceRoot, { recursive: true, force: true });
+      }
       const snapshotRoot = await mkdtemp(path.join(os.tmpdir(), 'm4-state-acceptance-snapshot-'));
       try {
         const snapshotStore = new ReferenceStateStore(snapshotRoot);
         await snapshotStore.close();
-        let corruption: 'registration' | 'count' | 'bytes' | 'digest' = 'registration';
+        const competingRegistrationDraft = draft({
+          candidateId: '0'.repeat(64) as never,
+          observedSelectorRevision: selection.observedSelectorRevision,
+          observedSelectorSnapshotSha256: selection.observedSelectorSnapshotSha256,
+          stateKey: manifest.stateKey,
+          sessionEpoch: manifest.sessionEpoch,
+          stateGeneration: manifest.generation.stateGeneration,
+          ledgerEpoch: manifest.generation.ledgerEpoch,
+          transition: manifest.transition,
+          interactionId: manifest.transaction.interactionId,
+          interactionOrdinal: manifest.transaction.interactionOrdinal,
+          producingRunId: '100',
+          producingRunAttempt: 1,
+          consumedInputSha256: manifest.transaction.consumedInputSha256,
+          manifestSha256: 'a'.repeat(64) as never,
+          candidateLedgerSha256: 'b'.repeat(64) as never,
+          providerRunMetadataSha256: 'c'.repeat(64) as never,
+          metadataSemanticSha256: 'd'.repeat(64) as never,
+          resultSha256: 'e'.repeat(64) as never,
+          traceSha256: 'f'.repeat(64) as never,
+        });
+        expect((await snapshotStore.registerCandidate(competingRegistrationDraft)).kind).toBe(
+          'created',
+        );
+        let corruption: 'registration' | 'count' | 'bytes' | 'digest' | 'incomplete' =
+          'registration';
         let registrationCorruption:
           | 'state_key'
           | 'locator_kind'
@@ -1472,6 +1589,25 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
                 registrations: [{ ...first, registrationBytes: new Uint8Array(2_097_153) }],
               };
             }
+            if (corruption === 'incomplete') {
+              const registrations = snapshot.registrations.slice(1);
+              return {
+                ...snapshot,
+                registrations,
+                candidateSetDigest: computeCandidateSetDigest(
+                  snapshot.competingScope,
+                  snapshot.cutoff,
+                  registrations.map(
+                    ({ registrationSequence, registrationId, registrationRecordSha256 }) => ({
+                      registrationSequence,
+                      registrationId,
+                      registrationRecordSha256,
+                    }),
+                  ),
+                  snapshot.enumeration,
+                ),
+              };
+            }
             return { ...snapshot, candidateSetDigest: 'f'.repeat(64) as never };
           },
           readSelector: snapshotStore.readSelector.bind(snapshotStore),
@@ -1494,6 +1630,12 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
         }
         expect(snapshotCalls).toBe(0);
         registrationCorruption = null;
+        corruption = 'incomplete';
+        expect(await acceptLocalCandidate(corruptingStore, acceptanceOptions)).toMatchObject({
+          acceptance: 'not_accepted',
+          reason: 'candidate_snapshot_invalid',
+        });
+        corruption = 'registration';
         expect(await acceptLocalCandidate(corruptingStore, acceptanceOptions)).toMatchObject({
           acceptance: 'not_accepted',
           reason: 'candidate_snapshot_invalid',
@@ -1519,6 +1661,12 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       const result = await acceptLocalCandidate(store, acceptanceOptions);
       expect(result.acceptance).toBe('accepted');
       expect(result.publication).toEqual({ status: 'succeeded' });
+      if (result.acceptance === 'accepted' || result.acceptance === 'already_accepted') {
+        const persistedMarker = await store.readMarker(manifest.stateKey, result.markerId);
+        expect(persistedMarker.marker?.acceptedAt).toBe('2026-07-20T00:00:03.000Z');
+        const persistedSelector = await store.readSelector(manifest.stateKey);
+        expect(persistedSelector.selector?.updatedAt).toBe('2026-07-20T00:00:03.000Z');
+      }
       const { ledgerSchemaVersion, prefixContractVersion, ...cacheContractIdentity } =
         manifest.cacheContractIdentity;
       const restored = await store.selectAcceptedState({
@@ -1605,6 +1753,25 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       ).toMatchObject({
         selection: 'selected',
         snapshot: { kind: 'recovery_root_selected', recoveryReason: 'over_bound_ledger' },
+      });
+      expect(
+        await store.selectAcceptedState({
+          stateKey: manifest.stateKey,
+          expectedLedgerSchemaVersion: ledgerSchemaVersion,
+          expectedPrefixContractVersion: prefixContractVersion,
+          cacheContractIdentity,
+          currentHeadSha: manifest.provenance.currentHeadSha,
+          currentBaseSha: manifest.provenance.currentBaseSha,
+          currentBaseRef: manifest.provenance.currentBaseRef,
+          provenanceTrusted: true,
+          workflowIdentity: manifest.stateKey.workflowIdentity,
+          trustedExecutionDomain: manifest.stateKey.trustedExecutionDomain,
+          headRelationship: 'same',
+          explicitRestore: true,
+        }),
+      ).toMatchObject({
+        selection: 'selected',
+        snapshot: { kind: 'explicit_restore_invalid', failure: 'over_bound_ledger' },
       });
       await writeFile(
         path.join(root, 'candidates', acceptedCandidateId, 'ledger.json'),
@@ -1844,7 +2011,7 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       } finally {
         await rm(failedRoot, { recursive: true, force: true });
       }
-      expect(releaseCount).toBe(17);
+      expect(releaseCount).toBe(21);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

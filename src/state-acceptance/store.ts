@@ -589,6 +589,11 @@ export class ReferenceStateStore implements StateAcceptanceStore {
         competingScope,
         cutoff: cutoff as DecimalSequence,
         registrations: frozen,
+        enumeration: {
+          kind: 'complete' as const,
+          matchingRegistrationCount: matching.length,
+          matchingRegistrationBytes: totalBytes,
+        },
         candidateSetDigest: computeCandidateSetDigest(
           competingScope,
           cutoff,
@@ -597,6 +602,10 @@ export class ReferenceStateStore implements StateAcceptanceStore {
             registrationId,
             registrationRecordSha256,
           })),
+          {
+            matchingRegistrationCount: matching.length,
+            matchingRegistrationBytes: totalBytes,
+          },
         ),
       };
     });
@@ -637,6 +646,9 @@ export class ReferenceStateStore implements StateAcceptanceStore {
             schemaVersion: 1,
             kind: 'explicit_restore_invalid',
             stateKey: options.stateKey,
+            currentHeadSha: options.currentHeadSha,
+            currentBaseSha: options.currentBaseSha,
+            currentBaseRef: options.currentBaseRef,
             observedSelectorBytes: null,
             observedSelectorRevision: 'bootstrap',
             observedSelectorSnapshotSha256: observedSelectorSnapshotSha256(null),
@@ -649,6 +661,9 @@ export class ReferenceStateStore implements StateAcceptanceStore {
           schemaVersion: 1,
           kind: 'bootstrap_selected',
           stateKey: options.stateKey,
+          currentHeadSha: options.currentHeadSha,
+          currentBaseSha: options.currentBaseSha,
+          currentBaseRef: options.currentBaseRef,
           observedSelectorBytes: null,
           observedSelectorRevision: 'bootstrap',
           observedSelectorSnapshotSha256: observedSelectorSnapshotSha256(null),
@@ -950,6 +965,9 @@ export class ReferenceStateStore implements StateAcceptanceStore {
     const common = {
       schemaVersion: 1 as const,
       stateKey: options.stateKey,
+      currentHeadSha: options.currentHeadSha,
+      currentBaseSha: options.currentBaseSha,
+      currentBaseRef: options.currentBaseRef,
       observedSelectorBytes: new Uint8Array(selectorBytes),
       observedSelectorRevision: observedRevision,
       observedSelectorSnapshotSha256: observedHash,
@@ -1024,10 +1042,13 @@ export class ReferenceStateStore implements StateAcceptanceStore {
           schemaVersion: 1,
           kind: 'explicit_restore_invalid',
           stateKey: options.stateKey,
+          currentHeadSha: options.currentHeadSha,
+          currentBaseSha: options.currentBaseSha,
+          currentBaseRef: options.currentBaseRef,
           observedSelectorBytes: new Uint8Array(selectorBytes),
           observedSelectorRevision: revision,
           observedSelectorSnapshotSha256: observedSelectorSnapshotSha256(selectorBytes),
-          failure,
+          failure: this.explicitFailureForRecoveryReason(reason, failure),
         }),
       };
     return {
@@ -1036,6 +1057,9 @@ export class ReferenceStateStore implements StateAcceptanceStore {
         schemaVersion: 1,
         kind: 'recovery_root_selected',
         stateKey: options.stateKey,
+        currentHeadSha: options.currentHeadSha,
+        currentBaseSha: options.currentBaseSha,
+        currentBaseRef: options.currentBaseRef,
         observedSelectorBytes: new Uint8Array(selectorBytes),
         observedSelectorRevision: revision,
         observedSelectorSnapshotSha256: observedSelectorSnapshotSha256(selectorBytes),
@@ -1044,6 +1068,47 @@ export class ReferenceStateStore implements StateAcceptanceStore {
         recoveryEvidence: evidence,
       }),
     };
+  }
+
+  private explicitFailureForRecoveryReason(
+    reason:
+      | 'unavailable_accepted_artifact'
+      | 'contract_version_incompatible'
+      | 'corrupt_accepted_artifact'
+      | 'integrity_mismatch'
+      | 'unsafe_provenance'
+      | 'state_key_mismatch'
+      | 'over_bound_ledger',
+    fallback:
+      | 'explicit_state_invalid'
+      | 'selector_invalid'
+      | 'marker_invalid'
+      | 'candidate_invalid'
+      | 'provenance_invalid'
+      | 'state_key_mismatch'
+      | 'contract_version_incompatible'
+      | 'over_bound_ledger',
+  ):
+    | 'explicit_state_invalid'
+    | 'selector_invalid'
+    | 'marker_invalid'
+    | 'candidate_invalid'
+    | 'provenance_invalid'
+    | 'state_key_mismatch'
+    | 'contract_version_incompatible'
+    | 'over_bound_ledger' {
+    switch (reason) {
+      case 'contract_version_incompatible':
+        return 'contract_version_incompatible';
+      case 'over_bound_ledger':
+        return 'over_bound_ledger';
+      case 'unsafe_provenance':
+        return 'provenance_invalid';
+      case 'state_key_mismatch':
+        return 'state_key_mismatch';
+      default:
+        return fallback;
+    }
   }
 
   private finalizeSnapshot(snapshot: SnapshotDraft): StateSelectionSnapshot {
@@ -1457,7 +1522,8 @@ function isUnsafeFileSystemError(error: unknown): boolean {
 }
 
 function isAlreadyExists(error: unknown): boolean {
-  return (error as NodeJS.ErrnoException | undefined)?.code === 'EEXIST';
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return code === 'EEXIST' || code === 'ENOTEMPTY';
 }
 
 function isAtomicTempEntry(entry: string): boolean {

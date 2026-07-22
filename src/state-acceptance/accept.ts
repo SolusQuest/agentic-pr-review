@@ -211,10 +211,8 @@ async function acceptWithoutCleanup(
     )
   )
     return notAccepted('candidate_invalid');
-  const winnerManifest = winnerClassification.manifest;
-
   if (options.signal?.aborted) return notAccepted('cancelled_before_acceptance');
-  const marker = materializeMarker(markerInput(winner, options));
+  const marker = materializeMarker(markerInput(winner, options), options.now?.());
   const markerBytes = encodeValidatedRecord(marker);
   let markerWrite;
   try {
@@ -245,7 +243,7 @@ async function acceptWithoutCleanup(
   }
 
   if (options.signal?.aborted) return notAccepted('cancelled_before_acceptance');
-  const selector = materializeSelector(selectorInput(acceptedMarker, options, winnerManifest));
+  const selector = materializeSelector(selectorInput(acceptedMarker, options), options.now?.());
   const selectorBytes = encodeValidatedRecord(selector);
   let cas;
   try {
@@ -450,12 +448,7 @@ function markerInput(
   };
 }
 
-function selectorInput(
-  marker: AcceptedStateMarkerV1,
-  options: AcceptanceOptions,
-  manifest: AcceptanceOptions['candidate']['manifest'],
-) {
-  const provenance = manifest.provenance;
+function selectorInput(marker: AcceptedStateMarkerV1, options: AcceptanceOptions) {
   return {
     schemaVersion: 1 as const,
     stateKey: marker.stateKey,
@@ -473,8 +466,8 @@ function selectorInput(
     consumedInputSha256: marker.consumedInputSha256,
     resultSha256: marker.resultSha256,
     traceSha256: marker.traceSha256,
-    currentHeadSha: provenance.currentHeadSha,
-    currentBaseSha: provenance.currentBaseSha,
+    currentHeadSha: options.selectionSnapshot.currentHeadSha,
+    currentBaseSha: options.selectionSnapshot.currentBaseSha,
     workflowIdentity: marker.stateKey.workflowIdentity,
     trustedExecutionDomain: marker.stateKey.trustedExecutionDomain,
   };
@@ -574,6 +567,12 @@ function selectionFactsAreConsistent(options: AcceptanceOptions): boolean {
       canonicalJsonBytes(snapshot.stateKey),
       canonicalJsonBytes(options.candidate.manifest.stateKey),
     )
+  )
+    return false;
+  if (
+    snapshot.currentHeadSha !== options.candidate.manifest.provenance.currentHeadSha ||
+    snapshot.currentBaseSha !== options.candidate.manifest.provenance.currentBaseSha ||
+    snapshot.currentBaseRef !== options.candidate.manifest.provenance.currentBaseRef
   )
     return false;
   if (
@@ -714,8 +713,23 @@ function validateAcceptanceSnapshot(
     }
     if (!currentRegistrationPresent) return 'candidate_snapshot_invalid';
     if (
-      computeCandidateSetDigest(expectedScope, snapshot.cutoff, registrationIdentities) !==
-      snapshot.candidateSetDigest
+      snapshot.enumeration === null ||
+      typeof snapshot.enumeration !== 'object' ||
+      snapshot.enumeration.kind !== 'complete' ||
+      !Number.isSafeInteger(snapshot.enumeration.matchingRegistrationCount) ||
+      snapshot.enumeration.matchingRegistrationCount !== snapshot.registrations.length ||
+      !Number.isSafeInteger(snapshot.enumeration.matchingRegistrationBytes) ||
+      snapshot.enumeration.matchingRegistrationBytes !== totalRegistrationBytes
+    ) {
+      return 'candidate_snapshot_invalid';
+    }
+    if (
+      computeCandidateSetDigest(
+        expectedScope,
+        snapshot.cutoff,
+        registrationIdentities,
+        snapshot.enumeration,
+      ) !== snapshot.candidateSetDigest
     ) {
       return 'candidate_set_digest_mismatch';
     }
