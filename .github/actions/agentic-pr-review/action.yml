@@ -239,6 +239,20 @@ outputs:
     description: 'Lineage cumulative output tokens'
   state_transition:
     description: M4 state transition selected by the ledger-csharp path.
+  state_reason:
+    description: Bounded M4 transition or recovery reason.
+  state_candidate_id:
+    description: M4 candidate identifier when durably known.
+  state_marker_id:
+    description: M4 accepted marker identifier when durably known.
+  state_selector_revision:
+    description: M4 accepted selector revision when durably known.
+  state_session_epoch:
+    description: M4 session epoch when durably known.
+  state_generation:
+    description: M4 state generation when durably known.
+  state_ledger_epoch:
+    description: M4 ledger epoch when durably known.
   state_acceptance_status:
     description: M4 state acceptance result.
   state_acceptance_reason:
@@ -247,6 +261,10 @@ outputs:
     description: M4 sticky publication result.
   state_receipt_status:
     description: M4 publication receipt persistence result.
+  state_cleanup_warnings:
+    description: Sorted M4 candidate lease cleanup warnings.
+  state_error_kind:
+    description: Bounded M4 host or state failure kind.
 
 runs:
   using: node24

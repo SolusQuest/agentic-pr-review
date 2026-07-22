@@ -287,12 +287,18 @@ function validateDeterministicRuntimeConfig(config: ActionConfig): void {
   if (config.debugAcknowledgement) invalid.push('debug_acknowledgement');
   if (backend === 'ledger-csharp') {
     if (config.reviewMode === 'bootstrap') invalid.push('review_mode');
+    if (config.prNumber !== undefined) invalid.push('pr_number');
     if (config.stateKey) invalid.push('state_key');
     if (config.stateArtifactRunId !== undefined) invalid.push('state_artifact_run_id');
     if (config.instructions || config.instructionsPath) invalid.push('instructions');
     if (config.bootstrapContext || config.bootstrapContextPath) invalid.push('bootstrap_context');
     if (config.incrementalContext || config.incrementalContextPath)
       invalid.push('incremental_context');
+    if (config.artifactRetentionDays !== 7) invalid.push('artifact_retention_days');
+    if (config.maxContextChars !== 60_000) invalid.push('max_context_chars');
+    if (config.maxPatchChars !== 120_000) invalid.push('max_patch_chars');
+    if (config.maxReviewChars !== 12_000) invalid.push('max_review_chars');
+    if (config.maxFindings !== 50) invalid.push('max_findings');
   }
   if (invalid.length > 0) {
     throw new Error(

@@ -3,7 +3,14 @@ import {
   computeSelectionSnapshotId,
   type StateSelectionSnapshot,
 } from './state-acceptance/index.js';
-import { ledgerStateKey, LEDGER_WORKFLOW_IDENTITY, planLedgerInvocation } from './ledger-csharp.js';
+import {
+  ledgerStateKey,
+  LEDGER_TRUSTED_EXECUTION_DOMAIN,
+  LEDGER_WORKFLOW_IDENTITY,
+  planLedgerInvocation,
+  VERIFICATION_TRUSTED_EXECUTION_DOMAIN,
+  VERIFICATION_WORKFLOW_IDENTITY,
+} from './ledger-csharp.js';
 import type { ActionConfig, ReviewTarget } from './types.js';
 
 const config: ActionConfig = {
@@ -85,7 +92,7 @@ describe('ledger-csharp host plan', () => {
     expect(plan.context.stateKey).toMatchObject({
       namespace: 'm4-ledger-v2',
       workflowIdentity: LEDGER_WORKFLOW_IDENTITY,
-      trustedExecutionDomain: LEDGER_WORKFLOW_IDENTITY,
+      trustedExecutionDomain: LEDGER_TRUSTED_EXECUTION_DOMAIN,
     });
     expect(plan.context.cacheContractIdentity).toMatchObject({
       providerId: 'provider',
@@ -98,7 +105,10 @@ describe('ledger-csharp host plan', () => {
     const production = ledgerStateKey('owner/repo', 53);
     const verification = ledgerStateKey('owner/repo', 53, 'smoke-1');
 
-    expect(verification.workflowIdentity).toBe(`${LEDGER_WORKFLOW_IDENTITY}/verification/smoke-1`);
+    expect(verification.workflowIdentity).toBe(`${VERIFICATION_WORKFLOW_IDENTITY}/smoke-1`);
+    expect(verification.trustedExecutionDomain).toBe(
+      `${VERIFICATION_TRUSTED_EXECUTION_DOMAIN}/smoke-1`,
+    );
     expect(verification.workflowIdentity).not.toBe(production.workflowIdentity);
   });
 });

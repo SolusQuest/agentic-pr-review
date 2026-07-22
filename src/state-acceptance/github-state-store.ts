@@ -6,7 +6,7 @@ import {
   MANIFEST_MAX_BYTES,
   METADATA_MAX_BYTES,
 } from '../state-v2/index.js';
-import { bytesEqual, recordSha256 } from './codec.js';
+import { bytesEqual, decodeRecord, encodeRecord, recordSha256 } from './codec.js';
 import {
   compareDecimalIds,
   computeCandidateSetDigest,
@@ -17,7 +17,12 @@ import {
   sha256Hex,
 } from './hash.js';
 import { GitDataStateTransport, type GitDataClient, type GitStateRef } from './github-git-data.js';
-import { gitStatePaths, stateKeyDigest } from './github-state-paths.js';
+import {
+  competingScopeDigest,
+  gitStatePaths,
+  isAllowedGitStatePath,
+  stateKeyDigest,
+} from './github-state-paths.js';
 import {
   decodeValidatedMarker,
   decodeValidatedRegistration,
@@ -64,6 +69,16 @@ import {
 } from './store.js';
 
 const counterMax = 1_000_000;
+const REGISTRATION_COUNTER_KIND = 'm4-registration-counter';
+
+interface RegistrationCounterV1 {
+  readonly schemaVersion: 1;
+  readonly kind: typeof REGISTRATION_COUNTER_KIND;
+  readonly stateKeyDigest: string;
+  readonly lastAllocatedSequence: string;
+  readonly lastRegistrationId?: string;
+  readonly lastCompetingScopeDigest?: string;
+}
 
 export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
   private readonly transport: GitDataStateTransport;
@@ -193,39 +208,57 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
   }
 
   async registerCandidate(draft: CandidateRegistrationDraft): Promise<RegistrationWriteResult> {
-    const state = await this.requireState();
     const registrationId = computeRegistrationId(draft);
-    const all = await this.registrations(state, draft.stateKey);
-    const same = all.find((entry) => entry.registration.registrationId === registrationId);
-    if (same) return { kind: 'already_exists_same', registration: same.registration };
-    const maximum = all.reduce(
-      (value, entry) => Math.max(value, Number(entry.registration.registrationSequence)),
-      0,
-    );
-    if (maximum >= counterMax) return { kind: 'registration_sequence_overflow' };
-    const registration = materializeRegistration(draft, String(maximum + 1));
-    const scope = scopeOf(registration);
-    const path = gitStatePaths.registration(
-      scope,
-      registration.registrationSequence,
-      registration.registrationId,
-    );
-    const bytes = encodeValidatedRecord(registration);
-    const result = await this.transport.commit(
-      state,
-      new Map([[path, bytes]]),
-      `m4 state registration ${registration.registrationId}`,
-    );
-    if (result === 'applied') return { kind: 'created', registration };
-    const reread = await this.transport.read();
-    if (reread) {
-      const candidate = await this.readPath(reread, path);
-      if (candidate && bytesEqual(candidate, bytes))
-        return { kind: 'already_exists_same', registration };
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const state = await this.requireState();
+      const all = await this.registrations(state, draft.stateKey);
+      const same = all.find((entry) => entry.registration.registrationId === registrationId);
+      if (same) return { kind: 'already_exists_same', registration: same.registration };
+
+      const counterPath = gitStatePaths.counter(draft.stateKey);
+      const counterBytes = await this.readPath(state, counterPath);
+      const counter =
+        counterBytes === null
+          ? initialCounter(draft.stateKey)
+          : decodeRegistrationCounter(counterBytes, draft.stateKey);
+      await this.assertCounterIndex(state, draft.stateKey, counter);
+      const last = Number(counter.lastAllocatedSequence);
+      if (last >= counterMax) return { kind: 'registration_sequence_overflow' };
+
+      const registration = materializeRegistration(draft, String(last + 1));
+      const scope = scopeOf(registration);
+      const path = gitStatePaths.registration(
+        scope,
+        registration.registrationSequence,
+        registration.registrationId,
+      );
+      const bytes = encodeValidatedRecord(registration);
+      const nextCounter = encodeRecord({
+        ...counter,
+        lastAllocatedSequence: registration.registrationSequence,
+        lastRegistrationId: registration.registrationId,
+        lastCompetingScopeDigest: competingScopeDigest(scope),
+      } satisfies RegistrationCounterV1);
+      const result = await this.transport.commit(
+        state,
+        new Map([
+          [counterPath, nextCounter],
+          [path, bytes],
+        ]),
+        `m4 state registration ${registration.registrationId}`,
+      );
+      if (result === 'applied') return { kind: 'created', registration };
+
+      const reread = await this.transport.read();
+      if (!reread) return { kind: 'outcome_unknown', registration };
+      const reconciled = await this.registrations(reread, draft.stateKey);
+      const existing = reconciled.find(
+        (entry) => entry.registration.registrationId === registrationId,
+      );
+      if (existing) return { kind: 'already_exists_same', registration: existing.registration };
+      if (result === 'unknown') return { kind: 'outcome_unknown', registration };
     }
-    return result === 'rejected'
-      ? { kind: 'registration_write_failed' }
-      : { kind: 'outcome_unknown', registration };
+    return { kind: 'registration_write_conflict' };
   }
 
   async readSelector(
@@ -268,31 +301,66 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
   /** Persist an idempotent public receipt after a candidate acceptance attempt. */
   async writePublicationReceipt(input: {
     readonly markerId: MarkerId;
-    readonly runId: string;
-    readonly runAttempt: number;
-    readonly publicationStatus: string;
-    readonly commentUrl: string;
+    readonly stateKey: StateKeyV2;
+    readonly selectorRevision: SelectorRevision;
+    readonly acceptingRunId: string;
+    readonly acceptingRunAttempt: number;
+    readonly publicationStatus: 'not_attempted' | 'succeeded' | 'failed' | 'unknown';
+    readonly commentId?: string;
+    readonly bodySha256?: string;
+    readonly failureCode?:
+      | 'comment_create_failed'
+      | 'comment_update_failed'
+      | 'comment_readback_failed'
+      | 'comment_outcome_unknown';
+    readonly recordedAt: string;
   }): Promise<'created' | 'already_exists_same' | 'failed'> {
     if (
       !SHA256_HEX.test(input.markerId) ||
-      !/^[1-9][0-9]{0,18}$/.test(input.runId) ||
-      !Number.isInteger(input.runAttempt) ||
-      input.runAttempt < 1 ||
-      input.runAttempt > 2_147_483_647
+      !/^sha256:[a-f0-9]{64}$/.test(input.selectorRevision) ||
+      !/^[1-9][0-9]{0,18}$/.test(input.acceptingRunId) ||
+      !Number.isInteger(input.acceptingRunAttempt) ||
+      input.acceptingRunAttempt < 1 ||
+      input.acceptingRunAttempt > 2_147_483_647 ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(input.recordedAt)
     ) {
       return 'failed';
     }
-    const bytes = canonicalJsonBytes({
+    const common = {
       schemaVersion: 1,
-      kind: 'm4-state-publication-receipt',
       markerId: input.markerId,
-      runId: input.runId,
-      runAttempt: input.runAttempt,
+      stateKeyDigest: stateKeyDigest(input.stateKey),
+      selectorRevision: input.selectorRevision,
+      acceptingRunId: input.acceptingRunId,
+      acceptingRunAttempt: input.acceptingRunAttempt,
       publicationStatus: input.publicationStatus,
-      commentUrl: input.commentUrl,
-    });
+      recordedAt: input.recordedAt,
+    };
+    const receipt =
+      input.publicationStatus === 'succeeded'
+        ? input.commentId && input.bodySha256 && SHA256_HEX.test(input.bodySha256)
+          ? { ...common, commentId: input.commentId, bodySha256: input.bodySha256 }
+          : null
+        : input.publicationStatus === 'failed'
+          ? input.failureCode &&
+            ['comment_create_failed', 'comment_update_failed', 'comment_readback_failed'].includes(
+              input.failureCode,
+            )
+            ? { ...common, failureCode: input.failureCode }
+            : null
+          : input.publicationStatus === 'unknown'
+            ? input.failureCode === 'comment_outcome_unknown'
+              ? { ...common, failureCode: input.failureCode }
+              : null
+            : { ...common };
+    if (!receipt) return 'failed';
+    const bytes = encodeRecord(receipt, 4096);
     const state = await this.requireState();
-    const path = gitStatePaths.receipt(input.markerId, input.runId, input.runAttempt);
+    const path = gitStatePaths.receipt(
+      input.markerId,
+      input.acceptingRunId,
+      input.acceptingRunAttempt,
+    );
     const existing = await this.readPath(state, path);
     if (existing !== null) return bytesEqual(existing, bytes) ? 'already_exists_same' : 'failed';
     const outcome = await this.transport.commit(
@@ -705,7 +773,16 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
   private async requireState(): Promise<GitStateRef> {
     const state = await this.transport.read();
     if (state === null) throw new StoreTransactionError('store_capability_unsupported');
+    this.validateStateTree(state);
     return state;
+  }
+
+  private validateStateTree(state: GitStateRef): void {
+    for (const [path, entry] of state.entries) {
+      if (!isAllowedGitStatePath(path) || entry.type !== 'blob' || entry.mode !== '100644') {
+        throw new StoreTransactionError('store_transaction_failed');
+      }
+    }
   }
 
   private async readPath(state: GitStateRef, path: string): Promise<Uint8Array | null> {
@@ -771,10 +848,79 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
       if (!path.startsWith(prefix)) continue;
       const bytes = await this.readPath(state, path);
       if (!bytes) throw new StoreTransactionError('store_transaction_failed');
-      results.push({ registration: decodeValidatedRegistration(bytes), bytes });
+      const registration = decodeValidatedRegistration(bytes);
+      const expected = gitStatePaths.registration(
+        scopeOf(registration),
+        registration.registrationSequence,
+        registration.registrationId,
+      );
+      if (path !== expected) throw new StoreTransactionError('store_transaction_failed');
+      results.push({ registration, bytes });
     }
     return results;
   }
+
+  private async assertCounterIndex(
+    state: GitStateRef,
+    stateKey: StateKeyV2,
+    counter: RegistrationCounterV1,
+  ): Promise<void> {
+    if (counter.lastAllocatedSequence === '0') return;
+    if (!counter.lastRegistrationId || !counter.lastCompetingScopeDigest) {
+      throw new StoreTransactionError('store_transaction_failed');
+    }
+    const path = `m4-state/v1/states/${stateKeyDigest(stateKey)}/registrations/${counter.lastCompetingScopeDigest}/${counter.lastAllocatedSequence}-${counter.lastRegistrationId}.json`;
+    const bytes = await this.readPath(state, path);
+    if (!bytes) throw new StoreTransactionError('store_transaction_failed');
+    const registration = decodeValidatedRegistration(bytes);
+    if (
+      registration.registrationSequence !== counter.lastAllocatedSequence ||
+      registration.registrationId !== counter.lastRegistrationId ||
+      !bytesEqual(canonicalJsonBytes(registration.stateKey), canonicalJsonBytes(stateKey)) ||
+      competingScopeDigest(scopeOf(registration)) !== counter.lastCompetingScopeDigest
+    ) {
+      throw new StoreTransactionError('store_transaction_failed');
+    }
+  }
+}
+
+function initialCounter(stateKey: StateKeyV2): RegistrationCounterV1 {
+  return {
+    schemaVersion: 1,
+    kind: REGISTRATION_COUNTER_KIND,
+    stateKeyDigest: stateKeyDigest(stateKey),
+    lastAllocatedSequence: '0',
+  };
+}
+
+function decodeRegistrationCounter(bytes: Uint8Array, stateKey: StateKeyV2): RegistrationCounterV1 {
+  const value = decodeRecord<unknown>(bytes, 1024);
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new StoreTransactionError('store_transaction_failed');
+  }
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).sort();
+  const zeroCounter = record.lastAllocatedSequence === '0';
+  const expectedKeys = zeroCounter
+    ? 'kind,lastAllocatedSequence,schemaVersion,stateKeyDigest'
+    : 'kind,lastAllocatedSequence,lastCompetingScopeDigest,lastRegistrationId,schemaVersion,stateKeyDigest';
+  if (
+    keys.join(',') !== expectedKeys ||
+    record.schemaVersion !== 1 ||
+    record.kind !== REGISTRATION_COUNTER_KIND ||
+    record.stateKeyDigest !== stateKeyDigest(stateKey) ||
+    typeof record.lastAllocatedSequence !== 'string' ||
+    !/^(?:0|[1-9][0-9]{0,6})$/.test(record.lastAllocatedSequence) ||
+    Number(record.lastAllocatedSequence) > counterMax ||
+    (!zeroCounter &&
+      (typeof record.lastRegistrationId !== 'string' ||
+        typeof record.lastCompetingScopeDigest !== 'string' ||
+        !SHA256_HEX.test(record.lastRegistrationId) ||
+        !SHA256_HEX.test(record.lastCompetingScopeDigest)))
+  ) {
+    throw new StoreTransactionError('store_transaction_failed');
+  }
+  return record as unknown as RegistrationCounterV1;
 }
 
 function revision(bytes: Uint8Array | null): SelectorRevision {

@@ -9,9 +9,10 @@ import {
   type StructuredFindingV1,
   type StructuredReviewEnvelopeV1,
 } from './types.js';
-import { truncateText } from './utils.js';
+import { sha256, truncateText } from './utils.js';
 
 export const STICKY_COMMENT_MARKER = '<!-- agentic-pr-review:v1 -->';
+const M4_STICKY_MARKER_PREFIX = '<!-- agentic-pr-review:m4-state/v1 ';
 const LINEAGE_META_PREFIX = '<!-- agentic-pr-review:meta';
 const LINEAGE_META_SUFFIX = '-->';
 const CURRENT_BLOCK_START = '<!-- agentic-pr-review:current:start -->';
@@ -70,6 +71,80 @@ export interface LineageCommentInput {
   maxTurns?: number;
   lineageTotals?: RuntimeLineageTotals;
   maxReviewChars: number;
+}
+
+export interface M4StateCommentInput {
+  octokit: any;
+  owner: string;
+  repo: string;
+  prNumber: number;
+  markerId: string;
+  selectorRevision: string;
+  structuredReview: StructuredReviewEnvelopeV1;
+}
+
+export async function upsertM4StateComment(
+  input: M4StateCommentInput,
+): Promise<{ commentUrl: string; commentId: string; bodySha256: string }> {
+  const body = buildM4StateCommentBody(
+    input.structuredReview,
+    input.markerId,
+    input.selectorRevision,
+  );
+  const comments = (await input.octokit.paginate(input.octokit.rest.issues.listComments, {
+    owner: input.owner,
+    repo: input.repo,
+    issue_number: input.prNumber,
+    per_page: 100,
+  })) as IssueComment[];
+  const match = comments
+    .filter((comment) => parseM4StateMarker(comment.body ?? '')?.markerId === input.markerId)
+    .sort((left, right) => left.id - right.id)[0];
+  const response = match
+    ? await input.octokit.rest.issues.updateComment({
+        owner: input.owner,
+        repo: input.repo,
+        comment_id: match.id,
+        body,
+      })
+    : await input.octokit.rest.issues.createComment({
+        owner: input.owner,
+        repo: input.repo,
+        issue_number: input.prNumber,
+        body,
+      });
+  if (String(response.data.body ?? '') !== body) {
+    throw new Error('comment_readback_failed');
+  }
+  return {
+    commentUrl: String(response.data.html_url ?? ''),
+    commentId: String(response.data.id),
+    bodySha256: sha256(renderStructuredReviewMarkdown(input.structuredReview)),
+  };
+}
+
+export function buildM4StateCommentBody(
+  structuredReview: StructuredReviewEnvelopeV1,
+  markerId: string,
+  selectorRevision: string,
+): string {
+  const rendered = renderStructuredReviewMarkdown(structuredReview);
+  const bodySha256 = sha256(rendered);
+  return `${rendered}\n${M4_STICKY_MARKER_PREFIX}{"bodySha256":"${bodySha256}","markerId":"${markerId}","selectorRevision":"${selectorRevision}"} -->`;
+}
+
+function parseM4StateMarker(body: string): {
+  readonly bodySha256: string;
+  readonly markerId: string;
+  readonly selectorRevision: string;
+} | null {
+  const match = body.match(
+    /\n<!-- agentic-pr-review:m4-state\/v1 \{"bodySha256":"([a-f0-9]{64})","markerId":"([a-f0-9]{64})","selectorRevision":"(sha256:[a-f0-9]{64})"\} -->$/u,
+  );
+  if (!match) return null;
+  const [, bodySha256, markerId, selectorRevision] = match;
+  const rendered = body.slice(0, body.length - match[0].length);
+  return sha256(rendered) === bodySha256 ? { bodySha256, markerId, selectorRevision } : null;
 }
 
 export function buildStickyComment(

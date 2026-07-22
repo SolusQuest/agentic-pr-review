@@ -99,6 +99,7 @@ class CoreInputReader implements InputReader {
 export async function run(): Promise<void> {
   const eventName = github.context.eventName || process.env.GITHUB_EVENT_NAME || '';
   const config = parseActionConfig(new CoreInputReader(), process.env, eventName);
+  if (config.runtimeBackend === 'ledger-csharp') setLedgerInitialOutputs();
   if (config.apiKey) {
     core.setSecret(config.apiKey);
   }
@@ -110,8 +111,15 @@ export async function run(): Promise<void> {
   try {
     await ensureDir(tempRoot);
   } catch (error) {
-    if ((config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
-      setDeterministicErrorOutputs(new Error('state-invalid: temporary directory unavailable'));
+    if (
+      (config.runtimeBackend ?? 'legacy') === 'deterministic-csharp' ||
+      config.runtimeBackend === 'ledger-csharp'
+    ) {
+      if (config.runtimeBackend === 'ledger-csharp') {
+        setLedgerErrorOutputs(new Error('state-invalid: temporary directory unavailable'));
+      } else {
+        setDeterministicErrorOutputs(new Error('state-invalid: temporary directory unavailable'));
+      }
       throw new Error('state-invalid: temporary directory unavailable');
     }
     throw error;
@@ -123,8 +131,15 @@ export async function run(): Promise<void> {
     target = await resolveTarget(config, octokit, github.context);
     validateSameRepositoryTarget(target);
   } catch (error) {
-    if ((config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
-      setDeterministicErrorOutputs(new Error('input-invalid: target resolution failed'));
+    if (
+      (config.runtimeBackend ?? 'legacy') === 'deterministic-csharp' ||
+      config.runtimeBackend === 'ledger-csharp'
+    ) {
+      if (config.runtimeBackend === 'ledger-csharp') {
+        setLedgerErrorOutputs(new Error('input-invalid: target resolution failed'));
+      } else {
+        setDeterministicErrorOutputs(new Error('input-invalid: target resolution failed'));
+      }
       throw new Error('input-invalid: target resolution failed');
     }
     throw error;
@@ -1352,11 +1367,51 @@ function setLedgerSuccessOutputs(result: Awaited<ReturnType<typeof runLedgerCsha
   core.setOutput('phase', result.phase);
   core.setOutput('review_phase', result.phase);
   core.setOutput('state_transition', result.transition);
+  core.setOutput('state_reason', '');
+  core.setOutput('state_candidate_id', '');
+  core.setOutput('state_marker_id', '');
+  core.setOutput('state_selector_revision', '');
+  core.setOutput('state_session_epoch', '');
+  core.setOutput('state_generation', '');
+  core.setOutput('state_ledger_epoch', '');
   core.setOutput('state_acceptance_status', result.acceptanceStatus);
   core.setOutput('state_acceptance_reason', result.acceptanceReason);
   core.setOutput('state_publication_status', result.publicationStatus);
   core.setOutput('state_receipt_status', result.receiptStatus);
+  core.setOutput('state_cleanup_warnings', '');
+  core.setOutput('state_error_kind', '');
   core.setOutput('comment_url', result.commentUrl);
+}
+
+function setLedgerInitialOutputs(): void {
+  for (const [name, value] of Object.entries({
+    runtime_backend: 'ledger-csharp',
+    runtime_version: '',
+    runtime_trace_sha256: '',
+    runtime_error_kind: '',
+    runtime_error_class: '',
+    usage_budget_status: 'not_applicable (records=0)',
+    state_key: '',
+    phase: '',
+    review_phase: '',
+    state_transition: '',
+    state_reason: '',
+    state_candidate_id: '',
+    state_marker_id: '',
+    state_selector_revision: '',
+    state_session_epoch: '',
+    state_generation: '',
+    state_ledger_epoch: '',
+    state_acceptance_status: 'not_started',
+    state_acceptance_reason: '',
+    state_publication_status: 'not_started',
+    state_receipt_status: 'not_started',
+    state_cleanup_warnings: '',
+    state_error_kind: '',
+    comment_url: '',
+  })) {
+    core.setOutput(name, value);
+  }
 }
 
 function setDeterministicHostErrorKind(kind: string): void {
@@ -1641,10 +1696,19 @@ function setLedgerErrorOutputs(error: unknown): void {
   core.setOutput('runtime_error_class', '');
   core.setOutput('usage_budget_status', 'not_applicable (records=0)');
   core.setOutput('state_transition', '');
+  core.setOutput('state_reason', '');
+  core.setOutput('state_candidate_id', '');
+  core.setOutput('state_marker_id', '');
+  core.setOutput('state_selector_revision', '');
+  core.setOutput('state_session_epoch', '');
+  core.setOutput('state_generation', '');
+  core.setOutput('state_ledger_epoch', '');
   core.setOutput('state_acceptance_status', 'failed');
   core.setOutput('state_acceptance_reason', sanitizeRuntimeDiagnosticForHost(message));
   core.setOutput('state_publication_status', 'not_attempted');
   core.setOutput('state_receipt_status', 'not_attempted');
+  core.setOutput('state_cleanup_warnings', '');
+  core.setOutput('state_error_kind', kind);
 }
 
 export function sanitizeRuntimeDiagnostic(value: string, secrets: readonly string[] = []): string {

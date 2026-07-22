@@ -46,6 +46,5 @@ jobs:
           runtime_provider: test
           target_mode: pull-request
           review_mode: auto
-          pr_number: ${{ github.event.workflow_run.pull_requests[0].number }}
           post_comment: 'true'
           inline_comments: 'false'

@@ -1,5 +1,5 @@
 import * as github from '@actions/github';
-import { capStructuredReviewForMarkdownLimit, upsertLineageComment } from './comments.js';
+import { capStructuredReviewForMarkdownLimit, upsertM4StateComment } from './comments.js';
 import { assembleStructuredReviewFromRuntimeContent } from './structured.js';
 import { buildReviewInputV1 } from './protocol/build-review-input.js';
 import { mapReviewResultV1ToRuntimeContent } from './protocol/map-review-result.js';
@@ -13,6 +13,7 @@ import {
   acceptLocalCandidate,
   GitHubGitStateAcceptanceStore,
   OctokitGitDataClient,
+  type StateAcceptanceStore,
   type StateSelectionSnapshot,
   type StateKeyV2,
 } from './state-acceptance/index.js';
@@ -24,6 +25,10 @@ import {
 import type { ActionConfig, Phase, ReviewTarget, StructuredReviewEnvelopeV1 } from './types.js';
 
 export const LEDGER_WORKFLOW_IDENTITY = 'agentic-pr-review/m4-stateful-review/v1';
+export const LEDGER_TRUSTED_EXECUTION_DOMAIN = 'github-default-branch-workflow-run/v1';
+export const VERIFICATION_WORKFLOW_IDENTITY = 'agentic-pr-review/m4-stateful-verification/v1';
+export const VERIFICATION_TRUSTED_EXECUTION_DOMAIN =
+  'github-default-branch-maintainer-verification/v1';
 const PLACEHOLDER_EPOCH = 'AAAAAAAAAAAAAAAAAAAAAA';
 
 const cacheContractEnvelopes = {
@@ -100,7 +105,7 @@ export async function runLedgerCsharp(input: {
   readonly eventName: string;
   readonly defaultBranchCommitSha: string;
 }): Promise<LedgerRunResult> {
-  await validateLedgerInvocationEvent(input.config, input.eventName, input.octokit);
+  await validateLedgerInvocationEvent(input.config, input.eventName, input.octokit, input.target);
   if (input.target.mode !== 'pull-request' || !input.target.prNumber) {
     throw new Error('input-invalid: ledger-csharp requires a resolved pull request');
   }
@@ -121,6 +126,13 @@ export async function runLedgerCsharp(input: {
     runId: String(github.context.runId),
     runAttempt: github.context.runAttempt,
   });
+  const { selector } = await store.readSelector(stateKey);
+  const headRelationship = await resolveHeadRelationship(
+    input.octokit,
+    repository,
+    selector?.currentHeadSha,
+    input.target.headSha,
+  );
   const selection = await store.selectAcceptedState({
     stateKey,
     expectedLedgerSchemaVersion: cacheContractIdentity.ledgerSchemaVersion,
@@ -132,7 +144,8 @@ export async function runLedgerCsharp(input: {
     provenanceTrusted: true,
     workflowIdentity: stateKey.workflowIdentity,
     trustedExecutionDomain: stateKey.trustedExecutionDomain,
-    headRelationship: 'same',
+    headRelationship,
+    explicitRestore: input.config.reviewMode === 'incremental',
   });
   if (selection.selection !== 'selected') {
     throw new Error(`state-invalid: state selection ${selection.selection}:${selection.reason}`);
@@ -181,8 +194,40 @@ export async function runLedgerCsharp(input: {
     assembled.envelope,
     input.config.maxReviewChars,
   );
+  if (!(await targetStillMatches(input.target, input.octokit))) {
+    await lease.release();
+    return {
+      stateKey: stateKey.workflowIdentity,
+      phase: plan.phase,
+      transition: lease.manifest.transition.kind,
+      acceptanceStatus: 'not_accepted',
+      acceptanceReason: 'target_changed',
+      publicationStatus: 'not_attempted',
+      receiptStatus: 'not_attempted',
+      runtimeVersion: lease.result.runtimeVersion,
+      traceSha256: lease.traceSha256,
+      commentUrl: '',
+    };
+  }
   let commentUrl = '';
-  const acceptance = await acceptLocalCandidate(store, {
+  let publishedComment: { commentId: string; bodySha256: string } | undefined;
+  let acceptedSelectorRevision = '';
+  const observingStore = new Proxy(store, {
+    get(target, property, receiver) {
+      if (property === 'casSelector') {
+        return async (...args: Parameters<StateAcceptanceStore['casSelector']>) => {
+          const outcome = await target.casSelector(...args);
+          if (outcome.kind === 'applied' || outcome.kind === 'already_applied_same_target') {
+            acceptedSelectorRevision = outcome.selector.selectorRevision;
+          }
+          return outcome;
+        };
+      }
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  }) as StateAcceptanceStore;
+  const acceptance = await acceptLocalCandidate(observingStore, {
     selectionSnapshot: selection.snapshot,
     candidate: lease,
     interactionId: lease.manifest.transaction.interactionId,
@@ -194,18 +239,19 @@ export async function runLedgerCsharp(input: {
     consumedInputSha256: lease.manifest.transaction.consumedInputSha256,
     transition: lease.manifest.transition,
     publishSticky: input.config.postComment
-      ? async () => {
+      ? async (markerId) => {
           const comment = await publishLedgerComment({
             octokit: input.octokit,
             target: input.target,
-            stateKey: stateKey.workflowIdentity,
-            phase: plan.phase,
             structuredReview,
-            runId: github.context.runId,
-            runAttempt: github.context.runAttempt,
-            previousHeadSha: plan.previousHeadSha,
+            markerId,
+            selectorRevision: acceptedSelectorRevision,
           });
-          commentUrl = comment;
+          commentUrl = comment.commentUrl;
+          publishedComment = {
+            commentId: comment.commentId,
+            bodySha256: comment.bodySha256,
+          };
         }
       : undefined,
   });
@@ -219,10 +265,23 @@ export async function runLedgerCsharp(input: {
     acceptance.acceptance === 'accepted' || acceptance.acceptance === 'already_accepted'
       ? await store.writePublicationReceipt({
           markerId: acceptance.markerId,
-          runId: String(github.context.runId),
-          runAttempt: github.context.runAttempt,
-          publicationStatus,
-          commentUrl,
+          stateKey,
+          selectorRevision: acceptance.selectorRevision,
+          acceptingRunId: String(github.context.runId),
+          acceptingRunAttempt: github.context.runAttempt,
+          publicationStatus:
+            publicationStatus === 'succeeded'
+              ? 'succeeded'
+              : publicationStatus === 'not_attempted'
+                ? 'not_attempted'
+                : publicationStatus === 'unknown'
+                  ? 'unknown'
+                  : 'failed',
+          ...(publishedComment ?? {}),
+          ...(publicationStatus === 'unknown'
+            ? { failureCode: 'comment_outcome_unknown' as const }
+            : {}),
+          recordedAt: new Date().toISOString(),
         })
       : 'not_attempted';
   if (input.config.postComment && publicationStatus !== 'succeeded') {
@@ -246,7 +305,18 @@ async function validateLedgerInvocationEvent(
   config: ActionConfig,
   eventName: string,
   octokit: any,
+  target: ReviewTarget,
 ): Promise<void> {
+  const repository = await octokit.rest.repos.get({
+    owner: github.context.repo.owner,
+    repo: github.context.repo.repo,
+  });
+  const defaultBranch = String(repository.data.default_branch ?? '');
+  const fullName = String(
+    repository.data.full_name ?? `${github.context.repo.owner}/${github.context.repo.repo}`,
+  );
+  if (!defaultBranch || !fullName)
+    throw new Error('input-invalid: repository default branch unavailable');
   const verification = config.verificationNamespace;
   if (verification === undefined && eventName !== 'workflow_run') {
     throw new Error('input-invalid: production ledger-csharp runs require workflow_run');
@@ -254,7 +324,34 @@ async function validateLedgerInvocationEvent(
   if (verification !== undefined && eventName !== 'workflow_dispatch') {
     throw new Error('input-invalid: verification_namespace requires workflow_dispatch');
   }
-  if (verification === undefined) return;
+  const workflowFile =
+    verification === undefined ? 'm4-stateful-review.yml' : 'm4-stateful-verification.yml';
+  const expectedWorkflowRef = `${fullName}/.github/workflows/${workflowFile}@refs/heads/${defaultBranch}`;
+  if (String(process.env.GITHUB_WORKFLOW_REF ?? '') !== expectedWorkflowRef) {
+    throw new Error(
+      'input-invalid: ledger-csharp workflow source is not the default-branch trusted workflow',
+    );
+  }
+  if (String(process.env.GITHUB_REF ?? '') !== `refs/heads/${defaultBranch}`) {
+    throw new Error('input-invalid: ledger-csharp must execute on the default branch ref');
+  }
+  if (verification === undefined) {
+    const workflowRun = (github.context.payload as any).workflow_run;
+    const pullRequests = workflowRun?.pull_requests;
+    if (
+      workflowRun?.conclusion !== 'success' ||
+      !Array.isArray(pullRequests) ||
+      pullRequests.length !== 1 ||
+      Number(pullRequests[0]?.number) !== target.prNumber ||
+      String(workflowRun?.head_repository?.full_name ?? '') !== target.headRepoFullName ||
+      String(workflowRun?.head_sha ?? '') !== target.headSha
+    ) {
+      throw new Error(
+        'input-invalid: workflow_run provenance does not bind exactly one current pull request',
+      );
+    }
+    return;
+  }
   const permission = await octokit.rest.repos.getCollaboratorPermissionLevel({
     owner: github.context.repo.owner,
     repo: github.context.repo.repo,
@@ -265,19 +362,65 @@ async function validateLedgerInvocationEvent(
   }
 }
 
+async function resolveHeadRelationship(
+  octokit: any,
+  repository: string,
+  predecessorHeadSha: string | undefined,
+  currentHeadSha: string,
+): Promise<'same' | 'descendant' | 'non_descendant' | 'unknown'> {
+  if (!predecessorHeadSha || predecessorHeadSha === currentHeadSha) return 'same';
+  const [owner, repo] = repository.split('/');
+  try {
+    const result = await octokit.rest.repos.compareCommits({
+      owner,
+      repo,
+      base: predecessorHeadSha,
+      head: currentHeadSha,
+    });
+    return result.data.status === 'ahead' ? 'descendant' : 'non_descendant';
+  } catch {
+    return 'unknown';
+  }
+}
+
+async function targetStillMatches(target: ReviewTarget, octokit: any): Promise<boolean> {
+  if (target.mode !== 'pull-request' || target.prNumber === undefined) return false;
+  try {
+    const current = await octokit.rest.pulls.get({
+      owner: github.context.repo.owner,
+      repo: github.context.repo.repo,
+      pull_number: target.prNumber,
+    });
+    return (
+      current.data.state === 'open' &&
+      String(current.data.base.ref) === target.baseRef &&
+      String(current.data.base.sha) === target.baseSha &&
+      String(current.data.head.sha) === target.headSha &&
+      String(current.data.head.repo?.full_name ?? '') === target.headRepoFullName
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function ledgerStateKey(
   repository: string,
   pullRequest: number,
   verificationNamespace?: string,
 ): StateKeyV2 {
-  const suffix = verificationNamespace ? `/verification/${verificationNamespace}` : '';
+  const workflowIdentity = verificationNamespace
+    ? `${VERIFICATION_WORKFLOW_IDENTITY}/${verificationNamespace}`
+    : LEDGER_WORKFLOW_IDENTITY;
+  const trustedExecutionDomain = verificationNamespace
+    ? `${VERIFICATION_TRUSTED_EXECUTION_DOMAIN}/${verificationNamespace}`
+    : LEDGER_TRUSTED_EXECUTION_DOMAIN;
   return {
     namespace: 'm4-ledger-v2',
     repository,
     headRepository: repository,
     pullRequest,
-    workflowIdentity: `${LEDGER_WORKFLOW_IDENTITY}${suffix}`,
-    trustedExecutionDomain: `${LEDGER_WORKFLOW_IDENTITY}${suffix}`,
+    workflowIdentity,
+    trustedExecutionDomain,
   };
 }
 
@@ -476,37 +619,22 @@ function predecessorManifest(bundle: {
 async function publishLedgerComment(input: {
   readonly octokit: any;
   readonly target: ReviewTarget;
-  readonly stateKey: string;
-  readonly phase: Phase;
   readonly structuredReview: StructuredReviewEnvelopeV1;
-  readonly runId: number;
-  readonly runAttempt: number;
-  readonly previousHeadSha?: string;
-}): Promise<string> {
-  const result = await upsertLineageComment({
+  readonly markerId: string;
+  readonly selectorRevision: string;
+}): Promise<{ commentUrl: string; commentId: string; bodySha256: string }> {
+  if (!/^sha256:[a-f0-9]{64}$/.test(input.selectorRevision)) {
+    throw new Error('publication_observation_invalid');
+  }
+  return upsertM4StateComment({
     octokit: input.octokit,
     owner: github.context.repo.owner,
     repo: github.context.repo.repo,
     prNumber: input.target.prNumber!,
-    target: input.target,
     structuredReview: input.structuredReview,
-    stateKey: input.stateKey,
-    phase: input.phase,
-    runtimeProvider: 'test',
-    runtimeBackend: 'ledger-csharp',
-    sessionId: `m4:${input.target.prNumber}`,
-    previousHeadSha: input.previousHeadSha,
-    currentHeadSha: input.target.headSha,
-    artifactName: 'git-data:m4-state-v1',
-    runId: input.runId,
-    runAttempt: input.runAttempt,
-    lineageReason: input.phase === 'bootstrap' ? 'manual_bootstrap' : 'continuity_mismatch',
-    usage: null,
-    observedTurns: null,
-    maxReviewChars: 12000,
-    lineageTotals: emptyLineageTotals(),
+    markerId: input.markerId,
+    selectorRevision: input.selectorRevision,
   });
-  return result.commentUrl;
 }
 
 function omitContractVersions<T extends typeof cacheContractIdentity>(identity: T) {

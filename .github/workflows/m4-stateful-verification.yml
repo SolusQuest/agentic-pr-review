@@ -50,7 +50,6 @@ jobs:
           runtime_provider: test
           target_mode: pull-request
           review_mode: auto
-          pr_number: ${{ inputs.pr_number }}
           verification_namespace: ${{ inputs.verification_namespace }}
           post_comment: 'false'
           inline_comments: 'false'

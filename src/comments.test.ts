@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  buildM4StateCommentBody,
   buildLineageCommentBody,
   buildStickyComment,
   capStructuredReviewForMarkdownLimit,
@@ -59,6 +60,19 @@ function structuredReview(headSha = 'head'): StructuredReviewEnvelopeV1 {
 }
 
 describe('sticky comment', () => {
+  it('uses a terminal M4 marker that is distinct from legacy lineage metadata', () => {
+    const markerId = 'a'.repeat(64);
+    const selectorRevision = `sha256:${'b'.repeat(64)}`;
+    const body = buildM4StateCommentBody(structuredReview(), markerId, selectorRevision);
+    expect(body).toMatch(
+      new RegExp(
+        `<!-- agentic-pr-review:m4-state/v1 \\{\"bodySha256\":\"[a-f0-9]{64}\",\"markerId\":\"${markerId}\",\"selectorRevision\":\"${selectorRevision}\"\\} -->$`,
+      ),
+    );
+    expect(body).not.toContain(STICKY_COMMENT_MARKER);
+    expect(body).not.toContain('agentic-pr-review:meta');
+  });
+
   it('uses generic markers', () => {
     const comment = buildStickyComment(
       {
