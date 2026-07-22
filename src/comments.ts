@@ -100,19 +100,40 @@ export async function upsertM4StateComment(
   const match = comments
     .filter((comment) => parseM4StateMarker(comment.body ?? '')?.markerId === input.markerId)
     .sort((left, right) => left.id - right.id)[0];
-  const response = match
-    ? await input.octokit.rest.issues.updateComment({
-        owner: input.owner,
-        repo: input.repo,
-        comment_id: match.id,
-        body,
-      })
-    : await input.octokit.rest.issues.createComment({
-        owner: input.owner,
-        repo: input.repo,
-        issue_number: input.prNumber,
-        body,
-      });
+  let response: { data: IssueComment };
+  try {
+    response = match
+      ? await input.octokit.rest.issues.updateComment({
+          owner: input.owner,
+          repo: input.repo,
+          comment_id: match.id,
+          body,
+        })
+      : await input.octokit.rest.issues.createComment({
+          owner: input.owner,
+          repo: input.repo,
+          issue_number: input.prNumber,
+          body,
+        });
+  } catch {
+    const reconciled = (await input.octokit.paginate(input.octokit.rest.issues.listComments, {
+      owner: input.owner,
+      repo: input.repo,
+      issue_number: input.prNumber,
+      per_page: 100,
+    })) as IssueComment[];
+    const exact = reconciled
+      .filter((comment) => comment.body === body)
+      .sort((left, right) => left.id - right.id)[0];
+    if (exact) {
+      return {
+        commentUrl: String(exact.html_url ?? ''),
+        commentId: String(exact.id),
+        bodySha256: sha256(renderStructuredReviewMarkdown(input.structuredReview)),
+      };
+    }
+    throw new Error('comment_outcome_unknown');
+  }
   if (String(response.data.body ?? '') !== body) {
     throw new Error('comment_readback_failed');
   }
@@ -138,6 +159,7 @@ function parseM4StateMarker(body: string): {
   readonly markerId: string;
   readonly selectorRevision: string;
 } | null {
+  if ([...body.matchAll(/<!-- agentic-pr-review:m4-state\/v1 /gu)].length !== 1) return null;
   const match = body.match(
     /\n<!-- agentic-pr-review:m4-state\/v1 \{"bodySha256":"([a-f0-9]{64})","markerId":"([a-f0-9]{64})","selectorRevision":"(sha256:[a-f0-9]{64})"\} -->$/u,
   );

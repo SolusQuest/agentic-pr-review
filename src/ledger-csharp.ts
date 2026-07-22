@@ -14,6 +14,7 @@ import {
   computeCandidateId,
   GitHubGitStateAcceptanceStore,
   OctokitGitDataClient,
+  StickyCallbackOutcomeUnknownError,
   type StateAcceptanceStore,
   type StateSelectionSnapshot,
   type StateKeyV2,
@@ -262,18 +263,25 @@ export async function runLedgerCsharp(input: {
     transition: lease.manifest.transition,
     publishSticky: input.config.postComment
       ? async (markerId) => {
-          const comment = await publishLedgerComment({
-            octokit: input.octokit,
-            target: input.target,
-            structuredReview,
-            markerId,
-            selectorRevision: acceptedSelectorRevision,
-          });
-          commentUrl = comment.commentUrl;
-          publishedComment = {
-            commentId: comment.commentId,
-            bodySha256: comment.bodySha256,
-          };
+          try {
+            const comment = await publishLedgerComment({
+              octokit: input.octokit,
+              target: input.target,
+              structuredReview,
+              markerId,
+              selectorRevision: acceptedSelectorRevision,
+            });
+            commentUrl = comment.commentUrl;
+            publishedComment = {
+              commentId: comment.commentId,
+              bodySha256: comment.bodySha256,
+            };
+          } catch (error) {
+            if (error instanceof Error && error.message === 'comment_outcome_unknown') {
+              throw new StickyCallbackOutcomeUnknownError();
+            }
+            throw error;
+          }
         }
       : undefined,
   });
