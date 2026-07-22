@@ -187,6 +187,7 @@ async function acceptWithoutCleanup(
       return notAccepted('candidate_snapshot_limit_exceeded');
     if (error instanceof SelectorRevisionMismatchError)
       return reconcileAlreadyAccepted(store, options, registration);
+    if (error instanceof StoreCorruptionError) throw error;
     if (error instanceof StoreTransactionError) return notAccepted(error.reason);
     return unknownAcceptance();
   }
@@ -232,6 +233,7 @@ async function acceptWithoutCleanup(
   try {
     markerWrite = await store.writeMarker(marker);
   } catch (error) {
+    if (error instanceof StoreCorruptionError) throw error;
     if (error instanceof StoreTransactionError) return notAccepted(error.reason);
     return notAccepted('marker_write_failed');
   }
@@ -242,7 +244,8 @@ async function acceptWithoutCleanup(
     let readBack: Awaited<ReturnType<StateAcceptanceStore['readMarker']>>;
     try {
       readBack = await store.readMarker(options.selectionSnapshot.stateKey, marker.markerId);
-    } catch {
+    } catch (error) {
+      if (error instanceof StoreCorruptionError) throw error;
       return unknownAcceptance();
     }
     if (
@@ -263,6 +266,7 @@ async function acceptWithoutCleanup(
   try {
     cas = await store.casSelector(options.selectionSnapshot.observedSelectorRevision, selector);
   } catch (error) {
+    if (error instanceof StoreCorruptionError) throw error;
     if (error instanceof StoreTransactionError) return notAccepted(error.reason);
     return notAccepted('store_transaction_failed');
   }
@@ -273,7 +277,8 @@ async function acceptWithoutCleanup(
     let readBack: Awaited<ReturnType<StateAcceptanceStore['readSelector']>>;
     try {
       readBack = await store.readSelector(options.selectionSnapshot.stateKey);
-    } catch {
+    } catch (error) {
+      if (error instanceof StoreCorruptionError) throw error;
       return unknownAcceptance();
     }
     if (
