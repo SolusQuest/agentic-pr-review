@@ -3,7 +3,7 @@ import { canonicalJsonBytes } from '../canonical-json/index.js';
 import { makeCacheContract, makeStateKey } from '../state-v2/test-helpers.js';
 import { computeCandidateId, decodeRecord, type CandidateRegistrationDraft } from './index.js';
 import type { GitDataClient } from './github-git-data.js';
-import { GitHubGitStateAcceptanceStore } from './github-state-store.js';
+import { GitHubGitStateAcceptanceStore, manifestProvenanceMatches } from './github-state-store.js';
 import { gitStatePaths } from './github-state-paths.js';
 
 function client(): GitDataClient {
@@ -111,6 +111,20 @@ class MemoryGitDataClient implements GitDataClient {
   private next(prefix: string): string {
     this.serial += 1;
     return `${prefix}${String(this.serial).padStart(39, '0')}`;
+  }
+}
+
+class RejectOnceMemoryGitDataClient extends MemoryGitDataClient {
+  updateAttempts = 0;
+  rejectNextUpdate = false;
+
+  override async updateRef(input: { readonly sha: string; readonly force: false }) {
+    this.updateAttempts += 1;
+    if (this.rejectNextUpdate) {
+      this.rejectNextUpdate = false;
+      return 'rejected' as const;
+    }
+    return super.updateRef(input);
   }
 }
 
@@ -319,5 +333,57 @@ describe('GitHubGitStateAcceptanceStore registrations', () => {
     ).rejects.toMatchObject({
       reason: 'store_transaction_failed',
     });
+  });
+});
+
+describe('GitHubGitStateAcceptanceStore durable receipts', () => {
+  it('retries a moved global state ref before persisting an otherwise unchanged receipt', async () => {
+    const transport = new RejectOnceMemoryGitDataClient();
+    const store = new GitHubGitStateAcceptanceStore(transport, 'owner', 'repo');
+    await store.ensureInitialized({
+      defaultBranchCommitSha: 'c'.repeat(40),
+      stateKey,
+      runId: '10',
+      runAttempt: 1,
+    });
+    transport.rejectNextUpdate = true;
+    await expect(
+      store.writePublicationReceipt({
+        markerId: 'a'.repeat(64) as never,
+        stateKey,
+        selectorRevision: `sha256:${'b'.repeat(64)}` as never,
+        acceptingRunId: '10',
+        acceptingRunAttempt: 1,
+        publicationStatus: 'not_attempted',
+        recordedAt: '2026-07-23T00:00:00.000Z',
+      }),
+    ).resolves.toBe('created');
+    expect(transport.updateAttempts).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('GitHubGitStateAcceptanceStore provenance binding', () => {
+  it('requires every supplied immutable workflow provenance field to match', () => {
+    const manifest = {
+      provenance: {
+        workflowEvent: 'workflow_run',
+        producingWorkflowRef: 'owner/repo/.github/workflows/m4.yml@refs/heads/main',
+        producingGitRef: 'refs/heads/main',
+        producingActionSourceSha: 'c'.repeat(40),
+      },
+    } as never;
+    expect(
+      manifestProvenanceMatches(manifest, {
+        expectedWorkflowEvent: 'workflow_run',
+        expectedProducingWorkflowRef: 'owner/repo/.github/workflows/m4.yml@refs/heads/main',
+        expectedProducingGitRef: 'refs/heads/main',
+        expectedProducingActionSourceSha: 'c'.repeat(40) as never,
+      } as never),
+    ).toBe(true);
+    expect(
+      manifestProvenanceMatches(manifest, {
+        expectedProducingActionSourceSha: 'd'.repeat(40) as never,
+      } as never),
+    ).toBe(false);
   });
 });

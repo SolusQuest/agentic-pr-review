@@ -154,6 +154,10 @@ export async function runLedgerCsharp(input: {
     provenanceTrusted: true,
     workflowIdentity: stateKey.workflowIdentity,
     trustedExecutionDomain: stateKey.trustedExecutionDomain,
+    expectedWorkflowEvent: input.eventName,
+    expectedProducingWorkflowRef: String(process.env.GITHUB_WORKFLOW_REF ?? ''),
+    expectedProducingGitRef: String(process.env.GITHUB_REF ?? ''),
+    expectedProducingActionSourceSha: String(process.env.GITHUB_SHA ?? '') as never,
     headRelationship,
     explicitRestore: input.config.reviewMode === 'incremental',
   });
@@ -305,11 +309,11 @@ export async function runLedgerCsharp(input: {
                 ? 'succeeded'
                 : publicationStatus === 'not_attempted'
                   ? 'not_attempted'
-                  : publicationStatus === 'unknown'
+                  : publicationStatus === 'unknown' || publicationStatus === 'pending'
                     ? 'unknown'
                     : 'failed',
             ...(publishedComment ?? {}),
-            ...(publicationStatus === 'unknown'
+            ...(publicationStatus === 'unknown' || publicationStatus === 'pending'
               ? { failureCode: 'comment_outcome_unknown' as const }
               : {}),
             recordedAt: new Date().toISOString(),
@@ -418,7 +422,8 @@ async function validateLedgerInvocationEvent(
       pullRequests.length !== 1 ||
       Number(pullRequests[0]?.number) !== target.prNumber ||
       String(workflowRun?.head_repository?.full_name ?? '') !== target.headRepoFullName ||
-      String(workflowRun?.head_sha ?? '') !== target.headSha
+      String(workflowRun?.event ?? '') !== 'pull_request' ||
+      String(workflowRun?.name ?? '') !== 'Agentic PR Review M4 Untrusted Analysis'
     ) {
       throw new Error(
         'input-invalid: workflow_run provenance does not bind exactly one current pull request',

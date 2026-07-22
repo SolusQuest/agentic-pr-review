@@ -359,6 +359,11 @@ export interface SelectionOptions {
   readonly provenanceTrusted: boolean;
   readonly workflowIdentity: string;
   readonly trustedExecutionDomain: string;
+  /** Immutable workflow provenance expected by a production restoration. */
+  readonly expectedWorkflowEvent?: string;
+  readonly expectedProducingWorkflowRef?: string;
+  readonly expectedProducingGitRef?: string;
+  readonly expectedProducingActionSourceSha?: GitSha;
   readonly headRelationship?: 'same' | 'descendant' | 'non_descendant' | 'unknown';
   readonly explicitRestore?: boolean;
 }

@@ -376,28 +376,34 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
             : { ...common };
     if (!receipt) return 'failed';
     const bytes = encodeRecord(receipt, 4096);
-    const state = await this.requireState();
     const path = gitStatePaths.receipt(
       input.markerId,
       input.acceptingRunId,
       input.acceptingRunAttempt,
     );
-    const existing = await this.readPath(state, path);
-    if (existing !== null) {
-      decodePublicationReceipt(existing);
-      return bytesEqual(existing, bytes) ? 'already_exists_same' : 'failed';
+    for (let attempt = 0; attempt < refRetryLimit; attempt += 1) {
+      const state = await this.requireState();
+      const existing = await this.readPath(state, path);
+      if (existing !== null) {
+        decodePublicationReceipt(existing);
+        return bytesEqual(existing, bytes) ? 'already_exists_same' : 'failed';
+      }
+      const outcome = await this.transport.commit(
+        state,
+        new Map([[path, bytes]]),
+        'm4 state receipt',
+      );
+      if (outcome === 'applied') return 'created';
+      const reread = await this.transport.read();
+      if (!reread) return 'failed';
+      const observed = await this.readPath(reread, path);
+      if (observed !== null) {
+        decodePublicationReceipt(observed);
+        return bytesEqual(observed, bytes) ? 'already_exists_same' : 'failed';
+      }
+      if (outcome === 'unknown') return 'failed';
     }
-    const outcome = await this.transport.commit(
-      state,
-      new Map([[path, bytes]]),
-      'm4 state receipt',
-    );
-    if (outcome === 'applied') return 'created';
-    const reread = await this.transport.read();
-    if (!reread) return 'failed';
-    const observed = await this.readPath(reread, path);
-    if (observed !== null) decodePublicationReceipt(observed);
-    return observed && bytesEqual(observed, bytes) ? 'already_exists_same' : 'failed';
+    return 'failed';
   }
 
   async readMarker(
@@ -612,7 +618,10 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
           ],
           revision,
         );
-      const registrations = await this.registrations(state, options.stateKey);
+      // Orphaned malformed registrations cannot be allowed to block recovery
+      // of the independently bound accepted chain.  Mutation paths retain a
+      // strict scan before issuing any new registration.
+      const registrations = await this.registrations(state, options.stateKey, true);
       const entry = registrations.find(
         (item) => item.registration.registrationId === marker.registrationId,
       );
@@ -664,6 +673,15 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
             ? 'contract_version_incompatible'
             : 'corrupt_accepted_artifact',
           'candidate_invalid',
+          [{ kind: 'candidate_reference', candidateId: marker.candidateId }],
+          revision,
+        );
+      if (!manifestProvenanceMatches(classified.manifest, options))
+        return this.recovery(
+          options,
+          selectorBytes,
+          'unsafe_provenance',
+          'provenance_invalid',
           [{ kind: 'candidate_reference', candidateId: marker.candidateId }],
           revision,
         );
@@ -895,21 +913,26 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
   private async registrations(
     state: GitStateRef,
     stateKey: StateKeyV2,
+    ignoreInvalid = false,
   ): Promise<{ readonly registration: CandidateRegistrationV1; readonly bytes: Uint8Array }[]> {
     const prefix = `m4-state/v1/states/${stateKeyDigest(stateKey)}/registrations/`;
     const results: { registration: CandidateRegistrationV1; bytes: Uint8Array }[] = [];
     for (const path of state.entries.keys()) {
       if (!path.startsWith(prefix)) continue;
-      const bytes = await this.readPath(state, path);
-      if (!bytes) throw new StoreTransactionError('store_transaction_failed');
-      const registration = decodeValidatedRegistration(bytes);
-      const expected = gitStatePaths.registration(
-        scopeOf(registration),
-        registration.registrationSequence,
-        registration.registrationId,
-      );
-      if (path !== expected) throw new StoreTransactionError('store_transaction_failed');
-      results.push({ registration, bytes });
+      try {
+        const bytes = await this.readPath(state, path);
+        if (!bytes) throw new StoreTransactionError('store_transaction_failed');
+        const registration = decodeValidatedRegistration(bytes);
+        const expected = gitStatePaths.registration(
+          scopeOf(registration),
+          registration.registrationSequence,
+          registration.registrationId,
+        );
+        if (path !== expected) throw new StoreTransactionError('store_transaction_failed');
+        results.push({ registration, bytes });
+      } catch (error) {
+        if (!ignoreInvalid) throw error;
+      }
     }
     return results;
   }
@@ -1028,6 +1051,19 @@ function isCanonicalTimestamp(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
   const parsed = new Date(value);
   return Number.isFinite(parsed.valueOf()) && parsed.toISOString() === value;
+}
+
+export function manifestProvenanceMatches(
+  manifest: import('../state-v2/index.js').StateManifestV2,
+  options: SelectionOptions,
+): boolean {
+  const expected = [
+    [manifest.provenance.workflowEvent, options.expectedWorkflowEvent],
+    [manifest.provenance.producingWorkflowRef, options.expectedProducingWorkflowRef],
+    [manifest.provenance.producingGitRef, options.expectedProducingGitRef],
+    [manifest.provenance.producingActionSourceSha, options.expectedProducingActionSourceSha],
+  ] as const;
+  return expected.every(([actual, required]) => required === undefined || actual === required);
 }
 
 function decodePublicationReceipt(bytes: Uint8Array): void {
