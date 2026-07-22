@@ -5,6 +5,7 @@ const [, , bundlePath, command, payloadText] = process.argv;
 const payload = JSON.parse(payloadText);
 const {
   ReferenceStateStore,
+  GitHubGitStateAcceptanceStore,
   acceptLocalCandidate,
   computeSelectionSnapshotId,
   observedSelectorSnapshotSha256,
@@ -19,8 +20,10 @@ const hooks =
         },
       }
     : undefined;
-const store = new ReferenceStateStore(payload.root, hooks);
-await store.close();
+const store = payload.githubUrl
+  ? new GitHubGitStateAcceptanceStore(httpGitDataClient(payload.githubUrl), 'owner', 'repo')
+  : new ReferenceStateStore(payload.root, hooks);
+if (!payload.githubUrl) await store.close();
 
 let result;
 switch (command) {
@@ -69,12 +72,14 @@ process.stdout.write(`${JSON.stringify(result)}\n`);
 
 async function acceptFixture(targetStore) {
   const { manifest, candidate } = await initialFixture();
+  await initializeGitStore(targetStore, manifest);
   const selectionSnapshot = bootstrapSelection(manifest.stateKey, manifest.provenance);
   return acceptLocalCandidate(targetStore, acceptanceOptions(selectionSnapshot, candidate));
 }
 
 async function restoreAndAcceptFixture(targetStore) {
   const { manifest } = await initialFixture();
+  await initializeGitStore(targetStore, manifest);
   const selectionOptions = selectionOptionsFor(manifest);
   const restored = await targetStore.selectAcceptedState(selectionOptions);
   if (restored.selection !== 'selected' || restored.snapshot.kind !== 'continuation_selected') {
@@ -95,6 +100,39 @@ async function restoreAndAcceptFixture(targetStore) {
       bytesEqual(predecessor.ledgerBytes, initial.candidate.ledgerBytes) &&
       bytesEqual(predecessor.providerRunMetadataBytes, initial.candidate.providerRunMetadataBytes),
     acceptance: summarizeAcceptance(accepted),
+  };
+}
+
+async function initializeGitStore(targetStore, manifest) {
+  if (!payload.githubUrl) return;
+  await targetStore.ensureInitialized({
+    defaultBranchCommitSha: 'c'.repeat(40),
+    stateKey: manifest.stateKey,
+    runId: String(payload.runId),
+    runAttempt: 1,
+  });
+}
+
+function httpGitDataClient(baseUrl) {
+  const call = async (method, input) => {
+    const response = await fetch(baseUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ method, input }),
+    });
+    if (!response.ok) throw new Error(`fake git data ${method} failed`);
+    return response.json();
+  };
+  return {
+    getRef: (input) => call('getRef', input),
+    getCommit: (input) => call('getCommit', input),
+    getTree: (input) => call('getTree', input),
+    getBlob: (input) => call('getBlob', input),
+    createBlob: (input) => call('createBlob', input),
+    createTree: (input) => call('createTree', input),
+    createCommit: (input) => call('createCommit', input),
+    updateRef: (input) => call('updateRef', input),
+    createRef: (input) => call('createRef', input),
   };
 }
 

@@ -1,4 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { createServer } from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { build } from 'esbuild';
 import { canonicalJsonBytes } from '../canonical-json/index.js';
 import { buildStateBundleV2 } from '../state-v2/index.js';
 import {
@@ -126,6 +133,74 @@ class MemoryGitDataClient implements GitDataClient {
   private next(prefix: string): string {
     this.serial += 1;
     return `${prefix}${String(this.serial).padStart(39, '0')}`;
+  }
+}
+
+async function buildStoreChildBundle(root: string): Promise<string> {
+  const outfile = path.join(root, '.m4-github-state-child.mjs');
+  await build({
+    entryPoints: [fileURLToPath(new URL('./index.ts', import.meta.url))],
+    bundle: true,
+    format: 'esm',
+    outfile,
+    platform: 'node',
+    logLevel: 'silent',
+  });
+  return outfile;
+}
+
+function runStoreChild(bundlePath: string, command: string, payload: Record<string, unknown>) {
+  const childScript = fileURLToPath(new URL('./store-child.mjs', import.meta.url));
+  return new Promise<{ readonly code: number | null; readonly result: Record<string, unknown> }>(
+    (resolve, reject) => {
+      const child = spawn(
+        process.execPath,
+        [childScript, bundlePath, command, JSON.stringify(payload)],
+        {
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
+      );
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (chunk: Buffer) => {
+        stdout += chunk.toString();
+      });
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderr += chunk.toString();
+      });
+      child.once('error', reject);
+      child.once('exit', (code) => {
+        if (code !== 0) return reject(new Error(stderr || `child exited ${code}`));
+        resolve({ code, result: JSON.parse(stdout) as Record<string, unknown> });
+      });
+    },
+  );
+}
+
+async function withGitDataServer<T>(run: (url: string) => Promise<T>): Promise<T> {
+  const transport = new MemoryGitDataClient();
+  const server = createServer(async (request, response) => {
+    try {
+      let body = '';
+      for await (const chunk of request) body += chunk.toString();
+      const { method, input } = JSON.parse(body) as { method: keyof GitDataClient; input: unknown };
+      const result = await (transport as any)[method](input);
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(result));
+    } catch {
+      response.writeHead(500);
+      response.end();
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('fake Git server did not bind');
+  try {
+    return await run(`http://127.0.0.1:${address.port}`);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
   }
 }
 
@@ -408,6 +483,33 @@ describe('GitHubGitStateAcceptanceStore control plane', () => {
 });
 
 describe('GitHubGitStateAcceptanceStore acceptance integration', () => {
+  it('uses two independent processes against a shared Git-data service for bootstrap then continuation', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'm4-github-store-child-'));
+    try {
+      const bundlePath = await buildStoreChildBundle(root);
+      await withGitDataServer(async (githubUrl) => {
+        const bootstrap = await runStoreChild(bundlePath, 'accept-fixture', {
+          githubUrl,
+          runId: '1',
+        });
+        expect(bootstrap.result).toMatchObject({ acceptance: 'accepted' });
+
+        const continuation = await runStoreChild(bundlePath, 'restore-and-accept-fixture', {
+          githubUrl,
+          runId: '2',
+        });
+        expect(continuation.result).toMatchObject({
+          selection: 'selected',
+          snapshotKind: 'continuation_selected',
+          predecessorBytesMatch: true,
+          acceptance: { acceptance: 'accepted' },
+        });
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('accepts at most one competing selector successor and suppresses loser sticky publication', async () => {
     const transport = new MemoryGitDataClient();
     const left = new GitHubGitStateAcceptanceStore(transport, 'owner', 'repo');
