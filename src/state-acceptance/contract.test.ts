@@ -1494,8 +1494,7 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       try {
         const snapshotStore = new ReferenceStateStore(snapshotRoot);
         await snapshotStore.close();
-        const competingRegistrationDraft = draft({
-          candidateId: '0'.repeat(64) as never,
+        const competingRegistrationDraftBase = draft({
           observedSelectorRevision: selection.observedSelectorRevision,
           observedSelectorSnapshotSha256: selection.observedSelectorSnapshotSha256,
           stateKey: manifest.stateKey,
@@ -1508,13 +1507,25 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
           producingRunId: '100',
           producingRunAttempt: 1,
           consumedInputSha256: manifest.transaction.consumedInputSha256,
-          manifestSha256: 'a'.repeat(64) as never,
-          candidateLedgerSha256: 'b'.repeat(64) as never,
-          providerRunMetadataSha256: 'c'.repeat(64) as never,
-          metadataSemanticSha256: 'd'.repeat(64) as never,
+          manifestSha256: sha256Hex(manifestBytes) as never,
+          candidateLedgerSha256: sha256Hex(ledgerBytes) as never,
+          providerRunMetadataSha256: sha256Hex(providerRunMetadataBytes) as never,
+          metadataSemanticSha256: manifest.transaction.metadataSemanticSha256,
           resultSha256: 'e'.repeat(64) as never,
-          traceSha256: 'f'.repeat(64) as never,
+          traceSha256: sha256Hex(traceBytes) as never,
         });
+        const competingRegistrationDraft = {
+          ...competingRegistrationDraftBase,
+          candidateId: computeCandidateId({
+            manifestSha256: competingRegistrationDraftBase.manifestSha256,
+            candidateLedgerSha256: competingRegistrationDraftBase.candidateLedgerSha256,
+            providerRunMetadataSha256: competingRegistrationDraftBase.providerRunMetadataSha256,
+            metadataSemanticSha256: competingRegistrationDraftBase.metadataSemanticSha256,
+            consumedInputSha256: competingRegistrationDraftBase.consumedInputSha256,
+            resultSha256: competingRegistrationDraftBase.resultSha256,
+            traceSha256: competingRegistrationDraftBase.traceSha256,
+          }) as never,
+        };
         expect((await snapshotStore.registerCandidate(competingRegistrationDraft)).kind).toBe(
           'created',
         );

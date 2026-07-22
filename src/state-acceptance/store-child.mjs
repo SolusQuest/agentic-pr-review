@@ -69,7 +69,7 @@ process.stdout.write(`${JSON.stringify(result)}\n`);
 
 async function acceptFixture(targetStore) {
   const { manifest, candidate } = await initialFixture();
-  const selectionSnapshot = bootstrapSelection(manifest.stateKey);
+  const selectionSnapshot = bootstrapSelection(manifest.stateKey, manifest.provenance);
   return acceptLocalCandidate(targetStore, acceptanceOptions(selectionSnapshot, candidate));
 }
 
@@ -194,11 +194,14 @@ async function successorFixture(previousManifest, predecessor) {
   };
 }
 
-function bootstrapSelection(stateKey) {
+function bootstrapSelection(stateKey, provenance) {
   const selection = {
     schemaVersion: 1,
     kind: 'bootstrap_selected',
     stateKey,
+    currentHeadSha: provenance.currentHeadSha,
+    currentBaseSha: provenance.currentBaseSha,
+    currentBaseRef: provenance.currentBaseRef,
     observedSelectorBytes: null,
     observedSelectorRevision: 'bootstrap',
     observedSelectorSnapshotSha256: observedSelectorSnapshotSha256(null),
