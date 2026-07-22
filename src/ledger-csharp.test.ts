@@ -80,6 +80,15 @@ describe('ledger-csharp host plan', () => {
         'b'.repeat(40),
       ),
     ).resolves.toBe('untrusted');
+
+    await expect(
+      actionSourceIsTrustedDefaultBranchAncestor(
+        { rest: { repos: { compareCommits: async () => Promise.reject(new Error('offline')) } } },
+        'owner/repo',
+        'a'.repeat(40),
+        'b'.repeat(40),
+      ),
+    ).resolves.toBe('unknown');
   });
 
   it('uses the frozen M4 state identity and bootstrap transition', () => {
