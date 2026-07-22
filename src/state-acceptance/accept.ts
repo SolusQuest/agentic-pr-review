@@ -181,7 +181,8 @@ async function acceptWithoutCleanup(
   } catch (error) {
     if (error instanceof SelectionSnapshotLimitError)
       return notAccepted('candidate_snapshot_limit_exceeded');
-    if (error instanceof SelectorRevisionMismatchError) return notAccepted('stale_candidate');
+    if (error instanceof SelectorRevisionMismatchError)
+      return reconcileAlreadyAccepted(store, options, registration);
     if (error instanceof StoreTransactionError) return notAccepted(error.reason);
     return unknownAcceptance();
   }
@@ -300,6 +301,49 @@ async function acceptWithoutCleanup(
     acceptance: selected,
     markerId: acceptedMarker.markerId,
     selectorRevision: selector.selectorRevision,
+    publication,
+    cleanupWarnings: [],
+  };
+}
+
+async function reconcileAlreadyAccepted(
+  store: StateAcceptanceStore,
+  options: AcceptanceOptions,
+  registration: CandidateRegistrationV1,
+): Promise<AcceptanceResult> {
+  let observed: Awaited<ReturnType<StateAcceptanceStore['readSelector']>>;
+  try {
+    observed = await store.readSelector(options.selectionSnapshot.stateKey);
+  } catch {
+    return unknownAcceptance();
+  }
+  if (
+    observed.selector === null ||
+    observed.selector.candidateId !== registration.candidateId ||
+    observed.selector.previousSelectorRevision !==
+      options.selectionSnapshot.observedSelectorRevision
+  )
+    return notAccepted('stale_candidate');
+  let publication: PublicationOutcome = { status: 'not_attempted' };
+  if (options.signal?.aborted)
+    publication = { status: 'pending', code: 'cancelled_after_acceptance' };
+  else if (options.publishSticky) {
+    try {
+      await options.publishSticky(observed.selector.acceptedMarkerId);
+      publication = { status: 'succeeded' };
+    } catch (error) {
+      publication =
+        error instanceof StickyCallbackOutcomeUnknownError
+          ? { status: 'unknown', code: 'sticky_callback_outcome_unknown' }
+          : error instanceof StickyCallbackKnownFailureError
+            ? { status: 'failed', code: error.code }
+            : { status: 'failed', code: 'sticky_callback_failed' };
+    }
+  }
+  return {
+    acceptance: 'already_accepted',
+    markerId: observed.selector.acceptedMarkerId,
+    selectorRevision: observed.selector.selectorRevision,
     publication,
     cleanupWarnings: [],
   };

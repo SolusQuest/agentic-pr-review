@@ -440,21 +440,21 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
       const state = await this.requireState();
       const current = await this.readPath(state, path);
       const currentRevision = revision(current);
+      if (current && bytesEqual(current, bytes)) {
+        try {
+          return {
+            kind: 'already_applied_same_target',
+            selector: decodeValidatedSelector(current),
+          };
+        } catch {
+          throw new StoreCorruptionError();
+        }
+      }
       if (
         selector.previousSelectorRevision !== expectedRevision ||
         currentRevision !== expectedRevision
       ) {
         return { kind: 'rejected_with_current_revision', currentRevision };
-      }
-      if (current) {
-        try {
-          const decoded = decodeValidatedSelector(current);
-          if (decoded.selectorId === selector.selectorId) {
-            return { kind: 'already_applied_same_target', selector: decoded };
-          }
-        } catch {
-          /* revision carries invalid state and is rejected above on a non-bootstrap CAS. */
-        }
       }
       const outcome = await this.transport.commit(
         state,
@@ -775,6 +775,7 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
     } catch (error) {
       if (error instanceof SelectionSnapshotLimitError)
         return { selection: 'failed', reason: 'selection_snapshot_limit_exceeded' };
+      if (error instanceof StoreCorruptionError) throw error;
       if (error instanceof StoreTransactionError)
         return { selection: 'failed', reason: error.reason };
       return { selection: 'unknown', reason: 'selection_outcome_unknown' };
@@ -944,21 +945,22 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
       if (entry.type === 'tree' && entry.mode === '040000') continue;
       if (entry.type !== 'blob' || entry.mode !== '100644' || !isAllowedGitStatePath(path)) {
         if (ignoreInvalid) continue;
-        throw new StoreTransactionError('store_transaction_failed');
+        throw new StoreCorruptionError();
       }
       try {
         const bytes = await this.readPath(state, path);
-        if (!bytes) throw new StoreTransactionError('store_transaction_failed');
+        if (!bytes) throw new StoreCorruptionError();
         const registration = decodeValidatedRegistration(bytes);
         const expected = gitStatePaths.registration(
           scopeOf(registration),
           registration.registrationSequence,
           registration.registrationId,
         );
-        if (path !== expected) throw new StoreTransactionError('store_transaction_failed');
+        if (path !== expected) throw new StoreCorruptionError();
         results.push({ registration, bytes });
       } catch (error) {
-        if (!ignoreInvalid || !(error instanceof ContractValidationError)) throw error;
+        if (!ignoreInvalid || !(error instanceof ContractValidationError))
+          throw error instanceof ContractValidationError ? new StoreCorruptionError() : error;
       }
     }
     return results;
@@ -977,13 +979,13 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
     const registrations = await this.registrations(state, stateKey);
     const counterBytes = await this.readPath(state, gitStatePaths.counter(stateKey));
     if (counterBytes === null) {
-      if (registrations.length > 0) throw new StoreTransactionError('store_transaction_failed');
+      if (registrations.length > 0) throw new StoreCorruptionError();
       return { registrations, counter: initialCounter(stateKey) };
     }
     const counter = decodeRegistrationCounter(counterBytes, stateKey);
     await this.assertCounterIndex(state, stateKey, counter);
     const last = Number(counter.lastAllocatedSequence);
-    if (registrations.length !== last) throw new StoreTransactionError('store_transaction_failed');
+    if (registrations.length !== last) throw new StoreCorruptionError();
     const sequences = new Set<string>();
     const identifiers = new Set<string>();
     for (const entry of registrations) {
@@ -993,14 +995,13 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
         sequences.has(sequence) ||
         identifiers.has(entry.registration.registrationId)
       ) {
-        throw new StoreTransactionError('store_transaction_failed');
+        throw new StoreCorruptionError();
       }
       sequences.add(sequence);
       identifiers.add(entry.registration.registrationId);
     }
     for (let sequence = 1; sequence <= last; sequence += 1) {
-      if (!sequences.has(String(sequence)))
-        throw new StoreTransactionError('store_transaction_failed');
+      if (!sequences.has(String(sequence))) throw new StoreCorruptionError();
     }
     return { registrations, counter };
   }
@@ -1015,7 +1016,7 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
   ): Promise<void> {
     const counterBytes = await this.readPath(state, gitStatePaths.counter(stateKey));
     if (counterBytes === null) {
-      if (registrations.length > 0) throw new StoreTransactionError('store_transaction_failed');
+      if (registrations.length > 0) throw new StoreCorruptionError();
       return;
     }
     await this.assertCounterIndex(
@@ -1032,19 +1033,24 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
   ): Promise<void> {
     if (counter.lastAllocatedSequence === '0') return;
     if (!counter.lastRegistrationId || !counter.lastCompetingScopeDigest) {
-      throw new StoreTransactionError('store_transaction_failed');
+      throw new StoreCorruptionError();
     }
     const path = `m4-state/v1/states/${stateKeyDigest(stateKey)}/registrations/${counter.lastCompetingScopeDigest}/${counter.lastAllocatedSequence}-${counter.lastRegistrationId}.json`;
     const bytes = await this.readPath(state, path);
-    if (!bytes) throw new StoreTransactionError('store_transaction_failed');
-    const registration = decodeValidatedRegistration(bytes);
+    if (!bytes) throw new StoreCorruptionError();
+    let registration: CandidateRegistrationV1;
+    try {
+      registration = decodeValidatedRegistration(bytes);
+    } catch {
+      throw new StoreCorruptionError();
+    }
     if (
       registration.registrationSequence !== counter.lastAllocatedSequence ||
       registration.registrationId !== counter.lastRegistrationId ||
       !bytesEqual(canonicalJsonBytes(registration.stateKey), canonicalJsonBytes(stateKey)) ||
       competingScopeDigest(scopeOf(registration)) !== counter.lastCompetingScopeDigest
     ) {
-      throw new StoreTransactionError('store_transaction_failed');
+      throw new StoreCorruptionError();
     }
   }
 }
@@ -1061,7 +1067,7 @@ function initialCounter(stateKey: StateKeyV2): RegistrationCounterV1 {
 function decodeRegistrationCounter(bytes: Uint8Array, stateKey: StateKeyV2): RegistrationCounterV1 {
   const value = decodeRecord<unknown>(bytes, 1024);
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new StoreTransactionError('store_transaction_failed');
+    throw new StoreCorruptionError();
   }
   const record = value as Record<string, unknown>;
   const keys = Object.keys(record).sort();
@@ -1083,7 +1089,7 @@ function decodeRegistrationCounter(bytes: Uint8Array, stateKey: StateKeyV2): Reg
         !SHA256_HEX.test(record.lastRegistrationId) ||
         !SHA256_HEX.test(record.lastCompetingScopeDigest)))
   ) {
-    throw new StoreTransactionError('store_transaction_failed');
+    throw new StoreCorruptionError();
   }
   return record as unknown as RegistrationCounterV1;
 }

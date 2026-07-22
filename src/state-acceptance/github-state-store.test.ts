@@ -420,9 +420,7 @@ describe('GitHubGitStateAcceptanceStore registrations', () => {
     state.set(counterPath, { mode: '100644', type: 'blob', sha: replacement.sha });
     await expect(
       store.registerCandidate(draft({ interactionId: 'b'.repeat(64) as never })),
-    ).rejects.toMatchObject({
-      reason: 'store_transaction_failed',
-    });
+    ).rejects.toBeInstanceOf(StoreCorruptionError);
   });
 });
 
@@ -691,6 +689,35 @@ describe('GitHubGitStateAcceptanceStore acceptance integration', () => {
       transition: bundle.manifest.transition,
     });
     expect(acceptance.acceptance).toBe('accepted');
+    const acceptedSelector = await store.readSelector(bundle.manifest.stateKey);
+    expect(acceptedSelector.selector).not.toBeNull();
+    if (acceptedSelector.selector === null) return;
+    await expect(store.casSelector('bootstrap', acceptedSelector.selector)).resolves.toMatchObject({
+      kind: 'already_applied_same_target',
+    });
+    const retry = await acceptLocalCandidate(store, {
+      selectionSnapshot: selection.snapshot,
+      candidate: {
+        ...bundle,
+        resultBytes,
+        traceBytes,
+        inputSha256: sha256Hex(inputBytes),
+        resultSha256: sha256Hex(resultBytes),
+        traceSha256: sha256Hex(traceBytes),
+        candidateLedgerSha256: sha256Hex(bundle.ledgerBytes),
+        metadataSemanticSha256: bundle.manifest.transaction.metadataSemanticSha256,
+        release: async () => undefined,
+      },
+      interactionId: bundle.manifest.transaction.interactionId,
+      interactionOrdinal: bundle.manifest.transaction.interactionOrdinal,
+      producingRunId: bundle.manifest.provenance.producingRunId,
+      producingRunAttempt: bundle.manifest.provenance.producingRunAttempt,
+      acceptingRunId: '1',
+      acceptingRunAttempt: 1,
+      consumedInputSha256: sha256Hex(inputBytes),
+      transition: bundle.manifest.transition,
+    });
+    expect(retry.acceptance).toBe('already_accepted');
 
     const reopened = new GitHubGitStateAcceptanceStore(transport, 'owner', 'repo');
     const continuation = await reopened.selectAcceptedState({
