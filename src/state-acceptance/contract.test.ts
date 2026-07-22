@@ -492,6 +492,15 @@ describe('M4 state acceptance contract', () => {
       '3',
     );
     expect(classifyCandidateRegistrations(conflict, [first, conflict])).toBe('conflict');
+
+    const differentLedgerEpoch = materializeRegistration(
+      draft({ ledgerEpoch: 'B'.repeat(22) as never }),
+      '4',
+    );
+    expect(classifyCandidateRegistrations(first, [first, differentLedgerEpoch])).toBe(first);
+    expect(
+      classifyCandidateRegistrations(differentLedgerEpoch, [first, differentLedgerEpoch]),
+    ).toBe(differentLedgerEpoch);
   });
 
   it('freezes the exact aggregate acceptance snapshot byte boundary', () => {
