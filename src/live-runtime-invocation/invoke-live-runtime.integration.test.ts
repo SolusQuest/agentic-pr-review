@@ -21,6 +21,13 @@ import {
 import { serializeInputBytes, sha256Hex } from '../runtime-invocation/runtime-files.js';
 import { classifyStateBundleV2, LEDGER_MAX_BYTES, METADATA_MAX_BYTES } from '../state-v2/index.js';
 import { makeStateManifestV2Input } from '../state-v2/test-helpers.js';
+import {
+  acceptLocalCandidate,
+  candidateIdentity,
+  computeSelectionSnapshotId,
+  observedSelectorSnapshotSha256,
+  ReferenceStateStore,
+} from '../state-acceptance/index.js';
 import type { ReviewInputV1 } from '../protocol/review-input.js';
 import { invokeLiveRuntime, runProcess } from './invoke-live-runtime.js';
 
@@ -409,9 +416,73 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
         ),
       };
       expect(classifyStateBundleV2(bundle).kind).toBe('valid');
-      const predecessorLedgerBytes = new Uint8Array(bundle.ledgerBytes);
-      const predecessorManifestBytes = new Uint8Array(bundle.manifestBytes);
-      const predecessorProviderRunMetadataBytes = new Uint8Array(bundle.providerRunMetadataBytes);
+      const acceptanceIdentity = candidateIdentity(lease);
+      expect(acceptanceIdentity.bundle.manifestBytes).toEqual(new Uint8Array(bundle.manifestBytes));
+      expect(acceptanceIdentity.bundle.ledgerBytes).toEqual(new Uint8Array(bundle.ledgerBytes));
+      expect(acceptanceIdentity.bundle.providerRunMetadataBytes).toEqual(
+        new Uint8Array(bundle.providerRunMetadataBytes),
+      );
+      const selectionSnapshotDraft = {
+        schemaVersion: 1 as const,
+        kind: 'bootstrap_selected' as const,
+        stateKey: lease.manifest.stateKey,
+        currentHeadSha: lease.manifest.provenance.currentHeadSha,
+        currentBaseSha: lease.manifest.provenance.currentBaseSha,
+        currentBaseRef: lease.manifest.provenance.currentBaseRef,
+        observedSelectorBytes: null,
+        observedSelectorRevision: 'bootstrap' as const,
+        observedSelectorSnapshotSha256: observedSelectorSnapshotSha256(null),
+        transitionPlan: 'bootstrap' as const,
+        selectionSnapshotId: '' as never,
+      };
+      const bootstrapSelectionSnapshot = {
+        ...selectionSnapshotDraft,
+        selectionSnapshotId: computeSelectionSnapshotId(selectionSnapshotDraft),
+      };
+      const acceptanceStore = new ReferenceStateStore(path.join(root, 'state-acceptance'));
+      const acceptance = await acceptLocalCandidate(acceptanceStore, {
+        selectionSnapshot: bootstrapSelectionSnapshot,
+        candidate: lease,
+        interactionId: lease.manifest.transaction.interactionId,
+        interactionOrdinal: lease.manifest.transaction.interactionOrdinal,
+        producingRunId: lease.manifest.provenance.producingRunId,
+        producingRunAttempt: lease.manifest.provenance.producingRunAttempt,
+        acceptingRunId: '2',
+        acceptingRunAttempt: 1,
+        consumedInputSha256: lease.manifest.transaction.consumedInputSha256,
+        transition: lease.manifest.transition,
+        publishSticky: async (markerId) => {
+          expect(markerId).toMatch(/^[a-f0-9]{64}$/);
+        },
+      });
+      expect(acceptance.acceptance).toBe('accepted');
+      await acceptanceStore.close();
+      const reopenedAcceptanceStore = new ReferenceStateStore(path.join(root, 'state-acceptance'));
+      const { ledgerSchemaVersion, prefixContractVersion, ...cacheContractIdentity } =
+        lease.manifest.cacheContractIdentity;
+      const restored = await reopenedAcceptanceStore.selectAcceptedState({
+        stateKey: lease.manifest.stateKey,
+        expectedLedgerSchemaVersion: ledgerSchemaVersion,
+        expectedPrefixContractVersion: prefixContractVersion,
+        cacheContractIdentity,
+        currentHeadSha: lease.manifest.provenance.currentHeadSha,
+        currentBaseSha: lease.manifest.provenance.currentBaseSha,
+        currentBaseRef: lease.manifest.provenance.currentBaseRef,
+        provenanceTrusted: true,
+        workflowIdentity: lease.manifest.stateKey.workflowIdentity,
+        trustedExecutionDomain: lease.manifest.stateKey.trustedExecutionDomain,
+        headRelationship: 'same',
+      });
+      expect(restored.selection).toBe('selected');
+      if (restored.selection !== 'selected' || restored.snapshot.kind !== 'continuation_selected')
+        throw new Error('accepted bootstrap must restore as continuation');
+      const predecessorLedgerBytes = new Uint8Array(restored.snapshot.predecessorBytes.ledgerBytes);
+      const predecessorManifestBytes = new Uint8Array(
+        restored.snapshot.predecessorBytes.manifestBytes,
+      );
+      const predecessorProviderRunMetadataBytes = new Uint8Array(
+        restored.snapshot.predecessorBytes.providerRunMetadataBytes,
+      );
       const predecessorLedgerSha256 = sha256Hex(predecessorLedgerBytes);
       const predecessorManifestSha256 = sha256Hex(predecessorManifestBytes);
       const continuationInteraction = deriveInteractionId(
@@ -861,6 +932,22 @@ describe('invokeLiveRuntime bootstrap transaction', () => {
           ),
         }).kind,
       ).toBe('valid');
+      const continuationAcceptance = await acceptLocalCandidate(reopenedAcceptanceStore, {
+        selectionSnapshot: restored.snapshot,
+        candidate: continuationLease,
+        interactionId: continuationLease.manifest.transaction.interactionId,
+        interactionOrdinal: continuationLease.manifest.transaction.interactionOrdinal,
+        producingRunId: continuationLease.manifest.provenance.producingRunId,
+        producingRunAttempt: continuationLease.manifest.provenance.producingRunAttempt,
+        acceptingRunId: '3',
+        acceptingRunAttempt: 1,
+        consumedInputSha256: continuationLease.manifest.transaction.consumedInputSha256,
+        transition: continuationLease.manifest.transition,
+        publishSticky: async (markerId) => {
+          expect(markerId).toMatch(/^[a-f0-9]{64}$/);
+        },
+      });
+      expect(continuationAcceptance.acceptance).toBe('accepted');
       await continuationLease.release();
       await continuationLease.release();
       expect(existsSync(continuationLease.bundleDirectory)).toBe(false);

@@ -1,0 +1,174 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/SolusQuest/agentic-pr-review/schemas/state-selector.v1.json",
+  "title": "StateSelectorV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "selectorId",
+    "stateKey",
+    "previousSelectorRevision",
+    "selectorRevision",
+    "acceptedMarkerId",
+    "candidateId",
+    "sessionEpoch",
+    "stateGeneration",
+    "ledgerEpoch",
+    "transition",
+    "manifestSha256",
+    "candidateLedgerSha256",
+    "providerRunMetadataSha256",
+    "metadataSemanticSha256",
+    "consumedInputSha256",
+    "resultSha256",
+    "traceSha256",
+    "currentHeadSha",
+    "currentBaseSha",
+    "workflowIdentity",
+    "trustedExecutionDomain",
+    "updatedAt"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "selectorId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "stateKey": { "$ref": "#/$defs/stateKey" },
+    "previousSelectorRevision": {
+      "type": "string",
+      "pattern": "^(bootstrap|sha256:[a-f0-9]{64}|invalid:[a-f0-9]{64})$"
+    },
+    "selectorRevision": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "acceptedMarkerId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "candidateId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sessionEpoch": { "type": "string", "pattern": "^[A-Za-z0-9_-]{22}$" },
+    "stateGeneration": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+    "ledgerEpoch": { "type": "string", "pattern": "^[A-Za-z0-9_-]{22}$" },
+    "transition": { "$ref": "#/$defs/transition" },
+    "manifestSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "candidateLedgerSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "providerRunMetadataSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "metadataSemanticSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "consumedInputSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "resultSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "traceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "currentHeadSha": { "type": "string", "pattern": "^([a-f0-9]{40}|[a-f0-9]{64})$" },
+    "currentBaseSha": { "type": "string", "pattern": "^([a-f0-9]{40}|[a-f0-9]{64})$" },
+    "workflowIdentity": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "trustedExecutionDomain": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "updatedAt": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    }
+  },
+  "$defs": {
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "epoch": { "type": "string", "pattern": "^[A-Za-z0-9_-]{22}$" },
+    "predecessor": { "anyOf": [{ "const": "bootstrap" }, { "$ref": "#/$defs/sha" }] },
+    "stateKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "namespace",
+        "repository",
+        "headRepository",
+        "pullRequest",
+        "workflowIdentity",
+        "trustedExecutionDomain"
+      ],
+      "properties": {
+        "namespace": { "const": "m4-ledger-v2" },
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$",
+          "minLength": 3,
+          "maxLength": 200
+        },
+        "headRepository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$",
+          "minLength": 3,
+          "maxLength": 200
+        },
+        "pullRequest": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        "workflowIdentity": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "trustedExecutionDomain": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "transition": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "predecessorManifestSha256", "predecessorLedgerSha256", "reason"],
+          "properties": {
+            "kind": { "const": "bootstrap" },
+            "predecessorManifestSha256": { "const": "bootstrap" },
+            "predecessorLedgerSha256": { "const": "bootstrap" },
+            "reason": { "const": "new_session" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "predecessorManifestSha256",
+            "predecessorLedgerSha256",
+            "predecessorStateGeneration",
+            "predecessorLedgerEpoch"
+          ],
+          "properties": {
+            "kind": { "const": "continuation" },
+            "predecessorManifestSha256": { "$ref": "#/$defs/sha" },
+            "predecessorLedgerSha256": { "$ref": "#/$defs/sha" },
+            "predecessorStateGeneration": { "type": "integer", "minimum": 0, "maximum": 999999 },
+            "predecessorLedgerEpoch": { "$ref": "#/$defs/epoch" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "predecessorManifestSha256",
+            "predecessorLedgerSha256",
+            "predecessorStateGeneration",
+            "predecessorLedgerEpoch",
+            "reason"
+          ],
+          "properties": {
+            "kind": { "const": "reset" },
+            "predecessorManifestSha256": { "$ref": "#/$defs/sha" },
+            "predecessorLedgerSha256": { "$ref": "#/$defs/sha" },
+            "predecessorStateGeneration": { "type": "integer", "minimum": 0, "maximum": 999999 },
+            "predecessorLedgerEpoch": { "$ref": "#/$defs/epoch" },
+            "reason": {
+              "enum": ["base_change", "head_history_discontinuity", "cache_contract_change"]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "predecessorManifestSha256", "predecessorLedgerSha256", "reason"],
+          "properties": {
+            "kind": { "const": "recovery_root" },
+            "predecessorManifestSha256": { "const": "bootstrap" },
+            "predecessorLedgerSha256": { "const": "bootstrap" },
+            "reason": {
+              "enum": [
+                "corrupt_accepted_artifact",
+                "integrity_mismatch",
+                "unsafe_provenance",
+                "state_key_mismatch",
+                "contract_version_incompatible",
+                "over_bound_ledger",
+                "unavailable_accepted_artifact"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}
