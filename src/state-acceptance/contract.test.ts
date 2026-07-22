@@ -1403,7 +1403,12 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
         const snapshotStore = new ReferenceStateStore(snapshotRoot);
         await snapshotStore.close();
         let corruption: 'registration' | 'count' | 'bytes' | 'digest' = 'registration';
-        let registrationCorruption = false;
+        let registrationCorruption:
+          | 'state_key'
+          | 'locator_kind'
+          | 'locator_namespace'
+          | 'locator_shape'
+          | null = null;
         let snapshotCalls = 0;
         const corruptingStore = {
           uploadCandidate: snapshotStore.uploadCandidate.bind(snapshotStore),
@@ -1412,13 +1417,29 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
             ...args: Parameters<ReferenceStateStore['registerCandidate']>
           ) => {
             const result = await snapshotStore.registerCandidate(...args);
-            if (!registrationCorruption || !result.registration) return result;
+            if (registrationCorruption === null || !result.registration) return result;
+            const registration = { ...result.registration };
+            if (registrationCorruption === 'state_key') {
+              registration.stateKey = {
+                ...registration.stateKey,
+                workflowIdentity: 'other-workflow',
+              };
+            } else if (registrationCorruption === 'locator_kind') {
+              registration.candidateArtifactLocator = {
+                ...registration.candidateArtifactLocator,
+                kind: 'unexpected-kind',
+              } as never;
+            } else if (registrationCorruption === 'locator_namespace') {
+              registration.candidateArtifactLocator = {
+                ...registration.candidateArtifactLocator,
+                namespace: 'unexpected-namespace',
+              } as never;
+            } else {
+              registration.candidateArtifactLocator = null as never;
+            }
             return {
               ...result,
-              registration: {
-                ...result.registration,
-                stateKey: { ...result.registration.stateKey, workflowIdentity: 'other-workflow' },
-              },
+              registration,
             };
           },
           createAcceptanceSnapshot: async (
@@ -1459,13 +1480,20 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
           casSelector: snapshotStore.casSelector.bind(snapshotStore),
           selectAcceptedState: snapshotStore.selectAcceptedState.bind(snapshotStore),
         };
-        registrationCorruption = true;
-        expect(await acceptLocalCandidate(corruptingStore, acceptanceOptions)).toMatchObject({
-          acceptance: 'not_accepted',
-          reason: 'candidate_invalid',
-        });
+        for (const corruptionCase of [
+          'state_key',
+          'locator_kind',
+          'locator_namespace',
+          'locator_shape',
+        ] as const) {
+          registrationCorruption = corruptionCase;
+          expect(await acceptLocalCandidate(corruptingStore, acceptanceOptions)).toMatchObject({
+            acceptance: 'not_accepted',
+            reason: 'candidate_invalid',
+          });
+        }
         expect(snapshotCalls).toBe(0);
-        registrationCorruption = false;
+        registrationCorruption = null;
         expect(await acceptLocalCandidate(corruptingStore, acceptanceOptions)).toMatchObject({
           acceptance: 'not_accepted',
           reason: 'candidate_snapshot_invalid',
@@ -1816,7 +1844,7 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       } finally {
         await rm(failedRoot, { recursive: true, force: true });
       }
-      expect(releaseCount).toBe(14);
+      expect(releaseCount).toBe(17);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

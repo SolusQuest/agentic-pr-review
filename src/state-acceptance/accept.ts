@@ -19,6 +19,7 @@ import {
   encodeValidatedRecord,
   materializeMarker,
   materializeSelector,
+  validateCandidateRegistration,
 } from './validation.js';
 import {
   MAX_ACCEPTANCE_SNAPSHOT_REGISTRATION_BYTES,
@@ -335,17 +336,24 @@ function registrationMatchesDraft(
   registration: CandidateRegistrationV1,
   draft: CandidateRegistrationDraft,
 ): boolean {
-  const expectedRegistrationId = computeRegistrationId(
-    draft,
-  ) as CandidateRegistrationV1['registrationId'];
-  return (
-    registration.registrationId === expectedRegistrationId &&
-    registration.candidateId === draft.candidateId &&
-    registration.candidateArtifactLocator.objectId ===
-      candidateLocator(draft.candidateId).objectId &&
-    bytesEqual(canonicalJsonBytes(registration.stateKey), canonicalJsonBytes(draft.stateKey)) &&
-    computeRegistrationId(registration) === expectedRegistrationId
-  );
+  try {
+    validateCandidateRegistration(registration);
+    const expectedRegistrationId = computeRegistrationId(
+      draft,
+    ) as CandidateRegistrationV1['registrationId'];
+    return (
+      registration.registrationId === expectedRegistrationId &&
+      registration.candidateId === draft.candidateId &&
+      bytesEqual(
+        canonicalJsonBytes(registration.candidateArtifactLocator),
+        canonicalJsonBytes(candidateLocator(draft.candidateId)),
+      ) &&
+      bytesEqual(canonicalJsonBytes(registration.stateKey), canonicalJsonBytes(draft.stateKey)) &&
+      computeRegistrationId(registration) === expectedRegistrationId
+    );
+  } catch {
+    return false;
+  }
 }
 
 function predecessorFor(snapshot: StateSelectionSnapshot) {
