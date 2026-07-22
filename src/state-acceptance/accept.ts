@@ -7,7 +7,9 @@ import {
   compareDecimalIds,
   computeCandidateId,
   computeCandidateSetDigest,
+  computeRegistrationId,
   computeSelectionSnapshotId,
+  candidateLocator,
   observedSelectorSnapshotSha256,
   sha256Hex,
 } from './hash.js';
@@ -156,6 +158,7 @@ async function acceptWithoutCleanup(
   }
   const registration = registrationResult.registration;
   if (!registration) return unknownAcceptance();
+  if (!registrationMatchesDraft(registration, draft)) return notAccepted('candidate_invalid');
 
   const scope = competingScope(registration);
   let snapshot;
@@ -326,6 +329,23 @@ function registrationDraft(
     resultSha256: identity.resultSha256 as CandidateRegistrationDraft['resultSha256'],
     traceSha256: identity.traceSha256 as CandidateRegistrationDraft['traceSha256'],
   };
+}
+
+function registrationMatchesDraft(
+  registration: CandidateRegistrationV1,
+  draft: CandidateRegistrationDraft,
+): boolean {
+  const expectedRegistrationId = computeRegistrationId(
+    draft,
+  ) as CandidateRegistrationV1['registrationId'];
+  return (
+    registration.registrationId === expectedRegistrationId &&
+    registration.candidateId === draft.candidateId &&
+    registration.candidateArtifactLocator.objectId ===
+      candidateLocator(draft.candidateId).objectId &&
+    bytesEqual(canonicalJsonBytes(registration.stateKey), canonicalJsonBytes(draft.stateKey)) &&
+    computeRegistrationId(registration) === expectedRegistrationId
+  );
 }
 
 function predecessorFor(snapshot: StateSelectionSnapshot) {

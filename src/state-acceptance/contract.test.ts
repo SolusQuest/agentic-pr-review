@@ -1403,13 +1403,28 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
         const snapshotStore = new ReferenceStateStore(snapshotRoot);
         await snapshotStore.close();
         let corruption: 'registration' | 'count' | 'bytes' | 'digest' = 'registration';
+        let registrationCorruption = false;
+        let snapshotCalls = 0;
         const corruptingStore = {
           uploadCandidate: snapshotStore.uploadCandidate.bind(snapshotStore),
           readCandidate: snapshotStore.readCandidate.bind(snapshotStore),
-          registerCandidate: snapshotStore.registerCandidate.bind(snapshotStore),
+          registerCandidate: async (
+            ...args: Parameters<ReferenceStateStore['registerCandidate']>
+          ) => {
+            const result = await snapshotStore.registerCandidate(...args);
+            if (!registrationCorruption || !result.registration) return result;
+            return {
+              ...result,
+              registration: {
+                ...result.registration,
+                stateKey: { ...result.registration.stateKey, workflowIdentity: 'other-workflow' },
+              },
+            };
+          },
           createAcceptanceSnapshot: async (
             ...args: Parameters<ReferenceStateStore['createAcceptanceSnapshot']>
           ) => {
+            snapshotCalls += 1;
             const snapshot = await snapshotStore.createAcceptanceSnapshot(...args);
             if (corruption === 'registration') {
               const first = snapshot.registrations[0]!;
@@ -1444,6 +1459,13 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
           casSelector: snapshotStore.casSelector.bind(snapshotStore),
           selectAcceptedState: snapshotStore.selectAcceptedState.bind(snapshotStore),
         };
+        registrationCorruption = true;
+        expect(await acceptLocalCandidate(corruptingStore, acceptanceOptions)).toMatchObject({
+          acceptance: 'not_accepted',
+          reason: 'candidate_invalid',
+        });
+        expect(snapshotCalls).toBe(0);
+        registrationCorruption = false;
         expect(await acceptLocalCandidate(corruptingStore, acceptanceOptions)).toMatchObject({
           acceptance: 'not_accepted',
           reason: 'candidate_snapshot_invalid',
@@ -1488,6 +1510,39 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
         selection: 'selected',
         snapshot: { kind: 'continuation_selected', transitionPlan: 'continuation' },
       });
+      const restoredWithoutAncestry = await store.selectAcceptedState({
+        stateKey: manifest.stateKey,
+        expectedLedgerSchemaVersion: ledgerSchemaVersion,
+        expectedPrefixContractVersion: prefixContractVersion,
+        cacheContractIdentity,
+        currentHeadSha: manifest.provenance.currentHeadSha,
+        currentBaseSha: manifest.provenance.currentBaseSha,
+        currentBaseRef: manifest.provenance.currentBaseRef,
+        provenanceTrusted: true,
+        workflowIdentity: manifest.stateKey.workflowIdentity,
+        trustedExecutionDomain: manifest.stateKey.trustedExecutionDomain,
+      });
+      expect(restoredWithoutAncestry).toMatchObject({
+        selection: 'selected',
+        snapshot: { kind: 'continuation_selected', transitionPlan: 'continuation' },
+      });
+      const restoredWithUnknownAncestry = await store.selectAcceptedState({
+        stateKey: manifest.stateKey,
+        expectedLedgerSchemaVersion: ledgerSchemaVersion,
+        expectedPrefixContractVersion: prefixContractVersion,
+        cacheContractIdentity,
+        currentHeadSha: manifest.provenance.currentHeadSha,
+        currentBaseSha: manifest.provenance.currentBaseSha,
+        currentBaseRef: manifest.provenance.currentBaseRef,
+        provenanceTrusted: true,
+        workflowIdentity: manifest.stateKey.workflowIdentity,
+        trustedExecutionDomain: manifest.stateKey.trustedExecutionDomain,
+        headRelationship: 'unknown',
+      });
+      expect(restoredWithUnknownAncestry).toMatchObject({
+        selection: 'selected',
+        snapshot: { kind: 'continuation_selected', transitionPlan: 'continuation' },
+      });
       if (result.acceptance === 'accepted' || result.acceptance === 'already_accepted') {
         expect(publishedMarkerId).toBe(result.markerId);
       }
@@ -1522,6 +1577,37 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       ).toMatchObject({
         selection: 'selected',
         snapshot: { kind: 'recovery_root_selected', recoveryReason: 'over_bound_ledger' },
+      });
+      await writeFile(
+        path.join(root, 'candidates', acceptedCandidateId, 'ledger.json'),
+        ledgerBytes,
+        { mode: 0o600 },
+      );
+      await writeFile(
+        path.join(root, 'candidates', acceptedCandidateId, 'provider-run-metadata.json'),
+        new Uint8Array(32_769),
+        { mode: 0o600 },
+      );
+      expect(
+        await store.selectAcceptedState({
+          stateKey: manifest.stateKey,
+          expectedLedgerSchemaVersion: ledgerSchemaVersion,
+          expectedPrefixContractVersion: prefixContractVersion,
+          cacheContractIdentity,
+          currentHeadSha: manifest.provenance.currentHeadSha,
+          currentBaseSha: manifest.provenance.currentBaseSha,
+          currentBaseRef: manifest.provenance.currentBaseRef,
+          provenanceTrusted: true,
+          workflowIdentity: manifest.stateKey.workflowIdentity,
+          trustedExecutionDomain: manifest.stateKey.trustedExecutionDomain,
+          headRelationship: 'same',
+        }),
+      ).toMatchObject({
+        selection: 'selected',
+        snapshot: {
+          kind: 'recovery_root_selected',
+          recoveryReason: 'corrupt_accepted_artifact',
+        },
       });
 
       const staleRoot = await mkdtemp(path.join(os.tmpdir(), 'm4-state-acceptance-stale-'));
@@ -1730,7 +1816,7 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       } finally {
         await rm(failedRoot, { recursive: true, force: true });
       }
-      expect(releaseCount).toBe(13);
+      expect(releaseCount).toBe(14);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

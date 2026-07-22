@@ -812,8 +812,7 @@ export class ReferenceStateStore implements StateAcceptanceStore {
         selectorBytes,
         candidate.status === 'missing'
           ? 'unavailable_accepted_artifact'
-          : candidate.diagnostic === 'ledger_byte_limit_exceeded' ||
-              candidate.diagnostic === 'provider_run_metadata_byte_limit_exceeded'
+          : candidate.diagnostic === 'ledger_byte_limit_exceeded'
             ? 'over_bound_ledger'
             : 'corrupt_accepted_artifact',
         'candidate_invalid',
@@ -856,8 +855,7 @@ export class ReferenceStateStore implements StateAcceptanceStore {
       const reason =
         diagnostic === 'manifest_unknown_version' || classification.kind === 'unsupported_legacy_v1'
           ? 'contract_version_incompatible'
-          : diagnostic === 'ledger_byte_limit_exceeded' ||
-              diagnostic === 'provider_run_metadata_byte_limit_exceeded'
+          : diagnostic === 'ledger_byte_limit_exceeded'
             ? 'over_bound_ledger'
             : 'corrupt_accepted_artifact';
       return this.recoveryOrExplicit(
@@ -913,6 +911,10 @@ export class ReferenceStateStore implements StateAcceptanceStore {
       );
     }
 
+    const headRelationship =
+      selector.currentHeadSha === options.currentHeadSha
+        ? 'same'
+        : (options.headRelationship ?? 'unknown');
     const compatibility = checkStateManifestV2Compatibility(classification.manifest, {
       stateKey: options.stateKey,
       expectedLedgerSchemaVersion: options.expectedLedgerSchemaVersion,
@@ -920,7 +922,7 @@ export class ReferenceStateStore implements StateAcceptanceStore {
       cacheContractIdentity: options.cacheContractIdentity,
       currentBaseSha: options.currentBaseSha,
       currentBaseRef: options.currentBaseRef,
-      headRelationship: options.headRelationship ?? 'unknown',
+      headRelationship,
       provenanceTrusted: options.provenanceTrusted,
     });
     if (compatibility.kind === 'incompatible') {
