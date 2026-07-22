@@ -211,17 +211,11 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
     const registrationId = computeRegistrationId(draft);
     for (let attempt = 0; attempt < 4; attempt += 1) {
       const state = await this.requireState();
-      const all = await this.registrations(state, draft.stateKey);
+      const { registrations: all, counter } = await this.registrationState(state, draft.stateKey);
       const same = all.find((entry) => entry.registration.registrationId === registrationId);
       if (same) return { kind: 'already_exists_same', registration: same.registration };
 
       const counterPath = gitStatePaths.counter(draft.stateKey);
-      const counterBytes = await this.readPath(state, counterPath);
-      const counter =
-        counterBytes === null
-          ? initialCounter(draft.stateKey)
-          : decodeRegistrationCounter(counterBytes, draft.stateKey);
-      await this.assertCounterIndex(state, draft.stateKey, counter);
       const last = Number(counter.lastAllocatedSequence);
       if (last >= counterMax) return { kind: 'registration_sequence_overflow' };
 
@@ -266,6 +260,23 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
   ): Promise<{ readonly bytes: Uint8Array | null; readonly selector: StateSelectorV1 | null }> {
     const bytes = await this.readPath(await this.requireState(), gitStatePaths.selector(stateKey));
     return { bytes, selector: bytes === null ? null : decodeValidatedSelector(bytes) };
+  }
+
+  /**
+   * Reads only enough selector state to choose a conservative ancestry input.
+   * Selection remains the sole authority that classifies malformed bytes into
+   * automatic recovery versus explicit-restore failure.
+   */
+  async peekSelectorForComparison(
+    stateKey: StateKeyV2,
+  ): Promise<{ readonly selector: StateSelectorV1 | null }> {
+    const bytes = await this.readPath(await this.requireState(), gitStatePaths.selector(stateKey));
+    if (bytes === null) return { selector: null };
+    try {
+      return { selector: decodeValidatedSelector(bytes) };
+    } catch {
+      return { selector: null };
+    }
   }
 
   async writeMarker(marker: AcceptedStateMarkerV1): Promise<WriteOutcome<AcceptedStateMarkerV1>> {
@@ -438,17 +449,25 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
     );
     if (currentRevision !== expectedObservedSelectorRevision)
       throw new SelectorRevisionMismatchError(currentRevision);
-    const registrations = (await this.registrations(state, competingScope.stateKey)).filter(
-      (entry) => matchesScope(entry.registration, competingScope),
+    const { registrations: allRegistrations, counter } = await this.registrationState(
+      state,
+      competingScope.stateKey,
     );
-    const cutoff = registrations
-      .reduce((value, entry) => Math.max(value, Number(entry.registration.registrationSequence)), 0)
-      .toString();
+    const registrations = allRegistrations.filter((entry) =>
+      matchesScope(entry.registration, competingScope),
+    );
+    const cutoff = counter.lastAllocatedSequence;
     const frozen: FrozenRegistration[] = [];
     let total = 0;
-    for (const entry of registrations.sort((a, b) =>
-      compareDecimalIds(a.registration.registrationSequence, b.registration.registrationSequence),
-    )) {
+    for (const entry of registrations.sort((a, b) => {
+      const bySequence = compareDecimalIds(
+        a.registration.registrationSequence,
+        b.registration.registrationSequence,
+      );
+      return (
+        bySequence || a.registration.registrationId.localeCompare(b.registration.registrationId)
+      );
+    })) {
       if (acceptanceSnapshotLimitExceeded(frozen.length, total, entry.bytes.byteLength))
         throw new SelectionSnapshotLimitError();
       total += entry.bytes.byteLength;
@@ -476,7 +495,16 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
       cutoff: cutoff as AcceptanceSnapshot['cutoff'],
       registrations: frozen,
       enumeration,
-      candidateSetDigest: computeCandidateSetDigest(competingScope, cutoff, frozen, enumeration),
+      candidateSetDigest: computeCandidateSetDigest(
+        competingScope,
+        cutoff,
+        frozen.map((entry) => ({
+          registrationSequence: entry.registrationSequence,
+          registrationId: entry.registrationId,
+          registrationRecordSha256: entry.registrationRecordSha256,
+        })),
+        enumeration,
+      ),
     };
   }
 
@@ -779,6 +807,11 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
 
   private validateStateTree(state: GitStateRef): void {
     for (const [path, entry] of state.entries) {
+      if (!path.startsWith('m4-state/')) continue;
+      if (isM4TreePath(path)) {
+        if (entry.type === 'tree' && entry.mode === '040000') continue;
+        throw new StoreTransactionError('store_transaction_failed');
+      }
       if (!isAllowedGitStatePath(path) || entry.type !== 'blob' || entry.mode !== '100644') {
         throw new StoreTransactionError('store_transaction_failed');
       }
@@ -860,6 +893,47 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
     return results;
   }
 
+  private async registrationState(
+    state: GitStateRef,
+    stateKey: StateKeyV2,
+  ): Promise<{
+    readonly registrations: readonly {
+      readonly registration: CandidateRegistrationV1;
+      readonly bytes: Uint8Array;
+    }[];
+    readonly counter: RegistrationCounterV1;
+  }> {
+    const registrations = await this.registrations(state, stateKey);
+    const counterBytes = await this.readPath(state, gitStatePaths.counter(stateKey));
+    if (counterBytes === null) {
+      if (registrations.length > 0) throw new StoreTransactionError('store_transaction_failed');
+      return { registrations, counter: initialCounter(stateKey) };
+    }
+    const counter = decodeRegistrationCounter(counterBytes, stateKey);
+    await this.assertCounterIndex(state, stateKey, counter);
+    const last = Number(counter.lastAllocatedSequence);
+    if (registrations.length !== last) throw new StoreTransactionError('store_transaction_failed');
+    const sequences = new Set<string>();
+    const identifiers = new Set<string>();
+    for (const entry of registrations) {
+      const sequence = entry.registration.registrationSequence;
+      if (
+        Number(sequence) > last ||
+        sequences.has(sequence) ||
+        identifiers.has(entry.registration.registrationId)
+      ) {
+        throw new StoreTransactionError('store_transaction_failed');
+      }
+      sequences.add(sequence);
+      identifiers.add(entry.registration.registrationId);
+    }
+    for (let sequence = 1; sequence <= last; sequence += 1) {
+      if (!sequences.has(String(sequence)))
+        throw new StoreTransactionError('store_transaction_failed');
+    }
+    return { registrations, counter };
+  }
+
   private async assertCounterIndex(
     state: GitStateRef,
     stateKey: StateKeyV2,
@@ -921,6 +995,12 @@ function decodeRegistrationCounter(bytes: Uint8Array, stateKey: StateKeyV2): Reg
     throw new StoreTransactionError('store_transaction_failed');
   }
   return record as unknown as RegistrationCounterV1;
+}
+
+function isM4TreePath(path: string): boolean {
+  return /^(?:m4-state|m4-state\/v1|m4-state\/v1\/(?:candidates|states|markers|receipts|probes)|m4-state\/v1\/candidates\/[a-f0-9]{64}|m4-state\/v1\/states\/[a-f0-9]{64}(?:\/(?:selectors|registrations)(?:\/[a-f0-9]{64})?)?|m4-state\/v1\/receipts\/[a-f0-9]{64})$/u.test(
+    path,
+  );
 }
 
 function revision(bytes: Uint8Array | null): SelectorRevision {

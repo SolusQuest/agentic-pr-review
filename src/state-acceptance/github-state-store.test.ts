@@ -42,6 +42,16 @@ class MemoryGitDataClient implements GitDataClient {
     return this.trees.get(this.commits.get(this.ref)!.treeSha)!;
   }
 
+  addEntry(
+    path: string,
+    entry: { readonly mode: string; readonly type: 'blob' | 'tree'; readonly sha: string },
+  ) {
+    (this.snapshot() as Map<string, { mode: string; type: 'blob'; sha: string }>).set(
+      path,
+      entry as { mode: string; type: 'blob'; sha: string },
+    );
+  }
+
   async getRef() {
     return { sha: this.ref };
   }
@@ -191,6 +201,16 @@ describe('GitHubGitStateAcceptanceStore selection', () => {
 });
 
 describe('GitHubGitStateAcceptanceStore registrations', () => {
+  it('accepts ordinary default-branch content and legal M4 ancestor tree entries', async () => {
+    const transport = new MemoryGitDataClient();
+    transport.addEntry('README.md', { mode: '100644', type: 'blob', sha: 'source' });
+    transport.addEntry('m4-state', { mode: '040000', type: 'tree', sha: 'tree-1' });
+    transport.addEntry('m4-state/v1', { mode: '040000', type: 'tree', sha: 'tree-2' });
+    await expect(
+      new GitHubGitStateAcceptanceStore(transport, 'owner', 'repo').registerCandidate(draft()),
+    ).resolves.toMatchObject({ kind: 'created' });
+  });
+
   it('commits the canonical counter and immutable registration in one ref transaction', async () => {
     const transport = new MemoryGitDataClient();
     const store = new GitHubGitStateAcceptanceStore(transport, 'owner', 'repo');
@@ -240,6 +260,31 @@ describe('GitHubGitStateAcceptanceStore registrations', () => {
       'base64',
     );
     expect(decodeRecord(counterBytes)).toMatchObject({ lastAllocatedSequence: '2' });
+  });
+
+  it('uses the global state-key counter as the acceptance cutoff across competing scopes', async () => {
+    const transport = new MemoryGitDataClient();
+    const store = new GitHubGitStateAcceptanceStore(transport, 'owner', 'repo');
+    const first = draft();
+    await store.registerCandidate(first);
+    await store.registerCandidate(draft({ interactionId: 'b'.repeat(64) as never }));
+    const snapshot = await store.createAcceptanceSnapshot(
+      'bootstrap',
+      {
+        stateKey,
+        sessionEpoch: first.sessionEpoch,
+        observedSelectorRevision: first.observedSelectorRevision,
+        predecessorMarkerId: first.predecessorMarkerId,
+        predecessorManifestSha256: first.predecessorManifestSha256,
+        predecessorLedgerSha256: first.predecessorLedgerSha256,
+        ledgerEpoch: first.ledgerEpoch,
+        targetStateGeneration: first.stateGeneration,
+        interactionId: first.interactionId,
+      },
+      'c'.repeat(64),
+    );
+    expect(snapshot.cutoff).toBe('2');
+    expect(snapshot.registrations).toHaveLength(1);
   });
 
   it('fails closed when the counter does not account for every immutable registration', async () => {

@@ -135,7 +135,7 @@ export async function runLedgerCsharp(input: {
     runId: String(github.context.runId),
     runAttempt: github.context.runAttempt,
   });
-  const { selector } = await store.readSelector(stateKey);
+  const { selector } = await store.peekSelectorForComparison(stateKey);
   const headRelationship = await resolveHeadRelationship(
     input.octokit,
     repository,
