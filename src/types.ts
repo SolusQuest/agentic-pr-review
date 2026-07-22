@@ -1,5 +1,5 @@
 export type RuntimeProvider = 'test' | 'claude-code-cli';
-export type RuntimeBackend = 'legacy' | 'deterministic-csharp';
+export type RuntimeBackend = 'legacy' | 'deterministic-csharp' | 'ledger-csharp';
 export type TargetMode = 'pull-request' | 'synthetic-fixture';
 export type ReviewMode = 'auto' | 'bootstrap' | 'incremental';
 export type Phase = 'bootstrap' | 'incremental';

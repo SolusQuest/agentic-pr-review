@@ -28,6 +28,7 @@ const RUNTIME_PROVIDERS = ['test', 'claude-code-cli'] as const satisfies readonl
 const RUNTIME_BACKENDS = [
   'legacy',
   'deterministic-csharp',
+  'ledger-csharp',
 ] as const satisfies readonly RuntimeBackend[];
 const TARGET_MODES = ['pull-request', 'synthetic-fixture'] as const satisfies readonly TargetMode[];
 const REVIEW_MODES = ['auto', 'bootstrap', 'incremental'] as const satisfies readonly ReviewMode[];
@@ -228,17 +229,18 @@ export function parseActionConfig(
 }
 
 function validateDeterministicRuntimeConfig(config: ActionConfig): void {
-  if (config.runtimeBackend !== 'deterministic-csharp') {
+  if (config.runtimeBackend !== 'deterministic-csharp' && config.runtimeBackend !== 'ledger-csharp') {
     return;
   }
+  const backend = config.runtimeBackend;
   if (config.runtimeProvider !== 'test') {
     throw new Error(
-      'config-invalid: runtime_backend=deterministic-csharp requires runtime_provider=test',
+      `config-invalid: runtime_backend=${backend} requires runtime_provider=test`,
     );
   }
-  if (config.targetMode === 'synthetic-fixture' && config.postComment) {
+  if (backend === 'ledger-csharp' && config.targetMode !== 'pull-request') {
     throw new Error(
-      'config-invalid: runtime_backend=deterministic-csharp with target_mode=synthetic-fixture requires post_comment=false',
+      'config-invalid: runtime_backend=ledger-csharp requires target_mode=pull-request',
     );
   }
   const invalid: string[] = [];
@@ -267,7 +269,7 @@ function validateDeterministicRuntimeConfig(config: ActionConfig): void {
   if (config.debugAcknowledgement) invalid.push('debug_acknowledgement');
   if (invalid.length > 0) {
     throw new Error(
-      `config-invalid: runtime_backend=deterministic-csharp configuration is invalid: ${invalid.join(', ')}`,
+      `config-invalid: runtime_backend=${backend} configuration is invalid: ${invalid.join(', ')}`,
     );
   }
 }

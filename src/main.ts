@@ -631,7 +631,10 @@ function createArtifactStore(
     {
       targetMode: target.mode,
       prNumber: target.prNumber,
-      runtimeBackend,
+      // The artifact transport is a legacy/deterministic compatibility seam.
+      // The ledger-csharp path is routed to Git data before it reaches this
+      // store; retain the legacy metadata value here until that branch splits.
+      runtimeBackend: runtimeBackend === 'ledger-csharp' ? 'legacy' : runtimeBackend,
     },
   );
 }
