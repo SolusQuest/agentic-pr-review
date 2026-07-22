@@ -233,6 +233,12 @@ export interface CompetingScope {
   readonly interactionId: Sha256Hex;
 }
 
+export interface AcceptanceEnumerationReceipt {
+  readonly kind: 'complete';
+  readonly matchingRegistrationCount: number;
+  readonly matchingRegistrationBytes: number;
+}
+
 export interface AcceptanceSnapshot {
   readonly schemaVersion: 1;
   readonly selectionSnapshotId: Sha256Hex;
@@ -246,11 +252,7 @@ export interface AcceptanceSnapshot {
    * checks it against the returned projection, but it is not an independent
    * proof against a faulty backend that omits records coherently.
    */
-  readonly enumeration: {
-    readonly kind: 'complete';
-    readonly matchingRegistrationCount: number;
-    readonly matchingRegistrationBytes: number;
-  };
+  readonly enumeration: AcceptanceEnumerationReceipt;
   readonly candidateSetDigest: Sha256Hex;
 }
 

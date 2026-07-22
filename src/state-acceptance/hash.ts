@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { canonicalJsonBytes } from '../canonical-json/index.js';
 import type {
   AcceptedStateMarkerV1,
+  AcceptanceEnumerationReceipt,
   CandidateBundleBytes,
   CandidateId,
   CandidateRegistrationDraft,
@@ -139,16 +140,17 @@ export function computeCandidateSetDigest(
     registrationId: string;
     registrationRecordSha256: string;
   }[],
-  enumeration: {
-    matchingRegistrationCount: number;
-    matchingRegistrationBytes: number;
-  },
+  enumeration: AcceptanceEnumerationReceipt,
 ): Sha256Hex {
   return digestId('agentic-pr-review/m4/candidate-set/v1', {
     competingScope: scope,
     cutoff,
     registrations,
-    enumeration,
+    enumeration: {
+      kind: enumeration.kind,
+      matchingRegistrationCount: enumeration.matchingRegistrationCount,
+      matchingRegistrationBytes: enumeration.matchingRegistrationBytes,
+    },
   });
 }
 

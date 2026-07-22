@@ -510,6 +510,41 @@ describe('M4 state acceptance contract', () => {
     expect(acceptanceSnapshotLimitExceeded(64, 2_097_152, 0)).toBe(true);
   });
 
+  it('binds the candidate-set digest to the complete enumeration receipt', () => {
+    const scope = {
+      stateKey,
+      sessionEpoch: epoch,
+      observedSelectorRevision: 'bootstrap' as const,
+      predecessorMarkerId: 'bootstrap' as const,
+      predecessorManifestSha256: 'bootstrap' as const,
+      predecessorLedgerSha256: 'bootstrap' as const,
+      ledgerEpoch: epoch,
+      targetStateGeneration: 0,
+      interactionId: sha as never,
+    };
+    const registrations = [
+      { registrationSequence: '1', registrationId: sha, registrationRecordSha256: sha },
+    ];
+    const receipt = {
+      kind: 'complete' as const,
+      matchingRegistrationCount: 1,
+      matchingRegistrationBytes: 128,
+    };
+    const digest = computeCandidateSetDigest(scope, '1', registrations, receipt);
+    expect(
+      computeCandidateSetDigest(scope, '1', registrations, {
+        ...receipt,
+        kind: 'partial',
+      } as never),
+    ).not.toBe(digest);
+    expect(() =>
+      computeCandidateSetDigest(scope, '1', registrations, {
+        matchingRegistrationCount: receipt.matchingRegistrationCount,
+        matchingRegistrationBytes: receipt.matchingRegistrationBytes,
+      } as never),
+    ).toThrow();
+  });
+
   it('freezes identity domains and the non-circular marker-to-selector order', () => {
     const candidateDraft = draft();
     const registration = materializeRegistration(candidateDraft, '1', '2026-07-20T00:00:00.000Z');
@@ -1466,12 +1501,14 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
               : manifest.provenance[property] === ('f'.repeat(40) as never)
                 ? ('e'.repeat(40) as never)
                 : ('f'.repeat(40) as never);
+          const mismatchedManifest = {
+            ...manifest,
+            provenance: { ...manifest.provenance, [property]: mismatchedValue },
+          };
           const mismatchedCandidate = {
             ...candidate,
-            manifest: {
-              ...manifest,
-              provenance: { ...manifest.provenance, [property]: mismatchedValue },
-            } as never,
+            manifest: mismatchedManifest as never,
+            manifestBytes: canonicalJsonBytes(mismatchedManifest),
           };
           expect(
             await acceptLocalCandidate(provenanceStore, {

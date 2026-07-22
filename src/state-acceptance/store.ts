@@ -36,6 +36,7 @@ import {
 import type {
   AcceptedStateMarkerV1,
   AcceptanceSnapshot,
+  AcceptanceEnumerationReceipt,
   CandidateBundleBytes,
   CandidateId,
   CandidateRegistrationDraft,
@@ -588,7 +589,7 @@ export class ReferenceStateStore implements StateAcceptanceStore {
           ? left.registrationId.localeCompare(right.registrationId)
           : sequenceOrder;
       });
-      const enumeration: AcceptanceSnapshot['enumeration'] = {
+      const enumeration: AcceptanceEnumerationReceipt = {
         kind: 'complete',
         matchingRegistrationCount: matching.length,
         matchingRegistrationBytes: totalBytes,
