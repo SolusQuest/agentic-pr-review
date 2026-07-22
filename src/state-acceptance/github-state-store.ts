@@ -69,6 +69,7 @@ import {
 } from './store.js';
 
 const counterMax = 1_000_000;
+const refRetryLimit = 4;
 const REGISTRATION_COUNTER_KIND = 'm4-registration-counter';
 
 interface RegistrationCounterV1 {
@@ -160,40 +161,41 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
       bundle.providerRunMetadataBytes.byteLength > METADATA_MAX_BYTES
     )
       return { kind: 'existing_content_conflict' };
-    const state = await this.requireState();
-    const existing = await this.readCandidateFrom(state, candidateId);
     const locator = {
       kind: 'store-object' as const,
       namespace: 'm4-state-v1' as const,
       objectId: `candidate-${candidateId}` as const,
     };
-    if (existing.status === 'present')
-      return bundlesEqual(existing.bundle, bundle)
-        ? { kind: 'already_exists_same', locator }
-        : { kind: 'existing_content_conflict' };
-    if (existing.status !== 'missing') return { kind: 'outcome_unknown', locator };
-    const result = await this.transport.commit(
-      state,
-      new Map([
-        [gitStatePaths.candidateFile(candidateId, 'manifest.json'), bundle.manifestBytes],
-        [gitStatePaths.candidateFile(candidateId, 'ledger.json'), bundle.ledgerBytes],
-        [
-          gitStatePaths.candidateFile(candidateId, 'provider-run-metadata.json'),
-          bundle.providerRunMetadataBytes,
-        ],
-      ]),
-      `m4 state candidate ${candidateId}`,
-    );
-    if (result === 'applied') return { kind: 'created', locator };
-    const reread = await this.transport.read();
-    if (reread) {
+    for (let attempt = 0; attempt < refRetryLimit; attempt += 1) {
+      const state = await this.requireState();
+      const existing = await this.readCandidateFrom(state, candidateId);
+      if (existing.status === 'present')
+        return bundlesEqual(existing.bundle, bundle)
+          ? { kind: 'already_exists_same', locator }
+          : { kind: 'existing_content_conflict' };
+      if (existing.status !== 'missing') return { kind: 'outcome_unknown', locator };
+      const result = await this.transport.commit(
+        state,
+        new Map([
+          [gitStatePaths.candidateFile(candidateId, 'manifest.json'), bundle.manifestBytes],
+          [gitStatePaths.candidateFile(candidateId, 'ledger.json'), bundle.ledgerBytes],
+          [
+            gitStatePaths.candidateFile(candidateId, 'provider-run-metadata.json'),
+            bundle.providerRunMetadataBytes,
+          ],
+        ]),
+        `m4 state candidate ${candidateId}`,
+      );
+      if (result === 'applied') return { kind: 'created', locator };
+      const reread = await this.transport.read();
+      if (!reread) return { kind: 'outcome_unknown', locator };
       const reconciled = await this.readCandidateFrom(reread, candidateId);
-      if (reconciled.status === 'present' && bundlesEqual(reconciled.bundle, bundle))
+      if (reconciled.status === 'present' && bundlesEqual(reconciled.bundle, bundle)) {
         return { kind: 'already_exists_same', locator };
+      }
+      if (result === 'unknown') return { kind: 'outcome_unknown', locator };
     }
-    return result === 'rejected'
-      ? { kind: 'outcome_unknown', locator }
-      : { kind: 'outcome_unknown', locator };
+    return { kind: 'outcome_unknown', locator };
   }
 
   async readCandidate(candidateId: CandidateId): Promise<CandidateReadResult> {
@@ -281,32 +283,35 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
 
   async writeMarker(marker: AcceptedStateMarkerV1): Promise<WriteOutcome<AcceptedStateMarkerV1>> {
     validateAcceptedStateMarker(marker);
-    const state = await this.requireState();
     const path = gitStatePaths.marker(marker.markerId);
-    const existing = await this.readPath(state, path);
-    if (existing) {
-      try {
-        const value = decodeValidatedMarker(existing);
-        return value.markerId === marker.markerId
-          ? { kind: 'already_exists_same', value }
-          : { kind: 'existing_content_conflict' };
-      } catch {
-        return { kind: 'existing_content_conflict' };
-      }
-    }
     const bytes = encodeValidatedRecord(marker);
-    const outcome = await this.transport.commit(
-      state,
-      new Map([[path, bytes]]),
-      `m4 state marker ${marker.markerId}`,
-    );
-    if (outcome === 'applied') return { kind: 'created', value: marker };
-    const reread = await this.transport.read();
-    if (reread && bytesEqual((await this.readPath(reread, path)) ?? new Uint8Array(), bytes))
-      return { kind: 'already_exists_same', value: marker };
-    return outcome === 'rejected'
-      ? { kind: 'existing_content_conflict' }
-      : { kind: 'outcome_unknown' };
+    for (let attempt = 0; attempt < refRetryLimit; attempt += 1) {
+      const state = await this.requireState();
+      const existing = await this.readPath(state, path);
+      if (existing) {
+        try {
+          const value = decodeValidatedMarker(existing);
+          return bytesEqual(existing, bytes)
+            ? { kind: 'already_exists_same', value }
+            : { kind: 'existing_content_conflict' };
+        } catch {
+          return { kind: 'existing_content_conflict' };
+        }
+      }
+      const outcome = await this.transport.commit(
+        state,
+        new Map([[path, bytes]]),
+        `m4 state marker ${marker.markerId}`,
+      );
+      if (outcome === 'applied') return { kind: 'created', value: marker };
+      const reread = await this.transport.read();
+      if (!reread) return { kind: 'outcome_unknown' };
+      if (bytesEqual((await this.readPath(reread, path)) ?? new Uint8Array(), bytes)) {
+        return { kind: 'already_exists_same', value: marker };
+      }
+      if (outcome === 'unknown') return { kind: 'outcome_unknown' };
+    }
+    return { kind: 'outcome_unknown' };
   }
 
   /** Persist an idempotent public receipt after a candidate acceptance attempt. */
@@ -403,37 +408,44 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
     selector: StateSelectorV1,
   ): Promise<SelectorCasOutcome> {
     validateStateSelector(selector);
-    const state = await this.requireState();
     const path = gitStatePaths.selector(selector.stateKey);
-    const current = await this.readPath(state, path);
-    const currentRevision = revision(current);
-    if (
-      selector.previousSelectorRevision !== expectedRevision ||
-      currentRevision !== expectedRevision
-    )
-      return { kind: 'rejected_with_current_revision', currentRevision };
-    if (current) {
-      try {
-        const decoded = decodeValidatedSelector(current);
-        if (decoded.selectorId === selector.selectorId)
-          return { kind: 'already_applied_same_target', selector: decoded };
-      } catch {
-        /* revision already carries invalid state */
-      }
-    }
     const bytes = encodeValidatedRecord(selector);
-    const outcome = await this.transport.commit(
-      state,
-      new Map([[path, bytes]]),
-      `m4 state selector ${selector.selectorId}`,
-    );
-    if (outcome === 'applied') return { kind: 'applied', selector };
-    const reread = await this.transport.read();
-    if (reread) {
+    for (let attempt = 0; attempt < refRetryLimit; attempt += 1) {
+      const state = await this.requireState();
+      const current = await this.readPath(state, path);
+      const currentRevision = revision(current);
+      if (
+        selector.previousSelectorRevision !== expectedRevision ||
+        currentRevision !== expectedRevision
+      ) {
+        return { kind: 'rejected_with_current_revision', currentRevision };
+      }
+      if (current) {
+        try {
+          const decoded = decodeValidatedSelector(current);
+          if (decoded.selectorId === selector.selectorId) {
+            return { kind: 'already_applied_same_target', selector: decoded };
+          }
+        } catch {
+          /* revision carries invalid state and is rejected above on a non-bootstrap CAS. */
+        }
+      }
+      const outcome = await this.transport.commit(
+        state,
+        new Map([[path, bytes]]),
+        `m4 state selector ${selector.selectorId}`,
+      );
+      if (outcome === 'applied') return { kind: 'applied', selector };
+      const reread = await this.transport.read();
+      if (!reread) return { kind: 'outcome_unknown' };
       const observed = await this.readPath(reread, path);
-      if (observed && bytesEqual(observed, bytes))
+      if (observed && bytesEqual(observed, bytes)) {
         return { kind: 'already_applied_same_target', selector };
-      return { kind: 'rejected_with_current_revision', currentRevision: revision(observed) };
+      }
+      if (outcome === 'unknown') return { kind: 'outcome_unknown' };
+      if (revision(observed) !== expectedRevision) {
+        return { kind: 'rejected_with_current_revision', currentRevision: revision(observed) };
+      }
     }
     return { kind: 'outcome_unknown' };
   }
