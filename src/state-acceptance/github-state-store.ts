@@ -340,7 +340,7 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
       !Number.isInteger(input.acceptingRunAttempt) ||
       input.acceptingRunAttempt < 1 ||
       input.acceptingRunAttempt > 2_147_483_647 ||
-      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(input.recordedAt)
+      !isCanonicalTimestamp(input.recordedAt)
     ) {
       return 'failed';
     }
@@ -356,7 +356,10 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
     };
     const receipt =
       input.publicationStatus === 'succeeded'
-        ? input.commentId && input.bodySha256 && SHA256_HEX.test(input.bodySha256)
+        ? input.commentId &&
+          /^[1-9][0-9]{0,18}$/.test(input.commentId) &&
+          input.bodySha256 &&
+          SHA256_HEX.test(input.bodySha256)
           ? { ...common, commentId: input.commentId, bodySha256: input.bodySha256 }
           : null
         : input.publicationStatus === 'failed'
@@ -380,7 +383,10 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
       input.acceptingRunAttempt,
     );
     const existing = await this.readPath(state, path);
-    if (existing !== null) return bytesEqual(existing, bytes) ? 'already_exists_same' : 'failed';
+    if (existing !== null) {
+      decodePublicationReceipt(existing);
+      return bytesEqual(existing, bytes) ? 'already_exists_same' : 'failed';
+    }
     const outcome = await this.transport.commit(
       state,
       new Map([[path, bytes]]),
@@ -388,9 +394,10 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
     );
     if (outcome === 'applied') return 'created';
     const reread = await this.transport.read();
-    return reread && bytesEqual((await this.readPath(reread, path)) ?? new Uint8Array(), bytes)
-      ? 'already_exists_same'
-      : 'failed';
+    if (!reread) return 'failed';
+    const observed = await this.readPath(reread, path);
+    if (observed !== null) decodePublicationReceipt(observed);
+    return observed && bytesEqual(observed, bytes) ? 'already_exists_same' : 'failed';
   }
 
   async readMarker(
@@ -1015,6 +1022,68 @@ function isM4TreePath(path: string): boolean {
   return /^(?:m4-state|m4-state\/v1|m4-state\/v1\/(?:candidates|states|markers|receipts|probes)|m4-state\/v1\/candidates\/[a-f0-9]{64}|m4-state\/v1\/states\/[a-f0-9]{64}(?:\/(?:selectors|registrations)(?:\/[a-f0-9]{64})?)?|m4-state\/v1\/receipts\/[a-f0-9]{64})$/u.test(
     path,
   );
+}
+
+function isCanonicalTimestamp(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.valueOf()) && parsed.toISOString() === value;
+}
+
+function decodePublicationReceipt(bytes: Uint8Array): void {
+  const value = decodeRecord<unknown>(bytes, 4096);
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new StoreTransactionError('store_transaction_failed');
+  }
+  const receipt = value as Record<string, unknown>;
+  const common = [
+    'acceptingRunAttempt',
+    'acceptingRunId',
+    'markerId',
+    'publicationStatus',
+    'recordedAt',
+    'schemaVersion',
+    'selectorRevision',
+    'stateKeyDigest',
+  ];
+  const expected =
+    receipt.publicationStatus === 'succeeded'
+      ? [...common, 'bodySha256', 'commentId']
+      : receipt.publicationStatus === 'failed' || receipt.publicationStatus === 'unknown'
+        ? [...common, 'failureCode']
+        : receipt.publicationStatus === 'not_attempted'
+          ? common
+          : [];
+  if (
+    expected.length === 0 ||
+    Object.keys(receipt).sort().join(',') !== expected.sort().join(',') ||
+    receipt.schemaVersion !== 1 ||
+    typeof receipt.markerId !== 'string' ||
+    !SHA256_HEX.test(receipt.markerId) ||
+    typeof receipt.stateKeyDigest !== 'string' ||
+    !SHA256_HEX.test(receipt.stateKeyDigest) ||
+    typeof receipt.selectorRevision !== 'string' ||
+    !/^sha256:[a-f0-9]{64}$/.test(receipt.selectorRevision) ||
+    typeof receipt.acceptingRunId !== 'string' ||
+    !/^[1-9][0-9]{0,18}$/.test(receipt.acceptingRunId) ||
+    !Number.isInteger(receipt.acceptingRunAttempt) ||
+    (receipt.acceptingRunAttempt as number) < 1 ||
+    (receipt.acceptingRunAttempt as number) > 2_147_483_647 ||
+    typeof receipt.recordedAt !== 'string' ||
+    !isCanonicalTimestamp(receipt.recordedAt) ||
+    (receipt.publicationStatus === 'succeeded' &&
+      (typeof receipt.commentId !== 'string' ||
+        !/^[1-9][0-9]{0,18}$/.test(receipt.commentId) ||
+        typeof receipt.bodySha256 !== 'string' ||
+        !SHA256_HEX.test(receipt.bodySha256))) ||
+    (receipt.publicationStatus === 'failed' &&
+      !['comment_create_failed', 'comment_update_failed', 'comment_readback_failed'].includes(
+        receipt.failureCode as string,
+      )) ||
+    (receipt.publicationStatus === 'unknown' && receipt.failureCode !== 'comment_outcome_unknown')
+  ) {
+    throw new StoreTransactionError('store_transaction_failed');
+  }
 }
 
 function revision(bytes: Uint8Array | null): SelectorRevision {
