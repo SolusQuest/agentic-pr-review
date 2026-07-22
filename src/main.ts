@@ -1748,7 +1748,7 @@ function setLedgerErrorOutputs(error: unknown): void {
   core.setOutput('state_acceptance_status', 'not_started');
   core.setOutput('state_acceptance_reason', '');
   core.setOutput('state_publication_status', 'not_attempted');
-  core.setOutput('state_receipt_status', 'not_attempted');
+  core.setOutput('state_receipt_status', 'not_written');
   core.setOutput('state_cleanup_warnings', '');
   core.setOutput('state_error_kind', kind);
 }

@@ -16,6 +16,7 @@ import {
   OctokitGitDataClient,
   StickyCallbackOutcomeUnknownError,
   StickyCallbackKnownFailureError,
+  ContractValidationError,
   type StateAcceptanceStore,
   type StateSelectionSnapshot,
   type StateKeyV2,
@@ -119,12 +120,14 @@ export class LedgerRunFailure extends Error {
   constructor(
     message: string,
     readonly result: LedgerRunResult,
-    readonly errorKind: 'state-invalid',
+    readonly errorKind: LedgerErrorKind,
   ) {
     super(message);
     this.name = 'LedgerRunFailure';
   }
 }
+
+export type LedgerErrorKind = 'state-invalid' | 'state-unknown' | 'store-corrupt';
 
 export async function runLedgerCsharp(input: {
   readonly config: ActionConfig;
@@ -194,16 +197,21 @@ export async function runLedgerCsharp(input: {
     throw new Error(`state-invalid: explicit restore rejected: ${selection.snapshot.failure}`);
   }
   if (
-    (selection.snapshot.kind === 'continuation_selected' ||
-      selection.snapshot.kind === 'reset_selected') &&
-    !(await actionSourceIsTrustedDefaultBranchAncestor(
+    selection.snapshot.kind === 'continuation_selected' ||
+    selection.snapshot.kind === 'reset_selected'
+  ) {
+    const actionSourceTrust = await actionSourceIsTrustedDefaultBranchAncestor(
       input.octokit,
       repository,
       predecessorManifest(selection.snapshot.predecessorBytes).provenance.producingActionSourceSha,
       input.defaultBranchCommitSha,
-    ))
-  ) {
-    throw new Error('state-invalid: accepted predecessor action source is not trusted');
+    );
+    if (actionSourceTrust === 'unknown') {
+      throw new Error('state-unknown: accepted predecessor action source could not be verified');
+    }
+    if (actionSourceTrust === 'untrusted') {
+      throw new Error('state-invalid: accepted predecessor action source is not trusted');
+    }
   }
   const plan = planLedgerInvocation({
     config: input.config,
@@ -228,6 +236,7 @@ export async function runLedgerCsharp(input: {
       signal: cancellation.signal,
     });
     let leaseOwnershipTransferred = false;
+    let leaseReleased = false;
     try {
       const assembled = assembleStructuredReviewFromRuntimeContent({
         content: mapReviewResultV1ToRuntimeContent(lease.result).content,
@@ -256,13 +265,8 @@ export async function runLedgerCsharp(input: {
         throw new Error('state-invalid: target revalidation failed');
       }
       if (revalidation === 'changed') {
-        let cleanupWarnings = '';
-        try {
-          await lease.release();
-        } catch {
-          cleanupWarnings = 'lease_release_failed';
-        }
-        leaseOwnershipTransferred = true;
+        const cleanupWarnings = await releaseLease(lease);
+        leaseReleased = true;
         return {
           stateKey: stateKey.workflowIdentity,
           phase: plan.phase,
@@ -450,8 +454,23 @@ export async function runLedgerCsharp(input: {
         );
       }
       return result;
+    } catch (error) {
+      if (leaseOwnershipTransferred || error instanceof LedgerRunFailure) throw error;
+      const cleanupWarnings = await releaseLease(lease);
+      leaseReleased = true;
+      throw new LedgerRunFailure(
+        'state-invalid: pre-acceptance execution failed',
+        preAcceptanceFailureResult({
+          stateKey,
+          plan,
+          lease,
+          cleanupWarnings,
+        }),
+        errorKindFor(error),
+      );
     } finally {
-      if (!leaseOwnershipTransferred) await lease.release().catch(() => undefined);
+      if (!leaseOwnershipTransferred && !leaseReleased)
+        await lease.release().catch(() => undefined);
     }
   } finally {
     cancellation.dispose();
@@ -601,9 +620,9 @@ export async function actionSourceIsTrustedDefaultBranchAncestor(
   repository: string,
   sourceSha: string,
   defaultBranchCommitSha: string,
-): Promise<boolean> {
+): Promise<'trusted' | 'untrusted' | 'unknown'> {
   if (!/^[a-f0-9]{40}$/i.test(sourceSha) || !/^[a-f0-9]{40}$/i.test(defaultBranchCommitSha)) {
-    return false;
+    return 'untrusted';
   }
   const [owner, repo] = repository.split('/');
   try {
@@ -613,10 +632,56 @@ export async function actionSourceIsTrustedDefaultBranchAncestor(
       base: sourceSha,
       head: defaultBranchCommitSha,
     });
-    return comparison.data.status === 'ahead' || comparison.data.status === 'identical';
+    return comparison.data.status === 'ahead' || comparison.data.status === 'identical'
+      ? 'trusted'
+      : 'untrusted';
   } catch {
-    return false;
+    return 'unknown';
   }
+}
+
+async function releaseLease(lease: { release(): Promise<void> }): Promise<string> {
+  try {
+    await lease.release();
+    return '';
+  } catch {
+    return 'lease_release_failed';
+  }
+}
+
+function preAcceptanceFailureResult(input: {
+  readonly stateKey: StateKeyV2;
+  readonly plan: ReturnType<typeof planLedgerInvocation>;
+  readonly lease: Awaited<ReturnType<typeof invokeLiveRuntime>>;
+  readonly cleanupWarnings: string;
+}): LedgerRunResult {
+  return {
+    stateKey: input.stateKey.workflowIdentity,
+    phase: input.plan.phase,
+    transition: input.lease.manifest.transition.kind,
+    acceptanceStatus: 'not_started',
+    acceptanceReason: '',
+    publicationStatus: 'not_attempted',
+    receiptStatus: 'not_written',
+    runtimeVersion: input.lease.result.runtimeVersion,
+    traceSha256: input.lease.traceSha256,
+    commentUrl: '',
+    stateReason: transitionReason(input.lease.manifest.transition),
+    candidateId: '',
+    markerId: '',
+    selectorRevision: '',
+    sessionEpoch: input.lease.manifest.sessionEpoch,
+    stateGeneration: String(input.lease.manifest.generation.stateGeneration),
+    ledgerEpoch: input.lease.manifest.generation.ledgerEpoch,
+    cleanupWarnings: input.cleanupWarnings,
+  };
+}
+
+function errorKindFor(error: unknown): LedgerErrorKind {
+  if (error instanceof ContractValidationError) return 'store-corrupt';
+  return error instanceof Error && error.message.startsWith('state-unknown:')
+    ? 'state-unknown'
+    : 'state-invalid';
 }
 
 async function targetStillMatches(

@@ -71,7 +71,7 @@ describe('ledger-csharp host plan', () => {
         'a'.repeat(40),
         'b'.repeat(40),
       ),
-    ).resolves.toBe(true);
+    ).resolves.toBe('trusted');
     await expect(
       actionSourceIsTrustedDefaultBranchAncestor(
         octokit,
@@ -79,7 +79,7 @@ describe('ledger-csharp host plan', () => {
         'c'.repeat(40),
         'b'.repeat(40),
       ),
-    ).resolves.toBe(false);
+    ).resolves.toBe('untrusted');
   });
 
   it('uses the frozen M4 state identity and bootstrap transition', () => {
