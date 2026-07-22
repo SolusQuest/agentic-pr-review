@@ -103,7 +103,9 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
       throw new StoreTransactionError('store_capability_unsupported');
     }
     const created = await this.transport.initialize(input.defaultBranchCommitSha);
-    if (created === 'unknown') throw new StoreTransactionError('store_transaction_failed');
+    if (created === 'unknown' && (await this.transport.read()) === null) {
+      throw new StoreTransactionError('store_transaction_failed');
+    }
     const state = await this.requireState();
     const sentinel = canonicalJsonBytes({
       schemaVersion: 1,

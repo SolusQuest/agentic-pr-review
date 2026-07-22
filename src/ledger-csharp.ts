@@ -93,7 +93,7 @@ export interface LedgerRunResult {
   readonly acceptanceStatus: string;
   readonly acceptanceReason: string;
   readonly publicationStatus: string;
-  readonly receiptStatus: 'created' | 'already_exists_same' | 'failed' | 'not_attempted';
+  readonly receiptStatus: 'written' | 'failed' | 'not_written';
   readonly runtimeVersion: string;
   readonly traceSha256: string;
   readonly commentUrl: string;
@@ -217,7 +217,7 @@ export async function runLedgerCsharp(input: {
       acceptanceStatus: 'not_accepted',
       acceptanceReason: 'target_changed',
       publicationStatus: 'not_attempted',
-      receiptStatus: 'not_attempted',
+      receiptStatus: 'not_written',
       runtimeVersion: lease.result.runtimeVersion,
       traceSha256: lease.traceSha256,
       commentUrl: '',
@@ -285,27 +285,35 @@ export async function runLedgerCsharp(input: {
   }
   const receiptStatus =
     acceptance.acceptance === 'accepted' || acceptance.acceptance === 'already_accepted'
-      ? await store.writePublicationReceipt({
-          markerId: acceptance.markerId,
-          stateKey,
-          selectorRevision: acceptance.selectorRevision,
-          acceptingRunId: String(github.context.runId),
-          acceptingRunAttempt: github.context.runAttempt,
-          publicationStatus:
-            publicationStatus === 'succeeded'
-              ? 'succeeded'
-              : publicationStatus === 'not_attempted'
-                ? 'not_attempted'
-                : publicationStatus === 'unknown'
-                  ? 'unknown'
-                  : 'failed',
-          ...(publishedComment ?? {}),
-          ...(publicationStatus === 'unknown'
-            ? { failureCode: 'comment_outcome_unknown' as const }
-            : {}),
-          recordedAt: new Date().toISOString(),
-        })
-      : 'not_attempted';
+      ? receiptOutputStatus(
+          await store.writePublicationReceipt({
+            markerId: acceptance.markerId,
+            stateKey,
+            selectorRevision: acceptance.selectorRevision,
+            acceptingRunId: String(github.context.runId),
+            acceptingRunAttempt: github.context.runAttempt,
+            publicationStatus:
+              publicationStatus === 'succeeded'
+                ? 'succeeded'
+                : publicationStatus === 'not_attempted'
+                  ? 'not_attempted'
+                  : publicationStatus === 'unknown'
+                    ? 'unknown'
+                    : 'failed',
+            ...(publishedComment ?? {}),
+            ...(publicationStatus === 'unknown'
+              ? { failureCode: 'comment_outcome_unknown' as const }
+              : {}),
+            recordedAt: new Date().toISOString(),
+          }),
+        )
+      : 'not_written';
+  if (acceptance.acceptance === 'not_accepted' && !isNeutralNotAccepted(acceptance.reason)) {
+    throw new Error(`state-invalid: acceptance ${acceptance.reason}`);
+  }
+  if (receiptStatus === 'failed') {
+    throw new Error('state-invalid: publication receipt write failed');
+  }
   if (input.config.postComment && publicationStatus !== 'succeeded') {
     throw new Error(`state-invalid: sticky publication ${publicationStatus}`);
   }
@@ -343,6 +351,16 @@ export async function runLedgerCsharp(input: {
     ledgerEpoch: lease.manifest.generation.ledgerEpoch,
     cleanupWarnings: [...acceptance.cleanupWarnings].sort().join(','),
   };
+}
+
+function receiptOutputStatus(
+  value: 'created' | 'already_exists_same' | 'failed',
+): 'written' | 'failed' {
+  return value === 'failed' ? 'failed' : 'written';
+}
+
+function isNeutralNotAccepted(reason: string): boolean {
+  return reason === 'stale_candidate' || reason === 'selector_cas_rejected';
 }
 
 function transitionReason(transition: StateManifestV2Transition): string {
