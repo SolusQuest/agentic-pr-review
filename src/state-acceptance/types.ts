@@ -241,6 +241,11 @@ export interface AcceptanceSnapshot {
   readonly competingScope: CompetingScope;
   readonly cutoff: DecimalSequence;
   readonly registrations: readonly FrozenRegistration[];
+  /**
+   * Completeness assertion from the trusted store transaction. Acceptance
+   * checks it against the returned projection, but it is not an independent
+   * proof against a faulty backend that omits records coherently.
+   */
   readonly enumeration: {
     readonly kind: 'complete';
     readonly matchingRegistrationCount: number;

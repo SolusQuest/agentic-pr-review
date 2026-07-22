@@ -180,6 +180,13 @@ export interface StateAcceptanceStore {
   ): Promise<CandidateUploadOutcome>;
   readCandidate(candidateId: CandidateId): Promise<CandidateReadResult>;
   registerCandidate(draft: CandidateRegistrationDraft): Promise<RegistrationWriteResult>;
+  /**
+   * Trusted completeness boundary: implementations must enumerate every
+   * registration matching the scope at or below the cutoff in one atomic
+   * store transaction. Acceptance validates the returned snapshot and digest
+   * against response mutation, but cannot independently prove that a faulty
+   * backend did not omit records while producing a self-consistent response.
+   */
   createAcceptanceSnapshot(
     expectedObservedSelectorRevision: SelectorRevision,
     competingScope: CompetingScope,
@@ -581,6 +588,11 @@ export class ReferenceStateStore implements StateAcceptanceStore {
           ? left.registrationId.localeCompare(right.registrationId)
           : sequenceOrder;
       });
+      const enumeration: AcceptanceSnapshot['enumeration'] = {
+        kind: 'complete',
+        matchingRegistrationCount: matching.length,
+        matchingRegistrationBytes: totalBytes,
+      };
       return {
         schemaVersion: 1 as const,
         selectionSnapshotId: selectionSnapshotId as FrozenRegistration['registrationRecordSha256'],
@@ -589,11 +601,7 @@ export class ReferenceStateStore implements StateAcceptanceStore {
         competingScope,
         cutoff: cutoff as DecimalSequence,
         registrations: frozen,
-        enumeration: {
-          kind: 'complete' as const,
-          matchingRegistrationCount: matching.length,
-          matchingRegistrationBytes: totalBytes,
-        },
+        enumeration,
         candidateSetDigest: computeCandidateSetDigest(
           competingScope,
           cutoff,
@@ -602,10 +610,7 @@ export class ReferenceStateStore implements StateAcceptanceStore {
             registrationId,
             registrationRecordSha256,
           })),
-          {
-            matchingRegistrationCount: matching.length,
-            matchingRegistrationBytes: totalBytes,
-          },
+          enumeration,
         ),
       };
     });
