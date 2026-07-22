@@ -41,6 +41,7 @@ import { mapReviewResultV1ToRuntimeContent } from './protocol/map-review-result.
 import { validateReviewInputV1 } from './protocol/review-input.js';
 import { invokeRuntime } from './runtime-invocation/invoke-runtime.js';
 import { resolveTrustedRuntimeCommand } from './runtime-invocation/command-resolver.js';
+import { runLedgerCsharp } from './ledger-csharp.js';
 import { RuntimeInvocationError } from './runtime-invocation/runtime-errors.js';
 import {
   deriveStateKey,
@@ -127,6 +128,27 @@ export async function run(): Promise<void> {
       throw new Error('input-invalid: target resolution failed');
     }
     throw error;
+  }
+
+  if ((config.runtimeBackend ?? 'legacy') === 'ledger-csharp') {
+    try {
+      const defaultBranchCommitSha = process.env.GITHUB_SHA?.trim();
+      if (!defaultBranchCommitSha || !/^[a-f0-9]{40}$/i.test(defaultBranchCommitSha)) {
+        throw new Error('state-invalid: default branch commit SHA is unavailable');
+      }
+      const result = await runLedgerCsharp({
+        config,
+        target,
+        octokit,
+        eventName,
+        defaultBranchCommitSha,
+      });
+      setLedgerSuccessOutputs(result);
+      return;
+    } catch (error) {
+      setLedgerErrorOutputs(error);
+      throw error;
+    }
   }
 
   let stateKey: string;
@@ -631,10 +653,7 @@ function createArtifactStore(
     {
       targetMode: target.mode,
       prNumber: target.prNumber,
-      // The artifact transport is a legacy/deterministic compatibility seam.
-      // The ledger-csharp path is routed to Git data before it reaches this
-      // store; retain the legacy metadata value here until that branch splits.
-      runtimeBackend: runtimeBackend === 'ledger-csharp' ? 'legacy' : runtimeBackend,
+      runtimeBackend: runtimeBackend === 'ledger-csharp' ? undefined : runtimeBackend,
     },
   );
 }
@@ -1322,6 +1341,24 @@ function setDeterministicSuccessOutputs(runtimeResult: RuntimeResult | undefined
   }
 }
 
+function setLedgerSuccessOutputs(result: Awaited<ReturnType<typeof runLedgerCsharp>>): void {
+  core.setOutput('runtime_backend', 'ledger-csharp');
+  core.setOutput('runtime_version', result.runtimeVersion);
+  core.setOutput('runtime_trace_sha256', result.traceSha256);
+  core.setOutput('runtime_error_kind', '');
+  core.setOutput('runtime_error_class', '');
+  core.setOutput('usage_budget_status', 'not_applicable (records=0)');
+  core.setOutput('state_key', result.stateKey);
+  core.setOutput('phase', result.phase);
+  core.setOutput('review_phase', result.phase);
+  core.setOutput('state_transition', result.transition);
+  core.setOutput('state_acceptance_status', result.acceptanceStatus);
+  core.setOutput('state_acceptance_reason', result.acceptanceReason);
+  core.setOutput('state_publication_status', result.publicationStatus);
+  core.setOutput('state_receipt_status', result.receiptStatus);
+  core.setOutput('comment_url', result.commentUrl);
+}
+
 function setDeterministicHostErrorKind(kind: string): void {
   core.setOutput('runtime_error_kind', kind);
   core.setOutput('runtime_error_class', '');
@@ -1587,6 +1624,27 @@ function setDeterministicErrorOutputs(error: unknown): void {
   core.setOutput('runtime_error_kind', kind);
   core.setOutput('runtime_error_class', adapterError?.exitClass ?? '');
   core.setOutput('usage_budget_status', 'not_applicable (records=0)');
+}
+
+function setLedgerErrorOutputs(error: unknown): void {
+  const message = messageOf(error);
+  const prefix = message.split(':', 1)[0];
+  const kind = ['config-invalid', 'command-unavailable', 'input-invalid', 'state-invalid'].includes(
+    prefix,
+  )
+    ? prefix
+    : 'state-invalid';
+  core.setOutput('runtime_backend', 'ledger-csharp');
+  core.setOutput('runtime_version', '');
+  core.setOutput('runtime_trace_sha256', '');
+  core.setOutput('runtime_error_kind', kind);
+  core.setOutput('runtime_error_class', '');
+  core.setOutput('usage_budget_status', 'not_applicable (records=0)');
+  core.setOutput('state_transition', '');
+  core.setOutput('state_acceptance_status', 'failed');
+  core.setOutput('state_acceptance_reason', sanitizeRuntimeDiagnosticForHost(message));
+  core.setOutput('state_publication_status', 'not_attempted');
+  core.setOutput('state_receipt_status', 'not_attempted');
 }
 
 export function sanitizeRuntimeDiagnostic(value: string, secrets: readonly string[] = []): string {

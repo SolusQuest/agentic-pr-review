@@ -109,6 +109,7 @@ export interface ActionConfig {
   runtimeProvider: RuntimeProvider;
   targetMode: TargetMode;
   reviewMode: ReviewMode;
+  verificationNamespace?: string;
   prNumber?: number;
   stateKey?: string;
   stateArtifactRunId?: number;

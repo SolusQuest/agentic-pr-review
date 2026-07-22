@@ -16,12 +16,7 @@ export interface GitDataClient {
     repo: string;
     commitSha: string;
   }): Promise<{ readonly treeSha: string }>;
-  getTree(input: {
-    owner: string;
-    repo: string;
-    treeSha: string;
-    recursive: true;
-  }): Promise<{
+  getTree(input: { owner: string; repo: string; treeSha: string; recursive: true }): Promise<{
     readonly truncated: boolean;
     readonly entries: readonly {
       readonly path: string;
@@ -44,7 +39,11 @@ export interface GitDataClient {
     owner: string;
     repo: string;
     baseTreeSha: string;
-    entries: readonly { readonly path: string; readonly mode: '100644'; readonly blobSha: string }[];
+    entries: readonly {
+      readonly path: string;
+      readonly mode: '100644';
+      readonly blobSha: string;
+    }[];
   }): Promise<{ readonly sha: string }>;
   createCommit(input: {
     owner: string;
@@ -71,7 +70,10 @@ export interface GitDataClient {
 export interface GitStateRef {
   readonly commitSha: string;
   readonly treeSha: string;
-  readonly entries: ReadonlyMap<string, { readonly mode: string; readonly type: string; readonly sha: string }>;
+  readonly entries: ReadonlyMap<
+    string,
+    { readonly mode: string; readonly type: string; readonly sha: string }
+  >;
 }
 
 export class GitDataStateTransport {
@@ -97,7 +99,10 @@ export class GitDataStateTransport {
       recursive: true,
     });
     if (tree.truncated) throw new GitStateTransportError('tree_truncated');
-    const entries = new Map<string, { readonly mode: string; readonly type: string; readonly sha: string }>();
+    const entries = new Map<
+      string,
+      { readonly mode: string; readonly type: string; readonly sha: string }
+    >();
     for (const entry of tree.entries) {
       if (entries.has(entry.path)) throw new GitStateTransportError('duplicate_tree_entry');
       entries.set(entry.path, { mode: entry.mode, type: entry.type, sha: entry.sha });
@@ -108,13 +113,23 @@ export class GitDataStateTransport {
   async readBlob(state: GitStateRef, path: string): Promise<Uint8Array | null> {
     const entry = state.entries.get(path);
     if (!entry) return null;
-    if (entry.type !== 'blob' || entry.mode !== '100644') throw new GitStateTransportError('invalid_tree_entry');
-    const result = await this.client.getBlob({ owner: this.owner, repo: this.repo, blobSha: entry.sha });
+    if (entry.type !== 'blob' || entry.mode !== '100644')
+      throw new GitStateTransportError('invalid_tree_entry');
+    const result = await this.client.getBlob({
+      owner: this.owner,
+      repo: this.repo,
+      blobSha: entry.sha,
+    });
     return Uint8Array.from(Buffer.from(result.contentBase64, 'base64'));
   }
 
   async initialize(baseCommitSha: string): Promise<'created' | 'already_exists' | 'unknown'> {
-    return this.client.createRef({ owner: this.owner, repo: this.repo, ref: this.ref, sha: baseCommitSha });
+    return this.client.createRef({
+      owner: this.owner,
+      repo: this.repo,
+      ref: this.ref,
+      sha: baseCommitSha,
+    });
   }
 
   async commit(

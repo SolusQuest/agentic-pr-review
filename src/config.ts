@@ -111,6 +111,7 @@ export function parseActionConfig(
     runtimeProvider,
     targetMode,
     reviewMode,
+    verificationNamespace: optionalInput(reader, 'verification_namespace'),
     prNumber: parseOptionalPositiveInteger(optionalInput(reader, 'pr_number'), 'pr_number'),
     stateKey: optionalInput(reader, 'state_key'),
     stateArtifactRunId: parseOptionalPositiveInteger(
@@ -223,24 +224,41 @@ export function parseActionConfig(
     );
   }
   validateDeterministicRuntimeConfig(config);
+  validateLedgerVerificationNamespace(config);
   validateLiveRuntimeConfig(config);
   validateDebugCapture(config, eventName);
   return config;
 }
 
+function validateLedgerVerificationNamespace(config: ActionConfig): void {
+  if (config.runtimeBackend !== 'ledger-csharp') return;
+  if (
+    config.verificationNamespace !== undefined &&
+    !/^[a-z0-9][a-z0-9-]{0,47}$/.test(config.verificationNamespace)
+  ) {
+    throw new Error('config-invalid: verification_namespace must match ^[a-z0-9][a-z0-9-]{0,47}$');
+  }
+}
+
 function validateDeterministicRuntimeConfig(config: ActionConfig): void {
-  if (config.runtimeBackend !== 'deterministic-csharp' && config.runtimeBackend !== 'ledger-csharp') {
+  if (
+    config.runtimeBackend !== 'deterministic-csharp' &&
+    config.runtimeBackend !== 'ledger-csharp'
+  ) {
     return;
   }
   const backend = config.runtimeBackend;
   if (config.runtimeProvider !== 'test') {
-    throw new Error(
-      `config-invalid: runtime_backend=${backend} requires runtime_provider=test`,
-    );
+    throw new Error(`config-invalid: runtime_backend=${backend} requires runtime_provider=test`);
   }
   if (backend === 'ledger-csharp' && config.targetMode !== 'pull-request') {
     throw new Error(
       'config-invalid: runtime_backend=ledger-csharp requires target_mode=pull-request',
+    );
+  }
+  if (config.targetMode === 'synthetic-fixture' && config.postComment) {
+    throw new Error(
+      `config-invalid: runtime_backend=${backend} with target_mode=synthetic-fixture requires post_comment=false`,
     );
   }
   const invalid: string[] = [];
@@ -267,6 +285,15 @@ function validateDeterministicRuntimeConfig(config: ActionConfig): void {
   if (config.claudeCodeVersion) invalid.push('claude_code_version');
   if (config.apiKey) invalid.push('AGENTIC_REVIEW_API_KEY');
   if (config.debugAcknowledgement) invalid.push('debug_acknowledgement');
+  if (backend === 'ledger-csharp') {
+    if (config.reviewMode === 'bootstrap') invalid.push('review_mode');
+    if (config.stateKey) invalid.push('state_key');
+    if (config.stateArtifactRunId !== undefined) invalid.push('state_artifact_run_id');
+    if (config.instructions || config.instructionsPath) invalid.push('instructions');
+    if (config.bootstrapContext || config.bootstrapContextPath) invalid.push('bootstrap_context');
+    if (config.incrementalContext || config.incrementalContextPath)
+      invalid.push('incremental_context');
+  }
   if (invalid.length > 0) {
     throw new Error(
       `config-invalid: runtime_backend=${backend} configuration is invalid: ${invalid.join(', ')}`,

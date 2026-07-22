@@ -169,17 +169,15 @@ export function buildLineageCommentBody(
   const chainStart = existingMeta?.lineage_id.split(':').at(-1) ?? shortSha(input.currentHeadSha);
   const lineageId =
     existingMeta?.lineage_id ??
-    (input.runtimeBackend === 'deterministic-csharp'
-      ? `deterministic-csharp:${input.stateKey}:${input.runtimeProvider}:${input.runId}:${chainStart}`
+    (isNonLegacyBackend(input.runtimeBackend)
+      ? `${input.runtimeBackend}:${input.stateKey}:${input.runtimeProvider}:${input.runId}:${chainStart}`
       : `${input.stateKey}:${input.runtimeProvider}:${input.runId}:${chainStart}`);
   const meta: LineageMeta = {
     version: 1,
     lineage_id: lineageId,
     state_key: input.stateKey,
     runtime_provider: input.runtimeProvider,
-    ...(input.runtimeBackend === 'deterministic-csharp'
-      ? { runtime_backend: input.runtimeBackend }
-      : {}),
+    ...(isNonLegacyBackend(input.runtimeBackend) ? { runtime_backend: input.runtimeBackend } : {}),
     session_id: input.sessionId,
     from_head_sha: input.previousHeadSha ?? null,
     to_head_sha: input.currentHeadSha,
@@ -195,10 +193,9 @@ export function buildLineageCommentBody(
   };
 
   const repository = input.target.htmlUrl ? repositoryFromUrl(input.target.htmlUrl) : undefined;
-  const runtimeLabel =
-    input.runtimeBackend === 'deterministic-csharp'
-      ? `${input.runtimeProvider} (${input.runtimeBackend})`
-      : input.runtimeProvider;
+  const runtimeLabel = isNonLegacyBackend(input.runtimeBackend)
+    ? `${input.runtimeProvider} (${input.runtimeBackend})`
+    : input.runtimeProvider;
   const runValue = repository
     ? `[${input.runId}.${input.runAttempt}](https://github.com/${repository}/actions/runs/${input.runId})`
     : `${input.runId}.${input.runAttempt}`;
@@ -581,4 +578,8 @@ function shortSha(value: string): string {
 
 function formatOptionalSha(value: string | null): string {
   return value ? shortSha(value) : 'n/a';
+}
+
+function isNonLegacyBackend(runtimeBackend: RuntimeBackend | undefined): boolean {
+  return runtimeBackend !== undefined && runtimeBackend !== 'legacy';
 }

@@ -14,8 +14,10 @@ export function competingScopeDigest(scope: CompetingScope): string {
 export const gitStatePaths = {
   sentinel: `${ROOT}/store.json`,
   candidate: (candidateId: CandidateId) => `${ROOT}/candidates/${candidateId}`,
-  candidateFile: (candidateId: CandidateId, file: 'manifest.json' | 'ledger.json' | 'provider-run-metadata.json') =>
-    `${ROOT}/candidates/${candidateId}/${file}`,
+  candidateFile: (
+    candidateId: CandidateId,
+    file: 'manifest.json' | 'ledger.json' | 'provider-run-metadata.json',
+  ) => `${ROOT}/candidates/${candidateId}/${file}`,
   counter: (stateKey: StateKeyV2) => `${ROOT}/states/${stateKeyDigest(stateKey)}/counter.json`,
   selector: (stateKey: StateKeyV2) =>
     `${ROOT}/states/${stateKeyDigest(stateKey)}/selectors/current.json`,
