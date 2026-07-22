@@ -42,6 +42,8 @@ jobs:
           printf 'AGENTIC_REVIEW_RUNTIME_EXECUTABLE=%s\n' "$(realpath "$(command -v dotnet)")" >> "$GITHUB_ENV"
           printf 'AGENTIC_REVIEW_RUNTIME_PREFIX_ARGS_JSON=["%s"]\n' "$RUNNER_TEMP/agentic-pr-review-runtime/AgenticPrReview.Runtime.dll" >> "$GITHUB_ENV"
       - uses: ./.github/actions/agentic-pr-review
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         with:
           runtime_backend: ledger-csharp
           runtime_provider: test

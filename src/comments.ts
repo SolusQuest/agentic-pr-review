@@ -115,13 +115,22 @@ export async function upsertM4StateComment(
           issue_number: input.prNumber,
           body,
         });
-  } catch {
-    const reconciled = (await input.octokit.paginate(input.octokit.rest.issues.listComments, {
-      owner: input.owner,
-      repo: input.repo,
-      issue_number: input.prNumber,
-      per_page: 100,
-    })) as IssueComment[];
+  } catch (error) {
+    const status = Number((error as { status?: unknown } | undefined)?.status);
+    if (Number.isInteger(status) && status >= 400 && status < 500) {
+      throw new Error(match ? 'comment_update_failed' : 'comment_create_failed');
+    }
+    let reconciled: IssueComment[];
+    try {
+      reconciled = (await input.octokit.paginate(input.octokit.rest.issues.listComments, {
+        owner: input.owner,
+        repo: input.repo,
+        issue_number: input.prNumber,
+        per_page: 100,
+      })) as IssueComment[];
+    } catch {
+      throw new Error('comment_outcome_unknown');
+    }
     const exact = reconciled
       .filter((comment) => comment.body === body)
       .sort((left, right) => left.id - right.id)[0];

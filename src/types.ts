@@ -236,6 +236,8 @@ export interface ReviewTarget {
   headSha: string;
   headRepoFullName?: string;
   draft: boolean;
+  /** GitHub pull-request state when resolved from the API. */
+  isOpen?: boolean;
   changedFiles: ChangedFile[];
   pullRequestDiffSnapshot?: PullRequestDiffSnapshotV1;
   htmlUrl?: string;

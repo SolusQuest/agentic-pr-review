@@ -104,6 +104,7 @@ export async function resolveTarget(
     headSha: String(pull.data.head.sha),
     headRepoFullName,
     draft: Boolean(pull.data.draft),
+    isOpen: pull.data.state === 'open',
     changedFiles,
     pullRequestDiffSnapshot,
     htmlUrl: pull.data.html_url,

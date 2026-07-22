@@ -71,6 +71,7 @@ export {
   acceptLocalCandidate,
   candidateIdentity,
   StickyCallbackOutcomeUnknownError,
+  StickyCallbackKnownFailureError,
   type CandidateIdentity,
 } from './accept.js';
 export {

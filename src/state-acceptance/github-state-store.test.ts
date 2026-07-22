@@ -385,5 +385,12 @@ describe('GitHubGitStateAcceptanceStore provenance binding', () => {
         expectedProducingActionSourceSha: 'd'.repeat(40) as never,
       } as never),
     ).toBe(false);
+    expect(
+      manifestProvenanceMatches(manifest, {
+        expectedWorkflowEvent: 'workflow_run',
+        expectedProducingWorkflowRef: 'owner/repo/.github/workflows/m4.yml@refs/heads/main',
+        expectedProducingGitRef: 'refs/heads/main',
+      } as never),
+    ).toBe(true);
   });
 });

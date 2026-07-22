@@ -53,6 +53,15 @@ export class StickyCallbackOutcomeUnknownError extends Error {
   }
 }
 
+export class StickyCallbackKnownFailureError extends Error {
+  constructor(
+    readonly code: 'comment_create_failed' | 'comment_update_failed' | 'comment_readback_failed',
+  ) {
+    super(code);
+    this.name = 'StickyCallbackKnownFailureError';
+  }
+}
+
 export interface CandidateIdentity {
   readonly candidateId: CandidateId;
   readonly bundle: CandidateBundleBytes;
@@ -282,7 +291,9 @@ async function acceptWithoutCleanup(
       publication =
         error instanceof StickyCallbackOutcomeUnknownError
           ? { status: 'unknown', code: 'sticky_callback_outcome_unknown' }
-          : { status: 'failed', code: 'sticky_callback_failed' };
+          : error instanceof StickyCallbackKnownFailureError
+            ? { status: 'failed', code: error.code }
+            : { status: 'failed', code: 'sticky_callback_failed' };
     }
   }
   return {

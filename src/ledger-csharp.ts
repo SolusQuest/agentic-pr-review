@@ -15,6 +15,7 @@ import {
   GitHubGitStateAcceptanceStore,
   OctokitGitDataClient,
   StickyCallbackOutcomeUnknownError,
+  StickyCallbackKnownFailureError,
   type StateAcceptanceStore,
   type StateSelectionSnapshot,
   type StateKeyV2,
@@ -32,6 +33,7 @@ export const VERIFICATION_WORKFLOW_IDENTITY = 'agentic-pr-review/m4-stateful-ver
 export const VERIFICATION_TRUSTED_EXECUTION_DOMAIN =
   'github-default-branch-maintainer-verification/v1';
 const PLACEHOLDER_EPOCH = 'AAAAAAAAAAAAAAAAAAAAAA';
+const UNTRUSTED_ANALYSIS_WORKFLOW_PATH = '.github/workflows/m4-untrusted-analysis.yml';
 
 const cacheContractEnvelopes = {
   template: {
@@ -94,7 +96,7 @@ export interface LedgerRunResult {
   readonly acceptanceStatus: string;
   readonly acceptanceReason: string;
   readonly publicationStatus: string;
-  readonly receiptStatus: 'written' | 'failed' | 'not_written';
+  readonly receiptStatus: 'written' | 'failed' | 'unknown' | 'not_written';
   readonly runtimeVersion: string;
   readonly traceSha256: string;
   readonly commentUrl: string;
@@ -108,6 +110,22 @@ export interface LedgerRunResult {
   readonly cleanupWarnings: string;
 }
 
+/**
+ * A terminal error after the acceptance transaction has produced durable state.
+ * Callers must retain this result in action outputs instead of replacing it with
+ * a free-form failure diagnostic.
+ */
+export class LedgerRunFailure extends Error {
+  constructor(
+    message: string,
+    readonly result: LedgerRunResult,
+    readonly errorKind: 'state-invalid',
+  ) {
+    super(message);
+    this.name = 'LedgerRunFailure';
+  }
+}
+
 export async function runLedgerCsharp(input: {
   readonly config: ActionConfig;
   readonly target: ReviewTarget;
@@ -118,6 +136,9 @@ export async function runLedgerCsharp(input: {
   await validateLedgerInvocationEvent(input.config, input.eventName, input.octokit, input.target);
   if (input.target.mode !== 'pull-request' || !input.target.prNumber) {
     throw new Error('input-invalid: ledger-csharp requires a resolved pull request');
+  }
+  if (input.target.isOpen !== true) {
+    throw new Error('input-invalid: ledger-csharp requires an initially open pull request');
   }
   const repository = `${github.context.repo.owner}/${github.context.repo.repo}`;
   const stateKey = ledgerStateKey(
@@ -136,31 +157,36 @@ export async function runLedgerCsharp(input: {
     runId: String(github.context.runId),
     runAttempt: github.context.runAttempt,
   });
-  const { selector } = await store.peekSelectorForComparison(stateKey);
-  const headRelationship = await resolveHeadRelationship(
-    input.octokit,
-    repository,
-    selector?.currentHeadSha,
-    input.target.headSha,
-  );
-  const selection = await store.selectAcceptedState({
-    stateKey,
-    expectedLedgerSchemaVersion: cacheContractIdentity.ledgerSchemaVersion,
-    expectedPrefixContractVersion: cacheContractIdentity.prefixContractVersion,
-    cacheContractIdentity: omitContractVersions(cacheContractIdentity) as never,
-    currentHeadSha: input.target.headSha as never,
-    currentBaseSha: input.target.baseSha as never,
-    currentBaseRef: canonicalBaseRef(input.target.baseRef),
-    provenanceTrusted: true,
-    workflowIdentity: stateKey.workflowIdentity,
-    trustedExecutionDomain: stateKey.trustedExecutionDomain,
-    expectedWorkflowEvent: input.eventName,
-    expectedProducingWorkflowRef: String(process.env.GITHUB_WORKFLOW_REF ?? ''),
-    expectedProducingGitRef: String(process.env.GITHUB_REF ?? ''),
-    expectedProducingActionSourceSha: String(process.env.GITHUB_SHA ?? '') as never,
-    headRelationship,
-    explicitRestore: input.config.reviewMode === 'incremental',
-  });
+  let selection;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const observed = await store.peekSelectorForComparison(stateKey);
+    const headRelationship = await resolveHeadRelationship(
+      input.octokit,
+      repository,
+      observed.selector?.currentHeadSha,
+      input.target.headSha,
+    );
+    selection = await store.selectAcceptedState({
+      stateKey,
+      expectedLedgerSchemaVersion: cacheContractIdentity.ledgerSchemaVersion,
+      expectedPrefixContractVersion: cacheContractIdentity.prefixContractVersion,
+      cacheContractIdentity: omitContractVersions(cacheContractIdentity) as never,
+      currentHeadSha: input.target.headSha as never,
+      currentBaseSha: input.target.baseSha as never,
+      currentBaseRef: canonicalBaseRef(input.target.baseRef),
+      provenanceTrusted: true,
+      workflowIdentity: stateKey.workflowIdentity,
+      trustedExecutionDomain: stateKey.trustedExecutionDomain,
+      expectedWorkflowEvent: input.eventName,
+      expectedProducingWorkflowRef: String(process.env.GITHUB_WORKFLOW_REF ?? ''),
+      expectedProducingGitRef: String(process.env.GITHUB_REF ?? ''),
+      expectedObservedSelectorRevision: observed.revision,
+      headRelationship,
+      explicitRestore: input.config.reviewMode === 'incremental',
+    });
+    if (selection.selection !== 'failed' || selection.reason !== 'selector_read_failed') break;
+  }
+  if (!selection) throw new Error('state-invalid: selector selection unavailable');
   if (selection.selection !== 'selected') {
     throw new Error(`state-invalid: state selection ${selection.selection}:${selection.reason}`);
   }
@@ -175,200 +201,260 @@ export async function runLedgerCsharp(input: {
     eventName: input.eventName,
   });
   const command = await resolveTrustedRuntimeCommand(process.env);
-  const lease = await invokeLiveRuntime({
-    command: command.command,
-    input: plan.reviewInput,
-    context: plan.context,
-    manifestInput: plan.manifestInput,
-    timeoutMs: 30_000,
-    trustedRoot: process.env.RUNNER_TEMP,
-    predecessorLedgerBytes: plan.predecessor?.ledgerBytes,
-    predecessorManifestBytes: plan.predecessor?.manifestBytes,
-    predecessorProviderRunMetadataBytes: plan.predecessor?.providerRunMetadataBytes,
-  });
-  const assembled = assembleStructuredReviewFromRuntimeContent({
-    content: mapReviewResultV1ToRuntimeContent(lease.result).content,
-    target: input.target,
-    phase: plan.phase,
-    previousReviewedHeadSha: plan.previousHeadSha,
-    reviewedRange: {
-      kind: plan.phase,
-      fromSha: plan.previousHeadSha ?? null,
-      toSha: input.target.headSha,
-    },
-    config: input.config,
-    sessionId: `m4:${stateKey.pullRequest}`,
-    usage: null,
-    observedTurns: null,
-    observedTurnSource: 'not_applicable',
-    lineageTotals: emptyLineageTotals(),
-    maxFindings: input.config.maxFindings,
-  });
-  const structuredReview = capStructuredReviewForMarkdownLimit(
-    assembled.envelope,
-    input.config.maxReviewChars,
-  );
-  const revalidation = await targetStillMatches(input.target, input.octokit);
-  if (revalidation === 'failed') {
-    await lease.release();
-    throw new Error('state-invalid: target revalidation failed');
-  }
-  if (revalidation === 'changed') {
-    await lease.release();
-    return {
-      stateKey: stateKey.workflowIdentity,
-      phase: plan.phase,
-      transition: lease.manifest.transition.kind,
-      acceptanceStatus: 'not_accepted',
-      acceptanceReason: 'target_changed',
-      publicationStatus: 'not_attempted',
-      receiptStatus: 'not_written',
-      runtimeVersion: lease.result.runtimeVersion,
-      traceSha256: lease.traceSha256,
-      commentUrl: '',
-      stateReason: transitionReason(lease.manifest.transition),
-      candidateId: '',
-      markerId: '',
-      selectorRevision: '',
-      sessionEpoch: '',
-      stateGeneration: '',
-      ledgerEpoch: '',
-      cleanupWarnings: '',
-    };
-  }
-  let commentUrl = '';
-  let publishedComment: { commentId: string; bodySha256: string } | undefined;
-  let acceptedSelectorRevision = '';
-  const observingStore = new Proxy(store, {
-    get(target, property, receiver) {
-      if (property === 'casSelector') {
-        return async (...args: Parameters<StateAcceptanceStore['casSelector']>) => {
-          const outcome = await target.casSelector(...args);
-          if (outcome.kind === 'applied' || outcome.kind === 'already_applied_same_target') {
-            acceptedSelectorRevision = outcome.selector.selectorRevision;
-          }
-          return outcome;
+  const cancellation = abortOnHostTermination();
+  try {
+    const lease = await invokeLiveRuntime({
+      command: command.command,
+      input: plan.reviewInput,
+      context: plan.context,
+      manifestInput: plan.manifestInput,
+      timeoutMs: 30_000,
+      trustedRoot: process.env.RUNNER_TEMP,
+      predecessorLedgerBytes: plan.predecessor?.ledgerBytes,
+      predecessorManifestBytes: plan.predecessor?.manifestBytes,
+      predecessorProviderRunMetadataBytes: plan.predecessor?.providerRunMetadataBytes,
+      signal: cancellation.signal,
+    });
+    let leaseOwnershipTransferred = false;
+    try {
+      const assembled = assembleStructuredReviewFromRuntimeContent({
+        content: mapReviewResultV1ToRuntimeContent(lease.result).content,
+        target: input.target,
+        phase: plan.phase,
+        previousReviewedHeadSha: plan.previousHeadSha,
+        reviewedRange: {
+          kind: plan.phase,
+          fromSha: plan.previousHeadSha ?? null,
+          toSha: input.target.headSha,
+        },
+        config: input.config,
+        sessionId: `m4:${stateKey.pullRequest}`,
+        usage: null,
+        observedTurns: null,
+        observedTurnSource: 'not_applicable',
+        lineageTotals: emptyLineageTotals(),
+        maxFindings: input.config.maxFindings,
+      });
+      const structuredReview = capStructuredReviewForMarkdownLimit(
+        assembled.envelope,
+        input.config.maxReviewChars,
+      );
+      const revalidation = await targetStillMatches(input.target, input.octokit);
+      if (revalidation === 'failed') {
+        await lease.release();
+        throw new Error('state-invalid: target revalidation failed');
+      }
+      if (revalidation === 'changed') {
+        await lease.release();
+        return {
+          stateKey: stateKey.workflowIdentity,
+          phase: plan.phase,
+          transition: lease.manifest.transition.kind,
+          acceptanceStatus: 'not_accepted',
+          acceptanceReason: 'target_changed',
+          publicationStatus: 'not_attempted',
+          receiptStatus: 'not_written',
+          runtimeVersion: lease.result.runtimeVersion,
+          traceSha256: lease.traceSha256,
+          commentUrl: '',
+          stateReason: transitionReason(lease.manifest.transition),
+          candidateId: '',
+          markerId: '',
+          selectorRevision: '',
+          sessionEpoch: '',
+          stateGeneration: '',
+          ledgerEpoch: '',
+          cleanupWarnings: '',
         };
       }
-      const value = Reflect.get(target, property, receiver);
-      return typeof value === 'function' ? value.bind(target) : value;
-    },
-  }) as StateAcceptanceStore;
-  const acceptance = await acceptLocalCandidate(observingStore, {
-    selectionSnapshot: selection.snapshot,
-    candidate: lease,
-    interactionId: lease.manifest.transaction.interactionId,
-    interactionOrdinal: lease.manifest.transaction.interactionOrdinal,
-    producingRunId: lease.manifest.provenance.producingRunId,
-    producingRunAttempt: lease.manifest.provenance.producingRunAttempt,
-    acceptingRunId: String(github.context.runId),
-    acceptingRunAttempt: github.context.runAttempt,
-    consumedInputSha256: lease.manifest.transaction.consumedInputSha256,
-    transition: lease.manifest.transition,
-    publishSticky: input.config.postComment
-      ? async (markerId) => {
-          try {
-            const comment = await publishLedgerComment({
-              octokit: input.octokit,
-              target: input.target,
-              structuredReview,
-              markerId,
-              selectorRevision: acceptedSelectorRevision,
-            });
-            commentUrl = comment.commentUrl;
-            publishedComment = {
-              commentId: comment.commentId,
-              bodySha256: comment.bodySha256,
+      let commentUrl = '';
+      let publishedComment: { commentId: string; bodySha256: string } | undefined;
+      let acceptedSelectorRevision = '';
+      const observingStore = new Proxy(store, {
+        get(target, property, receiver) {
+          if (property === 'casSelector') {
+            return async (...args: Parameters<StateAcceptanceStore['casSelector']>) => {
+              const outcome = await target.casSelector(...args);
+              if (outcome.kind === 'applied' || outcome.kind === 'already_applied_same_target') {
+                acceptedSelectorRevision = outcome.selector.selectorRevision;
+              }
+              return outcome;
             };
-          } catch (error) {
-            if (error instanceof Error && error.message === 'comment_outcome_unknown') {
-              throw new StickyCallbackOutcomeUnknownError();
-            }
-            throw error;
           }
-        }
-      : undefined,
-  });
-  const acceptanceStatus = acceptance.acceptance;
-  const acceptanceReason = 'reason' in acceptance ? acceptance.reason : '';
-  const publicationStatus = acceptance.publication.status;
-  if (acceptance.acceptance === 'unknown') {
-    throw new Error('state-invalid: acceptance outcome unknown');
+          if (property === 'readSelector') {
+            return async (...args: Parameters<StateAcceptanceStore['readSelector']>) => {
+              const observed = await target.readSelector(...args);
+              if (observed.selector) acceptedSelectorRevision = observed.selector.selectorRevision;
+              return observed;
+            };
+          }
+          const value = Reflect.get(target, property, receiver);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      }) as StateAcceptanceStore;
+      leaseOwnershipTransferred = true;
+      const acceptance = await acceptLocalCandidate(observingStore, {
+        selectionSnapshot: selection.snapshot,
+        candidate: lease,
+        interactionId: lease.manifest.transaction.interactionId,
+        interactionOrdinal: lease.manifest.transaction.interactionOrdinal,
+        producingRunId: lease.manifest.provenance.producingRunId,
+        producingRunAttempt: lease.manifest.provenance.producingRunAttempt,
+        acceptingRunId: String(github.context.runId),
+        acceptingRunAttempt: github.context.runAttempt,
+        consumedInputSha256: lease.manifest.transaction.consumedInputSha256,
+        transition: lease.manifest.transition,
+        publishSticky: input.config.postComment
+          ? async (markerId) => {
+              try {
+                const comment = await publishLedgerComment({
+                  octokit: input.octokit,
+                  target: input.target,
+                  structuredReview,
+                  markerId,
+                  selectorRevision: acceptedSelectorRevision,
+                });
+                commentUrl = comment.commentUrl;
+                publishedComment = {
+                  commentId: comment.commentId,
+                  bodySha256: comment.bodySha256,
+                };
+              } catch (error) {
+                if (error instanceof Error && error.message === 'comment_outcome_unknown') {
+                  throw new StickyCallbackOutcomeUnknownError();
+                }
+                if (error instanceof Error && error.message === 'comment_create_failed') {
+                  throw new StickyCallbackKnownFailureError('comment_create_failed');
+                }
+                if (error instanceof Error && error.message === 'comment_update_failed') {
+                  throw new StickyCallbackKnownFailureError('comment_update_failed');
+                }
+                if (error instanceof Error && error.message === 'comment_readback_failed') {
+                  throw new StickyCallbackKnownFailureError('comment_readback_failed');
+                }
+                throw error;
+              }
+            }
+          : undefined,
+        signal: cancellation.signal,
+      });
+      const acceptanceStatus = acceptance.acceptance;
+      const acceptanceReason = 'reason' in acceptance ? acceptance.reason : '';
+      const publicationStatus = acceptance.publication.status;
+      if (acceptance.acceptance === 'unknown') {
+        throw new Error('state-invalid: acceptance outcome unknown');
+      }
+      const receiptStatus =
+        (acceptance.acceptance === 'accepted' || acceptance.acceptance === 'already_accepted') &&
+        publicationStatus !== 'pending'
+          ? receiptOutputStatus(
+              await store.writePublicationReceipt({
+                markerId: acceptance.markerId,
+                stateKey,
+                selectorRevision: acceptance.selectorRevision,
+                acceptingRunId: String(github.context.runId),
+                acceptingRunAttempt: github.context.runAttempt,
+                publicationStatus:
+                  publicationStatus === 'succeeded'
+                    ? 'succeeded'
+                    : publicationStatus === 'not_attempted'
+                      ? 'not_attempted'
+                      : publicationStatus === 'unknown'
+                        ? 'unknown'
+                        : 'failed',
+                ...(publishedComment ?? {}),
+                ...(publicationStatus === 'unknown'
+                  ? { failureCode: 'comment_outcome_unknown' as const }
+                  : publicationStatus === 'failed' &&
+                      acceptance.publication.code !== 'sticky_callback_failed'
+                    ? { failureCode: acceptance.publication.code }
+                    : {}),
+                recordedAt: new Date().toISOString(),
+              }),
+            )
+          : 'not_written';
+      const result: LedgerRunResult = {
+        stateKey: stateKey.workflowIdentity,
+        phase: plan.phase,
+        transition: lease.manifest.transition.kind,
+        acceptanceStatus,
+        acceptanceReason,
+        publicationStatus,
+        receiptStatus,
+        runtimeVersion: lease.result.runtimeVersion,
+        traceSha256: lease.traceSha256,
+        commentUrl,
+        stateReason: transitionReason(lease.manifest.transition),
+        candidateId: computeCandidateId({
+          manifestSha256: sha256Hex(lease.manifestBytes),
+          candidateLedgerSha256: lease.candidateLedgerSha256,
+          providerRunMetadataSha256: sha256Hex(lease.providerRunMetadataBytes),
+          metadataSemanticSha256: lease.metadataSemanticSha256,
+          consumedInputSha256: lease.inputSha256,
+          resultSha256: lease.resultSha256,
+          traceSha256: lease.traceSha256,
+        }),
+        markerId:
+          acceptance.acceptance === 'accepted' || acceptance.acceptance === 'already_accepted'
+            ? acceptance.markerId
+            : '',
+        selectorRevision:
+          acceptance.acceptance === 'accepted' || acceptance.acceptance === 'already_accepted'
+            ? acceptance.selectorRevision
+            : '',
+        sessionEpoch: lease.manifest.sessionEpoch,
+        stateGeneration: String(lease.manifest.generation.stateGeneration),
+        ledgerEpoch: lease.manifest.generation.ledgerEpoch,
+        cleanupWarnings: [...acceptance.cleanupWarnings].sort().join(','),
+      };
+      if (acceptance.acceptance === 'not_accepted' && !isNeutralNotAccepted(acceptance.reason)) {
+        throw new LedgerRunFailure(
+          `state-invalid: acceptance ${acceptance.reason}`,
+          result,
+          'state-invalid',
+        );
+      }
+      if (receiptStatus === 'failed' || receiptStatus === 'unknown') {
+        throw new LedgerRunFailure(
+          'state-invalid: publication receipt outcome unknown',
+          result,
+          'state-invalid',
+        );
+      }
+      if (input.config.postComment && publicationStatus !== 'succeeded') {
+        throw new LedgerRunFailure(
+          `state-invalid: sticky publication ${publicationStatus}`,
+          result,
+          'state-invalid',
+        );
+      }
+      return result;
+    } finally {
+      if (!leaseOwnershipTransferred) await lease.release().catch(() => undefined);
+    }
+  } finally {
+    cancellation.dispose();
   }
-  const receiptStatus =
-    acceptance.acceptance === 'accepted' || acceptance.acceptance === 'already_accepted'
-      ? receiptOutputStatus(
-          await store.writePublicationReceipt({
-            markerId: acceptance.markerId,
-            stateKey,
-            selectorRevision: acceptance.selectorRevision,
-            acceptingRunId: String(github.context.runId),
-            acceptingRunAttempt: github.context.runAttempt,
-            publicationStatus:
-              publicationStatus === 'succeeded'
-                ? 'succeeded'
-                : publicationStatus === 'not_attempted'
-                  ? 'not_attempted'
-                  : publicationStatus === 'unknown' || publicationStatus === 'pending'
-                    ? 'unknown'
-                    : 'failed',
-            ...(publishedComment ?? {}),
-            ...(publicationStatus === 'unknown' || publicationStatus === 'pending'
-              ? { failureCode: 'comment_outcome_unknown' as const }
-              : {}),
-            recordedAt: new Date().toISOString(),
-          }),
-        )
-      : 'not_written';
-  if (acceptance.acceptance === 'not_accepted' && !isNeutralNotAccepted(acceptance.reason)) {
-    throw new Error(`state-invalid: acceptance ${acceptance.reason}`);
-  }
-  if (receiptStatus === 'failed') {
-    throw new Error('state-invalid: publication receipt write failed');
-  }
-  if (input.config.postComment && publicationStatus !== 'succeeded') {
-    throw new Error(`state-invalid: sticky publication ${publicationStatus}`);
-  }
+}
+
+function abortOnHostTermination(): { readonly signal: AbortSignal; readonly dispose: () => void } {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  process.once('SIGINT', abort);
+  process.once('SIGTERM', abort);
   return {
-    stateKey: stateKey.workflowIdentity,
-    phase: plan.phase,
-    transition: lease.manifest.transition.kind,
-    acceptanceStatus,
-    acceptanceReason,
-    publicationStatus,
-    receiptStatus,
-    runtimeVersion: lease.result.runtimeVersion,
-    traceSha256: lease.traceSha256,
-    commentUrl,
-    stateReason: transitionReason(lease.manifest.transition),
-    candidateId: computeCandidateId({
-      manifestSha256: sha256Hex(lease.manifestBytes),
-      candidateLedgerSha256: lease.candidateLedgerSha256,
-      providerRunMetadataSha256: sha256Hex(lease.providerRunMetadataBytes),
-      metadataSemanticSha256: lease.metadataSemanticSha256,
-      consumedInputSha256: lease.inputSha256,
-      resultSha256: lease.resultSha256,
-      traceSha256: lease.traceSha256,
-    }),
-    markerId:
-      acceptance.acceptance === 'accepted' || acceptance.acceptance === 'already_accepted'
-        ? acceptance.markerId
-        : '',
-    selectorRevision:
-      acceptance.acceptance === 'accepted' || acceptance.acceptance === 'already_accepted'
-        ? acceptance.selectorRevision
-        : '',
-    sessionEpoch: lease.manifest.sessionEpoch,
-    stateGeneration: String(lease.manifest.generation.stateGeneration),
-    ledgerEpoch: lease.manifest.generation.ledgerEpoch,
-    cleanupWarnings: [...acceptance.cleanupWarnings].sort().join(','),
+    signal: controller.signal,
+    dispose: () => {
+      process.removeListener('SIGINT', abort);
+      process.removeListener('SIGTERM', abort);
+    },
   };
 }
 
 function receiptOutputStatus(
-  value: 'created' | 'already_exists_same' | 'failed',
-): 'written' | 'failed' {
-  return value === 'failed' ? 'failed' : 'written';
+  value: 'created' | 'already_exists_same' | 'failed' | 'unknown',
+): 'written' | 'failed' | 'unknown' {
+  return value === 'failed' ? 'failed' : value === 'unknown' ? 'unknown' : 'written';
 }
 
 function isNeutralNotAccepted(reason: string): boolean {
@@ -423,10 +509,29 @@ async function validateLedgerInvocationEvent(
       Number(pullRequests[0]?.number) !== target.prNumber ||
       String(workflowRun?.head_repository?.full_name ?? '') !== target.headRepoFullName ||
       String(workflowRun?.event ?? '') !== 'pull_request' ||
-      String(workflowRun?.name ?? '') !== 'Agentic PR Review M4 Untrusted Analysis'
+      String(workflowRun?.name ?? '') !== 'Agentic PR Review M4 Untrusted Analysis' ||
+      String(workflowRun?.path ?? '') !== UNTRUSTED_ANALYSIS_WORKFLOW_PATH ||
+      String(workflowRun?.repository?.full_name ?? '') !== fullName ||
+      String(pullRequests[0]?.head?.sha ?? '') !== target.headSha ||
+      String(pullRequests[0]?.base?.sha ?? '') !== target.baseSha ||
+      String(pullRequests[0]?.base?.ref ?? '') !== target.baseRef
     ) {
       throw new Error(
         'input-invalid: workflow_run provenance does not bind exactly one current pull request',
+      );
+    }
+    const workflowId = Number(workflowRun?.workflow_id);
+    if (!Number.isSafeInteger(workflowId) || workflowId <= 0) {
+      throw new Error('input-invalid: workflow_run provenance has no workflow identity');
+    }
+    const workflow = await octokit.rest.actions.getWorkflow({
+      owner: github.context.repo.owner,
+      repo: github.context.repo.repo,
+      workflow_id: workflowId,
+    });
+    if (String(workflow.data.path ?? '') !== UNTRUSTED_ANALYSIS_WORKFLOW_PATH) {
+      throw new Error(
+        'input-invalid: workflow_run identity does not resolve to the untrusted workflow',
       );
     }
     return;
@@ -438,6 +543,12 @@ async function validateLedgerInvocationEvent(
   });
   if (permission.data.user?.permissions?.admin !== true) {
     throw new Error('input-invalid: verification_namespace requires repository administrator');
+  }
+  const reserved = String(process.env.AGENTIC_REVIEW_M4_RESERVED_VERIFICATION_PR ?? '');
+  if (!/^[1-9][0-9]*$/.test(reserved) || Number(reserved) !== target.prNumber) {
+    throw new Error(
+      'input-invalid: verification_namespace requires the reserved verification pull request',
+    );
   }
 }
 

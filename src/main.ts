@@ -41,7 +41,7 @@ import { mapReviewResultV1ToRuntimeContent } from './protocol/map-review-result.
 import { validateReviewInputV1 } from './protocol/review-input.js';
 import { invokeRuntime } from './runtime-invocation/invoke-runtime.js';
 import { resolveTrustedRuntimeCommand } from './runtime-invocation/command-resolver.js';
-import { runLedgerCsharp } from './ledger-csharp.js';
+import { LedgerRunFailure, runLedgerCsharp, type LedgerRunResult } from './ledger-csharp.js';
 import { RuntimeInvocationError } from './runtime-invocation/runtime-errors.js';
 import {
   deriveStateKey,
@@ -98,8 +98,16 @@ class CoreInputReader implements InputReader {
 
 export async function run(): Promise<void> {
   const eventName = github.context.eventName || process.env.GITHUB_EVENT_NAME || '';
-  const config = parseActionConfig(new CoreInputReader(), process.env, eventName);
-  if (config.runtimeBackend === 'ledger-csharp') setLedgerInitialOutputs();
+  const ledgerRequested = core.getInput('runtime_backend').trim() === 'ledger-csharp';
+  if (ledgerRequested) setLedgerInitialOutputs();
+  let config;
+  try {
+    config = parseActionConfig(new CoreInputReader(), process.env, eventName);
+  } catch (error) {
+    if (ledgerRequested) setLedgerErrorOutputs(error);
+    throw error;
+  }
+  if (config.runtimeBackend === 'ledger-csharp' && !ledgerRequested) setLedgerInitialOutputs();
   if (config.apiKey) {
     core.setSecret(config.apiKey);
   }
@@ -159,9 +167,15 @@ export async function run(): Promise<void> {
         defaultBranchCommitSha,
       });
       setLedgerSuccessOutputs(result);
+      await writeLedgerSummary(result);
       return;
     } catch (error) {
-      setLedgerErrorOutputs(error);
+      if (error instanceof LedgerRunFailure) {
+        setLedgerPartialFailureOutputs(error);
+        await writeLedgerSummary(error.result, error.errorKind);
+      } else {
+        setLedgerErrorOutputs(error);
+      }
       throw error;
     }
   }
@@ -1383,6 +1397,34 @@ function setLedgerSuccessOutputs(result: Awaited<ReturnType<typeof runLedgerCsha
   core.setOutput('comment_url', result.commentUrl);
 }
 
+function setLedgerPartialFailureOutputs(error: LedgerRunFailure): void {
+  setLedgerSuccessOutputs(error.result);
+  core.setOutput('runtime_error_kind', error.errorKind);
+  core.setOutput('state_error_kind', error.errorKind);
+}
+
+async function writeLedgerSummary(result: LedgerRunResult, failureKind = ''): Promise<void> {
+  try {
+    await core.summary
+      .addRaw(
+        [
+          '### Agentic PR Review M4 ledger',
+          '',
+          `- Phase: ${result.phase}`,
+          `- Transition: ${result.transition}`,
+          `- Acceptance: ${result.acceptanceStatus}${result.acceptanceReason ? ` (${result.acceptanceReason})` : ''}`,
+          `- Publication: ${result.publicationStatus}`,
+          `- Receipt: ${result.receiptStatus}`,
+          `- Selector revision: ${result.selectorRevision || 'n/a'}`,
+          `- Failure classification: ${failureKind || 'none'}`,
+        ].join('\n'),
+      )
+      .write();
+  } catch {
+    core.info('Unable to write M4 ledger summary.');
+  }
+}
+
 function setLedgerInitialOutputs(): void {
   for (const [name, value] of Object.entries({
     runtime_backend: 'ledger-csharp',
@@ -1772,6 +1814,6 @@ function messageOf(error: unknown): string {
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   run().catch((error: unknown) => {
-    core.setFailed(messageOf(error));
+    core.setFailed(sanitizeRuntimeDiagnosticForHost(messageOf(error)));
   });
 }

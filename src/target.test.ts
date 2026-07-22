@@ -80,6 +80,7 @@ describe('resolveTarget', () => {
               base: { ref: 'main', sha: 'base' },
               head: { ref: 'branch', sha: 'head', repo: { full_name: 'example/repo' } },
               draft: false,
+              state: 'open',
               html_url: 'https://github.com/example/repo/pull/1',
             },
           }),
@@ -126,6 +127,37 @@ describe('resolveTarget', () => {
       patchSha256: null,
     });
     expect(target.changedFiles[0].patch).toBe(rawPatch);
+    expect(target.isOpen).toBe(true);
+  });
+
+  it('retains the pull request open state for the ledger invocation gate', async () => {
+    const octokit = {
+      rest: {
+        pulls: {
+          get: async () => ({
+            data: {
+              title: 'Closed PR',
+              body: '',
+              base: { ref: 'main', sha: 'base' },
+              head: { ref: 'branch', sha: 'head', repo: { full_name: 'example/repo' } },
+              draft: false,
+              state: 'closed',
+              html_url: 'https://github.com/example/repo/pull/1',
+            },
+          }),
+          listFiles: {},
+        },
+      },
+      paginate: async () => [],
+    };
+
+    await expect(
+      resolveTarget(config(), octokit, {
+        repo: { owner: 'example', repo: 'repo' },
+        payload: {},
+        sha: 'head',
+      }),
+    ).resolves.toMatchObject({ isOpen: false });
   });
 
   it('computes changed current entries and stale removed entries from snapshots', () => {

@@ -24,6 +24,7 @@ import {
   stateKeyDigest,
 } from './github-state-paths.js';
 import {
+  ContractValidationError,
   decodeValidatedMarker,
   decodeValidatedRegistration,
   decodeValidatedSelector,
@@ -106,15 +107,11 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
     if (created === 'unknown' && (await this.transport.read()) === null) {
       throw new StoreTransactionError('store_transaction_failed');
     }
-    const state = await this.requireState();
     const sentinel = canonicalJsonBytes({
       schemaVersion: 1,
       kind: 'agentic-pr-review-m4-state-store',
       namespace: 'm4-state-v1',
     });
-    const existing = await this.readPath(state, gitStatePaths.sentinel);
-    if (existing !== null && !bytesEqual(existing, sentinel))
-      throw new StoreTransactionError('store_transaction_failed');
     const probe = canonicalJsonBytes({
       schemaVersion: 1,
       kind: 'm4-store-capability-probe',
@@ -123,33 +120,40 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
       stateKeyDigest: stateKeyDigest(input.stateKey),
     });
     const probePath = gitStatePaths.probe(input.runId, input.runAttempt);
-    const existingProbe = await this.readPath(state, probePath);
-    if (existingProbe !== null && !bytesEqual(existingProbe, probe))
-      throw new StoreTransactionError('store_transaction_failed');
-    if (existing !== null && existingProbe !== null) return;
-    const result = await this.transport.commit(
-      state,
-      new Map([
-        ...(existing === null ? [[gitStatePaths.sentinel, sentinel] as const] : []),
-        ...(existingProbe === null ? [[probePath, probe] as const] : []),
-      ]),
-      'm4 state capability probe',
-    );
-    if (result !== 'applied') {
+    for (let attempt = 0; attempt < refRetryLimit; attempt += 1) {
+      const state = await this.requireState();
+      const existing = await this.readPath(state, gitStatePaths.sentinel);
+      if (existing === null && hasM4NamespaceEntries(state)) {
+        throw new StoreTransactionError('store_transaction_failed');
+      }
+      if (existing !== null && !bytesEqual(existing, sentinel))
+        throw new StoreTransactionError('store_transaction_failed');
+      const existingProbe = await this.readPath(state, probePath);
+      if (existingProbe !== null && !bytesEqual(existingProbe, probe))
+        throw new StoreTransactionError('store_transaction_failed');
+      if (existing !== null && existingProbe !== null) return;
+      const result = await this.transport.commit(
+        state,
+        new Map([
+          ...(existing === null ? [[gitStatePaths.sentinel, sentinel] as const] : []),
+          ...(existingProbe === null ? [[probePath, probe] as const] : []),
+        ]),
+        'm4 state capability probe',
+      );
       const reread = await this.transport.read();
       if (
-        !reread ||
-        !bytesEqual(
+        reread &&
+        bytesEqual(
           (await this.readPath(reread, gitStatePaths.sentinel)) ?? new Uint8Array(),
           sentinel,
-        ) ||
-        !bytesEqual((await this.readPath(reread, probePath)) ?? new Uint8Array(), probe)
+        ) &&
+        bytesEqual((await this.readPath(reread, probePath)) ?? new Uint8Array(), probe)
       ) {
-        throw new StoreTransactionError(
-          result === 'unknown' ? 'store_transaction_failed' : 'store_capability_unsupported',
-        );
+        return;
       }
+      if (result === 'unknown') throw new StoreTransactionError('store_transaction_failed');
     }
+    throw new StoreTransactionError('store_capability_unsupported');
   }
 
   async uploadCandidate(
@@ -188,12 +192,11 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
         ]),
         `m4 state candidate ${candidateId}`,
       );
-      if (result === 'applied') return { kind: 'created', locator };
       const reread = await this.transport.read();
       if (!reread) return { kind: 'outcome_unknown', locator };
       const reconciled = await this.readCandidateFrom(reread, candidateId);
       if (reconciled.status === 'present' && bundlesEqual(reconciled.bundle, bundle)) {
-        return { kind: 'already_exists_same', locator };
+        return { kind: result === 'applied' ? 'created' : 'already_exists_same', locator };
       }
       if (result === 'unknown') return { kind: 'outcome_unknown', locator };
     }
@@ -273,13 +276,14 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
    */
   async peekSelectorForComparison(
     stateKey: StateKeyV2,
-  ): Promise<{ readonly selector: StateSelectorV1 | null }> {
+  ): Promise<{ readonly selector: StateSelectorV1 | null; readonly revision: SelectorRevision }> {
     const bytes = await this.readPath(await this.requireState(), gitStatePaths.selector(stateKey));
-    if (bytes === null) return { selector: null };
+    if (bytes === null) return { selector: null, revision: 'bootstrap' };
     try {
-      return { selector: decodeValidatedSelector(bytes) };
+      const selector = decodeValidatedSelector(bytes);
+      return { selector, revision: selector.selectorRevision };
     } catch {
-      return { selector: null };
+      return { selector: null, revision: selectorRevisionFromBytes(bytes) };
     }
   }
 
@@ -332,7 +336,7 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
       | 'comment_readback_failed'
       | 'comment_outcome_unknown';
     readonly recordedAt: string;
-  }): Promise<'created' | 'already_exists_same' | 'failed'> {
+  }): Promise<'created' | 'already_exists_same' | 'failed' | 'unknown'> {
     if (
       !SHA256_HEX.test(input.markerId) ||
       !/^sha256:[a-f0-9]{64}$/.test(input.selectorRevision) ||
@@ -395,15 +399,15 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
       );
       if (outcome === 'applied') return 'created';
       const reread = await this.transport.read();
-      if (!reread) return 'failed';
+      if (!reread) return outcome === 'unknown' ? 'unknown' : 'failed';
       const observed = await this.readPath(reread, path);
       if (observed !== null) {
         decodePublicationReceipt(observed);
         return bytesEqual(observed, bytes) ? 'already_exists_same' : 'failed';
       }
-      if (outcome === 'unknown') return 'failed';
+      if (outcome === 'unknown') return 'unknown';
     }
-    return 'failed';
+    return 'unknown';
   }
 
   async readMarker(
@@ -544,6 +548,12 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
     try {
       const state = await this.requireState();
       const selectorBytes = await this.readPath(state, gitStatePaths.selector(options.stateKey));
+      if (
+        options.expectedObservedSelectorRevision !== undefined &&
+        selectorRevisionFromBytes(selectorBytes) !== options.expectedObservedSelectorRevision
+      ) {
+        return { selection: 'failed', reason: 'selector_read_failed' };
+      }
       if (selectorBytes === null) return this.emptySelection(options);
       let selector: StateSelectorV1;
       try {
@@ -622,6 +632,7 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
       // of the independently bound accepted chain.  Mutation paths retain a
       // strict scan before issuing any new registration.
       const registrations = await this.registrations(state, options.stateKey, true);
+      await this.validateSelectionControlPlane(state, options.stateKey, registrations);
       const entry = registrations.find(
         (item) => item.registration.registrationId === marker.registrationId,
       );
@@ -846,6 +857,10 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
 
   private validateStateTree(state: GitStateRef): void {
     for (const [path, entry] of state.entries) {
+      if (path === 'm4-state') {
+        if (entry.type === 'tree' && entry.mode === '040000') continue;
+        throw new StoreTransactionError('store_transaction_failed');
+      }
       if (!path.startsWith('m4-state/')) continue;
       if (isM4TreePath(path)) {
         if (entry.type === 'tree' && entry.mode === '040000') continue;
@@ -917,8 +932,13 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
   ): Promise<{ readonly registration: CandidateRegistrationV1; readonly bytes: Uint8Array }[]> {
     const prefix = `m4-state/v1/states/${stateKeyDigest(stateKey)}/registrations/`;
     const results: { registration: CandidateRegistrationV1; bytes: Uint8Array }[] = [];
-    for (const path of state.entries.keys()) {
+    for (const [path, entry] of state.entries) {
       if (!path.startsWith(prefix)) continue;
+      if (entry.type === 'tree' && entry.mode === '040000') continue;
+      if (entry.type !== 'blob' || entry.mode !== '100644' || !isAllowedGitStatePath(path)) {
+        if (ignoreInvalid) continue;
+        throw new StoreTransactionError('store_transaction_failed');
+      }
       try {
         const bytes = await this.readPath(state, path);
         if (!bytes) throw new StoreTransactionError('store_transaction_failed');
@@ -931,7 +951,7 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
         if (path !== expected) throw new StoreTransactionError('store_transaction_failed');
         results.push({ registration, bytes });
       } catch (error) {
-        if (!ignoreInvalid) throw error;
+        if (!ignoreInvalid || !(error instanceof ContractValidationError)) throw error;
       }
     }
     return results;
@@ -976,6 +996,26 @@ export class GitHubGitStateAcceptanceStore implements StateAcceptanceStore {
         throw new StoreTransactionError('store_transaction_failed');
     }
     return { registrations, counter };
+  }
+
+  private async validateSelectionControlPlane(
+    state: GitStateRef,
+    stateKey: StateKeyV2,
+    registrations: readonly {
+      readonly registration: CandidateRegistrationV1;
+      readonly bytes: Uint8Array;
+    }[],
+  ): Promise<void> {
+    const counterBytes = await this.readPath(state, gitStatePaths.counter(stateKey));
+    if (counterBytes === null) {
+      if (registrations.length > 0) throw new StoreTransactionError('store_transaction_failed');
+      return;
+    }
+    await this.assertCounterIndex(
+      state,
+      stateKey,
+      decodeRegistrationCounter(counterBytes, stateKey),
+    );
   }
 
   private async assertCounterIndex(
@@ -1044,6 +1084,12 @@ function decodeRegistrationCounter(bytes: Uint8Array, stateKey: StateKeyV2): Reg
 function isM4TreePath(path: string): boolean {
   return /^(?:m4-state|m4-state\/v1|m4-state\/v1\/(?:candidates|states|markers|receipts|probes)|m4-state\/v1\/candidates\/[a-f0-9]{64}|m4-state\/v1\/states\/[a-f0-9]{64}(?:\/(?:selectors|registrations)(?:\/[a-f0-9]{64})?)?|m4-state\/v1\/receipts\/[a-f0-9]{64})$/u.test(
     path,
+  );
+}
+
+function hasM4NamespaceEntries(state: GitStateRef): boolean {
+  return [...state.entries.keys()].some(
+    (path) => path === 'm4-state' || path.startsWith('m4-state/'),
   );
 }
 
@@ -1129,6 +1175,10 @@ function revision(bytes: Uint8Array | null): SelectorRevision {
   } catch {
     return `invalid:${sha256Hex(bytes)}` as SelectorRevision;
   }
+}
+
+function selectorRevisionFromBytes(bytes: Uint8Array | null): SelectorRevision {
+  return revision(bytes);
 }
 function scopeOf(registration: CandidateRegistrationV1): CompetingScope {
   return {
