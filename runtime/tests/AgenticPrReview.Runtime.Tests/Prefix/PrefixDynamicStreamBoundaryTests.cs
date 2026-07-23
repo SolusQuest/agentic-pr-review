@@ -277,6 +277,15 @@ public sealed class PrefixDynamicStreamBoundaryTests
         Assert.Equal("prefix_current_context_invalid", Assert.Single(rejected.Diagnostics).Code);
     }
 
+    [Fact]
+    public void CurrentEvidenceNullSubjectReturnsTypedDiagnostic()
+    {
+        var outcome = PrefixMaterializer.Materialize(EvidenceInputWithSubject(null));
+
+        Assert.Null(outcome.Value);
+        Assert.Equal("prefix_current_context_invalid", Assert.Single(outcome.Diagnostics).Code);
+    }
+
     [Theory]
     [InlineData("1:a")]
     [InlineData(".foo:bar")]
@@ -332,6 +341,27 @@ public sealed class PrefixDynamicStreamBoundaryTests
     private static PrefixMaterializationInput EvidenceInput(string path, string? sourcePatch = null, string? evidencePatch = null)
     {
         return EvidenceInput((path, sourcePatch, evidencePatch));
+    }
+
+    private static PrefixMaterializationInput EvidenceInputWithSubject(string? subject)
+    {
+        var input = EvidenceInput("src/file.cs");
+        var context = input.CurrentContext;
+        return input with
+        {
+            CurrentContext = new ValidatedContextSource
+            {
+                SubjectDigest = context.SubjectDigest,
+                ReviewedHeadSha = context.ReviewedHeadSha,
+                ReviewedBaseSha = context.ReviewedBaseSha,
+                ChangedFiles = context.ChangedFiles,
+                CurrentEvidence = new CurrentReviewEvidence
+                {
+                    Subject = subject!,
+                    Files = [new CurrentEvidenceFile { Path = "src/file.cs" }],
+                },
+            },
+        };
     }
 
     private static PrefixMaterializationInput EvidenceInput(params (string Path, string? SourcePatch, string? EvidencePatch)[] entries)

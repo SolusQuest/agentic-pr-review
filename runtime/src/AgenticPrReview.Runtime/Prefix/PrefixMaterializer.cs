@@ -522,7 +522,8 @@ public static class PrefixMaterializer
             return null;
         }
 
-        if (evidence.Subject.Length > 4_000
+        if (evidence.Subject is null
+            || evidence.Subject.Length > 4_000
             || ContainsInvalidUnicode(evidence.Subject)
             || evidence.Files.IsDefault
             || evidence.Files.Length > 256
