@@ -543,6 +543,7 @@ public static class PrefixMaterializer
                 || !IsSafeRelativePath(file.Path)
                 || CountCodePoints(file.Path) > 500
                 || ContainsInvalidUnicode(file.Path)
+                || (file.Patch is null) != (sourceFile.Patch is null)
                 || (file.Patch is not null && (file.Patch.Length > 20_000 || ContainsInvalidUnicode(file.Patch))))
             {
                 return PrefixDiagnostic.Create(PrefixDiagnosticCodes.CurrentContextInvalid);
@@ -576,7 +577,7 @@ public static class PrefixMaterializer
         if (path.Length == 0
             || path.StartsWith("/", StringComparison.Ordinal)
             || path.Contains('\\')
-            || path.Contains(':'))
+            || System.Text.RegularExpressions.Regex.IsMatch(path, "^[A-Za-z][A-Za-z0-9+.-]*:"))
         {
             return false;
         }

@@ -2,6 +2,7 @@ using AgenticPrReview.Runtime.Ledger;
 using AgenticPrReview.Runtime.Prefix;
 using AgenticPrReview.Runtime.Canonical;
 using System.Buffers.Binary;
+using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -277,12 +278,24 @@ public sealed class PrefixDynamicStreamBoundaryTests
     }
 
     [Theory]
+    [InlineData("1:a")]
+    [InlineData(".foo:bar")]
+    [InlineData("-x:y")]
+    [InlineData("dir/a:b")]
+    public void CurrentEvidencePathMatchesAuthoritativeSchemeRule(string path)
+    {
+        var outcome = PrefixMaterializer.Materialize(EvidenceInput(path));
+        Assert.NotNull(outcome.Value);
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("/absolute")]
     [InlineData("../parent")]
     [InlineData("src/../escape")]
     [InlineData("src\\file.cs")]
     [InlineData("https://example.test/file")]
+    [InlineData("a1+.-:x")]
     public void CurrentEvidencePathRejectsUnsafeShapes(string path)
     {
         var outcome = PrefixMaterializer.Materialize(EvidenceInput(path));
@@ -290,18 +303,50 @@ public sealed class PrefixDynamicStreamBoundaryTests
         Assert.Equal("prefix_current_context_invalid", Assert.Single(outcome.Diagnostics).Code);
     }
 
-    private static PrefixMaterializationInput EvidenceInput(string path)
+    [Fact]
+    public void CurrentEvidencePatchMustMatchSourcePresenceAndDigest()
+    {
+        const string sourcePatch = "@@ -1 +1 @@\n-old\n+new";
+        const string otherPatch = "@@ -2 +2 @@\n-old\n+new";
+
+        Assert.Null(PrefixMaterializer.Materialize(EvidenceInput("src/file.cs", sourcePatch, null)).Value);
+        Assert.Null(PrefixMaterializer.Materialize(EvidenceInput("src/file.cs", null, sourcePatch)).Value);
+        Assert.Null(PrefixMaterializer.Materialize(EvidenceInput("src/file.cs", sourcePatch, otherPatch)).Value);
+        Assert.NotNull(PrefixMaterializer.Materialize(EvidenceInput("src/file.cs", sourcePatch, sourcePatch)).Value);
+    }
+
+    [Fact]
+    public void CurrentEvidencePatchCannotBeMovedToAnotherFile()
+    {
+        const string firstPatch = "@@ -1 +1 @@\n-first\n+new";
+        const string secondPatch = "@@ -2 +2 @@\n-second\n+new";
+        var outcome = PrefixMaterializer.Materialize(
+            EvidenceInput(
+                ("src/first.cs", firstPatch, secondPatch),
+                ("src/second.cs", secondPatch, firstPatch)));
+
+        Assert.Null(outcome.Value);
+        Assert.Equal("prefix_current_context_invalid", Assert.Single(outcome.Diagnostics).Code);
+    }
+
+    private static PrefixMaterializationInput EvidenceInput(string path, string? sourcePatch = null, string? evidencePatch = null)
+    {
+        return EvidenceInput((path, sourcePatch, evidencePatch));
+    }
+
+    private static PrefixMaterializationInput EvidenceInput(params (string Path, string? SourcePatch, string? EvidencePatch)[] entries)
     {
         var vector = PrefixFixtureLoader.LoadVector("materialization/bootstrap.json");
         var baseInput = PrefixFixtureLoader.BuildMaterializeInput(vector.GetProperty("input"));
-        var file = new LedgerChangedFile
+        var changedFiles = entries.Select(entry => new LedgerChangedFile
         {
-            Path = path,
+            Path = entry.Path,
             Status = "modified",
             Additions = 1,
             Deletions = 0,
             Changes = 1,
-        };
+            Patch = entry.SourcePatch is null ? null : PatchMetadata(entry.SourcePatch),
+        }).ToImmutableArray();
         return baseInput with
         {
             CurrentContext = new ValidatedContextSource
@@ -309,13 +354,27 @@ public sealed class PrefixDynamicStreamBoundaryTests
                 SubjectDigest = new string('1', 64),
                 ReviewedHeadSha = new string('0', 40),
                 ReviewedBaseSha = new string('1', 40),
-                ChangedFiles = [file],
+                ChangedFiles = changedFiles,
                 CurrentEvidence = new CurrentReviewEvidence
                 {
                     Subject = "subject",
-                    Files = [new CurrentEvidenceFile { Path = path }],
+                    Files = entries.Select(entry => new CurrentEvidenceFile
+                    {
+                        Path = entry.Path,
+                        Patch = entry.EvidencePatch,
+                    }).ToImmutableArray(),
                 },
             },
+        };
+    }
+
+    private static LedgerBoundedPatch PatchMetadata(string patch)
+    {
+        return new LedgerBoundedPatch
+        {
+            Sha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(patch))).ToLowerInvariant(),
+            Truncated = false,
+            MaxChars = 20_000,
         };
     }
 }
