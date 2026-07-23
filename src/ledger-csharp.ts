@@ -38,6 +38,7 @@ export const VERIFICATION_TRUSTED_EXECUTION_DOMAIN =
   'github-default-branch-maintainer-verification/v1';
 const PLACEHOLDER_EPOCH = 'AAAAAAAAAAAAAAAAAAAAAA';
 const UNTRUSTED_ANALYSIS_WORKFLOW_PATH = '.github/workflows/m4-untrusted-analysis.yml';
+const GITHUB_COMPARE_FILE_TRUNCATION_BOUNDARY = 300;
 
 const cacheContractEnvelopes = {
   template: {
@@ -946,7 +947,8 @@ export async function targetForLedgerContinuation(input: {
     });
     if (
       (comparison.data.status !== 'ahead' && comparison.data.status !== 'identical') ||
-      !Array.isArray(comparison.data.files)
+      !Array.isArray(comparison.data.files) ||
+      comparison.data.files.length >= GITHUB_COMPARE_FILE_TRUNCATION_BOUNDARY
     )
       throw new Error('predecessor-to-head comparison is incomplete');
     return {

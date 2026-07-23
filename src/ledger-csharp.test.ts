@@ -208,4 +208,32 @@ describe('ledger-csharp host plan', () => {
       expect.objectContaining({ filename: 'src/new-change.ts', patch: '@@ -1 +1 @@\n-old\n+new' }),
     ]);
   });
+
+  it('fails closed at the GitHub compare file truncation boundary', async () => {
+    await expect(
+      targetForLedgerContinuation({
+        target,
+        previousHeadSha: 'c'.repeat(40),
+        octokit: {
+          rest: {
+            repos: {
+              compareCommits: async () => ({
+                data: {
+                  status: 'ahead',
+                  files: Array.from({ length: 300 }, (_, index) => ({
+                    filename: `src/file-${index}.ts`,
+                    status: 'modified',
+                    additions: 1,
+                    deletions: 0,
+                    changes: 1,
+                  })),
+                },
+              }),
+            },
+          },
+        },
+        repository: 'owner/repo',
+      }),
+    ).rejects.toMatchObject({ errorKind: 'target_revalidation_failed' });
+  });
 });

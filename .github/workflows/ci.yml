@@ -83,6 +83,18 @@ jobs:
           expected="agentic-pr-review-deterministic-csharp-state-cs-$(printf %s 'ci-deterministic-smoke' | sha256sum | cut -c1-20)"
           test "$ARTIFACT_NAME" = "$expected"
 
+  m4-runtime-build-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - name: Build the runtime used by both controlled M4 workflows
+        run: >-
+          dotnet build runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj
+          --configuration Release --output "$RUNNER_TEMP/agentic-pr-review-runtime"
+
   m4-state-acceptance:
     runs-on: ubuntu-latest
     steps:
