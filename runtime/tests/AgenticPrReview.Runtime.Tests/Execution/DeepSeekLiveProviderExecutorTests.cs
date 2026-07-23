@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using AgenticPrReview.Runtime;
@@ -66,6 +67,40 @@ public sealed class DeepSeekLiveProviderExecutorTests
         Assert.Equal("user", messages[4].GetProperty("role").GetString());
         Assert.Contains("patch text", messages[4].GetProperty("content").GetString(), StringComparison.Ordinal);
         Assert.DoesNotContain("tools", root.EnumerateObject().Select(property => property.Name));
+        Assert.Equal("261e051956c8f706980ef288f6273452922e6ea0d37019b66d6e358e9c52d5b1", Convert.ToHexString(SHA256.HashData(handler.RequestBody)).ToLowerInvariant());
+    }
+
+    [Fact]
+    public async Task ContinuationRequestUsesByteExactGoldenAndPreservesEveryMessage()
+    {
+        var handler = new RecordingHandler(SuccessResponse());
+        var executor = new DeepSeekLiveProviderExecutor("k", handler, TimeSpan.FromSeconds(5));
+        var plan = Plan() with
+        {
+            Messages =
+            [
+                new ProviderRequestMessage("system", "template"),
+                new ProviderRequestMessage("system", "policy"),
+                new ProviderRequestMessage("system", "tools"),
+                new ProviderRequestMessage("assistant", "historical assistant"),
+                new ProviderRequestMessage("user", "historical user"),
+                new ProviderRequestMessage("user", "current patch"),
+            ],
+        };
+
+        await executor.ExecuteAsync(plan, Identities());
+
+        using var body = JsonDocument.Parse(handler.RequestBody);
+        var messages = body.RootElement.GetProperty("messages").EnumerateArray().ToArray();
+        Assert.Equal(
+            ["system", "system", "system", "system", "assistant", "user", "user"],
+            messages.Select(message => message.GetProperty("role").GetString()!).ToArray());
+        Assert.Equal("template", messages[0].GetProperty("content").GetString());
+        Assert.Equal(DeepSeekProviderContract.FixedInstruction, messages[3].GetProperty("content").GetString());
+        Assert.Equal("historical assistant", messages[4].GetProperty("content").GetString());
+        Assert.Equal("historical user", messages[5].GetProperty("content").GetString());
+        Assert.Equal("current patch", messages[6].GetProperty("content").GetString());
+        Assert.Equal("81da51de07655c712343b2d6772a20392186dc0fd4f8e7451c34020aab444c1d", Convert.ToHexString(SHA256.HashData(handler.RequestBody)).ToLowerInvariant());
     }
 
     [Fact]

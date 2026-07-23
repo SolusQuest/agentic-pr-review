@@ -14,6 +14,13 @@ describe('live runtime privacy barriers', () => {
     ).not.toThrow();
   });
 
+  it('allows a valid short key through ordinary JSON channels', () => {
+    const values = copySensitiveValues(['a']);
+    expect(() =>
+      assertPrivateBytes([new TextEncoder().encode('{"summary":"a normal JSON value"}')], values),
+    ).not.toThrow();
+  });
+
   it('rejects empty, duplicate, and over-bound values before asynchronous work', () => {
     for (const values of [
       [''],

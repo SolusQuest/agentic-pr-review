@@ -57,6 +57,36 @@ describe('live runtime process terminal ordering', () => {
     ).toBeUndefined();
   });
 
+  it('passes a short provider key through child env without serializing it', async () => {
+    const fake = new FakeChild();
+    let childEnv: NodeJS.ProcessEnv | undefined;
+    const resultPromise = runProcess(
+      { executablePath: '/trusted/runtime' },
+      ['review-live'],
+      1_000,
+      undefined,
+      '/private/invocation',
+      ((
+        _executablePath: string,
+        _args: readonly string[],
+        options: { env?: NodeJS.ProcessEnv },
+      ) => {
+        childEnv = (options as { env?: NodeJS.ProcessEnv }).env;
+        return fake as unknown as ChildProcess;
+      }) as never,
+      2_000,
+      { AGENTIC_REVIEW_DEEPSEEK_API_KEY: 'a' },
+    );
+    queueMicrotask(() => fake.emit('spawn'));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    fake.exitCode = 0;
+    fake.emit('exit', 0, null);
+    fake.emit('close', 0, null);
+
+    await expect(resultPromise).resolves.toMatchObject({ exitCode: 0 });
+    expect(childEnv?.AGENTIC_REVIEW_DEEPSEEK_API_KEY).toBe('a');
+  });
+
   it('cancels when abort occurs during spawn before listener registration', async () => {
     const fake = new FakeChild();
     const controller = new AbortController();
