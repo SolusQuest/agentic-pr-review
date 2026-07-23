@@ -41,7 +41,10 @@ public sealed record RuntimeFinding(
     [property: JsonPropertyName("body")] string Body,
     [property: JsonPropertyName("path")] string? Path,
     [property: JsonPropertyName("startLine")] int? StartLine,
-    [property: JsonPropertyName("endLine")] int? EndLine);
+    [property: JsonPropertyName("endLine")] int? EndLine,
+    [property: JsonPropertyName("evidence")] string? Evidence = null,
+    [property: JsonPropertyName("suggestedAction")] string? SuggestedAction = null,
+    [property: JsonPropertyName("inlinePreference")] string? InlinePreference = null);
 
 public sealed record RuntimeToolCall(
     [property: JsonPropertyName("name")] string Name,

@@ -1,0 +1,78 @@
+name: Agentic PR Review M4 DeepSeek Live
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Same-repository pull request number to review
+        required: true
+        type: string
+      enable_live_provider:
+        description: Explicitly acknowledge a live provider invocation
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  gate:
+    if: >-
+      github.repository == github.event.repository.full_name &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+      vars.AGENTIC_REVIEW_LIVE_PROVIDER_ENABLED == 'true' &&
+      inputs.enable_live_provider == true
+    runs-on: ubuntu-latest
+    outputs:
+      trusted: 'true'
+    steps:
+      - name: Confirm trusted live dispatch
+        run: >-
+          test "${GITHUB_REF}" = "refs/heads/${{ github.event.repository.default_branch }}"
+
+  live:
+    needs: gate
+    if: needs.gate.outputs.trusted == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: apr-m4-deepseek-live-v1-${{ github.repository_id }}-${{ inputs.pr_number }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - run: npm ci
+      - name: Build trusted runtime outside the checkout
+        run: >-
+          dotnet build runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj
+          --configuration Release --output "$RUNNER_TEMP/agentic-pr-review-runtime"
+      - name: Configure trusted runtime command
+        shell: bash
+        run: |
+          printf 'AGENTIC_REVIEW_RUNTIME_EXECUTABLE=%s\n' "$(realpath "$(command -v dotnet)")" >> "$GITHUB_ENV"
+          printf 'AGENTIC_REVIEW_RUNTIME_PREFIX_ARGS_JSON=["%s"]\n' "$RUNNER_TEMP/agentic-pr-review-runtime/AgenticPrReview.Runtime.dll" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/agentic-pr-review
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          AGENTIC_REVIEW_DEEPSEEK_API_KEY: ${{ secrets.AGENTIC_REVIEW_DEEPSEEK_API_KEY }}
+          AGENTIC_REVIEW_LIVE_PROVIDER_ENABLED: ${{ vars.AGENTIC_REVIEW_LIVE_PROVIDER_ENABLED }}
+        with:
+          runtime_backend: ledger-csharp
+          runtime_provider: test
+          live_provider: deepseek
+          target_mode: pull-request
+          review_mode: auto
+          max_patch_chars: '20000'
+          max_findings: '50'
+          post_comment: 'true'
+          inline_comments: 'false'

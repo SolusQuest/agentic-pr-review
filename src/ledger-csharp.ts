@@ -30,6 +30,10 @@ import {
   type StateManifestV2Transition,
 } from './state-v2/index.js';
 import type { ActionConfig, Phase, ReviewTarget, StructuredReviewEnvelopeV1 } from './types.js';
+import {
+  DEEPSEEK_CACHE_CONTRACT_ENVELOPES,
+  DEEPSEEK_CACHE_CONTRACT_IDENTITY,
+} from './live-provider/deepseek-contract.js';
 
 export const LEDGER_WORKFLOW_IDENTITY = 'agentic-pr-review/m4-stateful-review/v1';
 export const LEDGER_TRUSTED_EXECUTION_DOMAIN = 'github-default-branch-workflow-run/v1';
@@ -93,6 +97,16 @@ const cacheContractIdentity = {
   cacheConfigId: 'd5d1e7d93a8fac3ec89b896c771e92301d8cae17fe39fb7e63a42ebe3b35bfe9',
   adapterId: 'e0b738711687dd8e1d4aefea903cc395b48dc4c9e8ef4b11fedac34e67fd16c6',
 } as const;
+
+type LedgerContract = typeof cacheContractIdentity | typeof DEEPSEEK_CACHE_CONTRACT_IDENTITY;
+
+function ledgerContract(liveProvider: ActionConfig['liveProvider']): LedgerContract {
+  return liveProvider === 'deepseek' ? DEEPSEEK_CACHE_CONTRACT_IDENTITY : cacheContractIdentity;
+}
+
+function ledgerEnvelopes(liveProvider: ActionConfig['liveProvider']) {
+  return liveProvider === 'deepseek' ? DEEPSEEK_CACHE_CONTRACT_ENVELOPES : cacheContractEnvelopes;
+}
 
 export interface LedgerRunResult {
   readonly stateKey: string;
@@ -170,11 +184,13 @@ export async function runLedgerCsharp(input: {
   if (input.target.isOpen !== true) {
     throw new Error('input-invalid: ledger-csharp requires an initially open pull request');
   }
+  const contract = ledgerContract(input.config.liveProvider);
   const repository = `${github.context.repo.owner}/${github.context.repo.repo}`;
   const stateKey = ledgerStateKey(
     repository,
     input.target.prNumber,
     input.config.verificationNamespace,
+    input.config.liveProvider,
   );
   const store = new GitHubGitStateAcceptanceStore(
     new OctokitGitDataClient(input.octokit),
@@ -198,9 +214,9 @@ export async function runLedgerCsharp(input: {
     );
     selection = await store.selectAcceptedState({
       stateKey,
-      expectedLedgerSchemaVersion: cacheContractIdentity.ledgerSchemaVersion,
-      expectedPrefixContractVersion: cacheContractIdentity.prefixContractVersion,
-      cacheContractIdentity: omitContractVersions(cacheContractIdentity) as never,
+      expectedLedgerSchemaVersion: contract.ledgerSchemaVersion,
+      expectedPrefixContractVersion: contract.prefixContractVersion,
+      cacheContractIdentity: omitContractVersions(contract) as never,
       currentHeadSha: input.target.headSha as never,
       currentBaseSha: input.target.baseSha as never,
       currentBaseRef: canonicalBaseRef(input.target.baseRef),
@@ -274,12 +290,16 @@ export async function runLedgerCsharp(input: {
       input: plan.reviewInput,
       context: plan.context,
       manifestInput: plan.manifestInput,
-      timeoutMs: 30_000,
+      timeoutMs: input.config.liveProvider === 'deepseek' ? 150_000 : 30_000,
       trustedRoot: process.env.RUNNER_TEMP,
       predecessorLedgerBytes: plan.predecessor?.ledgerBytes,
       predecessorManifestBytes: plan.predecessor?.manifestBytes,
       predecessorProviderRunMetadataBytes: plan.predecessor?.providerRunMetadataBytes,
       signal: cancellation.signal,
+      sensitiveValues:
+        input.config.liveProvider === 'deepseek' && process.env.AGENTIC_REVIEW_DEEPSEEK_API_KEY
+          ? [process.env.AGENTIC_REVIEW_DEEPSEEK_API_KEY]
+          : undefined,
     });
     let leaseOwnershipTransferred = false;
     let leaseReleased = false;
@@ -564,14 +584,25 @@ async function validateLedgerInvocationEvent(
   if (!defaultBranch || !fullName)
     throw new Error('input-invalid: repository default branch unavailable');
   const verification = config.verificationNamespace;
+  const liveDeepSeek = config.liveProvider === 'deepseek';
+  if (liveDeepSeek && verification !== undefined) {
+    throw new Error(
+      'input-invalid: live_provider=deepseek does not support verification_namespace',
+    );
+  }
   if (verification === undefined && eventName !== 'workflow_run') {
-    throw new Error('input-invalid: production ledger-csharp runs require workflow_run');
+    if (!liveDeepSeek || eventName !== 'workflow_dispatch') {
+      throw new Error('input-invalid: production ledger-csharp runs require workflow_run');
+    }
   }
   if (verification !== undefined && eventName !== 'workflow_dispatch') {
     throw new Error('input-invalid: verification_namespace requires workflow_dispatch');
   }
-  const workflowFile =
-    verification === undefined ? 'm4-stateful-review.yml' : 'm4-stateful-verification.yml';
+  const workflowFile = liveDeepSeek
+    ? 'm4-deepseek-live.yml'
+    : verification === undefined
+      ? 'm4-stateful-review.yml'
+      : 'm4-stateful-verification.yml';
   const expectedWorkflowRef = `${fullName}/.github/workflows/${workflowFile}@refs/heads/${defaultBranch}`;
   if (String(process.env.GITHUB_WORKFLOW_REF ?? '') !== expectedWorkflowRef) {
     throw new Error(
@@ -580,6 +611,20 @@ async function validateLedgerInvocationEvent(
   }
   if (String(process.env.GITHUB_REF ?? '') !== `refs/heads/${defaultBranch}`) {
     throw new Error('input-invalid: ledger-csharp must execute on the default branch ref');
+  }
+  if (liveDeepSeek) {
+    const dispatchInputs = (github.context.payload as any).inputs;
+    if (
+      String(process.env.AGENTIC_REVIEW_LIVE_PROVIDER_ENABLED ?? '').toLowerCase() !== 'true' ||
+      String(dispatchInputs?.enable_live_provider ?? '').toLowerCase() !== 'true' ||
+      target.headRepoFullName !== fullName ||
+      canonicalBaseRef(target.baseRef) !== `refs/heads/${defaultBranch}`
+    ) {
+      throw new Error(
+        'input-invalid: DeepSeek live execution is not bound to the trusted repository gate',
+      );
+    }
+    return;
   }
   if (verification === undefined) {
     const workflowRun = (github.context.payload as any).workflow_run;
@@ -754,13 +799,18 @@ export function ledgerStateKey(
   repository: string,
   pullRequest: number,
   verificationNamespace?: string,
+  liveProvider: ActionConfig['liveProvider'] = 'none',
 ): StateKeyV2 {
   const workflowIdentity = verificationNamespace
     ? `${VERIFICATION_WORKFLOW_IDENTITY}/${verificationNamespace}`
-    : LEDGER_WORKFLOW_IDENTITY;
+    : liveProvider === 'deepseek'
+      ? 'agentic-pr-review/m4-deepseek-live/v1'
+      : LEDGER_WORKFLOW_IDENTITY;
   const trustedExecutionDomain = verificationNamespace
     ? `${VERIFICATION_TRUSTED_EXECUTION_DOMAIN}/${verificationNamespace}`
-    : LEDGER_TRUSTED_EXECUTION_DOMAIN;
+    : liveProvider === 'deepseek'
+      ? 'github-default-branch-live-workflow/v1'
+      : LEDGER_TRUSTED_EXECUTION_DOMAIN;
   return {
     namespace: 'm4-ledger-v2',
     repository,
@@ -797,6 +847,7 @@ export function planLedgerInvocation(input: {
       ? input.selection.predecessorBytes
       : undefined;
   const previous = predecessor ? predecessorManifest(predecessor) : undefined;
+  const contract = ledgerContract(input.config.liveProvider);
   const transition = transitionFor(input.selection, previous);
   const phase: Phase = transition.kind === 'continuation' ? 'incremental' : 'bootstrap';
   const reviewInput = buildReviewInputV1({
@@ -815,7 +866,7 @@ export function planLedgerInvocation(input: {
   });
   const inputHash = sha256Hex(serializeInputBytes(reviewInput));
   const subjectDigest = computeSubjectDigest(reviewInput.subject);
-  const cacheDigest = computeCacheContractDigest(omitContractVersions(cacheContractIdentity));
+  const cacheDigest = computeCacheContractDigest(omitContractVersions(contract));
   if (!subjectDigest.ok || !cacheDigest.ok)
     throw new Error('state-invalid: fixed ledger contract invalid');
   const ordinal =
@@ -846,7 +897,7 @@ export function planLedgerInvocation(input: {
     schemaVersion: 1 as const,
     stateKey: input.stateKey as unknown as Record<string, unknown>,
     sessionEpoch,
-    cacheContractIdentity: cacheContractIdentity as unknown as Record<string, unknown>,
+    cacheContractIdentity: contract as unknown as Record<string, unknown>,
     generation,
     transition,
     currentInteraction: {
@@ -856,8 +907,9 @@ export function planLedgerInvocation(input: {
       subjectDigest: subjectDigest.value,
       cacheContractDigest: cacheDigest.value,
     },
-    cacheContractEnvelopes,
-    providerMode: 'synthetic' as const,
+    cacheContractEnvelopes: ledgerEnvelopes(input.config.liveProvider),
+    providerMode:
+      input.config.liveProvider === 'deepseek' ? ('live' as const) : ('synthetic' as const),
     producingRun: {
       producingRunId: String(github.context.runId),
       runAttempt: github.context.runAttempt,
@@ -868,7 +920,7 @@ export function planLedgerInvocation(input: {
     stateNamespace: 'm4-ledger-v2' as const,
     stateKey: input.stateKey,
     sessionEpoch: sessionEpoch as never,
-    cacheContractIdentity: cacheContractIdentity as never,
+    cacheContractIdentity: contract as never,
     generation,
     transition,
     provenance: {
@@ -1037,7 +1089,7 @@ async function publishLedgerComment(input: {
   });
 }
 
-function omitContractVersions<T extends typeof cacheContractIdentity>(identity: T) {
+function omitContractVersions(identity: LedgerContract) {
   const {
     ledgerSchemaVersion: _ledgerSchemaVersion,
     prefixContractVersion: _prefixContractVersion,

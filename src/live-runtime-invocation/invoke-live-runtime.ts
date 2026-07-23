@@ -277,10 +277,10 @@ export async function invokeLiveRuntime(
       kind: 'options-invalid',
       message: 'The #55 live seam requires the host test runtime provider.',
     });
-  if (context.providerMode !== 'synthetic')
+  if (context.providerMode !== 'synthetic' && context.providerMode !== 'live')
     throw new LiveRuntimeInvocationError({
       kind: 'options-invalid',
-      message: 'The #55 synthetic executor does not accept live provider mode.',
+      message: 'The live runtime provider mode is unsupported.',
     });
   if (context.currentInteraction.consumedInputSha256 !== inputSha256)
     throw new LiveRuntimeInvocationError({
@@ -388,6 +388,11 @@ export async function invokeLiveRuntime(
       options.timeoutMs,
       options.signal,
       invocationDirectory,
+      spawn,
+      LIVE_CLOSE_DEADLINE_MS,
+      context.providerMode === 'live' && process.env.AGENTIC_REVIEW_DEEPSEEK_API_KEY
+        ? { AGENTIC_REVIEW_DEEPSEEK_API_KEY: process.env.AGENTIC_REVIEW_DEEPSEEK_API_KEY }
+        : undefined,
     );
     assertPrivateBytes([processResult.stdout, processResult.stderr], sensitive);
     if (processResult.exitCode !== 0)
@@ -1243,6 +1248,7 @@ export function runProcess(
   cwd: string,
   spawnFn: typeof spawn = spawn,
   closeDeadlineMs: number = LIVE_CLOSE_DEADLINE_MS,
+  environment?: Record<string, string>,
 ): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -1264,6 +1270,7 @@ export function runProcess(
           NO_COLOR: '1',
           DOTNET_NOLOGO: '1',
           DOTNET_CLI_TELEMETRY_OPTOUT: '1',
+          ...(environment ?? {}),
         },
         cwd,
       });

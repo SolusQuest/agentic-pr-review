@@ -3,6 +3,7 @@ import {
   type ApiKeyMode,
   type InlineCommentConfidence,
   type InlineCommentSeverity,
+  type LiveProvider,
   type ReviewMode,
   type RuntimeBackend,
   type RuntimeProvider,
@@ -25,6 +26,7 @@ export interface InputReader {
 }
 
 const RUNTIME_PROVIDERS = ['test', 'claude-code-cli'] as const satisfies readonly RuntimeProvider[];
+const LIVE_PROVIDERS = ['none', 'deepseek'] as const satisfies readonly LiveProvider[];
 const RUNTIME_BACKENDS = [
   'legacy',
   'deterministic-csharp',
@@ -84,6 +86,11 @@ export function parseActionConfig(
     'runtime_backend',
     RUNTIME_BACKENDS,
   );
+  const liveProvider = oneOf(
+    optionalInput(reader, 'live_provider') ?? 'none',
+    'live_provider',
+    LIVE_PROVIDERS,
+  );
   const targetMode = oneOf(
     optionalInput(reader, 'target_mode') ?? 'pull-request',
     'target_mode',
@@ -109,6 +116,7 @@ export function parseActionConfig(
   const config: ActionConfig = {
     runtimeBackend,
     runtimeProvider,
+    liveProvider,
     targetMode,
     reviewMode,
     verificationNamespace: optionalInput(reader, 'verification_namespace'),
@@ -296,9 +304,15 @@ function validateDeterministicRuntimeConfig(config: ActionConfig): void {
       invalid.push('incremental_context');
     if (config.artifactRetentionDays !== 7) invalid.push('artifact_retention_days');
     if (config.maxContextChars !== 60_000) invalid.push('max_context_chars');
-    if (config.maxPatchChars !== 120_000) invalid.push('max_patch_chars');
+    if (config.maxPatchChars !== (config.liveProvider === 'deepseek' ? 20_000 : 120_000))
+      invalid.push('max_patch_chars');
     if (config.maxReviewChars !== 12_000) invalid.push('max_review_chars');
     if (config.maxFindings !== 50) invalid.push('max_findings');
+  }
+  if (config.liveProvider === 'deepseek' && backend !== 'ledger-csharp') {
+    throw new Error(
+      'config-invalid: live_provider=deepseek requires runtime_backend=ledger-csharp',
+    );
   }
   if (invalid.length > 0) {
     throw new Error(
