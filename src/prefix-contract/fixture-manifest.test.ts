@@ -524,14 +524,20 @@ function validateMaterializationInput(id: string, input: unknown): string[] {
   kind(cacheConfig, 'markerPolicy', 'string', 'input.envelopes.cacheConfig');
   kind(cacheConfig, 'eligibility', 'string', 'input.envelopes.cacheConfig');
   kind(cacheConfig, 'statelessMode', 'boolean', 'input.envelopes.cacheConfig');
-  const adapter = object(envelopes?.adapter, 'input.envelopes.adapter', [
-    'schemaVersion',
-    'capabilityProfileVersion',
-    'adapterBuildVersion',
-  ]);
+  const adapter = object(
+    envelopes?.adapter,
+    'input.envelopes.adapter',
+    ['schemaVersion', 'capabilityProfileVersion', 'adapterBuildVersion'],
+    ['requestContractSha256'],
+  );
   integer(adapter, 'schemaVersion', 'input.envelopes.adapter');
   integer(adapter, 'capabilityProfileVersion', 'input.envelopes.adapter');
   kind(adapter, 'adapterBuildVersion', 'string', 'input.envelopes.adapter');
+  if (adapter?.schemaVersion === 2) {
+    sha256(adapter, 'requestContractSha256', 'input.envelopes.adapter');
+  } else if ('requestContractSha256' in (adapter ?? {})) {
+    violations.push(`unknown-field:${id}:input.envelopes.adapter.requestContractSha256`);
+  }
 
   return violations;
 }

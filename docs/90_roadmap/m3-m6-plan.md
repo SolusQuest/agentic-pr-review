@@ -201,10 +201,10 @@ Replay uses a versioned replay bundle or manifest, not `ReviewTraceV1` alone. Th
 
 Cache and cost signals:
 
-- total, uncached, cache-read, cache-write, and output tokens when exposed by the provider;
+- total, uncached, cache-read, cache-write, and output tokens when exposed by the provider; missing cache-write telemetry remains unavailable rather than fabricated as zero (the DeepSeek reference adapter is partial here);
 - cache-read ratio and prefix-hash continuity across restored sessions;
 - normalized input cost calculated from explicit evaluation pricing ratios rather than hard-coded protocol prices;
-- resumed-session cost ratio against a documented stateless baseline;
+- resumed-session cost ratio against a documented stateless baseline; a provider without a proven cache-disabled/stateless mode is synthetic-only/inconclusive for this comparison;
 - isolated cache miss versus sustained prefix instability or cost regression.
 
 Phase 6 should include a no-publish shadow mode that compares the project-owned runtime with the maintained baseline on the same sanitized review inputs. Its promotion thresholds become inputs to the later runtime distribution and live-graduation policy.

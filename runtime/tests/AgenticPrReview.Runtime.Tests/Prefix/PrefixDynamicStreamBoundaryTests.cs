@@ -1,5 +1,11 @@
 using AgenticPrReview.Runtime.Ledger;
 using AgenticPrReview.Runtime.Prefix;
+using AgenticPrReview.Runtime.Canonical;
+using System.Buffers.Binary;
+using System.Collections.Immutable;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Xunit;
 
 namespace AgenticPrReview.Runtime.Tests.Prefix;
@@ -160,5 +166,245 @@ public sealed class PrefixDynamicStreamBoundaryTests
         var outcome = PrefixMaterializer.Materialize(Input(196, 1, 1));
         var diagnostic = Assert.Single(outcome.Diagnostics);
         Assert.Equal("prefix_segment_too_large", diagnostic.Code);
+    }
+
+    [Fact]
+    public void CurrentEvidenceIsDynamicProviderDataAndDoesNotChangeStablePrefix()
+    {
+        var baseline = Input(0, 1, 1);
+        var changedFiles = baseline.CurrentContext.ChangedFiles.ToArray();
+        var patchText = "@@ -1 +1 @@\n-old\n+new";
+        changedFiles[0] = new LedgerChangedFile
+        {
+            Path = changedFiles[0].Path,
+            Status = changedFiles[0].Status,
+            Additions = changedFiles[0].Additions,
+            Deletions = changedFiles[0].Deletions,
+            Changes = changedFiles[0].Changes,
+            Patch = new LedgerBoundedPatch
+            {
+                Sha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(patchText))).ToLowerInvariant(),
+                Truncated = false,
+                MaxChars = 20_000,
+            },
+        };
+        var withEvidence = baseline with
+        {
+            CurrentContext = new ValidatedContextSource
+            {
+                SubjectDigest = baseline.CurrentContext.SubjectDigest,
+                ReviewedHeadSha = baseline.CurrentContext.ReviewedHeadSha,
+                ReviewedBaseSha = baseline.CurrentContext.ReviewedBaseSha,
+                ChangedFiles = [.. changedFiles],
+                CurrentEvidence = new CurrentReviewEvidence
+                {
+                    Subject = "Review subject",
+                    Files =
+                    [
+                        new CurrentEvidenceFile { Path = changedFiles[0].Path, Patch = patchText },
+                        new CurrentEvidenceFile { Path = changedFiles[1].Path },
+                        new CurrentEvidenceFile { Path = changedFiles[2].Path },
+                    ],
+                },
+            },
+        };
+
+        var baselineOutcome = PrefixMaterializer.Materialize(baseline);
+        var evidenceOutcome = PrefixMaterializer.Materialize(withEvidence);
+        Assert.NotNull(baselineOutcome.Value);
+        Assert.NotNull(evidenceOutcome.Value);
+        Assert.Equal(baselineOutcome.Value!.StableLogicalStream.Length, evidenceOutcome.Value!.StableLogicalStream.Length);
+        for (var i = 0; i < baselineOutcome.Value.StableLogicalStream.Length; i++)
+        {
+            Assert.True(
+                baselineOutcome.Value.StableLogicalStream[i] == evidenceOutcome.Value.StableLogicalStream[i],
+                $"stable logical differs at {i}: {baselineOutcome.Value.StableLogicalStream[i]} vs {evidenceOutcome.Value.StableLogicalStream[i]}");
+        }
+        Assert.Equal(baselineOutcome.Value.StableProviderStream.Length, evidenceOutcome.Value.StableProviderStream.Length);
+        for (var i = 0; i < baselineOutcome.Value.StableProviderStream.Length; i++)
+        {
+            Assert.True(
+                baselineOutcome.Value.StableProviderStream[i] == evidenceOutcome.Value.StableProviderStream[i],
+                $"stable provider differs at {i}: {baselineOutcome.Value.StableProviderStream[i]} vs {evidenceOutcome.Value.StableProviderStream[i]}");
+        }
+        Assert.NotEqual(baselineOutcome.Value.DynamicLogicalStream, evidenceOutcome.Value.DynamicLogicalStream);
+        Assert.Contains(
+            "Review subject",
+            System.Text.Encoding.UTF8.GetString(evidenceOutcome.Value.DynamicProviderStream.ToArray()));
+        Assert.Contains(
+            "@@ -1 +1 @@",
+            System.Text.Encoding.UTF8.GetString(evidenceOutcome.Value.DynamicProviderStream.ToArray()));
+
+        var dynamicLogical = evidenceOutcome.Value.DynamicLogicalStream.ToArray();
+        var logicalPayloadLength = BinaryPrimitives.ReadUInt32BigEndian(dynamicLogical.AsSpan(0, 4));
+        var logicalPayload = dynamicLogical.AsSpan(4, checked((int)logicalPayloadLength)).ToArray();
+        using var logicalDocument = JsonDocument.Parse(logicalPayload);
+        var canonicalLogical = JsonElementCanonicalizer.Canonicalize(
+            logicalDocument.RootElement,
+            PrefixBounds.MaxEnvelopeJsonDepth,
+            PrefixBounds.MaxEnvelopeObjectProperties,
+            PrefixBounds.MaxEnvelopeArrayItems,
+            long.MaxValue,
+            out var logicalCapped);
+        Assert.False(logicalCapped);
+        Assert.Equal(canonicalLogical.ToArray(), logicalPayload);
+
+        var dynamicProvider = evidenceOutcome.Value.DynamicProviderStream.ToArray();
+        var providerPayloadLength = BinaryPrimitives.ReadUInt32BigEndian(dynamicProvider.AsSpan(0, 4));
+        var providerPayload = dynamicProvider.AsSpan(4, checked((int)providerPayloadLength)).ToArray();
+        using var providerDocument = JsonDocument.Parse(providerPayload);
+        var providerText = providerDocument.RootElement.GetProperty("content")[0].GetProperty("text").GetString()!;
+        using var providerTextDocument = JsonDocument.Parse(providerText);
+        var canonicalProviderText = JsonElementCanonicalizer.Canonicalize(
+            providerTextDocument.RootElement,
+            PrefixBounds.MaxEnvelopeJsonDepth,
+            PrefixBounds.MaxEnvelopeObjectProperties,
+            PrefixBounds.MaxEnvelopeArrayItems,
+            long.MaxValue,
+            out var providerCapped);
+        Assert.False(providerCapped);
+        Assert.Equal(canonicalProviderText.ToArray(), Encoding.UTF8.GetBytes(providerText));
+    }
+
+    [Fact]
+    public void CurrentEvidencePathUsesUnicodeCodePointCap()
+    {
+        var accepted = PrefixMaterializer.Materialize(EvidenceInput(string.Concat(Enumerable.Repeat("😀", 500))));
+        Assert.NotNull(accepted.Value);
+
+        var rejected = PrefixMaterializer.Materialize(EvidenceInput(string.Concat(Enumerable.Repeat("😀", 501))));
+        Assert.Null(rejected.Value);
+        Assert.Equal("prefix_current_context_invalid", Assert.Single(rejected.Diagnostics).Code);
+    }
+
+    [Fact]
+    public void CurrentEvidenceNullSubjectReturnsTypedDiagnostic()
+    {
+        var outcome = PrefixMaterializer.Materialize(EvidenceInputWithSubject(null));
+
+        Assert.Null(outcome.Value);
+        Assert.Equal("prefix_current_context_invalid", Assert.Single(outcome.Diagnostics).Code);
+    }
+
+    [Theory]
+    [InlineData("1:a")]
+    [InlineData(".foo:bar")]
+    [InlineData("-x:y")]
+    [InlineData("dir/a:b")]
+    public void CurrentEvidencePathMatchesAuthoritativeSchemeRule(string path)
+    {
+        var outcome = PrefixMaterializer.Materialize(EvidenceInput(path));
+        Assert.NotNull(outcome.Value);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("/absolute")]
+    [InlineData("../parent")]
+    [InlineData("src/../escape")]
+    [InlineData("src\\file.cs")]
+    [InlineData("https://example.test/file")]
+    [InlineData("a1+.-:x")]
+    public void CurrentEvidencePathRejectsUnsafeShapes(string path)
+    {
+        var outcome = PrefixMaterializer.Materialize(EvidenceInput(path));
+        Assert.Null(outcome.Value);
+        Assert.Equal("prefix_current_context_invalid", Assert.Single(outcome.Diagnostics).Code);
+    }
+
+    [Fact]
+    public void CurrentEvidencePatchMustMatchSourcePresenceAndDigest()
+    {
+        const string sourcePatch = "@@ -1 +1 @@\n-old\n+new";
+        const string otherPatch = "@@ -2 +2 @@\n-old\n+new";
+
+        Assert.Null(PrefixMaterializer.Materialize(EvidenceInput("src/file.cs", sourcePatch, null)).Value);
+        Assert.Null(PrefixMaterializer.Materialize(EvidenceInput("src/file.cs", null, sourcePatch)).Value);
+        Assert.Null(PrefixMaterializer.Materialize(EvidenceInput("src/file.cs", sourcePatch, otherPatch)).Value);
+        Assert.NotNull(PrefixMaterializer.Materialize(EvidenceInput("src/file.cs", sourcePatch, sourcePatch)).Value);
+    }
+
+    [Fact]
+    public void CurrentEvidencePatchCannotBeMovedToAnotherFile()
+    {
+        const string firstPatch = "@@ -1 +1 @@\n-first\n+new";
+        const string secondPatch = "@@ -2 +2 @@\n-second\n+new";
+        var outcome = PrefixMaterializer.Materialize(
+            EvidenceInput(
+                ("src/first.cs", firstPatch, secondPatch),
+                ("src/second.cs", secondPatch, firstPatch)));
+
+        Assert.Null(outcome.Value);
+        Assert.Equal("prefix_current_context_invalid", Assert.Single(outcome.Diagnostics).Code);
+    }
+
+    private static PrefixMaterializationInput EvidenceInput(string path, string? sourcePatch = null, string? evidencePatch = null)
+    {
+        return EvidenceInput((path, sourcePatch, evidencePatch));
+    }
+
+    private static PrefixMaterializationInput EvidenceInputWithSubject(string? subject)
+    {
+        var input = EvidenceInput("src/file.cs");
+        var context = input.CurrentContext;
+        return input with
+        {
+            CurrentContext = new ValidatedContextSource
+            {
+                SubjectDigest = context.SubjectDigest,
+                ReviewedHeadSha = context.ReviewedHeadSha,
+                ReviewedBaseSha = context.ReviewedBaseSha,
+                ChangedFiles = context.ChangedFiles,
+                CurrentEvidence = new CurrentReviewEvidence
+                {
+                    Subject = subject!,
+                    Files = [new CurrentEvidenceFile { Path = "src/file.cs" }],
+                },
+            },
+        };
+    }
+
+    private static PrefixMaterializationInput EvidenceInput(params (string Path, string? SourcePatch, string? EvidencePatch)[] entries)
+    {
+        var vector = PrefixFixtureLoader.LoadVector("materialization/bootstrap.json");
+        var baseInput = PrefixFixtureLoader.BuildMaterializeInput(vector.GetProperty("input"));
+        var changedFiles = entries.Select(entry => new LedgerChangedFile
+        {
+            Path = entry.Path,
+            Status = "modified",
+            Additions = 1,
+            Deletions = 0,
+            Changes = 1,
+            Patch = entry.SourcePatch is null ? null : PatchMetadata(entry.SourcePatch),
+        }).ToImmutableArray();
+        return baseInput with
+        {
+            CurrentContext = new ValidatedContextSource
+            {
+                SubjectDigest = new string('1', 64),
+                ReviewedHeadSha = new string('0', 40),
+                ReviewedBaseSha = new string('1', 40),
+                ChangedFiles = changedFiles,
+                CurrentEvidence = new CurrentReviewEvidence
+                {
+                    Subject = "subject",
+                    Files = entries.Select(entry => new CurrentEvidenceFile
+                    {
+                        Path = entry.Path,
+                        Patch = entry.EvidencePatch,
+                    }).ToImmutableArray(),
+                },
+            },
+        };
+    }
+
+    private static LedgerBoundedPatch PatchMetadata(string patch)
+    {
+        return new LedgerBoundedPatch
+        {
+            Sha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(patch))).ToLowerInvariant(),
+            Truncated = false,
+            MaxChars = 20_000,
+        };
     }
 }

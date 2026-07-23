@@ -37,7 +37,12 @@ const ENVELOPE_ROOT_KEYS: Record<EnvelopeKind, ReadonlySet<string>> = {
     'schemaVersion',
     'statelessMode',
   ]),
-  adapter: new Set(['adapterBuildVersion', 'capabilityProfileVersion', 'schemaVersion']),
+  adapter: new Set([
+    'adapterBuildVersion',
+    'capabilityProfileVersion',
+    'requestContractSha256',
+    'schemaVersion',
+  ]),
 };
 
 const TOOL_WRAPPER_KEYS = new Set(['description', 'inputSchema', 'name', 'policyMetadata']);

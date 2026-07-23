@@ -98,6 +98,23 @@ public sealed class ValidatedContextSource
     public string ReviewedHeadSha { get; init; } = null!;
     public string ReviewedBaseSha { get; init; } = null!;
     public ImmutableArray<LedgerChangedFile> ChangedFiles { get; init; } = ImmutableArray<LedgerChangedFile>.Empty;
+    /// <summary>
+    /// Bounded current-call evidence for the provider-neutral dynamic request
+    /// plan. It is intentionally not part of the persisted ledger record.
+    /// </summary>
+    public CurrentReviewEvidence? CurrentEvidence { get; init; }
+}
+
+public sealed class CurrentReviewEvidence
+{
+    public string Subject { get; init; } = string.Empty;
+    public ImmutableArray<CurrentEvidenceFile> Files { get; init; } = ImmutableArray<CurrentEvidenceFile>.Empty;
+}
+
+public sealed class CurrentEvidenceFile
+{
+    public string Path { get; init; } = string.Empty;
+    public string? Patch { get; init; }
 }
 
 public sealed class ValidatedOutcomeSource

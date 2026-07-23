@@ -63,6 +63,14 @@ internal static class LogicalProjection
     }
 
     internal static ImmutableArray<byte> ProjectReviewContextSegment(ReviewContextRecord record)
+        => ProjectReviewContextSegment(record, evidence: null);
+
+    internal static ImmutableArray<byte> ProjectCurrentReviewSegment(
+        ReviewContextRecord record, CurrentReviewEvidence evidence)
+        => ProjectReviewContextSegment(record, evidence);
+
+    private static ImmutableArray<byte> ProjectReviewContextSegment(
+        ReviewContextRecord record, CurrentReviewEvidence? evidence)
     {
         var writer = new Rfc8785Writer(2048);
         writer.WriteObjectStart();
@@ -70,6 +78,39 @@ internal static class LogicalProjection
         writer.WriteString(record.CacheContractDigest);
         writer.WriteProperty("changedFiles");
         WriteChangedFiles(ref writer, record.ChangedFiles);
+        if (evidence is not null)
+        {
+            writer.WriteProperty("evidence");
+            writer.WriteObjectStart();
+            writer.WriteProperty("files");
+            writer.WriteArrayStart();
+            var files = evidence.Files.IsDefault ? ImmutableArray<CurrentEvidenceFile>.Empty : evidence.Files;
+            for (var i = 0; i < files.Length; i++)
+            {
+                if (i > 0)
+                {
+                    writer.WriteComma();
+                }
+
+                writer.WriteObjectStart();
+                var patch = files[i].Patch;
+                if (patch is not null)
+                {
+                    writer.WriteProperty("patch");
+                    writer.WriteString(patch);
+                }
+
+                writer.WriteProperty("path");
+                writer.WriteString(files[i].Path);
+
+                writer.WriteObjectEnd();
+            }
+
+            writer.WriteArrayEnd();
+            writer.WriteProperty("subject");
+            writer.WriteString(evidence.Subject);
+            writer.WriteObjectEnd();
+        }
         writer.WriteProperty("interactionOrdinal");
         writer.WriteNumber(record.InteractionOrdinal);
         writer.WriteProperty("kind");

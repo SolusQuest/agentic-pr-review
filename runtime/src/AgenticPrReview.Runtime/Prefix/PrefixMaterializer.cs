@@ -1,5 +1,7 @@
 using System.Buffers;
 using System.Collections.Immutable;
+using System.Security.Cryptography;
+using System.Text;
 using AgenticPrReview.Runtime.Ledger;
 
 namespace AgenticPrReview.Runtime.Prefix;
@@ -90,6 +92,12 @@ public static class PrefixMaterializer
             return Fail(PrefixDiagnostic.Create(PrefixDiagnosticCodes.CurrentContextInvalid, causeCode: cause));
         }
 
+        var evidenceError = ValidateCurrentEvidence(input.CurrentContext);
+        if (evidenceError is not null)
+        {
+            return Fail(evidenceError);
+        }
+
         // Segment assembly.
         var stableSegments = new List<(string Kind, ImmutableArray<byte> Bytes)>
         {
@@ -116,7 +124,12 @@ public static class PrefixMaterializer
 
         var dynamicSegments = new List<(string Kind, ImmutableArray<byte> Bytes)>
         {
-            (LogicalProjection.ReviewContextKind, LogicalProjection.ProjectReviewContextSegment(contextOutcome.Value)),
+            (
+                LogicalProjection.ReviewContextKind,
+                input.CurrentContext.CurrentEvidence is null
+                    ? LogicalProjection.ProjectReviewContextSegment(contextOutcome.Value)
+                    : LogicalProjection.ProjectCurrentReviewSegment(
+                        contextOutcome.Value, input.CurrentContext.CurrentEvidence)),
         };
 
         // Stream framing and bounds.
@@ -499,6 +512,127 @@ public static class PrefixMaterializer
     {
         PrefixHashPrimitives.WriteUInt32BigEndian(writer, checked((uint)payload.Length));
         writer.Write(payload);
+    }
+
+    private static PrefixDiagnostic? ValidateCurrentEvidence(ValidatedContextSource source)
+    {
+        var evidence = source.CurrentEvidence;
+        if (evidence is null)
+        {
+            return null;
+        }
+
+        if (evidence.Subject is null
+            || evidence.Subject.Length > 4_000
+            || ContainsInvalidUnicode(evidence.Subject)
+            || evidence.Files.IsDefault
+            || evidence.Files.Length > 256
+            || source.ChangedFiles.IsDefault
+            || evidence.Files.Length != source.ChangedFiles.Length)
+        {
+            return PrefixDiagnostic.Create(PrefixDiagnosticCodes.CurrentContextInvalid);
+        }
+
+        var totalBytes = Encoding.UTF8.GetByteCount(evidence.Subject);
+        for (var index = 0; index < evidence.Files.Length; index++)
+        {
+            var file = evidence.Files[index];
+            var sourceFile = source.ChangedFiles[index];
+            if (file is null
+                || sourceFile is null
+                || !StringComparer.Ordinal.Equals(file.Path, sourceFile.Path)
+                || !IsSafeRelativePath(file.Path)
+                || CountCodePoints(file.Path) > 500
+                || ContainsInvalidUnicode(file.Path)
+                || (file.Patch is null) != (sourceFile.Patch is null)
+                || (file.Patch is not null && (file.Patch.Length > 20_000 || ContainsInvalidUnicode(file.Patch))))
+            {
+                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.CurrentContextInvalid);
+            }
+
+            totalBytes += Encoding.UTF8.GetByteCount(file.Path);
+            if (file.Patch is not null)
+            {
+                if (sourceFile.Patch is null
+                    || !StringComparer.Ordinal.Equals(
+                        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(file.Patch))).ToLowerInvariant(),
+                        sourceFile.Patch.Sha256))
+                {
+                    return PrefixDiagnostic.Create(PrefixDiagnosticCodes.CurrentContextInvalid);
+                }
+
+                totalBytes += Encoding.UTF8.GetByteCount(file.Patch);
+            }
+
+            if (totalBytes > 200_000)
+            {
+                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.CurrentContextInvalid);
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsSafeRelativePath(string path)
+    {
+        if (path.Length == 0
+            || path.StartsWith("/", StringComparison.Ordinal)
+            || path.Contains('\\')
+            || System.Text.RegularExpressions.Regex.IsMatch(path, "^[A-Za-z][A-Za-z0-9+.-]*:"))
+        {
+            return false;
+        }
+
+        foreach (var segment in path.Split('/'))
+        {
+            if (segment.Length == 0 || segment is "." or "..")
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static int CountCodePoints(string value)
+    {
+        var count = 0;
+        for (var index = 0; index < value.Length; index++, count++)
+        {
+            if (char.IsHighSurrogate(value[index]))
+            {
+                index++;
+            }
+        }
+
+        return count;
+    }
+
+    private static bool ContainsInvalidUnicode(string value)
+    {
+        if (value.Contains('\0'))
+        {
+            return true;
+        }
+
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (char.IsHighSurrogate(value[index]))
+            {
+                if (index + 1 >= value.Length || !char.IsLowSurrogate(value[index + 1]))
+                {
+                    return true;
+                }
+
+                index++;
+            }
+            else if (char.IsLowSurrogate(value[index]))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static PrefixMaterializationOutcome Fail(PrefixDiagnostic diagnostic) =>

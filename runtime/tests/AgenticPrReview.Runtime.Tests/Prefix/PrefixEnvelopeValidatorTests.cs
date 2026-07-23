@@ -361,4 +361,38 @@ public sealed class PrefixEnvelopeValidatorTests
         Assert.Equal(262_144, CanonicalLength(padAtCap));
         Assert.Equal(-1, CanonicalLength(padAtCap + 1));
     }
+
+    [Fact]
+    public void AdapterEnvelopeV2RequiresRequestContractDigestWhileV1RemainsClosed()
+    {
+        using var validV2 = JsonDocument.Parse(
+            $$"""{"schemaVersion":2,"capabilityProfileVersion":1,"adapterBuildVersion":"deepseek-openai-chat-v1","requestContractSha256":"{{new string('f', 64)}}"}""");
+        Assert.Null(PrefixEnvelopeValidator.Validate(
+            PrefixEnvelopeValidator.EnvelopeKind.Adapter, validV2.RootElement, out _));
+
+        using var missing = JsonDocument.Parse(
+            "{\"schemaVersion\":2,\"capabilityProfileVersion\":1,\"adapterBuildVersion\":\"deepseek-openai-chat-v1\"}");
+        Assert.Equal("prefix_envelope_invalid:/requestContractSha256", PrefixEnvelopeValidator.Validate(
+            PrefixEnvelopeValidator.EnvelopeKind.Adapter, missing.RootElement, out _)?.Message);
+
+        using var stale = JsonDocument.Parse(
+            $$"""{"schemaVersion":1,"capabilityProfileVersion":1,"adapterBuildVersion":"fixture","requestContractSha256":"{{new string('f', 64)}}"}""");
+        Assert.Equal("prefix_envelope_invalid:/requestContractSha256", PrefixEnvelopeValidator.Validate(
+            PrefixEnvelopeValidator.EnvelopeKind.Adapter, stale.RootElement, out _)?.Message);
+
+        using var future = JsonDocument.Parse(
+            "{\"schemaVersion\":3,\"capabilityProfileVersion\":1,\"adapterBuildVersion\":\"future\"}");
+        Assert.Equal("prefix_envelope_invalid:/schemaVersion", PrefixEnvelopeValidator.Validate(
+            PrefixEnvelopeValidator.EnvelopeKind.Adapter, future.RootElement, out _)?.Message);
+
+        using var invalidDigest = JsonDocument.Parse(
+            "{\"schemaVersion\":2,\"capabilityProfileVersion\":1,\"adapterBuildVersion\":\"deepseek-openai-chat-v1\",\"requestContractSha256\":\"BAD\"}");
+        Assert.Equal("prefix_envelope_invalid:/requestContractSha256", PrefixEnvelopeValidator.Validate(
+            PrefixEnvelopeValidator.EnvelopeKind.Adapter, invalidDigest.RootElement, out _)?.Message);
+
+        using var exact = JsonDocument.Parse(
+            $$"""{"schemaVersion":2,"capabilityProfileVersion":1,"adapterBuildVersion":"deepseek-openai-chat-v1","requestContractSha256":"{{new string('f', 64)}}"}""");
+        var exactDigest = CacheContractDigests.ComputeAdapterId(exact.RootElement);
+        Assert.Equal("71044d2d1685969ce900ccd7ef4b716204cf9a852a5cd8fffc65f105ae6be1fd", exactDigest.Digest);
+    }
 }
