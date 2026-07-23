@@ -29,6 +29,10 @@ jobs:
     outputs:
       trusted: 'true'
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Confirm trusted live dispatch
         run: >-
           test "${GITHUB_REF}" = "refs/heads/${{ github.event.repository.default_branch }}"

@@ -118,11 +118,22 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
                 throw new ProviderFailureException(StatusCode(response.StatusCode), 30);
             }
 
-            var responseBytes = await ReadBoundedAsync(
-                response.Content,
-                DeepSeekProviderContract.ResponseBodyMaxBytes,
-                cancellationToken);
-            return ParseSuccess(responseBytes, plan, identities);
+            try
+            {
+                var responseBytes = await ReadBoundedAsync(
+                    response.Content,
+                    DeepSeekProviderContract.ResponseBodyMaxBytes,
+                    cancellationToken);
+                return ParseSuccess(responseBytes, plan, identities);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw new ProviderFailureException("APR_PROVIDER_CANCELLED", 30);
+            }
+            catch (TaskCanceledException)
+            {
+                throw new ProviderFailureException("APR_PROVIDER_TIMEOUT", 30);
+            }
         }
     }
 
@@ -515,7 +526,7 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
             }
             return false;
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
             return true;
         }
