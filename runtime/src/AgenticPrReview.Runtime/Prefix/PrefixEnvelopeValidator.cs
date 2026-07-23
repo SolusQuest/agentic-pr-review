@@ -327,7 +327,7 @@ internal static class PrefixEnvelopeValidator
             EnvelopeKind.Policy => new[] { "constraints", "instructions", "policyVersion", "schemaVersion" },
             EnvelopeKind.Tools => new[] { "definitions", "schemaVersion", "toolsetVersion" },
             EnvelopeKind.CacheConfig => new[] { "cacheConfigVersion", "eligibility", "markerPolicy", "schemaVersion", "statelessMode" },
-            EnvelopeKind.Adapter => new[] { "adapterBuildVersion", "capabilityProfileVersion", "schemaVersion" },
+            EnvelopeKind.Adapter => new[] { "adapterBuildVersion", "capabilityProfileVersion", "requestContractSha256", "schemaVersion" },
             _ => throw new ArgumentOutOfRangeException(nameof(kind)),
         };
 
@@ -365,9 +365,35 @@ internal static class PrefixEnvelopeValidator
 
         foreach (var required in allowed)
         {
+            if (kind == EnvelopeKind.Adapter && required == "requestContractSha256")
+            {
+                continue;
+            }
+
             if (!counts.ContainsKey(required))
             {
                 return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property(required) }));
+            }
+        }
+
+        if (kind == EnvelopeKind.Adapter
+            && envelope.TryGetProperty("schemaVersion", out var schemaVersion)
+            && schemaVersion.ValueKind == JsonValueKind.Number
+            && schemaVersion.TryGetInt64(out var version))
+        {
+            var hasRequestContract = counts.ContainsKey("requestContractSha256");
+            if (version == 1 && hasRequestContract)
+            {
+                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid,
+                    path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid,
+                        new[] { CanonicalPathSegment.Property("requestContractSha256") }));
+            }
+
+            if (version == 2 && !hasRequestContract)
+            {
+                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid,
+                    path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid,
+                        new[] { CanonicalPathSegment.Property("requestContractSha256") }));
             }
         }
 
@@ -444,6 +470,19 @@ internal static class PrefixEnvelopeValidator
                 if (buildVersion.ValueKind != JsonValueKind.String)
                 {
                     return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid, path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid, new[] { CanonicalPathSegment.Property("adapterBuildVersion") }));
+                }
+
+                var schemaVersion = envelope.GetProperty("schemaVersion");
+                if (schemaVersion.TryGetInt64(out var version) && version == 2)
+                {
+                    if (!envelope.TryGetProperty("requestContractSha256", out var requestContract)
+                        || requestContract.ValueKind != JsonValueKind.String
+                        || !PrefixIdentityValidation.IsValidDigest(requestContract.GetString()))
+                    {
+                        return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid,
+                            path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid,
+                                new[] { CanonicalPathSegment.Property("requestContractSha256") }));
+                    }
                 }
 
                 return null;

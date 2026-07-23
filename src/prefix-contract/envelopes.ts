@@ -10,7 +10,7 @@ import {
   isValidArrayLengthValue,
   canonicalViolationReason,
 } from './deep-snapshot.js';
-import { isValidIdentity } from './identity.js';
+import { isValidDigest, isValidIdentity } from './identity.js';
 import { PREFIX_CODES, fail, ok, type PrefixResult } from './result.js';
 import {
   encodePrefixPath,
@@ -49,6 +49,9 @@ const REQUIRED_KEYS: Record<EnvelopeKind, readonly string[]> = {
     'schemaVersion',
     'statelessMode',
   ],
+  // Adapter schemaVersion 1 keeps this three-key branch; schemaVersion 2 adds
+  // requestContractSha256. The versioned branch is selected below after the
+  // root fields have been captured.
   adapter: ['adapterBuildVersion', 'capabilityProfileVersion', 'schemaVersion'],
 };
 
@@ -113,7 +116,9 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
   if (rootKeys.some((key) => typeof key === 'symbol')) {
     return fail(PREFIX_CODES.envelopeInvalid);
   }
-  const allowed = new Set(REQUIRED_KEYS[kind]);
+  const allowed = new Set(
+    kind === 'adapter' ? [...REQUIRED_KEYS[kind], 'requestContractSha256'] : REQUIRED_KEYS[kind],
+  );
   const rootEntries: RootEntry[] = [];
   const rootNames = (rootKeys as string[]).sort(compareClosedKeys);
   for (const name of rootNames) {
@@ -156,6 +161,28 @@ function validateEnvelopeCore(kind: EnvelopeKind, raw: unknown): PrefixResult<Va
   // so the later deep snapshot never observes those caller nodes a second
   // time while open JSON fields are still snapshotted normally.
   const rawRecord = recordFromEntries(rootEntries);
+  if (kind === 'adapter') {
+    const schemaVersion = rawRecord.schemaVersion;
+    const hasRequestContract = rootNameSet.has('requestContractSha256');
+    if (schemaVersion === 1 && hasRequestContract) {
+      return fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath([{ name: 'requestContractSha256' }], kind, PREFIX_CODES.envelopeInvalid),
+      );
+    }
+    if (schemaVersion === 2 && !hasRequestContract) {
+      return fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath([{ name: 'requestContractSha256' }], kind, PREFIX_CODES.envelopeInvalid),
+      );
+    }
+    if (schemaVersion !== 1 && schemaVersion !== 2) {
+      return fail(
+        PREFIX_CODES.envelopeInvalid,
+        encodePrefixPath([{ name: 'schemaVersion' }], kind, PREFIX_CODES.envelopeInvalid),
+      );
+    }
+  }
   for (const versionField of VERSION_FIELDS[kind]) {
     const value = rawRecord[versionField];
     if (
@@ -329,6 +356,12 @@ function checkKindFields(
         return fail(
           PREFIX_CODES.envelopeInvalid,
           encodePrefixPath([{ name: 'adapterBuildVersion' }], kind, PREFIX_CODES.envelopeInvalid),
+        );
+      }
+      if (record.schemaVersion === 2 && !isValidDigest(record.requestContractSha256)) {
+        return fail(
+          PREFIX_CODES.envelopeInvalid,
+          encodePrefixPath([{ name: 'requestContractSha256' }], kind, PREFIX_CODES.envelopeInvalid),
         );
       }
       return null;
@@ -640,6 +673,12 @@ function checkEmbeddedIdentities(
       return fail(
         PREFIX_CODES.identityInvalid,
         encodePrefixPath([{ name: 'adapterBuildVersion' }], kind, PREFIX_CODES.identityInvalid),
+      );
+    }
+    if (record.schemaVersion === 2 && !isValidDigest(record.requestContractSha256)) {
+      return fail(
+        PREFIX_CODES.identityInvalid,
+        encodePrefixPath([{ name: 'requestContractSha256' }], kind, PREFIX_CODES.identityInvalid),
       );
     }
   }

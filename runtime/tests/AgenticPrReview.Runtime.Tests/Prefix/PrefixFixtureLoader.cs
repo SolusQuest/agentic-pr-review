@@ -469,7 +469,14 @@ internal static class PrefixFixtureLoader
         AssertNonnegativeInteger(config.GetProperty("cacheConfigVersion"), $"{id}.input.envelopes.cacheConfig.cacheConfigVersion");
 
         var adapter = envelopes.GetProperty("adapter");
-        AssertExactObject(adapter, $"{id}.input.envelopes.adapter", ("schemaVersion", JsonValueKind.Number), ("capabilityProfileVersion", JsonValueKind.Number), ("adapterBuildVersion", JsonValueKind.String));
+        if (adapter.GetProperty("schemaVersion").GetInt32() == 2)
+        {
+            AssertExactObject(adapter, $"{id}.input.envelopes.adapter", ("schemaVersion", JsonValueKind.Number), ("capabilityProfileVersion", JsonValueKind.Number), ("adapterBuildVersion", JsonValueKind.String), ("requestContractSha256", JsonValueKind.String));
+        }
+        else
+        {
+            AssertExactObject(adapter, $"{id}.input.envelopes.adapter", ("schemaVersion", JsonValueKind.Number), ("capabilityProfileVersion", JsonValueKind.Number), ("adapterBuildVersion", JsonValueKind.String));
+        }
         AssertNonnegativeInteger(adapter.GetProperty("schemaVersion"), $"{id}.input.envelopes.adapter.schemaVersion");
         AssertNonnegativeInteger(adapter.GetProperty("capabilityProfileVersion"), $"{id}.input.envelopes.adapter.capabilityProfileVersion");
     }

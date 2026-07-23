@@ -28,7 +28,7 @@ internal static class PrefixSafePath
             [PrefixEnvelopeValidator.EnvelopeKind.Policy] = new(StringComparer.Ordinal) { "constraints", "instructions", "policyVersion", "schemaVersion" },
             [PrefixEnvelopeValidator.EnvelopeKind.Tools] = new(StringComparer.Ordinal) { "definitions", "schemaVersion", "toolsetVersion" },
             [PrefixEnvelopeValidator.EnvelopeKind.CacheConfig] = new(StringComparer.Ordinal) { "cacheConfigVersion", "eligibility", "markerPolicy", "schemaVersion", "statelessMode" },
-            [PrefixEnvelopeValidator.EnvelopeKind.Adapter] = new(StringComparer.Ordinal) { "adapterBuildVersion", "capabilityProfileVersion", "schemaVersion" },
+            [PrefixEnvelopeValidator.EnvelopeKind.Adapter] = new(StringComparer.Ordinal) { "adapterBuildVersion", "capabilityProfileVersion", "requestContractSha256", "schemaVersion" },
         };
 
     private static readonly HashSet<string> ToolWrapperKeys = new(StringComparer.Ordinal)

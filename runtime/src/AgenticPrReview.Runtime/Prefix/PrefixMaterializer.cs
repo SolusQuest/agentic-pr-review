@@ -90,6 +90,12 @@ public static class PrefixMaterializer
             return Fail(PrefixDiagnostic.Create(PrefixDiagnosticCodes.CurrentContextInvalid, causeCode: cause));
         }
 
+        var evidenceError = ValidateCurrentEvidence(input.CurrentContext.CurrentEvidence);
+        if (evidenceError is not null)
+        {
+            return Fail(evidenceError);
+        }
+
         // Segment assembly.
         var stableSegments = new List<(string Kind, ImmutableArray<byte> Bytes)>
         {
@@ -116,7 +122,12 @@ public static class PrefixMaterializer
 
         var dynamicSegments = new List<(string Kind, ImmutableArray<byte> Bytes)>
         {
-            (LogicalProjection.ReviewContextKind, LogicalProjection.ProjectReviewContextSegment(contextOutcome.Value)),
+            (
+                LogicalProjection.ReviewContextKind,
+                input.CurrentContext.CurrentEvidence is null
+                    ? LogicalProjection.ProjectReviewContextSegment(contextOutcome.Value)
+                    : LogicalProjection.ProjectCurrentReviewSegment(
+                        contextOutcome.Value, input.CurrentContext.CurrentEvidence)),
         };
 
         // Stream framing and bounds.
@@ -499,6 +510,74 @@ public static class PrefixMaterializer
     {
         PrefixHashPrimitives.WriteUInt32BigEndian(writer, checked((uint)payload.Length));
         writer.Write(payload);
+    }
+
+    private static PrefixDiagnostic? ValidateCurrentEvidence(CurrentReviewEvidence? evidence)
+    {
+        if (evidence is null)
+        {
+            return null;
+        }
+
+        if (evidence.Subject.Length > 4_000
+            || ContainsInvalidUnicode(evidence.Subject)
+            || evidence.Files.IsDefault
+            || evidence.Files.Length > 256)
+        {
+            return PrefixDiagnostic.Create(PrefixDiagnosticCodes.CurrentContextInvalid);
+        }
+
+        var totalBytes = System.Text.Encoding.UTF8.GetByteCount(evidence.Subject);
+        foreach (var file in evidence.Files)
+        {
+            if (file is null
+                || file.Path.Length > 500
+                || ContainsInvalidUnicode(file.Path)
+                || (file.Patch is not null && (file.Patch.Length > 20_000 || ContainsInvalidUnicode(file.Patch))))
+            {
+                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.CurrentContextInvalid);
+            }
+
+            totalBytes += System.Text.Encoding.UTF8.GetByteCount(file.Path);
+            if (file.Patch is not null)
+            {
+                totalBytes += System.Text.Encoding.UTF8.GetByteCount(file.Patch);
+            }
+
+            if (totalBytes > 200_000)
+            {
+                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.CurrentContextInvalid);
+            }
+        }
+
+        return null;
+    }
+
+    private static bool ContainsInvalidUnicode(string value)
+    {
+        if (value.Contains('\0'))
+        {
+            return true;
+        }
+
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (char.IsHighSurrogate(value[index]))
+            {
+                if (index + 1 >= value.Length || !char.IsLowSurrogate(value[index + 1]))
+                {
+                    return true;
+                }
+
+                index++;
+            }
+            else if (char.IsLowSurrogate(value[index]))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static PrefixMaterializationOutcome Fail(PrefixDiagnostic diagnostic) =>

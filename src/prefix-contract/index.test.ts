@@ -330,6 +330,22 @@ describe('cache-contract digest helpers', () => {
       errors: [{ code: PREFIX_CODES.identityInvalid, path: '/adapterBuildVersion' }],
     });
   });
+
+  it('keeps adapter envelope v1 and v2 as separate closed branches', () => {
+    const requestContractSha256 = 'f'.repeat(64);
+    expect(computeAdapterId({ ...ADAPTER, schemaVersion: 2, requestContractSha256 }).ok).toBe(true);
+    expect(computeAdapterId({ ...ADAPTER, schemaVersion: 2 }).ok).toBe(false);
+    expect(computeAdapterId({ ...ADAPTER, requestContractSha256 })).toEqual({
+      ok: false,
+      errors: [{ code: PREFIX_CODES.envelopeInvalid, path: '/requestContractSha256' }],
+    });
+    expect(
+      computeAdapterId({ ...ADAPTER, schemaVersion: 2, requestContractSha256: 'F'.repeat(64) }),
+    ).toEqual({
+      ok: false,
+      errors: [{ code: PREFIX_CODES.envelopeInvalid, path: '/requestContractSha256' }],
+    });
+  });
 });
 
 describe('deriveInteractionId', () => {

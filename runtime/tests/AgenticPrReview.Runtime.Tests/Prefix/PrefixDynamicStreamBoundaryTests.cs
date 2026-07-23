@@ -161,4 +161,51 @@ public sealed class PrefixDynamicStreamBoundaryTests
         var diagnostic = Assert.Single(outcome.Diagnostics);
         Assert.Equal("prefix_segment_too_large", diagnostic.Code);
     }
+
+    [Fact]
+    public void CurrentEvidenceIsDynamicProviderDataAndDoesNotChangeStablePrefix()
+    {
+        var baseline = Input(0, 1, 1);
+        var withEvidence = baseline with
+        {
+            CurrentContext = new ValidatedContextSource
+            {
+                SubjectDigest = baseline.CurrentContext.SubjectDigest,
+                ReviewedHeadSha = baseline.CurrentContext.ReviewedHeadSha,
+                ReviewedBaseSha = baseline.CurrentContext.ReviewedBaseSha,
+                ChangedFiles = baseline.CurrentContext.ChangedFiles,
+                CurrentEvidence = new CurrentReviewEvidence
+                {
+                    Subject = "Review subject",
+                    Files = [new CurrentEvidenceFile { Path = "src/index.ts", Patch = "@@ -1 +1 @@\n-old\n+new" }],
+                },
+            },
+        };
+
+        var baselineOutcome = PrefixMaterializer.Materialize(baseline);
+        var evidenceOutcome = PrefixMaterializer.Materialize(withEvidence);
+        Assert.NotNull(baselineOutcome.Value);
+        Assert.NotNull(evidenceOutcome.Value);
+        Assert.Equal(baselineOutcome.Value!.StableLogicalStream.Length, evidenceOutcome.Value!.StableLogicalStream.Length);
+        for (var i = 0; i < baselineOutcome.Value.StableLogicalStream.Length; i++)
+        {
+            Assert.True(
+                baselineOutcome.Value.StableLogicalStream[i] == evidenceOutcome.Value.StableLogicalStream[i],
+                $"stable logical differs at {i}: {baselineOutcome.Value.StableLogicalStream[i]} vs {evidenceOutcome.Value.StableLogicalStream[i]}");
+        }
+        Assert.Equal(baselineOutcome.Value.StableProviderStream.Length, evidenceOutcome.Value.StableProviderStream.Length);
+        for (var i = 0; i < baselineOutcome.Value.StableProviderStream.Length; i++)
+        {
+            Assert.True(
+                baselineOutcome.Value.StableProviderStream[i] == evidenceOutcome.Value.StableProviderStream[i],
+                $"stable provider differs at {i}: {baselineOutcome.Value.StableProviderStream[i]} vs {evidenceOutcome.Value.StableProviderStream[i]}");
+        }
+        Assert.NotEqual(baselineOutcome.Value.DynamicLogicalStream, evidenceOutcome.Value.DynamicLogicalStream);
+        Assert.Contains(
+            "Review subject",
+            System.Text.Encoding.UTF8.GetString(evidenceOutcome.Value.DynamicProviderStream.ToArray()));
+        Assert.Contains(
+            "@@ -1 +1 @@",
+            System.Text.Encoding.UTF8.GetString(evidenceOutcome.Value.DynamicProviderStream.ToArray()));
+    }
 }
