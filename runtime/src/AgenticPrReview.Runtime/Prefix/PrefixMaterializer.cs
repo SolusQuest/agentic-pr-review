@@ -1,5 +1,7 @@
 using System.Buffers;
 using System.Collections.Immutable;
+using System.Security.Cryptography;
+using System.Text;
 using AgenticPrReview.Runtime.Ledger;
 
 namespace AgenticPrReview.Runtime.Prefix;
@@ -90,7 +92,7 @@ public static class PrefixMaterializer
             return Fail(PrefixDiagnostic.Create(PrefixDiagnosticCodes.CurrentContextInvalid, causeCode: cause));
         }
 
-        var evidenceError = ValidateCurrentEvidence(input.CurrentContext.CurrentEvidence);
+        var evidenceError = ValidateCurrentEvidence(input.CurrentContext);
         if (evidenceError is not null)
         {
             return Fail(evidenceError);
@@ -512,8 +514,9 @@ public static class PrefixMaterializer
         writer.Write(payload);
     }
 
-    private static PrefixDiagnostic? ValidateCurrentEvidence(CurrentReviewEvidence? evidence)
+    private static PrefixDiagnostic? ValidateCurrentEvidence(ValidatedContextSource source)
     {
+        var evidence = source.CurrentEvidence;
         if (evidence is null)
         {
             return null;
@@ -522,26 +525,41 @@ public static class PrefixMaterializer
         if (evidence.Subject.Length > 4_000
             || ContainsInvalidUnicode(evidence.Subject)
             || evidence.Files.IsDefault
-            || evidence.Files.Length > 256)
+            || evidence.Files.Length > 256
+            || source.ChangedFiles.IsDefault
+            || evidence.Files.Length != source.ChangedFiles.Length)
         {
             return PrefixDiagnostic.Create(PrefixDiagnosticCodes.CurrentContextInvalid);
         }
 
-        var totalBytes = System.Text.Encoding.UTF8.GetByteCount(evidence.Subject);
-        foreach (var file in evidence.Files)
+        var totalBytes = Encoding.UTF8.GetByteCount(evidence.Subject);
+        for (var index = 0; index < evidence.Files.Length; index++)
         {
+            var file = evidence.Files[index];
+            var sourceFile = source.ChangedFiles[index];
             if (file is null
-                || file.Path.Length > 500
+                || sourceFile is null
+                || !StringComparer.Ordinal.Equals(file.Path, sourceFile.Path)
+                || !IsSafeRelativePath(file.Path)
+                || CountCodePoints(file.Path) > 500
                 || ContainsInvalidUnicode(file.Path)
                 || (file.Patch is not null && (file.Patch.Length > 20_000 || ContainsInvalidUnicode(file.Patch))))
             {
                 return PrefixDiagnostic.Create(PrefixDiagnosticCodes.CurrentContextInvalid);
             }
 
-            totalBytes += System.Text.Encoding.UTF8.GetByteCount(file.Path);
+            totalBytes += Encoding.UTF8.GetByteCount(file.Path);
             if (file.Patch is not null)
             {
-                totalBytes += System.Text.Encoding.UTF8.GetByteCount(file.Patch);
+                if (sourceFile.Patch is null
+                    || !StringComparer.Ordinal.Equals(
+                        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(file.Patch))).ToLowerInvariant(),
+                        sourceFile.Patch.Sha256))
+                {
+                    return PrefixDiagnostic.Create(PrefixDiagnosticCodes.CurrentContextInvalid);
+                }
+
+                totalBytes += Encoding.UTF8.GetByteCount(file.Patch);
             }
 
             if (totalBytes > 200_000)
@@ -551,6 +569,41 @@ public static class PrefixMaterializer
         }
 
         return null;
+    }
+
+    private static bool IsSafeRelativePath(string path)
+    {
+        if (path.Length == 0
+            || path.StartsWith("/", StringComparison.Ordinal)
+            || path.Contains('\\')
+            || path.Contains(':'))
+        {
+            return false;
+        }
+
+        foreach (var segment in path.Split('/'))
+        {
+            if (segment.Length == 0 || segment is "." or "..")
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static int CountCodePoints(string value)
+    {
+        var count = 0;
+        for (var index = 0; index < value.Length; index++, count++)
+        {
+            if (char.IsHighSurrogate(value[index]))
+            {
+                index++;
+            }
+        }
+
+        return count;
     }
 
     private static bool ContainsInvalidUnicode(string value)

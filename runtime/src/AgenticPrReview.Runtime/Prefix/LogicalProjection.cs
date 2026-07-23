@@ -93,14 +93,15 @@ internal static class LogicalProjection
                 }
 
                 writer.WriteObjectStart();
-                writer.WriteProperty("path");
-                writer.WriteString(files[i].Path);
                 var patch = files[i].Patch;
                 if (patch is not null)
                 {
                     writer.WriteProperty("patch");
                     writer.WriteString(patch);
                 }
+
+                writer.WriteProperty("path");
+                writer.WriteString(files[i].Path);
 
                 writer.WriteObjectEnd();
             }

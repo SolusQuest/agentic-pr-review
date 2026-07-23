@@ -1,5 +1,10 @@
 using AgenticPrReview.Runtime.Ledger;
 using AgenticPrReview.Runtime.Prefix;
+using AgenticPrReview.Runtime.Canonical;
+using System.Buffers.Binary;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Xunit;
 
 namespace AgenticPrReview.Runtime.Tests.Prefix;
@@ -166,6 +171,22 @@ public sealed class PrefixDynamicStreamBoundaryTests
     public void CurrentEvidenceIsDynamicProviderDataAndDoesNotChangeStablePrefix()
     {
         var baseline = Input(0, 1, 1);
+        var changedFiles = baseline.CurrentContext.ChangedFiles.ToArray();
+        var patchText = "@@ -1 +1 @@\n-old\n+new";
+        changedFiles[0] = new LedgerChangedFile
+        {
+            Path = changedFiles[0].Path,
+            Status = changedFiles[0].Status,
+            Additions = changedFiles[0].Additions,
+            Deletions = changedFiles[0].Deletions,
+            Changes = changedFiles[0].Changes,
+            Patch = new LedgerBoundedPatch
+            {
+                Sha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(patchText))).ToLowerInvariant(),
+                Truncated = false,
+                MaxChars = 20_000,
+            },
+        };
         var withEvidence = baseline with
         {
             CurrentContext = new ValidatedContextSource
@@ -173,11 +194,16 @@ public sealed class PrefixDynamicStreamBoundaryTests
                 SubjectDigest = baseline.CurrentContext.SubjectDigest,
                 ReviewedHeadSha = baseline.CurrentContext.ReviewedHeadSha,
                 ReviewedBaseSha = baseline.CurrentContext.ReviewedBaseSha,
-                ChangedFiles = baseline.CurrentContext.ChangedFiles,
+                ChangedFiles = [.. changedFiles],
                 CurrentEvidence = new CurrentReviewEvidence
                 {
                     Subject = "Review subject",
-                    Files = [new CurrentEvidenceFile { Path = "src/index.ts", Patch = "@@ -1 +1 @@\n-old\n+new" }],
+                    Files =
+                    [
+                        new CurrentEvidenceFile { Path = changedFiles[0].Path, Patch = patchText },
+                        new CurrentEvidenceFile { Path = changedFiles[1].Path },
+                        new CurrentEvidenceFile { Path = changedFiles[2].Path },
+                    ],
                 },
             },
         };
@@ -207,5 +233,89 @@ public sealed class PrefixDynamicStreamBoundaryTests
         Assert.Contains(
             "@@ -1 +1 @@",
             System.Text.Encoding.UTF8.GetString(evidenceOutcome.Value.DynamicProviderStream.ToArray()));
+
+        var dynamicLogical = evidenceOutcome.Value.DynamicLogicalStream.ToArray();
+        var logicalPayloadLength = BinaryPrimitives.ReadUInt32BigEndian(dynamicLogical.AsSpan(0, 4));
+        var logicalPayload = dynamicLogical.AsSpan(4, checked((int)logicalPayloadLength)).ToArray();
+        using var logicalDocument = JsonDocument.Parse(logicalPayload);
+        var canonicalLogical = JsonElementCanonicalizer.Canonicalize(
+            logicalDocument.RootElement,
+            PrefixBounds.MaxEnvelopeJsonDepth,
+            PrefixBounds.MaxEnvelopeObjectProperties,
+            PrefixBounds.MaxEnvelopeArrayItems,
+            long.MaxValue,
+            out var logicalCapped);
+        Assert.False(logicalCapped);
+        Assert.Equal(canonicalLogical.ToArray(), logicalPayload);
+
+        var dynamicProvider = evidenceOutcome.Value.DynamicProviderStream.ToArray();
+        var providerPayloadLength = BinaryPrimitives.ReadUInt32BigEndian(dynamicProvider.AsSpan(0, 4));
+        var providerPayload = dynamicProvider.AsSpan(4, checked((int)providerPayloadLength)).ToArray();
+        using var providerDocument = JsonDocument.Parse(providerPayload);
+        var providerText = providerDocument.RootElement.GetProperty("content")[0].GetProperty("text").GetString()!;
+        using var providerTextDocument = JsonDocument.Parse(providerText);
+        var canonicalProviderText = JsonElementCanonicalizer.Canonicalize(
+            providerTextDocument.RootElement,
+            PrefixBounds.MaxEnvelopeJsonDepth,
+            PrefixBounds.MaxEnvelopeObjectProperties,
+            PrefixBounds.MaxEnvelopeArrayItems,
+            long.MaxValue,
+            out var providerCapped);
+        Assert.False(providerCapped);
+        Assert.Equal(canonicalProviderText.ToArray(), Encoding.UTF8.GetBytes(providerText));
+    }
+
+    [Fact]
+    public void CurrentEvidencePathUsesUnicodeCodePointCap()
+    {
+        var accepted = PrefixMaterializer.Materialize(EvidenceInput(string.Concat(Enumerable.Repeat("😀", 500))));
+        Assert.NotNull(accepted.Value);
+
+        var rejected = PrefixMaterializer.Materialize(EvidenceInput(string.Concat(Enumerable.Repeat("😀", 501))));
+        Assert.Null(rejected.Value);
+        Assert.Equal("prefix_current_context_invalid", Assert.Single(rejected.Diagnostics).Code);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("/absolute")]
+    [InlineData("../parent")]
+    [InlineData("src/../escape")]
+    [InlineData("src\\file.cs")]
+    [InlineData("https://example.test/file")]
+    public void CurrentEvidencePathRejectsUnsafeShapes(string path)
+    {
+        var outcome = PrefixMaterializer.Materialize(EvidenceInput(path));
+        Assert.Null(outcome.Value);
+        Assert.Equal("prefix_current_context_invalid", Assert.Single(outcome.Diagnostics).Code);
+    }
+
+    private static PrefixMaterializationInput EvidenceInput(string path)
+    {
+        var vector = PrefixFixtureLoader.LoadVector("materialization/bootstrap.json");
+        var baseInput = PrefixFixtureLoader.BuildMaterializeInput(vector.GetProperty("input"));
+        var file = new LedgerChangedFile
+        {
+            Path = path,
+            Status = "modified",
+            Additions = 1,
+            Deletions = 0,
+            Changes = 1,
+        };
+        return baseInput with
+        {
+            CurrentContext = new ValidatedContextSource
+            {
+                SubjectDigest = new string('1', 64),
+                ReviewedHeadSha = new string('0', 40),
+                ReviewedBaseSha = new string('1', 40),
+                ChangedFiles = [file],
+                CurrentEvidence = new CurrentReviewEvidence
+                {
+                    Subject = "subject",
+                    Files = [new CurrentEvidenceFile { Path = path }],
+                },
+            },
+        };
     }
 }

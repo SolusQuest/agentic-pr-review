@@ -379,7 +379,10 @@ internal static class PrefixEnvelopeValidator
         if (kind == EnvelopeKind.Adapter
             && envelope.TryGetProperty("schemaVersion", out var schemaVersion)
             && schemaVersion.ValueKind == JsonValueKind.Number
-            && schemaVersion.TryGetInt64(out var version))
+            && schemaVersion.TryGetDouble(out var version)
+            && version == Math.Truncate(version)
+            && version >= 1
+            && version <= 2_147_483_647)
         {
             var hasRequestContract = counts.ContainsKey("requestContractSha256");
             if (version == 1 && hasRequestContract)
@@ -394,6 +397,13 @@ internal static class PrefixEnvelopeValidator
                 return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid,
                     path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid,
                         new[] { CanonicalPathSegment.Property("requestContractSha256") }));
+            }
+
+            if (version != 1 && version != 2)
+            {
+                return PrefixDiagnostic.Create(PrefixDiagnosticCodes.EnvelopeInvalid,
+                    path: EncodePath(kind, PrefixDiagnosticCodes.EnvelopeInvalid,
+                        new[] { CanonicalPathSegment.Property("schemaVersion") }));
             }
         }
 
@@ -473,7 +483,9 @@ internal static class PrefixEnvelopeValidator
                 }
 
                 var schemaVersion = envelope.GetProperty("schemaVersion");
-                if (schemaVersion.TryGetInt64(out var version) && version == 2)
+                if (schemaVersion.TryGetDouble(out var version)
+                    && version == Math.Truncate(version)
+                    && version == 2)
                 {
                     if (!envelope.TryGetProperty("requestContractSha256", out var requestContract)
                         || requestContract.ValueKind != JsonValueKind.String

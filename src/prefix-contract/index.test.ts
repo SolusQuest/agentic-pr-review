@@ -333,7 +333,17 @@ describe('cache-contract digest helpers', () => {
 
   it('keeps adapter envelope v1 and v2 as separate closed branches', () => {
     const requestContractSha256 = 'f'.repeat(64);
-    expect(computeAdapterId({ ...ADAPTER, schemaVersion: 2, requestContractSha256 }).ok).toBe(true);
+    expect(
+      computeAdapterId({
+        ...ADAPTER,
+        schemaVersion: 2,
+        adapterBuildVersion: 'deepseek-openai-chat-v1',
+        requestContractSha256,
+      }),
+    ).toEqual({
+      ok: true,
+      value: '71044d2d1685969ce900ccd7ef4b716204cf9a852a5cd8fffc65f105ae6be1fd',
+    });
     expect(computeAdapterId({ ...ADAPTER, schemaVersion: 2 }).ok).toBe(false);
     expect(computeAdapterId({ ...ADAPTER, requestContractSha256 })).toEqual({
       ok: false,
