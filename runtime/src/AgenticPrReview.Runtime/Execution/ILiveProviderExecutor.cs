@@ -19,15 +19,15 @@ internal interface ILiveProviderExecutor
 
 internal interface ILiveProviderExecutorFactory
 {
-    ILiveProviderExecutor Create(string providerMode);
+    ILiveProviderExecutor Create(string providerMode, ProviderRequestPlan plan, ExpectedIdentities identities);
 }
 
 internal sealed class DefaultLiveProviderExecutorFactory : ILiveProviderExecutorFactory
 {
-    public ILiveProviderExecutor Create(string providerMode) => providerMode switch
+    public ILiveProviderExecutor Create(string providerMode, ProviderRequestPlan plan, ExpectedIdentities identities) => providerMode switch
     {
         "synthetic" => new SyntheticLiveProviderExecutor(),
-        "live" => DeepSeekLiveProviderExecutor.FromEnvironment(),
+        "live" => DeepSeekLiveProviderExecutor.CreateAfterPreflight(plan, identities),
         _ => throw new ProviderFailureException("APR_PROVIDER_CONFIG", 20),
     };
 }

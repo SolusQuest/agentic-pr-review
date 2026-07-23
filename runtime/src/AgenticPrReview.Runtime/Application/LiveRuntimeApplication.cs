@@ -197,7 +197,7 @@ internal static class LiveRuntimeApplication
             envelopes.GetProperty("adapter").TryGetProperty("requestContractSha256", out var requestContractSha256)
                 ? requestContractSha256.GetString()
                 : null);
-        var executor = (executorFactory ?? new DefaultLiveProviderExecutorFactory()).Create(providerMode);
+        var executor = (executorFactory ?? new DefaultLiveProviderExecutorFactory()).Create(providerMode, requestPlan, identities);
         var observation = await executor.ExecuteAsync(requestPlan, identities);
         var result = new ReviewResult(
             1,

@@ -139,3 +139,29 @@ export const DEEPSEEK_CACHE_CONTRACT_IDENTITY = {
   ),
   adapterId: digest(computeAdapterId(DEEPSEEK_CACHE_CONTRACT_ENVELOPES.adapter), 'adapter'),
 } as const;
+
+export function deepSeekContractForMaxFindings(maxFindings: number): {
+  readonly envelopes: typeof DEEPSEEK_CACHE_CONTRACT_ENVELOPES;
+  readonly identity: typeof DEEPSEEK_CACHE_CONTRACT_IDENTITY;
+} {
+  if (!Number.isInteger(maxFindings) || maxFindings < 1 || maxFindings > 50) {
+    throw new Error('invalid DeepSeek maxFindings contract');
+  }
+  const envelopes = {
+    ...DEEPSEEK_CACHE_CONTRACT_ENVELOPES,
+    policy: {
+      ...DEEPSEEK_CACHE_CONTRACT_ENVELOPES.policy,
+      constraints: {
+        ...DEEPSEEK_CACHE_CONTRACT_ENVELOPES.policy.constraints,
+        maxFindings,
+      },
+    },
+  } as typeof DEEPSEEK_CACHE_CONTRACT_ENVELOPES;
+  return {
+    envelopes,
+    identity: {
+      ...DEEPSEEK_CACHE_CONTRACT_IDENTITY,
+      policyId: digest(computePolicyId(envelopes.policy), 'policy'),
+    },
+  };
+}

@@ -7,6 +7,7 @@ import {
   DEEPSEEK_CACHE_CONTRACT_IDENTITY,
   DEEPSEEK_REQUEST_CONTRACT,
   DEEPSEEK_REQUEST_CONTRACT_SHA256,
+  deepSeekContractForMaxFindings,
 } from './deepseek-contract.js';
 
 describe('DeepSeek live contract', () => {
@@ -43,5 +44,14 @@ describe('DeepSeek live contract', () => {
     );
     expect(DEEPSEEK_REQUEST_CONTRACT.headers.names).toEqual(['Authorization', 'Content-Type']);
     expect(DEEPSEEK_REQUEST_CONTRACT.transport.connectTimeoutSeconds).toBe(15);
+  });
+
+  it('binds the selected finding cap into the policy identity', () => {
+    const defaultContract = deepSeekContractForMaxFindings(50);
+    const lowerContract = deepSeekContractForMaxFindings(7);
+    expect(defaultContract.identity.policyId).toBe(DEEPSEEK_CACHE_CONTRACT_IDENTITY.policyId);
+    expect(lowerContract.envelopes.policy.constraints.maxFindings).toBe(7);
+    expect(lowerContract.identity.policyId).not.toBe(defaultContract.identity.policyId);
+    expect(lowerContract.identity.adapterId).toBe(defaultContract.identity.adapterId);
   });
 });

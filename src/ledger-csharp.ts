@@ -7,6 +7,7 @@ import { computeCacheContractDigest, computeSubjectDigest } from './prefix-contr
 import { deriveInteractionId } from './prefix-contract/interaction-id.js';
 import { invokeLiveRuntime } from './live-runtime-invocation/invoke-live-runtime.js';
 import type { LiveRuntimeInvocationContextV1 } from './live-runtime-invocation/context.js';
+import { LiveRuntimeInvocationError } from './live-runtime-invocation/errors.js';
 import { resolveTrustedRuntimeCommand } from './runtime-invocation/command-resolver.js';
 import { serializeInputBytes, sha256Hex } from './runtime-invocation/runtime-files.js';
 import { changedFilesFromPullRequestFiles } from './target.js';
@@ -31,8 +32,8 @@ import {
 } from './state-v2/index.js';
 import type { ActionConfig, Phase, ReviewTarget, StructuredReviewEnvelopeV1 } from './types.js';
 import {
-  DEEPSEEK_CACHE_CONTRACT_ENVELOPES,
   DEEPSEEK_CACHE_CONTRACT_IDENTITY,
+  deepSeekContractForMaxFindings,
 } from './live-provider/deepseek-contract.js';
 
 export const LEDGER_WORKFLOW_IDENTITY = 'agentic-pr-review/m4-stateful-review/v1';
@@ -100,12 +101,16 @@ const cacheContractIdentity = {
 
 type LedgerContract = typeof cacheContractIdentity | typeof DEEPSEEK_CACHE_CONTRACT_IDENTITY;
 
-function ledgerContract(liveProvider: ActionConfig['liveProvider']): LedgerContract {
-  return liveProvider === 'deepseek' ? DEEPSEEK_CACHE_CONTRACT_IDENTITY : cacheContractIdentity;
+function ledgerContract(config: ActionConfig): LedgerContract {
+  return config.liveProvider === 'deepseek'
+    ? deepSeekContractForMaxFindings(config.maxFindings).identity
+    : cacheContractIdentity;
 }
 
-function ledgerEnvelopes(liveProvider: ActionConfig['liveProvider']) {
-  return liveProvider === 'deepseek' ? DEEPSEEK_CACHE_CONTRACT_ENVELOPES : cacheContractEnvelopes;
+function ledgerEnvelopes(config: ActionConfig) {
+  return config.liveProvider === 'deepseek'
+    ? deepSeekContractForMaxFindings(config.maxFindings).envelopes
+    : cacheContractEnvelopes;
 }
 
 export interface LedgerRunResult {
@@ -155,6 +160,15 @@ export type LedgerErrorKind =
   | 'store_corrupt'
   | 'state_restore_invalid'
   | 'runtime_failed'
+  | 'provider-timeout'
+  | 'provider-cancelled'
+  | 'provider-rate-limited'
+  | 'provider-4xx'
+  | 'provider-5xx'
+  | 'provider-transport'
+  | 'provider-response'
+  | 'provider-config'
+  | 'provider-persistence'
   | 'target_revalidation_failed'
   | 'publication_observation_invalid'
   | 'receipt_write_failed'
@@ -184,7 +198,7 @@ export async function runLedgerCsharp(input: {
   if (input.target.isOpen !== true) {
     throw new Error('input-invalid: ledger-csharp requires an initially open pull request');
   }
-  const contract = ledgerContract(input.config.liveProvider);
+  const contract = ledgerContract(input.config);
   const repository = `${github.context.repo.owner}/${github.context.repo.repo}`;
   const stateKey = ledgerStateKey(
     repository,
@@ -769,6 +783,20 @@ export function ledgerErrorKindFor(error: unknown): LedgerErrorKind {
   if (error instanceof StoreTransactionError) return error.reason;
   if (error instanceof StoreCorruptionError) return 'store_corrupt';
   if (error instanceof ContractValidationError) return 'store_corrupt';
+  if (error instanceof LiveRuntimeInvocationError) {
+    switch (error.kind) {
+      case 'provider-timeout':
+      case 'provider-cancelled':
+      case 'provider-rate-limited':
+      case 'provider-4xx':
+      case 'provider-5xx':
+      case 'provider-transport':
+      case 'provider-response':
+      case 'provider-config':
+      case 'provider-persistence':
+        return error.kind;
+    }
+  }
   return 'runtime_failed';
 }
 
@@ -847,7 +875,7 @@ export function planLedgerInvocation(input: {
       ? input.selection.predecessorBytes
       : undefined;
   const previous = predecessor ? predecessorManifest(predecessor) : undefined;
-  const contract = ledgerContract(input.config.liveProvider);
+  const contract = ledgerContract(input.config);
   const transition = transitionFor(input.selection, previous);
   const phase: Phase = transition.kind === 'continuation' ? 'incremental' : 'bootstrap';
   const reviewInput = buildReviewInputV1({
@@ -907,7 +935,7 @@ export function planLedgerInvocation(input: {
       subjectDigest: subjectDigest.value,
       cacheContractDigest: cacheDigest.value,
     },
-    cacheContractEnvelopes: ledgerEnvelopes(input.config.liveProvider),
+    cacheContractEnvelopes: ledgerEnvelopes(input.config),
     providerMode:
       input.config.liveProvider === 'deepseek' ? ('live' as const) : ('synthetic' as const),
     producingRun: {

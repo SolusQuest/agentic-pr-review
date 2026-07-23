@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -21,6 +22,10 @@ internal static class DeepSeekProviderContract
     public const int ConnectTimeoutSeconds = 15;
     public const string AdapterBuildVersion = "deepseek-openai-chat-v1";
     public const string RequestContractSha256 = "312f55d0038a4bcefb26703158edcf196bdb1e6a458c6ec88f3f08b1211f0356";
+    public const string TemplateId = "d5c87b69a0d5d89d58e8c7209b0cbcc9624a3f0646fc19f3cebc7c3f93a5b6cf";
+    public const string ToolDefinitionId = "e58c02b21ad200207ab6ae1e8665c2c6c7d2c1413d947b8dd26f7ef14cc1bd48";
+    public const string CacheConfigId = "0e5f725f811189bc4bf6e89b6c4ceaf532dda89748306d05d112109818933f7a";
+    public const string AdapterId = "676fc70591d9ded2eabcfd7772c08bc47d5191e10d11b5c2089f10000c24bfc3";
 
     public const string FixedInstruction =
         "Return exactly one JSON object with this shape; do not include Markdown fences or explanatory text:\n" +
@@ -32,11 +37,42 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
 {
     private readonly HttpClient client;
     private readonly string apiKey;
+    private readonly TimeSpan providerTimeout;
 
-    private DeepSeekLiveProviderExecutor(string apiKey, HttpClient client)
+    private DeepSeekLiveProviderExecutor(string apiKey, HttpClient client, TimeSpan providerTimeout)
     {
         this.apiKey = apiKey;
         this.client = client;
+        this.providerTimeout = providerTimeout;
+    }
+
+    public static DeepSeekLiveProviderExecutor CreateAfterPreflight(
+        ProviderRequestPlan plan,
+        ExpectedIdentities identities)
+    {
+        ValidatePreflight(plan, identities);
+        return FromEnvironment();
+    }
+
+    internal static void ValidatePreflight(ProviderRequestPlan plan, ExpectedIdentities identities)
+    {
+        if (!IsValidKey(Environment.GetEnvironmentVariable("AGENTIC_REVIEW_DEEPSEEK_API_KEY")))
+            throw new ProviderFailureException("APR_PROVIDER_CONFIG", 20);
+        ValidateIdentities(plan, identities);
+    }
+
+    internal static void ValidateIdentities(ProviderRequestPlan plan, ExpectedIdentities identities)
+    {
+        if (!StringComparer.Ordinal.Equals(identities.ProviderId, DeepSeekProviderContract.ProviderId) ||
+            !StringComparer.Ordinal.Equals(identities.ModelId, DeepSeekProviderContract.ModelId) ||
+            !StringComparer.Ordinal.Equals(plan.RequestContractSha256, DeepSeekProviderContract.RequestContractSha256) ||
+            !StringComparer.Ordinal.Equals(plan.AdapterId, DeepSeekProviderContract.AdapterId) ||
+            !StringComparer.Ordinal.Equals(identities.AdapterId, DeepSeekProviderContract.AdapterId) ||
+            !StringComparer.Ordinal.Equals(identities.TemplateId, DeepSeekProviderContract.TemplateId) ||
+            !StringComparer.Ordinal.Equals(identities.PolicyId, PolicyIdForMaxFindings(plan.MaxFindings)) ||
+            !StringComparer.Ordinal.Equals(identities.ToolDefinitionId, DeepSeekProviderContract.ToolDefinitionId) ||
+            !StringComparer.Ordinal.Equals(identities.CacheConfigId, DeepSeekProviderContract.CacheConfigId))
+            throw new ProviderFailureException("APR_PROVIDER_CONFIG", 20);
     }
 
     public static DeepSeekLiveProviderExecutor FromEnvironment()
@@ -56,11 +92,14 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
             Timeout = TimeSpan.FromSeconds(DeepSeekProviderContract.ProviderTimeoutSeconds),
         };
         client.DefaultRequestHeaders.Clear();
-        return new DeepSeekLiveProviderExecutor(key!, client);
+        return new DeepSeekLiveProviderExecutor(
+            key!,
+            client,
+            TimeSpan.FromSeconds(DeepSeekProviderContract.ProviderTimeoutSeconds));
     }
 
     internal DeepSeekLiveProviderExecutor(string apiKey, HttpMessageHandler handler, TimeSpan timeout)
-        : this(apiKey, new HttpClient(handler, disposeHandler: true) { Timeout = timeout })
+        : this(apiKey, new HttpClient(handler, disposeHandler: true) { Timeout = timeout }, timeout)
     {
         if (!IsValidKey(apiKey))
             throw new ArgumentException("The provider key is invalid.", nameof(apiKey));
@@ -72,12 +111,6 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
         ExpectedIdentities identities,
         CancellationToken cancellationToken = default)
     {
-        if (!StringComparer.Ordinal.Equals(identities.ProviderId, DeepSeekProviderContract.ProviderId) ||
-            !StringComparer.Ordinal.Equals(identities.ModelId, DeepSeekProviderContract.ModelId) ||
-            !StringComparer.Ordinal.Equals(plan.RequestContractSha256, DeepSeekProviderContract.RequestContractSha256) ||
-            !StringComparer.Ordinal.Equals(identities.AdapterId, plan.AdapterId))
-            throw new ProviderFailureException("APR_PROVIDER_CONFIG", 20);
-
         var messages = plan.Messages.ToList();
         if (messages.Count < 4 || messages.Take(3).Any(message => message.Role != "system") ||
             messages[^1].Role != "user")
@@ -87,6 +120,14 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
         var requestBody = BuildRequestBody(messages);
         if (requestBody.Length > DeepSeekProviderContract.RequestBodyMaxBytes)
             throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
+
+        using var timeoutCts = new CancellationTokenSource(
+            providerTimeout);
+        using var providerCts = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            timeoutCts.Token);
+        var providerToken = providerCts.Token;
+        ValidateIdentities(plan, identities);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, DeepSeekProviderContract.Endpoint)
         {
@@ -98,13 +139,13 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
         HttpResponseMessage response;
         try
         {
-            response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, providerToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw new ProviderFailureException("APR_PROVIDER_CANCELLED", 30);
         }
-        catch (TaskCanceledException)
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
         {
             throw new ProviderFailureException("APR_PROVIDER_TIMEOUT", 30);
         }
@@ -115,27 +156,34 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
 
         using (response)
         {
-            if (!response.IsSuccessStatusCode)
-            {
-                await DiscardBoundedAsync(response.Content, DeepSeekProviderContract.RetainedErrorBodyMaxBytes);
-                throw new ProviderFailureException(StatusCode(response.StatusCode), 30);
-            }
-
             try
             {
+                if (!response.IsSuccessStatusCode)
+                {
+                    await DiscardBoundedAsync(
+                        response.Content,
+                        DeepSeekProviderContract.RetainedErrorBodyMaxBytes,
+                        providerToken);
+                    throw new ProviderFailureException(StatusCode(response.StatusCode), 30);
+                }
+
                 var responseBytes = await ReadBoundedAsync(
                     response.Content,
                     DeepSeekProviderContract.ResponseBodyMaxBytes,
-                    cancellationToken);
+                    providerToken);
                 return ParseSuccess(responseBytes, plan, identities);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw new ProviderFailureException("APR_PROVIDER_CANCELLED", 30);
             }
-            catch (TaskCanceledException)
+            catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
             {
                 throw new ProviderFailureException("APR_PROVIDER_TIMEOUT", 30);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or IOException)
+            {
+                throw new ProviderFailureException("APR_PROVIDER_TRANSPORT", 30);
             }
         }
     }
@@ -152,6 +200,36 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
         {
             return false;
         }
+    }
+
+    internal static string PolicyIdForMaxFindings(int maxFindings)
+    {
+        if (maxFindings is < 1 or > 50)
+            throw new ProviderFailureException("APR_PROVIDER_CONFIG", 20);
+        var policy = new JsonObject
+        {
+            ["constraints"] = new JsonObject
+            {
+                ["maxFindings"] = maxFindings,
+                ["tone"] = "strict",
+            },
+            ["instructions"] = "Review the delta carefully and return only the requested structured result.",
+            ["policyVersion"] = 2,
+            ["schemaVersion"] = 1,
+        };
+        using var document = JsonDocument.Parse(policy.ToJsonString());
+        var canonical = AgenticPrReview.Runtime.Canonical.JsonElementCanonicalizer.Canonicalize(
+            document.RootElement,
+            64,
+            256,
+            1_024,
+            long.MaxValue,
+            out _).ToArray();
+        var tag = Encoding.UTF8.GetBytes("agentic-pr-review/cache-contract/policy/v1\0");
+        var preimage = new byte[tag.Length + canonical.Length];
+        tag.CopyTo(preimage, 0);
+        canonical.CopyTo(preimage, tag.Length);
+        return Convert.ToHexString(SHA256.HashData(preimage)).ToLowerInvariant();
     }
 
     private static string StatusCode(HttpStatusCode status) => status switch
@@ -391,7 +469,7 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
             if (limitationsElement.GetArrayLength() > 16)
                 throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
             var limitations = limitationsElement.EnumerateArray()
-                .Select(item => item.ValueKind == JsonValueKind.String && item.GetString() is { Length: > 0 } value && UnicodeCount(value) <= 1_200
+                .Select(item => item.ValueKind == JsonValueKind.String && item.GetString() is { Length: > 0 } value && !String.IsNullOrWhiteSpace(value) && UnicodeCount(value) <= 1_200
                     ? value
                     : throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20))
                 .ToArray();
@@ -414,7 +492,7 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
         if ((start is null) != (end is null) || start is not null && (path is null || end < start))
             throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
         var suggestedAction = finding.TryGetProperty("suggestedAction", out var action)
-            ? action.ValueKind == JsonValueKind.String && action.GetString() is { Length: > 0 } value && UnicodeCount(value) <= 1_600 ? value : throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20)
+            ? action.ValueKind == JsonValueKind.String && action.GetString() is { Length: > 0 } value && !String.IsNullOrWhiteSpace(value) && UnicodeCount(value) <= 1_600 ? value : throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20)
             : null;
         return new LedgerFinding
         {
@@ -434,7 +512,7 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
     {
         var element = Required(value, property);
         if (element.ValueKind == JsonValueKind.Null) return null;
-        if (element.ValueKind != JsonValueKind.String || element.GetString() is not { Length: > 0 } path || UnicodeCount(path) > 500 || !IsSafeRelativePath(path))
+        if (element.ValueKind != JsonValueKind.String || element.GetString() is not { Length: > 0 } path || String.IsNullOrWhiteSpace(path) || UnicodeCount(path) > 500 || !IsSafeRelativePath(path))
             throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
         return path;
     }
@@ -470,7 +548,7 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
     private static string ReadBoundedNonEmptyString(JsonElement value, string property, int maximum)
     {
         var result = ReadRequiredString(value, property);
-        if (result.Length == 0 || UnicodeCount(result) > maximum) throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
+        if (result.Length == 0 || String.IsNullOrWhiteSpace(result) || UnicodeCount(result) > maximum) throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
         return result;
     }
 
@@ -518,11 +596,20 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
         return output.ToArray();
     }
 
-    private static async Task DiscardBoundedAsync(HttpContent content, int maximum)
+    private static async Task DiscardBoundedAsync(
+        HttpContent content,
+        int maximum,
+        CancellationToken cancellationToken)
     {
-        try { _ = await ReadBoundedAsync(content, maximum, CancellationToken.None); }
-        catch (ProviderFailureException) { }
-        catch (Exception) { }
+        try
+        {
+            _ = await ReadBoundedAsync(content, maximum, cancellationToken);
+        }
+        catch (ProviderFailureException failure) when (failure.Code == "APR_PROVIDER_RESPONSE")
+        {
+            // The status code remains the authoritative provider failure when the
+            // bounded error body itself exceeds its retention cap.
+        }
     }
 
     private static bool HasDuplicateJsonProperties(ReadOnlySpan<byte> bytes)

@@ -15,6 +15,20 @@ public sealed class DeepSeekLiveProviderExecutorTests
         Assert.Equal(
             "312f55d0038a4bcefb26703158edcf196bdb1e6a458c6ec88f3f08b1211f0356",
             DeepSeekProviderContract.RequestContractSha256);
+        Assert.Equal(
+            "29b9fb2b505b72a008e703d61c7847d475119dfb72b90bbe167e7fade527a787",
+            DeepSeekLiveProviderExecutor.PolicyIdForMaxFindings(50));
+    }
+
+    [Fact]
+    public void InvalidIdentityFailsBeforeProviderExecution()
+    {
+        var error = Assert.Throws<ProviderFailureException>(() =>
+            DeepSeekLiveProviderExecutor.ValidateIdentities(
+                Plan(),
+                Identities() with { AdapterId = new string('c', 64) }));
+
+        Assert.Equal("APR_PROVIDER_CONFIG", error.Code);
     }
 
     [Fact]
@@ -156,6 +170,43 @@ public sealed class DeepSeekLiveProviderExecutorTests
     }
 
     [Fact]
+    public async Task BodyTimeoutAndTransportAreProviderFailures()
+    {
+        var timeoutError = await Assert.ThrowsAsync<ProviderFailureException>(() =>
+            new DeepSeekLiveProviderExecutor(
+                "k",
+                new RecordingHandler(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StallingContent(),
+                }),
+                TimeSpan.FromMilliseconds(20)).ExecuteAsync(Plan(), Identities()));
+        Assert.Equal("APR_PROVIDER_TIMEOUT", timeoutError.Code);
+
+        var transportError = await Assert.ThrowsAsync<ProviderFailureException>(() =>
+            new DeepSeekLiveProviderExecutor(
+                "k",
+                new RecordingHandler(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ThrowingContent(),
+                }),
+                TimeSpan.FromSeconds(5)).ExecuteAsync(Plan(), Identities()));
+        Assert.Equal("APR_PROVIDER_TRANSPORT", transportError.Code);
+    }
+
+    [Fact]
+    public async Task WhitespaceOnlyModelTextIsProviderResponseFailure()
+    {
+        var error = await Assert.ThrowsAsync<ProviderFailureException>(() =>
+            new DeepSeekLiveProviderExecutor(
+                "k",
+                new RecordingHandler(SuccessResponse(
+                    "{\"schemaVersion\":1,\"summary\":\"   \",\"findings\":[],\"limitations\":[]}")),
+                TimeSpan.FromSeconds(5)).ExecuteAsync(Plan(), Identities()));
+
+        Assert.Equal("APR_PROVIDER_RESPONSE", error.Code);
+    }
+
+    [Fact]
     public void ProviderKeyUsesUtf8ByteBounds()
     {
         Assert.Throws<ArgumentException>(() => new DeepSeekLiveProviderExecutor(string.Concat(Enumerable.Repeat("😀", 65)), new RecordingHandler(SuccessResponse()), TimeSpan.FromSeconds(5)));
@@ -164,7 +215,9 @@ public sealed class DeepSeekLiveProviderExecutorTests
 
     private static ExpectedIdentities Identities() => new(
         "owner/repo", "owner/repo", 52, "workflow", "domain", "deepseek", "deepseek-v4-flash",
-        "c".PadLeft(64, 'c'), "b".PadLeft(64, 'b'), "c".PadLeft(64, 'c'), "d".PadLeft(64, 'd'), "e".PadLeft(64, 'e'));
+        DeepSeekProviderContract.AdapterId, DeepSeekProviderContract.TemplateId,
+        "29b9fb2b505b72a008e703d61c7847d475119dfb72b90bbe167e7fade527a787",
+        DeepSeekProviderContract.ToolDefinitionId, DeepSeekProviderContract.CacheConfigId);
 
     private static ProviderRequestPlan Plan() => new(
         [
@@ -172,7 +225,7 @@ public sealed class DeepSeekLiveProviderExecutorTests
             new ProviderRequestMessage("system", "policy"),
             new ProviderRequestMessage("system", "tools"),
             new ProviderRequestMessage("user", "patch text"),
-        ], 50, "a".PadLeft(64, 'a'), "b".PadLeft(64, 'b'), "c".PadLeft(64, 'c'), DeepSeekProviderContract.RequestContractSha256);
+        ], 50, "a".PadLeft(64, 'a'), "b".PadLeft(64, 'b'), DeepSeekProviderContract.AdapterId, DeepSeekProviderContract.RequestContractSha256);
 
     private static string SuccessResponse(string model = "{\"schemaVersion\":1,\"summary\":\"ok\",\"findings\":[],\"limitations\":[]}", long prompt = 2, long completion = 1, long total = 3, long hit = 2, long miss = 0, bool omitMiss = false) =>
         $"{{\"id\":\"id\",\"object\":\"chat.completion\",\"created\":1,\"model\":\"deepseek-v4-flash\",\"choices\":[{{\"index\":0,\"message\":{{\"role\":\"assistant\",\"content\":{JsonSerializer.Serialize(model)}}},\"finish_reason\":\"stop\",\"logprobs\":null}}],\"usage\":{{\"prompt_tokens\":{prompt},\"completion_tokens\":{completion},\"total_tokens\":{total},\"prompt_cache_hit_tokens\":{hit}{(omitMiss ? "" : $",\"prompt_cache_miss_tokens\":{miss}")}}}}}";
@@ -210,5 +263,73 @@ public sealed class DeepSeekLiveProviderExecutorTests
             RequestBody = request.Content!.ReadAsByteArrayAsync(cancellationToken).GetAwaiter().GetResult();
             return Task.FromResult(response);
         }
+    }
+
+    private sealed class StallingContent : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+            throw new NotSupportedException();
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = -1;
+            return false;
+        }
+
+        protected override Task<Stream> CreateContentReadStreamAsync() =>
+            Task.FromResult<Stream>(new StallingStream());
+    }
+
+    private sealed class ThrowingContent : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+            throw new NotSupportedException();
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = -1;
+            return false;
+        }
+
+        protected override Task<Stream> CreateContentReadStreamAsync() =>
+            Task.FromResult<Stream>(new ThrowingStream());
+    }
+
+    private abstract class TestStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => 0;
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override void Flush() => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private sealed class StallingStream : TestStream
+    {
+        public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+    }
+
+    private sealed class ThrowingStream : TestStream
+    {
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            Task.FromException<int>(new IOException("simulated body read failure"));
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            ValueTask.FromException<int>(new IOException("simulated body read failure"));
     }
 }

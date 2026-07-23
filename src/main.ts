@@ -45,6 +45,7 @@ import {
   LedgerBoundaryError,
   LedgerRunFailure,
   runLedgerCsharp,
+  type LedgerErrorKind,
   type LedgerRunResult,
 } from './ledger-csharp.js';
 import { RuntimeInvocationError } from './runtime-invocation/runtime-errors.js';
@@ -1757,22 +1758,7 @@ function setLedgerErrorOutputs(error: unknown): void {
   core.setOutput('state_error_kind', kind);
 }
 
-function ledgerEntrypointErrorKind(
-  error: unknown,
-):
-  | 'event_rejected'
-  | 'trust_rejected'
-  | 'workflow_provenance_invalid'
-  | 'permission_denied'
-  | 'store_capability_unsupported'
-  | 'store_transaction_failed'
-  | 'store_corrupt'
-  | 'state_restore_invalid'
-  | 'runtime_failed'
-  | 'target_revalidation_failed'
-  | 'publication_observation_invalid'
-  | 'receipt_write_failed'
-  | 'outcome_unknown' {
+function ledgerEntrypointErrorKind(error: unknown): LedgerErrorKind {
   if (error instanceof LedgerBoundaryError) return error.errorKind;
   if (error instanceof StoreCorruptionError || error instanceof ContractValidationError)
     return 'store_corrupt';
