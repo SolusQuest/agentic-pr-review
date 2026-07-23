@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  buildM4StateCommentBody,
   buildLineageCommentBody,
   buildStickyComment,
   capStructuredReviewForMarkdownLimit,
   renderStructuredReviewMarkdown,
   STICKY_COMMENT_MARKER,
+  upsertM4StateComment,
   upsertLineageComment,
 } from './comments.js';
 import { type StructuredReviewEnvelopeV1 } from './types.js';
@@ -59,6 +61,19 @@ function structuredReview(headSha = 'head'): StructuredReviewEnvelopeV1 {
 }
 
 describe('sticky comment', () => {
+  it('uses a terminal M4 marker that is distinct from legacy lineage metadata', () => {
+    const markerId = 'a'.repeat(64);
+    const selectorRevision = `sha256:${'b'.repeat(64)}`;
+    const body = buildM4StateCommentBody(structuredReview(), markerId, selectorRevision);
+    expect(body).toMatch(
+      new RegExp(
+        `<!-- agentic-pr-review:m4-state/v1 \\{\"bodySha256\":\"[a-f0-9]{64}\",\"markerId\":\"${markerId}\",\"selectorRevision\":\"${selectorRevision}\"\\} -->$`,
+      ),
+    );
+    expect(body).not.toContain(STICKY_COMMENT_MARKER);
+    expect(body).not.toContain('agentic-pr-review:meta');
+  });
+
   it('uses generic markers', () => {
     const comment = buildStickyComment(
       {
@@ -226,5 +241,48 @@ describe('sticky comment', () => {
     const updatedBody = updateComment.mock.calls[0][0].body as string;
     expect(updatedBody).toContain('agentic-pr-review:history-entry:start');
     expect(updatedBody).not.toMatch(/solusquest/i);
+  });
+
+  it('updates the existing M4 sticky comment when the accepted marker advances', async () => {
+    const priorMarkerId = 'a'.repeat(64);
+    const nextMarkerId = 'b'.repeat(64);
+    const selectorRevision = `sha256:${'c'.repeat(64)}`;
+    const updateComment = vi.fn().mockImplementation(async ({ body }) => ({
+      data: { id: 10, html_url: 'https://comment', body },
+    }));
+    const octokit = {
+      paginate: vi.fn().mockResolvedValue([
+        {
+          id: 10,
+          body: buildM4StateCommentBody(
+            structuredReview('head-1'),
+            priorMarkerId,
+            selectorRevision,
+          ),
+        },
+      ]),
+      rest: {
+        issues: {
+          listComments: vi.fn(),
+          updateComment,
+          createComment: vi.fn(),
+        },
+      },
+    };
+
+    await upsertM4StateComment({
+      octokit,
+      owner: 'example',
+      repo: 'repo',
+      prNumber: 1,
+      markerId: nextMarkerId,
+      selectorRevision,
+      structuredReview: structuredReview('head-2'),
+    });
+
+    expect(updateComment).toHaveBeenCalledWith(
+      expect.objectContaining({ comment_id: 10, body: expect.stringContaining(nextMarkerId) }),
+    );
+    expect(octokit.rest.issues.createComment).not.toHaveBeenCalled();
   });
 });

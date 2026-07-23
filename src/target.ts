@@ -10,7 +10,11 @@ import { normalizeRepoRelativePath, sha256 } from './utils.js';
 
 export interface GitHubContextLike {
   repo: { owner: string; repo: string };
-  payload: { pull_request?: { number?: number } };
+  payload: {
+    pull_request?: { number?: number };
+    workflow_run?: { pull_requests?: { number?: number }[] };
+    inputs?: { pr_number?: string };
+  };
   sha: string;
 }
 
@@ -59,7 +63,12 @@ export async function resolveTarget(
     };
   }
 
-  const prNumber = config.prNumber ?? context.payload.pull_request?.number;
+  const workflowRunPullRequests = context.payload.workflow_run?.pull_requests;
+  const prNumber =
+    config.prNumber ??
+    context.payload.pull_request?.number ??
+    (workflowRunPullRequests?.length === 1 ? workflowRunPullRequests[0]?.number : undefined) ??
+    parseDispatchPullRequestNumber(context.payload.inputs?.pr_number);
   if (!prNumber) {
     throw new Error('pr_number is required unless the event payload contains a pull request');
   }
@@ -95,10 +104,15 @@ export async function resolveTarget(
     headSha: String(pull.data.head.sha),
     headRepoFullName,
     draft: Boolean(pull.data.draft),
+    isOpen: pull.data.state === 'open',
     changedFiles,
     pullRequestDiffSnapshot,
     htmlUrl: pull.data.html_url,
   };
+}
+
+function parseDispatchPullRequestNumber(value: string | undefined): number | undefined {
+  return value && /^[1-9][0-9]*$/.test(value) ? Number(value) : undefined;
 }
 
 export function buildPullRequestDiffSnapshot(input: {

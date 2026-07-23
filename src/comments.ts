@@ -9,9 +9,10 @@ import {
   type StructuredFindingV1,
   type StructuredReviewEnvelopeV1,
 } from './types.js';
-import { truncateText } from './utils.js';
+import { sha256, truncateText } from './utils.js';
 
 export const STICKY_COMMENT_MARKER = '<!-- agentic-pr-review:v1 -->';
+const M4_STICKY_MARKER_PREFIX = '<!-- agentic-pr-review:m4-state/v1 ';
 const LINEAGE_META_PREFIX = '<!-- agentic-pr-review:meta';
 const LINEAGE_META_SUFFIX = '-->';
 const CURRENT_BLOCK_START = '<!-- agentic-pr-review:current:start -->';
@@ -70,6 +71,111 @@ export interface LineageCommentInput {
   maxTurns?: number;
   lineageTotals?: RuntimeLineageTotals;
   maxReviewChars: number;
+}
+
+export interface M4StateCommentInput {
+  octokit: any;
+  owner: string;
+  repo: string;
+  prNumber: number;
+  markerId: string;
+  selectorRevision: string;
+  structuredReview: StructuredReviewEnvelopeV1;
+}
+
+export async function upsertM4StateComment(
+  input: M4StateCommentInput,
+): Promise<{ commentUrl: string; commentId: string; bodySha256: string }> {
+  const body = buildM4StateCommentBody(
+    input.structuredReview,
+    input.markerId,
+    input.selectorRevision,
+  );
+  const comments = (await input.octokit.paginate(input.octokit.rest.issues.listComments, {
+    owner: input.owner,
+    repo: input.repo,
+    issue_number: input.prNumber,
+    per_page: 100,
+  })) as IssueComment[];
+  const match = comments
+    .filter((comment) => parseM4StateMarker(comment.body ?? '') !== null)
+    .sort((left, right) => left.id - right.id)[0];
+  let response: { data: IssueComment };
+  try {
+    response = match
+      ? await input.octokit.rest.issues.updateComment({
+          owner: input.owner,
+          repo: input.repo,
+          comment_id: match.id,
+          body,
+        })
+      : await input.octokit.rest.issues.createComment({
+          owner: input.owner,
+          repo: input.repo,
+          issue_number: input.prNumber,
+          body,
+        });
+  } catch (error) {
+    const status = Number((error as { status?: unknown } | undefined)?.status);
+    if (Number.isInteger(status) && status >= 400 && status < 500) {
+      throw new Error(match ? 'comment_update_failed' : 'comment_create_failed');
+    }
+    let reconciled: IssueComment[];
+    try {
+      reconciled = (await input.octokit.paginate(input.octokit.rest.issues.listComments, {
+        owner: input.owner,
+        repo: input.repo,
+        issue_number: input.prNumber,
+        per_page: 100,
+      })) as IssueComment[];
+    } catch {
+      throw new Error('comment_outcome_unknown');
+    }
+    const exact = reconciled
+      .filter((comment) => comment.body === body)
+      .sort((left, right) => left.id - right.id)[0];
+    if (exact) {
+      return {
+        commentUrl: String(exact.html_url ?? ''),
+        commentId: String(exact.id),
+        bodySha256: sha256(renderStructuredReviewMarkdown(input.structuredReview)),
+      };
+    }
+    throw new Error('comment_outcome_unknown');
+  }
+  if (String(response.data.body ?? '') !== body) {
+    throw new Error('comment_readback_failed');
+  }
+  return {
+    commentUrl: String(response.data.html_url ?? ''),
+    commentId: String(response.data.id),
+    bodySha256: sha256(renderStructuredReviewMarkdown(input.structuredReview)),
+  };
+}
+
+export function buildM4StateCommentBody(
+  structuredReview: StructuredReviewEnvelopeV1,
+  markerId: string,
+  selectorRevision: string,
+): string {
+  const rendered = renderStructuredReviewMarkdown(structuredReview);
+  const bodySha256 = sha256(rendered);
+  return `${rendered}\n${M4_STICKY_MARKER_PREFIX}{"bodySha256":"${bodySha256}","markerId":"${markerId}","selectorRevision":"${selectorRevision}"} -->`;
+}
+
+function parseM4StateMarker(body: string): {
+  readonly bodySha256: string;
+  readonly markerId: string;
+  readonly selectorRevision: string;
+} | null {
+  if ([...body.matchAll(/<!-- agentic-pr-review:m4-state\/v1 /gu)].length !== 1) return null;
+  const match = body.match(
+    /\n<!-- agentic-pr-review:m4-state\/v1 \{"bodySha256":"([a-f0-9]{64})","markerId":"([a-f0-9]{64})","selectorRevision":"(sha256:[a-f0-9]{64})"\} -->$/u,
+  );
+  if (!match) return null;
+  const [, bodySha256, markerId, selectorRevision] = match;
+  const rendered = body.slice(0, body.length - match[0].length);
+  return sha256(rendered) === bodySha256 ? { bodySha256, markerId, selectorRevision } : null;
 }
 
 export function buildStickyComment(
@@ -169,17 +275,15 @@ export function buildLineageCommentBody(
   const chainStart = existingMeta?.lineage_id.split(':').at(-1) ?? shortSha(input.currentHeadSha);
   const lineageId =
     existingMeta?.lineage_id ??
-    (input.runtimeBackend === 'deterministic-csharp'
-      ? `deterministic-csharp:${input.stateKey}:${input.runtimeProvider}:${input.runId}:${chainStart}`
+    (isNonLegacyBackend(input.runtimeBackend)
+      ? `${input.runtimeBackend}:${input.stateKey}:${input.runtimeProvider}:${input.runId}:${chainStart}`
       : `${input.stateKey}:${input.runtimeProvider}:${input.runId}:${chainStart}`);
   const meta: LineageMeta = {
     version: 1,
     lineage_id: lineageId,
     state_key: input.stateKey,
     runtime_provider: input.runtimeProvider,
-    ...(input.runtimeBackend === 'deterministic-csharp'
-      ? { runtime_backend: input.runtimeBackend }
-      : {}),
+    ...(isNonLegacyBackend(input.runtimeBackend) ? { runtime_backend: input.runtimeBackend } : {}),
     session_id: input.sessionId,
     from_head_sha: input.previousHeadSha ?? null,
     to_head_sha: input.currentHeadSha,
@@ -195,10 +299,9 @@ export function buildLineageCommentBody(
   };
 
   const repository = input.target.htmlUrl ? repositoryFromUrl(input.target.htmlUrl) : undefined;
-  const runtimeLabel =
-    input.runtimeBackend === 'deterministic-csharp'
-      ? `${input.runtimeProvider} (${input.runtimeBackend})`
-      : input.runtimeProvider;
+  const runtimeLabel = isNonLegacyBackend(input.runtimeBackend)
+    ? `${input.runtimeProvider} (${input.runtimeBackend})`
+    : input.runtimeProvider;
   const runValue = repository
     ? `[${input.runId}.${input.runAttempt}](https://github.com/${repository}/actions/runs/${input.runId})`
     : `${input.runId}.${input.runAttempt}`;
@@ -581,4 +684,8 @@ function shortSha(value: string): string {
 
 function formatOptionalSha(value: string | null): string {
   return value ? shortSha(value) : 'n/a';
+}
+
+function isNonLegacyBackend(runtimeBackend: RuntimeBackend | undefined): boolean {
+  return runtimeBackend !== undefined && runtimeBackend !== 'legacy';
 }

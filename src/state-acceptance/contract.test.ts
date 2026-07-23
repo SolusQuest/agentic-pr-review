@@ -19,6 +19,7 @@ import {
   RECORD_CODEC_CODES,
   RECORD_CODEC_DIAGNOSTIC_VECTORS,
   SelectionSnapshotLimitError,
+  StoreCorruptionError,
   StoreTransactionError,
   StickyCallbackOutcomeUnknownError,
   candidateLocator,
@@ -2040,6 +2041,29 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
         await rm(selectorReadbackFailureRoot, { recursive: true, force: true });
       }
 
+      const corruptionRoot = await mkdtemp(
+        path.join(os.tmpdir(), 'm4-state-acceptance-corruption-boundary-'),
+      );
+      try {
+        const corruptionStore = new ReferenceStateStore(corruptionRoot);
+        await corruptionStore.close();
+        corruptionStore.createAcceptanceSnapshot = async () => {
+          throw new StoreCorruptionError();
+        };
+        let called = false;
+        await expect(
+          acceptLocalCandidate(corruptionStore, {
+            ...acceptanceOptions,
+            publishSticky: async () => {
+              called = true;
+            },
+          }),
+        ).rejects.toBeInstanceOf(StoreCorruptionError);
+        expect(called).toBe(false);
+      } finally {
+        await rm(corruptionRoot, { recursive: true, force: true });
+      }
+
       const failedRoot = await mkdtemp(
         path.join(os.tmpdir(), 'm4-state-acceptance-sticky-failed-'),
       );
@@ -2059,7 +2083,7 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
       } finally {
         await rm(failedRoot, { recursive: true, force: true });
       }
-      expect(releaseCount).toBe(21);
+      expect(releaseCount).toBe(22);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

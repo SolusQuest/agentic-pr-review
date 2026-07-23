@@ -28,6 +28,7 @@ const RUNTIME_PROVIDERS = ['test', 'claude-code-cli'] as const satisfies readonl
 const RUNTIME_BACKENDS = [
   'legacy',
   'deterministic-csharp',
+  'ledger-csharp',
 ] as const satisfies readonly RuntimeBackend[];
 const TARGET_MODES = ['pull-request', 'synthetic-fixture'] as const satisfies readonly TargetMode[];
 const REVIEW_MODES = ['auto', 'bootstrap', 'incremental'] as const satisfies readonly ReviewMode[];
@@ -110,6 +111,7 @@ export function parseActionConfig(
     runtimeProvider,
     targetMode,
     reviewMode,
+    verificationNamespace: optionalInput(reader, 'verification_namespace'),
     prNumber: parseOptionalPositiveInteger(optionalInput(reader, 'pr_number'), 'pr_number'),
     stateKey: optionalInput(reader, 'state_key'),
     stateArtifactRunId: parseOptionalPositiveInteger(
@@ -222,23 +224,41 @@ export function parseActionConfig(
     );
   }
   validateDeterministicRuntimeConfig(config);
+  validateLedgerVerificationNamespace(config);
   validateLiveRuntimeConfig(config);
   validateDebugCapture(config, eventName);
   return config;
 }
 
+function validateLedgerVerificationNamespace(config: ActionConfig): void {
+  if (config.runtimeBackend !== 'ledger-csharp') return;
+  if (
+    config.verificationNamespace !== undefined &&
+    !/^[a-z0-9][a-z0-9-]{0,47}$/.test(config.verificationNamespace)
+  ) {
+    throw new Error('config-invalid: verification_namespace must match ^[a-z0-9][a-z0-9-]{0,47}$');
+  }
+}
+
 function validateDeterministicRuntimeConfig(config: ActionConfig): void {
-  if (config.runtimeBackend !== 'deterministic-csharp') {
+  if (
+    config.runtimeBackend !== 'deterministic-csharp' &&
+    config.runtimeBackend !== 'ledger-csharp'
+  ) {
     return;
   }
+  const backend = config.runtimeBackend;
   if (config.runtimeProvider !== 'test') {
+    throw new Error(`config-invalid: runtime_backend=${backend} requires runtime_provider=test`);
+  }
+  if (backend === 'ledger-csharp' && config.targetMode !== 'pull-request') {
     throw new Error(
-      'config-invalid: runtime_backend=deterministic-csharp requires runtime_provider=test',
+      'config-invalid: runtime_backend=ledger-csharp requires target_mode=pull-request',
     );
   }
   if (config.targetMode === 'synthetic-fixture' && config.postComment) {
     throw new Error(
-      'config-invalid: runtime_backend=deterministic-csharp with target_mode=synthetic-fixture requires post_comment=false',
+      `config-invalid: runtime_backend=${backend} with target_mode=synthetic-fixture requires post_comment=false`,
     );
   }
   const invalid: string[] = [];
@@ -265,9 +285,24 @@ function validateDeterministicRuntimeConfig(config: ActionConfig): void {
   if (config.claudeCodeVersion) invalid.push('claude_code_version');
   if (config.apiKey) invalid.push('AGENTIC_REVIEW_API_KEY');
   if (config.debugAcknowledgement) invalid.push('debug_acknowledgement');
+  if (backend === 'ledger-csharp') {
+    if (config.reviewMode === 'bootstrap') invalid.push('review_mode');
+    if (config.prNumber !== undefined) invalid.push('pr_number');
+    if (config.stateKey) invalid.push('state_key');
+    if (config.stateArtifactRunId !== undefined) invalid.push('state_artifact_run_id');
+    if (config.instructions || config.instructionsPath) invalid.push('instructions');
+    if (config.bootstrapContext || config.bootstrapContextPath) invalid.push('bootstrap_context');
+    if (config.incrementalContext || config.incrementalContextPath)
+      invalid.push('incremental_context');
+    if (config.artifactRetentionDays !== 7) invalid.push('artifact_retention_days');
+    if (config.maxContextChars !== 60_000) invalid.push('max_context_chars');
+    if (config.maxPatchChars !== 120_000) invalid.push('max_patch_chars');
+    if (config.maxReviewChars !== 12_000) invalid.push('max_review_chars');
+    if (config.maxFindings !== 50) invalid.push('max_findings');
+  }
   if (invalid.length > 0) {
     throw new Error(
-      `config-invalid: runtime_backend=deterministic-csharp configuration is invalid: ${invalid.join(', ')}`,
+      `config-invalid: runtime_backend=${backend} configuration is invalid: ${invalid.join(', ')}`,
     );
   }
 }

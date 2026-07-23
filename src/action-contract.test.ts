@@ -61,8 +61,36 @@ describe('action contract', () => {
       'runtime_error_kind',
       'runtime_error_class',
       'usage_budget_status',
+      'state_transition',
+      'state_reason',
+      'state_candidate_id',
+      'state_marker_id',
+      'state_selector_revision',
+      'state_session_epoch',
+      'state_generation',
+      'state_ledger_epoch',
+      'state_acceptance_status',
+      'state_acceptance_reason',
+      'state_publication_status',
+      'state_receipt_status',
+      'state_cleanup_warnings',
+      'state_error_kind',
     ]) {
       expect(action).toContain(name);
+    }
+  });
+
+  it('wires the checked-in M4 workflows with the action token and frozen ledger inputs', () => {
+    for (const workflow of [
+      '.github/workflows/m4-stateful-review.yml',
+      '.github/workflows/m4-stateful-verification.yml',
+    ]) {
+      const source = readFileSync(workflow, 'utf8');
+      expect(source).toContain('uses: ./.github/actions/agentic-pr-review');
+      expect(source).toContain('GITHUB_TOKEN: ${{ github.token }}');
+      expect(source).toContain('runtime_backend: ledger-csharp');
+      expect(source).toContain('runtime_provider: test');
+      expect(source).toContain('target_mode: pull-request');
     }
   });
 });

@@ -1,0 +1,58 @@
+name: Agentic PR Review M4 Stateful Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Reserved same-repository synthetic pull request number
+        required: true
+        type: string
+      verification_namespace:
+        description: Lowercase verification namespace
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  verify:
+    if: vars.AGENTIC_REVIEW_M4_STATEFUL_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: apr-m4-verify-v1-${{ github.repository_id }}-${{ inputs.pr_number }}-${{ inputs.verification_namespace }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - run: npm ci
+      - name: Build trusted runtime outside the checkout
+        run: >-
+          dotnet build runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj
+          --configuration Release --output "$RUNNER_TEMP/agentic-pr-review-runtime"
+      - name: Configure trusted runtime command
+        shell: bash
+        run: |
+          printf 'AGENTIC_REVIEW_RUNTIME_EXECUTABLE=%s\n' "$(realpath "$(command -v dotnet)")" >> "$GITHUB_ENV"
+          printf 'AGENTIC_REVIEW_RUNTIME_PREFIX_ARGS_JSON=["%s"]\n' "$RUNNER_TEMP/agentic-pr-review-runtime/AgenticPrReview.Runtime.dll" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/agentic-pr-review
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          AGENTIC_REVIEW_M4_RESERVED_VERIFICATION_PR: ${{ vars.AGENTIC_REVIEW_M4_RESERVED_VERIFICATION_PR }}
+        with:
+          runtime_backend: ledger-csharp
+          runtime_provider: test
+          target_mode: pull-request
+          review_mode: auto
+          verification_namespace: ${{ inputs.verification_namespace }}
+          post_comment: 'false'
+          inline_comments: 'false'

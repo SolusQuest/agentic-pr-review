@@ -1,0 +1,14 @@
+name: Agentic PR Review M4 Untrusted Analysis
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record trusted workflow completion
+        run: echo "M4 untrusted analysis completed without checking out pull-request code."

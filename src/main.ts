@@ -41,7 +41,18 @@ import { mapReviewResultV1ToRuntimeContent } from './protocol/map-review-result.
 import { validateReviewInputV1 } from './protocol/review-input.js';
 import { invokeRuntime } from './runtime-invocation/invoke-runtime.js';
 import { resolveTrustedRuntimeCommand } from './runtime-invocation/command-resolver.js';
+import {
+  LedgerBoundaryError,
+  LedgerRunFailure,
+  runLedgerCsharp,
+  type LedgerRunResult,
+} from './ledger-csharp.js';
 import { RuntimeInvocationError } from './runtime-invocation/runtime-errors.js';
+import {
+  ContractValidationError,
+  StoreCorruptionError,
+  StoreTransactionError,
+} from './state-acceptance/index.js';
 import {
   deriveStateKey,
   diffPullRequestDiffSnapshots,
@@ -97,7 +108,16 @@ class CoreInputReader implements InputReader {
 
 export async function run(): Promise<void> {
   const eventName = github.context.eventName || process.env.GITHUB_EVENT_NAME || '';
-  const config = parseActionConfig(new CoreInputReader(), process.env, eventName);
+  const ledgerRequested = core.getInput('runtime_backend').trim() === 'ledger-csharp';
+  if (ledgerRequested) setLedgerInitialOutputs();
+  let config;
+  try {
+    config = parseActionConfig(new CoreInputReader(), process.env, eventName);
+  } catch (error) {
+    if (ledgerRequested) setLedgerErrorOutputs(error);
+    throw error;
+  }
+  if (config.runtimeBackend === 'ledger-csharp' && !ledgerRequested) setLedgerInitialOutputs();
   if (config.apiKey) {
     core.setSecret(config.apiKey);
   }
@@ -109,8 +129,15 @@ export async function run(): Promise<void> {
   try {
     await ensureDir(tempRoot);
   } catch (error) {
-    if ((config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
-      setDeterministicErrorOutputs(new Error('state-invalid: temporary directory unavailable'));
+    if (
+      (config.runtimeBackend ?? 'legacy') === 'deterministic-csharp' ||
+      config.runtimeBackend === 'ledger-csharp'
+    ) {
+      if (config.runtimeBackend === 'ledger-csharp') {
+        setLedgerErrorOutputs(new Error('state-invalid: temporary directory unavailable'));
+      } else {
+        setDeterministicErrorOutputs(new Error('state-invalid: temporary directory unavailable'));
+      }
       throw new Error('state-invalid: temporary directory unavailable');
     }
     throw error;
@@ -122,11 +149,45 @@ export async function run(): Promise<void> {
     target = await resolveTarget(config, octokit, github.context);
     validateSameRepositoryTarget(target);
   } catch (error) {
-    if ((config.runtimeBackend ?? 'legacy') === 'deterministic-csharp') {
-      setDeterministicErrorOutputs(new Error('input-invalid: target resolution failed'));
+    if (
+      (config.runtimeBackend ?? 'legacy') === 'deterministic-csharp' ||
+      config.runtimeBackend === 'ledger-csharp'
+    ) {
+      if (config.runtimeBackend === 'ledger-csharp') {
+        setLedgerErrorOutputs(new Error('input-invalid: target resolution failed'));
+      } else {
+        setDeterministicErrorOutputs(new Error('input-invalid: target resolution failed'));
+      }
       throw new Error('input-invalid: target resolution failed');
     }
     throw error;
+  }
+
+  if ((config.runtimeBackend ?? 'legacy') === 'ledger-csharp') {
+    try {
+      const defaultBranchCommitSha = process.env.GITHUB_SHA?.trim();
+      if (!defaultBranchCommitSha || !/^[a-f0-9]{40}$/i.test(defaultBranchCommitSha)) {
+        throw new Error('state-invalid: default branch commit SHA is unavailable');
+      }
+      const result = await runLedgerCsharp({
+        config,
+        target,
+        octokit,
+        eventName,
+        defaultBranchCommitSha,
+      });
+      setLedgerSuccessOutputs(result);
+      await writeLedgerSummary(result);
+      return;
+    } catch (error) {
+      if (error instanceof LedgerRunFailure) {
+        setLedgerPartialFailureOutputs(error);
+        await writeLedgerSummary(error.result, error.errorKind);
+      } else {
+        setLedgerErrorOutputs(error);
+      }
+      throw error;
+    }
   }
 
   let stateKey: string;
@@ -631,7 +692,7 @@ function createArtifactStore(
     {
       targetMode: target.mode,
       prNumber: target.prNumber,
-      runtimeBackend,
+      runtimeBackend: runtimeBackend === 'ledger-csharp' ? undefined : runtimeBackend,
     },
   );
 }
@@ -1319,6 +1380,92 @@ function setDeterministicSuccessOutputs(runtimeResult: RuntimeResult | undefined
   }
 }
 
+function setLedgerSuccessOutputs(result: Awaited<ReturnType<typeof runLedgerCsharp>>): void {
+  core.setOutput('runtime_backend', 'ledger-csharp');
+  core.setOutput('runtime_version', result.runtimeVersion);
+  core.setOutput('runtime_trace_sha256', result.traceSha256);
+  core.setOutput('runtime_error_kind', '');
+  core.setOutput('runtime_error_class', '');
+  core.setOutput('usage_budget_status', 'not_applicable (records=0)');
+  core.setOutput('state_key', result.stateKey);
+  core.setOutput('phase', result.phase);
+  core.setOutput('review_phase', result.phase);
+  core.setOutput('state_transition', result.transition);
+  core.setOutput('state_reason', result.stateReason);
+  core.setOutput('state_candidate_id', result.candidateId);
+  core.setOutput('state_marker_id', result.markerId);
+  core.setOutput('state_selector_revision', result.selectorRevision);
+  core.setOutput('state_session_epoch', result.sessionEpoch);
+  core.setOutput('state_generation', result.stateGeneration);
+  core.setOutput('state_ledger_epoch', result.ledgerEpoch);
+  core.setOutput('state_acceptance_status', result.acceptanceStatus);
+  core.setOutput('state_acceptance_reason', result.acceptanceReason);
+  core.setOutput('state_publication_status', result.publicationStatus);
+  core.setOutput('state_receipt_status', result.receiptStatus);
+  core.setOutput('state_cleanup_warnings', result.cleanupWarnings);
+  core.setOutput('state_error_kind', '');
+  core.setOutput('comment_url', result.commentUrl);
+}
+
+function setLedgerPartialFailureOutputs(error: LedgerRunFailure): void {
+  setLedgerSuccessOutputs(error.result);
+  core.setOutput('runtime_error_kind', error.errorKind);
+  core.setOutput('state_error_kind', error.errorKind);
+}
+
+async function writeLedgerSummary(result: LedgerRunResult, failureKind = ''): Promise<void> {
+  try {
+    await core.summary
+      .addRaw(
+        [
+          '### Agentic PR Review M4 ledger',
+          '',
+          `- Phase: ${result.phase}`,
+          `- Transition: ${result.transition}`,
+          `- Acceptance: ${result.acceptanceStatus}${result.acceptanceReason ? ` (${result.acceptanceReason})` : ''}`,
+          `- Publication: ${result.publicationStatus}`,
+          `- Receipt: ${result.receiptStatus}`,
+          `- Selector revision: ${result.selectorRevision || 'n/a'}`,
+          `- Failure classification: ${failureKind || 'none'}`,
+        ].join('\n'),
+      )
+      .write();
+  } catch {
+    core.info('Unable to write M4 ledger summary.');
+  }
+}
+
+function setLedgerInitialOutputs(): void {
+  for (const [name, value] of Object.entries({
+    runtime_backend: 'ledger-csharp',
+    runtime_version: '',
+    runtime_trace_sha256: '',
+    runtime_error_kind: '',
+    runtime_error_class: '',
+    usage_budget_status: 'not_applicable (records=0)',
+    state_key: '',
+    phase: '',
+    review_phase: '',
+    state_transition: '',
+    state_reason: '',
+    state_candidate_id: '',
+    state_marker_id: '',
+    state_selector_revision: '',
+    state_session_epoch: '',
+    state_generation: '',
+    state_ledger_epoch: '',
+    state_acceptance_status: 'not_started',
+    state_acceptance_reason: '',
+    state_publication_status: 'not_started',
+    state_receipt_status: 'not_started',
+    state_cleanup_warnings: '',
+    state_error_kind: '',
+    comment_url: '',
+  })) {
+    core.setOutput(name, value);
+  }
+}
+
 function setDeterministicHostErrorKind(kind: string): void {
   core.setOutput('runtime_error_kind', kind);
   core.setOutput('runtime_error_class', '');
@@ -1586,6 +1733,65 @@ function setDeterministicErrorOutputs(error: unknown): void {
   core.setOutput('usage_budget_status', 'not_applicable (records=0)');
 }
 
+function setLedgerErrorOutputs(error: unknown): void {
+  const kind = ledgerEntrypointErrorKind(error);
+  core.setOutput('runtime_backend', 'ledger-csharp');
+  core.setOutput('runtime_version', '');
+  core.setOutput('runtime_trace_sha256', '');
+  core.setOutput('runtime_error_kind', kind);
+  core.setOutput('runtime_error_class', '');
+  core.setOutput('usage_budget_status', 'not_applicable (records=0)');
+  core.setOutput('state_transition', '');
+  core.setOutput('state_reason', '');
+  core.setOutput('state_candidate_id', '');
+  core.setOutput('state_marker_id', '');
+  core.setOutput('state_selector_revision', '');
+  core.setOutput('state_session_epoch', '');
+  core.setOutput('state_generation', '');
+  core.setOutput('state_ledger_epoch', '');
+  core.setOutput('state_acceptance_status', 'not_started');
+  core.setOutput('state_acceptance_reason', '');
+  core.setOutput('state_publication_status', 'not_attempted');
+  core.setOutput('state_receipt_status', 'not_written');
+  core.setOutput('state_cleanup_warnings', '');
+  core.setOutput('state_error_kind', kind);
+}
+
+function ledgerEntrypointErrorKind(
+  error: unknown,
+):
+  | 'event_rejected'
+  | 'trust_rejected'
+  | 'workflow_provenance_invalid'
+  | 'permission_denied'
+  | 'store_capability_unsupported'
+  | 'store_transaction_failed'
+  | 'store_corrupt'
+  | 'state_restore_invalid'
+  | 'runtime_failed'
+  | 'target_revalidation_failed'
+  | 'publication_observation_invalid'
+  | 'receipt_write_failed'
+  | 'outcome_unknown' {
+  if (error instanceof LedgerBoundaryError) return error.errorKind;
+  if (error instanceof StoreCorruptionError || error instanceof ContractValidationError)
+    return 'store_corrupt';
+  if (error instanceof StoreTransactionError) return error.reason;
+  const message = messageOf(error);
+  if (message.includes('repository administrator')) return 'permission_denied';
+  if (message.includes('workflow source') || message.includes('workflow_run provenance'))
+    return 'workflow_provenance_invalid';
+  if (
+    message.includes('requires workflow_run') ||
+    message.includes('requires workflow_dispatch') ||
+    message.includes('resolved pull request') ||
+    message.includes('initially open pull request')
+  )
+    return 'event_rejected';
+  if (message.includes('default branch ref')) return 'trust_rejected';
+  return 'runtime_failed';
+}
+
 export function sanitizeRuntimeDiagnostic(value: string, secrets: readonly string[] = []): string {
   let sanitized = value.replace(/\s+/g, ' ').trim();
   for (const secret of secrets.filter((item) => item.length > 4)) {
@@ -1647,6 +1853,6 @@ function messageOf(error: unknown): string {
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   run().catch((error: unknown) => {
-    core.setFailed(messageOf(error));
+    core.setFailed(sanitizeRuntimeDiagnosticForHost(messageOf(error)));
   });
 }

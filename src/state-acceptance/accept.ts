@@ -21,6 +21,7 @@ import {
   materializeSelector,
   validateCandidateRegistration,
 } from './validation.js';
+import { StoreCorruptionError } from './github-state-store.js';
 import {
   MAX_ACCEPTANCE_SNAPSHOT_REGISTRATION_BYTES,
   MAX_ACCEPTANCE_SNAPSHOT_REGISTRATIONS,
@@ -50,6 +51,15 @@ export class StickyCallbackOutcomeUnknownError extends Error {
   constructor() {
     super('sticky callback outcome unknown');
     this.name = 'StickyCallbackOutcomeUnknownError';
+  }
+}
+
+export class StickyCallbackKnownFailureError extends Error {
+  constructor(
+    readonly code: 'comment_create_failed' | 'comment_update_failed' | 'comment_readback_failed',
+  ) {
+    super(code);
+    this.name = 'StickyCallbackKnownFailureError';
   }
 }
 
@@ -95,22 +105,25 @@ export async function acceptLocalCandidate(
 ): Promise<AcceptanceResult> {
   const warnings: CleanupWarningCode[] = [];
   let result: AcceptanceResult;
+  let corruption: StoreCorruptionError | undefined;
   try {
     result = await acceptWithoutCleanup(store, options);
-  } catch {
-    result = {
-      acceptance: 'unknown',
-      reason: 'acceptance_outcome_unknown',
-      publication: { status: 'not_attempted' },
-      cleanupWarnings: [],
-    };
+  } catch (error) {
+    if (error instanceof StoreCorruptionError) {
+      corruption = error;
+      result = unknownAcceptance();
+    } else {
+      result = unknownAcceptance();
+    }
   }
   try {
     await options.candidate.release();
   } catch {
     warnings.push('lease_release_failed');
   }
-  return addCleanupWarnings(result, warnings);
+  const withWarnings = addCleanupWarnings(result, warnings);
+  if (corruption) throw corruption;
+  return withWarnings;
 }
 
 async function acceptWithoutCleanup(
@@ -172,7 +185,9 @@ async function acceptWithoutCleanup(
   } catch (error) {
     if (error instanceof SelectionSnapshotLimitError)
       return notAccepted('candidate_snapshot_limit_exceeded');
-    if (error instanceof SelectorRevisionMismatchError) return notAccepted('stale_candidate');
+    if (error instanceof SelectorRevisionMismatchError)
+      return reconcileAlreadyAccepted(store, options, registration);
+    if (error instanceof StoreCorruptionError) throw error;
     if (error instanceof StoreTransactionError) return notAccepted(error.reason);
     return unknownAcceptance();
   }
@@ -218,6 +233,7 @@ async function acceptWithoutCleanup(
   try {
     markerWrite = await store.writeMarker(marker);
   } catch (error) {
+    if (error instanceof StoreCorruptionError) throw error;
     if (error instanceof StoreTransactionError) return notAccepted(error.reason);
     return notAccepted('marker_write_failed');
   }
@@ -228,7 +244,8 @@ async function acceptWithoutCleanup(
     let readBack: Awaited<ReturnType<StateAcceptanceStore['readMarker']>>;
     try {
       readBack = await store.readMarker(options.selectionSnapshot.stateKey, marker.markerId);
-    } catch {
+    } catch (error) {
+      if (error instanceof StoreCorruptionError) throw error;
       return unknownAcceptance();
     }
     if (
@@ -249,6 +266,7 @@ async function acceptWithoutCleanup(
   try {
     cas = await store.casSelector(options.selectionSnapshot.observedSelectorRevision, selector);
   } catch (error) {
+    if (error instanceof StoreCorruptionError) throw error;
     if (error instanceof StoreTransactionError) return notAccepted(error.reason);
     return notAccepted('store_transaction_failed');
   }
@@ -259,7 +277,8 @@ async function acceptWithoutCleanup(
     let readBack: Awaited<ReturnType<StateAcceptanceStore['readSelector']>>;
     try {
       readBack = await store.readSelector(options.selectionSnapshot.stateKey);
-    } catch {
+    } catch (error) {
+      if (error instanceof StoreCorruptionError) throw error;
       return unknownAcceptance();
     }
     if (
@@ -282,13 +301,96 @@ async function acceptWithoutCleanup(
       publication =
         error instanceof StickyCallbackOutcomeUnknownError
           ? { status: 'unknown', code: 'sticky_callback_outcome_unknown' }
-          : { status: 'failed', code: 'sticky_callback_failed' };
+          : error instanceof StickyCallbackKnownFailureError
+            ? { status: 'failed', code: error.code }
+            : { status: 'failed', code: 'sticky_callback_failed' };
     }
   }
   return {
     acceptance: selected,
     markerId: acceptedMarker.markerId,
     selectorRevision: selector.selectorRevision,
+    publication,
+    cleanupWarnings: [],
+  };
+}
+
+async function reconcileAlreadyAccepted(
+  store: StateAcceptanceStore,
+  options: AcceptanceOptions,
+  registration: CandidateRegistrationV1,
+): Promise<AcceptanceResult> {
+  let observed: Awaited<ReturnType<StateAcceptanceStore['readSelector']>>;
+  try {
+    observed = await store.readSelector(options.selectionSnapshot.stateKey);
+  } catch (error) {
+    if (error instanceof StoreCorruptionError) throw error;
+    return unknownAcceptance();
+  }
+  if (
+    observed.selector === null ||
+    observed.selector.candidateId !== registration.candidateId ||
+    observed.selector.previousSelectorRevision !==
+      options.selectionSnapshot.observedSelectorRevision
+  )
+    return notAccepted('stale_candidate');
+  const manifest = options.candidate.manifest;
+  const { ledgerSchemaVersion, prefixContractVersion, ...cacheContractIdentity } =
+    manifest.cacheContractIdentity;
+  let restored: Awaited<ReturnType<StateAcceptanceStore['selectAcceptedState']>>;
+  try {
+    restored = await store.selectAcceptedState({
+      stateKey: options.selectionSnapshot.stateKey,
+      expectedLedgerSchemaVersion: ledgerSchemaVersion,
+      expectedPrefixContractVersion: prefixContractVersion,
+      cacheContractIdentity,
+      currentHeadSha: options.selectionSnapshot.currentHeadSha,
+      currentBaseSha: options.selectionSnapshot.currentBaseSha,
+      currentBaseRef: options.selectionSnapshot.currentBaseRef,
+      provenanceTrusted: true,
+      workflowIdentity: options.selectionSnapshot.stateKey.workflowIdentity,
+      trustedExecutionDomain: options.selectionSnapshot.stateKey.trustedExecutionDomain,
+      headRelationship: 'same',
+    });
+  } catch (error) {
+    if (error instanceof StoreCorruptionError) throw error;
+    return unknownAcceptance();
+  }
+  if (
+    restored.selection !== 'selected' ||
+    restored.snapshot.kind !== 'continuation_selected' ||
+    restored.snapshot.markerId !== observed.selector.acceptedMarkerId ||
+    !bytesEqual(
+      restored.snapshot.predecessorBytes.manifestBytes,
+      options.candidate.manifestBytes,
+    ) ||
+    !bytesEqual(restored.snapshot.predecessorBytes.ledgerBytes, options.candidate.ledgerBytes) ||
+    !bytesEqual(
+      restored.snapshot.predecessorBytes.providerRunMetadataBytes,
+      options.candidate.providerRunMetadataBytes,
+    )
+  )
+    return notAccepted('stale_candidate');
+  let publication: PublicationOutcome = { status: 'not_attempted' };
+  if (options.signal?.aborted)
+    publication = { status: 'pending', code: 'cancelled_after_acceptance' };
+  else if (options.publishSticky) {
+    try {
+      await options.publishSticky(observed.selector.acceptedMarkerId);
+      publication = { status: 'succeeded' };
+    } catch (error) {
+      publication =
+        error instanceof StickyCallbackOutcomeUnknownError
+          ? { status: 'unknown', code: 'sticky_callback_outcome_unknown' }
+          : error instanceof StickyCallbackKnownFailureError
+            ? { status: 'failed', code: error.code }
+            : { status: 'failed', code: 'sticky_callback_failed' };
+    }
+  }
+  return {
+    acceptance: 'already_accepted',
+    markerId: observed.selector.acceptedMarkerId,
+    selectorRevision: observed.selector.selectorRevision,
     publication,
     cleanupWarnings: [],
   };

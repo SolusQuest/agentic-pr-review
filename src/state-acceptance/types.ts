@@ -291,7 +291,14 @@ export type SelectionOutcome =
 export type PublicationOutcome =
   | { readonly status: 'not_attempted' }
   | { readonly status: 'succeeded' }
-  | { readonly status: 'failed'; readonly code: 'sticky_callback_failed' }
+  | {
+      readonly status: 'failed';
+      readonly code:
+        | 'sticky_callback_failed'
+        | 'comment_create_failed'
+        | 'comment_update_failed'
+        | 'comment_readback_failed';
+    }
   | { readonly status: 'unknown'; readonly code: 'sticky_callback_outcome_unknown' }
   | { readonly status: 'pending'; readonly code: 'cancelled_after_acceptance' };
 
@@ -359,6 +366,13 @@ export interface SelectionOptions {
   readonly provenanceTrusted: boolean;
   readonly workflowIdentity: string;
   readonly trustedExecutionDomain: string;
+  /** Immutable workflow provenance expected by a production restoration. */
+  readonly expectedWorkflowEvent?: string;
+  readonly expectedProducingWorkflowRef?: string;
+  readonly expectedProducingGitRef?: string;
+  readonly expectedProducingActionSourceSha?: GitSha;
+  /** The exact selector revision used to derive the host's ancestry decision. */
+  readonly expectedObservedSelectorRevision?: SelectorRevision;
   readonly headRelationship?: 'same' | 'descendant' | 'non_descendant' | 'unknown';
   readonly explicitRestore?: boolean;
 }

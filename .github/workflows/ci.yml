@@ -82,3 +82,32 @@ jobs:
           test -z "$ERROR_KIND"
           expected="agentic-pr-review-deterministic-csharp-state-cs-$(printf %s 'ci-deterministic-smoke' | sha256sum | cut -c1-20)"
           test "$ARTIFACT_NAME" = "$expected"
+
+  m4-runtime-build-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - name: Build the runtime used by both controlled M4 workflows
+        run: >-
+          dotnet build runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj
+          --configuration Release --output "$RUNNER_TEMP/agentic-pr-review-runtime"
+
+  m4-state-acceptance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Exercise bootstrap, continuation, acceptance races, recovery, cancellation, and output contracts
+        run: >-
+          npm test -- --run
+          src/state-acceptance/contract.test.ts
+          src/state-acceptance/github-state-store.test.ts
+          src/ledger-csharp.test.ts
+          src/action-contract.test.ts

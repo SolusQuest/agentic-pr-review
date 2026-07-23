@@ -71,5 +71,14 @@ export {
   acceptLocalCandidate,
   candidateIdentity,
   StickyCallbackOutcomeUnknownError,
+  StickyCallbackKnownFailureError,
   type CandidateIdentity,
 } from './accept.js';
+export {
+  GitDataStateTransport,
+  GitStateTransportError,
+  type GitDataClient,
+  type GitStateRef,
+} from './github-git-data.js';
+export { GitHubGitStateAcceptanceStore, StoreCorruptionError } from './github-state-store.js';
+export { OctokitGitDataClient } from './github-octokit-client.js';

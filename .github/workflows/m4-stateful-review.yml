@@ -1,0 +1,53 @@
+name: Agentic PR Review M4 Stateful Review
+
+on:
+  workflow_run:
+    workflows: [Agentic PR Review M4 Untrusted Analysis]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  review:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      vars.AGENTIC_REVIEW_M4_STATEFUL_ENABLED == 'true' &&
+      github.event.workflow_run.pull_requests[0].number != '' &&
+      github.event.workflow_run.pull_requests[1] == null
+    runs-on: ubuntu-latest
+    concurrency:
+      group: apr-m4-v1-${{ github.repository_id }}-${{ github.event.workflow_run.pull_requests[0].number }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - run: npm ci
+      - name: Build trusted runtime outside the checkout
+        run: >-
+          dotnet build runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj
+          --configuration Release --output "$RUNNER_TEMP/agentic-pr-review-runtime"
+      - name: Configure trusted runtime command
+        shell: bash
+        run: |
+          printf 'AGENTIC_REVIEW_RUNTIME_EXECUTABLE=%s\n' "$(realpath "$(command -v dotnet)")" >> "$GITHUB_ENV"
+          printf 'AGENTIC_REVIEW_RUNTIME_PREFIX_ARGS_JSON=["%s"]\n' "$RUNNER_TEMP/agentic-pr-review-runtime/AgenticPrReview.Runtime.dll" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/agentic-pr-review
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          runtime_backend: ledger-csharp
+          runtime_provider: test
+          target_mode: pull-request
+          review_mode: auto
+          post_comment: 'true'
+          inline_comments: 'false'

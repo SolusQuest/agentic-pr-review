@@ -154,6 +154,40 @@ describe('parseActionConfig', () => {
     ).toThrow(/requires post_comment=false/);
   });
 
+  it('accepts the controlled ledger matrix and rejects caller-controlled state inputs', () => {
+    expect(
+      parseActionConfig(
+        new Inputs({ runtime_backend: 'ledger-csharp', target_mode: 'pull-request' }),
+        baseEnv,
+        'workflow_run',
+      ).runtimeBackend,
+    ).toBe('ledger-csharp');
+    expect(() =>
+      parseActionConfig(
+        new Inputs({
+          runtime_backend: 'ledger-csharp',
+          target_mode: 'pull-request',
+          instructions: 'untrusted override',
+          state_key: 'caller-owned',
+          review_mode: 'bootstrap',
+        }),
+        baseEnv,
+        'workflow_run',
+      ),
+    ).toThrow(/configuration is invalid/);
+    expect(() =>
+      parseActionConfig(
+        new Inputs({
+          runtime_backend: 'ledger-csharp',
+          target_mode: 'pull-request',
+          verification_namespace: 'Not-allowed',
+        }),
+        baseEnv,
+        'workflow_dispatch',
+      ),
+    ).toThrow(/verification_namespace/);
+  });
+
   it('rejects mutually exclusive instruction inputs', () => {
     expect(() =>
       parseActionConfig(

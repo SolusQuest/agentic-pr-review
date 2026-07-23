@@ -1,5 +1,5 @@
 export type RuntimeProvider = 'test' | 'claude-code-cli';
-export type RuntimeBackend = 'legacy' | 'deterministic-csharp';
+export type RuntimeBackend = 'legacy' | 'deterministic-csharp' | 'ledger-csharp';
 export type TargetMode = 'pull-request' | 'synthetic-fixture';
 export type ReviewMode = 'auto' | 'bootstrap' | 'incremental';
 export type Phase = 'bootstrap' | 'incremental';
@@ -109,6 +109,7 @@ export interface ActionConfig {
   runtimeProvider: RuntimeProvider;
   targetMode: TargetMode;
   reviewMode: ReviewMode;
+  verificationNamespace?: string;
   prNumber?: number;
   stateKey?: string;
   stateArtifactRunId?: number;
@@ -235,6 +236,8 @@ export interface ReviewTarget {
   headSha: string;
   headRepoFullName?: string;
   draft: boolean;
+  /** GitHub pull-request state when resolved from the API. */
+  isOpen?: boolean;
   changedFiles: ChangedFile[];
   pullRequestDiffSnapshot?: PullRequestDiffSnapshotV1;
   htmlUrl?: string;
