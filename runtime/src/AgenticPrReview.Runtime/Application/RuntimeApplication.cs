@@ -15,15 +15,26 @@ public sealed class RuntimeApplication
     private readonly IRuntimeFileSystem fileSystem;
     private readonly IRuntimeExecutor executor;
     private readonly SchemaContracts schemas;
+    private readonly ILiveProviderExecutorFactory? liveExecutorFactory;
 
     public RuntimeApplication(
         IRuntimeFileSystem? fileSystem = null,
         IRuntimeExecutor? executor = null,
         SchemaContracts? schemas = null)
+        : this(fileSystem, executor, schemas, null)
+    {
+    }
+
+    internal RuntimeApplication(
+        IRuntimeFileSystem? fileSystem,
+        IRuntimeExecutor? executor,
+        SchemaContracts? schemas,
+        ILiveProviderExecutorFactory? liveExecutorFactory)
     {
         this.fileSystem = fileSystem ?? new PhysicalRuntimeFileSystem();
         this.executor = executor ?? new DeterministicRuntimeExecutor();
         this.schemas = schemas ?? SchemaContracts.Load(typeof(RuntimeApplication).Assembly);
+        this.liveExecutorFactory = liveExecutorFactory;
     }
 
     public async Task<int> RunAsync(string[] args, TextWriter stdout, TextWriter stderr)
@@ -33,7 +44,7 @@ public sealed class RuntimeApplication
         {
             if (args.Length > 0 && StringComparer.Ordinal.Equals(args[0], "review-live"))
             {
-                return await LiveRuntimeApplication.RunAsync(args, fileSystem, schemas, stderr);
+                return await LiveRuntimeApplication.RunAsync(args, fileSystem, schemas, stderr, liveExecutorFactory);
             }
             var invocation = ParseInvocation(args);
             return await RunInvocationAsync(invocation, stderr);

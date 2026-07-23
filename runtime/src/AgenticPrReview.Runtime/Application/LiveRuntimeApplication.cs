@@ -24,12 +24,13 @@ internal static class LiveRuntimeApplication
         string[] args,
         IRuntimeFileSystem fileSystem,
         SchemaContracts schemas,
-        TextWriter stderr)
+        TextWriter stderr,
+        ILiveProviderExecutorFactory? executorFactory = null)
     {
         try
         {
             var invocation = ParseInvocation(args, fileSystem);
-            return await ExecuteAsync(invocation, fileSystem, schemas, stderr);
+            return await ExecuteAsync(invocation, fileSystem, schemas, stderr, executorFactory);
         }
         catch (RuntimeFailure failure)
         {
@@ -52,7 +53,8 @@ internal static class LiveRuntimeApplication
         LiveInvocation invocation,
         IRuntimeFileSystem fileSystem,
         SchemaContracts schemas,
-        TextWriter stderr)
+        TextWriter stderr,
+        ILiveProviderExecutorFactory? executorFactory)
     {
         var inputBytes = await ReadRequiredAsync(fileSystem, invocation.InputPath, "APR_INPUT_READ_FAILED");
         var contextBytes = await ReadRequiredAsync(fileSystem, invocation.ContextPath, "APR_LIVE_CONTEXT_READ_FAILED");
@@ -191,10 +193,11 @@ internal static class LiveRuntimeApplication
         var requestPlan = ProviderRequestPlan.From(
             prefixOutcome.Value,
             identities,
-            ReadMaxFindings(input.Host.Options));
-        ILiveProviderExecutor executor = providerMode == "live"
-            ? DeepSeekLiveProviderExecutor.FromEnvironment()
-            : new SyntheticLiveProviderExecutor();
+            ReadMaxFindings(input.Host.Options),
+            envelopes.GetProperty("adapter").TryGetProperty("requestContractSha256", out var requestContractSha256)
+                ? requestContractSha256.GetString()
+                : null);
+        var executor = (executorFactory ?? new DefaultLiveProviderExecutorFactory()).Create(providerMode);
         var observation = await executor.ExecuteAsync(requestPlan, identities);
         var result = new ReviewResult(
             1,
@@ -280,6 +283,8 @@ internal static class LiveRuntimeApplication
             {
                 await TryDeleteAsync(fileSystem, file.TempPath);
             }
+            if (providerMode == "live")
+                throw new ProviderFailureException("APR_PROVIDER_PERSISTENCE", 40);
             throw new RuntimeFailure(40, "APR_CANDIDATE_LEDGER_WRITE_FAILED", "Live output files could not be committed.");
         }
     }
@@ -522,7 +527,9 @@ internal static class LiveRuntimeApplication
         var subject = string.IsNullOrEmpty(pullRequest.Body)
             ? pullRequest.Title
             : $"{pullRequest.Title}\n\n{pullRequest.Body}";
-        return subject.Length <= 4_000 ? subject : subject[..4_000];
+        return subject.EnumerateRunes().Count() <= 4_000
+            ? subject
+            : string.Concat(subject.EnumerateRunes().Take(4_000).Select(rune => rune.ToString()));
     }
 
     private static int ReadMaxFindings(RuntimeOptions? options)

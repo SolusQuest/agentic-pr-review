@@ -307,12 +307,16 @@ function validateDeterministicRuntimeConfig(config: ActionConfig): void {
     if (config.maxPatchChars !== (config.liveProvider === 'deepseek' ? 20_000 : 120_000))
       invalid.push('max_patch_chars');
     if (config.maxReviewChars !== 12_000) invalid.push('max_review_chars');
-    if (config.maxFindings !== 50) invalid.push('max_findings');
+    if (config.maxFindings !== 50 && config.liveProvider !== 'deepseek')
+      invalid.push('max_findings');
   }
   if (config.liveProvider === 'deepseek' && backend !== 'ledger-csharp') {
     throw new Error(
       'config-invalid: live_provider=deepseek requires runtime_backend=ledger-csharp',
     );
+  }
+  if (config.liveProvider === 'deepseek' && config.maxFindings > 50) {
+    throw new Error('config-invalid: live_provider=deepseek requires max_findings<=50');
   }
   if (invalid.length > 0) {
     throw new Error(

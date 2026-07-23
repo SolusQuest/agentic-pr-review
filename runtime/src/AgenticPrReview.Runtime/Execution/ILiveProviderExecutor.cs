@@ -17,6 +17,21 @@ internal interface ILiveProviderExecutor
         CancellationToken cancellationToken = default);
 }
 
+internal interface ILiveProviderExecutorFactory
+{
+    ILiveProviderExecutor Create(string providerMode);
+}
+
+internal sealed class DefaultLiveProviderExecutorFactory : ILiveProviderExecutorFactory
+{
+    public ILiveProviderExecutor Create(string providerMode) => providerMode switch
+    {
+        "synthetic" => new SyntheticLiveProviderExecutor(),
+        "live" => DeepSeekLiveProviderExecutor.FromEnvironment(),
+        _ => throw new ProviderFailureException("APR_PROVIDER_CONFIG", 20),
+    };
+}
+
 internal sealed record ProviderRequestMessage(string Role, string Text);
 
 internal sealed record ProviderRequestPlan(
@@ -24,12 +39,14 @@ internal sealed record ProviderRequestPlan(
     int MaxFindings,
     string LogicalPrefixSha256,
     string PrefixSha256,
-    string AdapterId)
+    string AdapterId,
+    string? RequestContractSha256)
 {
     public static ProviderRequestPlan From(
         PrefixMaterialization materialization,
         ExpectedIdentities identities,
-        int maxFindings)
+        int maxFindings,
+        string? requestContractSha256)
     {
         var stable = ProviderRequestPlanDecoder.Decode(materialization.StableProviderStream);
         var dynamic = ProviderRequestPlanDecoder.Decode(materialization.DynamicProviderStream);
@@ -45,7 +62,8 @@ internal sealed record ProviderRequestPlan(
             Math.Clamp(maxFindings, 1, 50),
             materialization.LogicalPrefixSha256,
             materialization.PrefixSha256,
-            identities.AdapterId);
+            identities.AdapterId,
+            requestContractSha256);
     }
 }
 

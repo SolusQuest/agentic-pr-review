@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-import { runProcess } from './invoke-live-runtime.js';
+import { classifyProviderFailure, runProcess } from './invoke-live-runtime.js';
 
 class FakeChild extends EventEmitter {
   readonly stdout = new EventEmitter();
@@ -36,6 +36,27 @@ function start(
 }
 
 describe('live runtime process terminal ordering', () => {
+  it('maps only the closed provider diagnostic and exit pairs', () => {
+    expect(
+      classifyProviderFailure(
+        new TextEncoder().encode('APR_PROVIDER_TIMEOUT: Provider invocation failed.\n'),
+        30,
+      ),
+    ).toMatchObject({ kind: 'provider-timeout', exitCode: 30 });
+    expect(
+      classifyProviderFailure(
+        new TextEncoder().encode('APR_PROVIDER_RESPONSE: Provider invocation failed.\n'),
+        30,
+      ),
+    ).toBeUndefined();
+    expect(
+      classifyProviderFailure(
+        new TextEncoder().encode('APR_PROVIDER_RESPONSE: raw provider body'),
+        20,
+      ),
+    ).toBeUndefined();
+  });
+
   it('cancels when abort occurs during spawn before listener registration', async () => {
     const fake = new FakeChild();
     const controller = new AbortController();

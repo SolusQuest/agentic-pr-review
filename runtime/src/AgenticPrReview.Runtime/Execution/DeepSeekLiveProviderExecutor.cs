@@ -18,7 +18,9 @@ internal static class DeepSeekProviderContract
     public const int ModelContentMaxBytes = 256 * 1024;
     public const int RetainedErrorBodyMaxBytes = 8 * 1024;
     public const int ProviderTimeoutSeconds = 120;
+    public const int ConnectTimeoutSeconds = 15;
     public const string AdapterBuildVersion = "deepseek-openai-chat-v1";
+    public const string RequestContractSha256 = "312f55d0038a4bcefb26703158edcf196bdb1e6a458c6ec88f3f08b1211f0356";
 
     public const string FixedInstruction =
         "Return exactly one JSON object with this shape; do not include Markdown fences or explanatory text:\n" +
@@ -47,7 +49,7 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
         {
             UseProxy = false,
             AllowAutoRedirect = false,
-            ConnectTimeout = TimeSpan.FromSeconds(15),
+            ConnectTimeout = TimeSpan.FromSeconds(DeepSeekProviderContract.ConnectTimeoutSeconds),
         };
         var client = new HttpClient(handler, disposeHandler: true)
         {
@@ -72,6 +74,7 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
     {
         if (!StringComparer.Ordinal.Equals(identities.ProviderId, DeepSeekProviderContract.ProviderId) ||
             !StringComparer.Ordinal.Equals(identities.ModelId, DeepSeekProviderContract.ModelId) ||
+            !StringComparer.Ordinal.Equals(plan.RequestContractSha256, DeepSeekProviderContract.RequestContractSha256) ||
             !StringComparer.Ordinal.Equals(identities.AdapterId, plan.AdapterId))
             throw new ProviderFailureException("APR_PROVIDER_CONFIG", 20);
 
@@ -137,9 +140,19 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
         }
     }
 
-    private static bool IsValidKey(string? value) =>
-        value is { Length: >= 1 and <= 256 } &&
-        !value.Contains('\r') && !value.Contains('\n') && !value.Contains('\0');
+    private static bool IsValidKey(string? value)
+    {
+        if (value is null || value.Contains('\r') || value.Contains('\n') || value.Contains('\0')) return false;
+        try
+        {
+            var byteCount = new UTF8Encoding(false, true).GetByteCount(value);
+            return byteCount is >= 1 and <= 256;
+        }
+        catch (DecoderFallbackException)
+        {
+            return false;
+        }
+    }
 
     private static string StatusCode(HttpStatusCode status) => status switch
     {
@@ -208,7 +221,7 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
                 throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
 
             if (root.TryGetProperty("system_fingerprint", out var fingerprint) &&
-                (fingerprint.ValueKind != JsonValueKind.String || fingerprint.GetString()!.Length > 256))
+                (fingerprint.ValueKind != JsonValueKind.String || UnicodeCount(fingerprint.GetString()!) > 256))
                 throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
 
             var choices = Required(root, "choices", JsonValueKind.Array);
@@ -378,7 +391,7 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
             if (limitationsElement.GetArrayLength() > 16)
                 throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
             var limitations = limitationsElement.EnumerateArray()
-                .Select(item => item.ValueKind == JsonValueKind.String && item.GetString() is { Length: > 0 and <= 1_200 } value
+                .Select(item => item.ValueKind == JsonValueKind.String && item.GetString() is { Length: > 0 } value && UnicodeCount(value) <= 1_200
                     ? value
                     : throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20))
                 .ToArray();
@@ -401,7 +414,7 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
         if ((start is null) != (end is null) || start is not null && (path is null || end < start))
             throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
         var suggestedAction = finding.TryGetProperty("suggestedAction", out var action)
-            ? action.ValueKind == JsonValueKind.String && action.GetString() is { Length: > 0 and <= 1_600 } value ? value : throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20)
+            ? action.ValueKind == JsonValueKind.String && action.GetString() is { Length: > 0 } value && UnicodeCount(value) <= 1_600 ? value : throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20)
             : null;
         return new LedgerFinding
         {
@@ -421,7 +434,7 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
     {
         var element = Required(value, property);
         if (element.ValueKind == JsonValueKind.Null) return null;
-        if (element.ValueKind != JsonValueKind.String || element.GetString() is not { Length: > 0 and <= 500 } path || !IsSafeRelativePath(path))
+        if (element.ValueKind != JsonValueKind.String || element.GetString() is not { Length: > 0 } path || UnicodeCount(path) > 500 || !IsSafeRelativePath(path))
             throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
         return path;
     }
@@ -443,7 +456,7 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
     private static long ReadToken(JsonElement value, string property)
     {
         if (!value.TryGetProperty(property, out var element) || element.ValueKind != JsonValueKind.Number ||
-            !element.TryGetInt64(out var number) || number < 0 || number > 1_000_000_000)
+            !element.TryGetInt64(out var number) || number < 0 || number > 9_007_199_254_740_991L)
             throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
         return number;
     }
@@ -457,7 +470,7 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
     private static string ReadBoundedNonEmptyString(JsonElement value, string property, int maximum)
     {
         var result = ReadRequiredString(value, property);
-        if (result.Length == 0 || result.Length > maximum) throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
+        if (result.Length == 0 || UnicodeCount(result) > maximum) throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
         return result;
     }
 
@@ -531,6 +544,8 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
             return true;
         }
     }
+
+    private static int UnicodeCount(string value) => value.EnumerateRunes().Count();
 
     private sealed record ParsedUsage(long PromptTokens, long CompletionTokens, long HitTokens, long MissTokens, string CacheStatus);
     private sealed record ParsedModel(string Summary, ImmutableArray<LedgerFinding> Findings, string[] Limitations);

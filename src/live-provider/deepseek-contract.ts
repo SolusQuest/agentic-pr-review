@@ -30,6 +30,7 @@ export const DEEPSEEK_REQUEST_CONTRACT = {
     response_format: { type: 'json_object' },
   },
   headers: {
+    names: ['Authorization', 'Content-Type'],
     authorizationScheme: 'Bearer',
     contentType: 'application/json',
   },
@@ -39,6 +40,7 @@ export const DEEPSEEK_REQUEST_CONTRACT = {
   transport: {
     useProxy: false,
     allowAutoRedirect: false,
+    connectTimeoutSeconds: 15,
     oneRequest: true,
     oneAttempt: true,
     streaming: false,

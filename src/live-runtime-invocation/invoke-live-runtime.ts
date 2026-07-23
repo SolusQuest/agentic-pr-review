@@ -395,7 +395,9 @@ export async function invokeLiveRuntime(
         : undefined,
     );
     assertPrivateBytes([processResult.stdout, processResult.stderr], sensitive);
-    if (processResult.exitCode !== 0)
+    if (processResult.exitCode !== 0) {
+      const providerFailure = classifyProviderFailure(processResult.stderr, processResult.exitCode);
+      if (providerFailure) throw providerFailure;
       throw new LiveRuntimeInvocationError({
         kind:
           processResult.signal !== null
@@ -406,6 +408,7 @@ export async function invokeLiveRuntime(
         message: 'review-live did not complete successfully.',
         exitCode: processResult.exitCode ?? undefined,
       });
+    }
     if (processResult.stdout.byteLength !== 0)
       throw new LiveRuntimeInvocationError({
         kind: 'runtime-exit',
@@ -1238,6 +1241,38 @@ interface ProcessResult {
   readonly signal: NodeJS.Signals | null;
   readonly stdout: Uint8Array;
   readonly stderr: Uint8Array;
+}
+
+export function classifyProviderFailure(
+  stderr: Uint8Array,
+  exitCode: number | null,
+): LiveRuntimeInvocationError | undefined {
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(stderr);
+  } catch {
+    return undefined;
+  }
+  const match = /^((?:APR_PROVIDER_[A-Z0-9_]+)): Provider invocation failed\.\r?\n?$/.exec(text);
+  if (!match) return undefined;
+  const mapping: Record<string, { kind: LiveRuntimeErrorKind; exitCode: number }> = {
+    APR_PROVIDER_TIMEOUT: { kind: 'provider-timeout', exitCode: 30 },
+    APR_PROVIDER_CANCELLED: { kind: 'provider-cancelled', exitCode: 30 },
+    APR_PROVIDER_RATE_LIMITED: { kind: 'provider-rate-limited', exitCode: 30 },
+    APR_PROVIDER_4XX: { kind: 'provider-4xx', exitCode: 30 },
+    APR_PROVIDER_5XX: { kind: 'provider-5xx', exitCode: 30 },
+    APR_PROVIDER_TRANSPORT: { kind: 'provider-transport', exitCode: 30 },
+    APR_PROVIDER_RESPONSE: { kind: 'provider-response', exitCode: 20 },
+    APR_PROVIDER_CONFIG: { kind: 'provider-config', exitCode: 20 },
+    APR_PROVIDER_PERSISTENCE: { kind: 'provider-persistence', exitCode: 40 },
+  };
+  const expected = mapping[match[1]!];
+  if (!expected || exitCode !== expected.exitCode) return undefined;
+  return new LiveRuntimeInvocationError({
+    kind: expected.kind,
+    message: `Live provider failed (${match[1]}).`,
+    exitCode,
+  });
 }
 
 export function runProcess(

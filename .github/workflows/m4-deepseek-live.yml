@@ -12,6 +12,11 @@ on:
         required: true
         default: false
         type: boolean
+      max_findings:
+        description: Runtime finding cap from 1 through 50
+        required: true
+        default: '50'
+        type: string
 
 permissions:
   contents: write
@@ -34,8 +39,25 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - name: Confirm trusted live dispatch
-        run: >-
-          test "${GITHUB_REF}" = "refs/heads/${{ github.event.repository.default_branch }}"
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          case "${PR_NUMBER}" in
+            ''|*[!0-9]*) echo 'invalid pull request number' >&2; exit 1 ;;
+          esac
+          test "${GITHUB_REF}" = "refs/heads/${DEFAULT_BRANCH}"
+          response="$(curl --fail --silent --show-error --location \
+            --header 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${REPOSITORY}/pulls/${PR_NUMBER}")"
+          echo "${response}" | jq -e \
+            --arg repository "${REPOSITORY}" \
+            --arg default_branch "${DEFAULT_BRANCH}" \
+            '(.state == "open") and
+             (.base.repo.full_name == $repository) and
+             (.base.ref == $default_branch) and
+             (.head.repo.full_name == $repository)' >/dev/null
 
   live:
     needs: gate
@@ -77,6 +99,6 @@ jobs:
           target_mode: pull-request
           review_mode: auto
           max_patch_chars: '20000'
-          max_findings: '50'
+          max_findings: ${{ inputs.max_findings }}
           post_comment: 'true'
           inline_comments: 'false'
