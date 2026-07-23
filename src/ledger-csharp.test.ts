@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   computeSelectionSnapshotId,
   ContractValidationError,
@@ -13,6 +13,7 @@ import {
   LEDGER_WORKFLOW_IDENTITY,
   ledgerErrorKindFor,
   planLedgerInvocation,
+  targetForLedgerContinuation,
   VERIFICATION_TRUSTED_EXECUTION_DOMAIN,
   VERIFICATION_WORKFLOW_IDENTITY,
 } from './ledger-csharp.js';
@@ -162,5 +163,49 @@ describe('ledger-csharp host plan', () => {
       `${VERIFICATION_TRUSTED_EXECUTION_DOMAIN}/smoke-1`,
     );
     expect(verification.workflowIdentity).not.toBe(production.workflowIdentity);
+  });
+
+  it('uses the predecessor-to-head comparison rather than the cumulative PR diff for continuations', async () => {
+    const predecessorHeadSha = 'c'.repeat(40);
+    const compareCommits = vi.fn().mockResolvedValue({
+      data: {
+        status: 'ahead',
+        files: [
+          {
+            filename: 'src/new-change.ts',
+            status: 'modified',
+            additions: 1,
+            deletions: 1,
+            changes: 2,
+            patch: '@@ -1 +1 @@\n-old\n+new',
+          },
+        ],
+      },
+    });
+
+    const selected = await targetForLedgerContinuation({
+      target: {
+        ...target,
+        changedFiles: [
+          {
+            filename: 'src/cumulative.ts',
+            status: 'modified',
+            additions: 200,
+            deletions: 0,
+            changes: 200,
+          },
+        ],
+      },
+      previousHeadSha: predecessorHeadSha,
+      octokit: { rest: { repos: { compareCommits } } },
+      repository: 'owner/repo',
+    });
+
+    expect(compareCommits).toHaveBeenCalledWith(
+      expect.objectContaining({ base: predecessorHeadSha, head: target.headSha }),
+    );
+    expect(selected.changedFiles).toEqual([
+      expect.objectContaining({ filename: 'src/new-change.ts', patch: '@@ -1 +1 @@\n-old\n+new' }),
+    ]);
   });
 });

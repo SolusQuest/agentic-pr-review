@@ -34,7 +34,7 @@ jobs:
       - run: npm ci
       - name: Build trusted runtime outside the checkout
         run: >-
-          dotnet build runtime/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj
+          dotnet build runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj
           --configuration Release --output "$RUNNER_TEMP/agentic-pr-review-runtime"
       - name: Configure trusted runtime command
         shell: bash

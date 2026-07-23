@@ -9,6 +9,7 @@ import { invokeLiveRuntime } from './live-runtime-invocation/invoke-live-runtime
 import type { LiveRuntimeInvocationContextV1 } from './live-runtime-invocation/context.js';
 import { resolveTrustedRuntimeCommand } from './runtime-invocation/command-resolver.js';
 import { serializeInputBytes, sha256Hex } from './runtime-invocation/runtime-files.js';
+import { changedFilesFromPullRequestFiles } from './target.js';
 import {
   acceptLocalCandidate,
   computeCandidateId,
@@ -251,9 +252,15 @@ export async function runLedgerCsharp(input: {
       );
     }
   }
+  const runtimeTarget = await targetForLedgerSelection({
+    target: input.target,
+    selection: selection.snapshot,
+    octokit: input.octokit,
+    repository,
+  });
   const plan = planLedgerInvocation({
     config: input.config,
-    target: input.target,
+    target: runtimeTarget,
     stateKey,
     selection: selection.snapshot,
     eventName: input.eventName,
@@ -901,6 +908,58 @@ export function planLedgerInvocation(input: {
     context,
     manifestInput,
   };
+}
+
+export async function targetForLedgerSelection(input: {
+  readonly target: ReviewTarget;
+  readonly selection: Exclude<
+    StateSelectionSnapshot,
+    { readonly kind: 'explicit_restore_invalid' }
+  >;
+  readonly octokit: any;
+  readonly repository: string;
+}): Promise<ReviewTarget> {
+  if (input.selection.kind !== 'continuation_selected') return input.target;
+  return targetForLedgerContinuation({
+    target: input.target,
+    previousHeadSha: predecessorManifest(input.selection.predecessorBytes).provenance
+      .currentHeadSha,
+    octokit: input.octokit,
+    repository: input.repository,
+  });
+}
+
+export async function targetForLedgerContinuation(input: {
+  readonly target: ReviewTarget;
+  readonly previousHeadSha: string;
+  readonly octokit: any;
+  readonly repository: string;
+}): Promise<ReviewTarget> {
+  const [owner, repo] = input.repository.split('/');
+  try {
+    const comparison = await input.octokit.rest.repos.compareCommits({
+      owner,
+      repo,
+      base: input.previousHeadSha,
+      head: input.target.headSha,
+      per_page: 100,
+    });
+    if (
+      (comparison.data.status !== 'ahead' && comparison.data.status !== 'identical') ||
+      !Array.isArray(comparison.data.files)
+    )
+      throw new Error('predecessor-to-head comparison is incomplete');
+    return {
+      ...input.target,
+      changedFiles: changedFilesFromPullRequestFiles(comparison.data.files),
+    };
+  } catch (error) {
+    if (error instanceof LedgerBoundaryError) throw error;
+    throw new LedgerBoundaryError(
+      'target_revalidation_failed',
+      'predecessor-to-head comparison could not be resolved',
+    );
+  }
 }
 
 function transitionFor(

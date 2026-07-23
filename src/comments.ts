@@ -98,7 +98,7 @@ export async function upsertM4StateComment(
     per_page: 100,
   })) as IssueComment[];
   const match = comments
-    .filter((comment) => parseM4StateMarker(comment.body ?? '')?.markerId === input.markerId)
+    .filter((comment) => parseM4StateMarker(comment.body ?? '') !== null)
     .sort((left, right) => left.id - right.id)[0];
   let response: { data: IssueComment };
   try {
