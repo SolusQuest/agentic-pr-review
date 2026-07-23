@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -105,6 +105,7 @@ describe('DeepSeek provider-key channel separation', () => {
         },
       });
       const root = await mkdtemp(path.join(os.tmpdir(), 'apr-provider-key-'));
+      const shellExecutable = await realpath('/bin/sh');
       const originalKey = process.env.AGENTIC_REVIEW_DEEPSEEK_API_KEY;
       try {
         for (const key of ['null', 'aaaa']) {
@@ -112,7 +113,7 @@ describe('DeepSeek provider-key channel separation', () => {
           await expect(
             invokeLiveRuntime({
               command: {
-                executablePath: '/bin/sh',
+                executablePath: shellExecutable,
                 prefixArgs: [
                   '-c',
                   'printf "APR_PROVIDER_CONFIG: Provider invocation failed.\\n" >&2; exit 20',
