@@ -194,6 +194,28 @@ public sealed class DeepSeekLiveProviderExecutorTests
     }
 
     [Fact]
+    public async Task HeaderTimeoutUsesTheSingleProviderDeadline()
+    {
+        var error = await Assert.ThrowsAsync<ProviderFailureException>(() =>
+            new DeepSeekLiveProviderExecutor("k", new HeaderStallingHandler(), TimeSpan.FromMilliseconds(20))
+                .ExecuteAsync(Plan(), Identities()));
+
+        Assert.Equal("APR_PROVIDER_TIMEOUT", error.Code);
+    }
+
+    [Theory]
+    [InlineData("{\"schemaVersion\":1,\"summary\":\"\\uDEAD\",\"findings\":[],\"limitations\":[]}")]
+    [InlineData("{\"schemaVersion\":1,\"summary\":\"ok\",\"findings\":[],\"limitations\":[],\"bad\\uDEAD\":1}")]
+    public async Task ProviderOwnedUnpairedSurrogatesFailAsProviderResponse(string model)
+    {
+        var error = await Assert.ThrowsAsync<ProviderFailureException>(() =>
+            new DeepSeekLiveProviderExecutor("k", new RecordingHandler(SuccessResponse(model)), TimeSpan.FromSeconds(5))
+                .ExecuteAsync(Plan(), Identities()));
+
+        Assert.Equal("APR_PROVIDER_RESPONSE", error.Code);
+    }
+
+    [Fact]
     public async Task WhitespaceOnlyModelTextIsProviderResponseFailure()
     {
         var error = await Assert.ThrowsAsync<ProviderFailureException>(() =>
@@ -262,6 +284,15 @@ public sealed class DeepSeekLiveProviderExecutorTests
             Request = request;
             RequestBody = request.Content!.ReadAsByteArrayAsync(cancellationToken).GetAwaiter().GetResult();
             return Task.FromResult(response);
+        }
+    }
+
+    private sealed class HeaderStallingHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK);
         }
     }
 

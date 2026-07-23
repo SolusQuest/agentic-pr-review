@@ -89,7 +89,7 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
         };
         var client = new HttpClient(handler, disposeHandler: true)
         {
-            Timeout = TimeSpan.FromSeconds(DeepSeekProviderContract.ProviderTimeoutSeconds),
+            Timeout = System.Threading.Timeout.InfiniteTimeSpan,
         };
         client.DefaultRequestHeaders.Clear();
         return new DeepSeekLiveProviderExecutor(
@@ -99,7 +99,7 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
     }
 
     internal DeepSeekLiveProviderExecutor(string apiKey, HttpMessageHandler handler, TimeSpan timeout)
-        : this(apiKey, new HttpClient(handler, disposeHandler: true) { Timeout = timeout }, timeout)
+        : this(apiKey, new HttpClient(handler, disposeHandler: true) { Timeout = System.Threading.Timeout.InfiniteTimeSpan }, timeout)
     {
         if (!IsValidKey(apiKey))
             throw new ArgumentException("The provider key is invalid.", nameof(apiKey));
@@ -149,6 +149,10 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
         {
             throw new ProviderFailureException("APR_PROVIDER_TIMEOUT", 30);
         }
+        catch (OperationCanceledException)
+        {
+            throw new ProviderFailureException("APR_PROVIDER_TIMEOUT", 30);
+        }
         catch (HttpRequestException)
         {
             throw new ProviderFailureException("APR_PROVIDER_TRANSPORT", 30);
@@ -181,9 +185,17 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
             {
                 throw new ProviderFailureException("APR_PROVIDER_TIMEOUT", 30);
             }
+            catch (OperationCanceledException)
+            {
+                throw new ProviderFailureException("APR_PROVIDER_TIMEOUT", 30);
+            }
             catch (Exception ex) when (ex is HttpRequestException or IOException)
             {
                 throw new ProviderFailureException("APR_PROVIDER_TRANSPORT", 30);
+            }
+            catch (InvalidOperationException)
+            {
+                throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
             }
         }
     }
@@ -299,7 +311,7 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
                 throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
 
             if (root.TryGetProperty("system_fingerprint", out var fingerprint) &&
-                (fingerprint.ValueKind != JsonValueKind.String || UnicodeCount(fingerprint.GetString()!) > 256))
+                (fingerprint.ValueKind != JsonValueKind.String || !IsWellFormedUtf16(fingerprint.GetString()!) || UnicodeCount(fingerprint.GetString()!) > 256))
                 throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
 
             var choices = Required(root, "choices", JsonValueKind.Array);
@@ -469,7 +481,7 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
             if (limitationsElement.GetArrayLength() > 16)
                 throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
             var limitations = limitationsElement.EnumerateArray()
-                .Select(item => item.ValueKind == JsonValueKind.String && item.GetString() is { Length: > 0 } value && !String.IsNullOrWhiteSpace(value) && UnicodeCount(value) <= 1_200
+                .Select(item => item.ValueKind == JsonValueKind.String && item.GetString() is { Length: > 0 } value && !String.IsNullOrWhiteSpace(value) && IsWellFormedUtf16(value) && UnicodeCount(value) <= 1_200
                     ? value
                     : throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20))
                 .ToArray();
@@ -492,7 +504,7 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
         if ((start is null) != (end is null) || start is not null && (path is null || end < start))
             throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
         var suggestedAction = finding.TryGetProperty("suggestedAction", out var action)
-            ? action.ValueKind == JsonValueKind.String && action.GetString() is { Length: > 0 } value && !String.IsNullOrWhiteSpace(value) && UnicodeCount(value) <= 1_600 ? value : throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20)
+            ? action.ValueKind == JsonValueKind.String && action.GetString() is { Length: > 0 } value && !String.IsNullOrWhiteSpace(value) && IsWellFormedUtf16(value) && UnicodeCount(value) <= 1_600 ? value : throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20)
             : null;
         return new LedgerFinding
         {
@@ -512,7 +524,7 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
     {
         var element = Required(value, property);
         if (element.ValueKind == JsonValueKind.Null) return null;
-        if (element.ValueKind != JsonValueKind.String || element.GetString() is not { Length: > 0 } path || String.IsNullOrWhiteSpace(path) || UnicodeCount(path) > 500 || !IsSafeRelativePath(path))
+        if (element.ValueKind != JsonValueKind.String || element.GetString() is not { Length: > 0 } path || String.IsNullOrWhiteSpace(path) || !IsWellFormedUtf16(path) || UnicodeCount(path) > 500 || !IsSafeRelativePath(path))
             throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
         return path;
     }
@@ -542,13 +554,15 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
     private static string ReadRequiredString(JsonElement value, string property)
     {
         var element = Required(value, property, JsonValueKind.String);
-        return element.GetString()!;
+        var result = element.GetString()!;
+        if (!IsWellFormedUtf16(result)) throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
+        return result;
     }
 
     private static string ReadBoundedNonEmptyString(JsonElement value, string property, int maximum)
     {
         var result = ReadRequiredString(value, property);
-        if (result.Length == 0 || String.IsNullOrWhiteSpace(result) || UnicodeCount(result) > maximum) throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
+        if (result.Length == 0 || String.IsNullOrWhiteSpace(result) || UnicodeCount(result) > maximum || !IsWellFormedUtf16(result)) throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
         return result;
     }
 
@@ -578,7 +592,7 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
     {
         if (value.ValueKind != JsonValueKind.Object) return false;
         var set = allowed.ToHashSet(StringComparer.Ordinal);
-        return value.EnumerateObject().All(property => set.Contains(property.Name));
+        return value.EnumerateObject().All(property => IsWellFormedUtf16(property.Name) && set.Contains(property.Name));
     }
 
     private static async Task<byte[]> ReadBoundedAsync(HttpContent content, int maximum, CancellationToken cancellationToken)
@@ -633,6 +647,23 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
     }
 
     private static int UnicodeCount(string value) => value.EnumerateRunes().Count();
+
+    private static bool IsWellFormedUtf16(string value)
+    {
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (char.IsHighSurrogate(value[index]))
+            {
+                if (index + 1 >= value.Length || !char.IsLowSurrogate(value[index + 1])) return false;
+                index++;
+            }
+            else if (char.IsLowSurrogate(value[index]))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
 
     private sealed record ParsedUsage(long PromptTokens, long CompletionTokens, long HitTokens, long MissTokens, string CacheStatus);
     private sealed record ParsedModel(string Summary, ImmutableArray<LedgerFinding> Findings, string[] Limitations);

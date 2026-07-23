@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { sanitizeRuntimeDiagnostic } from './main.js';
+import { ledgerEntrypointErrorKind } from './main.js';
+import { LiveRuntimeInvocationError } from './live-runtime-invocation/errors.js';
 
 describe('sanitizeRuntimeDiagnostic', () => {
   it('redacts paths, auth headers, API headers, and credential-shaped tokens', () => {
@@ -37,5 +39,27 @@ describe('sanitizeRuntimeDiagnostic', () => {
     const sanitized = sanitizeRuntimeDiagnostic(value);
 
     expect(sanitized).not.toContain(leakedValue);
+  });
+});
+
+describe('ledgerEntrypointErrorKind', () => {
+  it('preserves every provider failure kind at the action entrypoint', () => {
+    for (const kind of [
+      'provider-timeout',
+      'provider-cancelled',
+      'provider-rate-limited',
+      'provider-4xx',
+      'provider-5xx',
+      'provider-transport',
+      'provider-response',
+      'provider-config',
+      'provider-persistence',
+    ] as const) {
+      expect(
+        ledgerEntrypointErrorKind(
+          new LiveRuntimeInvocationError({ kind, message: `provider failure: ${kind}` }),
+        ),
+      ).toBe(kind);
+    }
   });
 });

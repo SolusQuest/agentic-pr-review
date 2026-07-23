@@ -44,11 +44,13 @@ import { resolveTrustedRuntimeCommand } from './runtime-invocation/command-resol
 import {
   LedgerBoundaryError,
   LedgerRunFailure,
+  ledgerErrorKindFor,
   runLedgerCsharp,
   type LedgerErrorKind,
   type LedgerRunResult,
 } from './ledger-csharp.js';
 import { RuntimeInvocationError } from './runtime-invocation/runtime-errors.js';
+import { LiveRuntimeInvocationError } from './live-runtime-invocation/errors.js';
 import {
   ContractValidationError,
   StoreCorruptionError,
@@ -1758,8 +1760,9 @@ function setLedgerErrorOutputs(error: unknown): void {
   core.setOutput('state_error_kind', kind);
 }
 
-function ledgerEntrypointErrorKind(error: unknown): LedgerErrorKind {
+export function ledgerEntrypointErrorKind(error: unknown): LedgerErrorKind {
   if (error instanceof LedgerBoundaryError) return error.errorKind;
+  if (error instanceof LiveRuntimeInvocationError) return ledgerErrorKindFor(error);
   if (error instanceof StoreCorruptionError || error instanceof ContractValidationError)
     return 'store_corrupt';
   if (error instanceof StoreTransactionError) return error.reason;
