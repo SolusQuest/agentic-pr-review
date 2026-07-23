@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-6",
+  "apiVersion": "2023-06-01",
+  "endpoint": "https://api.anthropic.com/v1/messages",
+  "adapter": {
+    "schemaVersion": 1,
+    "capabilityProfileVersion": 1,
+    "adapterBuildVersion": "1.0.0",
+    "id": "70836d415405dc09aaff32d0095b67eb6488259e778aa7937462c200868425c4"
+  },
+  "template": {
+    "schemaVersion": 1,
+    "templateVersion": 3,
+    "definition": { "role": "system", "text": "You are a precise code reviewer." },
+    "id": "d5c87b69a0d5d89d58e8c7209b0cbcc9624a3f0646fc19f3cebc7c3f93a5b6cf"
+  },
+  "policy": {
+    "schemaVersion": 1,
+    "policyVersion": 2,
+    "instructions": "Review the delta carefully.",
+    "constraints": { "maxFindings": 10, "tone": "strict" },
+    "id": "6ef8489dac852f64c567efd63a196ef4b8bbf06d9b709b8af491d24c5a2b52b3"
+  },
+  "tools": {
+    "schemaVersion": 1,
+    "toolsetVersion": 1,
+    "definitions": [
+      {
+        "name": "submit_review",
+        "description": "Submit the bounded review result without requesting another provider turn.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["summary", "findings"],
+          "properties": {
+            "summary": { "type": "string", "maxLength": 4000 },
+            "findings": {
+              "type": "array",
+              "maxItems": 16,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "severity",
+                  "confidence",
+                  "category",
+                  "title",
+                  "body",
+                  "path",
+                  "startLine",
+                  "endLine"
+                ],
+                "properties": {
+                  "severity": { "enum": ["low", "medium", "high"] },
+                  "confidence": { "enum": ["medium", "high"] },
+                  "category": {
+                    "enum": [
+                      "correctness",
+                      "security",
+                      "requirements",
+                      "test_coverage",
+                      "build",
+                      "performance",
+                      "maintainability",
+                      "documentation"
+                    ]
+                  },
+                  "title": { "type": "string", "maxLength": 240 },
+                  "body": { "type": "string", "maxLength": 4000 },
+                  "evidence": { "type": "string", "maxLength": 2000 },
+                  "path": { "type": ["string", "null"], "maxLength": 500 },
+                  "startLine": { "type": ["integer", "null"], "minimum": 1 },
+                  "endLine": { "type": ["integer", "null"], "minimum": 1 },
+                  "suggestedAction": { "type": "string", "maxLength": 1600 },
+                  "inlinePreference": { "enum": ["allowed", "preferred", "avoid"] }
+                }
+              }
+            },
+            "limitations": { "type": "array", "maxItems": 16 }
+          }
+        },
+        "policyMetadata": { "risk": "low" }
+      }
+    ],
+    "id": "e58c02b21ad200207ab6ae1e8665c2c6c7d2c1413d947b8dd26f7ef14cc1bd48"
+  },
+  "cache": {
+    "standard": {
+      "schemaVersion": 1,
+      "cacheConfigVersion": 1,
+      "markerPolicy": "stable-boundary",
+      "eligibility": "min-prefix-1024",
+      "statelessMode": false,
+      "id": "d5d1e7d93a8fac3ec89b896c771e92301d8cae17fe39fb7e63a42ebe3b35bfe9"
+    },
+    "stateless": {
+      "schemaVersion": 1,
+      "cacheConfigVersion": 1,
+      "markerPolicy": "none",
+      "eligibility": "minimum-prefix-v1",
+      "statelessMode": true,
+      "id": "02288d75d7434fa58d2c85f4f92d98a36b4dafa92e875e4a811dfee275f61d58"
+    }
+  },
+  "workflow": {
+    "standard": {
+      "workflowIdentity": "agentic-pr-review/m4-stateful-verification/v1/m4-live-verification-v1-standard",
+      "trustedExecutionDomain": "github-default-branch-maintainer-verification/v1/m4-live-verification-v1-standard",
+      "verificationNamespace": "m4-live-verification-v1-standard"
+    },
+    "stateless": {
+      "workflowIdentity": "agentic-pr-review/m4-stateful-verification/v1/m4-live-verification-v1-stateless",
+      "trustedExecutionDomain": "github-default-branch-maintainer-verification/v1/m4-live-verification-v1-stateless",
+      "verificationNamespace": "m4-live-verification-v1-stateless"
+    }
+  }
+}

@@ -73,8 +73,11 @@ internal static class LiveRuntimeApplication
             throw new RuntimeFailure(10, "APR_LIVE_CONTEXT_SCHEMA_INVALID", "Live context does not satisfy LiveRuntimeInvocationContextV1.");
         if (!ValidateContextSemanticDomains(contextDocument.RootElement))
             throw new RuntimeFailure(10, "APR_LIVE_CONTEXT_SEMANTIC_INVALID", "Live context identity or lifecycle domains are invalid.");
-        if (contextDocument.RootElement.GetProperty("providerMode").GetString() != "synthetic")
-            throw new RuntimeFailure(10, "APR_LIVE_PROVIDER_UNAVAILABLE", "The #55 executor does not accept live provider mode.");
+        var providerMode = contextDocument.RootElement.GetProperty("providerMode").GetString();
+        if (providerMode == "live" && Environment.GetEnvironmentVariable("AGENTIC_REVIEW_M4_LIVE_VERIFICATION") != "1")
+            throw new RuntimeFailure(10, "APR_LIVE_TRUST_REQUIRED", "Live provider mode requires the trusted verification selector.");
+        if (providerMode is not ("synthetic" or "live"))
+            throw new RuntimeFailure(10, "APR_LIVE_PROVIDER_MODE_INVALID", "Live provider mode is unsupported.");
 
         if (!schemas.IsValid(SchemaKind.Input, inputDocument.RootElement))
             throw new RuntimeFailure(10, "APR_INPUT_SCHEMA_INVALID", "Input does not satisfy ReviewInputV1.");
@@ -172,14 +175,17 @@ internal static class LiveRuntimeApplication
         if (prefixOutcome.Value is null)
             throw new RuntimeFailure(20, "APR_LIVE_CONTEXT_SEMANTIC_INVALID", "Cache-contract envelopes failed independent validation.");
 
-        ILiveProviderExecutor executor = new SyntheticLiveProviderExecutor();
-        var observation = executor.Execute(input, inputHash, identities);
+        var stateless = envelopes.GetProperty("cacheConfig").TryGetProperty("statelessMode", out var statelessValue) && statelessValue.ValueKind == JsonValueKind.True;
+        ILiveProviderExecutor executor = providerMode == "live"
+            ? AnthropicReferenceProviderExecutor.CreateProduction()
+            : new SyntheticLiveProviderExecutor();
+        var observation = executor.Execute(input, inputHash, identities, prefixOutcome.Value, stateless);
         var result = new ReviewResult(
             1,
             RuntimeApplication.RuntimeVersion,
             inputHash,
             observation.Summary,
-            [],
+            observation.Findings,
             observation.Limitations,
             [],
             [],
@@ -200,7 +206,7 @@ internal static class LiveRuntimeApplication
         var outcomeSource = new ValidatedOutcomeSource
         {
             Summary = resultWithTrace.Summary,
-            Findings = [],
+            Findings = observation.Findings.Select(ToLedgerFinding).ToImmutableArray(),
             Limitations = resultWithTrace.Limitations.ToImmutableArray()
         };
         var outcome = LedgerBuilder.BuildReviewOutcome(outcomeSource, interaction);
@@ -234,7 +240,7 @@ internal static class LiveRuntimeApplication
         using (var metadataDocument = ParseJson(metadataBytes, "APR_METADATA_JSON_INVALID", "Live provider metadata is not valid JSON."))
         {
             if (!schemas.IsValid(SchemaKind.ProviderRunMetadata, metadataDocument.RootElement) ||
-                !HasValidSyntheticMetadataSemantics(metadataDocument.RootElement, observation))
+                !HasValidMetadataSemantics(metadataDocument.RootElement, observation))
                 throw new RuntimeFailure(20, "APR_LIVE_OUTPUT_SELF_VALIDATION_FAILED", "Live provider metadata failed schema validation.");
         }
 
@@ -563,8 +569,31 @@ internal static class LiveRuntimeApplication
         node.WriteTo(writer);
     }
 
-    private static bool HasValidSyntheticMetadataSemantics(JsonElement metadata, ProviderExecutionObservation observation)
+    private static LedgerFinding ToLedgerFinding(RuntimeFinding finding) => new()
     {
+        Severity = finding.Severity,
+        Confidence = finding.Confidence,
+        Category = finding.Category,
+        Title = finding.Title,
+        Body = finding.Body,
+        Path = finding.Path,
+        StartLine = finding.StartLine,
+        EndLine = finding.EndLine,
+        Evidence = finding.Evidence,
+        SuggestedAction = finding.SuggestedAction,
+        InlinePreference = finding.InlinePreference
+    };
+
+    private static bool HasValidMetadataSemantics(JsonElement metadata, ProviderExecutionObservation observation)
+    {
+        if (observation.Mode == "live-provider")
+        {
+            return metadata.GetProperty("selectedProviderId").GetString() == observation.SelectedProviderId &&
+                metadata.GetProperty("observedProviderId").GetString() == observation.ObservedProviderId &&
+                metadata.GetProperty("resolvedModelId").GetString() == observation.ResolvedModelId &&
+                metadata.GetProperty("adapterId").GetString() == observation.AdapterId &&
+                metadata.GetProperty("errorCodes").GetArrayLength() == 0;
+        }
         if (metadata.GetProperty("selectedProviderId").GetString() != observation.SelectedProviderId ||
             metadata.GetProperty("observedProviderId").GetString() != observation.ObservedProviderId ||
             metadata.GetProperty("resolvedModelId").GetString() != observation.ResolvedModelId ||

@@ -94,6 +94,49 @@ const cacheContractIdentity = {
   adapterId: 'e0b738711687dd8e1d4aefea903cc395b48dc4c9e8ef4b11fedac34e67fd16c6',
 } as const;
 
+// Live identity is selected only by the trusted workflow selector. The source
+// envelope shape remains the closed #50 shape; the checked-in live envelope
+// document records the provider-facing projection and lifecycle identity.
+const liveCacheContractIdentity = {
+  ...cacheContractIdentity,
+  providerId: 'anthropic',
+  modelId: 'claude-sonnet-4-6',
+  adapterId: '70836d415405dc09aaff32d0095b67eb6488259e778aa7937462c200868425c4',
+} as const;
+const liveStatelessCacheContractIdentity = {
+  ...liveCacheContractIdentity,
+  cacheConfigId: '02288d75d7434fa58d2c85f4f92d98a36b4dafa92e875e4a811dfee275f61d58',
+} as const;
+const liveCacheContractEnvelopes = {
+  ...cacheContractEnvelopes,
+  adapter: { ...cacheContractEnvelopes.adapter, adapterBuildVersion: '1.0.0' },
+} as const;
+const liveStatelessCacheContractEnvelopes = {
+  ...liveCacheContractEnvelopes,
+  cacheConfig: {
+    ...liveCacheContractEnvelopes.cacheConfig,
+    markerPolicy: 'none',
+    eligibility: 'minimum-prefix-v1',
+    statelessMode: true,
+  },
+} as const;
+
+function currentCacheContractIdentity() {
+  return process.env.AGENTIC_REVIEW_M4_LIVE_VERIFICATION === '1'
+    ? process.env.AGENTIC_REVIEW_M4_LIVE_STATELESS === '1'
+      ? liveStatelessCacheContractIdentity
+      : liveCacheContractIdentity
+    : cacheContractIdentity;
+}
+
+function currentCacheContractEnvelopes() {
+  return process.env.AGENTIC_REVIEW_M4_LIVE_VERIFICATION === '1'
+    ? process.env.AGENTIC_REVIEW_M4_LIVE_STATELESS === '1'
+      ? liveStatelessCacheContractEnvelopes
+      : liveCacheContractEnvelopes
+    : cacheContractEnvelopes;
+}
+
 export interface LedgerRunResult {
   readonly stateKey: string;
   readonly phase: Phase;
@@ -171,6 +214,7 @@ export async function runLedgerCsharp(input: {
     throw new Error('input-invalid: ledger-csharp requires an initially open pull request');
   }
   const repository = `${github.context.repo.owner}/${github.context.repo.repo}`;
+  const activeCacheContractIdentity = currentCacheContractIdentity();
   const stateKey = ledgerStateKey(
     repository,
     input.target.prNumber,
@@ -198,9 +242,9 @@ export async function runLedgerCsharp(input: {
     );
     selection = await store.selectAcceptedState({
       stateKey,
-      expectedLedgerSchemaVersion: cacheContractIdentity.ledgerSchemaVersion,
-      expectedPrefixContractVersion: cacheContractIdentity.prefixContractVersion,
-      cacheContractIdentity: omitContractVersions(cacheContractIdentity) as never,
+      expectedLedgerSchemaVersion: activeCacheContractIdentity.ledgerSchemaVersion,
+      expectedPrefixContractVersion: activeCacheContractIdentity.prefixContractVersion,
+      cacheContractIdentity: omitContractVersions(activeCacheContractIdentity) as never,
       currentHeadSha: input.target.headSha as never,
       currentBaseSha: input.target.baseSha as never,
       currentBaseRef: canonicalBaseRef(input.target.baseRef),
@@ -274,7 +318,7 @@ export async function runLedgerCsharp(input: {
       input: plan.reviewInput,
       context: plan.context,
       manifestInput: plan.manifestInput,
-      timeoutMs: 30_000,
+      timeoutMs: plan.context.providerMode === 'live' ? 150_000 : 30_000,
       trustedRoot: process.env.RUNNER_TEMP,
       predecessorLedgerBytes: plan.predecessor?.ledgerBytes,
       predecessorManifestBytes: plan.predecessor?.manifestBytes,
@@ -571,7 +615,13 @@ async function validateLedgerInvocationEvent(
     throw new Error('input-invalid: verification_namespace requires workflow_dispatch');
   }
   const workflowFile =
-    verification === undefined ? 'm4-stateful-review.yml' : 'm4-stateful-verification.yml';
+    verification === undefined
+      ? 'm4-stateful-review.yml'
+      : process.env.AGENTIC_REVIEW_M4_LIVE_VERIFICATION === '1'
+        ? process.env.AGENTIC_REVIEW_M4_LIVE_STATELESS === '1'
+          ? 'm4-stateful-live-stateless-verification.yml'
+          : 'm4-stateful-live-verification.yml'
+        : 'm4-stateful-verification.yml';
   const expectedWorkflowRef = `${fullName}/.github/workflows/${workflowFile}@refs/heads/${defaultBranch}`;
   if (String(process.env.GITHUB_WORKFLOW_REF ?? '') !== expectedWorkflowRef) {
     throw new Error(
@@ -815,7 +865,9 @@ export function planLedgerInvocation(input: {
   });
   const inputHash = sha256Hex(serializeInputBytes(reviewInput));
   const subjectDigest = computeSubjectDigest(reviewInput.subject);
-  const cacheDigest = computeCacheContractDigest(omitContractVersions(cacheContractIdentity));
+  const activeCacheContractIdentity = currentCacheContractIdentity();
+  const activeCacheContractEnvelopes = currentCacheContractEnvelopes();
+  const cacheDigest = computeCacheContractDigest(omitContractVersions(activeCacheContractIdentity));
   if (!subjectDigest.ok || !cacheDigest.ok)
     throw new Error('state-invalid: fixed ledger contract invalid');
   const ordinal =
@@ -846,7 +898,7 @@ export function planLedgerInvocation(input: {
     schemaVersion: 1 as const,
     stateKey: input.stateKey as unknown as Record<string, unknown>,
     sessionEpoch,
-    cacheContractIdentity: cacheContractIdentity as unknown as Record<string, unknown>,
+    cacheContractIdentity: activeCacheContractIdentity as unknown as Record<string, unknown>,
     generation,
     transition,
     currentInteraction: {
@@ -856,8 +908,8 @@ export function planLedgerInvocation(input: {
       subjectDigest: subjectDigest.value,
       cacheContractDigest: cacheDigest.value,
     },
-    cacheContractEnvelopes,
-    providerMode: 'synthetic' as const,
+    cacheContractEnvelopes: activeCacheContractEnvelopes,
+    providerMode: process.env.AGENTIC_REVIEW_M4_LIVE_VERIFICATION === '1' ? 'live' : 'synthetic',
     producingRun: {
       producingRunId: String(github.context.runId),
       runAttempt: github.context.runAttempt,
@@ -868,7 +920,7 @@ export function planLedgerInvocation(input: {
     stateNamespace: 'm4-ledger-v2' as const,
     stateKey: input.stateKey,
     sessionEpoch: sessionEpoch as never,
-    cacheContractIdentity: cacheContractIdentity as never,
+    cacheContractIdentity: activeCacheContractIdentity as never,
     generation,
     transition,
     provenance: {
@@ -1037,7 +1089,13 @@ async function publishLedgerComment(input: {
   });
 }
 
-function omitContractVersions<T extends typeof cacheContractIdentity>(identity: T) {
+function omitContractVersions<
+  T extends {
+    readonly ledgerSchemaVersion: number;
+    readonly prefixContractVersion: number;
+    readonly [key: string]: unknown;
+  },
+>(identity: T) {
   const {
     ledgerSchemaVersion: _ledgerSchemaVersion,
     prefixContractVersion: _prefixContractVersion,

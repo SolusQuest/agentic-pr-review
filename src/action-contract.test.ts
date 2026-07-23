@@ -84,6 +84,8 @@ describe('action contract', () => {
     for (const workflow of [
       '.github/workflows/m4-stateful-review.yml',
       '.github/workflows/m4-stateful-verification.yml',
+      '.github/workflows/m4-stateful-live-verification.yml',
+      '.github/workflows/m4-stateful-live-stateless-verification.yml',
     ]) {
       const source = readFileSync(workflow, 'utf8');
       expect(source).toContain('uses: ./.github/actions/agentic-pr-review');
@@ -91,6 +93,21 @@ describe('action contract', () => {
       expect(source).toContain('runtime_backend: ledger-csharp');
       expect(source).toContain('runtime_provider: test');
       expect(source).toContain('target_mode: pull-request');
+    }
+  });
+
+  it('keeps live verification behind the repository gate and fixed secret channel', () => {
+    for (const workflow of [
+      '.github/workflows/m4-stateful-live-verification.yml',
+      '.github/workflows/m4-stateful-live-stateless-verification.yml',
+    ]) {
+      const source = readFileSync(workflow, 'utf8');
+      expect(source).toContain("vars.AGENTIC_REVIEW_M4_STATEFUL_ENABLED == 'true'");
+      expect(source).toContain('vars.AGENTIC_REVIEW_M4_RESERVED_VERIFICATION_PR');
+      expect(source).toContain(
+        'AGENTIC_REVIEW_ANTHROPIC_API_KEY: ${{ secrets.AGENTIC_REVIEW_ANTHROPIC_API_KEY }}',
+      );
+      expect(source).toContain('persist-credentials: false');
     }
   });
 });

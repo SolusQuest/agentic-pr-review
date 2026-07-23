@@ -1,0 +1,59 @@
+name: Agentic PR Review M4 Trusted Stateless Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Reserved same-repository live verification pull request number
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  verify-stateless:
+    if: vars.AGENTIC_REVIEW_M4_STATEFUL_ENABLED == 'true' && inputs.pr_number == vars.AGENTIC_REVIEW_M4_RESERVED_VERIFICATION_PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: apr-m4-live-stateless-v1-${{ github.repository_id }}-${{ inputs.pr_number }}
+      cancel-in-progress: false
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      AGENTIC_REVIEW_M4_LIVE_VERIFICATION: '1'
+      AGENTIC_REVIEW_M4_LIVE_STATELESS: '1'
+      AGENTIC_REVIEW_M4_RESERVED_VERIFICATION_PR: ${{ vars.AGENTIC_REVIEW_M4_RESERVED_VERIFICATION_PR }}
+      AGENTIC_REVIEW_ANTHROPIC_API_KEY: ${{ secrets.AGENTIC_REVIEW_ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - run: npm ci
+      - name: Build trusted runtime outside the checkout
+        run: >-
+          dotnet build runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj
+          --configuration Release --output "$RUNNER_TEMP/agentic-pr-review-runtime"
+      - name: Configure trusted runtime command
+        shell: bash
+        run: |
+          printf 'AGENTIC_REVIEW_RUNTIME_EXECUTABLE=%s\n' "$(realpath "$(command -v dotnet)")" >> "$GITHUB_ENV"
+          printf 'AGENTIC_REVIEW_RUNTIME_PREFIX_ARGS_JSON=["%s"]\n' "$RUNNER_TEMP/agentic-pr-review-runtime/AgenticPrReview.Runtime.dll" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/agentic-pr-review
+        with:
+          runtime_backend: ledger-csharp
+          runtime_provider: test
+          target_mode: pull-request
+          review_mode: auto
+          verification_namespace: m4-live-verification-v1-stateless
+          post_comment: 'false'
+          inline_comments: 'false'

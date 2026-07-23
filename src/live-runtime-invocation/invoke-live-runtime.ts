@@ -194,7 +194,6 @@ export async function invokeLiveRuntime(
       message: 'Manifest input could not be safely canonicalized within its byte cap.',
     });
   }
-  const sensitive = copySensitiveValues(options.sensitiveValues);
   let suppliedContextBytes: Uint8Array;
   try {
     suppliedContextBytes = new Uint8Array(
@@ -214,6 +213,17 @@ export async function invokeLiveRuntime(
     });
   const inputSha256 = sha256Hex(inputBytes);
   const context = materializeHostEpochs(parsedContext.context);
+  const liveSecret =
+    context.providerMode === 'live' ? process.env.AGENTIC_REVIEW_ANTHROPIC_API_KEY : undefined;
+  if (context.providerMode === 'live' && (!liveSecret || liveSecret.trim() === ''))
+    throw new LiveRuntimeInvocationError({
+      kind: 'options-invalid',
+      message: 'Trusted live mode requires the fixed Anthropic secret overlay.',
+    });
+  const effectiveSensitive = copySensitiveValues([
+    ...(options.sensitiveValues ?? []),
+    ...(liveSecret ? [liveSecret] : []),
+  ]);
   const contextBytes = new Uint8Array(canonicalJsonBytes(context));
   const manifestInputSnapshot = alignManifestEpochs(suppliedManifestInputSnapshot, context);
   const inputRepository = `${inputSnapshot.host.repository.owner}/${inputSnapshot.host.repository.name}`;
@@ -276,11 +286,6 @@ export async function invokeLiveRuntime(
     throw new LiveRuntimeInvocationError({
       kind: 'options-invalid',
       message: 'The #55 live seam requires the host test runtime provider.',
-    });
-  if (context.providerMode !== 'synthetic')
-    throw new LiveRuntimeInvocationError({
-      kind: 'options-invalid',
-      message: 'The #55 synthetic executor does not accept live provider mode.',
     });
   if (context.currentInteraction.consumedInputSha256 !== inputSha256)
     throw new LiveRuntimeInvocationError({
@@ -354,14 +359,14 @@ export async function invokeLiveRuntime(
       '--provider-run-metadata',
       outputPaths.providerRunMetadata,
     ];
-    assertPrivateBytes([inputBytes, contextBytes], sensitive);
+    assertPrivateBytes([inputBytes, contextBytes], effectiveSensitive);
     assertPrivateBytes(
       [
         ...(commandSnapshot.prefixArgs?.map((arg) => new TextEncoder().encode(arg)) ?? []),
         new TextEncoder().encode(commandSnapshot.executablePath),
         ...cliArgs.map((arg) => new TextEncoder().encode(arg)),
       ],
-      sensitive,
+      effectiveSensitive,
     );
     await writePrivate(inputPath, inputBytes);
     await writePrivate(contextPath, contextBytes);
@@ -372,11 +377,13 @@ export async function invokeLiveRuntime(
           kind: 'options-invalid',
           message: 'A non-root live transition requires predecessor ledger bytes.',
         });
-      assertPrivateBytes([predecessorBytes], sensitive);
+      assertPrivateBytes([predecessorBytes], effectiveSensitive);
       await writePrivate(predecessorPath, predecessorBytes);
     }
-    if (predecessorManifestSnapshot) assertPrivateBytes([predecessorManifestSnapshot], sensitive);
-    if (predecessorMetadataSnapshot) assertPrivateBytes([predecessorMetadataSnapshot], sensitive);
+    if (predecessorManifestSnapshot)
+      assertPrivateBytes([predecessorManifestSnapshot], effectiveSensitive);
+    if (predecessorMetadataSnapshot)
+      assertPrivateBytes([predecessorMetadataSnapshot], effectiveSensitive);
     if (!(await isExecutableFile(commandSnapshot.executablePath, fs)))
       throw new LiveRuntimeInvocationError({
         kind: 'executable-invalid',
@@ -388,8 +395,19 @@ export async function invokeLiveRuntime(
       options.timeoutMs,
       options.signal,
       invocationDirectory,
+      undefined,
+      undefined,
+      context.providerMode === 'live'
+        ? {
+            AGENTIC_REVIEW_M4_LIVE_VERIFICATION: '1',
+            AGENTIC_REVIEW_ANTHROPIC_API_KEY: liveSecret!,
+            ...(process.env.AGENTIC_REVIEW_M4_LIVE_STATELESS === '1'
+              ? { AGENTIC_REVIEW_M4_LIVE_STATELESS: '1' }
+              : {}),
+          }
+        : undefined,
     );
-    assertPrivateBytes([processResult.stdout, processResult.stderr], sensitive);
+    assertPrivateBytes([processResult.stdout, processResult.stderr], effectiveSensitive);
     if (processResult.exitCode !== 0)
       throw new LiveRuntimeInvocationError({
         kind:
@@ -421,7 +439,7 @@ export async function invokeLiveRuntime(
       outputPaths.providerRunMetadata,
       'provider-metadata-invalid',
     );
-    assertPrivateBytes([resultBytes, traceBytes, ledgerBytes, metadataBytes], sensitive);
+    assertPrivateBytes([resultBytes, traceBytes, ledgerBytes, metadataBytes], effectiveSensitive);
     let success: Awaited<ReturnType<typeof validateSuccessAndBuildResultFromSnapshots>>;
     try {
       success = await validateSuccessAndBuildResultFromSnapshots({
@@ -504,7 +522,7 @@ export async function invokeLiveRuntime(
       metadataSemanticSha256,
     );
     const built = buildStateBundleV2(manifestInput, ledgerBytes, metadataBytes);
-    assertPrivateBytes([built.manifestBytes], sensitive);
+    assertPrivateBytes([built.manifestBytes], effectiveSensitive);
     leaseContainer = await makePrivateDirectory(
       trustedRoot,
       `agentic-pr-review-candidate-${randomBytes(16).toString('hex')}-`,
@@ -1243,6 +1261,7 @@ export function runProcess(
   cwd: string,
   spawnFn: typeof spawn = spawn,
   closeDeadlineMs: number = LIVE_CLOSE_DEADLINE_MS,
+  additionalEnv?: Readonly<Record<string, string>>,
 ): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -1264,6 +1283,7 @@ export function runProcess(
           NO_COLOR: '1',
           DOTNET_NOLOGO: '1',
           DOTNET_CLI_TELEMETRY_OPTOUT: '1',
+          ...(additionalEnv ?? {}),
         },
         cwd,
       });

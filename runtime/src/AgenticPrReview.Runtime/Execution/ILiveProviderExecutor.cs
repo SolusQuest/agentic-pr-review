@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.Ledger;
+using AgenticPrReview.Runtime.Prefix;
 
 namespace AgenticPrReview.Runtime;
 
@@ -10,7 +11,7 @@ namespace AgenticPrReview.Runtime;
 /// </summary>
 internal interface ILiveProviderExecutor
 {
-    ProviderExecutionObservation Execute(ReviewInput input, string inputHash, ExpectedIdentities identities);
+    ProviderExecutionObservation Execute(ReviewInput input, string inputHash, ExpectedIdentities identities, PrefixMaterialization prefix, bool stateless, CancellationToken cancellationToken = default);
 }
 
 internal sealed record ProviderExecutionObservation(
@@ -26,11 +27,12 @@ internal sealed record ProviderExecutionObservation(
     JsonObject TelemetryCompleteness,
     string Summary,
     string[] Limitations,
+    RuntimeFinding[] Findings,
     string Mode);
 
 internal sealed class SyntheticLiveProviderExecutor : ILiveProviderExecutor
 {
-    public ProviderExecutionObservation Execute(ReviewInput input, string inputHash, ExpectedIdentities identities) =>
+    public ProviderExecutionObservation Execute(ReviewInput input, string inputHash, ExpectedIdentities identities, PrefixMaterialization prefix, bool stateless, CancellationToken cancellationToken = default) =>
         new(
             identities.ProviderId,
             identities.ProviderId,
@@ -80,5 +82,6 @@ internal sealed class SyntheticLiveProviderExecutor : ILiveProviderExecutor
             },
             "Synthetic live runtime completed without findings.",
             ["No live provider was invoked."],
+            [],
             "live-provider");
 }
