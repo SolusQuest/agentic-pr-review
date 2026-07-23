@@ -1,13 +1,6 @@
 import { MAX_SENSITIVE_VALUES, MAX_SENSITIVE_VALUES_TOTAL_UTF8_BYTES } from './constants.js';
 import { LiveRuntimeInvocationError } from './errors.js';
 
-// Substring scanning is collision-safe only above this bound. A valid one-byte
-// provider key such as "a" occurs naturally in every JSON channel, so generic
-// byte scanning would reject the invocation before the child can start. Short
-// keys are still validated and are passed only through the child environment;
-// they are excluded from the ambiguous host-channel substring proof.
-const MIN_COLLISION_SAFE_SENSITIVE_VALUE_BYTES = 4;
-
 export function copySensitiveValues(values: readonly string[] | undefined): readonly Uint8Array[] {
   const source = values ? [...values] : [];
   if (source.length > MAX_SENSITIVE_VALUES || source.some((value) => value.length === 0)) {
@@ -24,19 +17,11 @@ export function copySensitiveValues(values: readonly string[] | undefined): read
       message: 'sensitiveValues exceeds its byte cap or contains duplicates.',
     });
   }
-  const collisionSafe = encoded.filter(
-    (value) => value.byteLength >= MIN_COLLISION_SAFE_SENSITIVE_VALUE_BYTES,
-  );
-  const escaped = source
-    .filter(
-      (value) =>
-        new TextEncoder().encode(value).byteLength >= MIN_COLLISION_SAFE_SENSITIVE_VALUE_BYTES,
-    )
-    .map((value) => {
-      const json = JSON.stringify(value);
-      return new TextEncoder().encode(json.slice(1, -1));
-    });
-  return [...collisionSafe, ...escaped].map((value) => new Uint8Array(value));
+  const escaped = source.map((value) => {
+    const json = JSON.stringify(value);
+    return new TextEncoder().encode(json.slice(1, -1));
+  });
+  return [...encoded, ...escaped].map((value) => new Uint8Array(value));
 }
 
 export function assertPrivateBytes(

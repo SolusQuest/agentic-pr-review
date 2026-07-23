@@ -310,10 +310,6 @@ export async function runLedgerCsharp(input: {
       predecessorManifestBytes: plan.predecessor?.manifestBytes,
       predecessorProviderRunMetadataBytes: plan.predecessor?.providerRunMetadataBytes,
       signal: cancellation.signal,
-      sensitiveValues:
-        input.config.liveProvider === 'deepseek' && process.env.AGENTIC_REVIEW_DEEPSEEK_API_KEY
-          ? [process.env.AGENTIC_REVIEW_DEEPSEEK_API_KEY]
-          : undefined,
     });
     let leaseOwnershipTransferred = false;
     let leaseReleased = false;

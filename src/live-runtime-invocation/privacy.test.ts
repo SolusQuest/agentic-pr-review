@@ -14,11 +14,11 @@ describe('live runtime privacy barriers', () => {
     ).not.toThrow();
   });
 
-  it('allows a valid short key through ordinary JSON channels', () => {
-    const values = copySensitiveValues(['a']);
+  it('still rejects arbitrary sensitive values at every serialized channel', () => {
+    const values = copySensitiveValues(['null']);
     expect(() =>
-      assertPrivateBytes([new TextEncoder().encode('{"summary":"a normal JSON value"}')], values),
-    ).not.toThrow();
+      assertPrivateBytes([new TextEncoder().encode('{"requestedRuntimeVersion":null}')], values),
+    ).toThrow(LiveRuntimeInvocationError);
   });
 
   it('rejects empty, duplicate, and over-bound values before asynchronous work', () => {

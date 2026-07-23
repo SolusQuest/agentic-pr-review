@@ -98,6 +98,7 @@ export interface InvokeLiveRuntimeOptions {
   readonly timeoutMs: number;
   readonly signal?: AbortSignal;
   readonly trustedRoot?: string;
+  /** Values that may be supplied through serialized or diagnostic channels. */
   readonly sensitiveValues?: readonly string[];
   readonly predecessorLedgerBytes?: Uint8Array;
   readonly predecessorManifestBytes?: Uint8Array;
@@ -382,6 +383,10 @@ export async function invokeLiveRuntime(
         kind: 'executable-invalid',
         message: 'The trusted runtime executable is not executable.',
       });
+    // The provider key is deliberately environment-only. It is not included in
+    // sensitiveValues because arbitrary contract-valid keys can collide with
+    // ordinary JSON literals (for example, "null"). The trusted child env is
+    // the only host-to-child channel that receives this value.
     const processResult = await runProcess(
       commandSnapshot,
       cliArgs,
