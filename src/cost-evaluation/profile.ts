@@ -106,6 +106,13 @@ export function resolveProfile(input: {
 
   const thresholdRef = parseBoundedString(input.thresholdContractRef, THRESHOLD_REF_RE);
   if (thresholdRef === null) return { ok: false, reason: 'threshold_ref_invalid' };
+  // The harness only supports the current frozen #29 threshold contract
+  // (classifyRatio uses the frozen 101/105 multipliers). A different ref would
+  // bind to a future threshold contract, which requires a #29 shared-contract
+  // revision + harness change; reject it here.
+  if (thresholdRef !== THRESHOLD_CONTRACT_REF) {
+    return { ok: false, reason: 'threshold_ref_invalid' };
+  }
 
   // Weights: parse (grammar + value cap) then canonicalize.
   const weightsRaw = {

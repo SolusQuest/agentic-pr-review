@@ -104,6 +104,27 @@ describe('resolveProfile / parseProfile', () => {
     );
   });
 
+  it('rejects a syntax-valid but non-frozen thresholdContractRef', () => {
+    expect(
+      resolveProfile({ ...DEFAULT_PROFILE_INPUT, thresholdContractRef: 'm4-other-thresholds-v1' })
+        .ok,
+    ).toBe(false);
+  });
+
+  it('outputWeight null vs "0" produce different digests (null != zero)', () => {
+    // null = "total cost not evaluated"; "0" = "output weight is zero". These
+    // are semantically distinct and must hash to different profile digests.
+    const absent = resolveProfile({ ...DEFAULT_PROFILE_INPUT, outputWeight: null });
+    const zero = resolveProfile({ ...DEFAULT_PROFILE_INPUT, outputWeight: '0' });
+    expect(absent.ok).toBe(true);
+    expect(zero.ok).toBe(true);
+    if (absent.ok && zero.ok) {
+      expect(absent.resolved.digest).not.toBe(zero.resolved.digest);
+      expect(absent.resolved.weights.output).toBeNull();
+      expect(zero.resolved.weights.output).toBe(0n);
+    }
+  });
+
   it('parseProfile rejects schema violations', () => {
     expect(parseProfile({ ...DEFAULT_PROFILE.profile, schemaVersion: 2 }).ok).toBe(false);
     expect(parseProfile({ uncachedWeight: '1' }).ok).toBe(false); // missing fields
