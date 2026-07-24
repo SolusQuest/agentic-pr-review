@@ -18,6 +18,7 @@ import {
   VERIFICATION_WORKFLOW_IDENTITY,
 } from './ledger-csharp.js';
 import type { ActionConfig, ReviewTarget } from './types.js';
+import { LiveRuntimeInvocationError } from './live-runtime-invocation/errors.js';
 
 const config: ActionConfig = {
   runtimeBackend: 'ledger-csharp',
@@ -75,6 +76,26 @@ describe('ledger-csharp host plan', () => {
     );
     expect(ledgerErrorKindFor(new StoreCorruptionError())).toBe('store_corrupt');
     expect(ledgerErrorKindFor(new Error('unclassified runtime failure'))).toBe('runtime_failed');
+  });
+
+  it('preserves closed live-provider failure kinds at the ledger action boundary', () => {
+    for (const kind of [
+      'provider-timeout',
+      'provider-cancelled',
+      'provider-rate-limited',
+      'provider-4xx',
+      'provider-5xx',
+      'provider-transport',
+      'provider-response',
+      'provider-config',
+      'provider-persistence',
+    ] as const) {
+      expect(
+        ledgerErrorKindFor(
+          new LiveRuntimeInvocationError({ kind, message: `Live provider failed (${kind}).` }),
+        ),
+      ).toBe(kind);
+    }
   });
 
   it('accepts only an action source that is an ancestor of the trusted default branch', async () => {

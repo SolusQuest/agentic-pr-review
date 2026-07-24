@@ -139,7 +139,8 @@ public static class PrefixMaterializer
             out var stableLogical,
             out var dynamicLogical,
             out var stableProvider,
-            out var dynamicProvider);
+            out var dynamicProvider,
+            input.ProviderBoundInstruction);
         if (streamError is not null)
         {
             return Fail(streamError);
@@ -247,6 +248,7 @@ public static class PrefixMaterializer
         return
             CanonicalizeAll(input, out var templateBytes, out var policyBytes, out var toolsBytes, out var configBytes, out var adapterBytes,
                 out var templateCapped, out var policyCapped, out var toolsCapped, out var configCapped, out var adapterCapped)
+            ?? ValidateProviderBoundInstruction(input.ProviderBoundInstruction)
             ?? PrefixEnvelopeValidator.CheckCanonicalCap(PrefixEnvelopeValidator.EnvelopeKind.Template, templateCapped)
             ?? PrefixEnvelopeValidator.CheckCanonicalCap(PrefixEnvelopeValidator.EnvelopeKind.Policy, policyCapped)
             ?? PrefixEnvelopeValidator.CheckCanonicalCap(PrefixEnvelopeValidator.EnvelopeKind.Tools, toolsCapped)
@@ -431,7 +433,8 @@ public static class PrefixMaterializer
         out ImmutableArray<byte> stableLogical,
         out ImmutableArray<byte> dynamicLogical,
         out ImmutableArray<byte> stableProvider,
-        out ImmutableArray<byte> dynamicProvider)
+        out ImmutableArray<byte> dynamicProvider,
+        string? providerBoundInstruction)
     {
         stableLogical = ImmutableArray<byte>.Empty;
         dynamicLogical = ImmutableArray<byte>.Empty;
@@ -449,8 +452,9 @@ public static class PrefixMaterializer
 
         var stableLogicalWriter = new ArrayBufferWriter<byte>();
         var stableProviderWriter = new ArrayBufferWriter<byte>();
-        foreach (var (kind, bytes) in stableSegments)
+        for (var index = 0; index < stableSegments.Count; index++)
         {
+            var (kind, bytes) = stableSegments[index];
             AppendFramed(stableLogicalWriter, bytes.AsSpan());
             var block = ProviderBlockMapper.MapBlock(kind, bytes.AsSpan());
             var blockError = PrefixGuards.CheckProviderBlockPayload(block.Length);
@@ -460,6 +464,20 @@ public static class PrefixMaterializer
             }
 
             AppendFramed(stableProviderWriter, block.AsSpan());
+
+            if (index == 2 && providerBoundInstruction is not null)
+            {
+                var instructionBlock = ProviderBlockMapper.MapSystemTextBlock(providerBoundInstruction, out var instructionCapExceeded);
+                var instructionError = instructionCapExceeded
+                    ? PrefixDiagnostic.Create(PrefixDiagnosticCodes.SegmentTooLarge, causeCode: "provider-block")
+                    : PrefixGuards.CheckProviderBlockPayload(instructionBlock.Length);
+                if (instructionError is not null)
+                {
+                    return instructionError;
+                }
+
+                AppendFramed(stableProviderWriter, instructionBlock.AsSpan());
+            }
         }
 
         var stableLogicalError = PrefixGuards.CheckLogicalStableTotal(stableLogicalWriter.WrittenCount);
@@ -573,6 +591,11 @@ public static class PrefixMaterializer
         return null;
     }
 
+    private static PrefixDiagnostic? ValidateProviderBoundInstruction(string? instruction) =>
+        ContainsUnpairedSurrogate(instruction)
+            ? PrefixDiagnostic.Create(PrefixDiagnosticCodes.CanonicalInputRejected)
+            : null;
+
     private static bool IsSafeRelativePath(string path)
     {
         if (path.Length == 0
@@ -608,11 +631,43 @@ public static class PrefixMaterializer
         return count;
     }
 
-    private static bool ContainsInvalidUnicode(string value)
+    private static bool ContainsInvalidUnicode(string? value)
     {
+        if (value is null)
+        {
+            return false;
+        }
+
         if (value.Contains('\0'))
         {
             return true;
+        }
+
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (char.IsHighSurrogate(value[index]))
+            {
+                if (index + 1 >= value.Length || !char.IsLowSurrogate(value[index + 1]))
+                {
+                    return true;
+                }
+
+                index++;
+            }
+            else if (char.IsLowSurrogate(value[index]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ContainsUnpairedSurrogate(string? value)
+    {
+        if (value is null)
+        {
+            return false;
         }
 
         for (var index = 0; index < value.Length; index++)

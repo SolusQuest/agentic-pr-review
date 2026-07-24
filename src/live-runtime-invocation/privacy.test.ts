@@ -14,6 +14,13 @@ describe('live runtime privacy barriers', () => {
     ).not.toThrow();
   });
 
+  it('still rejects arbitrary sensitive values at every serialized channel', () => {
+    const values = copySensitiveValues(['null']);
+    expect(() =>
+      assertPrivateBytes([new TextEncoder().encode('{"requestedRuntimeVersion":null}')], values),
+    ).toThrow(LiveRuntimeInvocationError);
+  });
+
   it('rejects empty, duplicate, and over-bound values before asynchronous work', () => {
     for (const values of [
       [''],

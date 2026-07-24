@@ -98,6 +98,7 @@ export interface InvokeLiveRuntimeOptions {
   readonly timeoutMs: number;
   readonly signal?: AbortSignal;
   readonly trustedRoot?: string;
+  /** Values that may be supplied through serialized or diagnostic channels. */
   readonly sensitiveValues?: readonly string[];
   readonly predecessorLedgerBytes?: Uint8Array;
   readonly predecessorManifestBytes?: Uint8Array;
@@ -277,10 +278,10 @@ export async function invokeLiveRuntime(
       kind: 'options-invalid',
       message: 'The #55 live seam requires the host test runtime provider.',
     });
-  if (context.providerMode !== 'synthetic')
+  if (context.providerMode !== 'synthetic' && context.providerMode !== 'live')
     throw new LiveRuntimeInvocationError({
       kind: 'options-invalid',
-      message: 'The #55 synthetic executor does not accept live provider mode.',
+      message: 'The live runtime provider mode is unsupported.',
     });
   if (context.currentInteraction.consumedInputSha256 !== inputSha256)
     throw new LiveRuntimeInvocationError({
@@ -382,15 +383,36 @@ export async function invokeLiveRuntime(
         kind: 'executable-invalid',
         message: 'The trusted runtime executable is not executable.',
       });
-    const processResult = await runProcess(
-      commandSnapshot,
-      cliArgs,
-      options.timeoutMs,
-      options.signal,
-      invocationDirectory,
-    );
+    // The provider key is deliberately environment-only. It is not included in
+    // sensitiveValues because arbitrary contract-valid keys can collide with
+    // ordinary JSON literals (for example, "null"). The trusted child env is
+    // the only host-to-child channel that receives this value.
+    let processResult: Awaited<ReturnType<typeof runProcess>>;
+    try {
+      processResult = await runProcess(
+        commandSnapshot,
+        cliArgs,
+        options.timeoutMs,
+        options.signal,
+        invocationDirectory,
+        spawn,
+        LIVE_CLOSE_DEADLINE_MS,
+        context.providerMode === 'live' && process.env.AGENTIC_REVIEW_DEEPSEEK_API_KEY
+          ? { AGENTIC_REVIEW_DEEPSEEK_API_KEY: process.env.AGENTIC_REVIEW_DEEPSEEK_API_KEY }
+          : undefined,
+      );
+    } catch (error) {
+      const providerCancellation = classifyLiveProviderHostCancellation(
+        error,
+        context.providerMode,
+      );
+      if (providerCancellation) throw providerCancellation;
+      throw error;
+    }
     assertPrivateBytes([processResult.stdout, processResult.stderr], sensitive);
-    if (processResult.exitCode !== 0)
+    if (processResult.exitCode !== 0) {
+      const providerFailure = classifyProviderFailure(processResult.stderr, processResult.exitCode);
+      if (providerFailure) throw providerFailure;
       throw new LiveRuntimeInvocationError({
         kind:
           processResult.signal !== null
@@ -401,6 +423,7 @@ export async function invokeLiveRuntime(
         message: 'review-live did not complete successfully.',
         exitCode: processResult.exitCode ?? undefined,
       });
+    }
     if (processResult.stdout.byteLength !== 0)
       throw new LiveRuntimeInvocationError({
         kind: 'runtime-exit',
@@ -1235,6 +1258,57 @@ interface ProcessResult {
   readonly stderr: Uint8Array;
 }
 
+export function classifyProviderFailure(
+  stderr: Uint8Array,
+  exitCode: number | null,
+): LiveRuntimeInvocationError | undefined {
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(stderr);
+  } catch {
+    return undefined;
+  }
+  const match = /^((?:APR_PROVIDER_[A-Z0-9_]+)): Provider invocation failed\.\r?\n?$/.exec(text);
+  if (!match) return undefined;
+  const mapping: Record<string, { kind: LiveRuntimeErrorKind; exitCode: number }> = {
+    APR_PROVIDER_TIMEOUT: { kind: 'provider-timeout', exitCode: 30 },
+    APR_PROVIDER_CANCELLED: { kind: 'provider-cancelled', exitCode: 30 },
+    APR_PROVIDER_RATE_LIMITED: { kind: 'provider-rate-limited', exitCode: 30 },
+    APR_PROVIDER_4XX: { kind: 'provider-4xx', exitCode: 30 },
+    APR_PROVIDER_5XX: { kind: 'provider-5xx', exitCode: 30 },
+    APR_PROVIDER_TRANSPORT: { kind: 'provider-transport', exitCode: 30 },
+    APR_PROVIDER_RESPONSE: { kind: 'provider-response', exitCode: 20 },
+    APR_PROVIDER_CONFIG: { kind: 'provider-config', exitCode: 20 },
+    APR_PROVIDER_PERSISTENCE: { kind: 'provider-persistence', exitCode: 40 },
+  };
+  const expected = mapping[match[1]!];
+  if (!expected || exitCode !== expected.exitCode) return undefined;
+  return new LiveRuntimeInvocationError({
+    kind: expected.kind,
+    message: `Live provider failed (${match[1]}).`,
+    exitCode,
+  });
+}
+
+export function classifyLiveProviderHostCancellation(
+  error: unknown,
+  providerMode: 'synthetic' | 'live',
+): LiveRuntimeInvocationError | undefined {
+  if (
+    providerMode !== 'live' ||
+    !(error instanceof LiveRuntimeInvocationError) ||
+    error.kind !== 'cancelled'
+  )
+    return undefined;
+  return new LiveRuntimeInvocationError({
+    kind: 'provider-cancelled',
+    message: 'Live provider invocation was cancelled by the host.',
+    exitCode: 30,
+    closeObserved: error.closeObserved,
+    cleanupWarnings: error.cleanupWarnings,
+  });
+}
+
 export function runProcess(
   command: RuntimeCommand,
   args: readonly string[],
@@ -1243,6 +1317,7 @@ export function runProcess(
   cwd: string,
   spawnFn: typeof spawn = spawn,
   closeDeadlineMs: number = LIVE_CLOSE_DEADLINE_MS,
+  environment?: Record<string, string>,
 ): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -1264,6 +1339,7 @@ export function runProcess(
           NO_COLOR: '1',
           DOTNET_NOLOGO: '1',
           DOTNET_CLI_TELEMETRY_OPTOUT: '1',
+          ...(environment ?? {}),
         },
         cwd,
       });

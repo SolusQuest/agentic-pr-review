@@ -16967,8 +16967,8 @@ var require_connection = __commonJS({
             return;
           }
           const secWSAccept = response.headersList.get("Sec-WebSocket-Accept");
-          const digest = crypto5.createHash("sha1").update(keyValue + uid).digest("base64");
-          if (secWSAccept !== digest) {
+          const digest2 = crypto5.createHash("sha1").update(keyValue + uid).digest("base64");
+          if (secWSAccept !== digest2) {
             failWebsocketConnection(ws, "Incorrect hash received in Sec-WebSocket-Accept header.");
             return;
           }
@@ -47475,8 +47475,8 @@ var require_zip_archive_output_stream = __commonJS({
       var process5 = deflate ? new DeflateCRC32Stream(this.options.zlib) : new CRC32Stream();
       var error2 = null;
       function handleStuff() {
-        var digest = process5.digest().readUInt32BE(0);
-        ae.setCrc(digest);
+        var digest2 = process5.digest().readUInt32BE(0);
+        ae.setCrc(digest2);
         ae.setSize(process5.size());
         ae.setCompressedSize(process5.size(true));
         this._afterAppend(ae);
@@ -104500,6 +104500,7 @@ var LocalArtifactStore = class {
 
 // src/config.ts
 var RUNTIME_PROVIDERS = ["test", "claude-code-cli"];
+var LIVE_PROVIDERS = ["none", "deepseek"];
 var RUNTIME_BACKENDS = [
   "legacy",
   "deterministic-csharp",
@@ -104548,6 +104549,11 @@ function parseActionConfig(reader, env, eventName) {
     "runtime_backend",
     RUNTIME_BACKENDS
   );
+  const liveProvider = oneOf(
+    optionalInput(reader, "live_provider") ?? "none",
+    "live_provider",
+    LIVE_PROVIDERS
+  );
   const targetMode = oneOf(
     optionalInput(reader, "target_mode") ?? "pull-request",
     "target_mode",
@@ -104572,6 +104578,7 @@ function parseActionConfig(reader, env, eventName) {
   const config = {
     runtimeBackend,
     runtimeProvider,
+    liveProvider,
     targetMode,
     reviewMode,
     verificationNamespace: optionalInput(reader, "verification_namespace"),
@@ -104741,9 +104748,19 @@ function validateDeterministicRuntimeConfig(config) {
       invalid2.push("incremental_context");
     if (config.artifactRetentionDays !== 7) invalid2.push("artifact_retention_days");
     if (config.maxContextChars !== 6e4) invalid2.push("max_context_chars");
-    if (config.maxPatchChars !== 12e4) invalid2.push("max_patch_chars");
+    if (config.maxPatchChars !== (config.liveProvider === "deepseek" ? 2e4 : 12e4))
+      invalid2.push("max_patch_chars");
     if (config.maxReviewChars !== 12e3) invalid2.push("max_review_chars");
-    if (config.maxFindings !== 50) invalid2.push("max_findings");
+    if (config.maxFindings !== 50 && config.liveProvider !== "deepseek")
+      invalid2.push("max_findings");
+  }
+  if (config.liveProvider === "deepseek" && backend !== "ledger-csharp") {
+    throw new Error(
+      "config-invalid: live_provider=deepseek requires runtime_backend=ledger-csharp"
+    );
+  }
+  if (config.liveProvider === "deepseek" && config.maxFindings > 50) {
+    throw new Error("config-invalid: live_provider=deepseek requires max_findings<=50");
   }
   if (invalid2.length > 0) {
     throw new Error(
@@ -114975,10 +114992,10 @@ async function invokeLiveRuntime(options) {
       kind: "options-invalid",
       message: "The #55 live seam requires the host test runtime provider."
     });
-  if (context5.providerMode !== "synthetic")
+  if (context5.providerMode !== "synthetic" && context5.providerMode !== "live")
     throw new LiveRuntimeInvocationError({
       kind: "options-invalid",
-      message: "The #55 synthetic executor does not accept live provider mode."
+      message: "The live runtime provider mode is unsupported."
     });
   if (context5.currentInteraction.consumedInputSha256 !== inputSha256)
     throw new LiveRuntimeInvocationError({
@@ -115071,20 +115088,36 @@ async function invokeLiveRuntime(options) {
         kind: "executable-invalid",
         message: "The trusted runtime executable is not executable."
       });
-    const processResult = await runProcess3(
-      commandSnapshot,
-      cliArgs,
-      options.timeoutMs,
-      options.signal,
-      invocationDirectory
-    );
+    let processResult;
+    try {
+      processResult = await runProcess3(
+        commandSnapshot,
+        cliArgs,
+        options.timeoutMs,
+        options.signal,
+        invocationDirectory,
+        spawn3,
+        LIVE_CLOSE_DEADLINE_MS,
+        context5.providerMode === "live" && process.env.AGENTIC_REVIEW_DEEPSEEK_API_KEY ? { AGENTIC_REVIEW_DEEPSEEK_API_KEY: process.env.AGENTIC_REVIEW_DEEPSEEK_API_KEY } : void 0
+      );
+    } catch (error2) {
+      const providerCancellation = classifyLiveProviderHostCancellation(
+        error2,
+        context5.providerMode
+      );
+      if (providerCancellation) throw providerCancellation;
+      throw error2;
+    }
     assertPrivateBytes([processResult.stdout, processResult.stderr], sensitive);
-    if (processResult.exitCode !== 0)
+    if (processResult.exitCode !== 0) {
+      const providerFailure = classifyProviderFailure(processResult.stderr, processResult.exitCode);
+      if (providerFailure) throw providerFailure;
       throw new LiveRuntimeInvocationError({
         kind: processResult.signal !== null ? "host-terminated" : processResult.exitCode === null ? "unknown-exit" : "runtime-exit",
         message: "review-live did not complete successfully.",
         exitCode: processResult.exitCode ?? void 0
       });
+    }
     if (processResult.stdout.byteLength !== 0)
       throw new LiveRuntimeInvocationError({
         kind: "runtime-exit",
@@ -115663,7 +115696,46 @@ function predecessorTransitionAgrees(transition, header) {
       return header.predecessorManifestSha256 === transition.predecessorManifestSha256 && header.predecessorLedgerEpoch === transition.predecessorLedgerEpoch && header.predecessorStateGeneration === transition.predecessorStateGeneration && header.resetReason === transition.reason;
   }
 }
-function runProcess3(command, args, timeoutMs, signal, cwd, spawnFn = spawn3, closeDeadlineMs = LIVE_CLOSE_DEADLINE_MS) {
+function classifyProviderFailure(stderr, exitCode) {
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(stderr);
+  } catch {
+    return void 0;
+  }
+  const match = /^((?:APR_PROVIDER_[A-Z0-9_]+)): Provider invocation failed\.\r?\n?$/.exec(text);
+  if (!match) return void 0;
+  const mapping = {
+    APR_PROVIDER_TIMEOUT: { kind: "provider-timeout", exitCode: 30 },
+    APR_PROVIDER_CANCELLED: { kind: "provider-cancelled", exitCode: 30 },
+    APR_PROVIDER_RATE_LIMITED: { kind: "provider-rate-limited", exitCode: 30 },
+    APR_PROVIDER_4XX: { kind: "provider-4xx", exitCode: 30 },
+    APR_PROVIDER_5XX: { kind: "provider-5xx", exitCode: 30 },
+    APR_PROVIDER_TRANSPORT: { kind: "provider-transport", exitCode: 30 },
+    APR_PROVIDER_RESPONSE: { kind: "provider-response", exitCode: 20 },
+    APR_PROVIDER_CONFIG: { kind: "provider-config", exitCode: 20 },
+    APR_PROVIDER_PERSISTENCE: { kind: "provider-persistence", exitCode: 40 }
+  };
+  const expected = mapping[match[1]];
+  if (!expected || exitCode !== expected.exitCode) return void 0;
+  return new LiveRuntimeInvocationError({
+    kind: expected.kind,
+    message: `Live provider failed (${match[1]}).`,
+    exitCode
+  });
+}
+function classifyLiveProviderHostCancellation(error2, providerMode) {
+  if (providerMode !== "live" || !(error2 instanceof LiveRuntimeInvocationError) || error2.kind !== "cancelled")
+    return void 0;
+  return new LiveRuntimeInvocationError({
+    kind: "provider-cancelled",
+    message: "Live provider invocation was cancelled by the host.",
+    exitCode: 30,
+    closeObserved: error2.closeObserved,
+    cleanupWarnings: error2.cleanupWarnings
+  });
+}
+function runProcess3(command, args, timeoutMs, signal, cwd, spawnFn = spawn3, closeDeadlineMs = LIVE_CLOSE_DEADLINE_MS, environment) {
   return new Promise((resolve2, reject) => {
     if (signal?.aborted) {
       reject(
@@ -115683,7 +115755,8 @@ function runProcess3(command, args, timeoutMs, signal, cwd, spawnFn = spawn3, cl
           SystemRoot: process.env.SystemRoot ?? "",
           NO_COLOR: "1",
           DOTNET_NOLOGO: "1",
-          DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+          DOTNET_CLI_TELEMETRY_OPTOUT: "1",
+          ...environment ?? {}
         },
         cwd
       });
@@ -119357,6 +119430,151 @@ function status(error2) {
   return typeof value?.status === "number" ? value.status : void 0;
 }
 
+// src/live-provider/deepseek-contract.ts
+import { createHash as createHash12 } from "node:crypto";
+var DEEPSEEK_LIVE_PROVIDER = "deepseek";
+var DEEPSEEK_LIVE_MODEL = "deepseek-v4-flash";
+var DEEPSEEK_LIVE_ADAPTER_BUILD_VERSION = "deepseek-openai-chat-v1";
+var DEEPSEEK_FIXED_INSTRUCTION = 'Return exactly one JSON object with this shape; do not include Markdown fences or explanatory text:\n{"schemaVersion":1,"summary":"string","findings":[{"severity":"low|medium|high","confidence":"medium|high","category":"correctness|security|requirements|test_coverage|build|performance|maintainability|documentation","title":"string","body":"string","path":"string or null","startLine":"positive integer or null","endLine":"positive integer or null","suggestedAction":"string or omitted"}],"limitations":["string"]}\nThe root keys schemaVersion, summary, findings, and limitations are required; every finding key shown except suggestedAction is required; no other keys are allowed. Use the exact enum and bound values from this closed schema: summary <=4000 Unicode characters, at most min(runtime policy maxFindings, 50) findings, title <=240, body <=4000, repo-relative path <=500 or null, evidence is not a model field, suggestedAction <=1600 when present, at most 16 limitations with each limitation <=1200. If both line values are present, endLine >= startLine. Return JSON, not a tool call.';
+var DEEPSEEK_REQUEST_CONTRACT = {
+  endpoint: "https://api.deepseek.com/chat/completions",
+  method: "POST",
+  request: {
+    model: DEEPSEEK_LIVE_MODEL,
+    messages: "provider-neutral plan projection",
+    stream: false,
+    temperature: 0,
+    max_tokens: 4096,
+    thinking: { type: "disabled" },
+    response_format: { type: "json_object" }
+  },
+  headers: {
+    names: ["Authorization", "Content-Type"],
+    authorizationScheme: "Bearer",
+    contentType: "application/json"
+  },
+  fixedInstruction: DEEPSEEK_FIXED_INSTRUCTION,
+  instructionPlacement: { afterStableSegments: 3, beforeHistoricalMessages: true },
+  responseParserVersion: 1,
+  transport: {
+    useProxy: false,
+    allowAutoRedirect: false,
+    connectTimeoutSeconds: 15,
+    oneRequest: true,
+    oneAttempt: true,
+    streaming: false,
+    toolCalls: false
+  },
+  limits: {
+    requestBodyBytes: 1048576,
+    responseBodyBytes: 1048576,
+    retainedErrorBodyBytes: 8192,
+    modelContentBytes: 262144,
+    providerTimeoutSeconds: 120,
+    hostBudgetSeconds: 150,
+    keyBytes: { min: 1, max: 256 }
+  },
+  response: {
+    object: "chat.completion",
+    choices: 1,
+    finish_reason: "stop",
+    usage: [
+      "prompt_tokens",
+      "completion_tokens",
+      "total_tokens",
+      "prompt_cache_hit_tokens",
+      "prompt_cache_miss_tokens"
+    ]
+  }
+};
+var DEEPSEEK_REQUEST_CONTRACT_SHA256 = createHash12("sha256").update(canonicalJsonBytes(DEEPSEEK_REQUEST_CONTRACT)).digest("hex");
+function digest(result, name) {
+  if (!result.ok || result.value === void 0)
+    throw new Error(`invalid DeepSeek ${name} contract`);
+  return result.value;
+}
+var DEEPSEEK_CACHE_CONTRACT_ENVELOPES = {
+  template: {
+    schemaVersion: 1,
+    templateVersion: 3,
+    definition: { role: "system", text: "You are a precise code reviewer." }
+  },
+  policy: {
+    schemaVersion: 1,
+    policyVersion: 2,
+    instructions: "Review the delta carefully and return only the requested structured result.",
+    constraints: { maxFindings: 50, tone: "strict" }
+  },
+  tools: {
+    schemaVersion: 1,
+    toolsetVersion: 1,
+    definitions: [
+      {
+        name: "submit_review",
+        description: "Submit the structured review.",
+        inputSchema: {
+          type: "object",
+          properties: { summary: { type: "string" } },
+          required: ["summary"]
+        },
+        policyMetadata: { risk: "low" }
+      }
+    ]
+  },
+  cacheConfig: {
+    schemaVersion: 1,
+    cacheConfigVersion: 1,
+    markerPolicy: "none",
+    eligibility: "automatic",
+    statelessMode: false
+  },
+  adapter: {
+    schemaVersion: 2,
+    capabilityProfileVersion: 1,
+    adapterBuildVersion: DEEPSEEK_LIVE_ADAPTER_BUILD_VERSION,
+    requestContractSha256: DEEPSEEK_REQUEST_CONTRACT_SHA256
+  }
+};
+var DEEPSEEK_CACHE_CONTRACT_IDENTITY = {
+  ledgerSchemaVersion: 1,
+  prefixContractVersion: 1,
+  providerId: DEEPSEEK_LIVE_PROVIDER,
+  modelId: DEEPSEEK_LIVE_MODEL,
+  templateId: digest(computeTemplateId(DEEPSEEK_CACHE_CONTRACT_ENVELOPES.template), "template"),
+  policyId: digest(computePolicyId(DEEPSEEK_CACHE_CONTRACT_ENVELOPES.policy), "policy"),
+  toolDefinitionId: digest(
+    computeToolDefinitionId(DEEPSEEK_CACHE_CONTRACT_ENVELOPES.tools),
+    "tools"
+  ),
+  cacheConfigId: digest(
+    computeCacheConfigId(DEEPSEEK_CACHE_CONTRACT_ENVELOPES.cacheConfig),
+    "cache config"
+  ),
+  adapterId: digest(computeAdapterId(DEEPSEEK_CACHE_CONTRACT_ENVELOPES.adapter), "adapter")
+};
+function deepSeekContractForMaxFindings(maxFindings) {
+  if (!Number.isInteger(maxFindings) || maxFindings < 1 || maxFindings > 50) {
+    throw new Error("invalid DeepSeek maxFindings contract");
+  }
+  const envelopes = {
+    ...DEEPSEEK_CACHE_CONTRACT_ENVELOPES,
+    policy: {
+      ...DEEPSEEK_CACHE_CONTRACT_ENVELOPES.policy,
+      constraints: {
+        ...DEEPSEEK_CACHE_CONTRACT_ENVELOPES.policy.constraints,
+        maxFindings
+      }
+    }
+  };
+  return {
+    envelopes,
+    identity: {
+      ...DEEPSEEK_CACHE_CONTRACT_IDENTITY,
+      policyId: digest(computePolicyId(envelopes.policy), "policy")
+    }
+  };
+}
+
 // src/ledger-csharp.ts
 var LEDGER_WORKFLOW_IDENTITY = "agentic-pr-review/m4-stateful-review/v1";
 var LEDGER_TRUSTED_EXECUTION_DOMAIN = "github-default-branch-workflow-run/v1";
@@ -119417,6 +119635,12 @@ var cacheContractIdentity = {
   cacheConfigId: "d5d1e7d93a8fac3ec89b896c771e92301d8cae17fe39fb7e63a42ebe3b35bfe9",
   adapterId: "e0b738711687dd8e1d4aefea903cc395b48dc4c9e8ef4b11fedac34e67fd16c6"
 };
+function ledgerContract(config) {
+  return config.liveProvider === "deepseek" ? deepSeekContractForMaxFindings(config.maxFindings).identity : cacheContractIdentity;
+}
+function ledgerEnvelopes(config) {
+  return config.liveProvider === "deepseek" ? deepSeekContractForMaxFindings(config.maxFindings).envelopes : cacheContractEnvelopes;
+}
 var LedgerRunFailure = class extends Error {
   constructor(message, result, errorKind) {
     super(message);
@@ -119443,11 +119667,13 @@ async function runLedgerCsharp(input) {
   if (input.target.isOpen !== true) {
     throw new Error("input-invalid: ledger-csharp requires an initially open pull request");
   }
+  const contract = ledgerContract(input.config);
   const repository = `${context2.repo.owner}/${context2.repo.repo}`;
   const stateKey = ledgerStateKey(
     repository,
     input.target.prNumber,
-    input.config.verificationNamespace
+    input.config.verificationNamespace,
+    input.config.liveProvider
   );
   const store = new GitHubGitStateAcceptanceStore(
     new OctokitGitDataClient(input.octokit),
@@ -119471,9 +119697,9 @@ async function runLedgerCsharp(input) {
     );
     selection = await store.selectAcceptedState({
       stateKey,
-      expectedLedgerSchemaVersion: cacheContractIdentity.ledgerSchemaVersion,
-      expectedPrefixContractVersion: cacheContractIdentity.prefixContractVersion,
-      cacheContractIdentity: omitContractVersions(cacheContractIdentity),
+      expectedLedgerSchemaVersion: contract.ledgerSchemaVersion,
+      expectedPrefixContractVersion: contract.prefixContractVersion,
+      cacheContractIdentity: omitContractVersions(contract),
       currentHeadSha: input.target.headSha,
       currentBaseSha: input.target.baseSha,
       currentBaseRef: canonicalBaseRef2(input.target.baseRef),
@@ -119544,7 +119770,7 @@ async function runLedgerCsharp(input) {
       input: plan.reviewInput,
       context: plan.context,
       manifestInput: plan.manifestInput,
-      timeoutMs: 3e4,
+      timeoutMs: input.config.liveProvider === "deepseek" ? 15e4 : 3e4,
       trustedRoot: process.env.RUNNER_TEMP,
       predecessorLedgerBytes: plan.predecessor?.ledgerBytes,
       predecessorManifestBytes: plan.predecessor?.manifestBytes,
@@ -119798,13 +120024,21 @@ async function validateLedgerInvocationEvent(config, eventName, octokit, target)
   if (!defaultBranch || !fullName)
     throw new Error("input-invalid: repository default branch unavailable");
   const verification = config.verificationNamespace;
+  const liveDeepSeek = config.liveProvider === "deepseek";
+  if (liveDeepSeek && verification !== void 0) {
+    throw new Error(
+      "input-invalid: live_provider=deepseek does not support verification_namespace"
+    );
+  }
   if (verification === void 0 && eventName !== "workflow_run") {
-    throw new Error("input-invalid: production ledger-csharp runs require workflow_run");
+    if (!liveDeepSeek || eventName !== "workflow_dispatch") {
+      throw new Error("input-invalid: production ledger-csharp runs require workflow_run");
+    }
   }
   if (verification !== void 0 && eventName !== "workflow_dispatch") {
     throw new Error("input-invalid: verification_namespace requires workflow_dispatch");
   }
-  const workflowFile = verification === void 0 ? "m4-stateful-review.yml" : "m4-stateful-verification.yml";
+  const workflowFile = liveDeepSeek ? "m4-deepseek-live.yml" : verification === void 0 ? "m4-stateful-review.yml" : "m4-stateful-verification.yml";
   const expectedWorkflowRef = `${fullName}/.github/workflows/${workflowFile}@refs/heads/${defaultBranch}`;
   if (String(process.env.GITHUB_WORKFLOW_REF ?? "") !== expectedWorkflowRef) {
     throw new Error(
@@ -119813,6 +120047,15 @@ async function validateLedgerInvocationEvent(config, eventName, octokit, target)
   }
   if (String(process.env.GITHUB_REF ?? "") !== `refs/heads/${defaultBranch}`) {
     throw new Error("input-invalid: ledger-csharp must execute on the default branch ref");
+  }
+  if (liveDeepSeek) {
+    const dispatchInputs = context2.payload.inputs;
+    if (String(process.env.AGENTIC_REVIEW_LIVE_PROVIDER_ENABLED ?? "").toLowerCase() !== "true" || String(dispatchInputs?.enable_live_provider ?? "").toLowerCase() !== "true" || target.headRepoFullName !== fullName || canonicalBaseRef2(target.baseRef) !== `refs/heads/${defaultBranch}`) {
+      throw new Error(
+        "input-invalid: DeepSeek live execution is not bound to the trusted repository gate"
+      );
+    }
+    return;
   }
   if (verification === void 0) {
     const workflowRun = context2.payload.workflow_run;
@@ -119920,6 +120163,20 @@ function ledgerErrorKindFor(error2) {
   if (error2 instanceof StoreTransactionError) return error2.reason;
   if (error2 instanceof StoreCorruptionError) return "store_corrupt";
   if (error2 instanceof ContractValidationError) return "store_corrupt";
+  if (error2 instanceof LiveRuntimeInvocationError) {
+    switch (error2.kind) {
+      case "provider-timeout":
+      case "provider-cancelled":
+      case "provider-rate-limited":
+      case "provider-4xx":
+      case "provider-5xx":
+      case "provider-transport":
+      case "provider-response":
+      case "provider-config":
+      case "provider-persistence":
+        return error2.kind;
+    }
+  }
   return "runtime_failed";
 }
 async function targetStillMatches(target, octokit) {
@@ -119935,9 +120192,9 @@ async function targetStillMatches(target, octokit) {
     return "failed";
   }
 }
-function ledgerStateKey(repository, pullRequest, verificationNamespace) {
-  const workflowIdentity = verificationNamespace ? `${VERIFICATION_WORKFLOW_IDENTITY}/${verificationNamespace}` : LEDGER_WORKFLOW_IDENTITY;
-  const trustedExecutionDomain = verificationNamespace ? `${VERIFICATION_TRUSTED_EXECUTION_DOMAIN}/${verificationNamespace}` : LEDGER_TRUSTED_EXECUTION_DOMAIN;
+function ledgerStateKey(repository, pullRequest, verificationNamespace, liveProvider = "none") {
+  const workflowIdentity = verificationNamespace ? `${VERIFICATION_WORKFLOW_IDENTITY}/${verificationNamespace}` : liveProvider === "deepseek" ? "agentic-pr-review/m4-deepseek-live/v1" : LEDGER_WORKFLOW_IDENTITY;
+  const trustedExecutionDomain = verificationNamespace ? `${VERIFICATION_TRUSTED_EXECUTION_DOMAIN}/${verificationNamespace}` : liveProvider === "deepseek" ? "github-default-branch-live-workflow/v1" : LEDGER_TRUSTED_EXECUTION_DOMAIN;
   return {
     namespace: "m4-ledger-v2",
     repository,
@@ -119950,6 +120207,7 @@ function ledgerStateKey(repository, pullRequest, verificationNamespace) {
 function planLedgerInvocation(input) {
   const predecessor2 = input.selection.kind === "continuation_selected" || input.selection.kind === "reset_selected" ? input.selection.predecessorBytes : void 0;
   const previous = predecessor2 ? predecessorManifest(predecessor2) : void 0;
+  const contract = ledgerContract(input.config);
   const transition = transitionFor(input.selection, previous);
   const phase = transition.kind === "continuation" ? "incremental" : "bootstrap";
   const reviewInput = buildReviewInputV1({
@@ -119968,7 +120226,7 @@ function planLedgerInvocation(input) {
   });
   const inputHash = sha256Hex(serializeInputBytes(reviewInput));
   const subjectDigest = computeSubjectDigest(reviewInput.subject);
-  const cacheDigest = computeCacheContractDigest(omitContractVersions(cacheContractIdentity));
+  const cacheDigest = computeCacheContractDigest(omitContractVersions(contract));
   if (!subjectDigest.ok || !cacheDigest.ok)
     throw new Error("state-invalid: fixed ledger contract invalid");
   const ordinal = transition.kind === "continuation" ? previous.transaction.interactionOrdinal + 1 : 0;
@@ -119988,7 +120246,7 @@ function planLedgerInvocation(input) {
     schemaVersion: 1,
     stateKey: input.stateKey,
     sessionEpoch,
-    cacheContractIdentity,
+    cacheContractIdentity: contract,
     generation,
     transition,
     currentInteraction: {
@@ -119998,8 +120256,8 @@ function planLedgerInvocation(input) {
       subjectDigest: subjectDigest.value,
       cacheContractDigest: cacheDigest.value
     },
-    cacheContractEnvelopes,
-    providerMode: "synthetic",
+    cacheContractEnvelopes: ledgerEnvelopes(input.config),
+    providerMode: input.config.liveProvider === "deepseek" ? "live" : "synthetic",
     producingRun: {
       producingRunId: String(context2.runId),
       runAttempt: context2.runAttempt
@@ -120010,7 +120268,7 @@ function planLedgerInvocation(input) {
     stateNamespace: "m4-ledger-v2",
     stateKey: input.stateKey,
     sessionEpoch,
-    cacheContractIdentity,
+    cacheContractIdentity: contract,
     generation,
     transition,
     provenance: {
@@ -121968,6 +122226,7 @@ function setLedgerErrorOutputs(error2) {
 }
 function ledgerEntrypointErrorKind(error2) {
   if (error2 instanceof LedgerBoundaryError) return error2.errorKind;
+  if (error2 instanceof LiveRuntimeInvocationError) return ledgerErrorKindFor(error2);
   if (error2 instanceof StoreCorruptionError || error2 instanceof ContractValidationError)
     return "store_corrupt";
   if (error2 instanceof StoreTransactionError) return error2.reason;
@@ -122031,6 +122290,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   });
 }
 export {
+  ledgerEntrypointErrorKind,
   run,
   sanitizeRuntimeDiagnostic
 };

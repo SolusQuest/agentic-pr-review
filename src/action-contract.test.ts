@@ -13,6 +13,7 @@ describe('action contract', () => {
     for (const name of [
       'runtime_backend',
       'runtime_provider',
+      'live_provider',
       'target_mode',
       'review_mode',
       'api_key_mode',
@@ -92,5 +93,21 @@ describe('action contract', () => {
       expect(source).toContain('runtime_provider: test');
       expect(source).toContain('target_mode: pull-request');
     }
+  });
+
+  it('keeps DeepSeek live behind a two-job immutable trusted gate', () => {
+    const source = readFileSync('.github/workflows/m4-deepseek-live.yml', 'utf8');
+    expect(source).toContain('workflow_dispatch:');
+    expect(source).toContain('enable_live_provider:');
+    expect(source).toContain('outputs:');
+    expect(source).toContain("trusted: 'true'");
+    expect(source).toContain('needs: gate');
+    expect(source).toContain('ref: ${{ github.sha }}');
+    expect(source).toContain('persist-credentials: false');
+    expect(source).toContain(
+      'AGENTIC_REVIEW_DEEPSEEK_API_KEY: ${{ secrets.AGENTIC_REVIEW_DEEPSEEK_API_KEY }}',
+    );
+    const gate = source.slice(source.indexOf('  gate:'), source.indexOf('  live:'));
+    expect(gate).not.toContain('AGENTIC_REVIEW_DEEPSEEK_API_KEY');
   });
 });

@@ -1,4 +1,5 @@
 export type RuntimeProvider = 'test' | 'claude-code-cli';
+export type LiveProvider = 'none' | 'deepseek';
 export type RuntimeBackend = 'legacy' | 'deterministic-csharp' | 'ledger-csharp';
 export type TargetMode = 'pull-request' | 'synthetic-fixture';
 export type ReviewMode = 'auto' | 'bootstrap' | 'incremental';
@@ -68,6 +69,7 @@ export interface StructuredReviewEnvelopeV1 {
   reviewedRange: ReviewedRange;
   toolMode: ToolMode;
   runtimeProvider: RuntimeProvider;
+  liveProvider?: LiveProvider;
   sessionId: string;
   summary: string;
   findings: StructuredFindingV1[];
@@ -107,6 +109,7 @@ export interface ActionConfig {
   /** Missing in hand-built legacy test fixtures; parsed action config always supplies legacy. */
   runtimeBackend?: RuntimeBackend;
   runtimeProvider: RuntimeProvider;
+  liveProvider?: LiveProvider;
   targetMode: TargetMode;
   reviewMode: ReviewMode;
   verificationNamespace?: string;

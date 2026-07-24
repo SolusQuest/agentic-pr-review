@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.Linq;
 using System.Text.Json;
+using AgenticPrReview.Runtime;
 using AgenticPrReview.Runtime.Prefix;
 using Xunit;
 
@@ -41,6 +42,90 @@ public sealed class PrefixMaterializerTests
         Assert.True(first.Value.StableProviderStream.SequenceEqual(second.Value.StableProviderStream));
         Assert.Equal(first.Value.LogicalPrefixSha256, second.Value.LogicalPrefixSha256);
         Assert.Equal(first.Value.PrefixSha256, second.Value.PrefixSha256);
+    }
+
+    [Fact]
+    public void ProviderBoundInstructionChangesOnlyProviderPrefixReceipt()
+    {
+        var baseline = PrefixMaterializer.Materialize(BootstrapInput());
+        var withInstruction = PrefixMaterializer.Materialize(BootstrapInput() with
+        {
+            ProviderBoundInstruction = "fixed provider instruction",
+        });
+
+        Assert.NotNull(baseline.Value);
+        Assert.NotNull(withInstruction.Value);
+        Assert.Equal(baseline.Value.LogicalPrefixSha256, withInstruction.Value.LogicalPrefixSha256);
+        Assert.NotEqual(baseline.Value.PrefixSha256, withInstruction.Value.PrefixSha256);
+        Assert.NotEqual(baseline.Value.StableProviderStream, withInstruction.Value.StableProviderStream);
+
+        var messages = ProviderRequestPlanDecoder.Decode(withInstruction.Value.StableProviderStream);
+        Assert.Equal("fixed provider instruction", messages[3].Text);
+        Assert.Equal("system", messages[3].Role);
+    }
+
+    [Fact]
+    public void InvalidProviderBoundInstructionReturnsTypedFailure()
+    {
+        var outcomes = new[] { new string('\uD800', 1), new string('\uDC00', 1) }
+            .Select(instruction => PrefixMaterializer.Materialize(BootstrapInput() with
+            {
+                ProviderBoundInstruction = instruction,
+            }));
+
+        foreach (var outcome in outcomes)
+        {
+            Assert.Null(outcome.Value);
+            var diagnostic = Assert.Single(outcome.Diagnostics);
+            Assert.Equal("prefix_canonical_input_rejected", diagnostic.Code);
+        }
+    }
+
+    [Fact]
+    public void ProviderBoundInstructionPreservesFrozenDiagnosticStageOrder()
+    {
+        var input = BootstrapInput();
+        var surrogate = new string('\uD800', 1);
+
+        var invalidIdentity = PrefixMaterializer.Materialize(input with
+        {
+            ProviderBoundInstruction = surrogate,
+            ExpectedIdentities = input.ExpectedIdentities with { ProviderId = string.Empty },
+        });
+        Assert.Equal("prefix_identity_invalid", Assert.Single(invalidIdentity.Diagnostics).Code);
+
+        using var malformedDocument = JsonDocument.Parse("{\"schemaVersion\":1,\"templateVersion\":3,\"bogus\":1}");
+        var malformedEnvelope = PrefixMaterializer.Materialize(input with
+        {
+            ProviderBoundInstruction = surrogate,
+            Envelopes = input.Envelopes with { Template = malformedDocument.RootElement },
+        });
+        Assert.Equal("prefix_envelope_invalid", Assert.Single(malformedEnvelope.Diagnostics).Code);
+
+        var wrapper = "{\"schemaVersion\":1,\"templateVersion\":3,\"definition\":\"\"}".Length;
+        var overTemplate = JsonDocument.Parse(
+            "{\"schemaVersion\":1,\"templateVersion\":3,\"definition\":\"" +
+            new string('x', 262_144 - wrapper + 1) + "\"}").RootElement;
+        var overCanonicalEnvelope = PrefixMaterializer.Materialize(input with
+        {
+            ProviderBoundInstruction = surrogate,
+            Envelopes = input.Envelopes with { Template = overTemplate },
+        });
+        Assert.Equal("prefix_canonical_input_rejected", Assert.Single(overCanonicalEnvelope.Diagnostics).Code);
+    }
+
+    [Fact]
+    public void OversizedProviderBoundInstructionReturnsTypedFailure()
+    {
+        var outcome = PrefixMaterializer.Materialize(BootstrapInput() with
+        {
+            ProviderBoundInstruction = new string('x', checked((int)PrefixBounds.MaxProviderBlockPayloadBytes)),
+        });
+
+        Assert.Null(outcome.Value);
+        var diagnostic = Assert.Single(outcome.Diagnostics);
+        Assert.Equal("prefix_segment_too_large", diagnostic.Code);
+        Assert.Equal("provider-block", diagnostic.CauseCode);
     }
 
     [Fact]

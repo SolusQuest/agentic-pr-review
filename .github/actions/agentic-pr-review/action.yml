@@ -10,6 +10,10 @@ inputs:
     description: 'Runtime to use for review generation: test or claude-code-cli.'
     required: false
     default: test
+  live_provider:
+    description: 'Optional live provider adapter for the isolated ledger-csharp workflow.'
+    required: false
+    default: none
   target_mode:
     description: 'Review target source: pull-request or synthetic-fixture.'
     required: false
