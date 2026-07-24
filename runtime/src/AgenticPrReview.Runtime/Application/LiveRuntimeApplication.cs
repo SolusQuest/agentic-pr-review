@@ -12,8 +12,9 @@ using AgenticPrReview.Runtime.Prefix;
 namespace AgenticPrReview.Runtime;
 
 /// <summary>
-/// The process-side M4 live seam. Provider execution is deliberately synthetic in
-/// #55; the transaction binding and four-output publication remain runtime-owned.
+/// The process-side M4 live seam. Provider execution is selected from the
+/// validated invocation context; transaction binding and four-output publication
+/// remain runtime-owned.
 /// </summary>
 internal static class LiveRuntimeApplication
 {
@@ -23,16 +24,22 @@ internal static class LiveRuntimeApplication
         string[] args,
         IRuntimeFileSystem fileSystem,
         SchemaContracts schemas,
-        TextWriter stderr)
+        TextWriter stderr,
+        ILiveProviderExecutorFactory? executorFactory = null)
     {
         try
         {
             var invocation = ParseInvocation(args, fileSystem);
-            return await ExecuteAsync(invocation, fileSystem, schemas, stderr);
+            return await ExecuteAsync(invocation, fileSystem, schemas, stderr, executorFactory);
         }
         catch (RuntimeFailure failure)
         {
             await WriteDiagnosticAsync(stderr, failure.Code, failure.Message);
+            return failure.ExitCode;
+        }
+        catch (ProviderFailureException failure)
+        {
+            await WriteDiagnosticAsync(stderr, failure.Code, "Provider invocation failed.");
             return failure.ExitCode;
         }
         catch (Exception ex) when (!IsFatalException(ex))
@@ -46,7 +53,8 @@ internal static class LiveRuntimeApplication
         LiveInvocation invocation,
         IRuntimeFileSystem fileSystem,
         SchemaContracts schemas,
-        TextWriter stderr)
+        TextWriter stderr,
+        ILiveProviderExecutorFactory? executorFactory)
     {
         var inputBytes = await ReadRequiredAsync(fileSystem, invocation.InputPath, "APR_INPUT_READ_FAILED");
         var contextBytes = await ReadRequiredAsync(fileSystem, invocation.ContextPath, "APR_LIVE_CONTEXT_READ_FAILED");
@@ -73,8 +81,9 @@ internal static class LiveRuntimeApplication
             throw new RuntimeFailure(10, "APR_LIVE_CONTEXT_SCHEMA_INVALID", "Live context does not satisfy LiveRuntimeInvocationContextV1.");
         if (!ValidateContextSemanticDomains(contextDocument.RootElement))
             throw new RuntimeFailure(10, "APR_LIVE_CONTEXT_SEMANTIC_INVALID", "Live context identity or lifecycle domains are invalid.");
-        if (contextDocument.RootElement.GetProperty("providerMode").GetString() != "synthetic")
-            throw new RuntimeFailure(10, "APR_LIVE_PROVIDER_UNAVAILABLE", "The #55 executor does not accept live provider mode.");
+        var providerMode = contextDocument.RootElement.GetProperty("providerMode").GetString();
+        if (providerMode is not ("synthetic" or "live"))
+            throw new RuntimeFailure(10, "APR_LIVE_PROVIDER_UNAVAILABLE", "The live runtime provider mode is unsupported.");
 
         if (!schemas.IsValid(SchemaKind.Input, inputDocument.RootElement))
             throw new RuntimeFailure(10, "APR_INPUT_SCHEMA_INVALID", "Input does not satisfy ReviewInputV1.");
@@ -148,7 +157,16 @@ internal static class LiveRuntimeApplication
             SubjectDigest = currentInteraction.GetProperty("subjectDigest").GetString() ?? ZeroHash,
             ReviewedHeadSha = input.Host.Review.HeadSha,
             ReviewedBaseSha = input.Host.Review.BaseSha,
-            ChangedFiles = ReadChangedFiles(input.Subject.ChangedFiles)
+            ChangedFiles = ReadChangedFiles(input.Subject.ChangedFiles),
+            CurrentEvidence = new CurrentReviewEvidence
+            {
+                Subject = BuildCurrentSubject(input.Subject.PullRequest),
+                Files = input.Subject.ChangedFiles.Select(file => new CurrentEvidenceFile
+                {
+                    Path = file.Path,
+                    Patch = file.Patch?.Text,
+                }).ToImmutableArray(),
+            },
         };
         var contextOutcome = LedgerBuilder.BuildReviewContext(source, identities, interaction);
         if (contextOutcome.Value is null)
@@ -172,14 +190,21 @@ internal static class LiveRuntimeApplication
         if (prefixOutcome.Value is null)
             throw new RuntimeFailure(20, "APR_LIVE_CONTEXT_SEMANTIC_INVALID", "Cache-contract envelopes failed independent validation.");
 
-        ILiveProviderExecutor executor = new SyntheticLiveProviderExecutor();
-        var observation = executor.Execute(input, inputHash, identities);
+        var requestPlan = ProviderRequestPlan.From(
+            prefixOutcome.Value,
+            identities,
+            ReadMaxFindings(input.Host.Options),
+            envelopes.GetProperty("adapter").TryGetProperty("requestContractSha256", out var requestContractSha256)
+                ? requestContractSha256.GetString()
+                : null);
+        var executor = (executorFactory ?? new DefaultLiveProviderExecutorFactory()).Create(providerMode, requestPlan, identities);
+        var observation = await executor.ExecuteAsync(requestPlan, identities);
         var result = new ReviewResult(
             1,
             RuntimeApplication.RuntimeVersion,
             inputHash,
             observation.Summary,
-            [],
+            observation.Findings.Select(ToRuntimeFinding).ToArray(),
             observation.Limitations,
             [],
             [],
@@ -200,7 +225,7 @@ internal static class LiveRuntimeApplication
         var outcomeSource = new ValidatedOutcomeSource
         {
             Summary = resultWithTrace.Summary,
-            Findings = [],
+            Findings = observation.Findings,
             Limitations = resultWithTrace.Limitations.ToImmutableArray()
         };
         var outcome = LedgerBuilder.BuildReviewOutcome(outcomeSource, interaction);
@@ -234,7 +259,7 @@ internal static class LiveRuntimeApplication
         using (var metadataDocument = ParseJson(metadataBytes, "APR_METADATA_JSON_INVALID", "Live provider metadata is not valid JSON."))
         {
             if (!schemas.IsValid(SchemaKind.ProviderRunMetadata, metadataDocument.RootElement) ||
-                !HasValidSyntheticMetadataSemantics(metadataDocument.RootElement, observation))
+                !HasValidMetadataSemantics(metadataDocument.RootElement, observation, providerMode))
                 throw new RuntimeFailure(20, "APR_LIVE_OUTPUT_SELF_VALIDATION_FAILED", "Live provider metadata failed schema validation.");
         }
 
@@ -258,6 +283,8 @@ internal static class LiveRuntimeApplication
             {
                 await TryDeleteAsync(fileSystem, file.TempPath);
             }
+            if (providerMode == "live")
+                throw new ProviderFailureException("APR_PROVIDER_PERSISTENCE", 40);
             throw new RuntimeFailure(40, "APR_CANDIDATE_LEDGER_WRITE_FAILED", "Live output files could not be committed.");
         }
     }
@@ -495,6 +522,38 @@ internal static class LiveRuntimeApplication
         }).ToImmutableArray();
     }
 
+    private static string BuildCurrentSubject(RuntimePullRequest pullRequest)
+    {
+        var subject = string.IsNullOrEmpty(pullRequest.Body)
+            ? pullRequest.Title
+            : $"{pullRequest.Title}\n\n{pullRequest.Body}";
+        return subject.EnumerateRunes().Count() <= 4_000
+            ? subject
+            : string.Concat(subject.EnumerateRunes().Take(4_000).Select(rune => rune.ToString()));
+    }
+
+    private static int ReadMaxFindings(RuntimeOptions? options)
+    {
+        if (options?.MaxFindings is not JsonElement maxFindings ||
+            maxFindings.ValueKind != JsonValueKind.Number ||
+            !maxFindings.TryGetInt32(out var value))
+            return 50;
+        return Math.Clamp(value, 1, 50);
+    }
+
+    private static RuntimeFinding ToRuntimeFinding(LedgerFinding finding) => new(
+        finding.Severity,
+        finding.Confidence,
+        finding.Category,
+        finding.Title,
+        finding.Body,
+        finding.Path,
+        finding.StartLine is null ? null : checked((int)finding.StartLine.Value),
+        finding.EndLine is null ? null : checked((int)finding.EndLine.Value),
+        finding.Evidence,
+        finding.SuggestedAction,
+        finding.InlinePreference);
+
     private static long Number(JsonElement value)
     {
         return NumberInt64(value, "APR_INPUT_SCHEMA_INVALID", 0, 1_000_000);
@@ -563,29 +622,50 @@ internal static class LiveRuntimeApplication
         node.WriteTo(writer);
     }
 
-    private static bool HasValidSyntheticMetadataSemantics(JsonElement metadata, ProviderExecutionObservation observation)
+    private static bool HasValidMetadataSemantics(
+        JsonElement metadata,
+        ProviderExecutionObservation observation,
+        string providerMode)
     {
         if (metadata.GetProperty("selectedProviderId").GetString() != observation.SelectedProviderId ||
             metadata.GetProperty("observedProviderId").GetString() != observation.ObservedProviderId ||
             metadata.GetProperty("resolvedModelId").GetString() != observation.ResolvedModelId ||
             metadata.GetProperty("adapterId").GetString() != observation.AdapterId ||
-            metadata.GetProperty("cacheStatus").GetString() != "unknown" ||
             metadata.GetProperty("errorCodes").GetArrayLength() != 0)
             return false;
-        var capability = metadata.GetProperty("capability");
-        if (capability.GetProperty("aggregate").GetString() != "unknown" ||
-            capability.GetProperty("statelessProof").ValueKind != JsonValueKind.Null)
+        if (providerMode == "synthetic")
+        {
+            if (metadata.GetProperty("cacheStatus").GetString() != "unknown") return false;
+            var capability = metadata.GetProperty("capability");
+            if (capability.GetProperty("aggregate").GetString() != "unknown" ||
+                capability.GetProperty("statelessProof").ValueKind != JsonValueKind.Null)
+                return false;
+            var usage = metadata.GetProperty("normalizedUsage");
+            var aggregate = usage.GetProperty("aggregate");
+            return usage.GetProperty("attempts").GetArrayLength() == 0 &&
+                usage.GetProperty("requests").GetArrayLength() == 0 &&
+                NumberInt64(aggregate.GetProperty("requestCount"), "APR_LIVE_OUTPUT_SELF_VALIDATION_FAILED", 0, 0) == 0 &&
+                NumberInt64(aggregate.GetProperty("attemptCount"), "APR_LIVE_OUTPUT_SELF_VALIDATION_FAILED", 0, 0) == 0 &&
+                metadata.GetProperty("retryObservations").GetProperty("requests").GetArrayLength() == 0 &&
+                metadata.GetProperty("telemetryCompleteness").GetProperty("usage").GetString() == "missing" &&
+                metadata.GetProperty("telemetryCompleteness").GetProperty("cache").GetString() == "missing" &&
+                metadata.GetProperty("telemetryCompleteness").GetProperty("aggregate").GetString() == "missing";
+        }
+        var liveCapability = metadata.GetProperty("capability");
+        if (liveCapability.GetProperty("aggregate").GetString() != "eligible" ||
+            liveCapability.GetProperty("statelessProof").ValueKind != JsonValueKind.Null ||
+            metadata.GetProperty("cacheStatus").GetString() != observation.CacheStatus)
             return false;
-        var usage = metadata.GetProperty("normalizedUsage");
-        var aggregate = usage.GetProperty("aggregate");
-        return usage.GetProperty("attempts").GetArrayLength() == 0 &&
-            usage.GetProperty("requests").GetArrayLength() == 0 &&
-            NumberInt64(aggregate.GetProperty("requestCount"), "APR_LIVE_OUTPUT_SELF_VALIDATION_FAILED", 0, 0) == 0 &&
-            NumberInt64(aggregate.GetProperty("attemptCount"), "APR_LIVE_OUTPUT_SELF_VALIDATION_FAILED", 0, 0) == 0 &&
-            metadata.GetProperty("retryObservations").GetProperty("requests").GetArrayLength() == 0 &&
-            metadata.GetProperty("telemetryCompleteness").GetProperty("usage").GetString() == "missing" &&
-            metadata.GetProperty("telemetryCompleteness").GetProperty("cache").GetString() == "missing" &&
-            metadata.GetProperty("telemetryCompleteness").GetProperty("aggregate").GetString() == "missing";
+        var liveUsage = metadata.GetProperty("normalizedUsage");
+        var liveAggregate = liveUsage.GetProperty("aggregate");
+        return liveUsage.GetProperty("attempts").GetArrayLength() == 1 &&
+            liveUsage.GetProperty("requests").GetArrayLength() == 1 &&
+            NumberInt64(liveAggregate.GetProperty("requestCount"), "APR_LIVE_OUTPUT_SELF_VALIDATION_FAILED", 1, 1) == 1 &&
+            NumberInt64(liveAggregate.GetProperty("attemptCount"), "APR_LIVE_OUTPUT_SELF_VALIDATION_FAILED", 1, 1) == 1 &&
+            metadata.GetProperty("retryObservations").GetProperty("requests").GetArrayLength() == 1 &&
+            metadata.GetProperty("telemetryCompleteness").GetProperty("usage").GetString() == "partial" &&
+            metadata.GetProperty("telemetryCompleteness").GetProperty("cache").GetString() == "complete" &&
+            metadata.GetProperty("telemetryCompleteness").GetProperty("aggregate").GetString() == "partial";
     }
 
     private static void WriteEmptyAggregate(Utf8JsonWriter writer)

@@ -16,6 +16,7 @@ describe('parseActionConfig', () => {
   it('parses defaults for test runtime', () => {
     const config = parseActionConfig(new Inputs({}), baseEnv, 'pull_request');
     expect(config.runtimeProvider).toBe('test');
+    expect(config.liveProvider).toBe('none');
     expect(config.runtimeBackend).toBe('legacy');
     expect(config.targetMode).toBe('pull-request');
     expect(config.reviewMode).toBe('auto');
@@ -186,6 +187,38 @@ describe('parseActionConfig', () => {
         'workflow_dispatch',
       ),
     ).toThrow(/verification_namespace/);
+  });
+
+  it('accepts DeepSeek live with a lower runtime finding cap', () => {
+    const config = parseActionConfig(
+      new Inputs({
+        runtime_backend: 'ledger-csharp',
+        live_provider: 'deepseek',
+        max_findings: '7',
+        max_patch_chars: '20000',
+        post_comment: 'true',
+      }),
+      baseEnv,
+      'workflow_dispatch',
+    );
+    expect(config.liveProvider).toBe('deepseek');
+    expect(config.maxFindings).toBe(7);
+  });
+
+  it('rejects a DeepSeek runtime finding cap above the provider contract', () => {
+    expect(() =>
+      parseActionConfig(
+        new Inputs({
+          runtime_backend: 'ledger-csharp',
+          live_provider: 'deepseek',
+          max_findings: '51',
+          max_patch_chars: '20000',
+          post_comment: 'true',
+        }),
+        baseEnv,
+        'workflow_dispatch',
+      ),
+    ).toThrow(/max_findings<=50/);
   });
 
   it('rejects mutually exclusive instruction inputs', () => {

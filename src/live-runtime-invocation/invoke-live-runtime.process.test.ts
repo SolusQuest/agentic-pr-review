@@ -1,7 +1,11 @@
 import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-import { runProcess } from './invoke-live-runtime.js';
+import {
+  classifyLiveProviderHostCancellation,
+  classifyProviderFailure,
+  runProcess,
+} from './invoke-live-runtime.js';
 
 class FakeChild extends EventEmitter {
   readonly stdout = new EventEmitter();
@@ -36,6 +40,57 @@ function start(
 }
 
 describe('live runtime process terminal ordering', () => {
+  it('maps only the closed provider diagnostic and exit pairs', () => {
+    expect(
+      classifyProviderFailure(
+        new TextEncoder().encode('APR_PROVIDER_TIMEOUT: Provider invocation failed.\n'),
+        30,
+      ),
+    ).toMatchObject({ kind: 'provider-timeout', exitCode: 30 });
+    expect(
+      classifyProviderFailure(
+        new TextEncoder().encode('APR_PROVIDER_RESPONSE: Provider invocation failed.\n'),
+        30,
+      ),
+    ).toBeUndefined();
+    expect(
+      classifyProviderFailure(
+        new TextEncoder().encode('APR_PROVIDER_RESPONSE: raw provider body'),
+        20,
+      ),
+    ).toBeUndefined();
+  });
+
+  it.each(['null', 'aaaa'])('passes the provider key through child env: %s', async (key) => {
+    const fake = new FakeChild();
+    let childEnv: NodeJS.ProcessEnv | undefined;
+    const resultPromise = runProcess(
+      { executablePath: '/trusted/runtime' },
+      ['review-live'],
+      1_000,
+      undefined,
+      '/private/invocation',
+      ((
+        _executablePath: string,
+        _args: readonly string[],
+        options: { env?: NodeJS.ProcessEnv },
+      ) => {
+        childEnv = (options as { env?: NodeJS.ProcessEnv }).env;
+        return fake as unknown as ChildProcess;
+      }) as never,
+      2_000,
+      { AGENTIC_REVIEW_DEEPSEEK_API_KEY: key },
+    );
+    queueMicrotask(() => fake.emit('spawn'));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    fake.exitCode = 0;
+    fake.emit('exit', 0, null);
+    fake.emit('close', 0, null);
+
+    await expect(resultPromise).resolves.toMatchObject({ exitCode: 0 });
+    expect(childEnv?.AGENTIC_REVIEW_DEEPSEEK_API_KEY).toBe(key);
+  });
+
   it('cancels when abort occurs during spawn before listener registration', async () => {
     const fake = new FakeChild();
     const controller = new AbortController();
@@ -43,6 +98,48 @@ describe('live runtime process terminal ordering', () => {
     queueMicrotask(() => fake.emit('close', null, null));
 
     await expect(resultPromise).rejects.toMatchObject({ kind: 'cancelled' });
+  });
+
+  it('maps an aborted live provider process to provider-cancelled', async () => {
+    const fake = new FakeChild();
+    const controller = new AbortController();
+    const resultPromise = start(fake, 1_000, controller.signal);
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    controller.abort();
+    fake.emit('close', null, null);
+
+    const error = await resultPromise.catch((value: unknown) => value);
+    expect(classifyLiveProviderHostCancellation(error, 'live')).toMatchObject({
+      kind: 'provider-cancelled',
+      exitCode: 30,
+    });
+    expect(classifyLiveProviderHostCancellation(error, 'synthetic')).toBeUndefined();
+  });
+
+  it('preserves deferred cleanup metadata when an aborted live child never closes', async () => {
+    const fake = new FakeChild();
+    const controller = new AbortController();
+    const resultPromise = runProcess(
+      { executablePath: '/trusted/runtime' },
+      [],
+      1_000,
+      controller.signal,
+      '/private/invocation',
+      (() => fake as unknown as ChildProcess) as never,
+      20,
+    );
+    queueMicrotask(() => fake.emit('spawn'));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    controller.abort();
+
+    const error = await resultPromise.catch((value: unknown) => value);
+    expect(error).toMatchObject({ kind: 'cancelled', closeObserved: false });
+    expect(classifyLiveProviderHostCancellation(error, 'live')).toMatchObject({
+      kind: 'provider-cancelled',
+      exitCode: 30,
+      closeObserved: false,
+      cleanupWarnings: [],
+    });
   });
 
   it('keeps natural exit when abort arrives before close', async () => {
