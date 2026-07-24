@@ -116,6 +116,32 @@ describe('live runtime process terminal ordering', () => {
     expect(classifyLiveProviderHostCancellation(error, 'synthetic')).toBeUndefined();
   });
 
+  it('preserves deferred cleanup metadata when an aborted live child never closes', async () => {
+    const fake = new FakeChild();
+    const controller = new AbortController();
+    const resultPromise = runProcess(
+      { executablePath: '/trusted/runtime' },
+      [],
+      1_000,
+      controller.signal,
+      '/private/invocation',
+      (() => fake as unknown as ChildProcess) as never,
+      20,
+    );
+    queueMicrotask(() => fake.emit('spawn'));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    controller.abort();
+
+    const error = await resultPromise.catch((value: unknown) => value);
+    expect(error).toMatchObject({ kind: 'cancelled', closeObserved: false });
+    expect(classifyLiveProviderHostCancellation(error, 'live')).toMatchObject({
+      kind: 'provider-cancelled',
+      exitCode: 30,
+      closeObserved: false,
+      cleanupWarnings: [],
+    });
+  });
+
   it('keeps natural exit when abort arrives before close', async () => {
     const fake = new FakeChild();
     const controller = new AbortController();

@@ -1304,6 +1304,8 @@ export function classifyLiveProviderHostCancellation(
     kind: 'provider-cancelled',
     message: 'Live provider invocation was cancelled by the host.',
     exitCode: 30,
+    closeObserved: error.closeObserved,
+    cleanupWarnings: error.cleanupWarnings,
   });
 }
 
