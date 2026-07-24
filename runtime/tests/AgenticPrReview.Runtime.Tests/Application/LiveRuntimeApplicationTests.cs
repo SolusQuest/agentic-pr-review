@@ -98,11 +98,20 @@ public sealed class LiveRuntimeApplicationTests
 
     private sealed class ResponseHandler(string content) : HttpMessageHandler
     {
+        private HttpResponseMessage? response = new(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StringContent(content, Encoding.UTF8, "application/json"),
+        };
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
-            {
-                Content = new StringContent(content, Encoding.UTF8, "application/json"),
-            });
+            Task.FromResult(Interlocked.Exchange(ref response, null) ?? throw new InvalidOperationException("Response was already consumed."));
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+                Interlocked.Exchange(ref response, null)?.Dispose();
+            base.Dispose(disposing);
+        }
     }
 
     private static string DeepSeekResponse(string model) =>
