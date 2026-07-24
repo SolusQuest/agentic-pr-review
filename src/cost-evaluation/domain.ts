@@ -5,24 +5,35 @@
  * run-evidence can share these without circular imports.
  */
 import { canonicalJsonBytes, type CanonicalJsonValue } from '../canonical-json/index.js';
+import { PREFIX_CONTRACT_VERSION } from '../state-v2/constants.js';
 import { digestId, sha256Hex } from './hash.js';
 
 export const STRATEGY_IDENTITY_SCHEMA_VERSION = 1 as const;
 export const STRATEGY_IDENTITY_DIGEST_TAG = 'agentic-pr-review/cost-eval/strategy-identity/v1';
 
 /**
- * Per-leg strategy identity (#54 § Domain model). Resumed leg:
- * `capabilityMode = "standard"`, `statelessProofKind = null`. Stateless leg:
- * `capabilityMode = "stateless"`, `statelessProofKind = "synthetic"`. All runs
- * of a leg must produce the same identity.
+ * Per-leg strategy identity (#54 § Domain model). Discriminated by
+ * `capabilityMode`: a resumed leg is `{ capabilityMode: 'standard',
+ * statelessProofKind: null }`; a stateless leg is `{ capabilityMode:
+ * 'stateless', statelessProofKind: 'synthetic' }`. The union excludes the
+ * illegal cartesian combinations (`standard`/`synthetic`, `stateless`/`null`).
+ * All runs of a leg must produce the same identity.
  */
-export interface CostEvaluationStrategyIdentityV1 {
-  readonly schemaVersion: 1;
-  readonly adapterId: string;
-  readonly cacheConfigId: string;
-  readonly capabilityMode: 'standard' | 'stateless';
-  readonly statelessProofKind: null | 'synthetic';
-}
+export type CostEvaluationStrategyIdentityV1 =
+  | {
+      readonly schemaVersion: 1;
+      readonly adapterId: string;
+      readonly cacheConfigId: string;
+      readonly capabilityMode: 'standard';
+      readonly statelessProofKind: null;
+    }
+  | {
+      readonly schemaVersion: 1;
+      readonly adapterId: string;
+      readonly cacheConfigId: string;
+      readonly capabilityMode: 'stateless';
+      readonly statelessProofKind: 'synthetic';
+    };
 
 /** Frozen strategy-identity digest preimage. */
 export function strategyIdentityDigest(identity: CostEvaluationStrategyIdentityV1): string {
@@ -48,7 +59,7 @@ export interface WindowPartitionInputs {
   readonly resumedStrategyIdentity: CostEvaluationStrategyIdentityV1;
   readonly statelessStrategyIdentity: CostEvaluationStrategyIdentityV1;
   readonly fixtureSuiteDigest: string;
-  readonly prefixContractVersion: string;
+  readonly prefixContractVersion: typeof PREFIX_CONTRACT_VERSION;
   readonly harnessVersion: string;
   readonly mode: string;
 }

@@ -27,15 +27,16 @@ describe('strategyIdentityDigest', () => {
     expect(strategyIdentityDigest(resumed)).toBe(strategyIdentityDigest(resumed));
   });
 
-  it('changes when any single field changes', () => {
+  it('changes when the free string fields change', () => {
     const base = strategyIdentityDigest(resumed);
     expect(strategyIdentityDigest({ ...resumed, adapterId: 'other' })).not.toBe(base);
     expect(strategyIdentityDigest({ ...resumed, cacheConfigId: 'other' })).not.toBe(base);
-    expect(strategyIdentityDigest({ ...resumed, capabilityMode: 'stateless' })).not.toBe(base);
-    expect(strategyIdentityDigest({ ...resumed, statelessProofKind: 'synthetic' })).not.toBe(base);
   });
 
-  it('distinguishes resumed vs stateless identities', () => {
+  it('couples capabilityMode/statelessProofKind: resumed vs stateless differ', () => {
+    // The discriminated union binds capabilityMode to statelessProofKind, so the
+    // two legal identities (standard/null, stateless/synthetic) are the only
+    // constructable variants; their digests must differ.
     expect(strategyIdentityDigest(resumed)).not.toBe(strategyIdentityDigest(stateless));
   });
 });
@@ -48,7 +49,7 @@ describe('windowPartitionKeyDigest', () => {
     resumedStrategyIdentity: resumed,
     statelessStrategyIdentity: stateless,
     fixtureSuiteDigest: 'fixture-suite-digest',
-    prefixContractVersion: 'pcv',
+    prefixContractVersion: 1,
     harnessVersion: 'harness-1',
     mode: 'synthetic',
   };
@@ -57,15 +58,17 @@ describe('windowPartitionKeyDigest', () => {
     expect(windowPartitionKeyDigest(base)).toBe(windowPartitionKeyDigest(base));
   });
 
-  it('changes when any scalar field changes', () => {
+  it('changes when any mutable scalar field changes', () => {
     const d = windowPartitionKeyDigest(base);
     expect(windowPartitionKeyDigest({ ...base, profileDigest: 'p2' })).not.toBe(d);
     expect(windowPartitionKeyDigest({ ...base, providerId: 'prov2' })).not.toBe(d);
     expect(windowPartitionKeyDigest({ ...base, modelId: 'm2' })).not.toBe(d);
     expect(windowPartitionKeyDigest({ ...base, fixtureSuiteDigest: 'fs2' })).not.toBe(d);
-    expect(windowPartitionKeyDigest({ ...base, prefixContractVersion: 'pcv2' })).not.toBe(d);
     expect(windowPartitionKeyDigest({ ...base, harnessVersion: 'h2' })).not.toBe(d);
     expect(windowPartitionKeyDigest({ ...base, mode: 'live' })).not.toBe(d);
+    // prefixContractVersion is a frozen literal (typeof PREFIX_CONTRACT_VERSION
+    // = 1); only one value is constructable, so its sensitivity is enforced by
+    // the type, not by mutation.
   });
 
   it('changes when either strategy identity changes', () => {
@@ -100,7 +103,7 @@ describe('windowPartitionKeyDigest structural independence', () => {
       resumedStrategyIdentity: resumed,
       statelessStrategyIdentity: stateless,
       fixtureSuiteDigest: 'fs',
-      prefixContractVersion: 'pcv',
+      prefixContractVersion: 1,
       harnessVersion: 'h',
       mode: 'synthetic',
     };

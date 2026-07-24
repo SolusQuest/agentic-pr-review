@@ -18,7 +18,12 @@ import {
   type SuiteReportView,
   type WindowPartitionInputs,
 } from './domain.js';
-import { suiteReducer, type ScenarioOutcome, type ScenarioReason } from './outcome.js';
+import {
+  suiteReducer,
+  type EligibilityFailureReason,
+  type InvalidReason,
+  type ScenarioOutcome,
+} from './outcome.js';
 
 export const REPORT_SCHEMA_VERSION = 1 as const;
 
@@ -31,15 +36,55 @@ export interface ReportProvenance {
   readonly timestamp: string | null;
 }
 
-export interface ScenarioResultEntry {
+/**
+ * Per-leg ratio-eligibility completeness projected into the suite report (#54
+ * § Report schema). `complete` = the leg was ratio-eligible (conclusive
+ * partitions); `incomplete` = the leg failed eligibility. Closed two-leg
+ * projection; included in the semantic envelope so it is part of the frozen
+ * `reportSha256` preimage.
+ */
+export type LegRatioCompleteness = 'complete' | 'incomplete';
+export interface ScenarioCompleteness {
+  readonly resumed: LegRatioCompleteness;
+  readonly stateless: LegRatioCompleteness;
+}
+
+type ScenarioResultEntryCommon = {
   readonly scenarioId: string;
-  readonly outcome: ScenarioOutcome;
-  readonly reason: ScenarioReason;
   readonly numerator: string | null;
   readonly denominator: string | null;
   readonly displayRatio: string | null;
   readonly totalCost: string | null;
-}
+  readonly completeness: ScenarioCompleteness;
+};
+
+/**
+ * Per-scenario result entry, a discriminated union on `outcome`. Each variant
+ * constrains `reason` to the subtype that maps to that outcome, so a
+ * contradictory (outcome, reason) pair is unconstructable (the closed
+ * reason->outcome matrix holds by construction, not just by convention).
+ */
+export type ScenarioResultEntry =
+  | (ScenarioResultEntryCommon & {
+      readonly outcome: 'pass';
+      readonly reason: 'ratio_pass';
+    })
+  | (ScenarioResultEntryCommon & {
+      readonly outcome: 'regression';
+      readonly reason: 'ratio_regression';
+    })
+  | (ScenarioResultEntryCommon & {
+      readonly outcome: 'inconclusive';
+      readonly reason: EligibilityFailureReason | 'ratio_gray_band';
+    })
+  | (ScenarioResultEntryCommon & {
+      readonly outcome: 'contract_regression';
+      readonly reason: 'prefix_drift';
+    })
+  | (ScenarioResultEntryCommon & {
+      readonly outcome: 'invalid';
+      readonly reason: InvalidReason;
+    });
 
 export interface SuiteTotals {
   readonly numerator: string | null;
@@ -49,10 +94,8 @@ export interface SuiteTotals {
 }
 
 export interface SuiteReportBuildInput {
-  readonly harnessVersion: string;
   readonly suiteId: string;
   readonly suiteVersion: string;
-  readonly mode: string;
   readonly windowInputs: WindowPartitionInputs;
   readonly scenarioResults: readonly ScenarioResultEntry[];
   readonly totals: SuiteTotals;
@@ -132,24 +175,51 @@ function cloneJson(value: unknown): CanonicalJsonValue {
   return value as unknown as CanonicalJsonValue;
 }
 
+/**
+ * Deep-clone `WindowPartitionInputs` into an owned snapshot for the graduation
+ * view. The view must not retain a live reference to the caller's
+ * `windowInputs`: a caller mutating its strategy identities / harness version /
+ * mode after `buildSuiteReport` would otherwise change the partition key that
+ * graduation recomputes from `view.windowPartitionInputs`, while the build-time
+ * `reportSha256` stays fixed - silently deserializing the report from its own
+ * envelope. Strategy identities are flat, so a shallow copy of each suffices.
+ */
+function cloneWindowInputs(inputs: WindowPartitionInputs): WindowPartitionInputs {
+  return {
+    profileDigest: inputs.profileDigest,
+    providerId: inputs.providerId,
+    modelId: inputs.modelId,
+    resumedStrategyIdentity: { ...inputs.resumedStrategyIdentity },
+    statelessStrategyIdentity: { ...inputs.statelessStrategyIdentity },
+    fixtureSuiteDigest: inputs.fixtureSuiteDigest,
+    prefixContractVersion: inputs.prefixContractVersion,
+    harnessVersion: inputs.harnessVersion,
+    mode: inputs.mode,
+  };
+}
+
 /** Build a suite report, its semantic envelope, reportSha256, and graduation view. */
 export function buildSuiteReport(input: SuiteReportBuildInput): BuiltSuiteReport {
   const suiteOutcome = suiteReducer(input.scenarioResults.map((r) => r.outcome));
-  const windowPartitionKey = windowPartitionKeyDigest(input.windowInputs);
+  // Single source of truth: harnessVersion and mode derive from the owned
+  // window inputs (they also feed the window-partition key), so the envelope
+  // root and the partition key can never disagree.
+  const ownedWindowInputs = cloneWindowInputs(input.windowInputs);
+  const windowPartitionKey = windowPartitionKeyDigest(ownedWindowInputs);
   const semanticEnvelope: Record<string, CanonicalJsonValue> = {
     schemaVersion: REPORT_SCHEMA_VERSION,
-    harnessVersion: input.harnessVersion,
+    harnessVersion: ownedWindowInputs.harnessVersion,
     reportKind: 'suite',
     suiteId: input.suiteId,
     suiteVersion: input.suiteVersion,
-    mode: input.mode,
-    profileDigest: input.windowInputs.profileDigest,
-    providerId: input.windowInputs.providerId,
-    modelId: input.windowInputs.modelId,
-    fixtureSuiteDigest: input.windowInputs.fixtureSuiteDigest,
-    prefixContractVersion: input.windowInputs.prefixContractVersion,
-    resumedStrategyIdentity: cloneJson(input.windowInputs.resumedStrategyIdentity),
-    statelessStrategyIdentity: cloneJson(input.windowInputs.statelessStrategyIdentity),
+    mode: ownedWindowInputs.mode,
+    profileDigest: ownedWindowInputs.profileDigest,
+    providerId: ownedWindowInputs.providerId,
+    modelId: ownedWindowInputs.modelId,
+    fixtureSuiteDigest: ownedWindowInputs.fixtureSuiteDigest,
+    prefixContractVersion: ownedWindowInputs.prefixContractVersion,
+    resumedStrategyIdentity: cloneJson(ownedWindowInputs.resumedStrategyIdentity),
+    statelessStrategyIdentity: cloneJson(ownedWindowInputs.statelessStrategyIdentity),
     windowPartitionKey,
     scenarioResults: cloneJson(input.scenarioResults),
     totals: cloneJson(input.totals),
@@ -166,7 +236,7 @@ export function buildSuiteReport(input: SuiteReportBuildInput): BuiltSuiteReport
     semanticEnvelope,
     evidenceOccurrenceId: input.evidenceOccurrenceId,
     suiteOutcome,
-    windowPartitionInputs: input.windowInputs,
+    windowPartitionInputs: ownedWindowInputs,
   };
   return { report, semanticEnvelope, reportSha256, windowPartitionKey, suiteOutcome, view };
 }

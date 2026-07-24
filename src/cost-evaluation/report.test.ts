@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildLiveObservationReport, buildSuiteReport, serializeReport } from './report.js';
+import {
+  buildLiveObservationReport,
+  buildSuiteReport,
+  serializeReport,
+  type ScenarioCompleteness,
+  type ScenarioResultEntry,
+} from './report.js';
 import { evaluateGraduationWindow } from './graduation.js';
 import {
   reportSha256Of,
@@ -28,20 +34,33 @@ const windowInputs: WindowPartitionInputs = {
   resumedStrategyIdentity: resumedIdentity,
   statelessStrategyIdentity: statelessIdentity,
   fixtureSuiteDigest: 'fixture-suite-digest',
-  prefixContractVersion: 'pcv1',
+  prefixContractVersion: 1,
   harnessVersion: 'h1',
   mode: 'synthetic',
 };
-const scenarioResults = [
-  {
-    scenarioId: 'large_prior_small_delta',
-    outcome: 'pass' as const,
-    reason: 'ratio_pass' as const,
-    numerator: '10',
-    denominator: '1000',
-    displayRatio: '0.010000',
+
+const complete: ScenarioCompleteness = { resumed: 'complete', stateless: 'complete' };
+
+function passEntry(
+  scenarioId: string,
+  numerator: string,
+  denominator: string,
+  displayRatio: string,
+): ScenarioResultEntry {
+  return {
+    scenarioId,
+    outcome: 'pass',
+    reason: 'ratio_pass',
+    numerator,
+    denominator,
+    displayRatio,
     totalCost: null,
-  },
+    completeness: complete,
+  };
+}
+
+const scenarioResults: readonly ScenarioResultEntry[] = [
+  passEntry('large_prior_small_delta', '10', '1000', '0.010000'),
 ];
 const totals = { numerator: '10', denominator: '1000', displayRatio: '0.010000', totalCost: null };
 
@@ -49,10 +68,8 @@ function suiteInput(
   over: { evidenceOccurrenceId?: string; provenance?: Record<string, string | null> } = {},
 ) {
   return {
-    harnessVersion: 'h1',
     suiteId: 'synthetic-v1',
     suiteVersion: '1',
-    mode: 'synthetic',
     windowInputs,
     scenarioResults,
     totals,
@@ -65,6 +82,15 @@ function suiteInput(
       nodeVersion: over.provenance?.nodeVersion ?? 'v20',
       timestamp: over.provenance?.timestamp ?? '2026-01-01T00:00:00Z',
     },
+  };
+}
+
+/** A fresh, locally-owned windowInputs (no shared-ref mutation pollution). */
+function freshWindowInputs(): WindowPartitionInputs {
+  return {
+    ...windowInputs,
+    resumedStrategyIdentity: { ...resumedIdentity },
+    statelessStrategyIdentity: { ...statelessIdentity },
   };
 }
 
@@ -85,6 +111,15 @@ describe('buildSuiteReport', () => {
     expect(env.windowPartitionKey).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  it('derives harnessVersion and mode from windowInputs (single source of truth)', () => {
+    const built = buildSuiteReport(suiteInput());
+    const env = built.semanticEnvelope as Record<string, unknown>;
+    // SuiteReportBuildInput has no top-level harnessVersion/mode; the envelope
+    // root binds to windowInputs (the same source as the window-partition key).
+    expect(env.harnessVersion).toBe(windowInputs.harnessVersion);
+    expect(env.mode).toBe(windowInputs.mode);
+  });
+
   it('reportSha256 is unaffected by evidenceOccurrenceId or provenance (determinism)', () => {
     const a = buildSuiteReport(
       suiteInput({ evidenceOccurrenceId: 'occ-1', provenance: { sourceCommit: 'sha-a' } }),
@@ -103,12 +138,94 @@ describe('buildSuiteReport', () => {
     expect(built.view.evidenceOccurrenceId).toBe('occ-1');
   });
 
+  it('includes per-scenario completeness in the semantic envelope', () => {
+    const built = buildSuiteReport(suiteInput());
+    const env = built.semanticEnvelope as Record<string, unknown>;
+    const results = env.scenarioResults as Array<Record<string, unknown>>;
+    expect(results[0].completeness).toEqual({ resumed: 'complete', stateless: 'complete' });
+  });
+
   it('serializeReport produces canonical JSON bytes containing reportSha256', () => {
     const built = buildSuiteReport(suiteInput());
     const bytes = serializeReport(built.report);
     const text = new TextDecoder().decode(bytes);
     expect(text).toContain(`"reportSha256":"${built.reportSha256}"`);
     expect(text.endsWith('}')).toBe(true);
+  });
+});
+
+describe('ScenarioResultEntry closed reason->outcome invariant (B2)', () => {
+  it('accepts each outcome variant with its matching reason subtype', () => {
+    const entries: ScenarioResultEntry[] = [
+      {
+        scenarioId: 'p',
+        outcome: 'pass',
+        reason: 'ratio_pass',
+        numerator: '1',
+        denominator: '1',
+        displayRatio: '1.000000',
+        totalCost: null,
+        completeness: complete,
+      },
+      {
+        scenarioId: 'r',
+        outcome: 'regression',
+        reason: 'ratio_regression',
+        numerator: '2',
+        denominator: '1',
+        displayRatio: '2.000000',
+        totalCost: null,
+        completeness: complete,
+      },
+      {
+        scenarioId: 'i',
+        outcome: 'inconclusive',
+        reason: 'telemetry_incomplete',
+        numerator: null,
+        denominator: null,
+        displayRatio: null,
+        totalCost: null,
+        completeness: complete,
+      },
+      {
+        scenarioId: 'c',
+        outcome: 'contract_regression',
+        reason: 'prefix_drift',
+        numerator: null,
+        denominator: null,
+        displayRatio: null,
+        totalCost: null,
+        completeness: complete,
+      },
+      {
+        scenarioId: 'v',
+        outcome: 'invalid',
+        reason: 'equivalence_mismatch',
+        numerator: null,
+        denominator: null,
+        displayRatio: null,
+        totalCost: null,
+        completeness: complete,
+      },
+    ];
+    const built = buildSuiteReport({ ...suiteInput(), scenarioResults: entries });
+    // mixed invalid-present suite -> suite reducer yields invalid
+    expect(built.suiteOutcome).toBe('invalid');
+  });
+
+  it('rejects a contradictory (outcome, reason) entry at compile time', () => {
+    // @ts-expect-error - 'prefix_drift' is not a valid reason for outcome 'pass'
+    const bad: ScenarioResultEntry = {
+      scenarioId: 'x',
+      outcome: 'pass',
+      reason: 'prefix_drift',
+      numerator: null,
+      denominator: null,
+      displayRatio: null,
+      totalCost: null,
+      completeness: complete,
+    };
+    expect(bad).toBeDefined();
   });
 });
 
@@ -143,25 +260,9 @@ describe('buildLiveObservationReport', () => {
 
 describe('buildSuiteReport envelope integrity', () => {
   it('scenarioResults order affects reportSha256 (canonical arrays are order-sensitive)', () => {
-    const two = [
-      {
-        scenarioId: 's1',
-        outcome: 'pass' as const,
-        reason: 'ratio_pass' as const,
-        numerator: '10',
-        denominator: '1000',
-        displayRatio: '0.010000',
-        totalCost: null,
-      },
-      {
-        scenarioId: 's2',
-        outcome: 'pass' as const,
-        reason: 'ratio_pass' as const,
-        numerator: '20',
-        denominator: '1000',
-        displayRatio: '0.020000',
-        totalCost: null,
-      },
+    const two: ScenarioResultEntry[] = [
+      passEntry('s1', '10', '1000', '0.010000'),
+      passEntry('s2', '20', '1000', '0.020000'),
     ];
     const base = suiteInput();
     const a = buildSuiteReport({ ...base, scenarioResults: two });
@@ -170,18 +271,49 @@ describe('buildSuiteReport envelope integrity', () => {
   });
 
   it('owns its envelope: caller mutation after build does not change the snapshot', () => {
-    const input = suiteInput();
+    const localResults = [passEntry('s1', '10', '1000', '0.010000')];
+    const localTotals = {
+      numerator: '10',
+      denominator: '1000',
+      displayRatio: '0.010000',
+      totalCost: null,
+    };
+    const input = { ...suiteInput(), scenarioResults: localResults, totals: localTotals };
     const built = buildSuiteReport(input);
     const sha = built.reportSha256;
     // mutate the caller's input arrays/objects after the build
-    (input.scenarioResults as Array<unknown>).push({
-      ...scenarioResults[0],
-      scenarioId: 's9',
-    });
-    (input.totals as { numerator: string }).numerator = '999';
+    localResults.push(passEntry('s9', '99', '1000', '0.099000'));
+    localTotals.numerator = '999';
     // the built envelope + sha are unaffected (recompute matches the snapshot)
     expect(reportSha256Of(built.semanticEnvelope)).toBe(sha);
     expect(built.reportSha256).toBe(sha);
+  });
+
+  it('owns window inputs: post-build mutation does not affect report, view, or graduation key', () => {
+    const localWindow = freshWindowInputs();
+    const built = buildSuiteReport({ ...suiteInput(), windowInputs: localWindow });
+    const sha = built.reportSha256;
+    const viewSnapshot = built.view.windowPartitionInputs;
+    // Simulate a caller mutating its (structurally shared) windowInputs after
+    // build, bypassing readonly via a cast. The builder must have cloned.
+    const mutable = localWindow as unknown as {
+      harnessVersion: string;
+      mode: string;
+      profileDigest: string;
+      resumedStrategyIdentity: { adapterId: string };
+    };
+    mutable.harnessVersion = 'mutated';
+    mutable.mode = 'live';
+    mutable.profileDigest = 'mutated';
+    mutable.resumedStrategyIdentity.adapterId = 'mutated';
+    // envelope + sha unaffected (envelope holds an owned clone)
+    expect(reportSha256Of(built.semanticEnvelope)).toBe(sha);
+    expect(built.reportSha256).toBe(sha);
+    // view's owned snapshot unaffected
+    expect(built.view.windowPartitionInputs).toEqual(viewSnapshot);
+    // graduation recomputes the same partition key from the owned view snapshot
+    const r = evaluateGraduationWindow([built.view, built.view, built.view]);
+    expect(r.invalid).toBe(false);
   });
 
   it('windowPartitionKey in the envelope equals windowPartitionKeyDigest(windowInputs)', () => {

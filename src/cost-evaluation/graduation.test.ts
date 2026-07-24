@@ -29,7 +29,7 @@ const baseWindowInputs: WindowPartitionInputs = {
   resumedStrategyIdentity: resumedIdentity,
   statelessStrategyIdentity: statelessIdentity,
   fixtureSuiteDigest: 'fixture-suite-digest',
-  prefixContractVersion: 'pcv1',
+  prefixContractVersion: 1,
   harnessVersion: 'h1',
   mode: 'synthetic',
 };

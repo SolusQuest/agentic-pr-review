@@ -21,8 +21,8 @@ export type ScenarioOutcome =
 /** Conformance cases may also produce `not_applicable` (legal invalidation). */
 export type ConformanceOutcome = ScenarioOutcome | 'not_applicable';
 
-export type ScenarioReason =
-  // invalid-class
+/** Invalid-class reasons (each maps to outcome `invalid`). */
+export type InvalidReason =
   | 'malformed_metadata'
   | 'profile_schema_mismatch'
   | 'profile_invalid'
@@ -39,21 +39,36 @@ export type ScenarioReason =
   | 'review_target_mismatch'
   | 'token_bound_violation'
   | 'weight_bound_violation'
-  | 'run_count_bound_violation'
-  // contract_regression
-  | 'prefix_drift'
-  // inconclusive-class (ratio uncomputable or gray band)
+  | 'run_count_bound_violation';
+
+/** Eligibility-failure reasons (each maps to outcome `inconclusive`). */
+export type EligibilityFailureReason =
   | 'telemetry_incomplete'
   | 'cache_completeness_unknown'
   | 'stateless_proof_unverified'
   | 'capability_stateless_unsupported'
   | 'partition_null'
-  | 'no_evaluable_requests'
-  | 'ratio_gray_band'
-  // regression / pass
-  | 'ratio_regression'
-  | 'ratio_pass'
-  // conformance-only
+  | 'no_evaluable_requests';
+
+/** Contract-regression reason (maps to outcome `contract_regression`). */
+export type ContractRegressionReason = 'prefix_drift';
+
+/** Ratio-class reasons: `ratio_pass` -> pass, `ratio_regression` -> regression, `ratio_gray_band` -> inconclusive. */
+export type RatioReason = 'ratio_pass' | 'ratio_regression' | 'ratio_gray_band';
+
+/**
+ * Closed reason vocabulary, partitioned into outcome-determined subtypes. Each
+ * reason maps to exactly one outcome via `reasonToOutcome`; the subtype
+ * partitioning makes a contradictory (outcome, reason) pair unconstructable on
+ * `ScenarioEvaluationInput`, `LegEligibility`, `ScenarioEvaluationResult`, and
+ * `ScenarioResultEntry`. `legal_invalidation` is conformance-only
+ * (`not_applicable`).
+ */
+export type ScenarioReason =
+  | InvalidReason
+  | EligibilityFailureReason
+  | ContractRegressionReason
+  | RatioReason
   | 'legal_invalidation';
 
 const REASON_OUTCOME: Record<ScenarioReason, ScenarioOutcome | 'not_applicable'> = {
@@ -129,7 +144,7 @@ export interface LegMetadataView {
 
 export interface LegEligibility {
   readonly eligible: boolean;
-  readonly reason: ScenarioReason | null;
+  readonly reason: EligibilityFailureReason | null;
 }
 
 /**
@@ -185,7 +200,7 @@ export function perLegRatioEligibility(metadata: LegMetadataView, leg: Leg): Leg
  * eligibilities and costs come from per-leg metadata.
  */
 export interface ScenarioEvaluationInput {
-  readonly validityReason: ScenarioReason | null;
+  readonly validityReason: InvalidReason | null;
   readonly prefixDrift: boolean;
   readonly resumedEligibility: LegEligibility;
   readonly statelessEligibility: LegEligibility;
@@ -193,13 +208,45 @@ export interface ScenarioEvaluationInput {
   readonly den: bigint | null;
 }
 
-export interface ScenarioEvaluationResult {
-  readonly outcome: ScenarioOutcome;
-  readonly reason: ScenarioReason;
-  readonly num: bigint | null;
-  readonly den: bigint | null;
-  readonly ratioClass?: 'pass' | 'inconclusive' | 'regression';
-}
+/**
+ * Scenario evaluation result, a discriminated union on `outcome`. Each variant
+ * constrains `reason` to the subtype that maps to that outcome, so a
+ * contradictory (outcome, reason) pair is unconstructable.
+ */
+export type ScenarioEvaluationResult =
+  | {
+      readonly outcome: 'invalid';
+      readonly reason: InvalidReason;
+      readonly num: bigint | null;
+      readonly den: bigint | null;
+    }
+  | {
+      readonly outcome: 'contract_regression';
+      readonly reason: 'prefix_drift';
+      readonly num: bigint | null;
+      readonly den: bigint | null;
+    }
+  | {
+      readonly outcome: 'inconclusive';
+      readonly reason: EligibilityFailureReason | 'ratio_gray_band';
+      readonly num: bigint | null;
+      readonly den: bigint | null;
+      readonly ratioClass?: 'inconclusive';
+    }
+  | {
+      readonly outcome: 'regression';
+      readonly reason: 'ratio_regression';
+      readonly num: bigint | null;
+      readonly den: bigint | null;
+      readonly ratioClass?: 'regression';
+    }
+  | {
+      readonly outcome: 'pass';
+      readonly reason: 'ratio_pass';
+      readonly num: bigint | null;
+      readonly den: bigint | null;
+      readonly ratioClass?: 'pass';
+    };
 
 /**
  * Evaluate a single scenario under deterministic precedence
