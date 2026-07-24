@@ -6,10 +6,12 @@
  *
  * No JavaScript `number` participates in cost or ratio math. Token values from
  * #51 metadata are safe integers (<= 2^53-1) and are converted to bigint at the
- * boundary. `arithmetic_overflow` is an internal invariant guard on this
- * helper, unit-tested with synthetic oversized bigint operands; legal
- * run-evidence cannot reach it (it would first violate a token/weight/run-count
- * bound, reported as `invalid` upstream).
+ * boundary. `arithmetic_overflow` is an internal invariant guard on this helper
+ * (enforced at three sites: per-run cost in `runInputCost`, run-count + per-run
+ * + leg-total in `sumLegCosts`, and leg-cost operands in `classifyRatio`),
+ * unit-tested with synthetic oversized bigint operands; legal run-evidence
+ * cannot reach it (it would first violate a token/weight/run-count bound,
+ * reported as `invalid` upstream).
  *
  * Frozen contract: see protocol/schemas/cost-evaluation/v1/ and issue #54
  * § Numeric semantics.
@@ -137,6 +139,11 @@ export interface InputWeights {
  * over the parser-validated `normalizedUsage.aggregate` partitions (already
  * summed by #51; no per-attempt multiplication). Returns `null` if any
  * partition is null (null propagates; the leg cost is then uncomputable).
+ *
+ * Internal guard: legal partitions are mutually exclusive and sum to <=
+ * `MAX_TOTAL_INPUT_TOKENS`, and weights <= `MAX_SCALED_WEIGHT`, so a legal
+ * per-run cost never exceeds `MAX_RUN_INPUT_COST`; a synthetic oversized
+ * operand throws `ArithmeticOverflow` here.
  */
 export function runInputCost(partitions: InputPartitions, weights: InputWeights): bigint | null {
   if (
@@ -146,22 +153,33 @@ export function runInputCost(partitions: InputPartitions, weights: InputWeights)
   ) {
     return null;
   }
-  return (
+  const cost =
     partitions.uncached * weights.uncached +
     partitions.cacheWrite * weights.cacheWrite +
-    partitions.cacheRead * weights.cacheRead
-  );
+    partitions.cacheRead * weights.cacheRead;
+  if (cost > MAX_RUN_INPUT_COST) {
+    throw new ArithmeticOverflow('per-run input cost exceeds reachable cap');
+  }
+  return cost;
 }
 
 /**
  * Sum per-run costs into a leg cost. Returns `null` if any run cost is `null`
- * (null propagates). Throws `ArithmeticOverflow` (internal guard) if the sum
- * exceeds the reachable leg cap; legal inputs cannot reach this.
+ * (null propagates). Throws `ArithmeticOverflow` (internal guard) if the run
+ * count exceeds `MAX_RUNS_PER_LEG`, any single run exceeds `MAX_RUN_INPUT_COST`,
+ * or the leg total exceeds `MAX_LEG_INPUT_COST`; legal inputs cannot reach any
+ * of these.
  */
 export function sumLegCosts(runCosts: readonly (bigint | null)[]): bigint | null {
+  if (runCosts.length > Number(MAX_RUNS_PER_LEG)) {
+    throw new ArithmeticOverflow('run count exceeds reachable cap');
+  }
   let total = 0n;
   for (const c of runCosts) {
     if (c === null) return null;
+    if (c > MAX_RUN_INPUT_COST) {
+      throw new ArithmeticOverflow('per-run input cost exceeds reachable cap');
+    }
     total += c;
   }
   if (total > MAX_LEG_INPUT_COST) {
@@ -189,6 +207,12 @@ export function classifyRatio(num: bigint, den: bigint): ClassifyRatioResult {
   if (den < 0n || num < 0n) {
     // Costs are non-negative; a negative value is an upstream contract violation.
     throw new ArithmeticOverflow('negative cost operand in ratio classification');
+  }
+  // Leg-cost operand guard: legal leg costs <= MAX_LEG_INPUT_COST, so the
+  // cross-products (100*num, 105*den) stay within MAX_RATIO_CROSS_PRODUCT. A
+  // synthetic oversized operand throws here.
+  if (num > MAX_LEG_INPUT_COST || den > MAX_LEG_INPUT_COST) {
+    throw new ArithmeticOverflow('ratio operand exceeds reachable leg-cost cap');
   }
   const lhs = 100n * num;
   if (lhs <= 101n * den) return { ok: true, class: 'pass' };

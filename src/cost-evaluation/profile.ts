@@ -207,6 +207,15 @@ export function parseProfile(value: unknown): ProfileParseResult {
       return { ok: false, reason: 'schema', errors: [field] };
     }
   }
+  // Fail-closed: an identity-bearing versioned profile must not silently drop
+  // unknown fields (they would escape the semantic digest). Reject any key not
+  // in the closed field set.
+  const extras = Object.keys(value).filter(
+    (k) => !PROFILE_FIELDS.includes(k as (typeof PROFILE_FIELDS)[number]),
+  );
+  if (extras.length > 0) {
+    return { ok: false, reason: 'schema', errors: extras };
+  }
   if (value.schemaVersion !== PROFILE_SCHEMA_VERSION) {
     return { ok: false, reason: 'schema', errors: ['schemaVersion'] };
   }
@@ -222,10 +231,10 @@ export function parseProfile(value: unknown): ProfileParseResult {
 }
 
 /**
- * Default provider-neutral synthetic evaluation profile (issue #54 D2).
- * Weights informed by DeepSeek v4 pro cache-pricing shape; `cacheWriteWeight`
- * is a declared policy assumption for the synthetic provider's explicit
- * cache-write tier (not derived from any provider price table).
+ * Default provider-neutral synthetic evaluation profile (issue #54 D2). Weights
+ * are versioned synthetic evaluation parameters (no provider price claim);
+ * `cacheWriteWeight` is a declared policy assumption for the synthetic
+ * provider's explicit cache-write tier.
  */
 export const DEFAULT_PROFILE_INPUT = {
   profileVersion: 'm4-cost-evaluation-default-v1',

@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   ArithmeticOverflow,
   MAX_LEG_INPUT_COST,
+  MAX_RUN_INPUT_COST,
+  MAX_RUNS_PER_LEG,
   MAX_SCALED_WEIGHT,
+  MAX_TOTAL_INPUT_TOKENS,
   canonicalWeightString,
   classifyRatio,
   displayRatio,
@@ -206,5 +209,61 @@ describe('displayRatio vs classifyRatio differential', () => {
       ok: true,
       class: 'regression',
     });
+  });
+});
+
+describe('runInputCost internal guard (per-run cap)', () => {
+  // weight 1000 = MAX_SCALED_WEIGHT; tokens = MAX_TOTAL_INPUT_TOKENS ->
+  // per-run cost = MAX_RUN_INPUT_COST exactly (the reachable cap).
+  const weights = { uncached: w('1000'), cacheWrite: w('0'), cacheRead: w('0') };
+
+  it('accepts a per-run cost at the reachable cap (limit)', () => {
+    expect(
+      runInputCost({ uncached: MAX_TOTAL_INPUT_TOKENS, cacheWrite: 0n, cacheRead: 0n }, weights),
+    ).toBe(MAX_RUN_INPUT_COST);
+  });
+
+  it('throws ArithmeticOverflow just over the cap (limit+1)', () => {
+    expect(() =>
+      runInputCost(
+        { uncached: MAX_TOTAL_INPUT_TOKENS + 1n, cacheWrite: 0n, cacheRead: 0n },
+        weights,
+      ),
+    ).toThrow(ArithmeticOverflow);
+  });
+});
+
+describe('sumLegCosts internal guard (run-count + per-run + leg-total)', () => {
+  it('accepts MAX_RUNS_PER_LEG runs (limit, count)', () => {
+    const runs = Array<bigint>(Number(MAX_RUNS_PER_LEG)).fill(1n);
+    expect(sumLegCosts(runs)).toBe(BigInt(Number(MAX_RUNS_PER_LEG)));
+  });
+
+  it('throws ArithmeticOverflow when run count exceeds MAX_RUNS_PER_LEG (limit+1)', () => {
+    const runs = Array<bigint>(Number(MAX_RUNS_PER_LEG) + 1).fill(1n);
+    expect(() => sumLegCosts(runs)).toThrow(ArithmeticOverflow);
+  });
+
+  it('throws ArithmeticOverflow when a single run exceeds MAX_RUN_INPUT_COST', () => {
+    expect(() => sumLegCosts([MAX_RUN_INPUT_COST + 1n])).toThrow(ArithmeticOverflow);
+  });
+
+  it('throws ArithmeticOverflow when the leg total exceeds MAX_LEG_INPUT_COST', () => {
+    expect(() => sumLegCosts([MAX_LEG_INPUT_COST + 1n])).toThrow(ArithmeticOverflow);
+  });
+});
+
+describe('classifyRatio internal guard (leg-cost operand cap)', () => {
+  it('accepts operands at MAX_LEG_INPUT_COST (limit)', () => {
+    // num == den == cap -> 100*num <= 101*den -> pass
+    expect(classifyRatio(MAX_LEG_INPUT_COST, MAX_LEG_INPUT_COST)).toEqual({
+      ok: true,
+      class: 'pass',
+    });
+  });
+
+  it('throws ArithmeticOverflow when either operand exceeds MAX_LEG_INPUT_COST (limit+1)', () => {
+    expect(() => classifyRatio(MAX_LEG_INPUT_COST + 1n, 1n)).toThrow(ArithmeticOverflow);
+    expect(() => classifyRatio(1n, MAX_LEG_INPUT_COST + 1n)).toThrow(ArithmeticOverflow);
   });
 });

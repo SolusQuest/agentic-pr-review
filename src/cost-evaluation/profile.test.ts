@@ -130,4 +130,18 @@ describe('resolveProfile / parseProfile', () => {
     expect(parseProfile({ uncachedWeight: '1' }).ok).toBe(false); // missing fields
     expect(parseProfile('not-an-object').ok).toBe(false);
   });
+
+  it('parseProfile is fail-closed: unknown fields are rejected, not silently dropped', () => {
+    // An identity-bearing versioned profile must not let an unknown field escape
+    // the semantic digest. Two profiles that differ only by an extra field must
+    // NOT resolve to the same canonical profile/digest - the extra is rejected.
+    const withExtra = parseProfile({
+      ...DEFAULT_PROFILE.profile,
+      futureThresholdOverride: '2.0',
+    });
+    expect(withExtra.ok).toBe(false);
+    if (!withExtra.ok) {
+      expect(withExtra.errors).toContain('futureThresholdOverride');
+    }
+  });
 });
