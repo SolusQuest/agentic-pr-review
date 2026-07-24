@@ -102,8 +102,33 @@ function provenanceObject(p: ReportProvenance): CanonicalJsonValue {
   return obj;
 }
 
-/** Cast a plain DTO (interface without an index signature) into CanonicalJsonValue. */
-function cv(value: unknown): CanonicalJsonValue {
+/**
+ * Deep-clone a caller-supplied JSON value into an owned `CanonicalJsonValue`
+ * tree. The report builder must not retain live references into the caller's
+ * input: a caller mutating its arrays/objects after `buildSuiteReport` would
+ * otherwise silently break the `reportSha256` <-> serialized-bytes invariant
+ * (the sha is a build-time snapshot over the envelope). Cloning at build time
+ * makes the envelope self-contained.
+ */
+function cloneJson(value: unknown): CanonicalJsonValue {
+  if (value === null) return null;
+  const type = typeof value;
+  if (type === 'boolean' || type === 'number' || type === 'string') {
+    return value as CanonicalJsonValue;
+  }
+  if (Array.isArray(value)) {
+    return value.map(cloneJson);
+  }
+  if (type === 'object') {
+    const obj: Record<string, CanonicalJsonValue> = {};
+    for (const key of Object.keys(value as object)) {
+      obj[key] = cloneJson((value as Record<string, unknown>)[key]);
+    }
+    return obj;
+  }
+  // Non-JSON values (bigint/function/symbol/undefined) are rejected downstream
+  // by canonicalJsonBytes; surface them unchanged so the error is attributed
+  // to the field that carried them.
   return value as unknown as CanonicalJsonValue;
 }
 
@@ -123,11 +148,11 @@ export function buildSuiteReport(input: SuiteReportBuildInput): BuiltSuiteReport
     modelId: input.windowInputs.modelId,
     fixtureSuiteDigest: input.windowInputs.fixtureSuiteDigest,
     prefixContractVersion: input.windowInputs.prefixContractVersion,
-    resumedStrategyIdentity: cv(input.windowInputs.resumedStrategyIdentity),
-    statelessStrategyIdentity: cv(input.windowInputs.statelessStrategyIdentity),
+    resumedStrategyIdentity: cloneJson(input.windowInputs.resumedStrategyIdentity),
+    statelessStrategyIdentity: cloneJson(input.windowInputs.statelessStrategyIdentity),
     windowPartitionKey,
-    scenarioResults: cv(input.scenarioResults),
-    totals: cv(input.totals),
+    scenarioResults: cloneJson(input.scenarioResults),
+    totals: cloneJson(input.totals),
   };
   const reportSha256 = reportSha256Of(semanticEnvelope);
   const report: Record<string, CanonicalJsonValue> = {
@@ -156,7 +181,7 @@ export function buildLiveObservationReport(
     reportKind: 'liveObservation',
     mode: input.mode,
     profileDigest: input.profileDigest,
-    resumedStrategyIdentity: cv(input.resumedStrategyIdentity),
+    resumedStrategyIdentity: cloneJson(input.resumedStrategyIdentity),
     statelessStrategyIdentity: null,
     observationReason: input.observationReason,
     outcome: 'inconclusive',

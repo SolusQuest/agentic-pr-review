@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildLiveObservationReport, buildSuiteReport, serializeReport } from './report.js';
+import { evaluateGraduationWindow } from './graduation.js';
 import {
   reportSha256Of,
   type CostEvaluationStrategyIdentityV1,
@@ -137,5 +138,68 @@ describe('buildLiveObservationReport', () => {
     expect(env.windowPartitionKey).toBeUndefined();
     expect(env.suiteId).toBeUndefined();
     expect(env.scenarioResults).toBeUndefined();
+  });
+});
+
+describe('buildSuiteReport envelope integrity', () => {
+  it('scenarioResults order affects reportSha256 (canonical arrays are order-sensitive)', () => {
+    const two = [
+      {
+        scenarioId: 's1',
+        outcome: 'pass' as const,
+        reason: 'ratio_pass' as const,
+        numerator: '10',
+        denominator: '1000',
+        displayRatio: '0.010000',
+        totalCost: null,
+      },
+      {
+        scenarioId: 's2',
+        outcome: 'pass' as const,
+        reason: 'ratio_pass' as const,
+        numerator: '20',
+        denominator: '1000',
+        displayRatio: '0.020000',
+        totalCost: null,
+      },
+    ];
+    const base = suiteInput();
+    const a = buildSuiteReport({ ...base, scenarioResults: two });
+    const b = buildSuiteReport({ ...base, scenarioResults: [two[1], two[0]] });
+    expect(a.reportSha256).not.toBe(b.reportSha256);
+  });
+
+  it('owns its envelope: caller mutation after build does not change the snapshot', () => {
+    const input = suiteInput();
+    const built = buildSuiteReport(input);
+    const sha = built.reportSha256;
+    // mutate the caller's input arrays/objects after the build
+    (input.scenarioResults as Array<unknown>).push({
+      ...scenarioResults[0],
+      scenarioId: 's9',
+    });
+    (input.totals as { numerator: string }).numerator = '999';
+    // the built envelope + sha are unaffected (recompute matches the snapshot)
+    expect(reportSha256Of(built.semanticEnvelope)).toBe(sha);
+    expect(built.reportSha256).toBe(sha);
+  });
+
+  it('windowPartitionKey in the envelope equals windowPartitionKeyDigest(windowInputs)', () => {
+    const built = buildSuiteReport(suiteInput());
+    const env = built.semanticEnvelope as Record<string, unknown>;
+    expect(env.windowPartitionKey).toBe(built.windowPartitionKey);
+  });
+});
+
+describe('report -> graduation closed loop (cross-module)', () => {
+  it('three built suite-report views graduate to candidateEligible', () => {
+    const views = ['occ-1', 'occ-2', 'occ-3'].map(
+      (id) => buildSuiteReport(suiteInput({ evidenceOccurrenceId: id })).view,
+    );
+    const result = evaluateGraduationWindow(views);
+    expect(result.invalid).toBe(false);
+    expect(result.candidateEligible).toBe(true);
+    expect(result.observationCount).toBe(3);
+    expect(result.windowPartitionKey).toMatch(/^[0-9a-f]{64}$/);
   });
 });
