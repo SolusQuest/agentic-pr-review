@@ -71,6 +71,13 @@ describe('tokenToBigint', () => {
     expect(() => tokenToBigint(-1)).toThrow(ArithmeticOverflow);
     expect(() => tokenToBigint(1.5)).toThrow(ArithmeticOverflow);
   });
+
+  it('rejects NaN, Infinity, and integers above MAX_SAFE_INTEGER', () => {
+    expect(() => tokenToBigint(Number.NaN)).toThrow(ArithmeticOverflow);
+    expect(() => tokenToBigint(Number.POSITIVE_INFINITY)).toThrow(ArithmeticOverflow);
+    expect(() => tokenToBigint(Number.NEGATIVE_INFINITY)).toThrow(ArithmeticOverflow);
+    expect(() => tokenToBigint(Number.MAX_SAFE_INTEGER + 1)).toThrow(ArithmeticOverflow);
+  });
 });
 
 function w(s: string): bigint {
@@ -163,5 +170,41 @@ describe('displayRatio', () => {
     expect(displayRatio(2n, 3n)).toBe('0.666667'); // 0.6666666... -> half-up 0.666667
     expect(displayRatio(0n, 100n)).toBe('0.000000');
     expect(displayRatio(1n, 0n)).toBe('n/a');
+  });
+
+  it('rounds exactly-half up and carries across the decimal point', () => {
+    expect(displayRatio(1n, 2_000_000n)).toBe('0.000001'); // exactly 0.0000005 -> up
+    expect(displayRatio(9_999_995n, 10_000_000n)).toBe('1.000000'); // 0.9999995 -> carry to 1
+  });
+});
+
+describe('displayRatio vs classifyRatio differential', () => {
+  // displayRatio rounds half-up to 6 decimals; two ratios can share an
+  // identical display string yet fall on opposite sides of a frozen threshold.
+  // This proves classification must use cross-multiplication, never the
+  // displayed value.
+  const base = 10n ** 18n;
+
+  it('identical display at the 1.01 boundary, different classification', () => {
+    expect(displayRatio(101n * base, 100n * base)).toBe('1.010000');
+    expect(displayRatio(101n * base + 1n, 100n * base)).toBe('1.010000');
+    expect(classifyRatio(101n * base, 100n * base)).toEqual({ ok: true, class: 'pass' });
+    expect(classifyRatio(101n * base + 1n, 100n * base)).toEqual({
+      ok: true,
+      class: 'inconclusive',
+    });
+  });
+
+  it('identical display at the 1.05 boundary, different classification', () => {
+    expect(displayRatio(105n * base, 100n * base)).toBe('1.050000');
+    expect(displayRatio(105n * base + 1n, 100n * base)).toBe('1.050000');
+    expect(classifyRatio(105n * base, 100n * base)).toEqual({
+      ok: true,
+      class: 'inconclusive',
+    });
+    expect(classifyRatio(105n * base + 1n, 100n * base)).toEqual({
+      ok: true,
+      class: 'regression',
+    });
   });
 });

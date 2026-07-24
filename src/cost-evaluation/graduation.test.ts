@@ -94,6 +94,44 @@ describe('evaluateGraduationWindow', () => {
     expect(r.candidateEligible).toBe(false);
   });
 
+  it('costRegressionBlocked is a latch: three later passes cannot clear it', () => {
+    const r = evaluateGraduationWindow([
+      suiteReport('regression', 'a'),
+      suiteReport('regression', 'b'),
+      suiteReport('regression', 'c'), // latch costRegressionBlocked
+      suiteReport('pass', 'd'),
+      suiteReport('pass', 'e'),
+      suiteReport('pass', 'f'), // passStreak reaches 3, but the block persists
+    ]);
+    expect(r.costRegressionBlocked).toBe(true);
+    expect(r.graduationBlocked).toBe(true);
+    expect(r.passStreak).toBe(3);
+    expect(r.candidateEligible).toBe(false);
+  });
+
+  it('report_sha_mismatch takes precedence over conflicting_evidence', () => {
+    // First report carries a wrong sha; the second shares its occurrenceId
+    // with a different outcome (which would otherwise be conflicting_evidence).
+    // The sha check (step 1) runs before the dedup check (step 3).
+    const r = evaluateGraduationWindow([
+      suiteReport('pass', 'a', { reportSha256: 'deadbeef' }),
+      suiteReport('regression', 'a'),
+    ]);
+    expect(r.invalid).toBe(true);
+    expect(r.invalidReason).toBe('report_sha_mismatch');
+  });
+
+  it('mixed_window takes precedence over conflicting_evidence', () => {
+    // Two reports share occurrenceId 'a' (would be conflicting_evidence) AND
+    // have different window inputs. The window check (step 2) runs first.
+    const r = evaluateGraduationWindow([
+      suiteReport('pass', 'a'),
+      suiteReport('regression', 'a', { windowPartitionInputs: otherWindowInputs }),
+    ]);
+    expect(r.invalid).toBe(true);
+    expect(r.invalidReason).toBe('mixed_window');
+  });
+
   it('contract_regression -> contractViolationBlocked (blocks even with 3 passes)', () => {
     const r = evaluateGraduationWindow([
       suiteReport('pass', 'a'),
