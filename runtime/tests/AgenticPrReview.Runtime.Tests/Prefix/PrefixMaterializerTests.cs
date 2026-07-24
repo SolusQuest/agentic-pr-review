@@ -82,6 +82,39 @@ public sealed class PrefixMaterializerTests
     }
 
     [Fact]
+    public void ProviderBoundInstructionPreservesFrozenDiagnosticStageOrder()
+    {
+        var input = BootstrapInput();
+        var surrogate = new string('\uD800', 1);
+
+        var invalidIdentity = PrefixMaterializer.Materialize(input with
+        {
+            ProviderBoundInstruction = surrogate,
+            ExpectedIdentities = input.ExpectedIdentities with { ProviderId = string.Empty },
+        });
+        Assert.Equal("prefix_identity_invalid", Assert.Single(invalidIdentity.Diagnostics).Code);
+
+        using var malformedDocument = JsonDocument.Parse("{\"schemaVersion\":1,\"templateVersion\":3,\"bogus\":1}");
+        var malformedEnvelope = PrefixMaterializer.Materialize(input with
+        {
+            ProviderBoundInstruction = surrogate,
+            Envelopes = input.Envelopes with { Template = malformedDocument.RootElement },
+        });
+        Assert.Equal("prefix_envelope_invalid", Assert.Single(malformedEnvelope.Diagnostics).Code);
+
+        var wrapper = "{\"schemaVersion\":1,\"templateVersion\":3,\"definition\":\"\"}".Length;
+        var overTemplate = JsonDocument.Parse(
+            "{\"schemaVersion\":1,\"templateVersion\":3,\"definition\":\"" +
+            new string('x', 262_144 - wrapper + 1) + "\"}").RootElement;
+        var overCanonicalEnvelope = PrefixMaterializer.Materialize(input with
+        {
+            ProviderBoundInstruction = surrogate,
+            Envelopes = input.Envelopes with { Template = overTemplate },
+        });
+        Assert.Equal("prefix_canonical_input_rejected", Assert.Single(overCanonicalEnvelope.Diagnostics).Code);
+    }
+
+    [Fact]
     public void OversizedProviderBoundInstructionReturnsTypedFailure()
     {
         var outcome = PrefixMaterializer.Materialize(BootstrapInput() with

@@ -33,11 +33,6 @@ public static class PrefixMaterializer
             return Fail(PrefixDiagnostic.Create(PrefixDiagnosticCodes.IdentityInvalid));
         }
 
-        if (ContainsInvalidUnicode(input.ProviderBoundInstruction))
-        {
-            return Fail(PrefixDiagnostic.Create(PrefixDiagnosticCodes.CanonicalInputRejected));
-        }
-
         // Stage: host-declared identities.
         var identityError = ValidateHostIdentities(input);
         if (identityError is not null)
@@ -253,6 +248,7 @@ public static class PrefixMaterializer
         return
             CanonicalizeAll(input, out var templateBytes, out var policyBytes, out var toolsBytes, out var configBytes, out var adapterBytes,
                 out var templateCapped, out var policyCapped, out var toolsCapped, out var configCapped, out var adapterCapped)
+            ?? ValidateProviderBoundInstruction(input.ProviderBoundInstruction)
             ?? PrefixEnvelopeValidator.CheckCanonicalCap(PrefixEnvelopeValidator.EnvelopeKind.Template, templateCapped)
             ?? PrefixEnvelopeValidator.CheckCanonicalCap(PrefixEnvelopeValidator.EnvelopeKind.Policy, policyCapped)
             ?? PrefixEnvelopeValidator.CheckCanonicalCap(PrefixEnvelopeValidator.EnvelopeKind.Tools, toolsCapped)
@@ -595,6 +591,11 @@ public static class PrefixMaterializer
         return null;
     }
 
+    private static PrefixDiagnostic? ValidateProviderBoundInstruction(string? instruction) =>
+        ContainsUnpairedSurrogate(instruction)
+            ? PrefixDiagnostic.Create(PrefixDiagnosticCodes.CanonicalInputRejected)
+            : null;
+
     private static bool IsSafeRelativePath(string path)
     {
         if (path.Length == 0
@@ -640,6 +641,33 @@ public static class PrefixMaterializer
         if (value.Contains('\0'))
         {
             return true;
+        }
+
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (char.IsHighSurrogate(value[index]))
+            {
+                if (index + 1 >= value.Length || !char.IsLowSurrogate(value[index + 1]))
+                {
+                    return true;
+                }
+
+                index++;
+            }
+            else if (char.IsLowSurrogate(value[index]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ContainsUnpairedSurrogate(string? value)
+    {
+        if (value is null)
+        {
+            return false;
         }
 
         for (var index = 0; index < value.Length; index++)
