@@ -65,6 +65,37 @@ public sealed class PrefixMaterializerTests
     }
 
     [Fact]
+    public void InvalidProviderBoundInstructionReturnsTypedFailure()
+    {
+        var outcomes = new[] { new string('\uD800', 1), new string('\uDC00', 1) }
+            .Select(instruction => PrefixMaterializer.Materialize(BootstrapInput() with
+            {
+                ProviderBoundInstruction = instruction,
+            }));
+
+        foreach (var outcome in outcomes)
+        {
+            Assert.Null(outcome.Value);
+            var diagnostic = Assert.Single(outcome.Diagnostics);
+            Assert.Equal("prefix_canonical_input_rejected", diagnostic.Code);
+        }
+    }
+
+    [Fact]
+    public void OversizedProviderBoundInstructionReturnsTypedFailure()
+    {
+        var outcome = PrefixMaterializer.Materialize(BootstrapInput() with
+        {
+            ProviderBoundInstruction = new string('x', checked((int)PrefixBounds.MaxProviderBlockPayloadBytes)),
+        });
+
+        Assert.Null(outcome.Value);
+        var diagnostic = Assert.Single(outcome.Diagnostics);
+        Assert.Equal("prefix_segment_too_large", diagnostic.Code);
+        Assert.Equal("provider-block", diagnostic.CauseCode);
+    }
+
+    [Fact]
     public void EnvelopeKeyOrderDoesNotChangeOutput()
     {
         var ordered = BootstrapInput();

@@ -26,11 +26,29 @@ internal static class ProviderBlockMapper
         return MapTextBlock(RoleFor(segmentKind), Encoding.UTF8.GetString(segmentCanonicalJson));
     }
 
-    internal static ImmutableArray<byte> MapSystemTextBlock(string text) => MapTextBlock("system", text);
+    internal static ImmutableArray<byte> MapSystemTextBlock(string text, out bool capExceeded)
+    {
+        return MapTextBlock("system", text, bounded: true, out capExceeded);
+    }
 
     private static ImmutableArray<byte> MapTextBlock(string role, string text)
     {
-        var writer = new Rfc8785Writer(Encoding.UTF8.GetByteCount(text) * 2 + 64);
+        return MapTextBlock(role, text, bounded: false, out _);
+    }
+
+    private static ImmutableArray<byte> MapTextBlock(
+        string role,
+        string text,
+        bool bounded,
+        out bool capExceeded)
+    {
+        var initialCapacity = bounded
+            ? (int)Math.Min(PrefixBounds.MaxProviderBlockPayloadBytes, (long)Encoding.UTF8.GetByteCount(text) + 64)
+            : checked(Encoding.UTF8.GetByteCount(text) * 2 + 64);
+        var writer = new Rfc8785Writer(initialCapacity)
+        {
+            DiscardLimit = bounded ? PrefixBounds.MaxProviderBlockPayloadBytes : -1,
+        };
         writer.WriteObjectStart();
         writer.WriteProperty("content");
         writer.WriteArrayStart();
@@ -44,6 +62,7 @@ internal static class ProviderBlockMapper
         writer.WriteProperty("role");
         writer.WriteString(role);
         writer.WriteObjectEnd();
+        capExceeded = writer.Exceeded;
         return writer.ToImmutableArray();
     }
 }

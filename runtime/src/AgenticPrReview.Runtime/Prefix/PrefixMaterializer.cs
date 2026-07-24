@@ -33,6 +33,11 @@ public static class PrefixMaterializer
             return Fail(PrefixDiagnostic.Create(PrefixDiagnosticCodes.IdentityInvalid));
         }
 
+        if (ContainsInvalidUnicode(input.ProviderBoundInstruction))
+        {
+            return Fail(PrefixDiagnostic.Create(PrefixDiagnosticCodes.CanonicalInputRejected));
+        }
+
         // Stage: host-declared identities.
         var identityError = ValidateHostIdentities(input);
         if (identityError is not null)
@@ -466,8 +471,10 @@ public static class PrefixMaterializer
 
             if (index == 2 && providerBoundInstruction is not null)
             {
-                var instructionBlock = ProviderBlockMapper.MapSystemTextBlock(providerBoundInstruction);
-                var instructionError = PrefixGuards.CheckProviderBlockPayload(instructionBlock.Length);
+                var instructionBlock = ProviderBlockMapper.MapSystemTextBlock(providerBoundInstruction, out var instructionCapExceeded);
+                var instructionError = instructionCapExceeded
+                    ? PrefixDiagnostic.Create(PrefixDiagnosticCodes.SegmentTooLarge, causeCode: "provider-block")
+                    : PrefixGuards.CheckProviderBlockPayload(instructionBlock.Length);
                 if (instructionError is not null)
                 {
                     return instructionError;
@@ -623,8 +630,13 @@ public static class PrefixMaterializer
         return count;
     }
 
-    private static bool ContainsInvalidUnicode(string value)
+    private static bool ContainsInvalidUnicode(string? value)
     {
+        if (value is null)
+        {
+            return false;
+        }
+
         if (value.Contains('\0'))
         {
             return true;
