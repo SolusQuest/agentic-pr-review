@@ -9,7 +9,7 @@ Production C# (`AgenticPrReview.Runtime.Prefix`) owns full materialization. Prod
 Namespace `AgenticPrReview.Runtime.Prefix`:
 
 - `PrefixMaterializer.Materialize(PrefixMaterializationInput) -> PrefixMaterializationOutcome(Value?, Diagnostics)` — deterministic, fail-fast; a failure carries exactly one `PrefixDiagnostic`.
-- `PrefixMaterializationInput` = `MaterializationHistory History`, `ValidatedContextSource CurrentContext` (#49), `InteractionIdentity Interaction` (#49), `ExpectedIdentities ExpectedIdentities` (#49), `string SessionEpoch`, `RawCacheContractEnvelopes Envelopes`.
+- `PrefixMaterializationInput` = `MaterializationHistory History`, `ValidatedContextSource CurrentContext` (#49), `InteractionIdentity Interaction` (#49), `ExpectedIdentities ExpectedIdentities` (#49), `string SessionEpoch`, `RawCacheContractEnvelopes Envelopes`, and an optional adapter-bound provider instruction. The instruction is added only to the stable provider-block stream; it is excluded from the logical stream and its logical hash.
 - `MaterializationHistory` = `BootstrapHistory` (also used for recovery-root materialization) | `ContinuationHistory(ValidatedLedger Prior)` | `ResetHistory(ValidatedLedger AcceptedPredecessor)`.
 - `RawCacheContractEnvelopes` = five raw `JsonElement` envelopes (template, policy, tools, cache config, adapter). The materializer validates each in the stage order below; there is no caller path that skips validation.
 - `CacheContractDigests.ComputeTemplateId / ComputePolicyId / ComputeToolDefinitionId / ComputeCacheConfigId / ComputeAdapterId(JsonElement) -> DigestOutcome`.

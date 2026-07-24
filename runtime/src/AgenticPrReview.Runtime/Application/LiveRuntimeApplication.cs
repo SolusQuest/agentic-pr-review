@@ -186,7 +186,8 @@ internal static class LiveRuntimeApplication
             new RawCacheContractEnvelopes(
                 envelopes.GetProperty("template"), envelopes.GetProperty("policy"),
                 envelopes.GetProperty("tools"), envelopes.GetProperty("cacheConfig"),
-                envelopes.GetProperty("adapter"))));
+                envelopes.GetProperty("adapter")),
+            providerMode == "live" ? DeepSeekProviderContract.FixedInstruction : null));
         if (prefixOutcome.Value is null)
             throw new RuntimeFailure(20, "APR_LIVE_CONTEXT_SEMANTIC_INVALID", "Cache-contract envelopes failed independent validation.");
 

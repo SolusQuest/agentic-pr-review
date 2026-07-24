@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.Linq;
 using System.Text.Json;
+using AgenticPrReview.Runtime;
 using AgenticPrReview.Runtime.Prefix;
 using Xunit;
 
@@ -41,6 +42,26 @@ public sealed class PrefixMaterializerTests
         Assert.True(first.Value.StableProviderStream.SequenceEqual(second.Value.StableProviderStream));
         Assert.Equal(first.Value.LogicalPrefixSha256, second.Value.LogicalPrefixSha256);
         Assert.Equal(first.Value.PrefixSha256, second.Value.PrefixSha256);
+    }
+
+    [Fact]
+    public void ProviderBoundInstructionChangesOnlyProviderPrefixReceipt()
+    {
+        var baseline = PrefixMaterializer.Materialize(BootstrapInput());
+        var withInstruction = PrefixMaterializer.Materialize(BootstrapInput() with
+        {
+            ProviderBoundInstruction = "fixed provider instruction",
+        });
+
+        Assert.NotNull(baseline.Value);
+        Assert.NotNull(withInstruction.Value);
+        Assert.Equal(baseline.Value.LogicalPrefixSha256, withInstruction.Value.LogicalPrefixSha256);
+        Assert.NotEqual(baseline.Value.PrefixSha256, withInstruction.Value.PrefixSha256);
+        Assert.NotEqual(baseline.Value.StableProviderStream, withInstruction.Value.StableProviderStream);
+
+        var messages = ProviderRequestPlanDecoder.Decode(withInstruction.Value.StableProviderStream);
+        Assert.Equal("fixed provider instruction", messages[3].Text);
+        Assert.Equal("system", messages[3].Role);
     }
 
     [Fact]

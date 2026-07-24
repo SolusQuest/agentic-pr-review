@@ -112,10 +112,10 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
         CancellationToken cancellationToken = default)
     {
         var messages = plan.Messages.ToList();
-        if (messages.Count < 4 || messages.Take(3).Any(message => message.Role != "system") ||
+        if (messages.Count < 5 || messages.Take(3).Any(message => message.Role != "system") ||
+            messages[3].Role != "system" || messages[3].Text != DeepSeekProviderContract.FixedInstruction ||
             messages[^1].Role != "user")
             throw new ProviderFailureException("APR_PROVIDER_CONFIG", 20);
-        messages.Insert(3, new ProviderRequestMessage("system", DeepSeekProviderContract.FixedInstruction));
 
         var requestBody = BuildRequestBody(messages, out var requestCapExceeded);
         if (requestCapExceeded || requestBody.Length > DeepSeekProviderContract.RequestBodyMaxBytes)
@@ -626,6 +626,11 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
         {
             // The status code remains the authoritative provider failure when the
             // bounded error body itself exceeds its retention cap.
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or HttpRequestException or IOException)
+        {
+            // The status code is already authoritative; error-body retention is
+            // best-effort and must not replace the bounded status classification.
         }
     }
 

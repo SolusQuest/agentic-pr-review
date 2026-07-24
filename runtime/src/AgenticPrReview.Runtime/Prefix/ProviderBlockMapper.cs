@@ -23,20 +23,26 @@ internal static class ProviderBlockMapper
 
     internal static ImmutableArray<byte> MapBlock(string segmentKind, ReadOnlySpan<byte> segmentCanonicalJson)
     {
-        var segmentText = Encoding.UTF8.GetString(segmentCanonicalJson);
-        var writer = new Rfc8785Writer(segmentCanonicalJson.Length * 2 + 64);
+        return MapTextBlock(RoleFor(segmentKind), Encoding.UTF8.GetString(segmentCanonicalJson));
+    }
+
+    internal static ImmutableArray<byte> MapSystemTextBlock(string text) => MapTextBlock("system", text);
+
+    private static ImmutableArray<byte> MapTextBlock(string role, string text)
+    {
+        var writer = new Rfc8785Writer(Encoding.UTF8.GetByteCount(text) * 2 + 64);
         writer.WriteObjectStart();
         writer.WriteProperty("content");
         writer.WriteArrayStart();
         writer.WriteObjectStart();
         writer.WriteProperty("text");
-        writer.WriteString(segmentText);
+        writer.WriteString(text);
         writer.WriteProperty("type");
         writer.WriteString("text");
         writer.WriteObjectEnd();
         writer.WriteArrayEnd();
         writer.WriteProperty("role");
-        writer.WriteString(RoleFor(segmentKind));
+        writer.WriteString(role);
         writer.WriteObjectEnd();
         return writer.ToImmutableArray();
     }

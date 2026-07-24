@@ -9,7 +9,8 @@ public sealed record PrefixMaterializationInput(
     InteractionIdentity Interaction,
     ExpectedIdentities ExpectedIdentities,
     string SessionEpoch,
-    RawCacheContractEnvelopes Envelopes);
+    RawCacheContractEnvelopes Envelopes,
+    string? ProviderBoundInstruction = null);
 
 /// <summary>Deeply immutable materialization result (issue #50, D8).</summary>
 public sealed class PrefixMaterialization

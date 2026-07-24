@@ -82,6 +82,7 @@ public sealed class DeepSeekLiveProviderExecutorTests
                 new ProviderRequestMessage("system", "template"),
                 new ProviderRequestMessage("system", "policy"),
                 new ProviderRequestMessage("system", "tools"),
+                new ProviderRequestMessage("system", DeepSeekProviderContract.FixedInstruction),
                 new ProviderRequestMessage("assistant", "historical assistant"),
                 new ProviderRequestMessage("user", "historical user"),
                 new ProviderRequestMessage("user", "current patch"),
@@ -129,6 +130,7 @@ public sealed class DeepSeekLiveProviderExecutorTests
                 new ProviderRequestMessage("system", "template"),
                 new ProviderRequestMessage("system", "policy"),
                 new ProviderRequestMessage("system", "tools"),
+                new ProviderRequestMessage("system", DeepSeekProviderContract.FixedInstruction),
                 new ProviderRequestMessage("user", new string('x', DeepSeekProviderContract.RequestBodyMaxBytes + 16_384)),
             ],
         };
@@ -232,6 +234,33 @@ public sealed class DeepSeekLiveProviderExecutorTests
         Assert.Equal("APR_PROVIDER_RESPONSE", responseError.Code);
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.TooManyRequests, "APR_PROVIDER_RATE_LIMITED")]
+    [InlineData(HttpStatusCode.BadRequest, "APR_PROVIDER_4XX")]
+    [InlineData(HttpStatusCode.InternalServerError, "APR_PROVIDER_5XX")]
+    public async Task ProviderStatusSurvivesErrorBodyReadFailure(HttpStatusCode status, string expectedCode)
+    {
+        var error = await Assert.ThrowsAsync<ProviderFailureException>(() =>
+            new DeepSeekLiveProviderExecutor(
+                "k",
+                new RecordingHandler(new HttpResponseMessage(status) { Content = new ThrowingContent() }),
+                TimeSpan.FromSeconds(5)).ExecuteAsync(Plan(), Identities()));
+
+        Assert.Equal(expectedCode, error.Code);
+    }
+
+    [Fact]
+    public async Task ProviderStatusSurvivesErrorBodyTimeout()
+    {
+        var error = await Assert.ThrowsAsync<ProviderFailureException>(() =>
+            new DeepSeekLiveProviderExecutor(
+                "k",
+                new RecordingHandler(new HttpResponseMessage(HttpStatusCode.TooManyRequests) { Content = new StallingContent() }),
+                TimeSpan.FromMilliseconds(20)).ExecuteAsync(Plan(), Identities()));
+
+        Assert.Equal("APR_PROVIDER_RATE_LIMITED", error.Code);
+    }
+
     [Fact]
     public async Task BodyTimeoutAndTransportAreProviderFailures()
     {
@@ -309,6 +338,7 @@ public sealed class DeepSeekLiveProviderExecutorTests
             new ProviderRequestMessage("system", "template"),
             new ProviderRequestMessage("system", "policy"),
             new ProviderRequestMessage("system", "tools"),
+            new ProviderRequestMessage("system", DeepSeekProviderContract.FixedInstruction),
             new ProviderRequestMessage("user", "patch text"),
         ], 50, "a".PadLeft(64, 'a'), "b".PadLeft(64, 'b'), DeepSeekProviderContract.AdapterId, DeepSeekProviderContract.RequestContractSha256);
 

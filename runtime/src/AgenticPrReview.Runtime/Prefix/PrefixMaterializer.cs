@@ -139,7 +139,8 @@ public static class PrefixMaterializer
             out var stableLogical,
             out var dynamicLogical,
             out var stableProvider,
-            out var dynamicProvider);
+            out var dynamicProvider,
+            input.ProviderBoundInstruction);
         if (streamError is not null)
         {
             return Fail(streamError);
@@ -431,7 +432,8 @@ public static class PrefixMaterializer
         out ImmutableArray<byte> stableLogical,
         out ImmutableArray<byte> dynamicLogical,
         out ImmutableArray<byte> stableProvider,
-        out ImmutableArray<byte> dynamicProvider)
+        out ImmutableArray<byte> dynamicProvider,
+        string? providerBoundInstruction)
     {
         stableLogical = ImmutableArray<byte>.Empty;
         dynamicLogical = ImmutableArray<byte>.Empty;
@@ -449,8 +451,9 @@ public static class PrefixMaterializer
 
         var stableLogicalWriter = new ArrayBufferWriter<byte>();
         var stableProviderWriter = new ArrayBufferWriter<byte>();
-        foreach (var (kind, bytes) in stableSegments)
+        for (var index = 0; index < stableSegments.Count; index++)
         {
+            var (kind, bytes) = stableSegments[index];
             AppendFramed(stableLogicalWriter, bytes.AsSpan());
             var block = ProviderBlockMapper.MapBlock(kind, bytes.AsSpan());
             var blockError = PrefixGuards.CheckProviderBlockPayload(block.Length);
@@ -460,6 +463,18 @@ public static class PrefixMaterializer
             }
 
             AppendFramed(stableProviderWriter, block.AsSpan());
+
+            if (index == 2 && providerBoundInstruction is not null)
+            {
+                var instructionBlock = ProviderBlockMapper.MapSystemTextBlock(providerBoundInstruction);
+                var instructionError = PrefixGuards.CheckProviderBlockPayload(instructionBlock.Length);
+                if (instructionError is not null)
+                {
+                    return instructionError;
+                }
+
+                AppendFramed(stableProviderWriter, instructionBlock.AsSpan());
+            }
         }
 
         var stableLogicalError = PrefixGuards.CheckLogicalStableTotal(stableLogicalWriter.WrittenCount);
