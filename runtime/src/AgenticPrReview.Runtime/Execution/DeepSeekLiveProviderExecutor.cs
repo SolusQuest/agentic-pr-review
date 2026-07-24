@@ -117,8 +117,8 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
             throw new ProviderFailureException("APR_PROVIDER_CONFIG", 20);
         messages.Insert(3, new ProviderRequestMessage("system", DeepSeekProviderContract.FixedInstruction));
 
-        var requestBody = BuildRequestBody(messages);
-        if (requestBody.Length > DeepSeekProviderContract.RequestBodyMaxBytes)
+        var requestBody = BuildRequestBody(messages, out var requestCapExceeded);
+        if (requestCapExceeded || requestBody.Length > DeepSeekProviderContract.RequestBodyMaxBytes)
             throw new ProviderFailureException("APR_PROVIDER_RESPONSE", 20);
 
         using var timeoutCts = new CancellationTokenSource(
@@ -252,7 +252,9 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
         _ => "APR_PROVIDER_TRANSPORT",
     };
 
-    private static byte[] BuildRequestBody(IReadOnlyList<ProviderRequestMessage> messages)
+    private static byte[] BuildRequestBody(
+        IReadOnlyList<ProviderRequestMessage> messages,
+        out bool capExceeded)
     {
         var messageArray = new JsonArray();
         foreach (var message in messages)
@@ -275,13 +277,14 @@ internal sealed class DeepSeekLiveProviderExecutor : ILiveProviderExecutor
             ["thinking"] = new JsonObject { ["type"] = "disabled" },
         };
         using var document = JsonDocument.Parse(body.ToJsonString());
-        return AgenticPrReview.Runtime.Canonical.JsonElementCanonicalizer.Canonicalize(
+        var canonical = AgenticPrReview.Runtime.Canonical.JsonElementCanonicalizer.Canonicalize(
             document.RootElement,
             DeepSeekProviderContract.RequestBodyMaxBytes,
             DeepSeekProviderContract.RequestBodyMaxBytes,
             DeepSeekProviderContract.RequestBodyMaxBytes,
             long.MaxValue,
-            out _).ToArray();
+            out capExceeded);
+        return canonical.ToArray();
     }
 
     private static ProviderExecutionObservation ParseSuccess(

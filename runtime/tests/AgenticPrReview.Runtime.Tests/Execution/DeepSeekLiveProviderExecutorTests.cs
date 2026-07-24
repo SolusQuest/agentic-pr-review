@@ -117,22 +117,50 @@ public sealed class DeepSeekLiveProviderExecutorTests
         Assert.Equal(0, handler.Requests);
     }
 
+    [Fact]
+    public async Task OversizedRequestFailsBeforeNetworkWhenCanonicalizerStopsEmitting()
+    {
+        var handler = new RecordingHandler(SuccessResponse());
+        var executor = new DeepSeekLiveProviderExecutor("k", handler, TimeSpan.FromSeconds(5));
+        var plan = Plan() with
+        {
+            Messages =
+            [
+                new ProviderRequestMessage("system", "template"),
+                new ProviderRequestMessage("system", "policy"),
+                new ProviderRequestMessage("system", "tools"),
+                new ProviderRequestMessage("user", new string('x', DeepSeekProviderContract.RequestBodyMaxBytes + 16_384)),
+            ],
+        };
+
+        var error = await Assert.ThrowsAsync<ProviderFailureException>(() => executor.ExecuteAsync(plan, Identities()));
+
+        Assert.Equal("APR_PROVIDER_RESPONSE", error.Code);
+        Assert.Equal(20, error.ExitCode);
+        Assert.Equal(0, handler.Requests);
+        Assert.Null(handler.Request);
+    }
+
     [Theory]
-    [InlineData(50, true)]
-    [InlineData(51, false)]
-    public async Task FindingsCapIsStrict(int count, bool succeeds)
+    [InlineData(50, 50, true)]
+    [InlineData(50, 51, false)]
+    [InlineData(7, 7, true)]
+    [InlineData(7, 8, false)]
+    public async Task FindingsCapIsStrict(int maxFindings, int count, bool succeeds)
     {
         var handler = new RecordingHandler(SuccessResponse(BuildModel(count, 0)));
         var executor = new DeepSeekLiveProviderExecutor("k", handler, TimeSpan.FromSeconds(5));
+        var plan = Plan() with { MaxFindings = maxFindings };
+        var identities = Identities(maxFindings);
 
         if (succeeds)
         {
-            var observation = await executor.ExecuteAsync(Plan(), Identities());
+            var observation = await executor.ExecuteAsync(plan, identities);
             Assert.Equal(count, observation.Findings.Length);
         }
         else
         {
-            var error = await Assert.ThrowsAsync<ProviderFailureException>(() => executor.ExecuteAsync(Plan(), Identities()));
+            var error = await Assert.ThrowsAsync<ProviderFailureException>(() => executor.ExecuteAsync(plan, identities));
             Assert.Equal("APR_PROVIDER_RESPONSE", error.Code);
         }
     }
@@ -270,10 +298,10 @@ public sealed class DeepSeekLiveProviderExecutorTests
         _ = new DeepSeekLiveProviderExecutor(new string('a', 256), new RecordingHandler(SuccessResponse()), TimeSpan.FromSeconds(5));
     }
 
-    private static ExpectedIdentities Identities() => new(
+    private static ExpectedIdentities Identities(int maxFindings = 50) => new(
         "owner/repo", "owner/repo", 52, "workflow", "domain", "deepseek", "deepseek-v4-flash",
         DeepSeekProviderContract.AdapterId, DeepSeekProviderContract.TemplateId,
-        "29b9fb2b505b72a008e703d61c7847d475119dfb72b90bbe167e7fade527a787",
+        DeepSeekLiveProviderExecutor.PolicyIdForMaxFindings(maxFindings),
         DeepSeekProviderContract.ToolDefinitionId, DeepSeekProviderContract.CacheConfigId);
 
     private static ProviderRequestPlan Plan() => new(

@@ -67,6 +67,54 @@ public sealed class LiveRuntimeApplicationTests
         Assert.All(fixture.OutputPaths, path => Assert.False(File.Exists(path), path));
     }
 
+    [Fact]
+    public async Task LowerMaxFindingsRejectsEightFindingsBeforePublishingAnySidecar()
+    {
+        using var fixture = LiveFixture.Create();
+        var application = fixture.Application(new DeepSeekExecutorFactory());
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await application.RunAsync(fixture.Arguments, stdout, stderr);
+
+        Assert.Equal(20, exitCode);
+        Assert.Empty(stdout.ToString());
+        Assert.StartsWith("APR_PROVIDER_RESPONSE:", stderr.ToString(), StringComparison.Ordinal);
+        Assert.All(fixture.OutputPaths, path => Assert.False(File.Exists(path), path));
+    }
+
+    private sealed class DeepSeekExecutorFactory : ILiveProviderExecutorFactory
+    {
+        public ILiveProviderExecutor Create(string providerMode, ProviderRequestPlan plan, ExpectedIdentities identities)
+        {
+            Assert.Equal("live", providerMode);
+            Assert.Equal(7, plan.MaxFindings);
+            return new DeepSeekLiveProviderExecutor(
+                "k",
+                new ResponseHandler(DeepSeekResponse(BuildModel(8))),
+                TimeSpan.FromSeconds(5));
+        }
+    }
+
+    private sealed class ResponseHandler(string content) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(content, Encoding.UTF8, "application/json"),
+            });
+    }
+
+    private static string DeepSeekResponse(string model) =>
+        $"{{\"id\":\"id\",\"object\":\"chat.completion\",\"created\":1,\"model\":\"deepseek-v4-flash\",\"choices\":[{{\"index\":0,\"message\":{{\"role\":\"assistant\",\"content\":{JsonSerializer.Serialize(model)}}},\"finish_reason\":\"stop\",\"logprobs\":null}}],\"usage\":{{\"prompt_tokens\":2,\"completion_tokens\":1,\"total_tokens\":3,\"prompt_cache_hit_tokens\":2,\"prompt_cache_miss_tokens\":0}}}}";
+
+    private static string BuildModel(int findings)
+    {
+        var findingItems = string.Join(',', Enumerable.Range(0, findings).Select(index =>
+            $"{{\"severity\":\"low\",\"confidence\":\"medium\",\"category\":\"correctness\",\"title\":\"f{index}\",\"body\":\"body\",\"path\":null,\"startLine\":null,\"endLine\":null}}"));
+        return $"{{\"schemaVersion\":1,\"summary\":\"ok\",\"findings\":[{findingItems}],\"limitations\":[]}}";
+    }
+
     private sealed class InjectedFactory(bool fail, long hit, long miss, string cacheStatus) : ILiveProviderExecutorFactory
     {
         public ILiveProviderExecutor Create(string providerMode, ProviderRequestPlan plan, ExpectedIdentities identities) =>

@@ -1,7 +1,11 @@
 import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-import { classifyProviderFailure, runProcess } from './invoke-live-runtime.js';
+import {
+  classifyLiveProviderHostCancellation,
+  classifyProviderFailure,
+  runProcess,
+} from './invoke-live-runtime.js';
 
 class FakeChild extends EventEmitter {
   readonly stdout = new EventEmitter();
@@ -94,6 +98,22 @@ describe('live runtime process terminal ordering', () => {
     queueMicrotask(() => fake.emit('close', null, null));
 
     await expect(resultPromise).rejects.toMatchObject({ kind: 'cancelled' });
+  });
+
+  it('maps an aborted live provider process to provider-cancelled', async () => {
+    const fake = new FakeChild();
+    const controller = new AbortController();
+    const resultPromise = start(fake, 1_000, controller.signal);
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    controller.abort();
+    fake.emit('close', null, null);
+
+    const error = await resultPromise.catch((value: unknown) => value);
+    expect(classifyLiveProviderHostCancellation(error, 'live')).toMatchObject({
+      kind: 'provider-cancelled',
+      exitCode: 30,
+    });
+    expect(classifyLiveProviderHostCancellation(error, 'synthetic')).toBeUndefined();
   });
 
   it('keeps natural exit when abort arrives before close', async () => {

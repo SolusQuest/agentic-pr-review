@@ -387,18 +387,28 @@ export async function invokeLiveRuntime(
     // sensitiveValues because arbitrary contract-valid keys can collide with
     // ordinary JSON literals (for example, "null"). The trusted child env is
     // the only host-to-child channel that receives this value.
-    const processResult = await runProcess(
-      commandSnapshot,
-      cliArgs,
-      options.timeoutMs,
-      options.signal,
-      invocationDirectory,
-      spawn,
-      LIVE_CLOSE_DEADLINE_MS,
-      context.providerMode === 'live' && process.env.AGENTIC_REVIEW_DEEPSEEK_API_KEY
-        ? { AGENTIC_REVIEW_DEEPSEEK_API_KEY: process.env.AGENTIC_REVIEW_DEEPSEEK_API_KEY }
-        : undefined,
-    );
+    let processResult: Awaited<ReturnType<typeof runProcess>>;
+    try {
+      processResult = await runProcess(
+        commandSnapshot,
+        cliArgs,
+        options.timeoutMs,
+        options.signal,
+        invocationDirectory,
+        spawn,
+        LIVE_CLOSE_DEADLINE_MS,
+        context.providerMode === 'live' && process.env.AGENTIC_REVIEW_DEEPSEEK_API_KEY
+          ? { AGENTIC_REVIEW_DEEPSEEK_API_KEY: process.env.AGENTIC_REVIEW_DEEPSEEK_API_KEY }
+          : undefined,
+      );
+    } catch (error) {
+      const providerCancellation = classifyLiveProviderHostCancellation(
+        error,
+        context.providerMode,
+      );
+      if (providerCancellation) throw providerCancellation;
+      throw error;
+    }
     assertPrivateBytes([processResult.stdout, processResult.stderr], sensitive);
     if (processResult.exitCode !== 0) {
       const providerFailure = classifyProviderFailure(processResult.stderr, processResult.exitCode);
@@ -1277,6 +1287,23 @@ export function classifyProviderFailure(
     kind: expected.kind,
     message: `Live provider failed (${match[1]}).`,
     exitCode,
+  });
+}
+
+export function classifyLiveProviderHostCancellation(
+  error: unknown,
+  providerMode: 'synthetic' | 'live',
+): LiveRuntimeInvocationError | undefined {
+  if (
+    providerMode !== 'live' ||
+    !(error instanceof LiveRuntimeInvocationError) ||
+    error.kind !== 'cancelled'
+  )
+    return undefined;
+  return new LiveRuntimeInvocationError({
+    kind: 'provider-cancelled',
+    message: 'Live provider invocation was cancelled by the host.',
+    exitCode: 30,
   });
 }
 
