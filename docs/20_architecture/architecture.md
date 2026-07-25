@@ -194,7 +194,7 @@ The stable prefix includes stable instructions, policy, ordered tool declaration
 
 The dynamic suffix includes the current PR delta, current-run tool activity, run identity, timestamps, request ids, and transient diagnostics.
 
-The provider adapter owns the deterministic projection from project session records into provider messages. `IChatClient` or a provider SDK must not silently redefine the cache-relevant ordering or content.
+The provider adapter owns the deterministic projection from project session records into provider messages. The selected narrow chat-client abstraction or a provider SDK must not silently redefine the cache-relevant ordering or content.
 
 Existing M4 prefix and ledger contracts remain evidence for canonicalization, invalidation, and adversarial validation. They are not automatically the final agent-session wire format.
 
@@ -235,6 +235,8 @@ Compilation alone is not sufficient evidence.
 - The model has no GitHub write tool.
 - The Agent has no repository write tool.
 - All model-produced tool arguments and terminal findings are untrusted and validated.
+- Repository, pull-request, diff, file, search-result, and tool-result content always remains untrusted data; persistence, restoration, and provider materialization cannot promote it into a system, developer, policy, tool-definition, provider-configuration, endpoint-selection, secret-channel, or other control record.
+- Authenticated session structure binds logical record kind, provider-facing role or framing, tool-call association, and control/data classification; inconsistent restored records are rejected before Agent or provider admission.
 - All GitHub side effects are deterministic and host-owned.
 - The host rechecks the reviewed head before publication and state acceptance.
 - State artifacts are bounded, integrity-bound, access-controlled, and free of credentials and unrestricted raw transport data. Reasoning continuation payloads are allowed only in restricted session state and never in normal traces or published surfaces.

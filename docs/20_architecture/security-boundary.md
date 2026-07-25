@@ -134,6 +134,19 @@ Tool implementations must:
 
 The model cannot ask a tool to change the root, revision, allowlist, or head identity.
 
+## Untrusted Content Classification Boundary
+
+Repository, pull-request title/body, diff, file, search-result, and tool-result content is always untrusted data. Text in those sources may resemble system or developer instructions, policy, tool definitions, provider configuration, endpoint selection, or credential-handling directions; resemblance does not grant control-plane authority.
+
+Host/Agent code fixes the project-owned durable record kind, provider-facing message role or tool-result framing, tool-call association, and control/data classification for this content. Persistence, restoration, adapter projection, and provider request materialization must preserve that classification. They must not promote or reinterpret repository-derived or tool-result content as a system or developer message, policy, tool definition, provider configuration, endpoint selection, secret channel, or any other control record.
+
+The authenticated project-owned session structure binds those classification fields. A restored record whose kind, role or framing, association, or control/data classification does not match the authenticated current-format structure is rejected before Agent or provider admission.
+
+R2 negative fixtures must prove both directions:
+
+- prompt injection that looks like a system or developer instruction round-trips inside a bounded tool result and remains tool-result/data content in the reconstructed provider request;
+- otherwise authenticated state whose repository-derived or tool-result content is relabeled or reframed as a control record is rejected before provider invocation.
+
 ## Trusted Policy Boundary
 
 Configuration and referenced review instructions are control-plane data. The Host resolves them at an immutable workflow-authorized commit SHA, normally from the repository default-branch lineage.
@@ -272,6 +285,8 @@ It must not contain:
 
 Project-owned logical records and provider-owned continuation artifacts are separate layers. Logical message/tool/outcome records may use canonical project-owned representations. Opaque provider byte/string payloads remain value-exact. Structured provider items preserve validated fields, array order, association, and adapter-required placement under an adapter-defined serialization contract. Neither form is normalized into provider-neutral content, interpreted, synthesized, or reused across providers.
 
+Repository-derived and tool-result logical records remain untrusted data under the classification boundary above. Their record kind, provider-facing role or tool-result framing, tool-call association, and control/data classification are authenticated session structure, not mutable content fields.
+
 State artifacts must be:
 
 - bound to repository and workflow trust domain;
@@ -279,6 +294,7 @@ State artifacts must be:
 - bounded before allocation and parsing;
 - integrity-checked;
 - authenticated and bound to the current-format discriminator, Host-authoritative state identity, provider/adapter scope, session identity, and required generation/provenance;
+- authenticated and bound to every logical record's kind, provider-facing role or framing, tool-call association, and control/data classification;
 - retained only for the documented period;
 - deletable according to the documented lifecycle;
 - readable only by workflow-authorized principals;

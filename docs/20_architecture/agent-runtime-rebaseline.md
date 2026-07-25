@@ -1,14 +1,16 @@
 # Agent Runtime Architecture Rebaseline
 
-Status: selected target architecture; implementation pending.
+Status: selected target architecture; active when the coordinated documentation PR is merged; implementation pending.
 
-Decision date: 2026-07-24.
+Drafted: 2026-07-24.
 
 Last revised: 2026-07-25.
 
+Activation record: [PR #76](https://github.com/SolusQuest/agentic-pr-review/pull/76); its merge commit is the normative activation point.
+
 This document records the architecture rebaseline for the project-owned code review agent. It supersedes the earlier long-term assumption that TypeScript remains the business-capable GitHub Action host and C# remains behind a broad language-neutral protocol. Existing M1-M4 documents continue to describe the implementation currently on `main` until migration work removes or replaces those surfaces.
 
-The breaking-reset governance gate and post-merge transition are tracked by [issue #75](https://github.com/SolusQuest/agentic-pr-review/issues/75). The coordinated documentation PR references that issue without closing it; the issue remains open until the authorized GitHub metadata transition and R1/R2 parent creation are complete.
+The breaking-reset governance gate and post-merge transition are tracked by [issue #75](https://github.com/SolusQuest/agentic-pr-review/issues/75). The coordinated documentation PR #76 references that issue without closing it; the issue remains open until the authorized GitHub metadata transition and R1/R2 parent creation are complete.
 
 ## Decision Summary
 
@@ -261,7 +263,7 @@ The initial agent loop is:
 1. `ActionHost` resolves and freezes the reviewed PR tuple and review root.
 2. `ActionHost` restores compatible session state or selects safe bootstrap.
 3. `ActionHost` creates a sanitized job and a tracked-file allowlist.
-4. `ActionHost` invokes the Agent with sanitized review context, narrow read-only tool capabilities, an `IChatClient`, and cancellation.
+4. `ActionHost` invokes the Agent with sanitized review context, narrow read-only tool capabilities, the selected narrow chat-client abstraction, and cancellation.
 5. The Agent materializes the stable prefix and current dynamic review request.
 6. The provider returns either tool calls or a terminal structured review.
 7. The Agent validates every tool name and argument object before execution.
@@ -398,7 +400,7 @@ An isolated spike may prove a narrower `AIFunctionFactory` usage safe. No such p
 
 ### Provider Adapter Control
 
-The existing project-owned HTTP adapter should evolve into an `IChatClient` implementation rather than being immediately replaced by a generic OpenAI-compatible client package.
+The existing project-owned HTTP adapter should evolve behind the selected narrow chat-client abstraction rather than being immediately replaced by a generic OpenAI-compatible client package. If R2 selects `Microsoft.Extensions.AI.Abstractions`, that abstraction is `IChatClient` and the adapter implements it; otherwise the adapter implements the project-minimal interface selected by the same spike.
 
 This preserves control over:
 
@@ -468,6 +470,10 @@ The durable session model contains:
 
 The two layers have different semantics. Project-owned logical records are canonical, bounded, and suitable for deterministic replay and evaluation. The prohibition on provider-neutral rewriting applies only to provider-owned continuation artifacts. Those artifacts are never normalized, interpreted, synthesized, or reused across providers.
 
+Repository, pull-request title/body, diff, file, search-result, and tool-result content is always untrusted data, including after it enters durable history. Host/Agent code fixes its project-owned record kind, provider-facing message role or tool-result framing, tool-call association, and control/data classification. Persistence, restoration, and provider request materialization must not promote or reinterpret that content as a system or developer message, policy, tool definition, provider configuration, endpoint selection, secret channel, or any other control record. Instruction-looking text inside repository content does not alter this classification or any Host-owned control.
+
+The authenticated project-owned session structure binds each logical record's kind, role or provider framing, association, and control/data classification. A restored record whose classification or framing does not match that structure is rejected before Agent or provider admission.
+
 The first implementation need not freeze a public union of every provider's reasoning block types. It may use a bounded adapter-owned envelope inside the project-owned session format, provided the envelope:
 
 - preserves opaque payload values exactly and structured validated fields, array order, and adapter-required structural association;
@@ -487,8 +493,14 @@ Before R3 begins, R2 must define and test:
 - authenticated-confidentiality or independent-integrity requirements and a storage-conformance negative matrix;
 - binding to the current-format discriminator, Host-authoritative state identity, provider/adapter scope, session identity, and required generation/provenance;
 - provider, resolved-model, adapter-build, and structural-position binding;
+- immutable data/control classification, durable record kind, provider-facing role or framing, and tool-call association for repository-derived and tool-result content;
 - explicit reset versus fail-closed behavior;
 - a new state namespace and current-format discriminator that cannot select old M4 state as current.
+
+R2 negative fixtures must prove that:
+
+- a tool result containing system/developer-looking prompt injection round-trips and remains tool-result/data content in the reconstructed provider request;
+- otherwise authenticated current-format state whose repository-derived or tool-result content is relabeled or reframed as a system, developer, policy, tool-definition, provider-configuration, endpoint-selection, secret-channel, or other control record is rejected before provider invocation.
 
 An adapter may discard reasoning state only where the provider contract explicitly makes it unnecessary for later continuation and fixtures prove that omission preserves valid behavior. Otherwise, the safe default is to preserve the complete returned continuation record. Provider or model changes that make the record incompatible cause an observable session bootstrap; cross-provider reasoning portability is not a goal.
 
@@ -499,7 +511,7 @@ Provider references:
 - [DeepSeek tool calls](https://api-docs.deepseek.com/guides/tool_calls)
 - [DeepSeek thinking mode](https://api-docs.deepseek.com/guides/thinking_mode/)
 - [DeepSeek multi-round conversation](https://api-docs.deepseek.com/guides/multi_round_chat)
-- [Anthropic extended thinking](https://platform.claude.com/docs/en/docs/build-with-claude/extended-thinking)
+- [Anthropic thinking in tool and multi-turn workflows](https://platform.claude.com/docs/en/build-with-claude/thinking-tool-workflows)
 - [Gemini thought signatures](https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures)
 - [OpenAI Responses API reasoning items](https://platform.openai.com/docs/api-reference/responses)
 
@@ -1053,6 +1065,7 @@ Deliver:
 - session serialize/restore round-trip;
 - synthetic readable and opaque provider-continuation round-trips;
 - state record classification, byte/count/session caps, trust/retention policy, new namespace/discriminator, and explicit reset/failure behavior;
+- immutable untrusted-data classification for repository, pull-request, diff, file, search-result, and tool-result content across persistence, restoration, and provider materialization;
 - a selected restricted storage class covering visibility, authorization, deletion, fork/untrusted access, and encryption requirements;
 - a storage-conformance interface and negative test matrix for any later production transport;
 - local authenticated-encrypted state round-trip, tamper rejection, key separation, cross-scope substitution rejection, and stale-replay rejection;
@@ -1070,6 +1083,8 @@ Gate:
 - a second fresh executable invocation restores the persisted session, with opaque provider continuation values and adapter-required placement unchanged;
 - automatic selection cannot treat old M4 state as current; a non-current discriminator bootstraps observably, while an explicitly supplied incompatible artifact fails closed;
 - no silent truncation or compaction occurs; provider-owned continuation artifacts are not rewritten into a provider-neutral form or interpreted across providers;
+- prompt-injection text inside a persisted tool result round-trips as tool-result/data content and cannot become a system, developer, policy, tool-definition, provider-configuration, endpoint-selection, secret-channel, or other control record;
+- otherwise authenticated state with inconsistent logical record kind, provider role or framing, tool-call association, or control/data classification is rejected before Agent or provider admission;
 - plaintext reasoning, tool results, and provider continuation material cannot enter Git objects, repository-visible refs, caches, or normal public artifacts;
 - the storage-conformance contract defines mandatory enumeration, restore, overwrite, decrypt, deletion, and publication denials for fork-origin and untrusted workflows without claiming a production workflow transport exists in R2;
 - authenticated local state rejects tampering, identity mismatch, cross-scope substitution, stale replay, and decryption failure before Agent/provider admission;
@@ -1205,6 +1220,8 @@ Gate:
 - provider capability enforcement;
 - value-exact opaque continuation preservation plus validated structured-field, order, and adapter-placement preservation;
 - provider/model/adapter incompatibility, authenticated-binding, cross-scope substitution, stale-replay, tamper, and decryption rejection;
+- immutable untrusted-data record kind, provider role or framing, tool-call association, and control/data classification across session round-trip and request materialization;
+- rejection of otherwise authenticated state that relabels or reframes repository-derived or tool-result content as a control record;
 - session append, reset, integrity, and bound behavior;
 - evidence-reference validation;
 - sanitization and stable diagnostic codes.
@@ -1230,6 +1247,7 @@ Gate:
 - later run selects and restores the accepted state;
 - compatible history reconstructs the same canonical logical prefix;
 - thinking-enabled history reconstructs value-exact opaque payloads and validated structured continuation fields in adapter-required positions;
+- prompt-injection-like repository and tool-result content remains data/tool-result content in the reconstructed provider request;
 - a prior-only high-entropy synthetic fact is absent from fresh input, repository tool results, and policy but appears in the validated second response;
 - the second outbound request contains prior logical records, value-exact opaque payloads, and validated structured provider fields in adapter-required positions;
 - incompatible provider/model/policy/toolset state resets observably;
@@ -1280,7 +1298,7 @@ These questions do not block the first spike unless stated:
 
 1. Should the Node wrapper permanently own Actions artifact transport, or should a later C# artifact client replace it?
 2. What exact durable state byte cap best fits representative private and public repositories?
-3. Which provider should be the second adapter used to prove the `IChatClient` abstraction?
+3. Which provider should be the second adapter used to prove the selected narrow chat-client abstraction?
 4. When, if ever, should mid-run checkpoints be supported?
 5. When a provider offers both readable reasoning and an opaque continuation form with equivalent semantics, which representation minimizes durable sensitive data without reducing continuation quality?
 6. Which operating systems require production Native AOT payloads for the first public post-rebaseline release?

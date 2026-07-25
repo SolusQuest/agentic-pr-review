@@ -248,6 +248,7 @@ In scope:
 - synthetic readable and opaque provider-continuation state round-trip;
 - project-owned logical message/tool/outcome records plus a separate provider-scoped continuation envelope;
 - allowed logical and provider-owned record classes;
+- immutable untrusted-data classification, durable record kind, provider-facing role or framing, and tool-call association for repository, pull-request, diff, file, search-result, and tool-result content;
 - per-record, per-message, per-session, and record-count limits;
 - repository/workflow trust scope, retention class, and explicit reset/failure behavior;
 - restricted-state storage visibility, authorization, deletion, fork/untrusted access, and encryption requirements;
@@ -280,6 +281,8 @@ Exit criteria:
 - automatic state selection rejects old M4 or non-current discriminators through an observable bootstrap, while an explicitly supplied incompatible artifact fails closed;
 - missing, altered, oversized, structurally misplaced, or adapter-incompatible continuation state fails closed or follows the explicit bootstrap policy;
 - no silent truncation or compaction occurs; provider-owned continuation artifacts are not rewritten into a provider-neutral form or interpreted across providers;
+- prompt-injection text inside persisted repository or tool-result content round-trips as data/tool-result content and cannot be promoted into a system, developer, policy, tool-definition, provider-configuration, endpoint-selection, secret-channel, or other control record;
+- otherwise authenticated state with inconsistent logical record kind, provider role or framing, tool-call association, or control/data classification is rejected before Agent or provider admission;
 - plaintext reasoning, repository tool results, and provider continuation material cannot enter Git objects, repository-visible refs, caches, or normal public artifacts;
 - the storage-conformance interface defines mandatory enumeration, restore, overwrite, decrypt, deletion, and publication denials for fork-origin and untrusted workflows without claiming a production workflow transport exists in R2;
 - authenticated local state rejects tampering, identity mismatch, cross-scope substitution, stale replay, and decryption failure before Agent/provider admission;
