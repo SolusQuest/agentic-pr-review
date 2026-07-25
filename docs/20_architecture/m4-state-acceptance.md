@@ -1,5 +1,15 @@
 # M4 v2 state acceptance
 
+> **Rebaseline note (2026-07-24):** These checks define the safety baseline of
+> the current M4 state implementation. The target architecture may simplify the
+> stored shapes and move ownership into the .NET Host and Agent modules,
+> but it must retain equivalent acceptance coverage for integrity, identity,
+> lineage, bounds, race handling, and recovery. See
+> [Agent Runtime Architecture Rebaseline](./agent-runtime-rebaseline.md).
+> Reuse of these acceptance invariants does not authorize storing new
+> restricted Agent continuation content as plaintext in the M4 Git-data
+> namespace or another repository-visible ref.
+
 This document is the implementation handoff for issue #67 and the contract consumed by issue #53. The TypeScript surface is isolated under `src/state-acceptance/`; the default action path does not import it.
 
 ## Durable records

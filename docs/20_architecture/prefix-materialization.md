@@ -1,5 +1,13 @@
 # Prefix Materialization (Issue #50)
 
+> **Rebaseline note (2026-07-24):** This is the accepted implementation
+> contract for the current M4 prefix path. The rebaselined runtime keeps the
+> semantic invariant—stable reusable prefix followed by current-turn
+> material—but does not require duplicate TypeScript and C# APIs. New work
+> should follow
+> [Agent Runtime Architecture Rebaseline](./agent-runtime-rebaseline.md) and
+> migrate this behavior behind the .NET agent/session boundary.
+
 `prefix-materialization` is the canonical logical projection and append-safe provider-prefix contract implementation for the M4 live path. Its shared framing, hash preimages, domain tags, envelope field sets, and identity domains are owned by the [session ledger and prefix contract](session-ledger-and-prefix-contract.md) (`## Prefix Contract`, `## M4 Batch #1 Frozen Vocabulary`); this document records only the workstream surface owned by issue #50 and does not restate the shared algorithms.
 
 Production C# (`AgenticPrReview.Runtime.Prefix`) owns full materialization. Production TypeScript (`src/prefix-contract/`) owns the host-side digest / interaction-id / identity helpers. Full-stream golden vectors under `protocol/fixtures/prefix-contract/v1/` are produced by the test-only TS oracle (`src/prefix-contract/generate-fixtures.testhelper.ts`, run via `scripts/regenerate-prefix-contract-fixtures.mjs`) and verified read-only by the C# test suite.

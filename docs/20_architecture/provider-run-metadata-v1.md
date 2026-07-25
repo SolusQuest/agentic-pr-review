@@ -1,5 +1,12 @@
 # ProviderRunMetadataV1
 
+> **Rebaseline note (2026-07-24):** This is an existing durable-state format,
+> not a mandate to version every internal agent structure. The rebaselined
+> runtime may fold or replace it before release, provided migration or explicit
+> incompatibility is tested and the required continuity and integrity
+> semantics remain. See
+> [Agent Runtime Architecture Rebaseline](./agent-runtime-rebaseline.md).
+
 `ProviderRunMetadataV1` is the bounded, provider-neutral telemetry sidecar for the M4 state bundle. Its shared vocabulary, diagnostic traversal, safe paths, and hash framing are defined by the [session ledger and prefix contract](session-ledger-and-prefix-contract.md); this document records only the TypeScript surface owned by issue #51.
 
 The public byte boundary is `parseProviderRunMetadata(bytes: Uint8Array)`. It owns the input, applies the raw transport gates before schema and semantic validation, and returns either branded validated metadata or bounded `MetadataError` values. `deriveAggregate` is a pure reducer over branded attempts. `buildSemanticEnvelope` and `computeMetadataSemanticSha256` reconstruct the allowlisted semantic projection; provenance and transaction-binding fields are deliberately excluded from that projection. `identityAgrees` is a boolean host-authority check.
