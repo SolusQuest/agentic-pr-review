@@ -27,8 +27,8 @@ The project will converge on a C#-owned product architecture:
 7. The durable model has two layers: project-owned logical message/tool/outcome records and a separate provider-scoped continuation envelope. Opaque provider payloads remain value-exact, while structured provider items preserve validated fields, array order, and adapter-required placement; this does not prevent canonical project-owned logical records.
 8. Restricted continuation state is never repository-visible plaintext. A transport that cannot keep readable reasoning, bounded tool results, and provider continuation material confidential must use workflow-authorized encryption or must not persist the readable payload.
 9. Encrypted continuation state provides authenticated confidentiality or equivalent integrity protection bound to its format, Host-authoritative identity, provider/adapter scope, session, and required generation/provenance. Altered, substituted, stale, or undecryptable state is rejected before Agent/provider admission.
-10. R2 decides whether a pinned `Microsoft.Extensions.AI.Abstractions` dependency or project-minimal exchange types provide the smaller verified Native AOT surface. Either choice leaves the agent loop, durable session model, provider request materialization, budgets, checkpoints, and final result validation project-owned.
-11. The unshipped Claude Code CLI implementation will be removed from the new development head. The existing immutable `v0.1.0` tag remains the historical legacy pin; the project will not publish later unshipped legacy work merely to create a final snapshot.
+10. R2 decides whether a pinned `Microsoft.Extensions.AI.Abstractions` dependency or project-minimal exchange types provide the smaller verified Native AOT surface. Either choice leaves the agent loop, durable session model, provider-neutral request planning, provider-specific request materialization, budgets, checkpoints, and final result validation project-owned under the core/adapter boundary below.
+11. The legacy Claude Code CLI implementation will be removed from the development head. The existing immutable `v0.1.0` tag remains the historical legacy pin; the project will not publish later unshipped post-`v0.1.0` legacy work merely to create a final snapshot.
 12. Versioning is retained only for independently released artifacts and durable cross-run formats. Cache-relevant policy, prompt, tool, and provider configuration use canonical content identities instead of parallel manual version and id families.
 
 ### Recommended Option
@@ -195,7 +195,8 @@ The Agent is review-specific trusted project code inside the same executable. It
 - tool-call validation and dispatch;
 - read-only repository tools;
 - canonical logical session messages;
-- provider request construction and cache-prefix identity;
+- stable-prefix and dynamic-suffix classification;
+- a provider-neutral logical request plan and logical prefix identity;
 - per-run model/tool/token/time budgets;
 - candidate session-state construction;
 - proposed findings and sanitized runtime telemetry.
@@ -208,7 +209,7 @@ The Agent does not receive or use:
 - GitHub API or publisher capabilities;
 - arbitrary shell or process execution;
 - repository write capabilities;
-- untrusted build or test execution in the first agent milestone.
+- untrusted build or test execution in the R2 spike or R3 initial live profile.
 
 ### Provider Adapter
 
@@ -219,7 +220,11 @@ The provider adapter is a narrow in-process capability. It owns:
 - an allowlisted base endpoint;
 - explicit provider authorization headers;
 - redirect, timeout, response-size, and failure behavior;
-- translation between project-owned logical messages and provider requests.
+- provider-specific role, message, block, and tool projection from the core-owned logical request plan;
+- the provider-specific request envelope and wire serialization;
+- adapter-required provider continuation placement;
+- provider-specific cache-relevant projection or identity where the provider exposes one;
+- HTTP transport plus usage and provider-error mapping.
 
 The GitHub and provider clients must not share an `HttpClient`, handler, default authorization header, or arbitrary URL configuration. Cross-host redirects are rejected. Normal logs and diagnostics never include authorization headers or raw transport objects.
 
@@ -242,7 +247,7 @@ The Agent must not receive a general DI container or service locator. Architectu
 
 ### When To Add Process Isolation
 
-A separate process is not part of the first agent milestone. Reconsider either a same-binary `worker` subcommand or separate worker artifact when one or more of these become real requirements:
+A separate process is not part of the R2 spike or R3 initial live profile. Reconsider either a same-binary `worker` subcommand or separate worker artifact when one or more of these become real requirements:
 
 - non-cooperative cancellation or a need to kill the entire agent reliably;
 - material CPU, memory, handle, or native-crash isolation;
@@ -299,9 +304,15 @@ Parallel read-only execution may be added later if:
 - result ordering is independent of completion timing;
 - fixtures prove identical session materialization.
 
-## Initial Tool Set
+## Initial Live Tool Set
 
-The first agent milestone exposes five read-only tools and one terminal tool.
+R2 proves the smallest executable Agent-loop subset:
+
+- `read_file`;
+- `search_text`;
+- terminal `finish_review`.
+
+The target initial live Agent profile is completed in R3. It retains the R2 subset and adds `list_changed_files`, `read_diff`, and `list_files`, for five read-only tools and one terminal tool in total.
 
 | Tool                 | Purpose                                                                           | Authority                    |
 | -------------------- | --------------------------------------------------------------------------------- | ---------------------------- |
@@ -405,7 +416,7 @@ The existing project-owned HTTP adapter should evolve behind the selected narrow
 This preserves control over:
 
 - provider endpoint and model identity;
-- message and tool ordering;
+- provider-specific projection of core-owned logical message and tool ordering;
 - thinking-mode fields;
 - retry and timeout behavior;
 - response size limits;
@@ -504,7 +515,7 @@ R2 negative fixtures must prove that:
 
 An adapter may discard reasoning state only where the provider contract explicitly makes it unnecessary for later continuation and fixtures prove that omission preserves valid behavior. Otherwise, the safe default is to preserve the complete returned continuation record. Provider or model changes that make the record incompatible cause an observable session bootstrap; cross-provider reasoning portability is not a goal.
 
-Provider continuation state is restricted session data. Readable reasoning may contain source excerpts or sensitive inferences and receives at least the same protection as observed private-repository content. It may be stored only in the bounded restricted session artifact and used only for provider replay. It must not be committed as plaintext to Git objects, repository history, repository-visible state refs, normal public artifacts, logs, traces, annotations, step summaries, Action outputs, PR comments, or normal diagnostics. Those channels may record only bounded metadata such as kind, byte count, hash, and whether replay validation succeeded. Raw HTTP response bodies, headers, unrelated provider fields, and transport framing are not retained merely to satisfy continuation equality.
+Provider continuation state is restricted session data. Readable reasoning may contain source excerpts or sensitive inferences and receives at least the same protection as observed private-repository content. Among retained, logged, diagnostic, artifact, and published channels, only the bounded restricted session artifact may contain the payload. Validated in-memory session state and the outbound provider request required for replay may contain it transiently. It must not be committed as plaintext to Git objects, repository history, repository-visible state refs, normal public artifacts, logs, traces, annotations, step summaries, Action outputs, PR comments, or normal diagnostics. Those channels may record only bounded metadata such as kind, byte count, hash, and whether replay validation succeeded. Raw HTTP response bodies, headers, unrelated provider fields, and transport framing are not retained merely to satisfy continuation equality.
 
 Provider references:
 
@@ -630,7 +641,7 @@ The dynamic suffix includes:
 - deadlines and transient diagnostics;
 - provider request ids and timestamps.
 
-The provider adapter owns the deterministic projection from project session records into provider messages. A generic AI abstraction or provider SDK must not silently reorder or rewrite cache-relevant content.
+The Agent/core owns canonical project records, stable-prefix and dynamic-suffix classification, the provider-neutral logical request plan, and logical prefix identity. The provider adapter owns the deterministic provider-specific projection into roles, messages, blocks, tools, continuation placement, request envelope, and wire serialization, plus any provider-specific cache-relevant projection or identity. Neither a generic AI abstraction nor a provider SDK may silently reorder or rewrite that cache-relevant projection.
 
 The existing M4 prefix and ledger implementation remains useful evidence for canonicalization, invalidation, append semantics, and adversarial validation. It is not automatically the final agent-session wire format.
 
@@ -1061,6 +1072,7 @@ Deliver:
 - explicit `read_file` and `search_text` tools;
 - project-owned serial agent loop;
 - terminal `finish_review`;
+- a tested core/adapter seam in which the core owns the logical request plan and logical prefix identity while the adapter owns provider-specific projection, continuation placement, request serialization, and any provider-specific cache identity;
 - project-owned logical message/tool/outcome records plus a separate provider-scoped continuation envelope;
 - session serialize/restore round-trip;
 - synthetic readable and opaque provider-continuation round-trips;
@@ -1078,6 +1090,7 @@ Gate:
 
 - fake provider requests a tool, consumes its result, and finishes;
 - restored history produces the same canonical logical prefix;
+- the core reconstructs the same provider-neutral logical request plan and logical prefix identity, while the fake adapter deterministically reconstructs the expected provider-specific projection without abstraction- or SDK-driven reordering;
 - restored history preserves opaque provider payloads value-exactly and preserves structured provider validated fields, array order, hashes, tool-call associations, and adapter-required placement without unrelated raw transport data;
 - missing, altered, oversized, or adapter-incompatible continuation state fails closed or bootstraps according to the state policy;
 - a second fresh executable invocation restores the persisted session, with opaque provider continuation values and adapter-required placement unchanged;
@@ -1100,7 +1113,7 @@ Deliver:
 
 - project-owned DeepSeek adapter behind the selected narrow chat-client abstraction, with thinking-mode tool calls;
 - value-exact opaque provider continuation payloads and validated structured provider fields, ordering, and adapter-required placement across tool calls and persisted fresh-process session state;
-- full initial tool set;
+- the remaining R3 initial live tools: `list_changed_files`, `read_diff`, and `list_files`, in addition to the R2 `read_file`, `search_text`, and `finish_review` subset;
 - limits, cancellation, provider failure mapping, and sanitized telemetry;
 - structured evidence references;
 - one trusted no-publish live workflow;
@@ -1279,7 +1292,7 @@ Gate:
 
 ### Quality Evaluation
 
-The first agent milestone requires:
+The R3 initial live Agent profile requires:
 
 - must-find cases;
 - must-not-find cases;

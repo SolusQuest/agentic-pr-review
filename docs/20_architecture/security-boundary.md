@@ -54,7 +54,7 @@ The Agent must not:
 
 The model has no GitHub write tool.
 
-GitHub reads needed for review are converted into an immutable host-authoritative snapshot or performed by a host-owned read service with an explicit bounded contract. The first agent milestone uses snapshots rather than model-directed GitHub requests.
+GitHub reads needed for review are converted into an immutable host-authoritative snapshot or performed by a host-owned read service with an explicit bounded contract. The R2 spike and R3 initial live profile use snapshots rather than model-directed GitHub requests.
 
 ## Provider Secret Boundary
 
@@ -186,7 +186,7 @@ Model-produced tool arguments are untrusted:
 
 Provider strict-schema or function-calling modes are quality aids, not security boundaries.
 
-The first agent milestone does not expose:
+The R2 spike and R3 initial live profile do not expose:
 
 - shell or arbitrary process execution;
 - file write or patch operations;
@@ -322,7 +322,8 @@ The security rule is data-flow separation, not blanket deletion:
 - the session validator binds it to the provider, resolved model, adapter behavior, reviewed session, byte limits, and integrity chain;
 - readable reasoning is treated as sensitive repository-session data even when the provider exposes it as ordinary JSON text;
 - opaque, signed, encrypted, or redacted payloads remain opaque and are never parsed, normalized, concatenated, summarized, or rewritten by generic session code;
-- only the restricted durable session artifact may contain the payload;
+- among retained, logged, diagnostic, artifact, and published channels, only the restricted durable session artifact may contain the payload;
+- validated in-memory session state and the outbound provider request required for replay may contain the payload transiently;
 - logs, normal traces, annotations, summaries, outputs, comments, replay reports, and diagnostics must not contain the payload;
 - bounded metadata such as kind, byte count, content hash, and validation outcome may be recorded;
 - credentials, authorization headers, ambient environment data, raw HTTP bodies, headers, unrelated provider fields, and transport framing remain prohibited;

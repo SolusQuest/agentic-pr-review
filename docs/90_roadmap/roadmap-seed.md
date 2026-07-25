@@ -43,7 +43,7 @@ That sequence proved important safety and runtime properties, but it also:
 
 The new critical path prioritizes the product vertical slice:
 
-1. remove the unshipped Claude Code CLI path and collapse public runtime selection;
+1. remove the legacy Claude Code CLI path from the development head and collapse public runtime selection;
 2. prove a C# agent loop, tools, session round-trip, Native AOT, and model-visible secret boundary;
 3. prove a live thinking-enabled tool-calling review and exact continuation across fresh executable invocations;
 4. migrate stable GitHub host responsibilities to `.NET ActionHost`, restore a thin Action, and prove continuation across independent workflow runs;
@@ -69,7 +69,7 @@ C# and Native AOT remain selected commitments.
 
 TypeScript is no longer a business-host commitment. It remains only where the official Actions JavaScript toolkit or payload launcher materially reduces risk and maintenance.
 
-R2 compares a pinned `Microsoft.Extensions.AI.Abstractions` dependency with project-minimal exchange types and selects the smaller Native AOT-proven surface. The project owns the agent loop, tool execution, durable state, prefix, provider capability policy, budgets, and side effects either way.
+R2 compares a pinned `Microsoft.Extensions.AI.Abstractions` dependency with project-minimal exchange types and selects the smaller Native AOT-proven surface. The project owns the agent loop, tool execution, durable state, provider capability policy, budgets, and side effects either way. Agent/core owns the provider-neutral logical request plan and logical prefix identity; the provider adapter owns provider-specific projection, continuation placement, wire serialization, and any provider-specific cache-relevant identity.
 
 ## Non-Goals
 
@@ -186,7 +186,7 @@ Exit criteria:
 
 ### R1: Remove Claude And Collapse Runtime Selection
 
-Goal: remove the unshipped legacy live runtime and stop preserving migration scaffolding as public architecture.
+Goal: remove the legacy live runtime from the development head and stop preserving migration scaffolding as public architecture.
 
 Entry criteria:
 
@@ -243,6 +243,7 @@ In scope:
 - `read_file` and `search_text`;
 - serial project-owned agent loop;
 - terminal `finish_review`;
+- a tested core/adapter request boundary: core-owned logical request planning and logical prefix identity, followed by adapter-owned provider projection, continuation placement, wire serialization, and any provider-specific cache identity;
 - centralized provisional `AgentLimits`;
 - session serialize/restore round-trip;
 - synthetic readable and opaque provider-continuation state round-trip;
@@ -264,7 +265,7 @@ Out of scope:
 
 - GitHub host rewrite;
 - live provider secrets;
-- full tool set;
+- the remaining R3 initial live tools beyond the R2 subset;
 - parallel tools;
 - live provider thinking-quality tuning;
 - mid-run checkpoint;
@@ -276,6 +277,7 @@ Exit criteria:
 - fake provider requests a tool, consumes the result, and returns a terminal review;
 - tool arguments and outputs are bounded and validated;
 - session history round-trips and reconstructs the same canonical logical prefix;
+- the core reconstructs the same provider-neutral logical request plan and logical prefix identity, and the fake adapter reconstructs the expected provider-specific projection without abstraction- or SDK-driven reordering;
 - opaque byte or string continuation payloads remain value-exact, while structured provider items retain validated field values, array order, adapter-required placement, hashes, and tool-call association without unrelated raw transport data;
 - a fresh executable invocation restores persisted state produced by an earlier invocation;
 - automatic state selection rejects old M4 or non-current discriminators through an observable bootstrap, while an explicitly supplied incompatible artifact fails closed;
@@ -297,7 +299,7 @@ Exit criteria:
 
 Goal: prove a real provider can use bounded repository tools and continue a completed review session in a fresh executable invocation.
 
-Initial tools:
+Initial live tools, consisting of the R2 subset plus the three R3 additions:
 
 - `list_changed_files`;
 - `read_diff`;

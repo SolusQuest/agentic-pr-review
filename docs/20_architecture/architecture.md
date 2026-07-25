@@ -100,25 +100,29 @@ The Agent owns:
 - stable instructions, policy, and tool declarations;
 - read-only repository tool validation and execution;
 - canonical logical session messages;
-- deterministic provider request and prefix construction;
+- stable-prefix and dynamic-suffix classification;
+- a provider-neutral logical request plan and logical prefix identity;
 - model, tool, byte, token, and time budgets;
 - structured proposed findings and evidence references;
 - candidate session state and sanitized telemetry.
 
-The Agent orchestration never receives `ActionConfig`, `HostSecrets`, a GitHub or Actions client or credential, an environment abstraction, a generic `HttpClient`, `IServiceProvider`, or a shell/process capability. It never owns GitHub writes, artifact publication, repository mutation, arbitrary shell execution, or untrusted build/test execution in the first agent milestone.
+The Agent orchestration never receives `ActionConfig`, `HostSecrets`, a GitHub or Actions client or credential, an environment abstraction, a generic `HttpClient`, `IServiceProvider`, or a shell/process capability. It never owns GitHub writes, artifact publication, repository mutation, arbitrary shell execution, or untrusted build/test execution in the R2 spike or R3 initial live profile.
 
-The provider adapter owns a separate provider-specific `HttpClient`, handler, endpoint allowlist, redirect policy, and authorization header. It does not share handlers or default headers with the GitHub client.
+The provider adapter owns provider-specific role/message/block/tool projection from the logical request plan, the provider request envelope and wire serialization, continuation placement, any provider-specific cache-relevant projection or identity, HTTP transport, usage mapping, and provider-error mapping. It owns a separate provider-specific `HttpClient`, handler, endpoint allowlist, redirect policy, and authorization header. It does not share handlers or default headers with the GitHub client.
 
 ## Agent Tools
 
-The initial tool set is:
+R2 proves the minimal Agent-loop subset:
+
+- `read_file`;
+- `search_text`;
+- terminal `finish_review`.
+
+The initial live Agent tool set completed in R3 retains that subset and adds:
 
 - `list_changed_files`;
 - `read_diff`;
 - `list_files`;
-- `search_text`;
-- `read_file`;
-- terminal `finish_review`.
 
 Tools are implemented and enforced in C#. The model cannot construct commands or access files outside the reviewed tracked-file allowlist. Symbol analysis, test execution, shell, network access, MCP, and write tools remain deferred.
 
@@ -194,7 +198,7 @@ The stable prefix includes stable instructions, policy, ordered tool declaration
 
 The dynamic suffix includes the current PR delta, current-run tool activity, run identity, timestamps, request ids, and transient diagnostics.
 
-The provider adapter owns the deterministic projection from project session records into provider messages. The selected narrow chat-client abstraction or a provider SDK must not silently redefine the cache-relevant ordering or content.
+The Agent/core owns the canonical logical records, stable-prefix and dynamic-suffix classification, provider-neutral logical request plan, and logical prefix identity. The provider adapter owns deterministic provider-specific role/message/block/tool projection, continuation placement, request-envelope and wire serialization, and any provider-specific cache-relevant projection or identity. Neither the selected narrow chat-client abstraction nor a provider SDK may silently reorder or rewrite that cache-relevant projection.
 
 Existing M4 prefix and ledger contracts remain evidence for canonicalization, invalidation, and adversarial validation. They are not automatically the final agent-session wire format.
 
@@ -239,7 +243,7 @@ Compilation alone is not sufficient evidence.
 - Authenticated session structure binds logical record kind, provider-facing role or framing, tool-call association, and control/data classification; inconsistent restored records are rejected before Agent or provider admission.
 - All GitHub side effects are deterministic and host-owned.
 - The host rechecks the reviewed head before publication and state acceptance.
-- State artifacts are bounded, integrity-bound, access-controlled, and free of credentials and unrestricted raw transport data. Reasoning continuation payloads are allowed only in restricted session state and never in normal traces or published surfaces.
+- State artifacts are bounded, integrity-bound, access-controlled, and free of credentials and unrestricted raw transport data. Among retained, logged, diagnostic, artifact, and published channels, reasoning continuation payloads are allowed only in restricted session state and never in normal traces or published surfaces; validated in-memory state and the outbound provider request required for replay may contain them transiently.
 - Restricted state cannot become repository-visible plaintext; authenticated binding rejects tampering, cross-scope substitution, and stale replay before Agent/provider admission.
 - R4 production authorization rejection occurs before decryption, provider construction, provider network activity, or publication, and fork/untrusted workflows cannot enumerate, restore, overwrite, decrypt, delete, or publish restricted state.
 - A state-encryption key or key identifier is not payload authority; the key remains Host-only and is never stored with the payload or exposed to Agent/model/provider-visible channels.
