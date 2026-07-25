@@ -1,5 +1,14 @@
 # M4 stateful review action
 
+> **Rebaseline note (2026-07-24):** This document records the completed M4
+> implementation baseline. It is useful migration evidence, but its current
+> TypeScript orchestration and one-shot provider runtime are not the selected
+> end state. The replacement sequence and ownership boundaries are defined in
+> [Agent Runtime Architecture Rebaseline](./agent-runtime-rebaseline.md).
+> The public Git-data state ref remains suitable only for the current sanitized
+> M4 records. It must not carry plaintext Agent reasoning, repository tool
+> results, or provider continuation artifacts under the target architecture.
+
 `runtime_backend=ledger-csharp` is default-off. It is not a general public action mode: production execution is accepted only from the repository's default-branch `workflow_run` workflow, and the separately named default-branch verification workflow is the only `workflow_dispatch` exception.
 
 ## Invocation and authority boundary

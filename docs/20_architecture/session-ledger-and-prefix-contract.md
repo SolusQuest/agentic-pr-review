@@ -1,5 +1,19 @@
 # M4 Session Ledger And Provider Request Prefix Contract
 
+> **Rebaseline note (2026-07-24):** This document is the contract for the
+> current M4 implementation, not a requirement to retain its class, schema, or
+> cross-language boundaries forever. The durable behaviors that survive the
+> rebaseline are continuity, deterministic reconstruction, bounded growth,
+> prefix stability, and fail-closed validation. Their target ownership and
+> simpler versioning policy are defined in
+> [Agent Runtime Architecture Rebaseline](./agent-runtime-rebaseline.md).
+> This document's former M4 cost-harness and milestone-closure requirements are
+> superseded; issue #54 and PR #74 are historical inputs for later R6
+> refinement, not remaining prerequisites for closing M4.
+> The current sanitized M4 ledger may use its existing transport, but new Agent
+> reasoning, repository tool results, and provider continuation artifacts must
+> not be stored as repository-visible plaintext.
+
 Status: design contract for M4, owned by issue #29.
 
 This document defines the cross-issue semantics for the project-owned live provider path. It does not implement the ledger, provider adapter, artifact transport, or cost evaluation harness.

@@ -14,11 +14,14 @@ The action uses the GitHub Actions `node24` runtime.
 ## Project Docs
 
 - `docs/00_project/project-context.md` describes the project role and source-of-truth model.
-- `docs/20_architecture/architecture.md` describes the long-term TypeScript adapter plus C# runtime direction.
+- `docs/20_architecture/architecture.md` summarizes the selected target architecture and distinguishes it from the current implementation.
+- `docs/20_architecture/agent-runtime-rebaseline.md` records the detailed C# Agent/Host target and breaking migration sequence.
 - `docs/20_architecture/security-boundary.md` describes token, side-effect, and artifact boundaries.
 - `docs/50_ai/agent-context.md` is the agent context entrypoint.
 - `docs/90_roadmap/roadmap-seed.md` describes the roadmap, near-term milestones, and issue
   plan.
+
+The usage and reference sections below describe the current implementation until roadmap migration replaces those surfaces. They are not the target architecture or a compatibility promise for unshipped post-`v0.1.0` behavior.
 
 ## Usage
 

@@ -1,5 +1,17 @@
 # StateManifestV2 And v2 State Bundle
 
+> **Rebaseline note (2026-07-24):** This remains the acceptance contract for
+> existing v2 state bundles. Before a public release, the implementation may
+> replace it with a simpler durable format because there are no active
+> downstream consumers. Preserve the semantic requirements—integrity,
+> repository and lineage binding, deterministic recovery, bounded growth, and
+> fail-closed parsing—rather than carrying this exact version structure into
+> every internal type. See
+> [Agent Runtime Architecture Rebaseline](./agent-runtime-rebaseline.md).
+> The target Agent state has a separate restricted storage class; this manifest
+> and the M4 repository-visible transport do not authorize plaintext reasoning,
+> tool results, or provider continuation material in Git-backed state.
+
 Workstream-specific implementation guide for the M4 v2 state-bundle contract. This document does NOT re-state the shared M4 Batch #1 machinery — the sole normative source for cross-workstream vocabulary, byte caps, resolver semantics, traversal, safe-path sanitizer, deep-path oracle, and conformance vectors is [session-ledger-and-prefix-contract.md](./session-ledger-and-prefix-contract.md), section `## M4 Batch #1 Frozen Vocabulary`.
 
 Reader flow: read this document for `#48`'s workstream-specific bindings (schema, TypeScript public surface, workstream error types, filesystem layout of positive/negative fixtures) and follow anchor references to the shared contract for algorithmic details.

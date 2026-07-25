@@ -1,14 +1,18 @@
 # M3-M6 Planning
 
+> Historical implementation plan. M3 and the foundational M4 work described here produced the current TypeScript/C# integration, state, ledger, prefix, provider, and acceptance surfaces. This file is retained for issue and implementation history, but it is superseded for new sequencing by [`roadmap-seed.md`](./roadmap-seed.md) and [`../20_architecture/agent-runtime-rebaseline.md`](../20_architecture/agent-runtime-rebaseline.md). Do not use this document to delay the agent tool-loop vertical slice, preserve Claude Code CLI compatibility on the new head, expand the TypeScript business host, or resume issue #54 or PR #74 before a new R6 issue is refined from real Agent traffic.
+
 This document records the next roadmap steps after the runtime protocol and deterministic C# CLI. It gives future refinement enough context without pretending unresolved implementation decisions are agent-ready.
 
-## Planning Policy
+## Historical Planning Policy
 
-- M3 and M4 are active GitHub milestones because their boundaries and dependencies are stable enough to track.
-- M3 issues may start as refinement-ready outlines. They must identify open decisions explicitly and must be refined to the repository's agent-ready criteria before implementation.
-- M4 starts with the session ledger and prefix contract design in #29. That issue creates or identifies the implementation follow-ups needed to complete M4.
-- M5 and M6 remain roadmap-only phases. Do not create their milestones or placeholder issues until M3 integration and the M4 design make their contracts stable.
-- #30 remains deferred, closed, and unmilestoned until Phase 6 evidence supports a Phase 7 live-runtime graduation decision.
+- M3 and M4 were activated because their boundaries and dependencies were considered stable enough to track.
+- M3 issues began as refinement-ready outlines and were refined before implementation.
+- M4 began with the session ledger and prefix contract design in #29, which identified its implementation follow-ups.
+- M5 and M6 remained roadmap-only phases under this historical sequence.
+- #30 remained deferred, closed, and unmilestoned under the historical graduation plan.
+
+These bullets describe how the completed work was organized. They do not authorize new milestones or implementation.
 
 ## M3: TypeScript Runtime Integration
 
@@ -144,7 +148,7 @@ Related paths:
 
 Goal: establish project-owned live-provider execution with deterministic, cache-efficient cross-session recovery.
 
-The first issue is #29, which defines the ledger, canonical prefix, provider capability, normalized usage, and cost non-regression contracts. #29 does not block deterministic M2 or M3 work, but project-owned live provider implementation must not proceed without its design.
+The first issue was #29, which defined the ledger, canonical prefix, provider capability, normalized usage, and cost non-regression contracts. Under this historical plan, #29 did not block deterministic M2 or M3 work, but project-owned live provider implementation was not to proceed without its design.
 
 Expected implementation follow-ups after #29:
 

@@ -1,118 +1,269 @@
 # Architecture Direction
 
-The project is intentionally evolving toward a narrow, review-specific architecture:
+The selected target architecture is a narrow, GitHub-first code review agent implemented primarily in C#:
 
-1. TypeScript GitHub Action host and publisher.
-2. C# review runtime core.
-3. Schema-first JSON protocol between them.
+1. a thin Node.js GitHub Action wrapper;
+2. one Native AOT C# executable with a trusted `ActionHost`, an in-process review `Agent`, bounded tools, and provider adapters;
+3. explicit data and capability boundaries that prevent GitHub credentials from entering provider-visible, model-visible, or durable channels;
+4. an optional future worker process only when fault, resource, extension, or trust evidence justifies it.
 
-This is the selected project architecture, not a claim that C# is universally better for PR review and not a requirement to rewrite the current TypeScript implementation immediately.
+The detailed decision, rationale, migration sequence, tools, `Microsoft.Extensions.AI` policy, versioning rules, and validation gates are defined in [`agent-runtime-rebaseline.md`](./agent-runtime-rebaseline.md).
 
-The schema-first protocol is defined as JSON Schema files under `protocol/schemas/`; see `docs/20_architecture/runtime-protocol.md` for contract details.
+## Status
+
+This is the selected target direction. The current code on `main` still contains a TypeScript business host, a Claude Code CLI path, deterministic and ledger-oriented C# paths, and M1-M4 cross-language contracts. Those files remain implementation truth until replacement work lands, but they are no longer the default shape for new architecture.
+
+New work must distinguish:
+
+- **current compatibility work**: a narrow fix required to keep the existing branch safe until removal;
+- **migration work**: code that moves ownership toward the selected target and has an explicit deletion gate;
+- **target work**: code that belongs in the thin wrapper or the C# Host, Agent, tools, provider, state, and publisher modules after migration.
+
+Do not expand a current compatibility surface merely because it already exists.
 
 ## Architecture Decision And Rationale
 
-The project deliberately accepts a cross-language host/runtime boundary:
+The project keeps C# and Native AOT as runtime and distribution commitments, but no longer treats a broad TypeScript/C# protocol boundary as an engineering goal.
 
-- TypeScript remains close to GitHub Actions and the existing deterministic publisher.
-- C# provides the project-owned review runtime implementation and a distinct environment for building provider, state, and orchestration capabilities.
-- Native AOT is the runtime distribution target so downstream workflows can use pinned, self-contained binaries without installing the .NET SDK.
+The prior split proved:
 
-A TypeScript-only runtime would reduce build and release complexity, while Go would also provide straightforward static distribution. Those remain technically credible alternatives, but they are not the selected direction. Reopening the language decision requires concrete evidence that the C# or Native AOT constraints prevent the product requirements from being met.
+- deterministic process invocation;
+- Native AOT feasibility;
+- schema and fixture discipline;
+- durable state selection and acceptance;
+- strict provider parsing;
+- canonical prefix materialization;
+- fail-closed side-effect barriers.
 
-The protocol remains language-neutral. Contract fixtures and observable behavior, rather than shared implementation types, keep the TypeScript host and C# runtime aligned.
+It also created substantial duplicate business logic and validation across TypeScript and C#. The next product risk is not whether another sidecar can be validated in two languages. It is whether a bounded, stateful agent can use repository tools to produce better grounded reviews across workflow runs.
 
-## TypeScript Responsibilities
+The architecture therefore optimizes for:
 
-TypeScript remains the best layer for GitHub Action integration:
+- one business implementation language;
+- a real agent vertical slice before further broad contract work;
+- explicit credential data-flow and capability isolation;
+- deterministic host-owned publication;
+- simple pre-1.0 compatibility rules;
+- reusable safety invariants without preserving unnecessary source-language duplication.
 
-- action inputs and outputs;
-- GitHub event parsing;
-- GitHub API calls;
-- PR metadata and changed file loading;
-- sticky PR comment state;
-- existing comment scanning;
-- inline comment publishing;
-- line mapping and inline eligibility, at least initially;
-- artifact upload;
-- step summary and failure reporting;
-- runtime binary resolution and invocation when an external runtime exists.
+## Target Runtime Boundary
 
-The TypeScript publisher owns side effects.
+```mermaid
+flowchart LR
+    Wrapper["Thin Node.js wrapper"] --> App["Single .NET Native AOT executable"]
+    App --> Host["ActionHost module<br/>GitHub and publisher authority"]
+    Host -->|"sanitized context and narrow capabilities"| Agent["Review Agent module<br/>loop, tools, session"]
+    Agent -->|"narrow chat client"| Provider["Provider adapter<br/>provider-only credential"]
+    Agent -->|"candidate result and state"| Host
+```
 
-## Runtime Core Responsibilities
+The model cannot inspect process memory. It observes only provider requests and tool results deliberately sent to it. For the initial trusted, project-owned tool set, security therefore depends on explicit data flow, narrow capabilities, separate credential-bearing clients, and canary tests—not on a mandatory Host/Agent process split.
 
-The project-owned C# runtime core should be platform-neutral and review-specific:
+Separate `csproj` files can enforce dependency direction but are not a security boundary. A future same-binary worker mode may add kill and resource isolation, but a second process is not a complete sandbox by itself.
 
-- read sanitized review input;
-- validate protocol version;
-- perform context packing;
-- run deterministic and live providers through a project-owned provider interface;
-- orchestrate read/grep/glob-style repo-local tools when enabled;
-- generate structured findings;
-- generate finding fingerprints or fingerprint inputs;
-- produce usage and trace data;
-- write structured review result output.
+## Thin Node.js Wrapper Responsibilities
 
-- own canonical session ledger management for cross-run resume;
-- own deterministic provider request construction;
-- preserve cacheable prefix stability across restored sessions;
-- expose stable request serialization and prefix-hash diagnostics through provider adapters.
+The wrapper may own:
 
-The runtime core proposes findings. The publisher decides what can be posted.
+- Action input and output bridging;
+- secret masking;
+- .NET payload resolution and checksum verification;
+- cancellation forwarding;
+- official JavaScript artifact toolkit integration;
+- step annotations and summary forwarding;
+- final exit-code forwarding.
 
-## Runtime Replacement Direction
+It must not own GitHub business operations, prompts, provider selection semantics, tools, findings, session compatibility, prefix construction, or publisher policy.
 
-`claude-code-cli` is the current live provider baseline. It is kept in a compatibility and maintenance role: bug fixes, security fixes, provider-version compatibility, and CI/live-smoke maintenance remain in scope. New runtime product capabilities - including cross-session context recovery and stable provider request construction - target the project-owned runtime path, not the Claude Code CLI integration.
+## .NET ActionHost Responsibilities
 
-The project-owned runtime is intended to replace `claude-code-cli` as the long-term default live review path. This is a directional target, not an immediate removal; migration, compatibility, and deprecation criteria are deferred to later planning.
+The trusted host owns:
 
-The project-owned runtime owns the LLM API call path directly. It does not wrap or depend on a third-party coding-agent CLI for live review execution.
+- GitHub event and input interpretation;
+- PR metadata, changed-file, diff, and tracked-file snapshots;
+- GitHub REST reads and writes;
+- state selection, provenance, acceptance, and stale-writer protection;
+- in-process Agent invocation through a narrow typed request;
+- candidate result and state validation;
+- finding fingerprints, duplicate suppression, line mapping, and caps;
+- sticky and inline publication;
+- the final side-effect and stale-head barrier.
+
+The Host may receive GitHub and Actions service credentials. The Agent may not receive those credentials or credential-bearing objects.
+
+## .NET Review Agent Responsibilities
+
+The Agent owns:
+
+- a narrow chat-client capability whose credential remains encapsulated by the provider adapter;
+- a project-owned bounded agent loop;
+- stable instructions, policy, and tool declarations;
+- read-only repository tool validation and execution;
+- canonical logical session messages;
+- stable-prefix and dynamic-suffix classification;
+- a provider-neutral logical request plan and logical prefix identity;
+- model, tool, byte, token, and time budgets;
+- structured proposed findings and evidence references;
+- candidate session state and sanitized telemetry.
+
+The Agent orchestration never receives `ActionConfig`, `HostSecrets`, a GitHub or Actions client or credential, an environment abstraction, a generic `HttpClient`, `IServiceProvider`, or a shell/process capability. It never owns GitHub writes, artifact publication, repository mutation, arbitrary shell execution, or untrusted build/test execution in the R2 spike or R3 initial live profile.
+
+The provider adapter owns provider-specific role/message/block/tool projection from the logical request plan, the provider request envelope and wire serialization, continuation placement, any provider-specific cache-relevant projection or identity, HTTP transport, usage mapping, and provider-error mapping. It owns a separate provider-specific `HttpClient`, handler, endpoint allowlist, redirect policy, and authorization header. It does not share handlers or default headers with the GitHub client.
+
+## Agent Tools
+
+R2 proves the minimal Agent-loop subset:
+
+- `read_file`;
+- `search_text`;
+- terminal `finish_review`.
+
+The initial live Agent tool set completed in R3 retains that subset and adds:
+
+- `list_changed_files`;
+- `read_diff`;
+- `list_files`;
+
+Tools are implemented and enforced in C#. The model cannot construct commands or access files outside the reviewed tracked-file allowlist. Symbol analysis, test execution, shell, network access, MCP, and write tools remain deferred.
+
+## Microsoft.Extensions.AI
+
+R2 compares a pinned `Microsoft.Extensions.AI.Abstractions` dependency with project-minimal in-memory exchange types and selects the smaller option that passes the same Native AOT tool-loop proof. If adopted, `Microsoft.Extensions.AI.Abstractions` may provide `IChatClient` and chat/tool exchange types. It never owns:
+
+- the durable ledger;
+- the agent loop;
+- tool dispatch and ordering;
+- budgets;
+- provider capabilities;
+- checkpoint and commit semantics;
+- prefix identity;
+- terminal result validation.
+
+The initial production loop invokes the selected narrow chat-client abstraction directly and handles function-call content itself. It uses explicit tool schemas, explicit dispatch, project-owned DTOs, and source-generated JSON metadata. `FunctionInvokingChatClient`, reflection-driven tool schema generation, Microsoft Agent Framework, and Semantic Kernel are not part of the initial target.
+
+## Runtime Replacement
+
+The project-owned runtime is the only live runtime direction for the new development head.
+
+The Claude Code CLI path will be removed rather than maintained as a fallback. Historical tags preserve historical behavior. The first release after removal is breaking and safely bootstraps instead of migrating Claude session state.
+
+New public runtime configuration should describe provider and review behavior directly. It should not preserve the migration-only combination of:
+
+- `runtime_backend=legacy|deterministic-csharp|ledger-csharp`;
+- `runtime_provider=test|claude-code-cli`;
+- a second `live_provider` selector.
+
+Deterministic and fake providers remain internal CI and fixture infrastructure.
 
 ## Session Continuity
 
-The project-owned runtime must resume review context across separate GitHub Actions runs without depending on Claude Code's `--resume` mechanism or `session.jsonl` files.
+R2 and R3 first prove completed-review continuation across two fresh executable invocations using persisted state. R4 then proves the product guarantee across two independent GitHub Actions runs, including state bootstrap/select, continuation, acceptance, stale-writer protection, and deterministic publication. Mid-run crash recovery is deferred.
 
-To achieve this, the runtime maintains a canonical session ledger: a durable, schema-versioned record that can be restored from a state artifact and used to reconstruct the next provider request. The ledger is distinct from `ReviewTraceV1`, which is sanitized execution evidence that may be referenced by a future replay bundle, carries no conversation content, and cannot replay a review by itself.
+The project-owned session ledger must contain enough canonical logical history to continue:
 
-See `docs/20_architecture/runtime-protocol.md` for the direction on a future ledger artifact, and `docs/20_architecture/security-boundary.md` for the artifact boundary the ledger must satisfy.
+- stable instruction, policy, tool, provider, model, and adapter identities;
+- admitted review-context and assistant messages;
+- validated tool calls and complete bounded tool results;
+- terminal review results;
+- bounded provider continuation state required to replay thinking-enabled history;
+- repository, pull request, and reviewed commit identity;
+- predecessor and integrity evidence.
 
-## Provider Request Prefix Contract
+The durable model has two layers:
 
-The runtime must construct LLM API requests with a strict, stable cacheable prefix so that prefix-cache reuse is possible across resumed sessions. Cache-efficient resumability is a product constraint. Byte-stable runtime-owned request construction is the enforceable contract; provider-reported cache behavior and resulting input cost are measured outcomes.
+- project-owned canonical logical records for bounded user/assistant-visible content, repository tool calls/results, and terminal outcomes;
+- a separate provider-scoped continuation envelope whose opaque byte/string payloads remain value-exact and whose structured items preserve validated fields, array order, association, and adapter-required placement.
 
-The contract defines four invariants:
+Provider-owned artifacts are not normalized, interpreted, synthesized, or reused across providers. This restriction does not prevent canonical project-owned logical records.
 
-1. **Materialization** - given the same canonical session ledger and the same stable runtime version, `materializePrefix(ledger, providerConfig, staticPolicy)` produces the same cacheable prefix.
-2. **Append** - after a provider interaction is appended to the ledger, re-materializing the prefix does not drift due to non-semantic fields such as run id, artifact id, timestamp, or runner path.
-3. **Round-trip** - for project-owned runtime-generated requests, the runtime can derive a canonical request-prefix projection from the session ledger, and that projection re-materializes to the same cache-relevant prefix. This is not a general parser from arbitrary provider HTTP requests back into full runtime state; it does not promise that provider SDK internals can be losslessly recovered.
-4. **Prefix boundary** - requests have an explicit `[stable prefix][dynamic suffix]` split. The stable prefix may include fixed system/developer instructions, protocol or schema identifiers, stable review policy, stable tool definitions, and canonical prior session turns. The dynamic suffix includes current PR delta, changed-file patch subsets, current run metadata, transient diagnostics, fresh tool outputs, timestamps, and provider request ids.
+The ledger does not persist credentials, raw HTTP bodies, headers, unrelated provider fields, unrestricted provider captures, transport framing, unbounded source content, private runner paths, or debug captures. Provider-returned reasoning text, signatures, signed blocks, or encrypted reasoning may be retained only as validated, bounded continuation records required or recommended for adapter-defined replay. The project does not request, reconstruct, or infer hidden chain-of-thought.
 
-Byte-for-byte stability is defined over the runtime-owned append-safe canonical provider-prefix segment stream (deterministic key order, UTF-8, newline normalization, default-value omission, array ordering), not over raw HTTP bodies, provider SDK internal objects, or tokenized prefixes. The exact segment framing and hash domain are normative in `docs/20_architecture/session-ledger-and-prefix-contract.md`.
+A content hash alone is not sufficient when the corresponding logical tool result cannot be reconstructed byte-for-byte. The first implementation persists the exact bounded tool result used in the conversation.
 
-A `prefixSha256` diagnostic carries version and domain separation (contract version, template version, provider, model) to avoid false cross-version or cross-model cache-hit judgments. Provider-specific cache eligibility, minimum prefix requirements, cache usage telemetry, and pricing inputs are isolated behind provider adapters or evaluation configuration.
+Restricted session state is never repository-visible plaintext. Reasoning, repository tool results, and provider continuation material must not enter Git objects, repository-visible state refs, caches, or normal public artifacts. A transport that cannot provide sufficient confidentiality requires workflow-authorized Host-side encryption whose key is not stored with the payload; otherwise readable continuation content is not persisted.
 
-Supported adapters should normalize cache-read, cache-write, uncached-input, and output usage when the provider exposes those values. Representative resumed-session evaluations must compare normalized input cost with a documented stateless baseline. An isolated provider cache miss does not invalidate a review because eviction, time-to-live, and provider routing are outside the runtime's control; sustained prefix instability or cost regression blocks runtime graduation.
+Encrypted state provides authenticated confidentiality or equivalent independent integrity protection. Authentication binds the current-format discriminator, Host-authoritative state identity, provider/adapter scope, session identity, and required generation/provenance. The key or key identifier is not payload authority. Authentication, identity, replay, or decryption failure is handled before state content reaches the Agent or provider. R2 defines the storage conformance contract; R4 proves that the production transport prevents fork and untrusted workflows from enumerating, restoring, overwriting, decrypting, deleting, or publishing restricted state.
 
-The ledger must not be raw API request storage. See `docs/20_architecture/security-boundary.md` for the artifact-class constraints the ledger must satisfy.
+## Trusted Policy Source
 
-The v2 state-bundle manifest for the M4 live-ledger path is defined by `docs/20_architecture/state-manifest-v2.md` (contract library, issue #48). Filesystem I/O, manifest-last local commit, and cross-workflow artifact selection remain out of scope for that library.
+Stable configuration and review instructions are resolved at an immutable Host-selected workflow-authorized commit SHA, normally from the repository default-branch lineage. They are never loaded from the reviewed-head checkout, model-controlled input, ambient workspace, or an unverified mutable ref.
 
-The canonical logical projection, append-safe provider-block materialization, hash framing, and golden fixtures for the M4 prefix contract are defined by `docs/20_architecture/prefix-materialization.md` (issue #50).
+The selected policy bytes and trusted source identity participate in the session and cache identity.
+
+## Provider Request Prefix
+
+Stable prefix reconstruction remains a product constraint.
+
+The stable prefix includes stable instructions, policy, ordered tool declarations, canonical completed prior session messages, prior tool calls and bounded results, provider-required reasoning continuation records, and provider/model/adapter identity.
+
+The dynamic suffix includes the current PR delta, current-run tool activity, run identity, timestamps, request ids, and transient diagnostics.
+
+The Agent/core owns the canonical logical records, stable-prefix and dynamic-suffix classification, provider-neutral logical request plan, and logical prefix identity. The provider adapter owns deterministic provider-specific role/message/block/tool projection, continuation placement, request-envelope and wire serialization, and any provider-specific cache-relevant projection or identity. Neither the selected narrow chat-client abstraction nor a provider SDK may silently reorder or rewrite that cache-relevant projection.
+
+Existing M4 prefix and ledger contracts remain evidence for canonicalization, invalidation, and adversarial validation. They are not automatically the final agent-session wire format.
+
+## Versioning
+
+Explicit version or identity remains necessary for:
+
+- Action and independently selected payload releases;
+- durable cross-run state;
+- replay and evaluation bundles.
+
+Semantic session reuse uses canonical content digests for instructions, policy, ordered tools, and cache-relevant configuration, plus resolved provider/model and runtime build identity. It does not require duplicate manual version and id fields for the same content.
+
+Internal C# types and atomically released components do not need public `V1`/`V2` families.
+
+Before 1.0, new Agent state uses its own namespace and one current-format discriminator. Automatic selection never interprets old M4 bytes as current state; a non-current namespace or discriminator produces an observable bootstrap through a small generic header check, while an explicitly supplied incompatible artifact fails closed. The project does not maintain a full legacy reader, parallel writer, converter, or compatibility matrix without a real downstream need.
+
+## Native AOT
+
+Native AOT remains the production distribution target for the .NET payload.
+
+Every new provider, AI abstraction, serializer, tool, and host dependency must:
+
+- pass framework-dependent tests;
+- publish successfully for the selected Native AOT target;
+- execute a representative published-binary path;
+- preserve reflection-disabled serialization;
+- avoid introducing unreviewed trimming or AOT failures.
+
+Compilation alone is not sufficient evidence.
+
+## Security Invariants
+
+- The model never receives a GitHub or provider credential.
+- Agent orchestration receives no GitHub or Actions credential-bearing object or client, credential-bearing Host configuration, environment abstraction, generic HTTP client, service locator, or process capability.
+- The provider credential remains inside the narrow provider transport and may appear only in its intended authorization channel.
+- GitHub or Actions credential bytes never enter provider requests, tool results, durable state, normal diagnostics, outputs, summaries, or comments.
+- The model has no GitHub write tool.
+- The Agent has no repository write tool.
+- All model-produced tool arguments and terminal findings are untrusted and validated.
+- Repository, pull-request, diff, file, search-result, and tool-result content always remains untrusted data; persistence, restoration, and provider materialization cannot promote it into a system, developer, policy, tool-definition, provider-configuration, endpoint-selection, secret-channel, or other control record.
+- Authenticated session structure binds logical record kind, provider-facing role or framing, tool-call association, and control/data classification; inconsistent restored records are rejected before Agent or provider admission.
+- All GitHub side effects are deterministic and host-owned.
+- The host rechecks the reviewed head before publication and state acceptance.
+- State artifacts are bounded, integrity-bound, access-controlled, and free of credentials and unrestricted raw transport data. Among retained, logged, diagnostic, artifact, and published channels, reasoning continuation payloads are allowed only in restricted session state and never in normal traces or published surfaces; validated in-memory state and the outbound provider request required for replay may contain them transiently.
+- Restricted state cannot become repository-visible plaintext; authenticated binding rejects tampering, cross-scope substitution, and stale replay before Agent/provider admission.
+- R4 production authorization rejection occurs before decryption, provider construction, provider network activity, or publication, and fork/untrusted workflows cannot enumerate, restore, overwrite, decrypt, delete, or publish restricted state.
+- A state-encryption key or key identifier is not payload authority; the key remains Host-only and is never stored with the payload or exposed to Agent/model/provider-visible channels.
+
+See [`security-boundary.md`](./security-boundary.md) for the full boundary.
 
 ## Non-Goals
 
-Do not build these in the initial architecture:
+Do not build these in the first post-rebaseline architecture:
 
-- a general coding agent;
-- an autonomous code-writing agent;
+- a general coding or editing agent;
+- arbitrary shell execution;
+- model-callable GitHub writes;
+- untrusted build or test execution;
 - a hosted GitHub App;
-- a multi-platform tool beyond GitHub PR review;
-- a Semantic Kernel or Microsoft Agent Framework dependency;
-- deep Roslyn/MSBuild semantic analysis;
-- model-callable GitHub write tools;
-- runtime-owned GitHub comment posting.
-
-The non-goal of not becoming a general coding agent or IDE-coding-agent replacement refers to product scope. It does not mean `claude-code-cli` is permanent; `claude-code-cli` is the transitional live provider that the project-owned runtime is intended to replace as the long-term default (see Runtime Replacement Direction above).
-
-The TypeScript ProviderRunMetadataV1 sidecar surface is documented in [`provider-run-metadata-v1.md`](provider-run-metadata-v1.md) and follows the shared [session ledger and prefix contract](session-ledger-and-prefix-contract.md).
+- GitLab or Azure DevOps support;
+- Microsoft Agent Framework or Semantic Kernel;
+- deep Roslyn/MSBuild integration;
+- dynamic provider/plugin discovery;
+- dynamic latest-runtime downloads;
+- provider-neutral normalization or human-visible publication of reasoning state;
+- mid-run checkpoint recovery;
+- a mandatory Host/Agent process split before an isolation need is demonstrated.

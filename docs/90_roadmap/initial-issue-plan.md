@@ -1,15 +1,14 @@
 # Initial Issue Plan
 
+> Historical M0-M2 issue plan. The completed milestones and issue descriptions remain implementation history. New runtime sequencing follows [`roadmap-seed.md`](./roadmap-seed.md) and [`../20_architecture/agent-runtime-rebaseline.md`](../20_architecture/agent-runtime-rebaseline.md).
+
 This file records the initial issue breakdown for the near-term roadmap. It is intended
 to seed GitHub milestones and issues for M0 through M2 only. Later roadmap phases remain candidates
 until their dependencies are clearer.
 
-Status: M0, M1, and M2 are complete. #21 closes M2 by making both the framework-dependent and
-`linux-x64` Native AOT deterministic runtime paths recurring CI. The next critical-path
-implementation phase is M3 (TypeScript runtime integration); M4's design gate in #29 remains
-active in parallel.
+Historical status at the end of this plan: M0, M1, and M2 were complete. #21 closed M2 by making both the framework-dependent and `linux-x64` Native AOT deterministic runtime paths recurring CI. At that time, the next planned implementation phase was M3 and M4's design gate in #29 was active in parallel. This paragraph is not current scheduling guidance.
 
-## Milestones To Create Now
+## Historical Milestones Created By This Plan
 
 ### [M0: Validation and roadmap baseline](https://github.com/SolusQuest/agentic-pr-review/milestone/1)
 

@@ -1,5 +1,15 @@
 # Runtime Protocol
 
+> **Rebaseline note (2026-07-24):** This document describes the current
+> TypeScript-to-.NET implementation contract. It remains authoritative for the
+> code that exists today, but it is not the target process boundary. The
+> selected replacement is defined in
+> [Agent Runtime Architecture Rebaseline](./agent-runtime-rebaseline.md): a
+> thin Node action wrapper starts one .NET application with explicit Host,
+> Agent, tool, provider, state, and publisher modules. Preserve this protocol
+> only until each responsibility has moved and equivalent acceptance coverage
+> exists.
+
 The runtime boundary is protocol-first and file-based.
 
 ## Direction

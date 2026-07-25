@@ -1,65 +1,100 @@
 # Project Context
 
-`agentic-pr-review` is a GitHub-native PR review action and runtime project.
+`agentic-pr-review` is a GitHub-native, stateful code review agent and deterministic publishing action.
 
-The product goal is to provide policy-driven, structured-first PR review automation that can:
+The product goal is to:
 
-- read GitHub PR metadata, changed files, and bounded patch context;
+- review one immutable pull request snapshot;
+- retrieve additional repository context through bounded read-only tools;
 - apply repository review policy and context documents;
-- produce structured findings;
-- preserve cost-efficient cross-workflow review memory;
-- avoid duplicate comments;
-- support deterministic fixtures and replayable validation;
-- publish safe PR feedback through deterministic adapter code.
+- produce structured, grounded, low-noise findings;
+- resume useful review context across separate GitHub Actions runs;
+- preserve cache-efficient session continuation where providers support prefix caching;
+- avoid duplicate comments and stale publication;
+- support deterministic fixtures, quality evaluation, and replay;
+- publish safe PR feedback only through trusted deterministic host code.
+
+The project is not a generic coding agent, code editor, shell agent, general agent framework, or hosted review service in its initial scope.
 
 ## Runtime Product Constraints
 
-Beyond the review capabilities above, the project-owned runtime has three product-level constraints that shape its architecture:
+The project-owned runtime has four product-level constraints:
 
-1. **Runtime replacement**: the self-developed runtime is the long-term live review path. `claude-code-cli` is the current live provider baseline and remains in a compatibility and maintenance role; new runtime capabilities target the project-owned runtime, not the Claude Code CLI integration.
-2. **Cross-session context recovery**: the project-owned runtime must resume review context across separate GitHub Actions runs without depending on Claude Code's session mechanism.
-3. **Cache-efficient session continuation**: for supported prefix-cache providers, the runtime must reconstruct a strict, stable cacheable request prefix across resumed sessions and make cache effectiveness and normalized input cost measurable. Stable construction is a runtime contract; an individual provider-reported cache hit is an observed outcome.
+1. **Project-owned execution**: the new development head uses the project-owned runtime. The Claude Code CLI path is legacy implementation scheduled for removal; historical tags preserve historical behavior.
+2. **Cross-run session recovery**: a completed review session can be restored and continued across separate GitHub Actions runs without relying on a third-party CLI session mechanism.
+3. **Cache-efficient continuation**: supported providers receive a stable, runtime-owned cacheable prefix reconstructed from canonical logical session state. Prefix stability is enforceable; a provider cache hit is an observed outcome.
+4. **Deterministic side effects**: the model and Agent propose findings, while trusted Host code validates and performs all GitHub writes.
 
-See `docs/20_architecture/architecture.md` for the runtime replacement direction, session continuity, and provider request prefix contract.
-The project is not trying to become a generic coding agent, a general agent framework, or a hosted review service in the initial scope.
+See [`docs/20_architecture/agent-runtime-rebaseline.md`](../20_architecture/agent-runtime-rebaseline.md) for the detailed selected architecture.
 
 ## Engineering Goals
 
-This repository is also an intentional production-style agent runtime engineering project. The selected implementation direction is a C# runtime with Native AOT as its distribution target, even though a TypeScript-only or Go implementation could reduce cross-language complexity.
+C# and Native AOT remain the selected product-runtime and distribution direction.
 
 The engineering goals are to:
 
-- build a review-specific agent runtime in C# behind a language-neutral JSON protocol;
-- exercise deterministic cross-language contracts, provider orchestration, durable session state, and replay;
-- keep runtime dependencies and serialization choices compatible with Native AOT from the first CLI milestone;
-- publish pinned, verifiable, self-contained runtime binaries once behavior and compatibility are stable;
-- make the added build, versioning, and distribution complexity visible and testable rather than incidental.
+- build a review-specific C# agent with a bounded multi-turn loop;
+- implement a small, safe read-only repository tool set;
+- keep GitHub credentials and capabilities out of provider-visible, model-visible, durable, and published channels through explicit data-flow and capability boundaries;
+- keep reasoning, repository tool results, and provider continuation material out of repository-visible plaintext state, with authenticated scope binding and production transport controls that prevent fork/untrusted workflows from accessing, decrypting, substituting, replaying, or publishing restricted sessions;
+- own canonical session state and provider request materialization;
+- validate review quality, resumability, safety, and cache economics with representative execution;
+- publish pinned, verifiable, self-contained runtime payloads;
+- keep compatibility machinery proportional to actual independently released or durable boundaries.
 
-C# and Native AOT are architecture and engineering commitments, not product success criteria. Review quality, safety, resumability, cache economics, and operational reliability determine whether the runtime succeeds.
+Cross-language contract implementation is no longer an objective by itself. TypeScript remains only where it materially simplifies the GitHub Actions launcher or official artifact-toolkit integration.
+
+C# and Native AOT are architecture commitments, not product success criteria. Review quality, grounded evidence, safety, resumability, cache economics, and operational reliability decide whether the runtime succeeds.
 
 ## Current Position
 
-The existing implementation is a TypeScript GitHub Action with structured review output, sticky comment publishing, optional inline comments, state artifacts, deterministic test fixtures, and a live `claude-code-cli` runtime provider.
+The current implementation contains:
 
-The next architectural direction is to evolve the review runtime into a clearer product boundary:
+- a TypeScript GitHub Action host and deterministic publisher;
+- a live Claude Code CLI path;
+- deterministic and ledger-oriented C# runtime paths;
+- a project-owned DeepSeek provider adapter;
+- structured review output and optional inline comments;
+- durable state artifacts, selection, acceptance, and prefix contracts;
+- extensive TypeScript/C# conformance fixtures;
+- framework-dependent and Native AOT validation.
 
-- TypeScript remains the GitHub Action host, adapter, and publisher.
-- The selected project-owned C# runtime core owns review-domain reasoning, contract validation, provider orchestration, and trace generation.
-- The boundary between them should be explicit, schema-first, and testable.
+This is a reliable stateful provider pipeline, but it is not yet the target code review agent. The core missing product slice is:
 
-Native AOT feasibility is validated early so incompatible dependency choices do not accumulate. Production release assets, checksums, and compatibility matrices remain later distribution work.
+- provider-requested repository tools;
+- multi-turn tool execution;
+- tool results returned to the provider;
+- canonical agent conversation state containing bounded tool results;
+- findings bound to observed tool evidence;
+- must-find and must-not-find quality evaluation.
 
-`claude-code-cli` remains the current live provider baseline. It may receive bug fixes, security fixes, provider-version compatibility fixes, and CI/live-smoke maintenance, but new runtime product capabilities should target the project-owned runtime path rather than the Claude Code CLI integration.
+The selected next direction is:
+
+- remove the Claude Code CLI and migration-only public runtime selectors from the new head;
+- prove a C# agent loop and read-only tools before another broad contract program;
+- let R2 compare a pinned `Microsoft.Extensions.AI.Abstractions` dependency with project-minimal exchange types and select the smaller Native AOT-proven surface;
+- keep the agent loop, durable state, budgets, provider capabilities, and prefix semantics project-owned;
+- migrate GitHub business logic into the trusted Host module of one C# executable;
+- reduce TypeScript to a thin Action wrapper and artifact bridge;
+- delete duplicate TypeScript business validators after equivalent host behavior is proven;
+- defer broad cost-graduation work until real resumed agent traffic exists.
+
+A separate Agent process is deferred until fault, resource, extension, or trust evidence justifies the additional protocol and distribution surface.
 
 ## Source Of Truth
 
 Use repository files as the durable source of truth:
 
-- `README.md`: user-facing action usage and current public API.
-- `docs/00_project/`: project role and source-of-truth rules.
-- `docs/10_workflow/`: issue, PR, and release workflow rules.
-- `docs/20_architecture/`: architecture, runtime protocol, security boundary, and distribution direction.
-- `docs/50_ai/`: agent context and cross-agent procedures.
-- `docs/90_roadmap/`: roadmap, near-term milestones, and issue planning.
+- `README.md`: current user-facing action usage and public API;
+- `docs/00_project/`: project role and source-of-truth rules;
+- `docs/10_workflow/`: issue, PR, and release workflow rules;
+- `docs/20_architecture/agent-runtime-rebaseline.md`: selected target agent architecture and migration;
+- `docs/20_architecture/architecture.md`: concise architecture direction;
+- `docs/20_architecture/security-boundary.md`: trust, credential, tool, and artifact boundaries;
+- `docs/20_architecture/`: current implementation contracts and architecture details;
+- `docs/50_ai/`: agent context and cross-agent procedures;
+- `docs/90_roadmap/`: current sequencing and issue-planning direction.
 
-GitHub issues track executable work. PR descriptions record implementation changes and validation. Chat discussions, local notes, and task prompts are not durable project truth until summarized into repository docs, issues, or PRs.
+Current implementation contract documents remain authoritative for current code until migration removes their surfaces. When they conflict with the selected long-term direction, the rebaseline document controls new design work.
+
+GitHub issues track actionable design, refinement, and implementation work. Pull requests record accepted project decisions, implementation history, and validation. Chat discussions, local notes, and task prompts are not durable project truth until summarized into repository docs, issues, or PRs.
