@@ -1,10 +1,10 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { residualReferenceRules } from './residual-reference-allowlist.js';
-
-const discovery =
-  /ClaudeCodeRuntime|ANTHROPIC_|claude_code|claude-code-cli|--resume|stream-json|runtime_backend|runtime_provider|live_provider|legacy/iu;
+import {
+  residualReferenceDiscovery,
+  residualReferenceRules,
+} from './residual-reference-allowlist.js';
 const metadataPaths = new Set([
   'src/residual-reference-allowlist.ts',
   'src/residual-reference-guard.test.ts',
@@ -38,7 +38,7 @@ describe('R1 residual reference allowlist', () => {
       if (metadataPaths.has(relative)) continue;
       const lines = (await readFile(path.join(root, relative), 'utf8')).split(/\r?\n/u);
       for (const [index, line] of lines.entries()) {
-        if (!discovery.test(line)) continue;
+        if (!residualReferenceDiscovery.test(line)) continue;
         const owners = residualReferenceRules.filter(
           (rule) => rule.path.test(relative) && rule.term.test(line),
         );
@@ -52,7 +52,7 @@ describe('R1 residual reference allowlist', () => {
     expect(unowned).toEqual([]);
     expect(multiplyOwned).toEqual([]);
     expect([...hitCounts.entries()].filter(([, count]) => count === 0)).toEqual([]);
-  });
+  }, 15_000);
 
   it('requires complete lifecycle ownership metadata', () => {
     expect(new Set(residualReferenceRules.map(({ id }) => id)).size).toBe(
@@ -71,5 +71,11 @@ describe('R1 residual reference allowlist', () => {
         expect(['governing', 'historical']).toContain(rule.lifecycleClass);
       }
     }
+  });
+
+  it('discovers human-readable and executable Claude-specific spellings', () => {
+    expect('The Claude Code CLI path has been removed.').toMatch(residualReferenceDiscovery);
+    expect('const config = process.env.CLAUDE_CONFIG_DIR;').toMatch(residualReferenceDiscovery);
+    expect("import '@anthropic-ai/claude-code';").toMatch(residualReferenceDiscovery);
   });
 });

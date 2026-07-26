@@ -24,8 +24,9 @@ export type ResidualReferenceRule = TemporaryResidualReferenceRule | PermanentRe
 const retiredSelector = /claude-code-cli/u;
 const anthropicCanary = /ANTHROPIC_/u;
 const stateOrMarkerLegacy = /runtime_backend|runtime_provider|live_provider|legacy/iu;
-const documentaryResidual =
-  /ClaudeCodeRuntime|ANTHROPIC_|claude_code|claude-code-cli|--resume|stream-json|runtime_backend|runtime_provider|live_provider|legacy/iu;
+const claudeBrandEvidence = /\bClaude\b(?!-code-cli\b)/iu;
+export const residualReferenceDiscovery =
+  /\bClaude\b|@anthropic-ai\/claude-code|\bCLAUDE_[A-Z0-9_]+\b|ClaudeCodeRuntime|ANTHROPIC_|claude_code|claude-code-cli|--resume|stream-json|runtime_backend|runtime_provider|live_provider|legacy/iu;
 
 function permanent(
   id: string,
@@ -38,7 +39,7 @@ function permanent(
 ): PermanentResidualReferenceRule {
   return {
     id,
-    term: documentaryResidual,
+    term: residualReferenceDiscovery,
     path,
     lifecycleClass,
     owner,
@@ -231,11 +232,11 @@ export const residualReferenceRules = [
   permanent(
     'RR-018',
     /^docs\/20_architecture\/architecture\.md$/u,
-    'historical',
-    'R2 architecture owner',
-    'retained pre-R1 architecture evidence',
-    'selector examples describe the removed mixed runtime surface and are not current configuration',
-    'project-context.md and agent-runtime-rebaseline.md control new design; R2 rewrites or retires this evidence',
+    'governing',
+    'current architecture maintainers',
+    'current post-R1 architecture direction with historical selector contrasts',
+    'post-R1 statements govern the current tree; selector examples describe the removed mixed runtime surface and are not current configuration',
+    'project-context.md and agent-runtime-rebaseline.md control sequencing; an accepted architecture revision supersedes this document',
   ),
   permanent(
     'RR-019',
@@ -336,4 +337,47 @@ export const residualReferenceRules = [
     'legacy and Claude terms define the completed R1 scope, historical pin, or later cleanup boundaries',
     'project-context.md records current completion; accepted roadmap amendments supersede future sequencing',
   ),
+  permanent(
+    'RR-030',
+    /^docs\/50_ai\/collaboration-layers\.md$/u,
+    'governing',
+    'repository collaboration-policy maintainers',
+    'current public/private collaboration boundary',
+    'Claude references identify a prohibited dependency on private instruction files, not an executable runtime route',
+    'an accepted collaboration-policy revision supersedes this rule',
+  ),
+  {
+    id: 'RR-031',
+    term: claudeBrandEvidence,
+    path: /^protocol\/fixtures\/v1\//u,
+    lifecycleClass: 'protocol-migration',
+    currentConsumer: 'frozen ReviewInputV1 and ReviewTraceV1 provider/model fixtures',
+    owner: 'R2 protocol replacement',
+    interpretation: 'provider/model identity fixture only, not an executable Claude runtime route',
+    deletionGate: 'replace the frozen v1 fixture family',
+    milestone: 'R2',
+  },
+  {
+    id: 'RR-032',
+    term: claudeBrandEvidence,
+    path: /^protocol\/fixtures\/state-manifest-v2(?:-compat)?\//u,
+    lifecycleClass: 'state-migration',
+    currentConsumer: 'StateManifestV2 provider/model conformance fixtures',
+    owner: 'R4 state bridge',
+    interpretation: 'opaque historical model identity in state evidence',
+    deletionGate: 'replace StateManifestV2 conformance fixtures in R4',
+    milestone: 'R4',
+  },
+  {
+    id: 'RR-033',
+    term: claudeBrandEvidence,
+    path: /^src\/(?:protocol\/review-trace\.test|state-v2\/test-helpers)\.ts$/u,
+    lifecycleClass: 'state-migration',
+    currentConsumer: 'TypeScript protocol and state model-identity fixtures',
+    owner: 'R2 protocol and R4 state replacements',
+    interpretation:
+      'opaque provider/model identity test data, not an executable Claude runtime route',
+    deletionGate: 'replace the corresponding protocol and state fixture families',
+    milestone: 'R4',
+  },
 ] as const satisfies readonly ResidualReferenceRule[];

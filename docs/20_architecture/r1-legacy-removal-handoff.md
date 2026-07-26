@@ -106,7 +106,8 @@ Ported vectors remain until equivalent R4 artifact-bridge conformance coverage e
 | RR-007..010 | M4 marker, state, artifact-vector, ledger, and provider vocabulary | Internal transition evidence only; delete with R4 owners                                     |
 | RR-011..012 | Unsupported-v1 state selection/classifier vocabulary               | Rejection and non-replay evidence; delete with R4 state replacement                          |
 | RR-013      | Temporary live-provider vocabulary                                 | Internal M4 contract/rejection evidence; delete with the R4 Host boundary                    |
-| RR-014..029 | Governing or historical documentation                              | Permanent path-specific status, owner, interpretation, and supersession records              |
+| RR-014..030 | Governing or historical documentation                              | Permanent path-specific status, owner, interpretation, and supersession records              |
+| RR-031..033 | Claude provider/model identity fixtures                            | Opaque protocol/state fixture evidence; delete with the R2/R4 owners                         |
 
 Temporary matches are not supported public runtime selectors. The exact retired runtime selector is retained only in frozen protocol/conformance inputs and a negative runtime regression; unsupported legacy state is retained only to prove rejection; credential names are canaries whose values must not reach the generic child. Permanent documentation matches describe current governing boundaries or are explicitly marked historical, with their controlling supersession rule in the allowlist.
 
