@@ -3,7 +3,7 @@
  *
  * Pure function: no filesystem, no process invocation, no globals.
  * Produces a `ReviewInputV1` from the existing host structures documented in
- * `src/protocol/review-input.ts` (ReviewTarget / ActionConfig / LoadedBlock / RestoredState).
+ * `src/protocol/review-input.ts` (ReviewTarget / LoadedBlock / RestoredState).
  *
  * See issue #18 for scope and design decisions. Notable rules:
  * - `config` is a `Pick<>` subset that excludes credential- and debug-control-shaped fields.
@@ -18,12 +18,15 @@
  *   and are rejected by `validateReviewInputV1`; the builder does not silently normalize.
  */
 
-import {
-  type ActionConfig,
-  type LoadedBlock,
-  type Phase,
-  type ReviewTarget,
-  type RestoredState,
+import type {
+  InlineCommentConfidence,
+  InlineCommentSeverity,
+  LoadedBlock,
+  Phase,
+  RestoredState,
+  ReviewTarget,
+  RuntimeProvider,
+  ToolMode,
 } from '../types.js';
 import { sha256 } from '../utils.js';
 import type {
@@ -34,27 +37,22 @@ import type {
 } from './review-input.js';
 
 /**
- * Host-safe subset of `ActionConfig` accepted by `buildReviewInputV1`.
- *
- * Excludes credential- and debug-control-shaped fields (`githubToken`, `apiKey`,
- * `debugAcknowledgement`, `debugCaptureRawApiBodies`, etc.). Callers must pass
- * only these fields; sensitive fields must not enter the builder at the type layer.
+ * Purpose-specific, credential-free values accepted by `buildReviewInputV1`.
  */
-export type BuildReviewInputConfig = Pick<
-  ActionConfig,
-  | 'runtimeProvider'
-  | 'toolMode'
-  | 'maxFindings'
-  | 'maxPatchChars'
-  | 'maxContextChars'
-  | 'maxReviewChars'
-  | 'stateKey'
-  | 'inlineComments'
-  | 'maxInlineComments'
-  | 'inlineMinSeverity'
-  | 'inlineMinConfidence'
-  | 'instructions'
->;
+export interface BuildReviewInputConfig {
+  readonly runtimeProvider: RuntimeProvider;
+  readonly toolMode: ToolMode;
+  readonly maxFindings: number;
+  readonly maxPatchChars: number;
+  readonly maxContextChars: number;
+  readonly maxReviewChars: number;
+  readonly stateKey?: string;
+  readonly inlineComments: boolean;
+  readonly maxInlineComments: number;
+  readonly inlineMinSeverity: InlineCommentSeverity;
+  readonly inlineMinConfidence: InlineCommentConfidence;
+  readonly instructions?: string;
+}
 
 export interface BuildReviewInputParams {
   target: ReviewTarget;

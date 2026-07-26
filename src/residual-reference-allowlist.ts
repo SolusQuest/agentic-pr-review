@@ -1,0 +1,161 @@
+export interface ResidualReferenceRule {
+  readonly id: string;
+  readonly term: RegExp;
+  readonly path: RegExp;
+  readonly lifecycleClass: 'protocol-migration' | 'state-migration' | 'credential-canary';
+  readonly currentConsumer: string;
+  readonly owner: string;
+  readonly interpretation: string;
+  readonly deletionGate: string;
+  readonly milestone: 'R2' | 'R4';
+}
+
+const retiredSelector = /claude-code-cli/u;
+const anthropicCanary = /ANTHROPIC_/u;
+const stateOrMarkerLegacy = /runtime_backend|runtime_provider|live_provider|legacy/iu;
+
+export const residualReferenceRules = [
+  {
+    id: 'RR-001',
+    term: retiredSelector,
+    path: /^protocol\/schemas\/review-input\.v1\.json$/u,
+    lifecycleClass: 'protocol-migration',
+    currentConsumer: 'ReviewInputV1 schema compatibility',
+    owner: 'R2 protocol replacement',
+    interpretation: 'accepted migration vocabulary, not an executable runtime route',
+    deletionGate: 'replace ReviewInputV1 runtime-provider vocabulary',
+    milestone: 'R2',
+  },
+  {
+    id: 'RR-002',
+    term: retiredSelector,
+    path: /^protocol\/fixtures\/v1\//u,
+    lifecycleClass: 'protocol-migration',
+    currentConsumer: 'frozen ReviewInputV1 and ReviewTraceV1 fixtures',
+    owner: 'R2 protocol replacement',
+    interpretation: 'fixture value only',
+    deletionGate: 'replace the frozen v1 fixture family',
+    milestone: 'R2',
+  },
+  {
+    id: 'RR-003',
+    term: retiredSelector,
+    path: /^src\/(?:types\.ts|protocol\/review-input\.ts|protocol\/review-trace\.test\.ts)$/u,
+    lifecycleClass: 'protocol-migration',
+    currentConsumer: 'temporary TypeScript DTO and trace conformance evidence',
+    owner: 'R2 protocol replacement',
+    interpretation: 'typed migration marker only',
+    deletionGate: 'replace the temporary TypeScript protocol DTOs',
+    milestone: 'R2',
+  },
+  {
+    id: 'RR-004',
+    term: retiredSelector,
+    path: /^src\/live-runtime-invocation\/invoke-live-runtime\.integration\.test\.ts$/u,
+    lifecycleClass: 'protocol-migration',
+    currentConsumer: 'exact retired-selector rejection regression',
+    owner: 'R2 runtime input replacement',
+    interpretation: 'must be rejected with APR_INPUT_RUNTIME_PROVIDER_INVALID',
+    deletionGate: 'replace the R1 runtime input contract and its exact rejection vector',
+    milestone: 'R2',
+  },
+  {
+    id: 'RR-005',
+    term: anthropicCanary,
+    path: /^src\/runtime-invocation\/(?:process-runner\.ts|invoke-runtime\.lifecycle\.test\.ts|__test-fixtures__\/fake-runtime\.mjs)$/u,
+    lifecycleClass: 'credential-canary',
+    currentConsumer: 'generic child-environment privacy boundary',
+    owner: 'R2 runtime invocation',
+    interpretation: 'credential name only; value must remain absent from the child',
+    deletionGate: 'replace the R1 generic runtime invocation boundary',
+    milestone: 'R2',
+  },
+  {
+    id: 'RR-006',
+    term: anthropicCanary,
+    path: /^src\/runtime-integration\/runtime-integration\.test\.ts$/u,
+    lifecycleClass: 'credential-canary',
+    currentConsumer: 'published runtime integration privacy probe',
+    owner: 'R4 Host integration',
+    interpretation: 'credential name only; value must remain absent from the generic child',
+    deletionGate: 'replace the R1 integration harness with R4 Host integration',
+    milestone: 'R4',
+  },
+  {
+    id: 'RR-007',
+    term: stateOrMarkerLegacy,
+    path: /^src\/comments(?:\.test)?\.ts$/u,
+    lifecycleClass: 'state-migration',
+    currentConsumer: 'M4 sticky-lineage marker parsing and rendering',
+    owner: 'R4 Host and publisher',
+    interpretation: 'retained marker compatibility evidence, not a runtime selector',
+    deletionGate: 'replace M4 marker publication in R4',
+    milestone: 'R4',
+  },
+  {
+    id: 'RR-008',
+    term: stateOrMarkerLegacy,
+    path: /^src\/types\.ts$/u,
+    lifecycleClass: 'state-migration',
+    currentConsumer: 'temporary M4 marker and state DTO vocabulary',
+    owner: 'R4 Host and state bridge',
+    interpretation: 'typed compatibility marker only',
+    deletionGate: 'replace retained M4 TypeScript DTO surfaces',
+    milestone: 'R4',
+  },
+  {
+    id: 'RR-009',
+    term: stateOrMarkerLegacy,
+    path: /^src\/artifact-provenance-vectors\.ts$/u,
+    lifecycleClass: 'state-migration',
+    currentConsumer: 'provider-independent APV-031 deletion record',
+    owner: 'R4 artifact bridge',
+    interpretation: 'obsolete adapter evidence, not executable code',
+    deletionGate: 'replace APV manifest with R4 artifact-bridge conformance coverage',
+    milestone: 'R4',
+  },
+  {
+    id: 'RR-010',
+    term: stateOrMarkerLegacy,
+    path: /^src\/ledger-csharp\.ts$/u,
+    lifecycleClass: 'state-migration',
+    currentConsumer: 'temporary unreachable M4 live-provider ledger boundary',
+    owner: 'R4 Host',
+    interpretation: 'internal configuration vocabulary only',
+    deletionGate: 'replace the temporary TypeScript ledger host boundary',
+    milestone: 'R4',
+  },
+  {
+    id: 'RR-011',
+    term: stateOrMarkerLegacy,
+    path: /^src\/state-acceptance\/(?:store|github-state-store|contract\.test)\.ts$/u,
+    lifecycleClass: 'state-migration',
+    currentConsumer: 'selection-level unsupported-v1 rejection and recovery evidence',
+    owner: 'R4 state bridge',
+    interpretation: 'legacy state is rejected and never replayed',
+    deletionGate: 'replace StateManifestV2 acceptance in R4',
+    milestone: 'R4',
+  },
+  {
+    id: 'RR-012',
+    term: stateOrMarkerLegacy,
+    path: /^src\/state-v2\/(?:index|diagnostics|classifier|schema|serializer|public-surface\.test|builder-string-safety\.test|core\.test|import-boundary\.test|aggregation\.test|short-circuit-and-exhaustive\.test)\.ts$/u,
+    lifecycleClass: 'state-migration',
+    currentConsumer: 'StateManifestV2 unsupported-v1 classifier and conformance tests',
+    owner: 'R4 state bridge',
+    interpretation: 'legacy state is classified as unsupported, never accepted',
+    deletionGate: 'replace StateManifestV2 in R4',
+    milestone: 'R4',
+  },
+  {
+    id: 'RR-013',
+    term: stateOrMarkerLegacy,
+    path: /^src\/(?:live-provider\/deepseek-contract\.ts|live-runtime-invocation\/invoke-live-runtime\.integration\.test\.ts)$/u,
+    lifecycleClass: 'state-migration',
+    currentConsumer: 'temporary M4 live-provider contract and integration rejection evidence',
+    owner: 'R4 Host',
+    interpretation: 'internal provider-mode vocabulary, not a public Action input',
+    deletionGate: 'replace the temporary TypeScript live-provider host boundary',
+    milestone: 'R4',
+  },
+] as const satisfies readonly ResidualReferenceRule[];

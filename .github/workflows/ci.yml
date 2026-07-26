@@ -51,5 +51,9 @@ jobs:
           src/target.test.ts
           src/comments.test.ts
           src/inline-comments.test.ts
-          src/main-sanitizer.test.ts
-          src/main.test.ts
+          src/ledger-pre-acceptance.test.ts
+          src/runtime-invocation/import-boundary.test.ts
+          src/artifact-provenance-vectors.test.ts
+          src/residual-reference-guard.test.ts
+          src/state-v2/core.test.ts
+          src/state-v2/short-circuit-and-exhaustive.test.ts

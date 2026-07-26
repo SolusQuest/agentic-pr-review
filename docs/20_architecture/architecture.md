@@ -11,7 +11,7 @@ The detailed decision, rationale, migration sequence, tools, `Microsoft.Extensio
 
 ## Status
 
-This is the selected target direction. The current code on `main` still contains a TypeScript business host, a Claude Code CLI path, deterministic and ledger-oriented C# paths, and M1-M4 cross-language contracts. Those files remain implementation truth until replacement work lands, but they are no longer the default shape for new architecture.
+This is the selected target direction. R1 removed the TypeScript business host and Claude Code CLI path, leaving no public Action. The current tree retains deterministic and ledger-oriented C# paths plus narrow M1-M4 TypeScript contract, state, publisher, and migration evidence until their R2-R4 owners replace them.
 
 New work must distinguish:
 
@@ -145,7 +145,7 @@ The initial production loop invokes the selected narrow chat-client abstraction 
 
 The project-owned runtime is the only live runtime direction for the new development head.
 
-The Claude Code CLI path will be removed rather than maintained as a fallback. Historical tags preserve historical behavior. The first release after removal is breaking and safely bootstraps instead of migrating Claude session state.
+The Claude Code CLI path has been removed rather than maintained as a fallback. Historical tags preserve historical behavior. The first release after removal is breaking and safely bootstraps instead of migrating Claude session state.
 
 New public runtime configuration should describe provider and review behavior directly. It should not preserve the migration-only combination of:
 

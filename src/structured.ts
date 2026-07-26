@@ -1,13 +1,14 @@
 import {
-  type ActionConfig,
   type InlineCommentsMetadata,
   type Phase,
   type ReviewedRange,
   type ReviewTarget,
   type RuntimeLineageTotals,
   type RuntimeUsage,
+  type RuntimeProvider,
   type StructuredFindingV1,
   type StructuredReviewEnvelopeV1,
+  type ToolMode,
 } from './types.js';
 import type { RuntimeReviewContentV1 } from './protocol/map-review-result.js';
 import { normalizeRepoRelativePath, sha256 } from './utils.js';
@@ -25,13 +26,18 @@ export interface StructuredResultMetadata {
   inlineComments?: InlineCommentsMetadata;
 }
 
+export interface StructuredReviewConfig {
+  readonly runtimeProvider: RuntimeProvider;
+  readonly toolMode: ToolMode;
+}
+
 export interface StructuredReviewNormalizationInput {
   modelJsonText: string;
   target: ReviewTarget;
   phase: Phase;
   previousReviewedHeadSha?: string;
   reviewedRange: ReviewedRange;
-  config: Pick<ActionConfig, 'runtimeProvider' | 'toolMode'>;
+  config: StructuredReviewConfig;
   sessionId: string;
   usage: RuntimeUsage | null;
   observedTurns: number | null;
@@ -46,7 +52,7 @@ export interface StructuredReviewAssemblyInput {
   phase: Phase;
   previousReviewedHeadSha?: string;
   reviewedRange: ReviewedRange;
-  config: Pick<ActionConfig, 'runtimeProvider' | 'toolMode'>;
+  config: StructuredReviewConfig;
   sessionId: string;
   usage: RuntimeUsage | null;
   observedTurns: number | null;

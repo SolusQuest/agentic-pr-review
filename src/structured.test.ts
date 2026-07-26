@@ -4,13 +4,9 @@ import {
   buildReviewedRange,
   normalizeStructuredReview,
   StructuredReviewValidationError,
+  type StructuredReviewConfig,
 } from './structured.js';
-import {
-  type ActionConfig,
-  type ReviewTarget,
-  type RuntimeLineageTotals,
-  type RuntimeUsage,
-} from './types.js';
+import { type ReviewTarget, type RuntimeLineageTotals, type RuntimeUsage } from './types.js';
 
 const target: ReviewTarget = {
   mode: 'synthetic-fixture',
@@ -54,7 +50,7 @@ const pullRequestTarget: ReviewTarget = {
   ],
 };
 
-const config: Pick<ActionConfig, 'runtimeProvider' | 'toolMode'> = {
+const config: StructuredReviewConfig = {
   runtimeProvider: 'test',
   toolMode: 'readonly',
 };

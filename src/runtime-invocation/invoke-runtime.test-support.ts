@@ -8,8 +8,8 @@ export type { RuntimeInvocationTestSeams };
  * future co-located harness) to exercise host-I/O, cleanup, and process seams
  * without touching the production `invokeRuntime` API surface.
  *
- * Do not import this module from action wiring, #34 integration, or any release
- * build path. The action bundle (built from `src/main.ts`) never reaches this file.
+ * Do not import this module from retained production wiring, integration, or any
+ * future release build path.
  *
  * @internal
  */

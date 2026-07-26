@@ -195,6 +195,7 @@ if (scenario == "env-probe")
         githubToken = Environment.GetEnvironmentVariable("GITHUB_TOKEN") is not null,
         githubAction = Environment.GetEnvironmentVariable("GITHUB_ACTION") is not null,
         agenticReviewApiKey = Environment.GetEnvironmentVariable("AGENTIC_REVIEW_API_KEY") is not null,
+        agenticReviewDeepSeekApiKey = Environment.GetEnvironmentVariable("AGENTIC_REVIEW_DEEPSEEK_API_KEY") is not null,
         anthropicApiKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY") is not null,
         sentinel = Environment.GetEnvironmentVariable("INTEGRATION_SECRET_SENTINEL") is not null,
     };

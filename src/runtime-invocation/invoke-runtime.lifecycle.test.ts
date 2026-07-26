@@ -312,9 +312,11 @@ describe('invokeRuntime - child environment', () => {
   it('does not forward GITHUB_* or provider credentials to the child', async () => {
     const previous = process.env.GITHUB_TOKEN;
     const previousAnthropic = process.env.ANTHROPIC_API_KEY;
+    const previousDeepSeek = process.env.AGENTIC_REVIEW_DEEPSEEK_API_KEY;
     const previousAgentic = process.env.AGENTIC_REVIEW_API_KEY;
     process.env.GITHUB_TOKEN = 'ghtok-should-not-forward';
     process.env.ANTHROPIC_API_KEY = 'anth-should-not-forward';
+    process.env.AGENTIC_REVIEW_DEEPSEEK_API_KEY = 'deepseek-should-not-forward';
     process.env.AGENTIC_REVIEW_API_KEY = 'agentic-should-not-forward';
     try {
       const { invoke } = await runScenario({ scenario: 'env-dump-success' }, registry);
@@ -323,6 +325,7 @@ describe('invokeRuntime - child environment', () => {
       // All three sensitive variables must be reported as absent in the child.
       expect(dump).toContain('GITHUB_TOKEN=absent');
       expect(dump).toContain('ANTHROPIC_API_KEY=absent');
+      expect(dump).toContain('AGENTIC_REVIEW_DEEPSEEK_API_KEY=absent');
       expect(dump).toContain('AGENTIC_REVIEW_API_KEY=absent');
       expect(dump).not.toContain('ghtok-should-not-forward');
     } finally {
@@ -330,6 +333,8 @@ describe('invokeRuntime - child environment', () => {
       else process.env.GITHUB_TOKEN = previous;
       if (previousAnthropic === undefined) delete process.env.ANTHROPIC_API_KEY;
       else process.env.ANTHROPIC_API_KEY = previousAnthropic;
+      if (previousDeepSeek === undefined) delete process.env.AGENTIC_REVIEW_DEEPSEEK_API_KEY;
+      else process.env.AGENTIC_REVIEW_DEEPSEEK_API_KEY = previousDeepSeek;
       if (previousAgentic === undefined) delete process.env.AGENTIC_REVIEW_API_KEY;
       else process.env.AGENTIC_REVIEW_API_KEY = previousAgentic;
     }

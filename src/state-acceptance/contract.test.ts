@@ -862,6 +862,7 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
         },
       });
       if (result.selection === 'selected' && result.snapshot.kind === 'recovery_root_selected') {
+        expect(result.snapshot).not.toHaveProperty('predecessorBytes');
         expect(result.snapshot.recoveryEvidence).toContainEqual({
           kind: 'candidate_bundle',
           candidateId,
@@ -874,12 +875,17 @@ describe.skipIf(process.platform !== 'linux')('Linux reference store', () => {
           bundleDiagnostic: 'manifest_unknown_version',
         });
       }
-      expect(
-        await store.selectAcceptedState({ ...selectionOptions, explicitRestore: true }),
-      ).toMatchObject({
+      const explicit = await store.selectAcceptedState({
+        ...selectionOptions,
+        explicitRestore: true,
+      });
+      expect(explicit).toMatchObject({
         selection: 'selected',
         snapshot: { kind: 'explicit_restore_invalid', failure: 'contract_version_incompatible' },
       });
+      if (explicit.selection === 'selected') {
+        expect(explicit.snapshot).not.toHaveProperty('predecessorBytes');
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }

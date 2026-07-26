@@ -1,7 +1,7 @@
 import * as github from '@actions/github';
 import { capStructuredReviewForMarkdownLimit, upsertM4StateComment } from './comments.js';
 import { assembleStructuredReviewFromRuntimeContent } from './structured.js';
-import { buildReviewInputV1 } from './protocol/build-review-input.js';
+import { buildReviewInputV1, type BuildReviewInputConfig } from './protocol/build-review-input.js';
 import { mapReviewResultV1ToRuntimeContent } from './protocol/map-review-result.js';
 import { computeCacheContractDigest, computeSubjectDigest } from './prefix-contract/digest.js';
 import { deriveInteractionId } from './prefix-contract/interaction-id.js';
@@ -30,7 +30,13 @@ import {
   type StateManifestV2Input,
   type StateManifestV2Transition,
 } from './state-v2/index.js';
-import type { ActionConfig, Phase, ReviewTarget, StructuredReviewEnvelopeV1 } from './types.js';
+import type {
+  LiveProvider,
+  Phase,
+  ReviewMode,
+  ReviewTarget,
+  StructuredReviewEnvelopeV1,
+} from './types.js';
 import {
   DEEPSEEK_CACHE_CONTRACT_IDENTITY,
   deepSeekContractForMaxFindings,
@@ -101,13 +107,20 @@ const cacheContractIdentity = {
 
 type LedgerContract = typeof cacheContractIdentity | typeof DEEPSEEK_CACHE_CONTRACT_IDENTITY;
 
-function ledgerContract(config: ActionConfig): LedgerContract {
+export interface LedgerCsharpConfig extends BuildReviewInputConfig {
+  readonly liveProvider?: LiveProvider;
+  readonly reviewMode: ReviewMode;
+  readonly verificationNamespace?: string;
+  readonly postComment: boolean;
+}
+
+function ledgerContract(config: LedgerCsharpConfig): LedgerContract {
   return config.liveProvider === 'deepseek'
     ? deepSeekContractForMaxFindings(config.maxFindings).identity
     : cacheContractIdentity;
 }
 
-function ledgerEnvelopes(config: ActionConfig) {
+function ledgerEnvelopes(config: LedgerCsharpConfig) {
   return config.liveProvider === 'deepseek'
     ? deepSeekContractForMaxFindings(config.maxFindings).envelopes
     : cacheContractEnvelopes;
@@ -184,8 +197,48 @@ export class LedgerBoundaryError extends Error {
   }
 }
 
+export type LedgerPreAcceptanceOutcome<Lease, Prepared, Accepted> =
+  | {
+      readonly kind: 'target_changed';
+      readonly lease: Lease;
+      readonly prepared: Prepared;
+    }
+  | {
+      readonly kind: 'acceptance_entered';
+      readonly lease: Lease;
+      readonly prepared: Prepared;
+      readonly accepted: Accepted;
+    };
+
+/**
+ * The retained production ordering boundary between runtime execution and state acceptance.
+ * Dependencies are explicit so failure-to-zero-write composition can be tested without a Host.
+ */
+export async function runLedgerPreAcceptanceStage<Lease, Prepared, Accepted>(input: {
+  readonly executeRuntime: () => Promise<Lease>;
+  readonly prepareResult: (lease: Lease) => Promise<Prepared> | Prepared;
+  readonly revalidateTarget: () => Promise<'matching' | 'changed' | 'failed'>;
+  readonly enterAcceptance: (lease: Lease, prepared: Prepared) => Promise<Accepted>;
+}): Promise<LedgerPreAcceptanceOutcome<Lease, Prepared, Accepted>> {
+  const lease = await input.executeRuntime();
+  const prepared = await input.prepareResult(lease);
+  const revalidation = await input.revalidateTarget();
+  if (revalidation === 'failed') {
+    throw new LedgerBoundaryError('target_revalidation_failed', 'target revalidation failed');
+  }
+  if (revalidation === 'changed') {
+    return { kind: 'target_changed', lease, prepared };
+  }
+  return {
+    kind: 'acceptance_entered',
+    lease,
+    prepared,
+    accepted: await input.enterAcceptance(lease, prepared),
+  };
+}
+
 export async function runLedgerCsharp(input: {
-  readonly config: ActionConfig;
+  readonly config: LedgerCsharpConfig;
   readonly target: ReviewTarget;
   readonly octokit: any;
   readonly eventName: string;
@@ -299,71 +352,11 @@ export async function runLedgerCsharp(input: {
   const command = await resolveTrustedRuntimeCommand(process.env);
   const cancellation = abortOnHostTermination();
   try {
-    const lease = await invokeLiveRuntime({
-      command: command.command,
-      input: plan.reviewInput,
-      context: plan.context,
-      manifestInput: plan.manifestInput,
-      timeoutMs: input.config.liveProvider === 'deepseek' ? 150_000 : 30_000,
-      trustedRoot: process.env.RUNNER_TEMP,
-      predecessorLedgerBytes: plan.predecessor?.ledgerBytes,
-      predecessorManifestBytes: plan.predecessor?.manifestBytes,
-      predecessorProviderRunMetadataBytes: plan.predecessor?.providerRunMetadataBytes,
-      signal: cancellation.signal,
-    });
+    let lease!: Awaited<ReturnType<typeof invokeLiveRuntime>>;
+    let leaseAcquired = false;
     let leaseOwnershipTransferred = false;
     let leaseReleased = false;
     try {
-      const assembled = assembleStructuredReviewFromRuntimeContent({
-        content: mapReviewResultV1ToRuntimeContent(lease.result).content,
-        target: input.target,
-        phase: plan.phase,
-        previousReviewedHeadSha: plan.previousHeadSha,
-        reviewedRange: {
-          kind: plan.phase,
-          fromSha: plan.previousHeadSha ?? null,
-          toSha: input.target.headSha,
-        },
-        config: input.config,
-        sessionId: `m4:${stateKey.pullRequest}`,
-        usage: null,
-        observedTurns: null,
-        observedTurnSource: 'not_applicable',
-        lineageTotals: emptyLineageTotals(),
-        maxFindings: input.config.maxFindings,
-      });
-      const structuredReview = capStructuredReviewForMarkdownLimit(
-        assembled.envelope,
-        input.config.maxReviewChars,
-      );
-      const revalidation = await targetStillMatches(input.target, input.octokit);
-      if (revalidation === 'failed') {
-        throw new LedgerBoundaryError('target_revalidation_failed', 'target revalidation failed');
-      }
-      if (revalidation === 'changed') {
-        const cleanupWarnings = await releaseLease(lease);
-        leaseReleased = true;
-        return {
-          stateKey: stateKey.workflowIdentity,
-          phase: plan.phase,
-          transition: lease.manifest.transition.kind,
-          acceptanceStatus: 'not_accepted',
-          acceptanceReason: 'target_changed',
-          publicationStatus: 'not_attempted',
-          receiptStatus: 'not_written',
-          runtimeVersion: lease.result.runtimeVersion,
-          traceSha256: lease.traceSha256,
-          commentUrl: '',
-          stateReason: transitionReason(lease.manifest.transition),
-          candidateId: '',
-          markerId: '',
-          selectorRevision: '',
-          sessionEpoch: '',
-          stateGeneration: '',
-          ledgerEpoch: '',
-          cleanupWarnings,
-        };
-      }
       let commentUrl = '';
       let publishedComment: { commentId: string; bodySha256: string } | undefined;
       let acceptedSelectorRevision = '';
@@ -389,52 +382,122 @@ export async function runLedgerCsharp(input: {
           return typeof value === 'function' ? value.bind(target) : value;
         },
       }) as StateAcceptanceStore;
-      leaseOwnershipTransferred = true;
-      const acceptance = await acceptLocalCandidate(observingStore, {
-        selectionSnapshot: selection.snapshot,
-        candidate: lease,
-        interactionId: lease.manifest.transaction.interactionId,
-        interactionOrdinal: lease.manifest.transaction.interactionOrdinal,
-        producingRunId: lease.manifest.provenance.producingRunId,
-        producingRunAttempt: lease.manifest.provenance.producingRunAttempt,
-        acceptingRunId: String(github.context.runId),
-        acceptingRunAttempt: github.context.runAttempt,
-        consumedInputSha256: lease.manifest.transaction.consumedInputSha256,
-        transition: lease.manifest.transition,
-        publishSticky: input.config.postComment
-          ? async (markerId) => {
-              try {
-                const comment = await publishLedgerComment({
-                  octokit: input.octokit,
-                  target: input.target,
-                  structuredReview,
-                  markerId,
-                  selectorRevision: acceptedSelectorRevision,
-                });
-                commentUrl = comment.commentUrl;
-                publishedComment = {
-                  commentId: comment.commentId,
-                  bodySha256: comment.bodySha256,
-                };
-              } catch (error) {
-                if (error instanceof Error && error.message === 'comment_outcome_unknown') {
-                  throw new StickyCallbackOutcomeUnknownError();
+      const stage = await runLedgerPreAcceptanceStage({
+        executeRuntime: async () => {
+          lease = await invokeLiveRuntime({
+            command: command.command,
+            input: plan.reviewInput,
+            context: plan.context,
+            manifestInput: plan.manifestInput,
+            timeoutMs: input.config.liveProvider === 'deepseek' ? 150_000 : 30_000,
+            trustedRoot: process.env.RUNNER_TEMP,
+            predecessorLedgerBytes: plan.predecessor?.ledgerBytes,
+            predecessorManifestBytes: plan.predecessor?.manifestBytes,
+            predecessorProviderRunMetadataBytes: plan.predecessor?.providerRunMetadataBytes,
+            signal: cancellation.signal,
+          });
+          leaseAcquired = true;
+          return lease;
+        },
+        prepareResult: (runtimeLease) => {
+          const assembled = assembleStructuredReviewFromRuntimeContent({
+            content: mapReviewResultV1ToRuntimeContent(runtimeLease.result).content,
+            target: input.target,
+            phase: plan.phase,
+            previousReviewedHeadSha: plan.previousHeadSha,
+            reviewedRange: {
+              kind: plan.phase,
+              fromSha: plan.previousHeadSha ?? null,
+              toSha: input.target.headSha,
+            },
+            config: input.config,
+            sessionId: `m4:${stateKey.pullRequest}`,
+            usage: null,
+            observedTurns: null,
+            observedTurnSource: 'not_applicable',
+            lineageTotals: emptyLineageTotals(),
+            maxFindings: input.config.maxFindings,
+          });
+          return capStructuredReviewForMarkdownLimit(
+            assembled.envelope,
+            input.config.maxReviewChars,
+          );
+        },
+        revalidateTarget: () => targetStillMatches(input.target, input.octokit),
+        enterAcceptance: async (runtimeLease, structuredReview) => {
+          leaseOwnershipTransferred = true;
+          return acceptLocalCandidate(observingStore, {
+            selectionSnapshot: selection.snapshot,
+            candidate: runtimeLease,
+            interactionId: runtimeLease.manifest.transaction.interactionId,
+            interactionOrdinal: runtimeLease.manifest.transaction.interactionOrdinal,
+            producingRunId: runtimeLease.manifest.provenance.producingRunId,
+            producingRunAttempt: runtimeLease.manifest.provenance.producingRunAttempt,
+            acceptingRunId: String(github.context.runId),
+            acceptingRunAttempt: github.context.runAttempt,
+            consumedInputSha256: runtimeLease.manifest.transaction.consumedInputSha256,
+            transition: runtimeLease.manifest.transition,
+            publishSticky: input.config.postComment
+              ? async (markerId) => {
+                  try {
+                    const comment = await publishLedgerComment({
+                      octokit: input.octokit,
+                      target: input.target,
+                      structuredReview,
+                      markerId,
+                      selectorRevision: acceptedSelectorRevision,
+                    });
+                    commentUrl = comment.commentUrl;
+                    publishedComment = {
+                      commentId: comment.commentId,
+                      bodySha256: comment.bodySha256,
+                    };
+                  } catch (error) {
+                    if (error instanceof Error && error.message === 'comment_outcome_unknown') {
+                      throw new StickyCallbackOutcomeUnknownError();
+                    }
+                    if (error instanceof Error && error.message === 'comment_create_failed') {
+                      throw new StickyCallbackKnownFailureError('comment_create_failed');
+                    }
+                    if (error instanceof Error && error.message === 'comment_update_failed') {
+                      throw new StickyCallbackKnownFailureError('comment_update_failed');
+                    }
+                    if (error instanceof Error && error.message === 'comment_readback_failed') {
+                      throw new StickyCallbackKnownFailureError('comment_readback_failed');
+                    }
+                    throw error;
+                  }
                 }
-                if (error instanceof Error && error.message === 'comment_create_failed') {
-                  throw new StickyCallbackKnownFailureError('comment_create_failed');
-                }
-                if (error instanceof Error && error.message === 'comment_update_failed') {
-                  throw new StickyCallbackKnownFailureError('comment_update_failed');
-                }
-                if (error instanceof Error && error.message === 'comment_readback_failed') {
-                  throw new StickyCallbackKnownFailureError('comment_readback_failed');
-                }
-                throw error;
-              }
-            }
-          : undefined,
-        signal: cancellation.signal,
+              : undefined,
+            signal: cancellation.signal,
+          });
+        },
       });
+      if (stage.kind === 'target_changed') {
+        const cleanupWarnings = await releaseLease(lease);
+        leaseReleased = true;
+        return {
+          stateKey: stateKey.workflowIdentity,
+          phase: plan.phase,
+          transition: lease.manifest.transition.kind,
+          acceptanceStatus: 'not_accepted',
+          acceptanceReason: 'target_changed',
+          publicationStatus: 'not_attempted',
+          receiptStatus: 'not_written',
+          runtimeVersion: lease.result.runtimeVersion,
+          traceSha256: lease.traceSha256,
+          commentUrl: '',
+          stateReason: transitionReason(lease.manifest.transition),
+          candidateId: '',
+          markerId: '',
+          selectorRevision: '',
+          sessionEpoch: '',
+          stateGeneration: '',
+          ledgerEpoch: '',
+          cleanupWarnings,
+        };
+      }
+      const acceptance = stage.accepted;
       const acceptanceStatus = acceptance.acceptance;
       const acceptanceReason = 'reason' in acceptance ? acceptance.reason : '';
       const publicationStatus = acceptance.publication.status;
@@ -527,7 +590,8 @@ export async function runLedgerCsharp(input: {
       }
       return result;
     } catch (error) {
-      if (leaseOwnershipTransferred || error instanceof LedgerRunFailure) throw error;
+      if (!leaseAcquired || leaseOwnershipTransferred || error instanceof LedgerRunFailure)
+        throw error;
       const cleanupWarnings = await releaseLease(lease);
       leaseReleased = true;
       throw new LedgerRunFailure(
@@ -541,7 +605,7 @@ export async function runLedgerCsharp(input: {
         ledgerErrorKindFor(error),
       );
     } finally {
-      if (!leaseOwnershipTransferred && !leaseReleased)
+      if (leaseAcquired && !leaseOwnershipTransferred && !leaseReleased)
         await lease.release().catch(() => undefined);
     }
   } finally {
@@ -578,7 +642,7 @@ function transitionReason(transition: StateManifestV2Transition): string {
 }
 
 async function validateLedgerInvocationEvent(
-  config: ActionConfig,
+  config: LedgerCsharpConfig,
   eventName: string,
   octokit: any,
   target: ReviewTarget,
@@ -823,7 +887,7 @@ export function ledgerStateKey(
   repository: string,
   pullRequest: number,
   verificationNamespace?: string,
-  liveProvider: ActionConfig['liveProvider'] = 'none',
+  liveProvider: LiveProvider = 'none',
 ): StateKeyV2 {
   const workflowIdentity = verificationNamespace
     ? `${VERIFICATION_WORKFLOW_IDENTITY}/${verificationNamespace}`
@@ -846,7 +910,7 @@ export function ledgerStateKey(
 }
 
 export function planLedgerInvocation(input: {
-  readonly config: ActionConfig;
+  readonly config: LedgerCsharpConfig;
   readonly target: ReviewTarget;
   readonly stateKey: StateKeyV2;
   readonly selection: Exclude<

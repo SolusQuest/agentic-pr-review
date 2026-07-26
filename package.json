@@ -14,8 +14,6 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "@actions/artifact": "^6.2.1",
-    "@actions/core": "^3.0.1",
     "@actions/github": "^9.1.1",
     "@types/node": "^25.9.3",
     "ajv": "^8.20.0",

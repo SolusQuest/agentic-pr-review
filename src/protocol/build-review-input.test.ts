@@ -2,13 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildReviewInputV1, type BuildReviewInputConfig } from './build-review-input.js';
 import { validateReviewInputV1 } from './review-input.js';
 import { sha256 } from '../utils.js';
-import type {
-  ActionConfig,
-  ChangedFile,
-  LoadedBlock,
-  RestoredState,
-  ReviewTarget,
-} from '../types.js';
+import type { ChangedFile, LoadedBlock, RestoredState, ReviewTarget } from '../types.js';
 
 const REPO = { owner: 'SolusQuest', name: 'agentic-pr-review' };
 
@@ -320,33 +314,18 @@ describe('buildReviewInputV1', () => {
     expect(validateReviewInputV1(built).ok).toBe(true);
   });
 
-  it('produces no leaked secrets when a full ActionConfig with sentinel values is passed through', () => {
-    const leakyConfig: ActionConfig = {
+  it('produces no leaked secrets when credential-shaped extra fields are passed through', () => {
+    const leakyConfig = {
       ...baseSafeConfig,
-      targetMode: 'pull-request',
-      reviewMode: 'auto',
-      artifactRetentionDays: 7,
-      postComment: true,
-      apiKeyMode: 'api-key',
-      claudeMaxTurns: 5,
-      testRuntimeFixture: 'valid',
-      usageBudgetLimits: {
-        maxUncachedInputTokens: 0,
-        maxCachedInputTokens: 0,
-        maxOutputTokens: 0,
-      },
-      disablePromptCaching: false,
       debugCaptureRawApiBodies: true,
       debugAcknowledgement: 'DEBUG_TESTFAKE',
       githubToken: 'ghp_TESTFAKE',
       apiKey: 'sk-TESTFAKE',
     };
 
-    // The public `config` type exposes only safe fields, but TypeScript structural
-    // typing does not prevent a variable already typed as `ActionConfig` from
-    // being passed at the call site. This test simulates a caller that
-    // erroneously forwards the full `ActionConfig`; the recursive scan and
-    // schema validation below are the runtime and shape gates that catch it.
+    // TypeScript structural typing permits a wider variable at the call site.
+    // The recursive scan and schema validation remain the runtime and shape gates
+    // against accidentally forwarding credential-shaped extras.
     const built = buildReviewInputV1({
       target: makeTarget(),
       config: leakyConfig as unknown as BuildReviewInputConfig,
