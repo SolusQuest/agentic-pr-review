@@ -10,7 +10,7 @@ const metadataPaths = new Set([
   'src/residual-reference-guard.test.ts',
 ]);
 
-async function sourceFiles(root: string): Promise<string[]> {
+async function repositoryFiles(root: string): Promise<string[]> {
   const result: string[] = [];
   const visit = async (relative: string): Promise<void> => {
     const absolute = path.join(root, relative);
@@ -20,20 +20,21 @@ async function sourceFiles(root: string): Promise<string[]> {
       else result.push(child);
     }
   };
-  for (const directory of ['src', 'scripts', '.github', 'protocol']) {
+  for (const directory of ['src', 'scripts', '.github', 'protocol', 'docs']) {
     await visit(directory);
   }
+  result.push('README.md');
   return result;
 }
 
 describe('R1 residual reference allowlist', () => {
-  it('owns every residual match exactly once and every temporary entry still matches', async () => {
+  it('owns every executable, contract, and documentary residual exactly once', async () => {
     const root = process.cwd();
     const hitCounts = new Map(residualReferenceRules.map((rule) => [rule.id, 0]));
     const unowned: string[] = [];
     const multiplyOwned: string[] = [];
 
-    for (const relative of await sourceFiles(root)) {
+    for (const relative of await repositoryFiles(root)) {
       if (metadataPaths.has(relative)) continue;
       const lines = (await readFile(path.join(root, relative), 'utf8')).split(/\r?\n/u);
       for (const [index, line] of lines.entries()) {
@@ -58,11 +59,17 @@ describe('R1 residual reference allowlist', () => {
       residualReferenceRules.length,
     );
     for (const rule of residualReferenceRules) {
-      expect(rule.currentConsumer).not.toBe('');
       expect(rule.owner).not.toBe('');
       expect(rule.interpretation).not.toBe('');
-      expect(rule.deletionGate).not.toBe('');
-      expect(['R2', 'R4']).toContain(rule.milestone);
+      if ('deletionGate' in rule) {
+        expect(rule.currentConsumer).not.toBe('');
+        expect(rule.deletionGate).not.toBe('');
+        expect(['R2', 'R4']).toContain(rule.milestone);
+      } else {
+        expect(rule.status).not.toBe('');
+        expect(rule.supersessionRule).not.toBe('');
+        expect(['governing', 'historical']).toContain(rule.lifecycleClass);
+      }
     }
   });
 });

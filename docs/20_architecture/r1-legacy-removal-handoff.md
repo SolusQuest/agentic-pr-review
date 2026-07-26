@@ -45,40 +45,40 @@ Under the retained M4 contract, sticky publication occurs after selector accepta
 
 `src/artifact-provenance-vectors.ts` is the authoritative provider-independent vector manifest. `src/artifact-provenance-vectors.test.ts` requires the complete stable ID range, unique IDs, structured inputs and outcomes, security invariants, future consumers and gates for ported vectors, and rationales for obsolete vectors.
 
-| ID      | Security question and current disposition                                        | R4 requirement or deletion rationale                        |
-| ------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| APV-001 | Exact artifact-name mismatch is ineligible                                       | Exact-name eligibility                                      |
-| APV-002 | Expired artifact is ineligible                                                   | Retention-aware eligibility                                 |
-| APV-003 | Missing or zero artifact ID is ineligible                                        | Positive artifact identity                                  |
-| APV-004 | Missing or zero producing run ID is ineligible                                   | Positive producer identity                                  |
-| APV-005 | Current-run metadata read failure aborts lookup                                  | Fail-closed trust-anchor read                               |
-| APV-006 | Candidate-run metadata read failure skips that candidate                         | Per-candidate fail-closed metadata read                     |
-| APV-007 | Malformed current run ID invalidates the trust anchor                            | Safe-integer current-run identity                           |
-| APV-008 | Malformed candidate run ID invalidates the candidate                             | Safe-integer candidate identity                             |
-| APV-009 | Missing, invalid, or mismatched workflow ID is rejected                          | Complete workflow identity                                  |
-| APV-010 | Missing or mismatched workflow path is rejected                                  | Complete workflow definition identity                       |
-| APV-011 | Missing or mismatched event is rejected                                          | Complete event-domain identity                              |
-| APV-012 | Missing head SHA is rejected                                                     | Complete source provenance                                  |
-| APV-013 | Missing or mismatched head repository is rejected                                | Complete repository identity                                |
-| APV-014 | Only the candidate producer must already have `conclusion=success`               | Candidate-only successful-producer rule                     |
-| APV-015 | Workflow ID mismatch is rejected                                                 | Current/candidate workflow equality                         |
-| APV-016 | Workflow path mismatch is rejected                                               | Current/candidate path equality                             |
-| APV-017 | Event mismatch is rejected                                                       | Current/candidate event equality                            |
-| APV-018 | Head-repository mismatch is rejected                                             | Current/candidate repository equality                       |
-| APV-019 | PR state requires a `pull_request` producer event                                | PR-domain eligibility                                       |
-| APV-020 | Candidate must be associated with the target PR number                           | Target binding                                              |
-| APV-021 | Explicit run selection does not bypass trust checks                              | Explicit-selection non-bypass                               |
-| APV-022 | Trust filtering occurs before recency ordering                                   | Newer untrusted candidates cannot shadow trusted state      |
-| APV-023 | Distinct valid timestamps used descending lexical order                          | Define timestamp semantics                                  |
-| APV-024 | Equal timestamps preserved upstream API order without a tie-break                | Define and test a deterministic total order                 |
-| APV-025 | Missing/malformed timestamps were string-coerced and remained eligible           | Validate or explicitly order malformed timestamps           |
-| APV-026 | The retired adapter observed only the first 100 results                          | Complete enumeration                                        |
-| APV-027 | A trusted candidate outside the observed page was indistinguishable from absence | Pagination completeness                                     |
-| APV-028 | Later-page failure was unrepresentable because pagination did not exist          | Partial-enumeration failure taxonomy                        |
-| APV-029 | A fully observed set with no trusted candidate returns no state                  | Never select the best untrusted candidate                   |
-| APV-030 | Artifact-list API failure propagates                                             | Lookup failure cannot masquerade as absence                 |
-| APV-031 | Permissive legacy explicit restore is obsolete                                   | Deleted with no reader, converter, or compatibility promise |
-| APV-032 | `@actions/artifact` upload/download transport is obsolete                        | R4 chooses its own artifact bridge                          |
+| ID      | Security question and current disposition                                                                                                                                                     | R4 requirement or deletion rationale                        |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| APV-001 | Exact artifact-name mismatch is ineligible                                                                                                                                                    | Exact-name eligibility                                      |
+| APV-002 | Expired artifact is ineligible                                                                                                                                                                | Retention-aware eligibility                                 |
+| APV-003 | Missing or zero artifact ID is ineligible                                                                                                                                                     | Positive artifact identity                                  |
+| APV-004 | Repository lookup requires embedded producer identity; explicit-run lookup falls back from missing/null embedded identity to `explicitRunId`, but present zero/invalid identity is ineligible | Structured producer-ID precedence cases                     |
+| APV-005 | Current-run metadata read failure aborts lookup                                                                                                                                               | Fail-closed trust-anchor read                               |
+| APV-006 | Candidate-run metadata read failure skips that candidate                                                                                                                                      | Per-candidate fail-closed metadata read                     |
+| APV-007 | Malformed current run ID invalidates the trust anchor                                                                                                                                         | Safe-integer current-run identity                           |
+| APV-008 | Malformed candidate run ID invalidates the candidate                                                                                                                                          | Safe-integer candidate identity                             |
+| APV-009 | Missing, invalid, or mismatched workflow ID is rejected                                                                                                                                       | Complete workflow identity                                  |
+| APV-010 | Missing or mismatched workflow path is rejected                                                                                                                                               | Complete workflow definition identity                       |
+| APV-011 | Missing or mismatched event is rejected                                                                                                                                                       | Complete event-domain identity                              |
+| APV-012 | Missing head SHA is rejected                                                                                                                                                                  | Complete source provenance                                  |
+| APV-013 | Missing or mismatched head repository is rejected                                                                                                                                             | Complete repository identity                                |
+| APV-014 | Only the candidate producer must already have `conclusion=success`                                                                                                                            | Candidate-only successful-producer rule                     |
+| APV-015 | Workflow ID mismatch is rejected                                                                                                                                                              | Current/candidate workflow equality                         |
+| APV-016 | Workflow path mismatch is rejected                                                                                                                                                            | Current/candidate path equality                             |
+| APV-017 | Event mismatch is rejected                                                                                                                                                                    | Current/candidate event equality                            |
+| APV-018 | Head-repository mismatch is rejected                                                                                                                                                          | Current/candidate repository equality                       |
+| APV-019 | PR state requires a `pull_request` producer event                                                                                                                                             | PR-domain eligibility                                       |
+| APV-020 | Candidate must be associated with the target PR number                                                                                                                                        | Target binding                                              |
+| APV-021 | Explicit run selection does not bypass trust checks                                                                                                                                           | Explicit-selection non-bypass                               |
+| APV-022 | Trust filtering occurs before recency ordering                                                                                                                                                | Newer untrusted candidates cannot shadow trusted state      |
+| APV-023 | Distinct valid timestamps used descending lexical order                                                                                                                                       | Define timestamp semantics                                  |
+| APV-024 | Equal timestamps preserved upstream API order without a tie-break                                                                                                                             | Define and test a deterministic total order                 |
+| APV-025 | Missing/malformed timestamps were string-coerced and remained eligible                                                                                                                        | Validate or explicitly order malformed timestamps           |
+| APV-026 | The retired adapter observed only the first 100 results                                                                                                                                       | Complete enumeration                                        |
+| APV-027 | A trusted candidate outside the observed page was indistinguishable from absence                                                                                                              | Pagination completeness                                     |
+| APV-028 | Later-page failure was unrepresentable because pagination did not exist                                                                                                                       | Partial-enumeration failure taxonomy                        |
+| APV-029 | A fully observed set with no trusted candidate returns no state                                                                                                                               | Never select the best untrusted candidate                   |
+| APV-030 | Artifact-list API failure propagates                                                                                                                                                          | Lookup failure cannot masquerade as absence                 |
+| APV-031 | Permissive legacy explicit restore is obsolete                                                                                                                                                | Deleted with no reader, converter, or compatibility promise |
+| APV-032 | `@actions/artifact` upload/download transport is obsolete                                                                                                                                     | R4 chooses its own artifact bridge                          |
 
 Ported vectors remain until equivalent R4 artifact-bridge conformance coverage exists. They preserve security questions and invariants without freezing the future transport or ordering algorithm.
 
@@ -97,7 +97,7 @@ Ported vectors remain until equivalent R4 artifact-bridge conformance coverage e
 
 ## Residual-reference ownership
 
-`src/residual-reference-allowlist.ts` is metadata and is excluded from match discovery to avoid recursive self-matches. `src/residual-reference-guard.test.ts` enforces both directions: every executable/contract-tree match has exactly one narrow rule, and every temporary rule still matches at least one owned line.
+`src/residual-reference-allowlist.ts` and `src/residual-reference-guard.test.ts` are lifecycle machinery and are excluded from match discovery to avoid recursive self-matches. The guard scans `src`, `scripts`, `.github`, `protocol`, `docs`, and `README.md`. It enforces both directions: every executable, contract, or documentary match has exactly one narrow rule, and every rule still matches at least one owned line.
 
 | Rules       | Owned residual                                                     | Consumer and deletion gate                                                                   |
 | ----------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
@@ -106,8 +106,9 @@ Ported vectors remain until equivalent R4 artifact-bridge conformance coverage e
 | RR-007..010 | M4 marker, state, artifact-vector, ledger, and provider vocabulary | Internal transition evidence only; delete with R4 owners                                     |
 | RR-011..012 | Unsupported-v1 state selection/classifier vocabulary               | Rejection and non-replay evidence; delete with R4 state replacement                          |
 | RR-013      | Temporary live-provider vocabulary                                 | Internal M4 contract/rejection evidence; delete with the R4 Host boundary                    |
+| RR-014..029 | Governing or historical documentation                              | Permanent path-specific status, owner, interpretation, and supersession records              |
 
-Remaining matches are not supported public runtime selectors. The exact retired runtime selector is retained only in frozen protocol/conformance inputs and a negative runtime regression; unsupported legacy state is retained only to prove rejection; credential names are canaries whose values must not reach the generic child.
+Temporary matches are not supported public runtime selectors. The exact retired runtime selector is retained only in frozen protocol/conformance inputs and a negative runtime regression; unsupported legacy state is retained only to prove rejection; credential names are canaries whose values must not reach the generic child. Permanent documentation matches describe current governing boundaries or are explicitly marked historical, with their controlling supersession rule in the allowlist.
 
 ## Validation ownership
 

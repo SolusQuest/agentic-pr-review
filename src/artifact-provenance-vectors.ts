@@ -1,11 +1,21 @@
 export type ArtifactVectorDisposition = 'port' | 'obsolete';
 
+export interface ArtifactProvenanceCase {
+  readonly id: string;
+  readonly lookup: 'repository' | 'explicit-run';
+  readonly embeddedWorkflowRunId: 'missing' | 'null' | 'zero' | 'invalid' | 'positive';
+  readonly explicitRunId?: 'positive';
+  readonly producerIdentitySource: 'none' | 'artifact.workflow_run.id' | 'explicitRunId';
+  readonly expectedOutcome: 'ineligible' | 'evaluate-provenance';
+}
+
 export interface ArtifactProvenanceVector {
   readonly id: `APV-${string}`;
   readonly inputMetadata: readonly string[];
   readonly selectionContext: string;
   readonly expectedOutcome: string;
   readonly securityInvariant: string;
+  readonly cases?: readonly ArtifactProvenanceCase[];
   readonly disposition: ArtifactVectorDisposition;
   readonly futureConsumer?: 'R4 artifact bridge';
   readonly deletionGate?: string;
@@ -20,6 +30,7 @@ function port(
   selectionContext: string,
   expectedOutcome: string,
   securityInvariant: string,
+  cases?: readonly ArtifactProvenanceCase[],
 ): ArtifactProvenanceVector {
   return {
     id,
@@ -27,6 +38,7 @@ function port(
     selectionContext,
     expectedOutcome,
     securityInvariant,
+    ...(cases === undefined ? {} : { cases }),
     disposition: 'port',
     futureConsumer: 'R4 artifact bridge',
     deletionGate: r4Gate,
@@ -81,9 +93,72 @@ export const artifactProvenanceVectors = [
   port(
     'APV-004',
     ['artifact.workflow_run.id', 'explicitRunId'],
-    'candidate eligibility',
-    'ignore a missing or zero producing run id',
-    'state cannot be restored without producer provenance',
+    'repository and explicit-run candidate eligibility',
+    'repository lookup requires an embedded producer id; explicit-run lookup falls back only from missing or null embedded identity to explicitRunId',
+    'producer provenance has one positive identity source and an explicit selection cannot repair a present zero or invalid embedded id',
+    [
+      {
+        id: 'repository-missing',
+        lookup: 'repository',
+        embeddedWorkflowRunId: 'missing',
+        producerIdentitySource: 'none',
+        expectedOutcome: 'ineligible',
+      },
+      {
+        id: 'repository-null',
+        lookup: 'repository',
+        embeddedWorkflowRunId: 'null',
+        producerIdentitySource: 'none',
+        expectedOutcome: 'ineligible',
+      },
+      {
+        id: 'repository-zero',
+        lookup: 'repository',
+        embeddedWorkflowRunId: 'zero',
+        producerIdentitySource: 'none',
+        expectedOutcome: 'ineligible',
+      },
+      {
+        id: 'explicit-missing',
+        lookup: 'explicit-run',
+        embeddedWorkflowRunId: 'missing',
+        explicitRunId: 'positive',
+        producerIdentitySource: 'explicitRunId',
+        expectedOutcome: 'evaluate-provenance',
+      },
+      {
+        id: 'explicit-null',
+        lookup: 'explicit-run',
+        embeddedWorkflowRunId: 'null',
+        explicitRunId: 'positive',
+        producerIdentitySource: 'explicitRunId',
+        expectedOutcome: 'evaluate-provenance',
+      },
+      {
+        id: 'explicit-zero',
+        lookup: 'explicit-run',
+        embeddedWorkflowRunId: 'zero',
+        explicitRunId: 'positive',
+        producerIdentitySource: 'none',
+        expectedOutcome: 'ineligible',
+      },
+      {
+        id: 'explicit-invalid',
+        lookup: 'explicit-run',
+        embeddedWorkflowRunId: 'invalid',
+        explicitRunId: 'positive',
+        producerIdentitySource: 'none',
+        expectedOutcome: 'ineligible',
+      },
+      {
+        id: 'explicit-positive',
+        lookup: 'explicit-run',
+        embeddedWorkflowRunId: 'positive',
+        explicitRunId: 'positive',
+        producerIdentitySource: 'artifact.workflow_run.id',
+        expectedOutcome: 'evaluate-provenance',
+      },
+    ],
   ),
   port(
     'APV-005',

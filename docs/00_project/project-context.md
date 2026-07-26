@@ -69,13 +69,11 @@ This is a reliable stateful provider pipeline, but it is not yet the target code
 
 The selected next direction is:
 
-- remove the Claude Code CLI and migration-only public runtime selectors from the new head;
 - prove a C# agent loop and read-only tools before another broad contract program;
 - let R2 compare a pinned `Microsoft.Extensions.AI.Abstractions` dependency with project-minimal exchange types and select the smaller Native AOT-proven surface;
 - keep the agent loop, durable state, budgets, provider capabilities, and prefix semantics project-owned;
-- migrate GitHub business logic into the trusted Host module of one C# executable;
-- reduce TypeScript to a thin Action wrapper and artifact bridge;
-- delete duplicate TypeScript business validators after equivalent host behavior is proven;
+- let R3 prove the trusted live tool workflow after the R2 vertical slice;
+- let R4 migrate GitHub business logic into the trusted Host module, restore a thin Action wrapper and artifact bridge, and delete duplicate TypeScript validators only after equivalent Host behavior is proven;
 - defer broad cost-graduation work until real resumed agent traffic exists.
 
 A separate Agent process is deferred until fault, resource, extension, or trust evidence justifies the additional protocol and distribution surface.

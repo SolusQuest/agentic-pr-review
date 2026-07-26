@@ -1,18 +1,52 @@
-export interface ResidualReferenceRule {
+interface ResidualReferenceRuleBase {
   readonly id: string;
   readonly term: RegExp;
   readonly path: RegExp;
-  readonly lifecycleClass: 'protocol-migration' | 'state-migration' | 'credential-canary';
-  readonly currentConsumer: string;
   readonly owner: string;
   readonly interpretation: string;
+}
+
+export interface TemporaryResidualReferenceRule extends ResidualReferenceRuleBase {
+  readonly lifecycleClass: 'protocol-migration' | 'state-migration' | 'credential-canary';
+  readonly currentConsumer: string;
   readonly deletionGate: string;
   readonly milestone: 'R2' | 'R4';
 }
 
+export interface PermanentResidualReferenceRule extends ResidualReferenceRuleBase {
+  readonly lifecycleClass: 'governing' | 'historical';
+  readonly status: string;
+  readonly supersessionRule: string;
+}
+
+export type ResidualReferenceRule = TemporaryResidualReferenceRule | PermanentResidualReferenceRule;
+
 const retiredSelector = /claude-code-cli/u;
 const anthropicCanary = /ANTHROPIC_/u;
 const stateOrMarkerLegacy = /runtime_backend|runtime_provider|live_provider|legacy/iu;
+const documentaryResidual =
+  /ClaudeCodeRuntime|ANTHROPIC_|claude_code|claude-code-cli|--resume|stream-json|runtime_backend|runtime_provider|live_provider|legacy/iu;
+
+function permanent(
+  id: string,
+  path: RegExp,
+  lifecycleClass: PermanentResidualReferenceRule['lifecycleClass'],
+  owner: string,
+  status: string,
+  interpretation: string,
+  supersessionRule: string,
+): PermanentResidualReferenceRule {
+  return {
+    id,
+    term: documentaryResidual,
+    path,
+    lifecycleClass,
+    owner,
+    status,
+    interpretation,
+    supersessionRule,
+  };
+}
 
 export const residualReferenceRules = [
   {
@@ -158,4 +192,148 @@ export const residualReferenceRules = [
     deletionGate: 'replace the temporary TypeScript live-provider host boundary',
     milestone: 'R4',
   },
+  permanent(
+    'RR-014',
+    /^README\.md$/u,
+    'governing',
+    'project maintainers',
+    'current public repository boundary with historical release notes',
+    'legacy terms identify the unmaintained v0.1.0 pin or removed surfaces, never a current public Action',
+    'project-context.md controls current implementation status; release-policy.md controls historical tag policy',
+  ),
+  permanent(
+    'RR-015',
+    /^docs\/00_project\/project-context\.md$/u,
+    'governing',
+    'R2-R4 roadmap owners',
+    'current project position',
+    'legacy and Claude terms describe completed R1 removal or bounded migration evidence',
+    'r1-legacy-removal-handoff.md owns deletion evidence; later accepted roadmap updates replace the current-position section',
+  ),
+  permanent(
+    'RR-016',
+    /^docs\/10_workflow\/release-policy\.md$/u,
+    'governing',
+    'release maintainers',
+    'current release policy',
+    'legacy terms identify the historical v0.1.0 pin and prohibit publishing an abandoned compatibility snapshot',
+    'a later accepted release-policy change is required to supersede this rule',
+  ),
+  permanent(
+    'RR-017',
+    /^docs\/20_architecture\/agent-runtime-rebaseline\.md$/u,
+    'governing',
+    'R0-R7 architecture owners',
+    'selected architecture and migration sequence',
+    'legacy and Claude passages define rejected alternatives, the completed R1 boundary, or later cleanup gates',
+    'project-context.md records current completion; accepted architecture amendments supersede this design',
+  ),
+  permanent(
+    'RR-018',
+    /^docs\/20_architecture\/architecture\.md$/u,
+    'historical',
+    'R2 architecture owner',
+    'retained pre-R1 architecture evidence',
+    'selector examples describe the removed mixed runtime surface and are not current configuration',
+    'project-context.md and agent-runtime-rebaseline.md control new design; R2 rewrites or retires this evidence',
+  ),
+  permanent(
+    'RR-019',
+    /^docs\/20_architecture\/distribution\.md$/u,
+    'governing',
+    'R4 and release owners',
+    'current distribution transition contract',
+    'legacy terms describe the historical pin and removed Claude installation surface',
+    'R4 distribution design and an accepted release-policy update supersede this transition text',
+  ),
+  permanent(
+    'RR-020',
+    /^docs\/20_architecture\/m4-stateful-action\.md$/u,
+    'historical',
+    'R4 Host and state bridge owners',
+    'retained M4 migration evidence',
+    'legacy terms describe rejected sticky-state reuse, not a supported Action route',
+    'R4 Host/state conformance replaces the retained M4 evidence',
+  ),
+  permanent(
+    'RR-021',
+    /^docs\/20_architecture\/r1-legacy-removal-handoff\.md$/u,
+    'governing',
+    'R1 handoff owner',
+    'authoritative R1 deletion and transition record',
+    'legacy and Claude terms record removed families, negative evidence, and owned migration inputs',
+    'later milestone handoffs may supersede individual retained-family entries but not the historical deletion record',
+  ),
+  permanent(
+    'RR-022',
+    /^docs\/20_architecture\/runtime-protocol\.md$/u,
+    'historical',
+    'R2 protocol owner',
+    'retained deterministic runtime protocol evidence',
+    'legacy parser terminology contrasts the removed host path with typed protocol mapping',
+    'R2 request and protocol contracts replace this evidence',
+  ),
+  permanent(
+    'RR-023',
+    /^docs\/20_architecture\/security-boundary\.md$/u,
+    'governing',
+    'R2-R4 security owners',
+    'current security design with historical contrasts',
+    'legacy terms identify behavior that does not automatically carry into the new runtime',
+    'accepted security-boundary revisions supersede individual historical comparisons',
+  ),
+  permanent(
+    'RR-024',
+    /^docs\/20_architecture\/session-ledger-and-prefix-contract\.md$/u,
+    'historical',
+    'R4 Host, ledger, and state owners',
+    'retained M4 contract and migration evidence',
+    'legacy and selector terms define unsupported inputs, removed wire spellings, and non-replay behavior',
+    'R4 Host/ledger/state conformance replaces executable ownership; this file remains historical evidence',
+  ),
+  permanent(
+    'RR-025',
+    /^docs\/20_architecture\/state-manifest-v2\.md$/u,
+    'historical',
+    'R4 state bridge owner',
+    'retained StateManifestV2 conformance evidence',
+    'legacy terms name the unsupported-v1 classification that must fail closed',
+    'R4 state contract replaces executable ownership; this file remains historical evidence',
+  ),
+  permanent(
+    'RR-026',
+    /^docs\/50_ai\/agent-context\.md$/u,
+    'governing',
+    'repository agent-workflow maintainers',
+    'current agent startup context',
+    'legacy and Claude terms state the completed R1 boundary and classify older contracts as migration or historical evidence',
+    'project-context.md and accepted milestone handoffs control current implementation status',
+  ),
+  permanent(
+    'RR-027',
+    /^docs\/50_ai\/skills\/runtime-design-refinement\.md$/u,
+    'governing',
+    'runtime design-refinement maintainers',
+    'current design procedure',
+    'legacy terms prohibit manufacturing a new release solely to preserve abandoned code',
+    'release-policy.md controls release decisions; an accepted skill revision supersedes this procedure',
+  ),
+  permanent(
+    'RR-028',
+    /^docs\/90_roadmap\/m3-m6-plan\.md$/u,
+    'historical',
+    'roadmap maintainers',
+    'superseded pre-rebaseline roadmap',
+    'legacy selectors and Claude decisions describe the earlier M3-M6 sequence, not current implementation',
+    'roadmap-seed.md and project-context.md control current sequencing',
+  ),
+  permanent(
+    'RR-029',
+    /^docs\/90_roadmap\/roadmap-seed\.md$/u,
+    'governing',
+    'R0-R7 roadmap owners',
+    'current milestone sequence with completed R1 clauses',
+    'legacy and Claude terms define the completed R1 scope, historical pin, or later cleanup boundaries',
+    'project-context.md records current completion; accepted roadmap amendments supersede future sequencing',
+  ),
 ] as const satisfies readonly ResidualReferenceRule[];

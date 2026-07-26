@@ -31,4 +31,72 @@ describe('retired artifact provenance vectors', () => {
       }
     }
   });
+
+  it('preserves the retired producer-id precedence cases in APV-004', () => {
+    const vector = artifactProvenanceVectors.find(({ id }) => id === 'APV-004');
+
+    expect(vector?.cases).toEqual([
+      {
+        id: 'repository-missing',
+        lookup: 'repository',
+        embeddedWorkflowRunId: 'missing',
+        producerIdentitySource: 'none',
+        expectedOutcome: 'ineligible',
+      },
+      {
+        id: 'repository-null',
+        lookup: 'repository',
+        embeddedWorkflowRunId: 'null',
+        producerIdentitySource: 'none',
+        expectedOutcome: 'ineligible',
+      },
+      {
+        id: 'repository-zero',
+        lookup: 'repository',
+        embeddedWorkflowRunId: 'zero',
+        producerIdentitySource: 'none',
+        expectedOutcome: 'ineligible',
+      },
+      {
+        id: 'explicit-missing',
+        lookup: 'explicit-run',
+        embeddedWorkflowRunId: 'missing',
+        explicitRunId: 'positive',
+        producerIdentitySource: 'explicitRunId',
+        expectedOutcome: 'evaluate-provenance',
+      },
+      {
+        id: 'explicit-null',
+        lookup: 'explicit-run',
+        embeddedWorkflowRunId: 'null',
+        explicitRunId: 'positive',
+        producerIdentitySource: 'explicitRunId',
+        expectedOutcome: 'evaluate-provenance',
+      },
+      {
+        id: 'explicit-zero',
+        lookup: 'explicit-run',
+        embeddedWorkflowRunId: 'zero',
+        explicitRunId: 'positive',
+        producerIdentitySource: 'none',
+        expectedOutcome: 'ineligible',
+      },
+      {
+        id: 'explicit-invalid',
+        lookup: 'explicit-run',
+        embeddedWorkflowRunId: 'invalid',
+        explicitRunId: 'positive',
+        producerIdentitySource: 'none',
+        expectedOutcome: 'ineligible',
+      },
+      {
+        id: 'explicit-positive',
+        lookup: 'explicit-run',
+        embeddedWorkflowRunId: 'positive',
+        explicitRunId: 'positive',
+        producerIdentitySource: 'artifact.workflow_run.id',
+        expectedOutcome: 'evaluate-provenance',
+      },
+    ]);
+  });
 });
