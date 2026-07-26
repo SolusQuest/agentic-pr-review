@@ -141,7 +141,10 @@ function containsRetiredActionInvocation(source) {
     }
 
     const simple = uncommented.match(/^(?:-\s+)?uses\s*:\s*(.*?)\s*$/u);
-    if (simple) return isRetiredActionScalar(simple[1]);
+    if (simple) {
+      if (isRetiredActionScalar(simple[1])) return true;
+      continue;
+    }
 
     if (!/^(?:-\s+)?\{/u.test(uncommented)) continue;
     const flow = uncommented.match(/\buses\s*:\s*([^,}]+)[,\}]/u);
