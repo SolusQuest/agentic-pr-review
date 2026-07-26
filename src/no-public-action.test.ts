@@ -133,6 +133,39 @@ describe('no-public-Action packaging guard', () => {
     expect(result.status).toBe(0);
   });
 
+  it.each([
+    [
+      'top-level step',
+      [
+        'steps:',
+        '  - name: |-',
+        '      Retired review',
+        '    uses: ./.github/actions/agentic-pr-review',
+        '',
+      ],
+    ],
+    [
+      'nested step',
+      [
+        'jobs:',
+        '  review:',
+        '    steps:',
+        '      - name: >',
+        '          Review',
+        '        uses: ./.github/actions/agentic-pr-review/',
+        '',
+      ],
+    ],
+  ])('scans a uses sibling after a block-style %s name', async (_name, lines) => {
+    const fixture = await createFixture();
+    await write('.github/workflows/review.yml', lines.join('\n'), fixture);
+
+    const result = runGuard(fixture);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('retired-local-action-invocation');
+  });
+
   it('ignores comments and similar paths', async () => {
     const fixture = await createFixture();
     await write(
@@ -142,6 +175,8 @@ describe('no-public-Action packaging guard', () => {
         'steps:',
         '  - uses: ./.github/actions/agentic-pr-review-next',
         '  - run: echo "uses: ./.github/actions/agentic-pr-review"',
+        '-uses: |-',
+        '  ./.github/actions/agentic-pr-review',
         '',
       ].join('\n'),
       fixture,

@@ -131,19 +131,19 @@ function containsRetiredActionInvocation(source) {
     if (!uncommented) continue;
 
     const blockHeader = uncommented.match(
-      /^(?:-\s*)?([A-Za-z0-9_-]+)\s*:\s*([|>])(?:[+-]?[1-9]?|[1-9][+-]?)$/u,
+      /^(?:-\s+)?([A-Za-z0-9_-]+)\s*:\s*([|>])(?:[+-]?[1-9]?|[1-9][+-]?)$/u,
     );
     if (blockHeader) {
-      const block = collectBlockScalar(lines, index + 1, indentationOf(line));
+      const block = collectBlockScalar(lines, index + 1, mappingKeyIndentation(line));
       index = block.nextIndex - 1;
       if (blockHeader[1] === 'uses' && isRetiredActionScalar(block.value, false)) return true;
       continue;
     }
 
-    const simple = uncommented.match(/^(?:-\s*)?uses\s*:\s*(.*?)\s*$/u);
+    const simple = uncommented.match(/^(?:-\s+)?uses\s*:\s*(.*?)\s*$/u);
     if (simple) return isRetiredActionScalar(simple[1]);
 
-    if (!/^(?:-\s*)?\{/u.test(uncommented)) continue;
+    if (!/^(?:-\s+)?\{/u.test(uncommented)) continue;
     const flow = uncommented.match(/\buses\s*:\s*([^,}]+)[,\}]/u);
     if (flow && isRetiredActionScalar(flow[1])) return true;
   }
@@ -171,6 +171,14 @@ function collectBlockScalar(lines, startIndex, headerIndentation) {
 
 function indentationOf(line) {
   return line.match(/^ */u)[0].length;
+}
+
+function mappingKeyIndentation(line) {
+  let indentation = indentationOf(line);
+  if (line[indentation] !== '-' || line[indentation + 1] !== ' ') return indentation;
+  indentation += 1;
+  while (line[indentation] === ' ') indentation += 1;
+  return indentation;
 }
 
 function stripYamlComment(line) {
