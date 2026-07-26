@@ -1,4 +1,5 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -10,21 +11,27 @@ const metadataPaths = new Set([
   'src/residual-reference-guard.test.ts',
 ]);
 
-async function repositoryFiles(root: string): Promise<string[]> {
-  const result: string[] = [];
-  const visit = async (relative: string): Promise<void> => {
-    const absolute = path.join(root, relative);
-    for (const entry of await readdir(absolute, { withFileTypes: true })) {
-      const child = path.posix.join(relative.replaceAll('\\', '/'), entry.name);
-      if (entry.isDirectory()) await visit(child);
-      else result.push(child);
-    }
-  };
-  for (const directory of ['src', 'scripts', '.github', 'protocol', 'docs']) {
-    await visit(directory);
+function trackedFiles(root: string): string[] {
+  return execFileSync('git', ['ls-files', '-z'], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+    .split('\0')
+    .filter((relative) => relative !== '')
+    .sort();
+}
+
+function decodeTrackedText(bytes: Uint8Array): string | undefined {
+  if (bytes.includes(0)) return undefined;
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return undefined;
   }
-  result.push('README.md');
-  return result;
+}
+
+function ownersFor(relative: string, line: string) {
+  return residualReferenceRules.filter((rule) => rule.path.test(relative) && rule.term.test(line));
 }
 
 describe('R1 residual reference allowlist', () => {
@@ -34,14 +41,14 @@ describe('R1 residual reference allowlist', () => {
     const unowned: string[] = [];
     const multiplyOwned: string[] = [];
 
-    for (const relative of await repositoryFiles(root)) {
+    for (const relative of trackedFiles(root)) {
       if (metadataPaths.has(relative)) continue;
-      const lines = (await readFile(path.join(root, relative), 'utf8')).split(/\r?\n/u);
+      const text = decodeTrackedText(await readFile(path.join(root, relative)));
+      if (text === undefined) continue;
+      const lines = text.split(/\r?\n/u);
       for (const [index, line] of lines.entries()) {
         if (!residualReferenceDiscovery.test(line)) continue;
-        const owners = residualReferenceRules.filter(
-          (rule) => rule.path.test(relative) && rule.term.test(line),
-        );
+        const owners = ownersFor(relative, line);
         const location = `${relative}:${index + 1}`;
         if (owners.length === 0) unowned.push(location);
         if (owners.length > 1) multiplyOwned.push(`${location} => ${owners.map(({ id }) => id)}`);
@@ -77,5 +84,19 @@ describe('R1 residual reference allowlist', () => {
     expect('The Claude Code CLI path has been removed.').toMatch(residualReferenceDiscovery);
     expect('const config = process.env.CLAUDE_CONFIG_DIR;').toMatch(residualReferenceDiscovery);
     expect("import '@anthropic-ai/claude-code';").toMatch(residualReferenceDiscovery);
+  });
+
+  it('discovers and singly owns the real tracked CLAUDE.md entrypoint', async () => {
+    const relative = 'CLAUDE.md';
+    const text = decodeTrackedText(await readFile(path.join(process.cwd(), relative)));
+    expect(text).toBeDefined();
+
+    const matches = (text ?? '')
+      .split(/\r?\n/u)
+      .filter((line) => residualReferenceDiscovery.test(line));
+    expect(matches.length).toBeGreaterThan(0);
+    for (const line of matches) {
+      expect(ownersFor(relative, line).map(({ id }) => id)).toEqual(['RR-034']);
+    }
   });
 });

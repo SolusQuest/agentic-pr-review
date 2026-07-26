@@ -97,7 +97,7 @@ Ported vectors remain until equivalent R4 artifact-bridge conformance coverage e
 
 ## Residual-reference ownership
 
-`src/residual-reference-allowlist.ts` and `src/residual-reference-guard.test.ts` are lifecycle machinery and are excluded from match discovery to avoid recursive self-matches. The guard scans `src`, `scripts`, `.github`, `protocol`, `docs`, and `README.md`. It enforces both directions: every executable, contract, or documentary match has exactly one narrow rule, and every rule still matches at least one owned line.
+`src/residual-reference-allowlist.ts` and `src/residual-reference-guard.test.ts` are lifecycle machinery and are excluded from match discovery to avoid recursive self-matches. The guard enumerates every Git-tracked file, skips only binary or invalid-UTF-8 content plus those two machinery files, and scans all remaining text. It enforces both directions: every executable, contract, or documentary match has exactly one narrow rule, and every rule still matches at least one owned line.
 
 | Rules       | Owned residual                                                     | Consumer and deletion gate                                                                   |
 | ----------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
@@ -108,6 +108,8 @@ Ported vectors remain until equivalent R4 artifact-bridge conformance coverage e
 | RR-013      | Temporary live-provider vocabulary                                 | Internal M4 contract/rejection evidence; delete with the R4 Host boundary                    |
 | RR-014..030 | Governing or historical documentation                              | Permanent path-specific status, owner, interpretation, and supersession records              |
 | RR-031..033 | Claude provider/model identity fixtures                            | Opaque protocol/state fixture evidence; delete with the R2/R4 owners                         |
+| RR-034      | Root `CLAUDE.md` entrypoint                                        | Supported thin agent instruction entrypoint governed by collaboration policy                 |
+| RR-035..036 | C# integration canary and internal provider diagnostics            | Privacy/failure-taxonomy evidence; delete with the R4 Host boundary                          |
 
 Temporary matches are not supported public runtime selectors. The exact retired runtime selector is retained only in frozen protocol/conformance inputs and a negative runtime regression; unsupported legacy state is retained only to prove rejection; credential names are canaries whose values must not reach the generic child. Permanent documentation matches describe current governing boundaries or are explicitly marked historical, with their controlling supersession rule in the allowlist.
 
