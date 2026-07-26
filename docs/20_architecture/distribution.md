@@ -1,6 +1,6 @@
 # Distribution Direction
 
-The current project is a JavaScript GitHub Action with a C# runtime. The selected target is a thin bundled Node.js Action wrapper plus pinned, self-contained .NET payloads.
+The development head is currently between public Action generations. R1 removed the mixed JavaScript Action metadata and bundle while retaining direct TypeScript/C# validation. The selected target is a thin bundled Node.js Action wrapper plus pinned, self-contained .NET payloads.
 
 See [`agent-runtime-rebaseline.md`](./agent-runtime-rebaseline.md) for component ownership and migration sequencing.
 
@@ -17,9 +17,9 @@ The distribution must:
 - avoid dynamic `latest` selection;
 - allow framework-dependent execution for development and tests without making it the downstream default.
 
-## Node.js Action Wrapper
+## Target Node.js Action Wrapper
 
-The checked-in Action entrypoint remains a bundled JavaScript file produced from a small TypeScript source.
+No checked-in Action entrypoint exists during the R1-R3 transition. R4 introduces the replacement wrapper only after the C# Host target, small public configuration surface, and integrated proof are ready.
 
 The wrapper may:
 
@@ -36,13 +36,13 @@ Business behavior does not belong in the distribution wrapper.
 
 The wrapper and Host still require one minimal lockstep process contract for cancellation, bounded outcome/output handoff, exit status, and executable build identity. This is an atomically maintained launcher seam, not a review-domain cross-language protocol or public compatibility matrix.
 
-If `dist/` changes, run:
+During the no-public-Action interval, run:
 
 ```bash
 npm run dist:check
 ```
 
-The bundled entrypoint must be reproducible from source.
+This command verifies that the retired Action directory, bundle builder, local runner, and local workflow invocation remain absent. It does not build product code. R4 restores generated-wrapper reproducibility validation when the replacement wrapper exists.
 
 ## .NET Payload
 

@@ -18,11 +18,15 @@ Default:
 npm run check
 ```
 
-If action bundle output changes:
+During the R1-R3 no-public-Action interval, packaging, workflow, README, and
+distribution changes:
 
 ```bash
 npm run dist:check
 ```
+
+This command currently verifies that the retired Action surface remains absent.
+R4 restores generated-wrapper reproducibility semantics.
 
 If validation cannot run, state why in the PR body.
 

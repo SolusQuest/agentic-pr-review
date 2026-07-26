@@ -1,6 +1,5 @@
 node_modules/
 dist/
-.github/actions/agentic-pr-review/dist/
 runtime/tests/fixtures/deterministic/**
 runtime/tests/fixtures/prefix-contract/**
 .codex/
@@ -17,4 +16,3 @@ protocol/fixtures/prefix-contract/**
 
 # Agent-local scratch (never committed)
 .scratch/
-
