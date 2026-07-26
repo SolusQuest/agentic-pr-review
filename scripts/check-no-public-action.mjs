@@ -124,17 +124,53 @@ async function walkWorkflowDirectory(absoluteDirectory, relativeDirectory) {
 }
 
 function containsRetiredActionInvocation(source) {
-  return source.split(/\r?\n/u).some((line) => {
+  const lines = source.split(/\r?\n/u);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
     const uncommented = stripYamlComment(line).trim();
-    if (!uncommented) return false;
+    if (!uncommented) continue;
+
+    const blockHeader = uncommented.match(
+      /^(?:-\s*)?([A-Za-z0-9_-]+)\s*:\s*([|>])(?:[+-]?[1-9]?|[1-9][+-]?)$/u,
+    );
+    if (blockHeader) {
+      const block = collectBlockScalar(lines, index + 1, indentationOf(line));
+      index = block.nextIndex - 1;
+      if (blockHeader[1] === 'uses' && isRetiredActionScalar(block.value, false)) return true;
+      continue;
+    }
 
     const simple = uncommented.match(/^(?:-\s*)?uses\s*:\s*(.*?)\s*$/u);
     if (simple) return isRetiredActionScalar(simple[1]);
 
-    if (!/^(?:-\s*)?\{/u.test(uncommented)) return false;
+    if (!/^(?:-\s*)?\{/u.test(uncommented)) continue;
     const flow = uncommented.match(/\buses\s*:\s*([^,}]+)[,\}]/u);
-    return flow ? isRetiredActionScalar(flow[1]) : false;
-  });
+    if (flow && isRetiredActionScalar(flow[1])) return true;
+  }
+  return false;
+}
+
+function collectBlockScalar(lines, startIndex, headerIndentation) {
+  const body = [];
+  let nextIndex = startIndex;
+  while (nextIndex < lines.length) {
+    const line = lines[nextIndex];
+    if (line.trim() !== '' && indentationOf(line) <= headerIndentation) break;
+    body.push(line);
+    nextIndex += 1;
+  }
+
+  const contentIndentation = body
+    .filter((line) => line.trim() !== '')
+    .reduce((minimum, line) => Math.min(minimum, indentationOf(line)), Number.POSITIVE_INFINITY);
+  const value = Number.isFinite(contentIndentation)
+    ? body.map((line) => line.slice(Math.min(line.length, contentIndentation))).join('\n')
+    : '';
+  return { nextIndex, value };
+}
+
+function indentationOf(line) {
+  return line.match(/^ */u)[0].length;
 }
 
 function stripYamlComment(line) {
@@ -162,11 +198,11 @@ function stripYamlComment(line) {
   return line;
 }
 
-function isRetiredActionScalar(value) {
+function isRetiredActionScalar(value, stripQuotes = true) {
   let normalized = value.trim();
   const first = normalized[0];
   const last = normalized.at(-1);
-  if ((first === "'" || first === '"') && last === first) {
+  if (stripQuotes && (first === "'" || first === '"') && last === first) {
     normalized = normalized.slice(1, -1).trim();
   }
   normalized = normalized.replace(/\/+$/u, '');

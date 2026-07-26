@@ -93,6 +93,46 @@ describe('no-public-Action packaging guard', () => {
     expect(result.stderr).toContain('retired-local-action-invocation');
   });
 
+  it.each([
+    ['literal', '|'],
+    ['folded', '>-'],
+  ])('rejects a block-style %s uses value', async (_name, indicator) => {
+    const fixture = await createFixture();
+    await write(
+      '.github/workflows/review.yml',
+      ['steps:', `  - uses: ${indicator}`, '      ./.github/actions/agentic-pr-review', ''].join(
+        '\n',
+      ),
+      fixture,
+    );
+
+    const result = runGuard(fixture);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('retired-local-action-invocation');
+  });
+
+  it.each([
+    ['literal', '|'],
+    ['folded', '>-'],
+  ])('ignores retired uses text inside a %s run block', async (_name, indicator) => {
+    const fixture = await createFixture();
+    await write(
+      '.github/workflows/clean.yml',
+      [
+        'steps:',
+        `  - run: ${indicator}`,
+        '      uses: ./.github/actions/agentic-pr-review',
+        '',
+      ].join('\n'),
+      fixture,
+    );
+
+    const result = runGuard(fixture);
+
+    expect(result.status).toBe(0);
+  });
+
   it('ignores comments and similar paths', async () => {
     const fixture = await createFixture();
     await write(
