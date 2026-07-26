@@ -1,8 +1,5 @@
 node_modules/
 dist/
-!.github/actions/agentic-pr-review/dist/
-!.github/actions/agentic-pr-review/dist/index.js
-!.github/actions/agentic-pr-review/dist/index.js.LEGAL.txt
 *.tsbuildinfo
 .agentic-pr-review-local/
 .local/

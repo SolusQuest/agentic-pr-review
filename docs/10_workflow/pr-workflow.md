@@ -28,10 +28,14 @@ Default validation for repository changes:
 npm run check
 ```
 
-If the generated action bundle is changed, also run:
+During the R1-R3 no-public-Action interval, packaging, workflow, README, and
+distribution changes also run:
 
 ```bash
 npm run dist:check
 ```
+
+This command currently verifies that the retired Action surface remains absent.
+R4 restores generated-wrapper reproducibility semantics.
 
 For docs-only changes, run the available formatting checks and inspect the rendered Markdown in the diff.

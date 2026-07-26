@@ -163,10 +163,36 @@ integration('runtime integration', () => {
     const artifactNames = await readdir(artifactRoot);
     expect(artifactNames).toHaveLength(1);
     const bundle = path.join(artifactRoot, artifactNames[0]);
-    await expect(stat(path.join(bundle, 'manifest.json'))).resolves.toBeTruthy();
+    const manifestPath = path.join(bundle, 'manifest.json');
+    await expect(stat(manifestPath)).resolves.toBeTruthy();
     await expect(stat(path.join(bundle, 'structured-result.json'))).resolves.toBeTruthy();
     await expect(stat(path.join(bundle, 'rendered-review.md'))).resolves.toBeTruthy();
     await expect(readdir(path.join(bundle, 'runtime'))).rejects.toThrow();
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+    expect(manifest).toMatchObject({
+      runtimeBackend: 'deterministic-csharp',
+      review: { requestedMode: 'bootstrap', executedPhase: 'bootstrap' },
+      target: {
+        mode: 'pull-request',
+        baseSha: 'integration-base-sha',
+        headSha: 'integration-head-sha',
+      },
+    });
+    expect(manifest.reviewInputSha256).toMatch(/^[a-f0-9]{64}$/);
+    const bundleEntries = await readdir(bundle, { recursive: true });
+    expect(bundleEntries.some((entry) => /(^|[\\/])(input|result|trace)\.json$/u.test(entry))).toBe(
+      false,
+    );
+    expect(
+      bundleEntries.some((entry) =>
+        entry.split(/[\\/]/u).some((segment) => segment === 'runtime' || segment === 'session'),
+      ),
+    ).toBe(false);
+    expect(
+      bundleEntries.some((entry) =>
+        /(^|[\\/])(raw|debug|provider-response)([\\/.-]|$)/iu.test(entry),
+      ),
+    ).toBe(false);
     const result = await readFile(path.join(bundle, 'structured-result.json'), 'utf8');
     expect(result).toContain('Deterministic fixture runtime completed without findings.');
     expect(result).not.toContain('integration-github-token');

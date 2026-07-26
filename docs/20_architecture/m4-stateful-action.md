@@ -8,6 +8,8 @@
 > The public Git-data state ref remains suitable only for the current sanitized
 > M4 records. It must not carry plaintext Agent reasoning, repository tool
 > results, or provider continuation artifacts under the target architecture.
+> R1 issue #79 retired the checked-in Action and M4 workflow entrypoints; all
+> invocation and workflow details below describe the pre-removal M4 baseline.
 
 `runtime_backend=ledger-csharp` is default-off. It is not a general public action mode: production execution is accepted only from the repository's default-branch `workflow_run` workflow, and the separately named default-branch verification workflow is the only `workflow_dispatch` exception.
 
