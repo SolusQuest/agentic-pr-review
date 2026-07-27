@@ -77,7 +77,11 @@ internal sealed class MinimalFakeBackend(
                 {
                     continue;
                 }
-                var item = continuation?.Items.SingleOrDefault(candidate =>
+                if (continuation is null)
+                {
+                    throw new FixtureFailure("APR_AI_CONTINUATION");
+                }
+                var item = continuation.Items.SingleOrDefault(candidate =>
                     candidate.MessagePosition == messagePosition &&
                     candidate.ContentPosition == contentPosition);
                 if (item is null ||
@@ -91,7 +95,7 @@ internal sealed class MinimalFakeBackend(
                     throw new FixtureFailure("APR_AI_CONTINUATION");
                 }
                 continuations.Add(new ObservedContinuation(
-                    continuation!.ProviderId,
+                    continuation.ProviderId,
                     continuation.ModelId,
                     "candidate-adapter",
                     continuation.SessionId,
