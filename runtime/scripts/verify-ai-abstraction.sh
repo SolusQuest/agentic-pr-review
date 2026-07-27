@@ -329,10 +329,6 @@ _build_candidate() {
     printf 'APR_AI_DEPENDENCY_FORBIDDEN %s %s\n' "${candidate}" "${mode}" >&2
     return 1
   fi
-  local expected_graph="${FIXTURES}/manifests/${candidate}-${mode}-packages.txt"
-  _require_file expected-package-graph "${expected_graph}"
-  _compare_files "${graph}" "${expected_graph}" \
-    APR_AI_DEPENDENCY_GRAPH_MISMATCH "${candidate}:${mode}"
   while IFS= read -r dependency; do
     if [[ -n "${dependency}" ]]; then
       printf 'APR_AI_MANIFEST dependency candidate=%s mode=%s package=%s\n' \
@@ -340,7 +336,29 @@ _build_candidate() {
     fi
   done <"${graph}"
   printf 'APR_AI_METRIC package_graph_sha256 candidate=%s mode=%s sha256=%s\n' \
-    "${candidate}" "${mode}" "$(sha256sum "${graph}" | awk '{print $1}')"
+      "${candidate}" "${mode}" "$(sha256sum "${graph}" | awk '{print $1}')"
+  local managed_graph="${root}/candidate-managed-package-graph.txt"
+  awk -F/ '
+    {
+      id=tolower($1)
+      if (id == "microsoft.dotnet.ilcompiler" ||
+          id == "microsoft.net.illink.tasks" ||
+          id ~ /^runtime\..*\.microsoft\.dotnet\.ilcompiler$/) {
+        next
+      }
+      print
+    }
+  ' "${graph}" >"${managed_graph}"
+  if [[ "${candidate}" == "Minimal" && -s "${managed_graph}" ]]; then
+    printf 'APR_AI_DEPENDENCY_GRAPH_MISMATCH Minimal:%s\n' "${mode}" >&2
+    return 1
+  fi
+  if [[ "${candidate}" == "MicrosoftExtensionsAI" ]]; then
+    local expected_graph="${FIXTURES}/manifests/MicrosoftExtensionsAI-managed-packages.txt"
+    _require_file expected-package-graph "${expected_graph}"
+    _compare_files "${managed_graph}" "${expected_graph}" \
+      APR_AI_DEPENDENCY_GRAPH_MISMATCH "${candidate}:${mode}"
+  fi
 
   local warnings
   warnings="$(grep -Eic ': warning [A-Z]+[0-9]+:' "${log}" || true)"
@@ -392,9 +410,21 @@ _check_production_dependency_graph() {
     printf 'APR_AI_PRODUCTION_DEPENDENCY_LEAK\n' >&2
     return 1
   fi
+  local managed_graph="${root}/production-managed-package-graph.txt"
+  awk -F/ '
+    {
+      id=tolower($1)
+      if (id == "microsoft.dotnet.ilcompiler" ||
+          id == "microsoft.net.illink.tasks" ||
+          id ~ /^runtime\..*\.microsoft\.dotnet\.ilcompiler$/) {
+        next
+      }
+      print
+    }
+  ' "${graph}" >"${managed_graph}"
   local expected_graph="${FIXTURES}/manifests/production-packages.txt"
   _require_file expected-production-package-graph "${expected_graph}"
-  _compare_files "${graph}" "${expected_graph}" \
+  _compare_files "${managed_graph}" "${expected_graph}" \
     APR_AI_PRODUCTION_DEPENDENCY_GRAPH_MISMATCH production
   while IFS= read -r dependency; do
     if [[ -n "${dependency}" ]]; then

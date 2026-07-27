@@ -24,7 +24,7 @@ This choice does not assign the Agent loop, tool dispatch, durable state, provid
 | Selection implementation commit                   | `337bec8000746cd67cb37ca1784732839662b1d9`                                                                                           |
 | Neutral Ubuntu Runtime CI                         | [run 30271101423, runtime job 89993553987](https://github.com/SolusQuest/agentic-pr-review/actions/runs/30271101423/job/89993553987) |
 | Selection and production-parity Ubuntu Runtime CI | [run 30271957701, runtime job 89996440677](https://github.com/SolusQuest/agentic-pr-review/actions/runs/30271957701/job/89996440677) |
-| SDK                                               | .NET SDK `10.0.109`, pinned by `global.json`                                                                                         |
+| Neutral-evidence SDK                              | .NET SDK `10.0.109`; `global.json` sets that baseline with `latestPatch` roll-forward                                                |
 | AOT target                                        | `linux-x64`, self-contained Native AOT                                                                                               |
 | Runner                                            | `ubuntu-24.04`, runner-image version `20260720.247.2`, runner version `2.336.0`                                                      |
 
@@ -153,7 +153,7 @@ The deletion gate is mandatory: #78 Phase 2 must assign removal of the dual-cand
 
 The neutral source manifest fixes the adapter-only path, Git blob object ID, and Git blob byte count for each candidate at `405e0468fc15dc932970b378081ae030028409fe`. CI fetches that commit and verifies the recorded objects and sizes. The adjacent API member manifest records the project-owned Minimal native surface and every Microsoft.Extensions.AI package member exercised by the neutral adapter.
 
-The verifier parses `project.assets.json` rather than grepping raw JSON. It compares each complete sorted graph with a checked-in candidate/mode or production manifest, retains every entry and its digest, rejects any `Microsoft.Extensions.AI*` package from Minimal and production, and permits exactly `Microsoft.Extensions.AI.Abstractions/10.8.1` in that package family for the MEAI candidate. Native AOT runs retain a sorted publish-file name/byte manifest in CI output in addition to aggregate executable and directory bytes.
+The verifier parses `project.assets.json` rather than grepping raw JSON. It retains every entry and the digest of each complete sorted graph. It then separates SDK-provided ILCompiler/ILLink/runtime-pack infrastructure, whose patch follows the repository's `latestPatch` SDK policy, and compares the remaining candidate-owned or production-owned managed closure exactly. Minimal's candidate-owned closure is empty, production rejects every `Microsoft.Extensions.AI*` package, and MEAI permits exactly `Microsoft.Extensions.AI.Abstractions/10.8.1`. Native AOT runs retain a sorted publish-file name/byte manifest in CI output in addition to aggregate executable and directory bytes.
 
 These manifests distinguish candidate adapter source, test harness source, package API surface, resolved package graph, and publish output. They do not redefine the already-frozen selection order, and the corrected source metric does not change the selected candidate.
 

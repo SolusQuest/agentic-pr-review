@@ -2,5 +2,3 @@ Humanizer.Core/3.0.10
 Json.More.Net/3.0.1
 JsonPointer.Net/7.0.1
 JsonSchema.Net/9.2.2
-Microsoft.DotNet.ILCompiler/10.0.9
-Microsoft.NET.ILLink.Tasks/10.0.9
