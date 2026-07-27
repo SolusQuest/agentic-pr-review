@@ -270,7 +270,7 @@ _run_negatives() {
     "${CANDIDATE_RUNNER[@]}" negative \
       --scenario "${scenario}" \
       --first-fixture "${FIRST_INPUT}" \
-      --resume-fixture "${RESUME_INPUT}" \
+      --second-fixture "${RESUME_INPUT}" \
       --state "${work}/state.json" \
       --evidence "${work}/evidence.json" \
       "${canary_args[@]}" >"${work}/run.log" 2>&1

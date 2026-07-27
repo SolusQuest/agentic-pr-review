@@ -97,7 +97,7 @@ internal static class NegativeRunner
         }
 
         var resumeInput = FixtureJson.ReadResumeInput(
-            command.Required("resume-fixture"));
+            command.Required("second-fixture"));
         var resumeHarness = CandidateFactory.Create(FixturePhase.Resume, "happy");
         var state = Mutate(first.State, scenario);
         _ = await FixtureRunner.RunResumeAsync(
