@@ -60,8 +60,9 @@ internal sealed class MinimalFakeBackend(
 
     private static NativeRequestObservation Observe(MinimalChatRequest request)
     {
-        if (request.Continuation is not null &&
-            string.IsNullOrWhiteSpace(request.Continuation.AdapterId))
+        var continuation = request.Continuation;
+        if (continuation is not null &&
+            string.IsNullOrWhiteSpace(continuation.AdapterId))
         {
             throw new FixtureFailure("APR_AI_MAPPING");
         }
@@ -76,7 +77,7 @@ internal sealed class MinimalFakeBackend(
                 {
                     continue;
                 }
-                var item = request.Continuation?.Items.SingleOrDefault(candidate =>
+                var item = continuation?.Items.SingleOrDefault(candidate =>
                     candidate.MessagePosition == messagePosition &&
                     candidate.ContentPosition == contentPosition);
                 if (item is null ||
@@ -90,10 +91,10 @@ internal sealed class MinimalFakeBackend(
                     throw new FixtureFailure("APR_AI_CONTINUATION");
                 }
                 continuations.Add(new ObservedContinuation(
-                    request.Continuation!.ProviderId,
-                    request.Continuation.ModelId,
+                    continuation!.ProviderId,
+                    continuation.ModelId,
                     "candidate-adapter",
-                    request.Continuation.SessionId,
+                    continuation.SessionId,
                     FixtureHash.Text(content.Text!),
                     FixtureHash.Text(content.Opaque!),
                     content.Framing!,
