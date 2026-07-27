@@ -1,6 +1,5 @@
 name: Task
 description: Planning, docs, research, spike, tooling, release, or maintenance work
-title: 'Task: '
 type: task
 body:
   - type: textarea

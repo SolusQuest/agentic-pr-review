@@ -1,7 +1,6 @@
 name: Enhancement
 description: Improve an existing capability without adding a fundamentally new feature
-title: 'Enhancement: '
-type: feature
+type: enhancement
 body:
   - type: textarea
     id: goal
