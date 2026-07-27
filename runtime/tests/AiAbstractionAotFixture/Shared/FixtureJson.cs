@@ -18,8 +18,13 @@ internal static class FixtureJson
     internal static FirstEvidence ReadFirstEvidence(string path) =>
         Read(path, FixtureJsonContext.Default.FirstEvidence);
 
-    internal static byte[] Serialize(ProofState value) =>
-        JsonSerializer.SerializeToUtf8Bytes(value, FixtureJsonContext.Default.ProofState);
+    internal static byte[] Serialize(ProofState value)
+    {
+        EnsureProofStateAdmissible(value);
+        return JsonSerializer.SerializeToUtf8Bytes(
+            value,
+            FixtureJsonContext.Default.ProofState);
+    }
 
     internal static byte[] Serialize(FirstEvidence value) =>
         JsonSerializer.SerializeToUtf8Bytes(value, FixtureJsonContext.Default.FirstEvidence);
@@ -41,6 +46,72 @@ internal static class FixtureJson
         EnsureNoDuplicateProperties(bytes);
         return JsonSerializer.Deserialize(bytes, typeInfo) ??
             throw new FixtureFailure("APR_AI_SERIALIZATION");
+    }
+
+    internal static void EnsureProofStateAdmissible(object? value)
+    {
+        switch (value)
+        {
+            case null:
+            case string:
+            case int:
+                return;
+            case ProofState state:
+                EnsureProofStateAdmissible(state.Format);
+                EnsureProofStateAdmissible(state.Candidate);
+                EnsureProofStateAdmissible(state.ProviderId);
+                EnsureProofStateAdmissible(state.ModelId);
+                EnsureProofStateAdmissible(state.AdapterId);
+                EnsureProofStateAdmissible(state.SessionId);
+                EnsureProofStateAdmissible(state.Records);
+                EnsureProofStateAdmissible(state.Continuations);
+                EnsureProofStateAdmissible(state.Review);
+                return;
+            case LogicalRecord record:
+                EnsureProofStateAdmissible(record.Kind);
+                EnsureProofStateAdmissible(record.Role);
+                EnsureProofStateAdmissible(record.Text);
+                EnsureProofStateAdmissible(record.CallId);
+                EnsureProofStateAdmissible(record.ToolName);
+                EnsureProofStateAdmissible(record.Result);
+                EnsureProofStateAdmissible(record.MessagePosition);
+                EnsureProofStateAdmissible(record.ContentPosition);
+                return;
+            case StoredContinuation continuation:
+                EnsureProofStateAdmissible(continuation.Readable);
+                EnsureProofStateAdmissible(continuation.Opaque);
+                EnsureProofStateAdmissible(continuation.Framing);
+                EnsureProofStateAdmissible(continuation.AssociatedCallId);
+                EnsureProofStateAdmissible(continuation.MessagePosition);
+                EnsureProofStateAdmissible(continuation.ContentPosition);
+                EnsureProofStateAdmissible(continuation.ReadableSha256);
+                EnsureProofStateAdmissible(continuation.OpaqueSha256);
+                return;
+            case TerminalReview review:
+                EnsureProofStateAdmissible(review.Summary);
+                EnsureProofStateAdmissible(review.Findings);
+                return;
+            case LogicalRecord[] records:
+                foreach (var record in records)
+                {
+                    EnsureProofStateAdmissible(record);
+                }
+                return;
+            case StoredContinuation[] continuations:
+                foreach (var continuation in continuations)
+                {
+                    EnsureProofStateAdmissible(continuation);
+                }
+                return;
+            case string[] strings:
+                foreach (var text in strings)
+                {
+                    EnsureProofStateAdmissible(text);
+                }
+                return;
+            default:
+                throw new FixtureFailure("APR_AI_SERIALIZATION");
+        }
     }
 
     private static T Read<T>(string path, JsonTypeInfo<T> typeInfo)

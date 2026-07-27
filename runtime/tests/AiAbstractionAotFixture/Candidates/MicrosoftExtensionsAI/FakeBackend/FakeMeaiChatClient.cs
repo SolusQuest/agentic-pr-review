@@ -15,7 +15,8 @@ internal sealed class FakeMeaiChatClient(
     {
     }
 
-    public object? GetService(Type serviceType, object? serviceKey = null) => null;
+    public object? GetService(Type serviceType, object? serviceKey = null) =>
+        throw new FixtureFailure("APR_AI_GET_SERVICE_NOT_ALLOWED");
 
     public async Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages,
@@ -30,7 +31,11 @@ internal sealed class FakeMeaiChatClient(
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
         }
 
-        var scripted = FixtureScript.ResponseFor(phase, _turn++, scenario);
+        var scripted = FixtureScript.ResponseFor(
+            phase,
+            _turn++,
+            scenario,
+            messageArray.Length);
         var contents = scripted.Message.Contents.Select(ToNative).ToList();
         return new ChatResponse(new ChatMessage(
             scripted.Message.Role == "assistant"
@@ -103,8 +108,8 @@ internal sealed class FakeMeaiChatClient(
         ChatMessage[] messages,
         ChatOptions options)
     {
-        ObservedContinuation? continuation = null;
-        var observedMessages = messages.Select(message =>
+        var continuations = new List<ObservedContinuation>();
+        var observedMessages = messages.Select((message, messagePosition) =>
         {
             var contents = new List<ObservedContent>();
             foreach (var (content, position) in message.Contents.Select(
@@ -113,10 +118,31 @@ internal sealed class FakeMeaiChatClient(
                 if (content is TextReasoningContent reasoning &&
                     reasoning.AdditionalProperties?.ContainsKey("providerId") == true)
                 {
-                    _ = MicrosoftExtensionsAiCandidateAdapter.RequiredString(
+                    var adapterId = MicrosoftExtensionsAiCandidateAdapter.RequiredString(
                         reasoning,
                         "adapterId");
-                    continuation = new ObservedContinuation(
+                    var declaredMessagePosition =
+                        MicrosoftExtensionsAiCandidateAdapter.RequiredInt(
+                            reasoning,
+                            "messagePosition");
+                    var declaredContentPosition =
+                        MicrosoftExtensionsAiCandidateAdapter.RequiredInt(
+                            reasoning,
+                            "contentPosition");
+                    var associatedCallId =
+                        MicrosoftExtensionsAiCandidateAdapter.OptionalString(
+                            reasoning,
+                            "associatedCallId");
+                    if (adapterId.Length == 0 ||
+                        declaredMessagePosition != messagePosition ||
+                        declaredContentPosition != position ||
+                        associatedCallId is null ||
+                        !message.Contents.OfType<FunctionCallContent>().Any(
+                            call => call.CallId == associatedCallId))
+                    {
+                        throw new FixtureFailure("APR_AI_CONTINUATION");
+                    }
+                    continuations.Add(new ObservedContinuation(
                         MicrosoftExtensionsAiCandidateAdapter.RequiredString(
                             reasoning,
                             "providerId"),
@@ -132,16 +158,9 @@ internal sealed class FakeMeaiChatClient(
                         MicrosoftExtensionsAiCandidateAdapter.RequiredString(
                             reasoning,
                             "framing"),
-                        MicrosoftExtensionsAiCandidateAdapter.OptionalString(
-                            reasoning,
-                            "associatedCallId"),
-                        MicrosoftExtensionsAiCandidateAdapter.RequiredInt(
-                            reasoning,
-                            "messagePosition"),
-                        MicrosoftExtensionsAiCandidateAdapter.RequiredInt(
-                            reasoning,
-                            "contentPosition"));
-                    continue;
+                        associatedCallId,
+                        messagePosition,
+                        position));
                 }
                 contents.Add(ObserveContent(content, position));
             }
@@ -151,9 +170,12 @@ internal sealed class FakeMeaiChatClient(
             observedMessages,
             options.Tools!
                 .OfType<AIFunctionDeclaration>()
-                .Select(tool => tool.Name)
+                .Select(tool => NativeObservation.Tool(
+                    tool.Name,
+                    tool.Description,
+                    tool.JsonSchema.GetRawText()))
                 .ToArray(),
-            continuation);
+            continuations.ToArray());
     }
 
     private static ObservedContent ObserveContent(AIContent content, int position) =>

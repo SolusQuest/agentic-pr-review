@@ -1,3 +1,5 @@
+using AgenticPrReview.Runtime.Agent.Chat;
+
 namespace AgenticPrReview.Runtime.AiAbstractionFixture;
 
 internal static class NegativeRunner
@@ -19,6 +21,14 @@ internal static class NegativeRunner
             ["continuation-wrong-association"] = "APR_AI_CONTINUATION",
             ["continuation-wrong-role"] = "APR_AI_PROVIDER_ROLE",
             ["wrong-tool-result-id"] = "APR_AI_ASSOCIATION",
+            ["wrong-existing-tool-result-id"] = "APR_AI_ASSOCIATION",
+            ["swapped-tool-results"] = "APR_AI_ASSOCIATION",
+            ["duplicate-call-id"] = "APR_AI_ASSOCIATION",
+            ["reordered-records"] = "APR_AI_ASSOCIATION",
+            ["continuation-rebound-existing"] = "APR_AI_CONTINUATION",
+            ["continuation-rebound-unknown"] = "APR_AI_CONTINUATION",
+            ["resume-instructions-missing"] = "APR_AI_RESTORE_INPUT",
+            ["resume-request-missing"] = "APR_AI_RESTORE_INPUT",
             ["wrong-candidate"] = "APR_AI_RESTORE_BINDING",
             ["wrong-provider"] = "APR_AI_RESTORE_BINDING",
             ["wrong-model"] = "APR_AI_RESTORE_BINDING",
@@ -79,7 +89,24 @@ internal static class NegativeRunner
 
         if (scenario == "candidate-object-state")
         {
-            throw new FixtureFailure("APR_AI_SERIALIZATION");
+            var request = new ProjectChatRequest(
+                [
+                    new ProjectChatMessage(
+                        "system",
+                        [new ProjectTextContent(firstInput.Instructions)]),
+                    new ProjectChatMessage(
+                        "user",
+                        [new ProjectTextContent(firstInput.UserRequest)]),
+                ],
+                firstInput.Tools.Select(tool => new ProjectToolDefinition(
+                    tool.Name,
+                    tool.Description,
+                    tool.SchemaJson)).ToArray(),
+                null);
+            var candidateObject =
+                firstHarness.MaterializeCandidateRequest(request);
+            FixtureJson.EnsureProofStateAdmissible(candidateObject);
+            throw new FixtureFailure("APR_AI_NEGATIVE_ACCEPTED");
         }
         if (scenario is "before-evidence-commit" or "before-state-commit")
         {
@@ -98,14 +125,34 @@ internal static class NegativeRunner
 
         var resumeInput = FixtureJson.ReadResumeInput(
             command.Required("second-fixture"));
+        resumeInput = scenario switch
+        {
+            "resume-instructions-missing" => resumeInput with
+            {
+                Instructions = string.Empty,
+            },
+            "resume-request-missing" => resumeInput with { UserRequest = string.Empty },
+            _ => resumeInput,
+        };
         var resumeHarness = CandidateFactory.Create(FixturePhase.Resume, "happy");
         var state = Mutate(first.State, scenario);
-        _ = await FixtureRunner.RunResumeAsync(
-            resumeInput,
-            state,
-            resumeHarness,
-            command.Many("canary"),
-            CancellationToken.None);
+        try
+        {
+            _ = await FixtureRunner.RunResumeAsync(
+                resumeInput,
+                state,
+                resumeHarness,
+                command.Many("canary"),
+                CancellationToken.None);
+        }
+        catch (FixtureFailure)
+        {
+            if (resumeHarness.Probe.Requests.Count != 0)
+            {
+                throw new FixtureFailure("APR_AI_RESTORE_AFTER_PROVIDER");
+            }
+            throw;
+        }
     }
 
     private static bool IsFirstPhaseScenario(string scenario) => scenario is
@@ -133,6 +180,68 @@ internal static class NegativeRunner
                     record.Kind == "tool_result" && index > 0
                         ? record with { CallId = "call-unknown-999" }
                         : record).ToArray(),
+            },
+            "wrong-existing-tool-result-id" => state with
+            {
+                Records = state.Records.Select(record =>
+                    record.Kind == "tool_result" &&
+                    record.CallId == FixtureConstants.ReadCallId
+                        ? record with
+                        {
+                            CallId = FixtureConstants.SearchCallId,
+                            ToolName = "search_text",
+                        }
+                        : record).ToArray(),
+            },
+            "swapped-tool-results" => state with
+            {
+                Records = state.Records.Select(record =>
+                    record.Kind != "tool_result"
+                        ? record
+                        : record.CallId == FixtureConstants.ReadCallId
+                            ? record with
+                            {
+                                CallId = FixtureConstants.SearchCallId,
+                                ToolName = "search_text",
+                            }
+                            : record with
+                            {
+                                CallId = FixtureConstants.ReadCallId,
+                                ToolName = "read_file",
+                            }).ToArray(),
+            },
+            "duplicate-call-id" => state with
+            {
+                Records = state.Records.Select(record =>
+                    record.CallId == FixtureConstants.SearchCallId
+                        ? record with { CallId = FixtureConstants.ReadCallId }
+                        : record).ToArray(),
+            },
+            "reordered-records" => state with
+            {
+                Records = state.Records.Select((_, index) =>
+                    index == 2
+                        ? state.Records[3]
+                        : index == 3
+                            ? state.Records[2]
+                            : state.Records[index]).ToArray(),
+            },
+            "continuation-rebound-existing" => state with
+            {
+                Continuations = state.Continuations.Select((item, index) =>
+                    index == 0
+                        ? item with
+                        {
+                            AssociatedCallId = FixtureConstants.SearchCallId,
+                        }
+                        : item).ToArray(),
+            },
+            "continuation-rebound-unknown" => state with
+            {
+                Continuations = state.Continuations.Select((item, index) =>
+                    index == 0
+                        ? item with { AssociatedCallId = "call-unknown-999" }
+                        : item).ToArray(),
             },
             "wrong-candidate" => state with { Candidate = "OtherCandidate" },
             "wrong-provider" => state with { ProviderId = "other-provider" },

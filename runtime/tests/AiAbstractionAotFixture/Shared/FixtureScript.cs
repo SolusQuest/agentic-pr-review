@@ -7,13 +7,15 @@ internal static class FixtureScript
     internal static ProjectChatResponse ResponseFor(
         FixturePhase phase,
         int turn,
-        string scenario)
+        string scenario,
+        int messagePosition)
     {
         if (phase == FixturePhase.Resume)
         {
             return BuildTerminal(
                 FixtureConstants.ResumeFinishCallId,
-                FixtureConstants.ResumeTerminalSummary);
+                FixtureConstants.ResumeTerminalSummary,
+                messagePosition);
         }
 
         return turn switch
@@ -22,15 +24,18 @@ internal static class FixtureScript
                 FixtureConstants.ReadCallId,
                 "read_file",
                 ReadArguments(scenario),
-                scenario),
+                scenario,
+                messagePosition),
             1 => BuildToolResponse(
                 FixtureConstants.SearchCallId,
                 "search_text",
                 """{"path":"src/Widget.cs","query":"PRIOR_ONLY_FACT_81_9f6d3a"}""",
-                scenario),
+                scenario,
+                messagePosition),
             2 => BuildTerminal(
                 FixtureConstants.FinishCallId,
-                FixtureConstants.TerminalSummary),
+                FixtureConstants.TerminalSummary,
+                messagePosition),
             _ => throw new FixtureFailure("APR_AI_FIXTURE"),
         };
     }
@@ -39,7 +44,8 @@ internal static class FixtureScript
         string callId,
         string toolName,
         string arguments,
-        string scenario)
+        string scenario,
+        int expectedMessagePosition)
     {
         if (scenario == "unknown-tool")
         {
@@ -60,7 +66,9 @@ internal static class FixtureScript
         var associatedCallId = scenario == "continuation-wrong-association"
             ? "call-other-999"
             : callId;
-        var messagePosition = scenario == "continuation-misplaced" ? 3 : 2;
+        var messagePosition = scenario == "continuation-misplaced"
+            ? expectedMessagePosition + 1
+            : expectedMessagePosition;
         var contentPosition = scenario == "continuation-misplaced" ? 2 : 1;
         var role = scenario == "continuation-wrong-role" ? "user" : "assistant";
 
@@ -95,14 +103,17 @@ internal static class FixtureScript
         return new ProjectChatResponse(new ProjectChatMessage(role, contents));
     }
 
-    private static ProjectChatResponse BuildTerminal(string callId, string summary)
+    private static ProjectChatResponse BuildTerminal(
+        string callId,
+        string summary,
+        int messagePosition)
     {
         var reasoning = new ProjectReasoningContent(
             FixtureConstants.ReadableContinuation,
             FixtureConstants.OpaqueContinuation,
             FixtureConstants.ReasoningFraming,
             callId,
-            2,
+            messagePosition,
             1);
         return new ProjectChatResponse(new ProjectChatMessage(
             "assistant",

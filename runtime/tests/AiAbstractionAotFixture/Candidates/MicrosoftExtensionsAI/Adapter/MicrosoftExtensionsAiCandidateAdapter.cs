@@ -26,6 +26,8 @@ internal sealed class MicrosoftExtensionsAiCandidateHarness(
     public string AdapterId => "apr-meai-adapter";
     public IProjectChatClient ChatClient => chatClient;
     public CandidateProbe Probe => probe;
+    public object MaterializeCandidateRequest(ProjectChatRequest request) =>
+        MicrosoftExtensionsAiCandidateAdapter.Materialize(request).Messages;
 }
 
 internal sealed class MicrosoftExtensionsAiCandidateAdapter(
@@ -35,36 +37,42 @@ internal sealed class MicrosoftExtensionsAiCandidateAdapter(
         ProjectChatRequest request,
         CancellationToken cancellationToken)
     {
-        var messages = request.Messages.Select(ToNative).ToList();
-        if (request.Continuation is not null)
-        {
-            InsertContinuation(messages, request.Continuation);
-        }
-
-        var options = new ChatOptions
-        {
-            Reasoning = new ReasoningOptions
-            {
-                Effort = ReasoningEffort.High,
-                Output = ReasoningOutput.Full,
-            },
-            Tools = request.Tools
-                .Select<ProjectToolDefinition, AITool>(tool =>
-                    new ClosedToolDeclaration(
-                        tool.Name,
-                        tool.Description,
-                        tool.SchemaJson))
-                .ToList(),
-        };
+        var invocation = Materialize(request);
         var response = await client.GetResponseAsync(
-            messages,
-            options,
+            invocation.Messages,
+            invocation.Options,
             cancellationToken);
         if (response.Messages.Count != 1)
         {
             throw new FixtureFailure("APR_AI_MAPPING");
         }
         return new ProjectChatResponse(ToProject(response.Messages[0]));
+    }
+
+    internal static MeaiInvocation Materialize(ProjectChatRequest request)
+    {
+        var messages = request.Messages.Select(ToNative).ToList();
+        if (request.Continuation is not null)
+        {
+            InsertContinuations(messages, request.Continuation);
+        }
+        return new MeaiInvocation(
+            messages,
+            new ChatOptions
+            {
+                Reasoning = new ReasoningOptions
+                {
+                    Effort = ReasoningEffort.High,
+                    Output = ReasoningOutput.Full,
+                },
+                Tools = request.Tools
+                    .Select<ProjectToolDefinition, AITool>(tool =>
+                        new ClosedToolDeclaration(
+                            tool.Name,
+                            tool.Description,
+                            tool.SchemaJson))
+                    .ToList(),
+            });
     }
 
     private static ChatMessage ToNative(ProjectChatMessage message) => new(
@@ -110,35 +118,39 @@ internal sealed class MicrosoftExtensionsAiCandidateAdapter(
         return content;
     }
 
-    private static void InsertContinuation(
+    private static void InsertContinuations(
         List<ChatMessage> messages,
         ProjectContinuation continuation)
     {
-        if (continuation.MessagePosition < 0 ||
-            continuation.MessagePosition >= messages.Count)
+        foreach (var item in continuation.Items
+            .OrderBy(item => item.MessagePosition))
         {
-            throw new FixtureFailure("APR_AI_CONTINUATION");
+            if (item.MessagePosition < 0 ||
+                item.MessagePosition >= messages.Count)
+            {
+                throw new FixtureFailure("APR_AI_CONTINUATION");
+            }
+            var target = messages[item.MessagePosition];
+            if (item.ContentPosition < 0 ||
+                item.ContentPosition > target.Contents.Count)
+            {
+                throw new FixtureFailure("APR_AI_CONTINUATION");
+            }
+            var reasoning = new TextReasoningContent(item.Readable)
+            {
+                ProtectedData = item.Opaque,
+                AdditionalProperties = Metadata(
+                    item.Framing,
+                    item.AssociatedCallId,
+                    item.MessagePosition,
+                    item.ContentPosition),
+            };
+            reasoning.AdditionalProperties["providerId"] = continuation.ProviderId;
+            reasoning.AdditionalProperties["modelId"] = continuation.ModelId;
+            reasoning.AdditionalProperties["adapterId"] = continuation.AdapterId;
+            reasoning.AdditionalProperties["sessionId"] = continuation.SessionId;
+            target.Contents.Insert(item.ContentPosition, reasoning);
         }
-        var target = messages[continuation.MessagePosition];
-        if (continuation.ContentPosition < 0 ||
-            continuation.ContentPosition > target.Contents.Count)
-        {
-            throw new FixtureFailure("APR_AI_CONTINUATION");
-        }
-        var reasoning = new TextReasoningContent(continuation.Readable)
-        {
-            ProtectedData = continuation.Opaque,
-            AdditionalProperties = Metadata(
-                continuation.Framing,
-                continuation.AssociatedCallId,
-                continuation.MessagePosition,
-                continuation.ContentPosition),
-        };
-        reasoning.AdditionalProperties["providerId"] = continuation.ProviderId;
-        reasoning.AdditionalProperties["modelId"] = continuation.ModelId;
-        reasoning.AdditionalProperties["adapterId"] = continuation.AdapterId;
-        reasoning.AdditionalProperties["sessionId"] = continuation.SessionId;
-        target.Contents.Insert(continuation.ContentPosition, reasoning);
     }
 
     private static ProjectChatMessage ToProject(ChatMessage message) => new(
@@ -212,6 +224,10 @@ internal sealed class MicrosoftExtensionsAiCandidateAdapter(
             ? number
             : throw new FixtureFailure("APR_AI_MAPPING");
 }
+
+internal sealed record MeaiInvocation(
+    List<ChatMessage> Messages,
+    ChatOptions Options);
 
 internal sealed class ClosedToolDeclaration : AIFunctionDeclaration
 {

@@ -53,6 +53,9 @@ internal sealed record ProjectContinuation(
     string ModelId,
     string AdapterId,
     string SessionId,
+    ProjectContinuationItem[] Items);
+
+internal sealed record ProjectContinuationItem(
     string Readable,
     string Opaque,
     string Framing,

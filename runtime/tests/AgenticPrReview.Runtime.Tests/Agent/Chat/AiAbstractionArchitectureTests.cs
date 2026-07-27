@@ -49,7 +49,9 @@ public sealed class AiAbstractionArchitectureTests
 
         var referencedNames = types
             .SelectMany(ReferencedTypes)
+            .SelectMany(ExpandTypeGraph)
             .Select(type => type.FullName ?? type.Name)
+            .Distinct(StringComparer.Ordinal)
             .ToArray();
         var forbiddenFragments = new[]
         {
@@ -134,6 +136,25 @@ public sealed class AiAbstractionArchitectureTests
             foreach (var parameter in method.GetParameters())
             {
                 yield return parameter.ParameterType;
+            }
+        }
+    }
+
+    private static IEnumerable<Type> ExpandTypeGraph(Type type)
+    {
+        yield return type;
+        if (type.HasElementType && type.GetElementType() is { } element)
+        {
+            foreach (var nested in ExpandTypeGraph(element))
+            {
+                yield return nested;
+            }
+        }
+        foreach (var argument in type.GetGenericArguments())
+        {
+            foreach (var nested in ExpandTypeGraph(argument))
+            {
+                yield return nested;
             }
         }
     }

@@ -7,35 +7,53 @@ internal sealed class MinimalChatClient(
         ProjectChatRequest request,
         CancellationToken cancellationToken)
     {
-        var native = new MinimalChatRequest(
-            request.Messages.Select(ToNative).ToArray(),
-            request.Tools.Select(tool => new MinimalChatTool(
-                tool.Name,
-                tool.Description,
-                tool.SchemaJson)).ToArray(),
-            request.Continuation is null
-                ? null
-                : new MinimalChatContinuation(
-                    request.Continuation.ProviderId,
-                    request.Continuation.ModelId,
-                    request.Continuation.AdapterId,
-                    request.Continuation.SessionId,
-                    request.Continuation.Readable,
-                    request.Continuation.Opaque,
-                    request.Continuation.Framing,
-                    request.Continuation.AssociatedCallId,
-                    request.Continuation.MessagePosition,
-                    request.Continuation.ContentPosition));
+        var native = Materialize(request);
         var response = await backend.GetResponseAsync(native, cancellationToken);
         return new ProjectChatResponse(ToProject(response.Message));
     }
 
-    private static MinimalChatMessage ToNative(ProjectChatMessage message) => new(
+    internal static MinimalChatRequest Materialize(ProjectChatRequest request)
+    {
+        var messages = request.Messages
+            .Select((message, messagePosition) => ToNative(message, messagePosition))
+            .ToArray();
+        var continuation = request.Continuation is null
+            ? null
+            : new MinimalChatContinuation(
+                request.Continuation.ProviderId,
+                request.Continuation.ModelId,
+                request.Continuation.AdapterId,
+                request.Continuation.SessionId,
+                request.Continuation.Items.Select(item =>
+                    new MinimalChatContinuationItem(
+                        item.Readable,
+                        item.Opaque,
+                        item.Framing,
+                        item.AssociatedCallId,
+                        item.MessagePosition,
+                        item.ContentPosition)).ToArray());
+        if (continuation is not null)
+        {
+            InsertContinuations(messages, continuation);
+        }
+        return new MinimalChatRequest(
+            messages,
+            request.Tools.Select(tool => new MinimalChatTool(
+                tool.Name,
+                tool.Description,
+                tool.SchemaJson)).ToArray(),
+            continuation);
+    }
+
+    private static MinimalChatMessage ToNative(
+        ProjectChatMessage message,
+        int messagePosition) => new(
         message.Role,
-        message.Contents.Select(content => content switch
+        message.Contents.Select((content, contentPosition) => content switch
         {
             ProjectTextContent text => new MinimalChatContent(
-                "text", null, null, text.Text, null, null, null, 0),
+                "text", null, null, text.Text, null, null, null,
+                messagePosition, contentPosition),
             ProjectReasoningContent reasoning => new MinimalChatContent(
                 "reasoning",
                 null,
@@ -44,6 +62,7 @@ internal sealed class MinimalChatClient(
                 reasoning.Opaque,
                 reasoning.Framing,
                 reasoning.AssociatedCallId,
+                reasoning.MessagePosition,
                 reasoning.Position),
             ProjectToolCallContent call => new MinimalChatContent(
                 "tool_call",
@@ -53,7 +72,8 @@ internal sealed class MinimalChatClient(
                 null,
                 null,
                 null,
-                0),
+                messagePosition,
+                contentPosition),
             ProjectToolResultContent result => new MinimalChatContent(
                 "tool_result",
                 result.CallId,
@@ -62,9 +82,46 @@ internal sealed class MinimalChatClient(
                 null,
                 null,
                 null,
-                0),
+                messagePosition,
+                contentPosition),
             _ => throw new InvalidOperationException("Unsupported project chat content."),
         }).ToArray());
+
+    private static void InsertContinuations(
+        MinimalChatMessage[] messages,
+        MinimalChatContinuation continuation)
+    {
+        foreach (var item in continuation.Items.OrderBy(item => item.MessagePosition))
+        {
+            if (item.MessagePosition < 0 ||
+                item.MessagePosition >= messages.Length)
+            {
+                throw new InvalidOperationException("Invalid continuation message position.");
+            }
+            var target = messages[item.MessagePosition];
+            if (item.ContentPosition < 0 ||
+                item.ContentPosition > target.Contents.Length)
+            {
+                throw new InvalidOperationException("Invalid continuation content position.");
+            }
+            var contents = target.Contents.ToList();
+            contents.Insert(item.ContentPosition, new MinimalChatContent(
+                "reasoning",
+                null,
+                null,
+                item.Readable,
+                item.Opaque,
+                item.Framing,
+                item.AssociatedCallId,
+                item.MessagePosition,
+                item.ContentPosition));
+            messages[item.MessagePosition] = target with
+            {
+                Contents = contents.Select((content, position) =>
+                    content with { Position = position }).ToArray(),
+            };
+        }
+    }
 
     private static ProjectChatMessage ToProject(MinimalChatMessage message) => new(
         message.Role,
@@ -76,7 +133,7 @@ internal sealed class MinimalChatClient(
                 content.Opaque!,
                 content.Framing!,
                 content.AssociatedCallId,
-                2,
+                content.MessagePosition,
                 content.Position),
             "tool_call" => new ProjectToolCallContent(
                 content.CallId!,
@@ -113,6 +170,7 @@ internal sealed record MinimalChatContent(
     string? Opaque,
     string? Framing,
     string? AssociatedCallId,
+    int MessagePosition,
     int Position);
 
 internal sealed record MinimalChatTool(
@@ -125,6 +183,9 @@ internal sealed record MinimalChatContinuation(
     string ModelId,
     string AdapterId,
     string SessionId,
+    MinimalChatContinuationItem[] Items);
+
+internal sealed record MinimalChatContinuationItem(
     string Readable,
     string Opaque,
     string Framing,

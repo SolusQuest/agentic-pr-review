@@ -24,6 +24,9 @@ The runtime now also contains the selected internal project-minimal Agent chat s
 by the reproducible two-candidate decision in
 [`docs/20_architecture/ai-abstraction-decision.md`](../docs/20_architecture/ai-abstraction-decision.md);
 the comparison fixture compiles the exact same selected source rather than a copied implementation.
+The comparison gate also verifies checked-in neutral adapter/API manifests, parses isolated
+`project.assets.json` files, rejects non-zero candidate warnings, and classifies every byte
+comparison failure without printing raw build logs or private absolute paths.
 
 ## Local validation
 

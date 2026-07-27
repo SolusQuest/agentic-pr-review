@@ -42,9 +42,8 @@ internal sealed record ProofState(
     string AdapterId,
     string SessionId,
     LogicalRecord[] Records,
-    StoredContinuation Continuation,
-    TerminalReview Review,
-    string FirstProjectionSha256);
+    StoredContinuation[] Continuations,
+    TerminalReview Review);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 internal sealed record LogicalRecord(
@@ -53,7 +52,9 @@ internal sealed record LogicalRecord(
     string? Text,
     string? CallId,
     string? ToolName,
-    string? Result);
+    string? Result,
+    int MessagePosition,
+    int ContentPosition);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 internal sealed record StoredContinuation(
@@ -80,7 +81,7 @@ internal sealed record FirstEvidence(
     string[] OrderedTools,
     string[] ToolCalls,
     string[] ToolResultSha256,
-    ContinuationEvidence Continuation,
+    ContinuationEvidence[] Continuations,
     string TerminalSummary);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
@@ -89,8 +90,10 @@ internal sealed record ResumeEvidence(
     string RestoredRecordsSha256,
     string ProviderProjectionSha256,
     string PriorFactSha256,
+    string CurrentInstructionsSha256,
+    string CurrentRequestSha256,
     string PrefixIdentity,
-    ContinuationEvidence Continuation,
+    ContinuationEvidence[] Continuations,
     string TerminalSummary);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]

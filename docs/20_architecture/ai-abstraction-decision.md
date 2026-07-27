@@ -44,15 +44,17 @@ The first fresh process:
 
 The second fresh process:
 
-1. reads and validates the proof state;
-2. verifies candidate, provider, model, adapter, session, continuation hashes, framing, position, and tool-result association;
-3. reconstructs the prior logical records and provider-facing request;
+1. reads and validates the proof state before candidate request materialization;
+2. verifies candidate, provider, model, adapter, session, every continuation hash, framing, exact message/content position, and exact ordered tool-call/result association;
+3. reconstructs grouped prior messages, inserts every reasoning continuation back into its original assistant message, and appends the process-2 instructions and user request as new control/data messages;
 4. proves that a fact available only in the first process participated in the restored request;
 5. reaches a later terminal review and emits first, second, and combined evidence.
 
-The Minimal and Microsoft.Extensions.AI candidates produce byte-identical canonical evidence. Candidate identity and implementation metrics are kept outside that equality surface.
+Assistant text, reasoning, and the associated tool call remain one physical provider message in that order. Later assistant turns use their actual later message positions; no adapter may reuse a fixed position or derive placement solely from unvalidated metadata. The Minimal and Microsoft.Extensions.AI candidates produce byte-identical canonical evidence. Candidate identity and implementation metrics are kept outside that equality surface.
 
-Both framework and Native AOT modes execute the same negative matrix. It rejects invalid compile-time candidate selection; unknown or malformed tools and arguments; oversized tool results; ordering defects; missing, altered, oversized, misplaced, misframed, misassociated, or wrong-role continuation; incorrect tool-result association; restore-binding mismatches; pending-call cancellation; candidate-object proof-state admission; and evidence/state commit faults. A successful proof-state transition is absent on every negative path.
+Both framework and Native AOT modes execute the same negative matrix. It rejects invalid compile-time candidate selection; unknown or malformed tools and arguments; oversized tool results; ordering defects; missing, altered, oversized, misplaced, misframed, misassociated, or wrong-role continuation; unknown, later-existing, and swapped tool-result associations; continuation rebinding to an existing or unknown call; missing process-2 instructions or request; restore-binding mismatches; pending-call cancellation; actual candidate-native object admission at the proof-state serialization boundary; and evidence/state commit faults. Restore failures are asserted to occur before any candidate request reaches the backend. A successful proof-state transition is absent on every negative path.
+
+The native projection evidence observes full tool declarations, not names alone: ordered name, description hash, and canonical closed-schema hash all participate. Framework, Native AOT, candidate-to-candidate, first-oracle, resume-oracle, and combined-oracle byte comparisons have stable failure codes. Non-zero candidate build or publish warning counts fail the gate.
 
 Nine synthetic canary categories cover GitHub, Actions, provider, state cryptography, runner, package registry, cloud, signing, and unrelated workflow values. Candidate-visible messages, tools, proof state, evidence, logs, stdout, and stderr are scanned and contain none of them.
 
@@ -82,7 +84,7 @@ The comparison and selected production seam add no direct or transitive managed 
 - Native AOT warning count: 0.
 - Ubuntu Native AOT executable: 3,236,904 bytes.
 - Ubuntu publish directory: 9,445,096 bytes.
-- Candidate-owned neutral-head adapter and fake-backend Git blob bytes: 8,445.
+- Neutral-head adapter-only Git blob: object `97d83c2dcf579e62685153a0fec9b106f502ccbf`, 5,037 bytes. The fake backend and shared harness are explicitly excluded.
 - The selected source is the exact physical `MinimalChatClient.cs` compiled by both the production runtime and the comparison fixture; it is not a copied implementation.
 - Framework and Native AOT selected-production parity passed on the selection commit.
 
@@ -100,7 +102,7 @@ The private candidate adapter used:
 - explicit `AITool`/`AIFunctionDeclaration` declarations with closed `JsonElement` schemas;
 - `AdditionalPropertiesDictionary` for adapter-owned structural metadata.
 
-The fake backend implemented the interface-required streaming and service-retrieval members only to fail closed if reached. The Agent-facing seam did not expose or call them. The candidate did not use automatic function invocation, reflection-driven tool schema generation, middleware construction, response caching, chat reduction, generic DI, or package implementation objects in proof state.
+The fake backend implemented the interface-required streaming and service-retrieval members only to throw stable fixture failures if reached. The Agent-facing seam did not expose or call them. The candidate did not use automatic function invocation, reflection-driven tool schema generation, middleware construction, response caching, chat reduction, generic DI, or package implementation objects in proof state.
 
 ### Dependency graph
 
@@ -112,7 +114,7 @@ The comparison project pins exactly `Microsoft.Extensions.AI.Abstractions` 10.8.
 - Native AOT warning count: 0.
 - Ubuntu Native AOT executable: 3,258,008 bytes.
 - Ubuntu publish directory: 9,485,672 bytes.
-- Candidate-owned neutral-head adapter and fake-backend Git blob bytes: 16,693.
+- Neutral-head adapter-only Git blob: object `dda777b71ecb06d7a4e719866b456f65e977e8fe`, 8,580 bytes. The fake backend and shared harness are explicitly excluded.
 - Framework and Native AOT common proof passed, including reasoning-enabled tool calls and fresh-process restoration.
 
 ## Selection Rationale
@@ -122,10 +124,10 @@ The frozen selection order produces a clear result:
 1. Both candidates preserve project ownership of the loop, validation, serial tool ordering, state, prefix identity, provider projection, continuation, terminal review, and side effects.
 2. Both candidates pass reflection-disabled source-generated serialization and add no candidate-specific trimming or AOT warning.
 3. Both present the same one-operation Agent-facing capability, but Minimal has no additional package or package API surface.
-4. Minimal needs substantially less candidate-owned adapter/fake-backend source and no compatibility work for broader interface members that the project does not use.
+4. Minimal needs substantially less candidate-owned adapter-only source and no compatibility work for broader interface members that the project does not use.
 5. Minimal also has the smaller resolved managed dependency graph and the smaller published executable and directory, although size alone did not determine the result.
 
-Project-minimal exchange types therefore provide the smaller production and maintenance surface without rewriting provider continuation into provider-neutral assistant text.
+Project-minimal exchange types therefore provide the smaller production and maintenance surface without rewriting provider continuation into provider-neutral assistant text. The corrected adapter-only metric keeps the same selection outcome; sunk fake-backend test code is not part of that production-surface comparison.
 
 ## Security And Privacy Impact
 
@@ -146,6 +148,14 @@ Dependency upgrades are not incidental maintenance. A future AI abstraction or p
 The Microsoft.Extensions.AI candidate remains only under `runtime/tests/AiAbstractionAotFixture/**`. It is excluded from the production project graph and cannot be selected at production runtime. Retention keeps the exact comparison reproducible while the selected seam is still only a spike-level vertical slice.
 
 The deletion gate is mandatory: #78 Phase 2 must assign removal of the dual-candidate fixture and its non-selected package to the focused child that replaces this proof with the real selected Agent loop and fresh-process Agent-session fixture. R2 cannot close until that ownership is assigned and the replacement evidence is green. Retention beyond that gate requires a new explicit maintenance decision.
+
+## Frozen Evidence Manifests
+
+The neutral source manifest fixes the adapter-only path, Git blob object ID, and Git blob byte count for each candidate at `405e0468fc15dc932970b378081ae030028409fe`. CI fetches that commit and verifies the recorded objects and sizes. The adjacent API member manifest records the project-owned Minimal native surface and every Microsoft.Extensions.AI package member exercised by the neutral adapter.
+
+The verifier parses `project.assets.json` rather than grepping raw JSON. It compares each complete sorted graph with a checked-in candidate/mode or production manifest, retains every entry and its digest, rejects any `Microsoft.Extensions.AI*` package from Minimal and production, and permits exactly `Microsoft.Extensions.AI.Abstractions/10.8.1` in that package family for the MEAI candidate. Native AOT runs retain a sorted publish-file name/byte manifest in CI output in addition to aggregate executable and directory bytes.
+
+These manifests distinguish candidate adapter source, test harness source, package API surface, resolved package graph, and publish output. They do not redefine the already-frozen selection order, and the corrected source metric does not change the selected candidate.
 
 ## Open Questions
 

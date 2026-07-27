@@ -24,4 +24,6 @@ internal sealed class MinimalCandidateHarness(
     public string AdapterId => "apr-minimal-adapter";
     public IProjectChatClient ChatClient => chatClient;
     public CandidateProbe Probe => probe;
+    public object MaterializeCandidateRequest(ProjectChatRequest request) =>
+        MinimalChatClient.Materialize(request);
 }
