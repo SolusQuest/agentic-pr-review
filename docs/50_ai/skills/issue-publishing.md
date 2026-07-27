@@ -8,11 +8,11 @@ Follow `docs/10_workflow/issue-workflow.md` for the normative type, title, body,
 
 Before writing to GitHub:
 
-- confirm the repository and target issue, if updating;
+- confirm the repository and read the current target issue, if updating;
 - select exactly one native type: `Feature`, `Enhancement`, `Bug`, or `Task`;
 - confirm the title has no type prefix;
 - confirm the body has no parallel `Type:` metadata field;
-- confirm any milestone, parent/sub-issue, dependency, or assignee changes are authorized.
+- list every requested metadata write and confirm that milestone, parent/sub-issue, dependency, project, or assignee changes are authorized.
 
 ## Create
 
@@ -32,6 +32,24 @@ If another creation path is required, set the native type immediately afterward 
 gh api --method PATCH 'repos/{owner}/{repo}/issues/NUMBER' -f type='Task'
 ```
 
+## Update
+
+Update the existing issue in place; do not create a replacement issue for an approved refinement.
+
+Read the target first and confirm its repository, number, title, body, native type, milestone, and assignees:
+
+```bash
+gh api 'repos/{owner}/{repo}/issues/NUMBER' --jq '{number, title, type: .type.name, milestone: .milestone.title, assignees: [.assignees[].login], body}'
+```
+
+Write the approved title, body, and native type to that same issue in one request:
+
+```bash
+gh api --method PATCH 'repos/{owner}/{repo}/issues/NUMBER' -f title='Describe the work' -F body=@issue-body.md -f type='Task'
+```
+
+Do not include milestone, assignees, labels, or other fields in this PATCH unless the task explicitly authorizes those changes. Apply authorized additional metadata through its dedicated field or endpoint.
+
 ## Additional Metadata
 
 Apply requested milestone, parent/sub-issue, dependency, project, or assignee metadata through the appropriate GitHub fields or endpoints. These writes are independent of the native type and must be verified separately.
@@ -40,18 +58,28 @@ Do not create or mutate labels, milestones, Projects, or repository settings unl
 
 ## Verify
 
-Read the remote issue after all writes:
+With a GitHub CLI version that supports the fields, read the complete issue metadata after all writes:
 
 ```bash
-gh api 'repos/{owner}/{repo}/issues/NUMBER' --jq '{number, title, type: .type.name, milestone: .milestone.title, body}'
+gh issue view NUMBER --repo OWNER/REPO --json number,title,body,issueType,milestone,parent,subIssues,blockedBy,blocking,assignees,projectItems
 ```
+
+If the installed CLI does not expose one of these fields, read it through the corresponding REST or GraphQL path instead. Do not omit a requested field from verification.
+
+| Metadata                                       | Preferred JSON field                                   | Older-CLI fallback                                                                                                                  |
+| ---------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| title, body, native type, milestone, assignees | `title`, `body`, `issueType`, `milestone`, `assignees` | `GET repos/{owner}/{repo}/issues/NUMBER`                                                                                            |
+| parent                                         | `parent`                                               | `GET repos/{owner}/{repo}/issues/NUMBER/parent`                                                                                     |
+| sub-issues                                     | `subIssues`                                            | `GET repos/{owner}/{repo}/issues/NUMBER/sub_issues`                                                                                 |
+| dependencies                                   | `blockedBy`, `blocking`                                | `GET repos/{owner}/{repo}/issues/NUMBER/dependencies/blocked_by` and `GET repos/{owner}/{repo}/issues/NUMBER/dependencies/blocking` |
+| Projects                                       | `projectItems`                                         | GraphQL `Issue.projectItems` query                                                                                                  |
 
 Before reporting completion, verify:
 
-- `.type.name` exactly matches the selected native type and is not `null`;
+- the remote native type exactly matches the selected type and is not `null`;
 - the remote title exactly matches the approved title and has no type prefix;
 - the remote body exactly matches the approved body and has no `Type:` field;
-- requested milestone and relationship metadata is present;
+- every requested and authorized milestone, parent/sub-issue, dependency, project, and assignee write exactly matches the remote value;
 - the rendered issue contains no raw prompts, logs, transcripts, credentials, or secrets.
 
-If any check fails, repair the remote metadata and verify again.
+If any requested field cannot be read back, remains `null`, is silently dropped, or otherwise does not match, stop and report publication as incomplete. Name the missing permission, unsupported verification path, or mismatched remote state. Retry only after authorization or external state changes; do not loop on the same failed write.

@@ -20,6 +20,8 @@ Do not repeat the type in the issue title or body:
 
 An issue without a native type has incomplete metadata even when its title or body names a type.
 
+This rule does not authorize a bulk migration of existing issues. Normalize an existing issue's title, body, and native type together the next time an authorized substantive update is made. Leave closed or historical issues unchanged unless a task explicitly authorizes their migration.
+
 ## Issue Body
 
 Every issue should include:
@@ -59,7 +61,9 @@ Publication is complete only when:
 - `.type.name` exactly matches the selected native type;
 - the title has no type prefix;
 - the body has no parallel `Type:` field and matches the approved content;
-- requested milestone, parent/sub-issue, and dependency metadata is also verified.
+- every requested and authorized milestone, parent/sub-issue, dependency, project, and assignee write exactly matches its remote readback.
+
+If any requested field cannot be read back or does not match, publication is incomplete. Stop and report the missing permission, unsupported verification path, or mismatched remote state.
 
 Agents should follow `docs/50_ai/skills/issue-publishing.md` for the complete publishing procedure.
 
