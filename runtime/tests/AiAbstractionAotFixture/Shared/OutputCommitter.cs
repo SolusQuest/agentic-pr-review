@@ -78,9 +78,14 @@ internal static class OutputCommitter
     {
         var directory = Path.GetDirectoryName(Path.GetFullPath(destination))!;
         Directory.CreateDirectory(directory);
-        var stage = Path.Combine(
+        var fileName = Path.GetFileName(destination);
+        if (string.IsNullOrEmpty(fileName))
+        {
+            throw new FixtureFailure("APR_AI_OUTPUT_PATH");
+        }
+        var stage = Path.Join(
             directory,
-            $".{Path.GetFileName(destination)}.{Guid.NewGuid():N}.stage");
+            $".{fileName}.{Guid.NewGuid():N}.stage");
         using var stream = new FileStream(
             stage,
             FileMode.CreateNew,
