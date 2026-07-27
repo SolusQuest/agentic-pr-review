@@ -20,10 +20,15 @@ EXPECTED_FIRST="${FIXTURES}/expected-first.json.golden"
 EXPECTED_RESUME="${FIXTURES}/expected-resume.json.golden"
 EXPECTED_COMBINED="${FIXTURES}/expected-combined.json.golden"
 SOURCE_MANIFEST="${FIXTURES}/manifests/neutral-source-manifest.tsv"
-API_MANIFEST="${FIXTURES}/manifests/neutral-api-member-manifest.tsv"
+MINIMAL_PROJECT_API_MANIFEST="${FIXTURES}/manifests/neutral-Minimal-project-api.tsv"
+MINIMAL_PACKAGE_API_MANIFEST="${FIXTURES}/manifests/neutral-Minimal-package-api.tsv"
+MEAI_PROJECT_API_MANIFEST="${FIXTURES}/manifests/neutral-MicrosoftExtensionsAI-project-api.tsv"
+MEAI_PACKAGE_API_MANIFEST="${FIXTURES}/manifests/neutral-MicrosoftExtensionsAI-package-api.tsv"
+API_MANIFEST_TOOL="${REPO_ROOT}/runtime/tools/AiApiManifest/AgenticPrReview.Runtime.AiApiManifest.csproj"
 ASSEMBLY="AgenticPrReview.Runtime.AiAbstractionAotFixture"
 DOTNET_CMD="${DOTNET_CMD:-dotnet}"
 NEUTRAL_COMMIT="405e0468fc15dc932970b378081ae030028409fe"
+_neutral_api_verified=0
 
 CANDIDATES=(Minimal MicrosoftExtensionsAI)
 NEGATIVE_SCENARIOS=(
@@ -102,7 +107,11 @@ _require_inputs() {
   _require_file expected-resume "${EXPECTED_RESUME}"
   _require_file expected-combined "${EXPECTED_COMBINED}"
   _require_file neutral-source-manifest "${SOURCE_MANIFEST}"
-  _require_file neutral-api-manifest "${API_MANIFEST}"
+  _require_file neutral-minimal-project-api "${MINIMAL_PROJECT_API_MANIFEST}"
+  _require_file neutral-minimal-package-api "${MINIMAL_PACKAGE_API_MANIFEST}"
+  _require_file neutral-meai-project-api "${MEAI_PROJECT_API_MANIFEST}"
+  _require_file neutral-meai-package-api "${MEAI_PACKAGE_API_MANIFEST}"
+  _require_file neutral-api-manifest-tool "${API_MANIFEST_TOOL}"
 }
 
 _compare_files() {
@@ -137,7 +146,8 @@ _verifier_self_tests() {
     APR_AI_FIRST_ORACLE_MISMATCH \
     APR_AI_RESUME_ORACLE_MISMATCH \
     APR_AI_FRAMEWORK_AOT_MISMATCH \
-    APR_AI_CROSS_CANDIDATE_MISMATCH; do
+    APR_AI_CROSS_CANDIDATE_MISMATCH \
+    APR_AI_NEUTRAL_API_MISMATCH; do
     local output
     if output="$(_compare_files \
       "${root}/actual" "${root}/expected" "${code}" injected 2>&1)"; then
@@ -175,8 +185,14 @@ _verifier_self_tests() {
 _emit_frozen_manifests() {
   printf 'APR_AI_MANIFEST neutral_source_sha256=%s\n' \
     "$(sha256sum "${SOURCE_MANIFEST}" | awk '{print $1}')"
-  printf 'APR_AI_MANIFEST neutral_api_sha256=%s\n' \
-    "$(sha256sum "${API_MANIFEST}" | awk '{print $1}')"
+  printf 'APR_AI_MANIFEST neutral_minimal_project_api_sha256=%s\n' \
+    "$(sha256sum "${MINIMAL_PROJECT_API_MANIFEST}" | awk '{print $1}')"
+  printf 'APR_AI_MANIFEST neutral_minimal_package_api_sha256=%s\n' \
+    "$(sha256sum "${MINIMAL_PACKAGE_API_MANIFEST}" | awk '{print $1}')"
+  printf 'APR_AI_MANIFEST neutral_meai_project_api_sha256=%s\n' \
+    "$(sha256sum "${MEAI_PROJECT_API_MANIFEST}" | awk '{print $1}')"
+  printf 'APR_AI_MANIFEST neutral_meai_package_api_sha256=%s\n' \
+    "$(sha256sum "${MEAI_PACKAGE_API_MANIFEST}" | awk '{print $1}')"
   local header
   IFS= read -r header <"${SOURCE_MANIFEST}"
   local candidate path expected_object expected_bytes scope
@@ -198,6 +214,113 @@ _emit_frozen_manifests() {
       return 1
     fi
   done < <(tail -n +2 "${SOURCE_MANIFEST}")
+  _verify_neutral_api_manifests
+}
+
+_generate_neutral_api_manifests() {
+  local output_dir="$1"
+  mkdir -p -- "${output_dir}"
+  local root
+  _new_tempdir root
+  local neutral_source="${root}/neutral"
+  mkdir -p -- "${neutral_source}"
+  local archive_log="${root}/archive.log"
+  if ! git archive "${NEUTRAL_COMMIT}" \
+      global.json \
+      runtime/tests/AiAbstractionAotFixture |
+      tar -x -C "${neutral_source}" >"${archive_log}" 2>&1; then
+    printf 'APR_AI_NEUTRAL_ARCHIVE_FAIL\n' >&2
+    return 1
+  fi
+
+  local tool_output="${root}/tool"
+  local tool_log="${root}/tool-build.log"
+  if ! "${DOTNET_CMD}" build "${API_MANIFEST_TOOL}" \
+      -c Release \
+      --nologo \
+      -o "${tool_output}" >"${tool_log}" 2>&1; then
+    printf 'APR_AI_API_MANIFEST_TOOL_BUILD_FAIL\n' >&2
+    return 1
+  fi
+
+  local neutral_project="${neutral_source}/runtime/tests/AiAbstractionAotFixture/AgenticPrReview.Runtime.AiAbstractionAotFixture.csproj"
+  local tool="${tool_output}/AgenticPrReview.Runtime.AiApiManifest.dll"
+  local candidate
+  for candidate in "${CANDIDATES[@]}"; do
+    local candidate_root="${root}/candidate/${candidate}"
+    mkdir -p -- "${candidate_root}"
+    local -a properties=(
+      "-p:AiAbstractionCandidate=${candidate}"
+      "-p:AiAbstractionMode=neutral-api"
+      "-p:AiAbstractionIsolationRoot=${candidate_root}/obj/"
+      "-p:MSBuildProjectExtensionsPath=${candidate_root}/obj/extensions/"
+      "-p:BaseIntermediateOutputPath=${candidate_root}/obj/intermediate/"
+      "-p:BaseOutputPath=${candidate_root}/bin/"
+      "-p:RestorePackagesPath=${candidate_root}/packages/"
+      "-p:PublishAot=false"
+      "-p:SelfContained=false"
+      "-p:DebugType=portable"
+    )
+    local build_log="${candidate_root}/build.log"
+    if ! "${DOTNET_CMD}" restore "${neutral_project}" \
+        "${properties[@]}" >"${build_log}" 2>&1; then
+      printf 'APR_AI_NEUTRAL_API_RESTORE_FAIL %s\n' "${candidate}" >&2
+      return 1
+    fi
+    if ! "${DOTNET_CMD}" build "${neutral_project}" \
+        -c Release \
+        --no-restore \
+        "${properties[@]}" >>"${build_log}" 2>&1; then
+      printf 'APR_AI_NEUTRAL_API_BUILD_FAIL %s\n' "${candidate}" >&2
+      return 1
+    fi
+
+    local assembly="${candidate_root}/bin/Release/net10.0/${ASSEMBLY}.dll"
+    local pdb="${candidate_root}/bin/Release/net10.0/${ASSEMBLY}.pdb"
+    _require_file neutral-api-assembly "${assembly}"
+    _require_file neutral-api-pdb "${pdb}"
+    local scope
+    for scope in project package; do
+      local manifest="${output_dir}/neutral-${candidate}-${scope}-api.tsv"
+      local manifest_log="${candidate_root}/${scope}-manifest.log"
+      if ! "${DOTNET_CMD}" "${tool}" \
+          "${assembly}" \
+          "${pdb}" \
+          "${candidate}" \
+          "${scope}" >"${manifest}" 2>"${manifest_log}"; then
+        printf 'APR_AI_API_MANIFEST_GENERATE_FAIL %s %s\n' \
+          "${candidate}" "${scope}" >&2
+        return 1
+      fi
+    done
+  done
+}
+
+_verify_neutral_api_manifests() {
+  if [[ "${_neutral_api_verified}" == "1" ]]; then
+    return 0
+  fi
+
+  local actual
+  _new_tempdir actual
+  _generate_neutral_api_manifests "${actual}"
+  _compare_files \
+    "${actual}/neutral-Minimal-project-api.tsv" \
+    "${MINIMAL_PROJECT_API_MANIFEST}" \
+    APR_AI_NEUTRAL_API_MISMATCH Minimal:project
+  _compare_files \
+    "${actual}/neutral-Minimal-package-api.tsv" \
+    "${MINIMAL_PACKAGE_API_MANIFEST}" \
+    APR_AI_NEUTRAL_API_MISMATCH Minimal:package
+  _compare_files \
+    "${actual}/neutral-MicrosoftExtensionsAI-project-api.tsv" \
+    "${MEAI_PROJECT_API_MANIFEST}" \
+    APR_AI_NEUTRAL_API_MISMATCH MicrosoftExtensionsAI:project
+  _compare_files \
+    "${actual}/neutral-MicrosoftExtensionsAI-package-api.tsv" \
+    "${MEAI_PACKAGE_API_MANIFEST}" \
+    APR_AI_NEUTRAL_API_MISMATCH MicrosoftExtensionsAI:package
+  _neutral_api_verified=1
 }
 
 _run_fixture_checked() {
@@ -630,14 +753,23 @@ case "${subcommand}" in
   aot) run_aot ;;
   all) run_all ;;
   selected-production) run_selected_production ;;
+  generate-neutral-api-manifests)
+    if [[ "$#" != "2" ]]; then
+      printf 'APR_AI_COMMAND_ARGUMENTS generate-neutral-api-manifests\n' >&2
+      exit 2
+    fi
+    _generate_neutral_api_manifests "$2"
+    ;;
   -h|--help|help)
     cat <<'USAGE'
 Usage: verify-ai-abstraction.sh [framework|aot|all|selected-production]
+       verify-ai-abstraction.sh generate-neutral-api-manifests OUTPUT_DIRECTORY
 
-  framework            Compare both candidates on the .NET runtime.
-  aot                  Compare both candidates as linux-x64 Native AOT binaries.
-  all                  Run framework and AOT comparison gates (default).
-  selected-production  Execute the selected shared-source production seam.
+  framework                       Compare both candidates on the .NET runtime.
+  aot                             Compare both candidates as linux-x64 Native AOT binaries.
+  all                             Run framework and AOT comparison gates (default).
+  selected-production             Execute the selected shared-source production seam.
+  generate-neutral-api-manifests  Regenerate commit-bound API manifests.
 USAGE
     ;;
   *)

@@ -85,6 +85,7 @@ The comparison and selected production seam add no direct or transitive managed 
 - Ubuntu Native AOT executable: 3,236,904 bytes.
 - Ubuntu publish directory: 9,445,096 bytes.
 - Neutral-head adapter-only Git blob: object `97d83c2dcf579e62685153a0fec9b106f502ccbf`, 5,037 bytes. The fake backend and shared harness are explicitly excluded.
+- Neutral assembly metadata: 59 sorted project-owned adapter type/member rows and 0 external-package `MemberReference` rows.
 - The selected source is the exact physical `MinimalChatClient.cs` compiled by both the production runtime and the comparison fixture; it is not a copied implementation.
 - Framework and Native AOT selected-production parity passed on the selection commit.
 
@@ -115,6 +116,7 @@ The comparison project pins exactly `Microsoft.Extensions.AI.Abstractions` 10.8.
 - Ubuntu Native AOT executable: 3,258,008 bytes.
 - Ubuntu publish directory: 9,485,672 bytes.
 - Neutral-head adapter-only Git blob: object `dda777b71ecb06d7a4e719866b456f65e977e8fe`, 8,580 bytes. The fake backend and shared harness are explicitly excluded.
+- Neutral assembly metadata: 30 sorted project-owned adapter type/member rows and 32 `Microsoft.Extensions.AI.Abstractions/10.8.1` `MemberReference` rows reached from adapter-source methods.
 - Framework and Native AOT common proof passed, including reasoning-enabled tool calls and fresh-process restoration.
 
 ## Selection Rationale
@@ -151,7 +153,18 @@ The deletion gate is mandatory: #78 Phase 2 must assign removal of the dual-cand
 
 ## Frozen Evidence Manifests
 
-The neutral source manifest fixes the adapter-only path, Git blob object ID, and Git blob byte count for each candidate at `405e0468fc15dc932970b378081ae030028409fe`. CI fetches that commit and verifies the recorded objects and sizes. The adjacent API member manifest records the project-owned Minimal native surface and every Microsoft.Extensions.AI package member exercised by the neutral adapter.
+The neutral source manifest fixes the adapter-only path, Git blob object ID, and Git blob byte count for each candidate at `405e0468fc15dc932970b378081ae030028409fe`. CI fetches that commit and verifies the recorded objects and sizes.
+
+The verifier also archives and builds that exact neutral commit in isolated candidate roots. A checked-in deterministic metadata reader uses portable-PDB sequence points to identify types and members originating in each candidate's `Adapter` source directory. It then scans the IL of those adapter-source methods and records only `MemberReference` rows owned by `Microsoft.Extensions.AI.Abstractions`. Project-owned and external-package surfaces are emitted as four independent, ordinally sorted TSV manifests and compared byte-for-byte with the checked-in files. The rows retain exact metadata signature blobs rather than manually normalized signatures.
+
+| Neutral API manifest                          | Rows | SHA-256                                                            |
+| --------------------------------------------- | ---: | ------------------------------------------------------------------ |
+| Minimal project-owned adapter surface         |   59 | `4b28ca2541c0af564f85d78f638c00daa245a8a16a5a417495da67c007e72445` |
+| Minimal external-package member references    |    0 | `9ff962f8714d859640b19b6eae40a04d33a2d86ba80491730bd65808f056bb80` |
+| Microsoft.Extensions.AI project-owned adapter |   30 | `b92b0da4fd8700480cd45d12435a0ad08197e65bf311d2230d44c9cc9c2e7e6f` |
+| Microsoft.Extensions.AI package references    |   32 | `dcd1c72b7462be0403bd2a248700f62d8498f105a293478015617fc9b74f2986` |
+
+Minimal's empty package manifest is an explicit checked-in header-only artifact. The project manifest names the actual neutral types, including `MinimalCandidateAdapter`, `MinimalRequest`, `MinimalMessage`, `MinimalContent`, `MinimalTool`, and `MinimalContinuation`; it does not substitute the later selected-production `MinimalChat*` types. The MEAI package manifest reflects actual metadata references reached by the neutral adapter rather than a manually curated API inventory.
 
 The verifier parses `project.assets.json` rather than grepping raw JSON. It retains every entry and the digest of each complete sorted graph. It then separates SDK-provided ILCompiler/ILLink/runtime-pack infrastructure, whose patch follows the repository's `latestPatch` SDK policy, and compares the remaining candidate-owned or production-owned managed closure exactly. Minimal's candidate-owned closure is empty, production rejects every `Microsoft.Extensions.AI*` package, and MEAI permits exactly `Microsoft.Extensions.AI.Abstractions/10.8.1`. Native AOT runs retain a sorted publish-file name/byte manifest in CI output in addition to aggregate executable and directory bytes.
 
