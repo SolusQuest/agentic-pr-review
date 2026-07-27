@@ -427,7 +427,12 @@ switch (s) {
   case 'env-dump-success': {
     // Report only presence of security-sensitive variables so the summary stays within maxLength.
     const flags = [];
-    for (const name of ['GITHUB_TOKEN', 'ANTHROPIC_API_KEY', 'AGENTIC_REVIEW_API_KEY']) {
+    for (const name of [
+      'GITHUB_TOKEN',
+      'ANTHROPIC_API_KEY',
+      'AGENTIC_REVIEW_API_KEY',
+      'AGENTIC_REVIEW_DEEPSEEK_API_KEY',
+    ]) {
       flags.push(`${name}=${process.env[name] ?? 'absent'}`);
     }
     commitWithSummary(paths, input, rv, flags.join('|'));

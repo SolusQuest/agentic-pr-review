@@ -20,7 +20,7 @@ The project is not a generic coding agent, code editor, shell agent, general age
 
 The project-owned runtime has four product-level constraints:
 
-1. **Project-owned execution**: the new development head uses the project-owned runtime. The Claude Code CLI path is legacy implementation scheduled for removal; historical tags preserve historical behavior.
+1. **Project-owned execution**: the new development head uses the project-owned runtime. The Claude Code CLI path and legacy TypeScript coordinator have been removed; historical tags preserve historical behavior.
 2. **Cross-run session recovery**: a completed review session can be restored and continued across separate GitHub Actions runs without relying on a third-party CLI session mechanism.
 3. **Cache-efficient continuation**: supported providers receive a stable, runtime-owned cacheable prefix reconstructed from canonical logical session state. Prefix stability is enforceable; a provider cache hit is an observed outcome.
 4. **Deterministic side effects**: the model and Agent propose findings, while trusted Host code validates and performs all GitHub writes.
@@ -42,7 +42,7 @@ The engineering goals are to:
 - publish pinned, verifiable, self-contained runtime payloads;
 - keep compatibility machinery proportional to actual independently released or durable boundaries.
 
-Cross-language contract implementation is no longer an objective by itself. TypeScript remains only where it materially simplifies the GitHub Actions launcher or official artifact-toolkit integration.
+Cross-language contract implementation is no longer an objective by itself. During the R1 no-public-Action interval, TypeScript remains only as narrow runtime, state, publisher, migration, and conformance evidence. R4 may reintroduce a thin wrapper and artifact bridge after the Host is selected and proven.
 
 C# and Native AOT are architecture commitments, not product success criteria. Review quality, grounded evidence, safety, resumability, cache economics, and operational reliability decide whether the runtime succeeds.
 
@@ -50,12 +50,11 @@ C# and Native AOT are architecture commitments, not product success criteria. Re
 
 The current implementation contains:
 
-- a TypeScript GitHub Action host and deterministic publisher;
-- a live Claude Code CLI path;
+- no public GitHub Action and no legacy TypeScript coordinator or Claude Code CLI execution path;
 - deterministic and ledger-oriented C# runtime paths;
 - a project-owned DeepSeek provider adapter;
 - structured review output and optional inline comments;
-- durable state artifacts, selection, acceptance, and prefix contracts;
+- retained internal TypeScript state selection, acceptance, publisher, and prefix-contract evidence for R2-R4 migration;
 - extensive TypeScript/C# conformance fixtures;
 - framework-dependent and Native AOT validation.
 
@@ -70,13 +69,11 @@ This is a reliable stateful provider pipeline, but it is not yet the target code
 
 The selected next direction is:
 
-- remove the Claude Code CLI and migration-only public runtime selectors from the new head;
 - prove a C# agent loop and read-only tools before another broad contract program;
 - let R2 compare a pinned `Microsoft.Extensions.AI.Abstractions` dependency with project-minimal exchange types and select the smaller Native AOT-proven surface;
 - keep the agent loop, durable state, budgets, provider capabilities, and prefix semantics project-owned;
-- migrate GitHub business logic into the trusted Host module of one C# executable;
-- reduce TypeScript to a thin Action wrapper and artifact bridge;
-- delete duplicate TypeScript business validators after equivalent host behavior is proven;
+- let R3 prove the trusted live tool workflow after the R2 vertical slice;
+- let R4 migrate GitHub business logic into the trusted Host module, restore a thin Action wrapper and artifact bridge, and delete duplicate TypeScript validators only after equivalent Host behavior is proven;
 - defer broad cost-graduation work until real resumed agent traffic exists.
 
 A separate Agent process is deferred until fault, resource, extension, or trust evidence justifies the additional protocol and distribution surface.

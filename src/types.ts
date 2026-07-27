@@ -8,20 +8,9 @@ export type EffectiveDiffSource =
   | 'target_changed_files'
   | 'bootstrap_pr_files'
   | 'incremental_pr_diff_snapshot_delta';
-export type ApiKeyMode = 'auth-token' | 'api-key' | 'both';
 export type ToolMode = 'none' | 'readonly';
 export type InlineCommentSeverity = 'low' | 'medium' | 'high';
 export type InlineCommentConfidence = 'medium' | 'high';
-export type TestRuntimeFixture =
-  | 'valid'
-  | 'no_findings'
-  | 'null_location'
-  | 'many_findings'
-  | 'inline_commentable'
-  | 'inline_non_commentable'
-  | 'inline_many_findings'
-  | 'invalid_json'
-  | 'schema_invalid';
 
 export interface ModelReviewFindingV1 {
   severity: 'low' | 'medium' | 'high';
@@ -86,66 +75,6 @@ export interface StructuredReviewEnvelopeV1 {
     truncationReason?: 'max_findings' | 'max_review_chars' | 'both';
   };
   inlineComments?: InlineCommentsMetadata;
-}
-
-export interface UsageBudgetLimits {
-  maxUncachedInputTokens: number;
-  maxCachedInputTokens: number;
-  maxOutputTokens: number;
-}
-
-export interface UsageBudgetStatus {
-  status: 'disabled' | 'within_limit' | 'exceeded' | 'not_applicable';
-  limits: UsageBudgetLimits;
-  usageRecordsObserved: number;
-  exceeded?: {
-    category: 'uncached_input' | 'cached_input' | 'output';
-    limit: number;
-    observed: number;
-  };
-}
-
-export interface ActionConfig {
-  /** Missing in hand-built legacy test fixtures; parsed action config always supplies legacy. */
-  runtimeBackend?: RuntimeBackend;
-  runtimeProvider: RuntimeProvider;
-  liveProvider?: LiveProvider;
-  targetMode: TargetMode;
-  reviewMode: ReviewMode;
-  verificationNamespace?: string;
-  prNumber?: number;
-  stateKey?: string;
-  stateArtifactRunId?: number;
-  artifactRetentionDays: number;
-  postComment: boolean;
-  modelBaseUrl?: string;
-  modelName?: string;
-  smallModelName?: string;
-  apiKeyMode: ApiKeyMode;
-  claudeCodeVersion?: string;
-  toolMode: ToolMode;
-  claudeMaxTurns: number;
-  instructions?: string;
-  instructionsPath?: string;
-  bootstrapContext?: string;
-  bootstrapContextPath?: string;
-  incrementalContext?: string;
-  incrementalContextPath?: string;
-  maxContextChars: number;
-  maxPatchChars: number;
-  maxReviewChars: number;
-  maxFindings: number;
-  inlineComments: boolean;
-  maxInlineComments: number;
-  inlineMinSeverity: InlineCommentSeverity;
-  inlineMinConfidence: InlineCommentConfidence;
-  testRuntimeFixture: TestRuntimeFixture;
-  usageBudgetLimits: UsageBudgetLimits;
-  disablePromptCaching: boolean;
-  debugCaptureRawApiBodies: boolean;
-  debugAcknowledgement?: string;
-  githubToken: string;
-  apiKey?: string;
 }
 
 export interface InlineCommentsPolicy {
@@ -265,26 +194,6 @@ export interface RestoredState {
   manifestPath: string;
 }
 
-export interface RuntimeResult {
-  sessionId: string;
-  sessionName: string;
-  /** Legacy bridge payload; deterministic C# leaves it absent and uses typed content. */
-  modelReviewJson?: string;
-  debugFiles: string[];
-  toolMode: ToolMode;
-  allowedTools: string[];
-  observedTurns: number | null;
-  observedTurnSource: 'unique_assistant_message_ids' | 'not_applicable' | 'unavailable';
-  usage: RuntimeUsage | null;
-  usageBudgetStatus: UsageBudgetStatus;
-  lineageTotals: RuntimeLineageTotals;
-  reviewInputSha256?: string;
-  reviewInputBytes?: number;
-  runtimeVersion?: string;
-  traceSha256?: string;
-  diagnosticSummary?: string;
-}
-
 export interface RuntimeUsage {
   inputTokens: number;
   cacheReadInputTokens: number;
@@ -310,13 +219,6 @@ export interface RuntimeLineageTotals {
     | 'legacy_manifest_fallback'
     | 'unavailable';
   partial: boolean;
-}
-
-export interface UploadedArtifact {
-  name: string;
-  id?: number;
-  url?: string;
-  retentionDays: number;
 }
 
 export type LineageReason =

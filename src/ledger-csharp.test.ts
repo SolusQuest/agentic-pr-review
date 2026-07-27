@@ -16,20 +16,16 @@ import {
   targetForLedgerContinuation,
   VERIFICATION_TRUSTED_EXECUTION_DOMAIN,
   VERIFICATION_WORKFLOW_IDENTITY,
+  type LedgerCsharpConfig,
 } from './ledger-csharp.js';
-import type { ActionConfig, ReviewTarget } from './types.js';
+import type { ReviewTarget } from './types.js';
 import { LiveRuntimeInvocationError } from './live-runtime-invocation/errors.js';
 
-const config: ActionConfig = {
-  runtimeBackend: 'ledger-csharp',
+const config: LedgerCsharpConfig = {
   runtimeProvider: 'test',
-  targetMode: 'pull-request',
   reviewMode: 'auto',
-  artifactRetentionDays: 7,
   postComment: false,
-  apiKeyMode: 'auth-token',
   toolMode: 'none',
-  claudeMaxTurns: 6,
   maxContextChars: 60_000,
   maxPatchChars: 120_000,
   maxReviewChars: 12_000,
@@ -38,15 +34,6 @@ const config: ActionConfig = {
   maxInlineComments: 5,
   inlineMinSeverity: 'medium',
   inlineMinConfidence: 'high',
-  testRuntimeFixture: 'valid',
-  usageBudgetLimits: {
-    maxUncachedInputTokens: 0,
-    maxCachedInputTokens: 0,
-    maxOutputTokens: 0,
-  },
-  disablePromptCaching: false,
-  debugCaptureRawApiBodies: false,
-  githubToken: 'test-token',
 };
 
 const target: ReviewTarget = {

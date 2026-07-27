@@ -1,7 +1,7 @@
 /**
  * Public entry point for the M4 v2 state-bundle contract library (issue #48).
- * Pure library: no filesystem I/O; no imports from src/main.ts, src/runtime.ts,
- * src/runtime-invocation/*, src/runtime-integration/*, or src/state.ts.
+ * Pure library: no filesystem I/O and no imports from runtime invocation,
+ * runtime integration, or Host/state transport layers.
  */
 
 export {

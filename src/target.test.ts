@@ -3,38 +3,14 @@ import {
   buildPullRequestDiffSnapshot,
   diffPullRequestDiffSnapshots,
   resolveTarget,
+  type TargetResolutionConfig,
 } from './target.js';
-import { type ActionConfig } from './types.js';
 import { sha256 } from './utils.js';
 
-function config(): ActionConfig {
+function config(): TargetResolutionConfig {
   return {
-    runtimeProvider: 'test',
     targetMode: 'pull-request',
-    reviewMode: 'auto',
     prNumber: 1,
-    artifactRetentionDays: 7,
-    postComment: false,
-    apiKeyMode: 'auth-token',
-    toolMode: 'none',
-    claudeMaxTurns: 6,
-    maxContextChars: 1000,
-    maxPatchChars: 1000,
-    maxReviewChars: 1000,
-    maxFindings: 50,
-    inlineComments: false,
-    maxInlineComments: 5,
-    inlineMinSeverity: 'medium',
-    inlineMinConfidence: 'high',
-    testRuntimeFixture: 'valid',
-    usageBudgetLimits: {
-      maxUncachedInputTokens: 0,
-      maxCachedInputTokens: 0,
-      maxOutputTokens: 0,
-    },
-    disablePromptCaching: false,
-    debugCaptureRawApiBodies: false,
-    githubToken: 'token',
   };
 }
 
@@ -108,7 +84,7 @@ describe('resolveTarget', () => {
       ],
     };
 
-    const target = await resolveTarget({ ...config(), maxPatchChars: 10 }, octokit, {
+    const target = await resolveTarget(config(), octokit, {
       repo: { owner: 'example', repo: 'repo' },
       payload: {},
       sha: 'head',

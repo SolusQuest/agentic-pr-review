@@ -54,10 +54,10 @@ describe('prefix-contract import boundary', () => {
     }
   });
 
-  it('the action entry graph does not import the oracle generator', () => {
-    // Static one-hop check on the action entry points: no production entry
-    // file imports anything under prefix-contract test tooling.
-    const entries = ['src/main.ts', 'src/runtime.ts'];
+  it('retained production entry points do not import the oracle generator', () => {
+    // Static one-hop check: retained production entry files do not import
+    // anything under prefix-contract test tooling.
+    const entries = ['src/ledger-csharp.ts', 'src/runtime-invocation/invoke-runtime.ts'];
     for (const entry of entries) {
       const text = readFileSync(entry, 'utf8');
       expect(text, entry).not.toContain('generate-fixtures.testhelper');

@@ -1,10 +1,11 @@
 import {
-  type ActionConfig,
   type ChangedFile,
   type PullRequestDiffSnapshotDeltaV1,
   type PullRequestDiffSnapshotEntryV1,
   type PullRequestDiffSnapshotV1,
   type ReviewTarget,
+  type RuntimeProvider,
+  type TargetMode,
 } from './types.js';
 import { normalizeRepoRelativePath, sha256 } from './utils.js';
 
@@ -29,8 +30,18 @@ export interface PullRequestFileData {
   patch?: string;
 }
 
+export interface TargetResolutionConfig {
+  readonly targetMode: TargetMode;
+  readonly prNumber?: number;
+}
+
+export interface StateKeyConfig {
+  readonly stateKey?: string;
+  readonly runtimeProvider: RuntimeProvider;
+}
+
 export async function resolveTarget(
-  config: ActionConfig,
+  config: TargetResolutionConfig,
   octokit: any,
   context: GitHubContextLike,
 ): Promise<ReviewTarget> {
@@ -246,7 +257,7 @@ function snapshotEntryChanged(
   );
 }
 
-export function deriveStateKey(config: ActionConfig, target: ReviewTarget): string {
+export function deriveStateKey(config: StateKeyConfig, target: ReviewTarget): string {
   if (config.stateKey) {
     return config.stateKey;
   }

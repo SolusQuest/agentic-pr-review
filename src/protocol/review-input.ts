@@ -11,15 +11,15 @@
  *   host.review.phase           <- Phase (src/types.ts) / executed phase
  *   host.review.baseSha         <- ReviewTarget.baseSha
  *   host.review.headSha         <- ReviewTarget.headSha
- *   host.review.stateKey        <- ActionConfig.stateKey
- *   host.review.runtimeProvider <- ActionConfig.runtimeProvider
- *   host.options.toolMode       <- ActionConfig.toolMode
- *   host.options.maxFindings    <- ActionConfig.maxFindings
- *   host.options.inlineComments <- InlineCommentsPolicy (derived from ActionConfig)
+ *   host.review.stateKey        <- BuildReviewInputConfig.stateKey
+ *   host.review.runtimeProvider <- BuildReviewInputConfig.runtimeProvider
+ *   host.options.toolMode       <- BuildReviewInputConfig.toolMode
+ *   host.options.maxFindings    <- BuildReviewInputConfig.maxFindings
+ *   host.options.inlineComments <- purpose-specific builder policy fields
  *   subject.pullRequest         <- ReviewTarget (number, title, body, baseRef, headRef, draft)
  *   subject.changedFiles        <- ReviewTarget.changedFiles (ChangedFile -> changedFile)
- *   subject.contextDocuments    <- LoadedBlock[] (src/context-blocks.ts)
- *   subject.policyText          <- ActionConfig.instructions
+ *   subject.contextDocuments    <- pre-resolved LoadedBlock[]
+ *   subject.policyText          <- BuildReviewInputConfig.instructions
  *   previousState               <- RestoredState (reviewedHeadSha, phase, fingerprints, lineage)
  *   commentEvidence             <- existing inline-comment finding fingerprints (runtime scan)
  */

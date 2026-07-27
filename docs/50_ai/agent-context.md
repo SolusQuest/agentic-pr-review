@@ -23,7 +23,9 @@ For new runtime design and sequencing, read:
 3. `docs/20_architecture/security-boundary.md`;
 4. `docs/90_roadmap/roadmap-seed.md`.
 
-`README.md` and older contract documents continue to describe current implementation behavior until migration removes those surfaces. Historical roadmap files do not override the R0-R7 sequence.
+R1 is complete: the development head has no public Action, legacy TypeScript coordinator, or Claude Code CLI execution path. Read `docs/20_architecture/r1-legacy-removal-handoff.md` before changing retained protocol, runtime-invocation, state, publisher, ledger, or artifact-provenance evidence. Those families are migration inputs for R2-R4, not a supported public Host.
+
+`README.md` and current-position documents describe the live repository boundary. Older contracts that mention deleted surfaces are historical or migration evidence unless the R1 handoff assigns them a retained current consumer; they do not by themselves describe current implementation behavior. Historical roadmap files do not override the R0-R7 sequence.
 
 ## Default Validation
 
