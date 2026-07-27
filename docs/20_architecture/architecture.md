@@ -130,6 +130,8 @@ Tools are implemented and enforced in C#. The model cannot construct commands or
 
 R2 compared `Microsoft.Extensions.AI.Abstractions` 10.8.1 with project-minimal exchange types under the same reasoning-enabled tool-loop, fresh-process restoration, and Native AOT proof. Both passed. Project-minimal exchange was selected because it preserves the same one-operation Agent capability and project ownership without an additional production package. The complete evidence and deletion gate are in [`ai-abstraction-decision.md`](./ai-abstraction-decision.md).
 
+The selection accounts for DeepSeek as the initial live provider and MiMo as the intended second provider. Multiple providers do not require MEAI ownership of the Agent boundary: each provider adapter still owns wire projection, reasoning continuation, capabilities, cache identity, usage mapping, and failures, while the Agent consumes one project-owned capability. The second real adapter is an evidence gate for reconsidering whether MEAI would materially reduce duplication.
+
 The comparison confirmed that an AI abstraction must never own:
 
 - the durable ledger;
@@ -142,6 +144,8 @@ The comparison confirmed that an AI abstraction must never own:
 - terminal result validation.
 
 The initial production loop invokes the selected narrow chat-client abstraction directly and handles function-call content itself. It uses explicit tool schemas, explicit dispatch, project-owned DTOs, and source-generated JSON metadata. `FunctionInvokingChatClient`, reflection-driven tool schema generation, Microsoft Agent Framework, and Semantic Kernel are not part of the initial target.
+
+MEAI adoption and multi-agent orchestration are separate decisions. A main-agent/sub-agent topology does not by itself require MEAI; adopting Microsoft Agent Framework would require a later focused proof of orchestration ownership, scoped capabilities, session continuity, Native AOT, security, and provider-reasoning preservation. MEAI may be introduced behind the project-owned chat seam without changing the Agent loop or durable project-owned records if later provider or pipeline evidence justifies it.
 
 ## Runtime Replacement
 

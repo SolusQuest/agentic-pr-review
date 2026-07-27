@@ -1313,7 +1313,7 @@ These questions do not block the first spike unless stated:
 
 1. Should the Node wrapper permanently own Actions artifact transport, or should a later C# artifact client replace it?
 2. What exact durable state byte cap best fits representative private and public repositories?
-3. Which provider should be the second adapter used to prove the selected narrow chat-client abstraction?
+3. At which later milestone should MiMo be added as the second provider adapter used to validate the selected narrow chat-client abstraction after the initial DeepSeek vertical slice?
 4. When, if ever, should mid-run checkpoints be supported?
 5. When a provider offers both readable reasoning and an opaque continuation form with equivalent semantics, which representation minimizes durable sensitive data without reducing continuation quality?
 6. Which operating systems require production Native AOT payloads for the first public post-rebaseline release?
@@ -1321,4 +1321,4 @@ These questions do not block the first spike unless stated:
 8. Should the final result use provider-native structured output, a terminal `finish_review` tool, or an adapter-specific choice behind one candidate-result validator?
 9. Which observed failure, resource, extension, or trust requirement would justify a same-binary worker process?
 
-The default answers for the first vertical slice are: keep the Node artifact bridge, use one C# executable and process, completed-review continuation only, DeepSeek thinking-mode tool calls with value-exact `reasoning_content` replay under the adapter contract, Linux x64 Native AOT, serial tools, and a terminal `finish_review` result.
+The default answers for the first vertical slice are: keep the Node artifact bridge, use one C# executable and process, completed-review continuation only, DeepSeek thinking-mode tool calls with value-exact `reasoning_content` replay under the adapter contract, Linux x64 Native AOT, serial tools, and a terminal `finish_review` result. MiMo is the intended second provider, but it is not an R3 initial-live-profile gate; its exact implementation milestone remains subject to later refinement.

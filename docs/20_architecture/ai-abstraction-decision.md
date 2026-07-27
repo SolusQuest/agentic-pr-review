@@ -133,6 +133,14 @@ The frozen selection order produces a clear result:
 
 Project-minimal exchange types therefore provide the smaller production and maintenance surface without rewriting provider continuation into provider-neutral assistant text. The corrected adapter-only metric keeps the same selection outcome; sunk fake-backend test code is not part of that production-surface comparison.
 
+## Known Multi-Provider Requirement
+
+The selection accounts for an intended two-provider direction rather than assuming that the product will remain single-provider. DeepSeek is the initial live vertical-slice provider, and MiMo is the intended second provider used to validate the selected narrow abstraction after that slice. MiMo is not an additional R3 initial-live-profile gate; its exact implementation milestone remains subject to later refinement.
+
+Provider count alone does not determine the abstraction. Each adapter must still own provider-specific wire serialization, reasoning continuation, capability checks, cache-relevant projection, failure mapping, and usage mapping. The currently known response-usage differences between DeepSeek and MiMo do not remove that adapter work or require MEAI types at the Agent boundary.
+
+The project-owned normalized usage model must preserve the distinction between a reported zero and an unavailable value. Provider-specific cache-read, cache-write, uncached-input, reasoning-token, output-token, and additional-count fields are mapped only when their meaning and source are established; absent or non-comparable telemetry remains unknown rather than being fabricated. MEAI `UsageDetails` could be a useful adapter-side container, but it would not own these product, budget, or cost-comparison semantics.
+
 ## Security And Privacy Impact
 
 The selected seam is internal and capability-minimal. Architecture tests reject raw MEAI references, generic networking, service resolution, host environment, publisher, shell, process, GitHub, and Actions types under the Agent chat namespace. Production has no compile-time candidate selector and references only the selected path.
@@ -146,6 +154,19 @@ The selected seam is deliberately not the Agent loop. Later R2 work can build ex
 No current Application, Execution, Protocol, Ledger, Prefix, TypeScript, schema, state-acceptance, publisher, package, or Action contract was migrated into this decision.
 
 Dependency upgrades are not incidental maintenance. A future AI abstraction or provider package must have a focused issue and rerun representative framework and Native AOT execution.
+
+The decision is intended to remain reversible. A future MEAI-backed implementation can be introduced behind `IProjectChatClient` without changing the project-owned Agent loop or serializing MEAI-native objects into durable session state. A change that instead exposes MEAI types throughout Agent orchestration, persists them as the session model, delegates the project-owned tool loop, or adopts a framework-owned session would be a broader architecture migration and requires a separate design decision.
+
+The project should reconsider MEAI after the second real provider adapter provides implementation evidence, or earlier if a concrete requirement needs several of the following:
+
+- substantial repeated message, tool, capability, or usage mapping across provider adapters;
+- a mature `IChatClient` implementation that preserves required provider reasoning continuation and tool ordering without raw escape paths;
+- a broader provider set;
+- common streaming, middleware, telemetry, rate-limiting, or other `IChatClient` pipeline behavior;
+- independently owned modules that need the same chat-client interoperability surface;
+- adoption of Microsoft Agent Framework after its orchestration, session, Native AOT, security, and continuation behavior passes a separate project proof.
+
+Multi-agent or main-agent/sub-agent topology by itself is not a MEAI adoption trigger. MEAI is a model-client and content abstraction; orchestration ownership, scoped context, tools, budgets, cancellation, evidence, durable state, and side effects remain separate project or agent-framework decisions.
 
 ## Non-Selected Candidate Disposition
 
