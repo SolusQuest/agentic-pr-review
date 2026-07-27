@@ -11,6 +11,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 PROJECT="${REPO_ROOT}/runtime/tests/AiAbstractionAotFixture/AgenticPrReview.Runtime.AiAbstractionAotFixture.csproj"
+PRODUCTION_PROJECT="${REPO_ROOT}/runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj"
+SELECTED_SOURCE="${REPO_ROOT}/runtime/src/AgenticPrReview.Runtime/Agent/Chat/MinimalChatClient.cs"
 FIXTURES="${REPO_ROOT}/runtime/tests/fixtures/agent/ai-abstraction"
 FIRST_INPUT="${FIXTURES}/first-input.json"
 RESUME_INPUT="${FIXTURES}/resume-input.json"
@@ -80,6 +82,8 @@ _require_file() {
 
 _require_inputs() {
   _require_file "${PROJECT}"
+  _require_file "${PRODUCTION_PROJECT}"
+  _require_file "${SELECTED_SOURCE}"
   _require_file "${FIRST_INPUT}"
   _require_file "${RESUME_INPUT}"
   _require_file "${EXPECTED_FIRST}"
@@ -340,15 +344,48 @@ run_all() {
   run_aot
 }
 
+_run_selected_mode() {
+  local mode="$1"
+  _require_inputs
+  if ! grep -Fq \
+    '..\..\src\AgenticPrReview.Runtime\Agent\Chat\MinimalChatClient.cs' \
+    "${PROJECT}"; then
+    printf 'APR_AI_SELECTED_SOURCE_NOT_LINKED\n' >&2
+    return 1
+  fi
+  local mode_root
+  _new_tempdir mode_root
+  local candidate="Minimal"
+  local root="${mode_root}/${candidate}"
+  mkdir -p -- "${root}"
+  ACTIVE_CANARIES=(
+    "apr-canary-github-selected-${mode}-$$-${RANDOM}"
+    "apr-canary-actions-selected-${mode}-$$-${RANDOM}"
+    "apr-canary-provider-selected-${mode}-$$-${RANDOM}"
+    "apr-canary-state-crypto-selected-${mode}-$$-${RANDOM}"
+    "apr-canary-runner-selected-${mode}-$$-${RANDOM}"
+    "apr-canary-registry-selected-${mode}-$$-${RANDOM}"
+    "apr-canary-cloud-selected-${mode}-$$-${RANDOM}"
+    "apr-canary-signing-selected-${mode}-$$-${RANDOM}"
+    "apr-canary-unrelated-workflow-selected-${mode}-$$-${RANDOM}"
+  )
+  _build_candidate "${candidate}" "${mode}" "${root}"
+  _run_positive "${candidate}" "selected-${mode}" "${root}"
+  _run_negatives "${candidate}" "selected-${mode}" "${root}"
+  printf 'APR_AI_SELECTED_PRODUCTION_OK %s\n' "${mode}"
+}
+
+run_selected_production() {
+  _run_selected_mode framework
+  _run_selected_mode aot
+}
+
 subcommand="${1:-all}"
 case "${subcommand}" in
   framework) run_framework ;;
   aot) run_aot ;;
   all) run_all ;;
-  selected-production)
-    printf 'APR_AI_PRODUCTION_NOT_MATERIALIZED\n' >&2
-    exit 3
-    ;;
+  selected-production) run_selected_production ;;
   -h|--help|help)
     cat <<'USAGE'
 Usage: verify-ai-abstraction.sh [framework|aot|all|selected-production]
@@ -356,7 +393,7 @@ Usage: verify-ai-abstraction.sh [framework|aot|all|selected-production]
   framework            Compare both candidates on the .NET runtime.
   aot                  Compare both candidates as linux-x64 Native AOT binaries.
   all                  Run framework and AOT comparison gates (default).
-  selected-production  Reserved until the evidence-backed selection is materialized.
+  selected-production  Execute the selected shared-source production seam.
 USAGE
     ;;
   *)

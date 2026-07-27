@@ -35,6 +35,9 @@ jobs:
       - name: AI abstraction framework and Native AOT comparison
         run: bash runtime/scripts/verify-ai-abstraction.sh all
 
+      - name: Selected production AI abstraction parity
+        run: bash runtime/scripts/verify-ai-abstraction.sh selected-production
+
   integration:
     runs-on: ubuntu-latest
     permissions:
