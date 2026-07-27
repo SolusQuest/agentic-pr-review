@@ -16,19 +16,21 @@ This choice does not assign the Agent loop, tool dispatch, durable state, provid
 
 ## Traceability
 
-| Record                                            | Exact value                                                                                                                          |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Implementation-start `main`                       | `812c98be3a298de1b449759a94e7facb20a52ad5`                                                                                           |
-| R1 completion                                     | issue #80, PR #83, merge `8603a5c6acc77b55f7790ed6a17b56edbad0bc67`                                                                  |
-| Neutral comparison evidence commit                | `405e0468fc15dc932970b378081ae030028409fe`                                                                                           |
-| Selection implementation commit                   | `337bec8000746cd67cb37ca1784732839662b1d9`                                                                                           |
-| Neutral Ubuntu Runtime CI                         | [run 30271101423, runtime job 89993553987](https://github.com/SolusQuest/agentic-pr-review/actions/runs/30271101423/job/89993553987) |
-| Selection and production-parity Ubuntu Runtime CI | [run 30271957701, runtime job 89996440677](https://github.com/SolusQuest/agentic-pr-review/actions/runs/30271957701/job/89996440677) |
-| Neutral-evidence SDK                              | .NET SDK `10.0.109`; `global.json` sets that baseline with `latestPatch` roll-forward                                                |
-| AOT target                                        | `linux-x64`, self-contained Native AOT                                                                                               |
-| Runner                                            | `ubuntu-24.04`, runner-image version `20260720.247.2`, runner version `2.336.0`                                                      |
+| Record                                     | Exact value                                                                                                                          |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Implementation-start `main`                | `812c98be3a298de1b449759a94e7facb20a52ad5`                                                                                           |
+| R1 completion                              | issue #80, PR #83, merge `8603a5c6acc77b55f7790ed6a17b56edbad0bc67`                                                                  |
+| Neutral comparison evidence commit         | `405e0468fc15dc932970b378081ae030028409fe`                                                                                           |
+| Selection implementation commit            | `337bec8000746cd67cb37ca1784732839662b1d9`                                                                                           |
+| Initial neutral Ubuntu Runtime CI          | [run 30271101423, runtime job 89993553987](https://github.com/SolusQuest/agentic-pr-review/actions/runs/30271101423/job/89993553987) |
+| Initial selection and production-parity CI | [run 30271957701, runtime job 89996440677](https://github.com/SolusQuest/agentic-pr-review/actions/runs/30271957701/job/89996440677) |
+| Corrected proof evidence commit            | `f249565aec80a6af1c4eb919d0c5d6d6e210d4ac`                                                                                           |
+| Corrected proof Ubuntu Runtime CI          | [run 30284216582, runtime job 90037870356](https://github.com/SolusQuest/agentic-pr-review/actions/runs/30284216582/job/90037870356) |
+| Initial neutral-evidence SDK               | .NET SDK `10.0.109`; `global.json` sets that baseline with `latestPatch` roll-forward                                                |
+| Corrected proof SDK and RID                | .NET SDK `10.0.110`; `ubuntu-24.04`; `linux-x64`, self-contained Native AOT                                                          |
+| Initial neutral runner                     | `ubuntu-24.04`, runner-image version `20260720.247.2`, runner version `2.336.0`                                                      |
 
-The selection implementation commit is the decision commit: it introduces the selected production seam and activates the selected-production parity gate. This document is a later documentation-only record and therefore does not attempt to embed its own commit hash.
+The original selection was made at `337bec8000746cd67cb37ca1784732839662b1d9`, which introduced the selected production seam and activated the selected-production parity gate. The later substantive correction commit `f249565aec80a6af1c4eb919d0c5d6d6e210d4ac` repaired and mechanized the evidence without changing that selection. Its Runtime CI rebuilt the exact neutral commit for API-manifest comparison, executed both candidates in framework and Native AOT modes, and executed selected-production parity in both modes. This documentation-only record follows that green evidence commit and therefore keeps its own commit SHA and final CI in the PR record rather than attempting a self-reference.
 
 ## Common Proof
 
