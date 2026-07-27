@@ -1,6 +1,5 @@
 name: Bug
 description: Report broken expected behavior
-title: 'Bug: '
 type: bug
 body:
   - type: textarea

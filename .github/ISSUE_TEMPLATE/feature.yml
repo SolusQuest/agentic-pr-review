@@ -1,6 +1,5 @@
 name: Feature
 description: Add a new action, runtime, maintainer, or system capability
-title: 'Feature: '
 type: feature
 body:
   - type: textarea

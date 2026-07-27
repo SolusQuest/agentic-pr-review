@@ -3,6 +3,7 @@
 Use this procedure when turning an idea, placeholder, or broad request into an agent-ready issue.
 
 Follow `docs/10_workflow/issue-workflow.md` for issue type selection and body conventions.
+When creating or updating the remote issue, follow `docs/50_ai/skills/issue-publishing.md`.
 
 ## Inputs
 
@@ -49,6 +50,8 @@ An issue is agent-ready when:
 If a human decision is still needed, state that design is still needed and name the blocking decision.
 
 ## Draft Shape
+
+Select the native issue type separately from the title and body. The title does not use a type prefix, and the body does not include a `Type:` metadata field.
 
 Keep body sections clear and execution-oriented:
 
