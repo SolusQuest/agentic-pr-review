@@ -4,7 +4,7 @@ Status: selected target architecture; active when the coordinated documentation 
 
 Drafted: 2026-07-24.
 
-Last revised: 2026-07-25.
+Last revised: 2026-07-27.
 
 Activation record: [PR #76](https://github.com/SolusQuest/agentic-pr-review/pull/76); its merge commit is the normative activation point.
 
@@ -27,7 +27,7 @@ The project will converge on a C#-owned product architecture:
 7. The durable model has two layers: project-owned logical message/tool/outcome records and a separate provider-scoped continuation envelope. Opaque provider payloads remain value-exact, while structured provider items preserve validated fields, array order, and adapter-required placement; this does not prevent canonical project-owned logical records.
 8. Restricted continuation state is never repository-visible plaintext. A transport that cannot keep readable reasoning, bounded tool results, and provider continuation material confidential must use workflow-authorized encryption or must not persist the readable payload.
 9. Encrypted continuation state provides authenticated confidentiality or equivalent integrity protection bound to its format, Host-authoritative identity, provider/adapter scope, session, and required generation/provenance. Altered, substituted, stale, or undecryptable state is rejected before Agent/provider admission.
-10. R2 decides whether a pinned `Microsoft.Extensions.AI.Abstractions` dependency or project-minimal exchange types provide the smaller verified Native AOT surface. Either choice leaves the agent loop, durable session model, provider-neutral request planning, provider-specific request materialization, budgets, checkpoints, and final result validation project-owned under the core/adapter boundary below.
+10. R2 selected project-minimal in-memory exchange types after both they and `Microsoft.Extensions.AI.Abstractions` 10.8.1 passed the same reasoning-enabled framework and Native AOT tool-loop/restoration proof. The agent loop, durable session model, provider-neutral request planning, provider-specific request materialization, budgets, checkpoints, and final result validation remain project-owned under the core/adapter boundary below.
 11. The legacy Claude Code CLI implementation will be removed from the development head. The existing immutable `v0.1.0` tag remains the historical legacy pin; the project will not publish later unshipped post-`v0.1.0` legacy work merely to create a final snapshot.
 12. Versioning is retained only for independently released artifacts and durable cross-run formats. Cache-relevant policy, prompt, tool, and provider configuration use canonical content identities instead of parallel manual version and id families.
 
@@ -359,18 +359,20 @@ The following tools require separate evidence and threat review:
 
 ## Microsoft.Extensions.AI Decision
 
-### Permitted Use; Final Choice Deferred To R2
+### Selected Project-Minimal Exchange
 
-R2 must compare a pinned `Microsoft.Extensions.AI.Abstractions` dependency with project-minimal in-memory exchange types. Adoption is permitted, not preselected. The decision must use the smaller option that passes the same fake-provider, explicit-tool-loop, source-generated serialization, and Native AOT publish-and-run proof.
+R2 compared project-minimal in-memory exchange types with `Microsoft.Extensions.AI.Abstractions` 10.8.1 through the same fake-provider, explicit-tool-loop, source-generated serialization, fresh-process restoration, and Native AOT publish-and-run proof. Both candidates passed; project-minimal exchange was selected because it preserves the same project ownership and narrow capability with no additional package and a smaller adapter, dependency, and published-binary surface.
 
-If adopted, `Microsoft.Extensions.AI.Abstractions` may supply:
+The exact commits, CI evidence, API surfaces, metrics, rationale, and deletion gate are recorded in [`ai-abstraction-decision.md`](./ai-abstraction-decision.md).
+
+The isolated comparison shows that `Microsoft.Extensions.AI.Abstractions` can safely supply:
 
 - `IChatClient`;
 - chat messages and content;
 - tool declarations and function-call content where they do not weaken project-owned validation;
 - cancellation propagation.
 
-If adopted, the package must be pinned to an exact stable version compatible with the repository's .NET target and must pass framework-dependent and Native AOT publish-and-run tests.
+It is not a production dependency. The pinned 10.8.1 candidate remains test-only until the decision record's replacement gate is met.
 
 Official references:
 
