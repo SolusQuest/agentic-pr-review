@@ -10,6 +10,7 @@ namespace AgenticPrReview.Runtime.Agent.Loop;
 internal sealed record AgentRunRequest(
     ReviewedIdentity ReviewedIdentity,
     StableAgentPlan StablePlan,
+    string SessionId,
     ProjectChatMessage[] InitialMessages,
     ProjectContinuation? Continuation = null);
 
@@ -41,7 +42,11 @@ internal sealed class AgentLoop(
 
         if (!run.ReviewedIdentity.IsValid() ||
             !ValidStablePlan(run.StablePlan, run.ReviewedIdentity) ||
-            !TryValidateInitialMessages(messages, out contentParts) ||
+            !AgentValueDomains.IsIdentifier(run.SessionId) ||
+            !TryValidateInitialMessages(
+                messages,
+                usedCallIds,
+                out contentParts) ||
             messages.Count > AgentLimits.Messages)
         {
             return Failure(
@@ -58,12 +63,15 @@ internal sealed class AgentLoop(
             events.Add(CreateMessageEvent(index, messages[index]));
         }
 
-        if (!TryAdmitContinuation(
+        if (!TryAdmitInitialContinuation(
                 continuation,
                 run.StablePlan,
+                run.SessionId,
                 messages,
+                usedCallIds,
                 events,
-                ref continuationBytes))
+                ref continuationBytes,
+                ref contentParts))
         {
             return Failure(
                 AgentFailureCodes.ResponseInvalid,
@@ -143,6 +151,15 @@ internal sealed class AgentLoop(
                         AgentFailureCodes.ChatFailed,
                     modelCalls,
                     toolCalls,
+                        events);
+            }
+            catch (ProjectChatNormalizationException)
+            {
+                return Failure(
+                    StopReason(started, cancellationToken) ??
+                        AgentFailureCodes.ResponseInvalid,
+                    modelCalls,
+                    toolCalls,
                     events);
             }
             catch
@@ -171,6 +188,8 @@ internal sealed class AgentLoop(
                 ref outputTokens,
                 ref combinedTokens,
                 out var preparedCalls,
+                out var admittedMessage,
+                out var messageEvent,
                 out var admittedParts);
             if (admissionFailure is not null)
             {
@@ -195,15 +214,18 @@ internal sealed class AgentLoop(
                     events);
             }
 
-            messages.Add(response.Message);
-            contentParts += admittedParts;
-            events.Add(CreateMessageEvent(messages.Count - 1, response.Message));
-            if (!TryAdmitContinuation(
+            if (!TryMergeResponseContinuation(
+                    continuation,
                     response.Continuation,
                     run.StablePlan,
-                    messages,
-                    events,
-                    ref continuationBytes))
+                    run.SessionId,
+                    response.Message,
+                    messages.Count,
+                    usedCallIds,
+                    events.Count,
+                    ref continuationBytes,
+                    out var mergedContinuation,
+                    out var continuationEvents))
             {
                 return Failure(
                     AgentFailureCodes.ResponseInvalid,
@@ -212,6 +234,12 @@ internal sealed class AgentLoop(
                     events);
             }
 
+            messages.Add(admittedMessage);
+            contentParts += admittedParts;
+            events.Add(messageEvent);
+            events.AddRange(continuationEvents);
+            continuation = mergedContinuation;
+
             if (terminalResponse &&
                 preparedCalls[0] is PreparedFinishReviewCall terminal)
             {
@@ -219,7 +247,9 @@ internal sealed class AgentLoop(
                 events.Add(new AgentToolCallEvent(
                     terminal.CallId,
                     terminal.Name,
-                    AgentCanonical.HashRaw(terminal.CanonicalArguments),
+                    AgentCanonical.HashDomain(
+                        AgentCanonical.TerminalDomain,
+                        terminal.CanonicalArguments),
                     terminal.CanonicalArguments.ToImmutableArray()));
                 if (!TerminalReviewValidator.TryValidate(
                         terminal.Arguments,
@@ -235,7 +265,10 @@ internal sealed class AgentLoop(
                 }
 
                 events.Add(new AgentTerminalEvent(review!.TerminalSha256));
-                return AgentRunOutcome.Success(review, events.ToImmutable());
+                return AgentRunOutcome.Success(
+                    review,
+                    events.ToImmutable(),
+                    ToContinuationCandidate(continuation));
             }
 
             foreach (var call in preparedCalls)
@@ -350,7 +383,6 @@ internal sealed class AgentLoop(
                 contentParts++;
             }
 
-            continuation = response.Continuation;
         }
     }
 
@@ -364,9 +396,13 @@ internal sealed class AgentLoop(
         ref long cumulativeOutput,
         ref long cumulativeCombined,
         out ImmutableArray<PreparedAgentToolCall> preparedCalls,
+        out ProjectChatMessage admittedMessage,
+        out AgentMessageEvent messageEvent,
         out int admittedParts)
     {
         preparedCalls = [];
+        admittedMessage = new ProjectChatMessage("assistant", []);
+        messageEvent = new AgentMessageEvent(currentMessages, "assistant", []);
         admittedParts = 0;
         if (response is null ||
             response.CapturedResponseBodyBytes is null ||
@@ -409,9 +445,10 @@ internal sealed class AgentLoop(
                         reasoning.Position >= 0:
                     break;
                 case ProjectToolCallContent call
-                    when ValidIdentifier(call.CallId) &&
-                        ValidIdentifier(call.Name) &&
-                        ValidToolArguments(call.ArgumentsJson):
+                    when AgentValueDomains.IsIdentifier(call.CallId) &&
+                        AgentValueDomains.IsIdentifier(call.Name) &&
+                        call.ArgumentsJson is not null &&
+                        Utf8Bytes(call.ArgumentsJson) <= AgentLimits.ResponseBytes:
                     toolContents.Add(call);
                     break;
                 default:
@@ -452,7 +489,7 @@ internal sealed class AgentLoop(
             toolContents.Count);
         foreach (var call in toolContents)
         {
-            if (!localCallIds.Add(call.CallId) || !usedCallIds.Add(call.CallId))
+            if (!localCallIds.Add(call.CallId) || usedCallIds.Contains(call.CallId))
             {
                 return AgentFailureCodes.ResponseInvalid;
             }
@@ -494,6 +531,20 @@ internal sealed class AgentLoop(
             }
         }
 
+        foreach (var call in prepared)
+        {
+            if (call is PreparedFinishReviewCall)
+            {
+                continue;
+            }
+
+            var preflightFailure = toolExecutor.Preflight(call);
+            if (preflightFailure is not null)
+            {
+                return preflightFailure;
+            }
+        }
+
         if (response.Usage is null ||
             response.Usage.InputTokens < 0 ||
             response.Usage.OutputTokens < 0)
@@ -529,81 +580,296 @@ internal sealed class AgentLoop(
         cumulativeOutput = newOutput;
         cumulativeCombined = newCombined;
         preparedCalls = prepared.MoveToImmutable();
+        foreach (var callId in localCallIds)
+        {
+            usedCallIds.Add(callId);
+        }
+
+        var preparedById = preparedCalls.ToDictionary(
+            call => call.CallId,
+            StringComparer.Ordinal);
+        var eventContents = message.Contents.Select(content =>
+            content is ProjectToolCallContent call
+                ? (ProjectChatContent)new ProjectToolCallContent(
+                    call.CallId,
+                    call.Name,
+                    Encoding.UTF8.GetString(
+                        preparedById[call.CallId].CanonicalArguments))
+                : content).ToArray();
+        admittedMessage = new ProjectChatMessage(
+            "assistant",
+            eventContents
+                .Where(content => content is not ProjectReasoningContent)
+                .ToArray());
+        messageEvent = CreateMessageEvent(
+            currentMessages,
+            new ProjectChatMessage("assistant", eventContents));
         admittedParts = message.Contents.Length;
         return null;
     }
 
-    private bool TryAdmitContinuation(
+    private bool TryAdmitInitialContinuation(
         ProjectContinuation? continuation,
         StableAgentPlan stablePlan,
+        string sessionId,
         IReadOnlyList<ProjectChatMessage> logicalMessages,
+        IReadOnlySet<string> usedCallIds,
         ImmutableArray<AgentLogicalEvent>.Builder events,
-        ref long aggregateBytes)
+        ref long aggregateBytes,
+        ref int contentParts)
     {
         if (continuation is null)
         {
             return true;
         }
 
-        if (continuation.ProviderId is null ||
-            continuation.ModelId is null ||
-            continuation.AdapterId is null ||
-            continuation.SessionId is null ||
-            continuation.Items is null ||
-            !ValidContent(continuation.ProviderId) ||
-            !ValidContent(continuation.ModelId) ||
-            !ValidContent(continuation.AdapterId) ||
-            !ValidContent(continuation.SessionId) ||
-            !StringComparer.Ordinal.Equals(
-                continuation.ProviderId,
-                stablePlan.ProviderId) ||
-            !StringComparer.Ordinal.Equals(
-                continuation.ModelId,
-                stablePlan.ModelId) ||
-            !StringComparer.Ordinal.Equals(
-                continuation.AdapterId,
-                stablePlan.AdapterId))
+        if (!ValidContinuationScope(continuation, stablePlan, sessionId))
         {
             return false;
         }
 
+        if (continuation.Items.Any(item => item is null))
+        {
+            return false;
+        }
+
+        var slots = new HashSet<(int Message, int Content)>();
+        var itemsByMessage = continuation.Items
+            .GroupBy(item => item.MessagePosition)
+            .ToDictionary(group => group.Key, group => group.Count());
+        foreach (var entry in itemsByMessage)
+        {
+            if (entry.Key < 0 ||
+                entry.Key >= logicalMessages.Count ||
+                !StringComparer.Ordinal.Equals(
+                    logicalMessages[entry.Key].Role,
+                    "assistant") ||
+                logicalMessages[entry.Key].Contents.Length + entry.Value >
+                    AgentLimits.PartsPerMessage)
+            {
+                return false;
+            }
+        }
+
         foreach (var item in continuation.Items)
         {
-            if (item.MessagePosition < 0 ||
-                item.MessagePosition >= logicalMessages.Count ||
+            if (!ValidContinuationItem(item) ||
+                !slots.Add((item.MessagePosition, item.ContentPosition)) ||
+                !itemsByMessage.TryGetValue(item.MessagePosition, out var itemCount) ||
+                item.ContentPosition >=
+                    logicalMessages[item.MessagePosition].Contents.Length + itemCount ||
+                !ValidContinuationAssociation(
+                    item,
+                    logicalMessages[item.MessagePosition],
+                    usedCallIds))
+            {
+                return false;
+            }
+        }
+
+        int newContentParts;
+        try
+        {
+            newContentParts = checked(contentParts + continuation.Items.Length);
+        }
+        catch (OverflowException)
+        {
+            return false;
+        }
+
+        if (newContentParts > AgentLimits.PartsTotal ||
+            !TryCreateContinuationEvents(
+                continuation.Items,
+                events.Count,
+                aggregateBytes,
+                out var newAggregate,
+                out var continuationEvents))
+        {
+            return false;
+        }
+
+        contentParts = newContentParts;
+        aggregateBytes = newAggregate;
+        events.AddRange(continuationEvents);
+        return true;
+    }
+
+    private bool TryMergeResponseContinuation(
+        ProjectContinuation? current,
+        ProjectContinuation? delta,
+        StableAgentPlan stablePlan,
+        string sessionId,
+        ProjectChatMessage rawMessage,
+        int messagePosition,
+        IReadOnlySet<string> usedCallIds,
+        int existingEventCount,
+        ref long aggregateBytes,
+        out ProjectContinuation? merged,
+        out ImmutableArray<AgentContinuationEvent> continuationEvents)
+    {
+        merged = current;
+        continuationEvents = [];
+        var reasoning = rawMessage.Contents
+            .Select((content, position) => (content, position))
+            .Where(entry => entry.content is ProjectReasoningContent)
+            .ToArray();
+        if (delta is null)
+        {
+            return reasoning.Length == 0;
+        }
+
+        if (!ValidContinuationScope(delta, stablePlan, sessionId) ||
+            delta.Items.Length != reasoning.Length)
+        {
+            return false;
+        }
+
+        var priorSlots = current?.Items.Select(item =>
+            (item.MessagePosition, item.ContentPosition)).ToHashSet() ?? [];
+        var deltaSlots = new HashSet<(int Message, int Content)>();
+        foreach (var item in delta.Items)
+        {
+            if (!ValidContinuationItem(item) ||
+                item.MessagePosition != messagePosition ||
                 item.ContentPosition < 0 ||
-                item.ContentPosition >
-                    logicalMessages[item.MessagePosition].Contents.Length ||
-                item.Readable is null ||
-                item.Opaque is null ||
-                item.Framing is null)
+                item.ContentPosition >= rawMessage.Contents.Length ||
+                !priorSlots.Add((item.MessagePosition, item.ContentPosition)) ||
+                !deltaSlots.Add((item.MessagePosition, item.ContentPosition)) ||
+                rawMessage.Contents[item.ContentPosition] is not
+                    ProjectReasoningContent responseReasoning ||
+                !SameContinuationValue(item, responseReasoning) ||
+                !ValidContinuationAssociation(item, rawMessage, usedCallIds))
             {
                 return false;
             }
+        }
 
-            var itemBytes = AgentRequestWriter.WriteContinuationItem(item);
-            var bytes = itemBytes.Length;
-            if (bytes > AgentLimits.ContinuationItemBytes)
+        foreach (var entry in reasoning)
+        {
+            var responseReasoning = (ProjectReasoningContent)entry.content;
+            if (responseReasoning.MessagePosition != messagePosition ||
+                responseReasoning.Position != entry.position ||
+                !deltaSlots.Contains((messagePosition, entry.position)))
             {
                 return false;
             }
+        }
 
+        if (!TryCreateContinuationEvents(
+                delta.Items,
+                existingEventCount + 1,
+                aggregateBytes,
+                out var newAggregate,
+                out continuationEvents))
+        {
+            return false;
+        }
+
+        merged = current is null
+            ? delta
+            : current with { Items = [.. current.Items, .. delta.Items] };
+        aggregateBytes = newAggregate;
+        return true;
+    }
+
+    private static bool ValidContinuationScope(
+        ProjectContinuation continuation,
+        StableAgentPlan stablePlan,
+        string sessionId) =>
+        continuation.Items is not null &&
+        AgentValueDomains.IsUtf8(continuation.ProviderId, 1, 128) &&
+        AgentValueDomains.IsUtf8(continuation.ModelId, 1, 128) &&
+        AgentValueDomains.IsUtf8(continuation.AdapterId, 1, 128) &&
+        AgentValueDomains.IsIdentifier(continuation.SessionId) &&
+        StringComparer.Ordinal.Equals(
+            continuation.ProviderId,
+            stablePlan.ProviderId) &&
+        StringComparer.Ordinal.Equals(
+            continuation.ModelId,
+            stablePlan.ModelId) &&
+        StringComparer.Ordinal.Equals(
+            continuation.AdapterId,
+            stablePlan.AdapterId) &&
+        StringComparer.Ordinal.Equals(continuation.SessionId, sessionId);
+
+    private static bool ValidContinuationItem(ProjectContinuationItem item) =>
+        item is not null &&
+        item.MessagePosition >= 0 &&
+        item.ContentPosition >= 0 &&
+        AgentValueDomains.IsUtf8(item.Readable, 0, AgentLimits.ContentBytes) &&
+        AgentValueDomains.IsUtf8(item.Opaque, 0, AgentLimits.ContentBytes) &&
+        AgentValueDomains.IsUtf8(item.Framing, 1, AgentLimits.ContentBytes) &&
+        (item.AssociatedCallId is null ||
+            AgentValueDomains.IsIdentifier(item.AssociatedCallId));
+
+    private static bool ValidContinuationAssociation(
+        ProjectContinuationItem item,
+        ProjectChatMessage message,
+        IReadOnlySet<string> usedCallIds)
+    {
+        if (item.AssociatedCallId is null)
+        {
+            return true;
+        }
+
+        return usedCallIds.Contains(item.AssociatedCallId) &&
+            message.Contents.OfType<ProjectToolCallContent>().Any(call =>
+                StringComparer.Ordinal.Equals(
+                    call.CallId,
+                    item.AssociatedCallId));
+    }
+
+    private static bool SameContinuationValue(
+        ProjectContinuationItem item,
+        ProjectReasoningContent reasoning) =>
+        StringComparer.Ordinal.Equals(item.Readable, reasoning.Text) &&
+        StringComparer.Ordinal.Equals(item.Opaque, reasoning.Opaque) &&
+        StringComparer.Ordinal.Equals(item.Framing, reasoning.Framing) &&
+        StringComparer.Ordinal.Equals(
+            item.AssociatedCallId,
+            reasoning.AssociatedCallId) &&
+        item.MessagePosition == reasoning.MessagePosition &&
+        item.ContentPosition == reasoning.Position;
+
+    private static bool TryCreateContinuationEvents(
+        IReadOnlyList<ProjectContinuationItem> items,
+        int existingEventCount,
+        long aggregateBytes,
+        out long newAggregate,
+        out ImmutableArray<AgentContinuationEvent> continuationEvents)
+    {
+        newAggregate = aggregateBytes;
+        var builder = ImmutableArray.CreateBuilder<AgentContinuationEvent>(
+            items.Count);
+        foreach (var item in items)
+        {
+            byte[] itemBytes;
             try
             {
-                aggregateBytes = checked(aggregateBytes + bytes);
+                itemBytes = AgentRequestWriter.WriteContinuationItem(item);
+                newAggregate = checked(newAggregate + itemBytes.Length);
             }
             catch (OverflowException)
             {
+                continuationEvents = [];
                 return false;
             }
-
-            if (aggregateBytes > AgentLimits.ContinuationTotalBytes ||
-                events.Count >= AgentLimits.SessionRecords)
+            catch (Rfc8785CanonicalizationException)
             {
+                continuationEvents = [];
                 return false;
             }
 
-            events.Add(new AgentContinuationEvent(
+            if (itemBytes.Length > AgentLimits.ContinuationItemBytes ||
+                newAggregate > AgentLimits.ContinuationTotalBytes ||
+                existingEventCount + builder.Count + 1 >
+                    AgentLimits.SessionRecords)
+            {
+                continuationEvents = [];
+                return false;
+            }
+
+            builder.Add(new AgentContinuationEvent(
                 AgentCanonical.HashRaw(Encoding.UTF8.GetBytes(item.Readable)),
                 AgentCanonical.HashRaw(Encoding.UTF8.GetBytes(item.Opaque)),
                 AgentCanonical.HashRaw(Encoding.UTF8.GetBytes(item.Framing)),
@@ -612,41 +878,173 @@ internal sealed class AgentLoop(
                 item.ContentPosition));
         }
 
+        continuationEvents = builder.MoveToImmutable();
         return true;
     }
 
     private static bool TryValidateInitialMessages(
         IReadOnlyList<ProjectChatMessage> messages,
+        HashSet<string> usedCallIds,
         out int contentParts)
     {
         contentParts = 0;
+        var pendingResults = new Queue<string>();
         foreach (var message in messages)
         {
             if (message is null ||
-                string.IsNullOrEmpty(message.Role) ||
                 message.Contents is null ||
-                message.Contents.Length > AgentLimits.PartsPerMessage)
+                message.Contents.Length is < 1 or > AgentLimits.PartsPerMessage)
             {
                 return false;
             }
 
-            contentParts += message.Contents.Length;
+            try
+            {
+                contentParts = checked(contentParts + message.Contents.Length);
+            }
+            catch (OverflowException)
+            {
+                return false;
+            }
+
             if (contentParts > AgentLimits.PartsTotal)
             {
                 return false;
             }
 
+            if (pendingResults.Count > 0)
+            {
+                if (!StringComparer.Ordinal.Equals(message.Role, "tool"))
+                {
+                    return false;
+                }
+
+                foreach (var content in message.Contents)
+                {
+                    if (content is not ProjectToolResultContent result ||
+                        !AgentValueDomains.IsIdentifier(result.CallId) ||
+                        !AgentValueDomains.IsUtf8(
+                            result.Result,
+                            1,
+                            AgentLimits.ToolResultBytes) ||
+                        pendingResults.Count == 0 ||
+                        !StringComparer.Ordinal.Equals(
+                            pendingResults.Dequeue(),
+                            result.CallId))
+                    {
+                        return false;
+                    }
+                }
+
+                continue;
+            }
+
+            if (StringComparer.Ordinal.Equals(message.Role, "system") ||
+                StringComparer.Ordinal.Equals(message.Role, "user"))
+            {
+                if (message.Contents.Any(content =>
+                    content is not ProjectTextContent text ||
+                    !ValidContent(text.Text)))
+                {
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (!StringComparer.Ordinal.Equals(message.Role, "assistant"))
+            {
+                return false;
+            }
+
+            var calls = new List<ProjectToolCallContent>();
             foreach (var content in message.Contents)
             {
-                if (content is not ProjectTextContent text ||
-                    !ValidContent(text.Text))
+                switch (content)
+                {
+                    case ProjectTextContent text when ValidContent(text.Text):
+                        break;
+                    case ProjectToolCallContent call
+                        when TryValidatePriorCall(call, usedCallIds):
+                        calls.Add(call);
+                        break;
+                    default:
+                        return false;
+                }
+            }
+
+            if (calls.Count is < 1 or > AgentLimits.ToolCallsPerResponse)
+            {
+                return false;
+            }
+
+            var terminalCount = calls.Count(call =>
+                StringComparer.Ordinal.Equals(
+                    call.Name,
+                    AgentToolRegistry.FinishReviewName));
+            if (terminalCount > 0)
+            {
+                if (terminalCount != 1 || calls.Count != 1)
                 {
                     return false;
                 }
             }
+            else
+            {
+                foreach (var call in calls)
+                {
+                    pendingResults.Enqueue(call.CallId);
+                }
+            }
         }
 
-        return true;
+        return pendingResults.Count == 0;
+    }
+
+    private static bool TryValidatePriorCall(
+        ProjectToolCallContent call,
+        HashSet<string> usedCallIds)
+    {
+        if (!AgentValueDomains.IsIdentifier(call.CallId) ||
+            !usedCallIds.Add(call.CallId) ||
+            call.ArgumentsJson is null)
+        {
+            return false;
+        }
+
+        PreparedAgentToolCall? prepared = null;
+        switch (call.Name)
+        {
+            case AgentToolRegistry.ReadFileName:
+                if (AgentToolArguments.TryReadFile(
+                    call.ArgumentsJson,
+                    out var read))
+                {
+                    prepared = new PreparedReadFileCall(call.CallId, read!);
+                }
+                break;
+            case AgentToolRegistry.SearchTextName:
+                if (AgentToolArguments.TrySearchText(
+                    call.ArgumentsJson,
+                    out var search))
+                {
+                    prepared = new PreparedSearchTextCall(call.CallId, search!);
+                }
+                break;
+            case AgentToolRegistry.FinishReviewName:
+                if (AgentToolArguments.TryFinishReview(
+                    call.ArgumentsJson,
+                    out var finish))
+                {
+                    prepared = new PreparedFinishReviewCall(call.CallId, finish!);
+                }
+                break;
+        }
+
+        return prepared is not null &&
+            Encoding.UTF8.GetBytes(call.ArgumentsJson)
+                .AsSpan()
+                .SequenceEqual(prepared.CanonicalArguments);
     }
 
     private static bool ValidStablePlan(
@@ -658,7 +1056,7 @@ internal sealed class AgentLoop(
                 plan.RepositoryId,
                 identity.RepositoryId) &&
             plan.ReviewTarget == identity.ReviewTarget &&
-            ValidNonEmpty(plan.WorkflowIdentity) &&
+            AgentValueDomains.IsUtf8(plan.WorkflowIdentity, 1, 256) &&
             IsLowerHex(plan.PolicySha256, 64) &&
             StringComparer.Ordinal.Equals(
                 plan.ToolsetSha256,
@@ -666,18 +1064,13 @@ internal sealed class AgentLoop(
             StringComparer.Ordinal.Equals(
                 plan.LimitsSha256,
                 AgentCanonical.LimitsSha256()) &&
-            ValidNonEmpty(plan.BuildId) &&
-            ValidNonEmpty(plan.ProviderId) &&
-            ValidNonEmpty(plan.ModelId) &&
-            ValidNonEmpty(plan.AdapterId) &&
+            AgentValueDomains.IsUtf8(plan.BuildId, 1, 256) &&
+            AgentValueDomains.IsUtf8(plan.ProviderId, 1, 128) &&
+            AgentValueDomains.IsUtf8(plan.ModelId, 1, 128) &&
+            AgentValueDomains.IsUtf8(plan.AdapterId, 1, 128) &&
             (plan.PriorSessionSha256 is null ||
                 IsLowerHex(plan.PriorSessionSha256, 64));
     }
-
-    private static bool ValidNonEmpty(string? value) =>
-        value is not null &&
-        value.Length > 0 &&
-        Utf8Bytes(value) <= AgentLimits.ContentBytes;
 
     private static bool IsLowerHex(string? value, int length) =>
         value is not null &&
@@ -708,8 +1101,7 @@ internal sealed class AgentLoop(
                     new AgentToolCallReferencePart(
                         call.CallId,
                         call.Name,
-                        AgentCanonical.HashRaw(
-                            Encoding.UTF8.GetBytes(call.ArgumentsJson))),
+                        ToolCallArgumentsSha256(call)),
                 ProjectToolResultContent result =>
                     new AgentToolResultReferencePart(
                         result.CallId,
@@ -726,17 +1118,37 @@ internal sealed class AgentLoop(
             parts.MoveToImmutable());
     }
 
+    private static string ToolCallArgumentsSha256(
+        ProjectToolCallContent call)
+    {
+        var bytes = Encoding.UTF8.GetBytes(call.ArgumentsJson);
+        return StringComparer.Ordinal.Equals(
+            call.Name,
+            AgentToolRegistry.FinishReviewName)
+            ? AgentCanonical.HashDomain(AgentCanonical.TerminalDomain, bytes)
+            : AgentCanonical.HashRaw(bytes);
+    }
+
+    private static AgentContinuationCandidate? ToContinuationCandidate(
+        ProjectContinuation? continuation) =>
+        continuation is null
+            ? null
+            : new AgentContinuationCandidate(
+                continuation.ProviderId,
+                continuation.ModelId,
+                continuation.AdapterId,
+                continuation.SessionId,
+                continuation.Items.Select(item =>
+                    new AgentContinuationCandidateItem(
+                        item.Readable,
+                        item.Opaque,
+                        item.Framing,
+                        item.AssociatedCallId,
+                        item.MessagePosition,
+                        item.ContentPosition)).ToImmutableArray());
+
     private static bool ValidContent(string? value) =>
         value is not null && Utf8Bytes(value) <= AgentLimits.ContentBytes;
-
-    private static bool ValidIdentifier(string? value) =>
-        value is not null &&
-        value.Length > 0 &&
-        Utf8Bytes(value) <= AgentLimits.ContentBytes;
-
-    private static bool ValidToolArguments(string? value) =>
-        value is not null &&
-        Utf8Bytes(value) <= AgentLimits.ToolArgumentsBytes;
 
     private static int Utf8Bytes(string value)
     {

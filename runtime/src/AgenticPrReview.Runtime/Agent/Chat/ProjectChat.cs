@@ -7,6 +7,14 @@ internal interface IProjectChatClient
         CancellationToken cancellationToken);
 }
 
+internal sealed class ProjectChatNormalizationException : Exception
+{
+    internal ProjectChatNormalizationException()
+        : base("The backend response could not be normalized.")
+    {
+    }
+}
+
 internal sealed record ProjectChatRequest(
     ProjectChatMessage[] Messages,
     ProjectToolDefinition[] Tools,

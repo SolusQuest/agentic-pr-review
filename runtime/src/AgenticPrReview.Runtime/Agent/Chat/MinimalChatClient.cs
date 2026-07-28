@@ -9,17 +9,24 @@ internal sealed class MinimalChatClient(
     {
         var native = Materialize(request);
         var response = await backend.GetResponseAsync(native, cancellationToken);
-        return new ProjectChatResponse(
-            ToProject(response.Message),
-            response.Usage is null
-                ? null
-                : new ProjectChatUsage(
-                    response.Usage.InputTokens,
-                    response.Usage.OutputTokens),
-            response.CapturedResponseBodyBytes,
-            response.Continuation is null
-                ? null
-                : ToProject(response.Continuation));
+        try
+        {
+            return new ProjectChatResponse(
+                ToProject(response.Message),
+                response.Usage is null
+                    ? null
+                    : new ProjectChatUsage(
+                        response.Usage.InputTokens,
+                        response.Usage.OutputTokens),
+                response.CapturedResponseBodyBytes,
+                response.Continuation is null
+                    ? null
+                    : ToProject(response.Continuation));
+        }
+        catch
+        {
+            throw new ProjectChatNormalizationException();
+        }
     }
 
     internal static MinimalChatRequest Materialize(ProjectChatRequest request)
@@ -102,31 +109,57 @@ internal sealed class MinimalChatClient(
         MinimalChatMessage[] messages,
         MinimalChatContinuation continuation)
     {
-        foreach (var item in continuation.Items.OrderBy(item => item.MessagePosition))
+        foreach (var group in continuation.Items
+            .GroupBy(item => item.MessagePosition)
+            .OrderBy(group => group.Key))
         {
-            if (item.MessagePosition < 0 ||
-                item.MessagePosition >= messages.Length)
+            if (group.Key < 0 || group.Key >= messages.Length)
             {
                 throw new InvalidOperationException("Invalid continuation message position.");
             }
-            var target = messages[item.MessagePosition];
-            if (item.ContentPosition < 0 ||
-                item.ContentPosition > target.Contents.Length)
+
+            var target = messages[group.Key];
+            if (!StringComparer.Ordinal.Equals(target.Role, "assistant"))
             {
-                throw new InvalidOperationException("Invalid continuation content position.");
+                throw new InvalidOperationException("Invalid continuation message role.");
             }
+
             var contents = target.Contents.ToList();
-            contents.Insert(item.ContentPosition, new MinimalChatContent(
-                "reasoning",
-                null,
-                null,
-                item.Readable,
-                item.Opaque,
-                item.Framing,
-                item.AssociatedCallId,
-                item.MessagePosition,
-                item.ContentPosition));
-            messages[item.MessagePosition] = target with
+            var ordered = group.OrderBy(item => item.ContentPosition).ToArray();
+            if (ordered.Select(item => item.ContentPosition).Distinct().Count() !=
+                ordered.Length)
+            {
+                throw new InvalidOperationException("Duplicate continuation content position.");
+            }
+
+            foreach (var item in ordered)
+            {
+                if (item.ContentPosition < 0 ||
+                    item.ContentPosition >= target.Contents.Length + ordered.Length ||
+                    (item.AssociatedCallId is not null &&
+                        !target.Contents.OfType<MinimalChatContent>().Any(content =>
+                            content.Kind == "tool_call" &&
+                            StringComparer.Ordinal.Equals(
+                                content.CallId,
+                                item.AssociatedCallId))))
+                {
+                    throw new InvalidOperationException(
+                        "Invalid continuation content position or association.");
+                }
+
+                contents.Insert(item.ContentPosition, new MinimalChatContent(
+                    "reasoning",
+                    null,
+                    null,
+                    item.Readable,
+                    item.Opaque,
+                    item.Framing,
+                    item.AssociatedCallId,
+                    item.MessagePosition,
+                    item.ContentPosition));
+            }
+
+            messages[group.Key] = target with
             {
                 Contents = contents.Select((content, position) =>
                     content with { Position = position }).ToArray(),

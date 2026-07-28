@@ -29,8 +29,8 @@ For each model turn, the loop:
 2. constructs one project request containing the admitted logical history, the exact ordered tool definitions, continuation values, and `ThinkingRequired = true`;
 3. consumes the model-call count immediately before invoking chat;
 4. after the await, rechecks caller cancellation and deadline, then maps chat failure;
-5. admits captured response bytes and shape before exact non-negative per-call usage, checked cumulative input/output/combined token totals, content counts, call IDs, the complete tool-call sequence, and every canonical arguments value;
-6. dispatches admitted nonterminal calls one at a time in provider order;
+5. admits captured response bytes and shape before exact non-negative per-call usage, checked cumulative input/output/combined token totals, content counts, call IDs, the complete tool-call sequence, every canonical arguments value, and every path/allowlist preflight;
+6. dispatches admitted nonterminal calls one at a time in provider order only after the complete response has passed lexical, schema, canonical, call-ID, toolset, and snapshot-allowlist admission;
 7. after each tool await, rechecks cancellation and deadline, maps the operation failure, charges the complete actual canonical result against individual and aggregate result-byte limits, records the observation, and only then permits the next call;
 8. invokes chat again with one physical assistant message followed by its ordered tool-result messages; or
 9. succeeds only when the response contains one valid terminal `finish_review` call and no other tool call.
@@ -47,7 +47,15 @@ Canonical JSON is UTF-8 without BOM or insignificant whitespace. Each owning sch
 - `search_text` stores `query`, then a string or JSON `null` path;
 - `finish_review` has no optional fields.
 
-Domain-separated SHA-256 identities use the exact tags and envelopes in #78. File hashes cover the complete raw file, including a leading UTF-8 BOM. Read/search observation identities omit only their own `observation_id` field. The terminal digest covers the complete validated canonical `finish_review` arguments.
+The normalized bytes are the single identity used for the admitted assistant message, later replay, logical message reference, call event, and tool dispatch. Domain-separated SHA-256 identities use the exact tags and envelopes in #78. File hashes cover the complete raw file, including a leading UTF-8 BOM. Read/search observation identities omit only their own `observation_id` field. The terminal call reference, call event, and terminal review digest all cover the complete validated canonical `finish_review` arguments under the terminal domain.
+
+## Logical history and continuation
+
+The loop accepts an in-memory handoff consisting of the exact stable plan, an identifier-domain session ID, canonical logical history, and an optional provider-scoped continuation envelope. Initial history may contain system/user text, canonical assistant tool calls, and ordered tool-result messages. It is validated before chat, and every prior call ID is seeded into the run-wide reuse registry.
+
+An initial continuation is a cumulative envelope for that history. Each item must match provider, model, adapter, and exact session scope; target an assistant message and valid content slot; retain its exact readable, opaque, and framing values; and reference a valid same-message tool call when associated. A response continuation is a per-response delta. It must account one-for-one for the response reasoning parts at their exact message/content positions. Accepted deltas are appended once, in returned array order, to the cumulative envelope.
+
+Reasoning payload values stay only in the provider continuation channel. The logical assistant history stores canonical text and tool calls, while message and continuation events retain hashes, placement, and association metadata. A successful outcome exposes the exact cumulative continuation candidate for #89's in-memory session handoff; failures expose no candidate.
 
 ## Reviewed-snapshot capability
 
@@ -55,7 +63,7 @@ The Host prepares a capability containing one validated reviewed identity, one a
 
 Paths must be nonempty `/`-separated repository-relative strings within the 1,024-byte cap. Control characters, DEL, backslash, URI/drive/query metacharacters, roots, empty/`.`/`..` segments, and segments ending in ASCII dot or space are rejected before filesystem access. A valid path must also match one allowlist entry exactly.
 
-The production file-access seam performs conservative component checks and fails closed on symlink, junction, reparse, directory/device/special-file, root-containment, or identity ambiguity. It probes a regular file through a controlled handle, records a platform file identity and length, requires the read handle to match that identity, then reopens and verifies the path identity after the bounded read. Windows identity is volume plus file index; Linux identity is device plus inode. If confinement or identity proof is unavailable, the result is `tool_path_unsafe`. I/O failure after a safe object is established is `tool_io_failed`.
+The production file-access seam performs conservative component checks and fails closed on symlink, junction, reparse, directory/device/special-file, root-containment, or identity ambiguity. Linux opens with read-only, nonblocking, no-follow, and close-on-exec flags before `fstat` proves the opened object is a regular file, so a FIFO or Unix socket cannot block admission. The seam records a platform file identity and length, requires the read handle to match that identity, then reopens and verifies the path identity after the bounded read. Windows identity is volume plus file index; Linux identity is device plus inode. If confinement or identity proof is unavailable, the result is `tool_path_unsafe`. I/O failure after a safe object is established is `tool_io_failed`.
 
 `read_file` and `search_text` share strict UTF-8, leading-BOM, NUL/binary, LF/CRLF, lone-CR, empty-file, final-unterminated-line, and raw-hash behavior. Search is ordinal and literal, scans paths in ordinal order, and applies the exact skip and truncation precedence from #78. All result writers preserve the normative property order and byte caps.
 
@@ -67,7 +75,7 @@ Every evidence reference must match an admitted current-run observation with the
 
 ## Stable outcomes and precedence
 
-The implementation uses only the stable outcome taxonomy in #78. Before starting an operation the first outcome is caller cancellation, elapsed deadline, then the applicable limit. After an await the first outcome is caller cancellation, elapsed deadline, operation/chat failure, response shape/size, usage, then result limits.
+The implementation uses only the stable outcome taxonomy in #78. Before starting an operation the first outcome is caller cancellation, elapsed deadline, then the applicable limit. After an await the first outcome is caller cancellation, elapsed deadline, operation/chat failure, response shape/size, usage, then result limits. A backend or transport exception is `agent_chat_failed`; a response received by the selected adapter but not normalizable into the project shape is `agent_response_invalid`.
 
 Diagnostics contain only the stable code and bounded counters. They never contain repository or tool text, prompts, reasoning/continuation, raw arguments/results, credentials, authorization values, absolute roots, or exception messages/objects.
 
@@ -76,12 +84,12 @@ Diagnostics contain only the stable code and bounded counters. They never contai
 Architecture tests cover all production types in `Agent.Chat`, `Agent.Core`, `Agent.Loop`, and `Agent.Tools` with three layers:
 
 1. signature/type-graph inspection over base types, interfaces, constructors, fields, properties, methods, arrays, and nested generic arguments;
-2. compiled method-body inspection that resolves call, construction, field, method-handle, and type-token references and rejects indirect unmanaged calls;
+2. compiled method-body inspection, including ordinary and static constructor bodies, that resolves call, construction, field, method-handle, and type-token references and rejects indirect unmanaged calls;
 3. metadata inspection of every native import declaration, including unused and body-free generated methods.
 
-Chat/Core/Loop cannot acquire filesystem, environment, networking, process/shell, GitHub/Actions, publisher, Host-secret, service-locator, MEAI production, provider-wire, or native capabilities. Tools may use only the reviewed managed file/handle members and two exact native file-identity declarations: Windows `GetFileInformationByHandle` and Linux `fstat`, each pinned by module, entry point, owner, and managed signature. Dynamic native loading/export lookup remains forbidden.
+Chat/Core/Loop cannot acquire filesystem, environment, networking, process/shell, GitHub/Actions, publisher, Host-secret, service-locator, MEAI production, provider-wire, or native capabilities. Tools may use only the reviewed managed file/handle members and three exact native file-access declarations: Windows `GetFileInformationByHandle`, plus Linux `open` and `fstat`, each pinned by module, entry point, owner, and managed signature. Dynamic native loading/export lookup remains forbidden.
 
-Scanner self-tests contain method-body-only forbidden calls, dynamic native loading, an unused forbidden native process import, and an explicitly allowed file-identity import so a broken resolver cannot silently approve production.
+Scanner self-tests contain method-body-only forbidden calls, forbidden ordinary- and static-constructor bodies, dynamic native loading, an unused forbidden native process import, and an explicitly allowed file-identity import so a broken resolver cannot silently approve production.
 
 ## Validation and handoff
 

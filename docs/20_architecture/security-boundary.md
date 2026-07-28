@@ -134,6 +134,8 @@ Tool implementations must:
 - cap files scanned, bytes read, lines returned, and matches returned;
 - avoid executing reviewed code.
 
+The R2 implementation validates every tool call in a received assistant response, including lexical path and tracked-file allowlist preflight, before dispatching the first call. Linux file access opens with nonblocking and no-follow flags and proves a regular file through the opened descriptor before any seek or read, so FIFO and Unix-socket paths fail closed without hanging the run.
+
 The model cannot ask a tool to change the root, revision, allowlist, or head identity.
 
 ## Untrusted Content Classification Boundary
@@ -224,7 +226,7 @@ The Agent must:
 - propagate cancellation through provider and tool operations;
 - keep provider transport objects outside logical messages and durable state.
 
-Architecture tests reject signature, method-body, dynamic-native-loading, and native-import references that would give Agent or tool modules Host secrets, GitHub clients, publisher code, Actions integration, ambient environment, arbitrary filesystem/network, or process capability. The exact R2 enforcement is recorded in [`agent-loop-contract.md`](./agent-loop-contract.md).
+Architecture tests reject signature, ordinary/static-constructor body, other method-body, dynamic-native-loading, and native-import references that would give Agent or tool modules Host secrets, GitHub clients, publisher code, Actions integration, ambient environment, arbitrary filesystem/network, or process capability. The exact R2 enforcement is recorded in [`agent-loop-contract.md`](./agent-loop-contract.md).
 
 ## Future Child-Process Boundary
 
@@ -286,6 +288,8 @@ It must not contain:
 - model-callable write authorities.
 
 Project-owned logical records and provider-owned continuation artifacts are separate layers. Logical message/tool/outcome records may use canonical project-owned representations. Opaque provider byte/string payloads remain value-exact. Structured provider items preserve validated fields, array order, association, and adapter-required placement under an adapter-defined serialization contract. Neither form is normalized into provider-neutral content, interpreted, synthesized, or reused across providers.
+
+Within the R2 in-memory seam, prior history contains only admitted logical roles, canonical tool arguments, and ordered tool results. The cumulative continuation envelope is independently bound to provider, model, adapter, identifier-domain session, assistant message/content positions, and same-message tool-call associations. Each received response contributes a validated delta that is appended exactly once. A successful outcome may hand the exact cumulative candidate to session code; a failure never returns one.
 
 Repository-derived and tool-result logical records remain untrusted data under the classification boundary above. Their record kind, provider-facing role or tool-result framing, tool-call association, and control/data classification are authenticated session structure, not mutable content fields.
 

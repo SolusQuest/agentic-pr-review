@@ -71,6 +71,7 @@ internal static class AgentToolArguments
                 input,
                 AgentToolJsonContext.Default.ReadFileArgumentsDto);
             if (dto?.Path is null ||
+                !RepositoryPath.IsValid(dto.Path) ||
                 dto.StartLine is < 1 ||
                 dto.LineCount is < 1 or > AgentLimits.ReadFileLines)
             {
@@ -122,7 +123,8 @@ internal static class AgentToolArguments
             var queryBytes = Encoding.UTF8.GetByteCount(dto.Query);
             if (queryBytes is < 1 or > AgentLimits.QueryBytes ||
                 dto.Query.IndexOfAny(['\0', '\r', '\n']) >= 0 ||
-                AgentTextValidation.IsOnlyFixedWhitespace(dto.Query))
+                AgentTextValidation.IsOnlyFixedWhitespace(dto.Query) ||
+                (dto.Path is not null && !RepositoryPath.IsValid(dto.Path)))
             {
                 return false;
             }

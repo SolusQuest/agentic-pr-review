@@ -17,6 +17,7 @@ public sealed partial class AgentCapabilityArchitectureTests
     [
         "AgenticPrReview.Runtime.Agent.Tools.NativeReviewedFileIdentity|kernel32.dll|GetFileInformationByHandle|System.Int32(System.IntPtr,AgenticPrReview.Runtime.Agent.Tools.NativeReviewedFileIdentity+ByHandleFileInformation*)",
         "AgenticPrReview.Runtime.Agent.Tools.NativeReviewedFileIdentity|libc|fstat|System.Int32(System.Int32,AgenticPrReview.Runtime.Agent.Tools.NativeReviewedFileIdentity+LinuxFileInformation*)",
+        "AgenticPrReview.Runtime.Agent.Tools.NativeReviewedFileIdentity|libc|open|System.Int32(System.Byte*,System.Int32)",
     ];
 
     [Fact]
@@ -38,12 +39,7 @@ public sealed partial class AgentCapabilityArchitectureTests
                 }
             }
 
-            foreach (var method in type.GetMethods(
-                BindingFlags.Instance |
-                BindingFlags.Static |
-                BindingFlags.Public |
-                BindingFlags.NonPublic |
-                BindingFlags.DeclaredOnly))
+            foreach (var method in DeclaredExecutableMembers(type))
             {
                 var body = method.GetMethodBody();
                 if (body is not null)
@@ -93,9 +89,9 @@ public sealed partial class AgentCapabilityArchitectureTests
             typeof(RuntimeApplication).Assembly,
             typeName => typeName.StartsWith(AgentNamespace, StringComparison.Ordinal));
 
-        Assert.Equal(
-            AllowedNativeImports.Order(StringComparer.Ordinal),
-            imports.Order(StringComparer.Ordinal));
+        Assert.True(
+            AllowedNativeImports.SetEquals(imports),
+            string.Join(Environment.NewLine, imports.Order(StringComparer.Ordinal)));
     }
 
     [Fact]
@@ -111,6 +107,26 @@ public sealed partial class AgentCapabilityArchitectureTests
             member => member.DeclaringType == typeof(Environment));
         Assert.Contains(
             members,
+            member => member.DeclaringType == typeof(NativeLibrary));
+    }
+
+    [Fact]
+    public void ScannerDetectsForbiddenConstructorAndStaticConstructorBodies()
+    {
+        var constructorMembers =
+            DeclaredExecutableMembers(typeof(ConstructorForbiddenFixture))
+                .SelectMany(ResolveMethodBodyMembers)
+                .ToArray();
+        var staticConstructorMembers =
+            DeclaredExecutableMembers(typeof(StaticConstructorForbiddenFixture))
+                .SelectMany(ResolveMethodBodyMembers)
+                .ToArray();
+
+        Assert.Contains(
+            constructorMembers,
+            member => member.DeclaringType == typeof(Environment));
+        Assert.Contains(
+            staticConstructorMembers,
             member => member.DeclaringType == typeof(NativeLibrary));
     }
 
@@ -142,6 +158,22 @@ public sealed partial class AgentCapabilityArchitectureTests
         return NativeLibrary.Load("apr-architecture-fixture");
     }
 
+    private sealed class ConstructorForbiddenFixture
+    {
+        internal ConstructorForbiddenFixture()
+        {
+            _ = Environment.GetEnvironmentVariable("APR_CONSTRUCTOR_FIXTURE");
+        }
+    }
+
+    private sealed class StaticConstructorForbiddenFixture
+    {
+        static StaticConstructorForbiddenFixture()
+        {
+            _ = NativeLibrary.Load("apr-static-constructor-fixture");
+        }
+    }
+
     [LibraryImport("libc", EntryPoint = "fstat")]
     private static partial int AllowedIdentityImportFixture(
         int fileDescriptor,
@@ -156,6 +188,33 @@ public sealed partial class AgentCapabilityArchitectureTests
     private static IEnumerable<Type> AgentTypes(Assembly assembly) =>
         assembly.GetTypes().Where(type =>
             type.Namespace?.StartsWith(AgentNamespace, StringComparison.Ordinal) == true);
+
+    private static IEnumerable<MethodBase> DeclaredExecutableMembers(Type type)
+    {
+        foreach (var method in type.GetMethods(
+            BindingFlags.Instance |
+            BindingFlags.Static |
+            BindingFlags.Public |
+            BindingFlags.NonPublic |
+            BindingFlags.DeclaredOnly))
+        {
+            yield return method;
+        }
+
+        foreach (var constructor in type.GetConstructors(
+            BindingFlags.Instance |
+            BindingFlags.Public |
+            BindingFlags.NonPublic |
+            BindingFlags.DeclaredOnly))
+        {
+            yield return constructor;
+        }
+
+        if (type.TypeInitializer is { } typeInitializer)
+        {
+            yield return typeInitializer;
+        }
+    }
 
     private static bool IsForbiddenType(Type source, Type referenced)
     {
@@ -257,6 +316,7 @@ public sealed partial class AgentCapabilityArchitectureTests
                 "get_LinkTarget" or
                 "get_Length",
             "Microsoft.Win32.SafeHandles.SafeFileHandle" => member.Name is
+                ".ctor" or
                 "DangerousGetHandle" or
                 "Dispose",
             "System.IO.FileSystemInfo" => member.Name is
@@ -370,7 +430,7 @@ public sealed partial class AgentCapabilityArchitectureTests
         }
     }
 
-    private static IEnumerable<MemberInfo> ResolveMethodBodyMembers(MethodInfo method)
+    private static IEnumerable<MemberInfo> ResolveMethodBodyMembers(MethodBase method)
     {
         var body = method.GetMethodBody();
         if (body is null)
@@ -404,7 +464,9 @@ public sealed partial class AgentCapabilityArchitectureTests
                     resolved = method.Module.ResolveMember(
                         token,
                         method.DeclaringType?.GetGenericArguments(),
-                        method.GetGenericArguments())!;
+                        method is MethodInfo info
+                            ? info.GetGenericArguments()
+                            : null)!;
                 }
                 catch (Exception exception)
                 {

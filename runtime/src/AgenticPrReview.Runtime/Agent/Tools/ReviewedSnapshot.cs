@@ -194,7 +194,15 @@ internal sealed class VerifiedReviewedFileAccess : IReviewedFileAccess
 
         try
         {
-            using var handle = OpenRead(fullPath);
+            var openStatus = OpenRead(fullPath, out var openedHandle);
+            if (openStatus != ReviewedFileAccessStatus.Success)
+            {
+                return openStatus == ReviewedFileAccessStatus.Unsafe
+                    ? ReviewedFileProbe.Unsafe()
+                    : ReviewedFileProbe.IoFailure();
+            }
+
+            using var handle = openedHandle!;
             if (!TryInspectRegular(handle, out var identity, out var length) ||
                 !TryResolveSafePath(snapshot, path, out _))
             {
@@ -230,7 +238,15 @@ internal sealed class VerifiedReviewedFileAccess : IReviewedFileAccess
 
         try
         {
-            using var handle = OpenRead(fullPath);
+            var openStatus = OpenRead(fullPath, out var openedHandle);
+            if (openStatus != ReviewedFileAccessStatus.Success)
+            {
+                return openStatus == ReviewedFileAccessStatus.Unsafe
+                    ? ReviewedFileRead.Unsafe()
+                    : ReviewedFileRead.IoFailure();
+            }
+
+            using var handle = openedHandle!;
             if (!TryInspectRegular(handle, out var openedIdentity, out var length) ||
                 openedIdentity != expected.Identity ||
                 length != expected.Length ||
@@ -261,7 +277,17 @@ internal sealed class VerifiedReviewedFileAccess : IReviewedFileAccess
                 return ReviewedFileRead.Unsafe();
             }
 
-            using var verificationHandle = OpenRead(verifiedPath);
+            var verificationStatus = OpenRead(
+                verifiedPath,
+                out var reopenedHandle);
+            if (verificationStatus != ReviewedFileAccessStatus.Success)
+            {
+                return verificationStatus == ReviewedFileAccessStatus.Unsafe
+                    ? ReviewedFileRead.Unsafe()
+                    : ReviewedFileRead.IoFailure();
+            }
+
+            using var verificationHandle = reopenedHandle!;
             if (!TryInspectRegular(
                     verificationHandle,
                     out var verifiedIdentity,
@@ -288,13 +314,39 @@ internal sealed class VerifiedReviewedFileAccess : IReviewedFileAccess
         }
     }
 
-    private static SafeFileHandle OpenRead(string fullPath) =>
-        File.OpenHandle(
-            fullPath,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.Read,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
+    private static ReviewedFileAccessStatus OpenRead(
+        string fullPath,
+        out SafeFileHandle? handle)
+    {
+        handle = null;
+        if (OperatingSystem.IsLinux())
+        {
+            return NativeReviewedFileIdentity.TryOpenNonBlockingNoFollow(
+                fullPath,
+                out handle)
+                ? ReviewedFileAccessStatus.Success
+                : ReviewedFileAccessStatus.Unsafe;
+        }
+
+        try
+        {
+            handle = File.OpenHandle(
+                fullPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            return ReviewedFileAccessStatus.Success;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return ReviewedFileAccessStatus.IoFailure;
+        }
+        catch (IOException)
+        {
+            return ReviewedFileAccessStatus.IoFailure;
+        }
+    }
 
     private static bool TryInspectRegular(
         SafeFileHandle handle,
@@ -311,9 +363,13 @@ internal sealed class VerifiedReviewedFileAccess : IReviewedFileAccess
                 return false;
             }
 
+            if (!NativeReviewedFileIdentity.TryGet(handle, out identity))
+            {
+                return false;
+            }
+
             length = RandomAccess.GetLength(handle);
-            return length >= 0 &&
-                NativeReviewedFileIdentity.TryGet(handle, out identity);
+            return length >= 0;
         }
         catch (IOException)
         {
@@ -403,6 +459,28 @@ internal sealed class VerifiedReviewedFileAccess : IReviewedFileAccess
 
 internal static partial class NativeReviewedFileIdentity
 {
+    private const int OpenReadOnly = 0;
+    private const int OpenNonBlocking = 0x800;
+    private const int OpenNoFollow = 0x20000;
+    private const int OpenCloseOnExec = 0x80000;
+
+    internal static bool TryOpenNonBlockingNoFollow(
+        string path,
+        out SafeFileHandle? handle)
+    {
+        var descriptor = Open(
+            path,
+            OpenReadOnly | OpenNonBlocking | OpenNoFollow | OpenCloseOnExec);
+        if (descriptor < 0)
+        {
+            handle = null;
+            return false;
+        }
+
+        handle = new SafeFileHandle((nint)descriptor, ownsHandle: true);
+        return true;
+    }
+
     internal static bool TryGet(
         SafeFileHandle handle,
         out ReviewedFileIdentity identity)
@@ -455,6 +533,13 @@ internal static partial class NativeReviewedFileIdentity
     private static partial int FStat(
         int fileDescriptor,
         out LinuxFileInformation information);
+
+    [LibraryImport(
+        "libc",
+        EntryPoint = "open",
+        SetLastError = true,
+        StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int Open(string path, int flags);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct ByHandleFileInformation

@@ -89,6 +89,50 @@ internal sealed record StableAgentPlan(
     string AdapterId,
     string? PriorSessionSha256);
 
+internal static class AgentValueDomains
+{
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+
+    internal static bool IsIdentifier(string? value)
+    {
+        if (value is null || value.Length is < 1 or > 64)
+        {
+            return false;
+        }
+
+        foreach (var character in value)
+        {
+            if (!(character is >= 'A' and <= 'Z') &&
+                !(character is >= 'a' and <= 'z') &&
+                !(character is >= '0' and <= '9') &&
+                character is not '_' and not '-')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    internal static bool IsUtf8(string? value, int minimumBytes, int maximumBytes)
+    {
+        if (value is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var bytes = StrictUtf8.GetByteCount(value);
+            return bytes >= minimumBytes && bytes <= maximumBytes;
+        }
+        catch (EncoderFallbackException)
+        {
+            return false;
+        }
+    }
+}
+
 internal sealed record AgentEvidence(
     string ObservationId,
     string Path,
@@ -116,22 +160,39 @@ internal sealed record AgentRunOutcome(
     bool Succeeded,
     AgentTerminalReview? Review,
     AgentDiagnostic? Diagnostic,
-    ImmutableArray<AgentLogicalEvent> Events)
+    ImmutableArray<AgentLogicalEvent> Events,
+    AgentContinuationCandidate? Continuation)
 {
     internal bool CompletedSessionEligible => Succeeded && Review is not null;
 
     internal static AgentRunOutcome Success(
         AgentTerminalReview review,
-        ImmutableArray<AgentLogicalEvent> events) =>
-        new(true, review, null, events);
+        ImmutableArray<AgentLogicalEvent> events,
+        AgentContinuationCandidate? continuation) =>
+        new(true, review, null, events, continuation);
 
     internal static AgentRunOutcome Failure(
         string code,
         int modelCalls,
         int toolCalls,
         ImmutableArray<AgentLogicalEvent> events) =>
-        new(false, null, new AgentDiagnostic(code, modelCalls, toolCalls), events);
+        new(false, null, new AgentDiagnostic(code, modelCalls, toolCalls), events, null);
 }
+
+internal sealed record AgentContinuationCandidate(
+    string ProviderId,
+    string ModelId,
+    string AdapterId,
+    string SessionId,
+    ImmutableArray<AgentContinuationCandidateItem> Items);
+
+internal sealed record AgentContinuationCandidateItem(
+    string Readable,
+    string Opaque,
+    string Framing,
+    string? AssociatedCallId,
+    int MessagePosition,
+    int ContentPosition);
 
 internal abstract record AgentLogicalEvent(string Kind);
 

@@ -1,4 +1,6 @@
 using System.Collections.Immutable;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
@@ -6,7 +8,7 @@ using AgenticPrReview.Runtime.Agent.Tools;
 
 namespace AgenticPrReview.Runtime.Tests.Agent.Tools;
 
-public sealed class AgentToolsTests
+public sealed partial class AgentToolsTests
 {
     private static readonly ReviewedIdentity Identity = new(
         "repo",
@@ -109,6 +111,18 @@ public sealed class AgentToolsTests
         Assert.False(result.Succeeded);
         Assert.Equal("tool_file_too_large", result.FailureCode);
         Assert.Equal(0, access.ReadCount);
+    }
+
+    [Fact]
+    public async Task ReadFileRawByteCapIsAcceptedExactly()
+    {
+        var result = await ExecuteReadAsync(
+            "exact.txt",
+            Enumerable.Repeat((byte)'a', AgentLimits.ReadFileRawBytes).ToArray(),
+            "{\"path\":\"exact.txt\"}");
+
+        Assert.True(result.Succeeded);
+        Assert.NotNull(result.Observation);
     }
 
     [Fact]
@@ -220,6 +234,70 @@ public sealed class AgentToolsTests
             AgentCanonical.HashRaw(result.CanonicalResult));
     }
 
+    [Fact]
+    public async Task SearchPerFileAndAggregateRawByteCapsAreExact()
+    {
+        var exactFile = await ExecuteSearchAsync(
+            ["exact.txt"],
+            new Dictionary<string, byte[]>
+            {
+                ["exact.txt"] =
+                    Enumerable.Repeat((byte)'a', AgentLimits.SearchFileBytes)
+                        .ToArray(),
+            },
+            "exact.txt");
+        Assert.True(exactFile.Succeeded);
+        Assert.Contains(
+            "\"raw_bytes_scanned\":" + AgentLimits.SearchFileBytes,
+            exactFile.ResultJson,
+            StringComparison.Ordinal);
+
+        var files = Enumerable.Range(0, 33)
+            .ToDictionary(
+                index => "file-" + index.ToString("D2") + ".txt",
+                index => index < 32
+                    ? Enumerable.Repeat(
+                        (byte)'a',
+                        AgentLimits.SearchFileBytes).ToArray()
+                    : [(byte)'a'],
+                StringComparer.Ordinal);
+        var aggregate = await ExecuteSearchAsync(files.Keys, files);
+        Assert.True(aggregate.Succeeded);
+        Assert.Contains(
+            "\"raw_bytes_scanned\":" + AgentLimits.SearchRawBytes,
+            aggregate.ResultJson,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "\"truncation_reason\":\"bytes_scanned\"",
+            aggregate.ResultJson,
+            StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(AgentLimits.SearchFiles, false)]
+    [InlineData(AgentLimits.SearchFiles + 1, true)]
+    public async Task SearchFileCountCapIsExact(int files, bool truncated)
+    {
+        var content = Enumerable.Range(0, files)
+            .ToDictionary(
+                index => "file-" + index.ToString("D3") + ".txt",
+                _ => Array.Empty<byte>(),
+                StringComparer.Ordinal);
+
+        var result = await ExecuteSearchAsync(content.Keys, content);
+
+        Assert.True(result.Succeeded);
+        Assert.Contains(
+            "\"files_scanned\":" + Math.Min(files, AgentLimits.SearchFiles),
+            result.ResultJson,
+            StringComparison.Ordinal);
+        Assert.Equal(
+            truncated,
+            result.ResultJson!.Contains(
+                "\"truncation_reason\":\"files_scanned\"",
+                StringComparison.Ordinal));
+    }
+
     [Theory]
     [InlineData("{\"path\":\"a.txt\",\"start_line\":1,\"line_count\":400}", true)]
     [InlineData("{\"path\":\"a.txt\"}", true)]
@@ -255,6 +333,41 @@ public sealed class AgentToolsTests
     }
 
     [Theory]
+    [InlineData(AgentLimits.ToolArgumentsBytes, true)]
+    [InlineData(AgentLimits.ToolArgumentsBytes + 1, false)]
+    public void OrdinaryToolArgumentByteCapIsExact(int bytes, bool accepted)
+    {
+        var json = SearchArgumentsOfSize(bytes);
+
+        Assert.Equal(
+            accepted,
+            AgentToolArguments.TrySearchText(json, out _));
+    }
+
+    [Theory]
+    [InlineData(AgentLimits.PathBytes, true)]
+    [InlineData(AgentLimits.PathBytes + 1, false)]
+    public void RepositoryPathByteCapIsExact(int bytes, bool accepted)
+    {
+        Assert.Equal(
+            accepted,
+            RepositoryPath.IsValid(new string('a', bytes)));
+    }
+
+    [Theory]
+    [InlineData(AgentLimits.QueryBytes, true)]
+    [InlineData(AgentLimits.QueryBytes + 1, false)]
+    public void SearchQueryByteCapIsExact(int bytes, bool accepted)
+    {
+        var query = new string('x', bytes);
+        var json = "{\"query\":\"" + query + "\"}";
+
+        Assert.Equal(
+            accepted,
+            AgentToolArguments.TrySearchText(json, out _));
+    }
+
+    [Theory]
     [InlineData("{\"summary\":\"done\",\"findings\":[]}", true)]
     [InlineData("{ \"summary\":\"done\",\"findings\":[]}", false)]
     [InlineData("{\"findings\":[],\"summary\":\"done\"}", false)]
@@ -266,6 +379,22 @@ public sealed class AgentToolsTests
         string json,
         bool accepted)
     {
+        Assert.Equal(
+            accepted,
+            AgentToolArguments.TryFinishReview(json, out _));
+    }
+
+    [Theory]
+    [InlineData(AgentLimits.TerminalBytes, true)]
+    [InlineData(AgentLimits.TerminalBytes + 1, false)]
+    public void TerminalParserUsesItsDistinctByteCap(int bytes, bool accepted)
+    {
+        var empty = AgentToolArguments.WriteFinishReview(string.Empty, []);
+        var json = Encoding.UTF8.GetString(AgentToolArguments.WriteFinishReview(
+            new string('x', bytes - empty.Length),
+            []));
+        Assert.Equal(bytes, Encoding.UTF8.GetByteCount(json));
+
         Assert.Equal(
             accepted,
             AgentToolArguments.TryFinishReview(json, out _));
@@ -480,6 +609,82 @@ public sealed class AgentToolsTests
     }
 
     [Fact]
+    public async Task ProductionAccessRejectsLinuxFifoWithoutBlocking()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var root = Directory.CreateTempSubdirectory("apr86-fifo-");
+        try
+        {
+            var fullPath = Path.Combine(root.FullName, "pipe");
+            Assert.Equal(0, UnixSpecialFileFixture.MkFifo(fullPath, 0x180));
+            Assert.True(AgentToolArguments.TryReadFile(
+                "{\"path\":\"pipe\"}",
+                out var arguments));
+            var executor = new SnapshotToolExecutor(
+                new ReviewedSnapshot(Identity, root.FullName, ["pipe"]),
+                new VerifiedReviewedFileAccess());
+
+            var result = await executor.ExecuteAsync(
+                    new PreparedReadFileCall("call", arguments!),
+                    CancellationToken.None)
+                .AsTask()
+                .WaitAsync(TimeSpan.FromSeconds(2));
+
+            Assert.False(result.Succeeded);
+            Assert.Equal("tool_path_unsafe", result.FailureCode);
+            Assert.Null(result.Observation);
+        }
+        finally
+        {
+            root.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ProductionAccessRejectsLinuxUnixSocketWithoutBlocking()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var root = Directory.CreateTempSubdirectory("apr86-socket-");
+        try
+        {
+            var fullPath = Path.Combine(root.FullName, "socket");
+            using var socket = new Socket(
+                AddressFamily.Unix,
+                SocketType.Stream,
+                ProtocolType.Unspecified);
+            socket.Bind(new UnixDomainSocketEndPoint(fullPath));
+            Assert.True(AgentToolArguments.TryReadFile(
+                "{\"path\":\"socket\"}",
+                out var arguments));
+            var executor = new SnapshotToolExecutor(
+                new ReviewedSnapshot(Identity, root.FullName, ["socket"]),
+                new VerifiedReviewedFileAccess());
+
+            var result = await executor.ExecuteAsync(
+                    new PreparedReadFileCall("call", arguments!),
+                    CancellationToken.None)
+                .AsTask()
+                .WaitAsync(TimeSpan.FromSeconds(2));
+
+            Assert.False(result.Succeeded);
+            Assert.Equal("tool_path_unsafe", result.FailureCode);
+            Assert.Null(result.Observation);
+        }
+        finally
+        {
+            root.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public void TerminalRequiresCurrentGroundedUniqueEvidence()
     {
         var returned = ImmutableDictionary<string, ImmutableHashSet<int>>.Empty
@@ -525,6 +730,82 @@ public sealed class AgentToolsTests
             out _));
     }
 
+    [Theory]
+    [InlineData(AgentLimits.Findings, true)]
+    [InlineData(AgentLimits.Findings + 1, false)]
+    public void TerminalFindingCapIsExact(int findingCount, bool accepted)
+    {
+        var observationId = new string('a', 64);
+        var observation = new AgentObservation(
+            observationId,
+            Identity,
+            ImmutableDictionary<string, ImmutableHashSet<int>>.Empty
+                .WithComparers(StringComparer.Ordinal)
+                .Add("a.txt", [1]));
+        var findings = Enumerable.Range(0, findingCount)
+            .Select(index => new AgentFinding(
+                "high",
+                "finding-" + index,
+                "message",
+                [
+                    new AgentEvidence(
+                        observationId,
+                        "a.txt",
+                        1,
+                        1),
+                ]))
+            .ToArray();
+        var json = Encoding.UTF8.GetString(
+            AgentToolArguments.WriteFinishReview("done", findings));
+        Assert.True(AgentToolArguments.TryFinishReview(json, out var arguments));
+
+        Assert.Equal(
+            accepted,
+            TerminalReviewValidator.TryValidate(
+                arguments!,
+                Identity,
+                [observation],
+                out _));
+    }
+
+    [Theory]
+    [InlineData(AgentLimits.EvidencePerFinding, true)]
+    [InlineData(AgentLimits.EvidencePerFinding + 1, false)]
+    public void TerminalEvidenceCapIsExact(int evidenceCount, bool accepted)
+    {
+        var observationId = new string('a', 64);
+        var returned = Enumerable.Range(1, evidenceCount)
+            .ToImmutableHashSet();
+        var observation = new AgentObservation(
+            observationId,
+            Identity,
+            ImmutableDictionary<string, ImmutableHashSet<int>>.Empty
+                .WithComparers(StringComparer.Ordinal)
+                .Add("a.txt", returned));
+        var finding = new AgentFinding(
+            "high",
+            "finding",
+            "message",
+            Enumerable.Range(1, evidenceCount)
+                .Select(line => new AgentEvidence(
+                    observationId,
+                    "a.txt",
+                    line,
+                    line))
+                .ToImmutableArray());
+        var json = Encoding.UTF8.GetString(
+            AgentToolArguments.WriteFinishReview("done", [finding]));
+        Assert.True(AgentToolArguments.TryFinishReview(json, out var arguments));
+
+        Assert.Equal(
+            accepted,
+            TerminalReviewValidator.TryValidate(
+                arguments!,
+                Identity,
+                [observation],
+                out _));
+    }
+
     private static async Task<AgentToolExecution> ExecuteReadAsync(
         string path,
         byte[] bytes,
@@ -540,6 +821,31 @@ public sealed class AgentToolsTests
         return await executor.ExecuteAsync(
             new PreparedReadFileCall("call", arguments!),
             CancellationToken.None);
+    }
+
+    private static string SearchArgumentsOfSize(int targetBytes)
+    {
+        const string prefix = "{\"query\":\"";
+        const string suffix = "\"}";
+        var contentBytes = targetBytes - prefix.Length - suffix.Length;
+        var escapedControls = contentBytes / 6;
+        var plain = contentBytes % 6;
+        var json = prefix +
+            string.Concat(Enumerable.Repeat("\\u0001", escapedControls)) +
+            new string('x', plain) +
+            suffix;
+        Assert.Equal(targetBytes, Encoding.UTF8.GetByteCount(json));
+        return json;
+    }
+
+    private static partial class UnixSpecialFileFixture
+    {
+        [LibraryImport(
+            "libc",
+            EntryPoint = "mkfifo",
+            SetLastError = true,
+            StringMarshalling = StringMarshalling.Utf8)]
+        internal static partial int MkFifo(string path, uint mode);
     }
 
     private static async Task<AgentToolExecution> ExecuteSearchAsync(

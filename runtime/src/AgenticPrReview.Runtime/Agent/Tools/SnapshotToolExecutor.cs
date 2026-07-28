@@ -74,6 +74,8 @@ internal sealed record AgentToolExecution(
 
 internal interface IAgentToolExecutor
 {
+    string? Preflight(PreparedAgentToolCall call);
+
     ValueTask<AgentToolExecution> ExecuteAsync(
         PreparedAgentToolCall call,
         CancellationToken cancellationToken);
@@ -84,6 +86,16 @@ internal sealed class SnapshotToolExecutor(
     IReviewedFileAccess fileAccess) : IAgentToolExecutor
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+
+    public string? Preflight(PreparedAgentToolCall call) =>
+        call switch
+        {
+            PreparedReadFileCall read => ValidatePath(read.Arguments.Path),
+            PreparedSearchTextCall { Arguments.Path: { } path } =>
+                ValidatePath(path),
+            PreparedSearchTextCall => null,
+            _ => AgentFailureCodes.UnknownTool,
+        };
 
     public ValueTask<AgentToolExecution> ExecuteAsync(
         PreparedAgentToolCall call,

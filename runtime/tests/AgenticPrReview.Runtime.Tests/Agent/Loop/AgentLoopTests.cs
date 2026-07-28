@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
@@ -72,6 +73,21 @@ public sealed class AgentLoopTests
             crossProvider,
             CancellationToken.None);
         AssertFailure(continuationOutcome, "agent_response_invalid");
+        Assert.Empty(chat.Requests);
+
+        var nullItem = Request() with
+        {
+            Continuation = new ProjectContinuation(
+                "provider",
+                "model",
+                "adapter",
+                "session",
+                [null!]),
+        };
+        var nullItemOutcome = await loop.RunAsync(
+            nullItem,
+            CancellationToken.None);
+        AssertFailure(nullItemOutcome, "agent_response_invalid");
         Assert.Empty(chat.Requests);
     }
 
@@ -156,6 +172,172 @@ public sealed class AgentLoopTests
             tool => Assert.Equal("tool", tool.Role));
         Assert.IsType<ProjectToolResultContent>(
             chat.Requests[1].Messages[2].Contents.Single());
+    }
+
+    [Fact]
+    public async Task ContinuationDeltasMergeOnceAndExposeAnExactHandoff()
+    {
+        var firstItem = new ProjectContinuationItem(
+            "readable-one",
+            "opaque-one",
+            "frame-one",
+            "read",
+            1,
+            0);
+        var secondItem = new ProjectContinuationItem(
+            "readable-two",
+            "opaque-two",
+            "frame-two",
+            "finish",
+            3,
+            0);
+        var chat = new ScriptedChatClient([
+            new ProjectChatResponse(
+                new ProjectChatMessage(
+                    "assistant",
+                    [
+                        Reasoning(firstItem),
+                        new ProjectToolCallContent(
+                            "read",
+                            "read_file",
+                            "{\"path\":\"a.txt\"}"),
+                    ]),
+                new ProjectChatUsage(1, 1),
+                1,
+                Continuation(firstItem)),
+            new ProjectChatResponse(
+                new ProjectChatMessage(
+                    "assistant",
+                    [
+                        Reasoning(secondItem),
+                        TerminalCall("finish", "done"),
+                    ]),
+                new ProjectChatUsage(1, 1),
+                1,
+                Continuation(secondItem)),
+        ]);
+        var loop = new AgentLoop(
+            chat,
+            new ScriptedToolExecutor(call =>
+                Success(call, new string('a', 64), "a.txt", 1)));
+
+        var outcome = await loop.RunAsync(Request(), CancellationToken.None);
+
+        Assert.True(outcome.Succeeded);
+        Assert.NotNull(outcome.Continuation);
+        Assert.Equal("session", outcome.Continuation.SessionId);
+        Assert.Collection(
+            outcome.Continuation.Items,
+            item => AssertContinuation(item, firstItem),
+            item => AssertContinuation(item, secondItem));
+        var replay = Assert.IsType<ProjectContinuation>(
+            chat.Requests[1].Continuation);
+        Assert.Collection(
+            replay.Items,
+            item => Assert.Equal(firstItem, item));
+        var replayAssistant = Assert.Single(
+            chat.Requests[1].Messages,
+            message => message.Role == "assistant");
+        Assert.DoesNotContain(
+            replayAssistant.Contents,
+            content => content is ProjectReasoningContent);
+        var replayCall = Assert.IsType<ProjectToolCallContent>(
+            Assert.Single(replayAssistant.Contents));
+        Assert.Equal(
+            "{\"path\":\"a.txt\",\"start_line\":1,\"line_count\":400}",
+            replayCall.ArgumentsJson);
+    }
+
+    [Fact]
+    public async Task InitialHistorySeedsCanonicalCallIdsAcrossResume()
+    {
+        var resumed = Request() with
+        {
+            InitialMessages =
+            [
+                new ProjectChatMessage(
+                    "user",
+                    [new ProjectTextContent("prior review")]),
+                new ProjectChatMessage(
+                    "assistant",
+                    [
+                        new ProjectToolCallContent(
+                            "prior",
+                            "read_file",
+                            "{\"path\":\"a.txt\",\"start_line\":1,\"line_count\":400}"),
+                    ]),
+                new ProjectChatMessage(
+                    "tool",
+                    [new ProjectToolResultContent("prior", "{}")]),
+                new ProjectChatMessage(
+                    "user",
+                    [new ProjectTextContent("continue")]),
+            ],
+        };
+        var executor = new ScriptedToolExecutor();
+        var loop = new AgentLoop(
+            new ScriptedChatClient([
+                Response(
+                    new ProjectToolCallContent(
+                        "prior",
+                        "search_text",
+                        "{\"query\":\"x\"}"),
+                    1,
+                    1),
+            ]),
+            executor);
+
+        var outcome = await loop.RunAsync(resumed, CancellationToken.None);
+
+        AssertFailure(outcome, "agent_response_invalid");
+        Assert.Empty(executor.Order);
+    }
+
+    [Theory]
+    [InlineData("wrong_session")]
+    [InlineData("wrong_slot")]
+    [InlineData("wrong_association")]
+    public async Task ContinuationScopePlacementAndAssociationFailClosed(
+        string scenario)
+    {
+        var item = new ProjectContinuationItem(
+            "readable",
+            "opaque",
+            "frame",
+            scenario == "wrong_association" ? "other" : "read",
+            1,
+            scenario == "wrong_slot" ? 1 : 0);
+        var response = new ProjectChatResponse(
+            new ProjectChatMessage(
+                "assistant",
+                [
+                    new ProjectReasoningContent(
+                        "readable",
+                        "opaque",
+                        "frame",
+                        item.AssociatedCallId,
+                        1,
+                        0),
+                    new ProjectToolCallContent(
+                        "read",
+                        "read_file",
+                        "{\"path\":\"a.txt\"}"),
+                ]),
+            new ProjectChatUsage(1, 1),
+            1,
+            new ProjectContinuation(
+                "provider",
+                "model",
+                "adapter",
+                scenario == "wrong_session" ? "other" : "session",
+                [item]));
+        var executor = new ScriptedToolExecutor();
+        var outcome = await new AgentLoop(
+            new ScriptedChatClient([response]),
+            executor).RunAsync(Request(), CancellationToken.None);
+
+        AssertFailure(outcome, "agent_response_invalid");
+        Assert.Empty(executor.Order);
     }
 
     [Fact]
@@ -374,6 +556,130 @@ public sealed class AgentLoopTests
 
         AssertFailure(outcome, "agent_tool_arguments_invalid");
         Assert.Empty(executor.Order);
+        Assert.Empty(executor.PreflightOrder);
+    }
+
+    [Fact]
+    public async Task CompleteResponseAllowlistPreflightRunsBeforeFirstTool()
+    {
+        var response = new ProjectChatResponse(
+            new ProjectChatMessage(
+                "assistant",
+                [
+                    new ProjectToolCallContent(
+                        "one",
+                        "read_file",
+                        "{\"path\":\"a.txt\"}"),
+                    new ProjectToolCallContent(
+                        "two",
+                        "read_file",
+                        "{\"path\":\"untracked.txt\"}"),
+                ]),
+            new ProjectChatUsage(1, 1),
+            1);
+        var executor = new ScriptedToolExecutor(
+            preflight: call =>
+                call.CallId == "two" ? "tool_path_not_tracked" : null);
+        var outcome = await new AgentLoop(
+            new ScriptedChatClient([response]),
+            executor).RunAsync(Request(), CancellationToken.None);
+
+        AssertFailure(outcome, "tool_path_not_tracked");
+        Assert.Equal(["one", "two"], executor.PreflightOrder);
+        Assert.Empty(executor.Order);
+    }
+
+    [Fact]
+    public async Task CanonicalArgumentsDriveReplayAndLogicalEvents()
+    {
+        var chat = new ScriptedChatClient([
+            Response(
+                new ProjectToolCallContent(
+                    "read",
+                    "read_file",
+                    "{\"path\":\"a.txt\"}"),
+                1,
+                1),
+            Response(TerminalCall("finish", "done"), 1, 1),
+        ]);
+        var outcome = await new AgentLoop(
+            chat,
+            new ScriptedToolExecutor(call =>
+                Success(call, new string('a', 64), "a.txt", 1)))
+            .RunAsync(Request(), CancellationToken.None);
+
+        Assert.True(outcome.Succeeded);
+        const string canonical =
+            "{\"path\":\"a.txt\",\"start_line\":1,\"line_count\":400}";
+        var replayCall = Assert.IsType<ProjectToolCallContent>(
+            chat.Requests[1].Messages[1].Contents.Single());
+        Assert.Equal(canonical, replayCall.ArgumentsJson);
+        var callEvent = outcome.Events
+            .OfType<AgentToolCallEvent>()
+            .Single(item => item.CallId == "read");
+        Assert.Equal(Encoding.UTF8.GetBytes(canonical), callEvent.CanonicalArguments);
+        Assert.Equal(
+            AgentCanonical.HashRaw(Encoding.UTF8.GetBytes(canonical)),
+            callEvent.ArgumentsSha256);
+        var messageCall = Assert.IsType<AgentToolCallReferencePart>(
+            outcome.Events
+                .OfType<AgentMessageEvent>()
+                .Single(item => item.MessageIndex == 1)
+                .Contents
+                .Single());
+        Assert.Equal(callEvent.ArgumentsSha256, messageCall.ArgumentsSha256);
+        var terminalCall = outcome.Events
+            .OfType<AgentToolCallEvent>()
+            .Single(item => item.CallId == "finish");
+        Assert.Equal(outcome.Review!.TerminalSha256, terminalCall.ArgumentsSha256);
+    }
+
+    [Fact]
+    public async Task TerminalPayloadAboveOrdinaryArgumentCapIsAccepted()
+    {
+        var observationId = new string('a', 64);
+        var message = new string('x', AgentLimits.ToolArgumentsBytes + 1);
+        var terminalArguments = AgentToolArguments.WriteFinishReview(
+            "done",
+            [
+                new AgentFinding(
+                    "high",
+                    "finding",
+                    message,
+                    [
+                        new AgentEvidence(
+                            observationId,
+                            "a.txt",
+                            1,
+                            1),
+                    ]),
+            ]);
+        Assert.True(terminalArguments.Length > AgentLimits.ToolArgumentsBytes);
+        Assert.True(terminalArguments.Length <= AgentLimits.TerminalBytes);
+        var chat = new ScriptedChatClient([
+            Response(
+                new ProjectToolCallContent(
+                    "read",
+                    "read_file",
+                    "{\"path\":\"a.txt\"}"),
+                1,
+                1),
+            Response(
+                new ProjectToolCallContent(
+                    "finish",
+                    "finish_review",
+                    Encoding.UTF8.GetString(terminalArguments)),
+                1,
+                1),
+        ]);
+        var outcome = await new AgentLoop(
+            chat,
+            new ScriptedToolExecutor(call =>
+                Success(call, observationId, "a.txt", 1)))
+            .RunAsync(Request(), CancellationToken.None);
+
+        Assert.True(outcome.Succeeded);
+        Assert.Equal(message, outcome.Review!.Findings.Single().Message);
     }
 
     [Fact]
@@ -490,6 +796,149 @@ public sealed class AgentLoopTests
         Assert.Equal(AgentLimits.ModelCalls, executor.Order.Count);
     }
 
+    [Theory]
+    [InlineData(AgentLimits.ToolCallsPerResponse, true)]
+    [InlineData(AgentLimits.ToolCallsPerResponse + 1, false)]
+    public async Task PerResponseToolCallCapIsExact(int calls, bool accepted)
+    {
+        var response = ToolResponse(0, calls);
+        var chat = new ScriptedChatClient(
+            accepted
+                ? [response, Response(TerminalCall("finish", "done"), 0, 0)]
+                : [response]);
+        var executor = new ScriptedToolExecutor();
+        var outcome = await new AgentLoop(chat, executor).RunAsync(
+            Request(),
+            CancellationToken.None);
+
+        if (accepted)
+        {
+            Assert.True(outcome.Succeeded);
+            Assert.Equal(calls, executor.Order.Count);
+        }
+        else
+        {
+            AssertFailure(outcome, "agent_response_invalid");
+            Assert.Empty(executor.Order);
+        }
+    }
+
+    [Theory]
+    [InlineData(AgentLimits.ToolCalls, true)]
+    [InlineData(AgentLimits.ToolCalls + 1, false)]
+    public async Task TotalToolCallCapIsExact(int totalCalls, bool accepted)
+    {
+        var nonTerminal = totalCalls - 1;
+        var responses = new List<ProjectChatResponse>();
+        var offset = 0;
+        while (offset < nonTerminal)
+        {
+            var count = Math.Min(
+                AgentLimits.ToolCallsPerResponse,
+                nonTerminal - offset);
+            responses.Add(ToolResponse(offset, count));
+            offset += count;
+        }
+        responses.Add(Response(TerminalCall("finish", "done"), 0, 0));
+        var executor = new ScriptedToolExecutor();
+        var outcome = await new AgentLoop(
+            new ScriptedChatClient(responses),
+            executor).RunAsync(
+                Request(),
+                CancellationToken.None);
+
+        if (accepted)
+        {
+            Assert.True(outcome.Succeeded);
+            Assert.Equal(nonTerminal, executor.Order.Count);
+        }
+        else
+        {
+            AssertFailure(outcome, "agent_tool_limit");
+            Assert.Equal(nonTerminal, executor.Order.Count);
+        }
+    }
+
+    [Theory]
+    [InlineData(AgentLimits.RequestBytes, true)]
+    [InlineData(AgentLimits.RequestBytes + 1, false)]
+    public async Task SerializedRequestByteCapIsExact(int requestBytes, bool accepted)
+    {
+        var run = RequestWithSerializedSize(requestBytes);
+        var chat = new ScriptedChatClient(
+            accepted
+                ? [Response(TerminalCall("finish", "done"), 0, 0)]
+                : []);
+        var outcome = await new AgentLoop(
+            chat,
+            new ScriptedToolExecutor()).RunAsync(
+                run,
+                CancellationToken.None);
+
+        if (accepted)
+        {
+            Assert.True(outcome.Succeeded);
+            Assert.Single(chat.Requests);
+        }
+        else
+        {
+            AssertFailure(outcome, "agent_request_too_large");
+            Assert.Empty(chat.Requests);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AggregateToolResultByteCapIsExact(bool plusOne)
+    {
+        var responses = new List<ProjectChatResponse>
+        {
+            ToolResponse(0, AgentLimits.ToolCallsPerResponse),
+        };
+        if (plusOne)
+        {
+            responses.Add(ToolResponse(AgentLimits.ToolCallsPerResponse, 1));
+        }
+        else
+        {
+            responses.Add(Response(TerminalCall("finish", "done"), 0, 0));
+        }
+
+        var executor = new ScriptedToolExecutor(call =>
+        {
+            var size = plusOne &&
+                call.CallId == "call-" + AgentLimits.ToolCallsPerResponse
+                ? 1
+                : AgentLimits.ToolResultBytes;
+            return new AgentToolExecution(
+                true,
+                null,
+                "{}",
+                new byte[size],
+                new AgentObservation(
+                    new string('a', 64),
+                    Identity,
+                    ImmutableDictionary<string, ImmutableHashSet<int>>.Empty));
+        });
+        var outcome = await new AgentLoop(
+            new ScriptedChatClient(responses),
+            executor).RunAsync(
+                Request(),
+                CancellationToken.None);
+
+        if (plusOne)
+        {
+            AssertFailure(outcome, "tool_result_limit");
+            Assert.Equal(AgentLimits.ToolCallsPerResponse + 1, executor.Order.Count);
+        }
+        else
+        {
+            Assert.True(outcome.Succeeded);
+            Assert.Equal(AgentLimits.ToolCallsPerResponse, executor.Order.Count);
+        }
+    }
+
     [Fact]
     public async Task CallerCancellationWinsBeforeModelCall()
     {
@@ -594,6 +1043,251 @@ public sealed class AgentLoopTests
     }
 
     [Fact]
+    public async Task BackendMappingFailuresAreResponseInvalidButBackendFailuresAreChatFailed()
+    {
+        var malformedBackend = new CapturingMinimalBackend(
+            new MinimalChatResponse(
+                new MinimalChatMessage(
+                    "assistant",
+                    [
+                        new MinimalChatContent(
+                            "unknown",
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            0,
+                            0),
+                    ]),
+                new MinimalChatUsage(1, 1),
+                1));
+        var malformed = await new AgentLoop(
+            new MinimalChatClient(malformedBackend),
+            new ScriptedToolExecutor()).RunAsync(
+                Request(),
+                CancellationToken.None);
+        AssertFailure(malformed, "agent_response_invalid");
+
+        var failed = await new AgentLoop(
+            new MinimalChatClient(new ThrowingMinimalBackend()),
+            new ScriptedToolExecutor()).RunAsync(
+                Request(),
+                CancellationToken.None);
+        AssertFailure(failed, "agent_chat_failed");
+    }
+
+    [Fact]
+    public async Task IdentifierAndScopeDomainsAcceptExactCapsAndRejectPlusOne()
+    {
+        var exact = Request() with
+        {
+            SessionId = new string('s', 64),
+            StablePlan = Request().StablePlan with
+            {
+                WorkflowIdentity = new string('w', 256),
+                BuildId = new string('b', 256),
+                ProviderId = new string('p', 128),
+                ModelId = new string('m', 128),
+                AdapterId = new string('a', 128),
+            },
+        };
+        var success = await new AgentLoop(
+            new ScriptedChatClient([
+                Response(TerminalCall(new string('c', 64), "done"), 0, 0),
+            ]),
+            new ScriptedToolExecutor()).RunAsync(
+                exact,
+                CancellationToken.None);
+        Assert.True(success.Succeeded);
+
+        var invalidRuns = new[]
+        {
+            exact with { SessionId = new string('s', 65) },
+            exact with { SessionId = "bad/session" },
+            exact with
+            {
+                StablePlan = exact.StablePlan with
+                {
+                    WorkflowIdentity = new string('w', 257),
+                },
+            },
+            exact with
+            {
+                StablePlan = exact.StablePlan with
+                {
+                    ProviderId = new string('p', 129),
+                },
+            },
+        };
+        foreach (var invalid in invalidRuns)
+        {
+            var chat = new ScriptedChatClient([]);
+            var outcome = await new AgentLoop(
+                chat,
+                new ScriptedToolExecutor()).RunAsync(
+                    invalid,
+                    CancellationToken.None);
+            AssertFailure(outcome, "agent_response_invalid");
+            Assert.Empty(chat.Requests);
+        }
+
+        var invalidCall = await new AgentLoop(
+            new ScriptedChatClient([
+                Response(
+                    TerminalCall(new string('c', 65), "done"),
+                    0,
+                    0),
+            ]),
+            new ScriptedToolExecutor()).RunAsync(
+                exact,
+                CancellationToken.None);
+        AssertFailure(invalidCall, "agent_response_invalid");
+    }
+
+    [Theory]
+    [InlineData(AgentLimits.Messages, true)]
+    [InlineData(AgentLimits.Messages + 1, false)]
+    public async Task TotalMessageCapIsExact(int totalMessages, bool accepted)
+    {
+        var messages = Enumerable.Range(0, totalMessages - 1)
+            .Select(_ => new ProjectChatMessage(
+                "user",
+                [new ProjectTextContent("x")]))
+            .ToArray();
+        var chat = new ScriptedChatClient([
+            Response(TerminalCall("finish", "done"), 0, 0),
+        ]);
+        var outcome = await new AgentLoop(
+            chat,
+            new ScriptedToolExecutor()).RunAsync(
+                Request() with { InitialMessages = messages },
+                CancellationToken.None);
+
+        if (accepted)
+        {
+            Assert.True(outcome.Succeeded);
+        }
+        else
+        {
+            AssertFailure(outcome, "agent_response_invalid");
+        }
+    }
+
+    [Theory]
+    [InlineData(AgentLimits.PartsPerMessage, true)]
+    [InlineData(AgentLimits.PartsPerMessage + 1, false)]
+    public async Task PerMessagePartCapIsExact(int parts, bool accepted)
+    {
+        var chat = new ScriptedChatClient(
+            accepted
+                ? [Response(TerminalCall("finish", "done"), 0, 0)]
+                : []);
+        var outcome = await new AgentLoop(
+            chat,
+            new ScriptedToolExecutor()).RunAsync(
+                Request() with
+                {
+                    InitialMessages =
+                    [
+                        new ProjectChatMessage(
+                            "user",
+                            Enumerable.Range(0, parts)
+                                .Select(_ =>
+                                    (ProjectChatContent)new ProjectTextContent("x"))
+                                .ToArray()),
+                    ],
+                },
+                CancellationToken.None);
+
+        if (accepted)
+        {
+            Assert.True(outcome.Succeeded);
+        }
+        else
+        {
+            AssertFailure(outcome, "agent_response_invalid");
+            Assert.Empty(chat.Requests);
+        }
+    }
+
+    [Theory]
+    [InlineData(AgentLimits.PartsTotal, true)]
+    [InlineData(AgentLimits.PartsTotal + 1, false)]
+    public async Task TotalPartCapIsExact(int totalParts, bool accepted)
+    {
+        var initialParts = totalParts - 1;
+        var messages = Enumerable.Range(
+                0,
+                (initialParts + AgentLimits.PartsPerMessage - 1) /
+                    AgentLimits.PartsPerMessage)
+            .Select(messageIndex =>
+            {
+                var count = Math.Min(
+                    AgentLimits.PartsPerMessage,
+                    initialParts - messageIndex * AgentLimits.PartsPerMessage);
+                return new ProjectChatMessage(
+                    "user",
+                    Enumerable.Range(0, count)
+                        .Select(_ => (ProjectChatContent)new ProjectTextContent("x"))
+                        .ToArray());
+            })
+            .ToArray();
+        var chat = new ScriptedChatClient([
+            Response(TerminalCall("finish", "done"), 0, 0),
+        ]);
+        var outcome = await new AgentLoop(
+            chat,
+            new ScriptedToolExecutor()).RunAsync(
+                Request() with { InitialMessages = messages },
+                CancellationToken.None);
+
+        if (accepted)
+        {
+            Assert.True(outcome.Succeeded);
+        }
+        else
+        {
+            AssertFailure(outcome, "agent_response_invalid");
+        }
+    }
+
+    [Theory]
+    [InlineData(AgentLimits.ContentBytes, true)]
+    [InlineData(AgentLimits.ContentBytes + 1, false)]
+    public async Task ContentByteCapIsExact(int bytes, bool accepted)
+    {
+        var chat = new ScriptedChatClient(
+            accepted
+                ? [Response(TerminalCall("finish", "done"), 0, 0)]
+                : []);
+        var outcome = await new AgentLoop(
+            chat,
+            new ScriptedToolExecutor()).RunAsync(
+                Request() with
+                {
+                    InitialMessages =
+                    [
+                        new ProjectChatMessage(
+                            "user",
+                            [new ProjectTextContent(new string('x', bytes))]),
+                    ],
+                },
+                CancellationToken.None);
+
+        if (accepted)
+        {
+            Assert.True(outcome.Succeeded);
+        }
+        else
+        {
+            AssertFailure(outcome, "agent_response_invalid");
+            Assert.Empty(chat.Requests);
+        }
+    }
+
+    [Fact]
     public async Task DeadlineAfterAwaitWinsBeforeResponseAdmission()
     {
         var clock = new AdvancingTimeProvider();
@@ -629,6 +1323,7 @@ public sealed class AgentLoopTests
             "model",
             "adapter",
             null),
+        "session",
         [
             new ProjectChatMessage(
                 "user",
@@ -651,6 +1346,75 @@ public sealed class AgentLoopTests
             new ProjectChatMessage("assistant", [call]),
             new ProjectChatUsage(inputTokens, outputTokens),
             1);
+
+    private static ProjectChatResponse ToolResponse(int offset, int count) =>
+        new(
+            new ProjectChatMessage(
+                "assistant",
+                Enumerable.Range(offset, count)
+                    .Select(index =>
+                        (ProjectChatContent)new ProjectToolCallContent(
+                            "call-" + index,
+                            "search_text",
+                            "{\"query\":\"x\"}"))
+                    .ToArray()),
+            new ProjectChatUsage(0, 0),
+            1);
+
+    private static ProjectReasoningContent Reasoning(
+        ProjectContinuationItem item) =>
+        new(
+            item.Readable,
+            item.Opaque,
+            item.Framing,
+            item.AssociatedCallId,
+            item.MessagePosition,
+            item.ContentPosition);
+
+    private static ProjectContinuation Continuation(
+        params ProjectContinuationItem[] items) =>
+        new("provider", "model", "adapter", "session", items);
+
+    private static void AssertContinuation(
+        AgentContinuationCandidateItem actual,
+        ProjectContinuationItem expected)
+    {
+        Assert.Equal(expected.Readable, actual.Readable);
+        Assert.Equal(expected.Opaque, actual.Opaque);
+        Assert.Equal(expected.Framing, actual.Framing);
+        Assert.Equal(expected.AssociatedCallId, actual.AssociatedCallId);
+        Assert.Equal(expected.MessagePosition, actual.MessagePosition);
+        Assert.Equal(expected.ContentPosition, actual.ContentPosition);
+    }
+
+    private static AgentRunRequest RequestWithSerializedSize(int targetBytes)
+    {
+        var messages = Enumerable.Range(0, 15)
+            .Select(_ => new ProjectChatMessage(
+                "user",
+                [new ProjectTextContent(new string('x', AgentLimits.ContentBytes))]))
+            .Append(new ProjectChatMessage(
+                "user",
+                [new ProjectTextContent(string.Empty)]))
+            .ToArray();
+        var run = Request() with { InitialMessages = messages };
+        var initialSize = SerializedSize(run);
+        var remaining = targetBytes - initialSize;
+        Assert.InRange(remaining, 0, AgentLimits.ContentBytes);
+        messages[^1] = new ProjectChatMessage(
+            "user",
+            [new ProjectTextContent(new string('x', remaining))]);
+        run = run with { InitialMessages = messages };
+        Assert.Equal(targetBytes, SerializedSize(run));
+        return run;
+    }
+
+    private static int SerializedSize(AgentRunRequest run) =>
+        AgentRequestWriter.Write(new ProjectChatRequest(
+            run.InitialMessages,
+            AgentToolRegistry.Definitions.ToArray(),
+            run.Continuation,
+            ThinkingRequired: true)).Length;
 
     private static AgentToolExecution Success(
         PreparedAgentToolCall call,
@@ -709,6 +1473,15 @@ public sealed class AgentLoopTests
         }
     }
 
+    private sealed class ThrowingMinimalBackend : IMinimalChatBackend
+    {
+        public Task<MinimalChatResponse> GetResponseAsync(
+            MinimalChatRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromException<MinimalChatResponse>(
+                new InvalidOperationException("backend credential canary"));
+    }
+
     private sealed class ThrowingChatClient(
         Func<ProjectChatRequest, Task<ProjectChatResponse>> callback)
         : IProjectChatClient
@@ -757,6 +1530,8 @@ public sealed class AgentLoopTests
 
         internal CancellationToken ObservedToken { get; private set; }
 
+        public string? Preflight(PreparedAgentToolCall call) => null;
+
         public async ValueTask<AgentToolExecution> ExecuteAsync(
             PreparedAgentToolCall call,
             CancellationToken cancellationToken)
@@ -771,13 +1546,22 @@ public sealed class AgentLoopTests
 
     private sealed class ScriptedToolExecutor(
         Func<PreparedAgentToolCall, AgentToolExecution>? callback = null,
-        bool yieldDuringExecution = false) : IAgentToolExecutor
+        bool yieldDuringExecution = false,
+        Func<PreparedAgentToolCall, string?>? preflight = null) : IAgentToolExecutor
     {
         private int _active;
 
         internal List<string> Order { get; } = [];
 
+        internal List<string> PreflightOrder { get; } = [];
+
         internal int MaximumConcurrency { get; private set; }
+
+        public string? Preflight(PreparedAgentToolCall call)
+        {
+            PreflightOrder.Add(call.CallId);
+            return preflight?.Invoke(call);
+        }
 
         public async ValueTask<AgentToolExecution> ExecuteAsync(
             PreparedAgentToolCall call,
