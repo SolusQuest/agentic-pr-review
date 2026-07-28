@@ -20,6 +20,8 @@ EXPECTED_FIRST="${FIXTURES}/expected-first.json.golden"
 EXPECTED_RESUME="${FIXTURES}/expected-resume.json.golden"
 EXPECTED_COMBINED="${FIXTURES}/expected-combined.json.golden"
 SOURCE_MANIFEST="${FIXTURES}/manifests/neutral-source-manifest.tsv"
+NEUTRAL_SNAPSHOT_MANIFEST="${FIXTURES}/manifests/neutral-snapshot-manifest.tsv"
+NEUTRAL_SOURCE_ROOT="${FIXTURES}/neutral-source"
 MINIMAL_PROJECT_API_MANIFEST="${FIXTURES}/manifests/neutral-Minimal-project-api.tsv"
 MINIMAL_PACKAGE_API_MANIFEST="${FIXTURES}/manifests/neutral-Minimal-package-api.tsv"
 MEAI_PROJECT_API_MANIFEST="${FIXTURES}/manifests/neutral-MicrosoftExtensionsAI-project-api.tsv"
@@ -27,7 +29,7 @@ MEAI_PACKAGE_API_MANIFEST="${FIXTURES}/manifests/neutral-MicrosoftExtensionsAI-p
 API_MANIFEST_TOOL="${REPO_ROOT}/runtime/tools/AiApiManifest/AgenticPrReview.Runtime.AiApiManifest.csproj"
 ASSEMBLY="AgenticPrReview.Runtime.AiAbstractionAotFixture"
 DOTNET_CMD="${DOTNET_CMD:-dotnet}"
-NEUTRAL_COMMIT="405e0468fc15dc932970b378081ae030028409fe"
+_neutral_snapshot_verified=0
 _neutral_api_verified=0
 
 CANDIDATES=(Minimal MicrosoftExtensionsAI)
@@ -107,6 +109,9 @@ _require_inputs() {
   _require_file expected-resume "${EXPECTED_RESUME}"
   _require_file expected-combined "${EXPECTED_COMBINED}"
   _require_file neutral-source-manifest "${SOURCE_MANIFEST}"
+  _require_file neutral-snapshot-manifest "${NEUTRAL_SNAPSHOT_MANIFEST}"
+  _require_file neutral-snapshot-project \
+    "${NEUTRAL_SOURCE_ROOT}/runtime/tests/AiAbstractionAotFixture/AgenticPrReview.Runtime.AiAbstractionAotFixture.csproj"
   _require_file neutral-minimal-project-api "${MINIMAL_PROJECT_API_MANIFEST}"
   _require_file neutral-minimal-package-api "${MINIMAL_PACKAGE_API_MANIFEST}"
   _require_file neutral-meai-project-api "${MEAI_PROJECT_API_MANIFEST}"
@@ -185,6 +190,8 @@ _verifier_self_tests() {
 _emit_frozen_manifests() {
   printf 'APR_AI_MANIFEST neutral_source_sha256=%s\n' \
     "$(sha256sum "${SOURCE_MANIFEST}" | awk '{print $1}')"
+  printf 'APR_AI_MANIFEST neutral_snapshot_sha256=%s\n' \
+    "$(sha256sum "${NEUTRAL_SNAPSHOT_MANIFEST}" | awk '{print $1}')"
   printf 'APR_AI_MANIFEST neutral_minimal_project_api_sha256=%s\n' \
     "$(sha256sum "${MINIMAL_PROJECT_API_MANIFEST}" | awk '{print $1}')"
   printf 'APR_AI_MANIFEST neutral_minimal_package_api_sha256=%s\n' \
@@ -193,6 +200,7 @@ _emit_frozen_manifests() {
     "$(sha256sum "${MEAI_PROJECT_API_MANIFEST}" | awk '{print $1}')"
   printf 'APR_AI_MANIFEST neutral_meai_package_api_sha256=%s\n' \
     "$(sha256sum "${MEAI_PACKAGE_API_MANIFEST}" | awk '{print $1}')"
+  _verify_neutral_snapshot
   local header
   IFS= read -r header <"${SOURCE_MANIFEST}"
   local candidate path expected_object expected_bytes scope
@@ -203,11 +211,13 @@ _emit_frozen_manifests() {
     fi
     local actual_object
     local actual_bytes
-    if ! actual_object="$(git rev-parse "${NEUTRAL_COMMIT}:${path}" 2>/dev/null)" ||
-       ! actual_bytes="$(git cat-file -s "${NEUTRAL_COMMIT}:${path}" 2>/dev/null)"; then
+    local snapshot_path="${NEUTRAL_SOURCE_ROOT}/${path}"
+    if ! actual_object="$(git hash-object -- "${snapshot_path}" 2>/dev/null)" ||
+       ! actual_bytes="$(wc -c <"${snapshot_path}")"; then
       printf 'APR_AI_NEUTRAL_EVIDENCE_MISSING %s\n' "${candidate}" >&2
       return 1
     fi
+    actual_bytes="${actual_bytes//[[:space:]]/}"
     if [[ "${actual_object}" != "${expected_object}" ||
           "${actual_bytes}" != "${expected_bytes}" ]]; then
       printf 'APR_AI_NEUTRAL_SOURCE_MISMATCH %s\n' "${candidate}" >&2
@@ -217,21 +227,69 @@ _emit_frozen_manifests() {
   _verify_neutral_api_manifests
 }
 
+_verify_neutral_snapshot() {
+  if [[ "${_neutral_snapshot_verified}" == "1" ]]; then
+    return 0
+  fi
+
+  _require_file neutral-snapshot-manifest "${NEUTRAL_SNAPSHOT_MANIFEST}"
+  local header
+  IFS= read -r header <"${NEUTRAL_SNAPSHOT_MANIFEST}"
+  if [[ "${header}" != $'path\tgitBlobObjectId\tgitBlobBytes' ]]; then
+    printf 'APR_AI_NEUTRAL_SNAPSHOT_MANIFEST_INVALID\n' >&2
+    return 1
+  fi
+
+  local root
+  _new_tempdir root
+  tail -n +2 "${NEUTRAL_SNAPSHOT_MANIFEST}" |
+    cut -f1 |
+    LC_ALL=C sort >"${root}/expected-paths"
+  find "${NEUTRAL_SOURCE_ROOT}" -type f -printf '%P\n' |
+    LC_ALL=C sort >"${root}/actual-paths"
+  _compare_files \
+    "${root}/actual-paths" \
+    "${root}/expected-paths" \
+    APR_AI_NEUTRAL_SNAPSHOT_MISMATCH paths
+
+  local path expected_object expected_bytes
+  while IFS=$'\t' read -r path expected_object expected_bytes; do
+    if [[ -z "${path}" ]]; then
+      continue
+    fi
+    if [[ "${path}" == /* ||
+          "${path}" == ".." ||
+          "${path}" == ../* ||
+          "${path}" == */../* ]]; then
+      printf 'APR_AI_NEUTRAL_SNAPSHOT_MANIFEST_INVALID\n' >&2
+      return 1
+    fi
+
+    local snapshot_path="${NEUTRAL_SOURCE_ROOT}/${path}"
+    local actual_object
+    local actual_bytes
+    if ! actual_object="$(git hash-object -- "${snapshot_path}" 2>/dev/null)" ||
+       ! actual_bytes="$(wc -c <"${snapshot_path}")"; then
+      printf 'APR_AI_NEUTRAL_SNAPSHOT_MISSING\n' >&2
+      return 1
+    fi
+    actual_bytes="${actual_bytes//[[:space:]]/}"
+    if [[ "${actual_object}" != "${expected_object}" ||
+          "${actual_bytes}" != "${expected_bytes}" ]]; then
+      printf 'APR_AI_NEUTRAL_SNAPSHOT_MISMATCH content\n' >&2
+      return 1
+    fi
+  done < <(tail -n +2 "${NEUTRAL_SNAPSHOT_MANIFEST}")
+  _neutral_snapshot_verified=1
+}
+
 _generate_neutral_api_manifests() {
   local output_dir="$1"
   mkdir -p -- "${output_dir}"
+  _verify_neutral_snapshot
   local root
   _new_tempdir root
-  local neutral_source="${root}/neutral"
-  mkdir -p -- "${neutral_source}"
-  local archive_log="${root}/archive.log"
-  if ! git archive "${NEUTRAL_COMMIT}" \
-      global.json \
-      runtime/tests/AiAbstractionAotFixture |
-      tar -x -C "${neutral_source}" >"${archive_log}" 2>&1; then
-    printf 'APR_AI_NEUTRAL_ARCHIVE_FAIL\n' >&2
-    return 1
-  fi
+  local neutral_source="${NEUTRAL_SOURCE_ROOT}"
 
   local tool_output="${root}/tool"
   local tool_log="${root}/tool-build.log"
@@ -769,7 +827,7 @@ Usage: verify-ai-abstraction.sh [framework|aot|all|selected-production]
   aot                             Compare both candidates as linux-x64 Native AOT binaries.
   all                             Run framework and AOT comparison gates (default).
   selected-production             Execute the selected shared-source production seam.
-  generate-neutral-api-manifests  Regenerate commit-bound API manifests.
+  generate-neutral-api-manifests  Regenerate tree-contained neutral API manifests.
 USAGE
     ;;
   *)
