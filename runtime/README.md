@@ -24,11 +24,13 @@ The runtime now also contains the selected internal project-minimal Agent chat s
 by the reproducible two-candidate decision in
 [`docs/20_architecture/ai-abstraction-decision.md`](../docs/20_architecture/ai-abstraction-decision.md);
 the comparison fixture compiles the exact same selected source rather than a copied implementation.
-The comparison gate also verifies a checked-in, complete neutral source snapshot plus its
-adapter/API manifests, parses isolated `project.assets.json` files, rejects non-zero candidate
-warnings, and classifies every byte comparison failure without printing raw build logs or private
-absolute paths. The snapshot is ordinary reachable tree content, so reproducing the decision does
-not depend on an intermediate PR commit remaining reachable after squash merge or branch deletion.
+The comparison gate also verifies a checked-in, complete neutral source snapshot under the named
+test-only fixture's `NeutralEvidence` directory plus its adapter/API manifests, parses isolated
+`project.assets.json` files, rejects non-zero candidate warnings, and classifies every byte
+comparison failure without printing raw build logs or private absolute paths. The active project
+excludes the snapshot from normal compilation; the verifier builds it only as isolated evidence.
+The snapshot is ordinary reachable tree content, so reproducing the decision does not depend on an
+intermediate PR commit remaining reachable after squash merge or branch deletion.
 
 ## Local validation
 
