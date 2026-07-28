@@ -731,6 +731,85 @@ public sealed partial class AgentToolsTests
     }
 
     [Theory]
+    [InlineData("summary", "", false)]
+    [InlineData("summary", "\n", false)]
+    [InlineData("summary", "\r", false)]
+    [InlineData("summary", " \t\r\n ", false)]
+    [InlineData("summary", "line one\nline two", true)]
+    [InlineData("title", "\n", false)]
+    [InlineData("title", "\r", false)]
+    [InlineData("title", " \t\r\n ", false)]
+    [InlineData("title", "line one\nline two", true)]
+    [InlineData("message", "\n", false)]
+    [InlineData("message", "\r", false)]
+    [InlineData("message", " \t\r\n ", false)]
+    [InlineData("message", "line one\nline two", true)]
+    public void TerminalTextRejectsOnlyWhitespaceAcrossLineBreaks(
+        string field,
+        string value,
+        bool accepted)
+    {
+        var observationId = new string('a', 64);
+        var observation = GroundedObservation(observationId);
+        var summary = field == "summary" ? value : "done";
+        var title = field == "title" ? value : "finding";
+        var message = field == "message" ? value : "message";
+        var findings = field == "summary"
+            ? ImmutableArray<AgentFinding>.Empty
+            :
+            [
+                GroundedFinding(observationId, title, message),
+            ];
+        var json = Encoding.UTF8.GetString(
+            AgentToolArguments.WriteFinishReview(summary, findings));
+        Assert.True(AgentToolArguments.TryFinishReview(json, out var arguments));
+
+        Assert.Equal(
+            accepted,
+            TerminalReviewValidator.TryValidate(
+                arguments!,
+                Identity,
+                [observation],
+                out _));
+    }
+
+    [Theory]
+    [InlineData("summary", AgentLimits.SummaryBytes, true)]
+    [InlineData("summary", AgentLimits.SummaryBytes + 1, false)]
+    [InlineData("title", AgentLimits.FindingTitleBytes, true)]
+    [InlineData("title", AgentLimits.FindingTitleBytes + 1, false)]
+    [InlineData("message", AgentLimits.FindingMessageBytes, true)]
+    [InlineData("message", AgentLimits.FindingMessageBytes + 1, false)]
+    public void TerminalTextFieldByteCapsAreExact(
+        string field,
+        int bytes,
+        bool accepted)
+    {
+        var observationId = new string('a', 64);
+        var observation = GroundedObservation(observationId);
+        var summary = field == "summary" ? new string('s', bytes) : "done";
+        var title = field == "title" ? new string('t', bytes) : "finding";
+        var message = field == "message" ? new string('m', bytes) : "message";
+        var findings = field == "summary"
+            ? ImmutableArray<AgentFinding>.Empty
+            :
+            [
+                GroundedFinding(observationId, title, message),
+            ];
+        var json = Encoding.UTF8.GetString(
+            AgentToolArguments.WriteFinishReview(summary, findings));
+        Assert.True(AgentToolArguments.TryFinishReview(json, out var arguments));
+
+        Assert.Equal(
+            accepted,
+            TerminalReviewValidator.TryValidate(
+                arguments!,
+                Identity,
+                [observation],
+                out _));
+    }
+
+    [Theory]
     [InlineData(AgentLimits.Findings, true)]
     [InlineData(AgentLimits.Findings + 1, false)]
     public void TerminalFindingCapIsExact(int findingCount, bool accepted)
@@ -805,6 +884,30 @@ public sealed partial class AgentToolsTests
                 [observation],
                 out _));
     }
+
+    private static AgentObservation GroundedObservation(string observationId) =>
+        new(
+            observationId,
+            Identity,
+            ImmutableDictionary<string, ImmutableHashSet<int>>.Empty
+                .WithComparers(StringComparer.Ordinal)
+                .Add("a.txt", [1]));
+
+    private static AgentFinding GroundedFinding(
+        string observationId,
+        string title,
+        string message) =>
+        new(
+            "high",
+            title,
+            message,
+            [
+                new AgentEvidence(
+                    observationId,
+                    "a.txt",
+                    1,
+                    1),
+            ]);
 
     private static async Task<AgentToolExecution> ExecuteReadAsync(
         string path,

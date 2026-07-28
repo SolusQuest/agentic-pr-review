@@ -29,9 +29,9 @@ For each model turn, the loop:
 2. constructs one project request containing the admitted logical history, the exact ordered tool definitions, continuation values, and `ThinkingRequired = true`;
 3. consumes the model-call count immediately before invoking chat;
 4. after the await, rechecks caller cancellation and deadline, then maps chat failure;
-5. admits captured response bytes and shape before exact non-negative per-call usage, checked cumulative input/output/combined token totals, content counts, call IDs, the complete tool-call sequence, every canonical arguments value, and every path/allowlist preflight;
+5. admits captured response bytes and generic message/content-kind shape, then exact non-negative per-call usage and checked cumulative input/output/combined token totals before content counts, tool sequence/name semantics, canonical arguments, or path/allowlist preflight;
 6. dispatches admitted nonterminal calls one at a time in provider order only after the complete response has passed lexical, schema, canonical, call-ID, toolset, and snapshot-allowlist admission;
-7. after each tool await, rechecks cancellation and deadline, maps the operation failure, charges the complete actual canonical result against individual and aggregate result-byte limits, records the observation, and only then permits the next call;
+7. after each tool await, rechecks cancellation and deadline, maps only the frozen tool-failure taxonomy, charges the complete actual canonical result against individual and aggregate result-byte limits, then admits the result only when its strict UTF-8 model text, registered canonical writer, reviewed identity, domain-separated observation ID, and returned-line evidence map all agree before permitting the next call;
 8. invokes chat again with one physical assistant message followed by its ordered tool-result messages; or
 9. succeeds only when the response contains one valid terminal `finish_review` call and no other tool call.
 
@@ -51,9 +51,9 @@ The normalized bytes are the single identity used for the admitted assistant mes
 
 ## Logical history and continuation
 
-The loop accepts an in-memory handoff consisting of the exact stable plan, an identifier-domain session ID, canonical logical history, and an optional provider-scoped continuation envelope. Initial history may contain system/user text, canonical assistant tool calls, and ordered tool-result messages. It is validated before chat, and every prior call ID is seeded into the run-wide reuse registry.
+The loop accepts an in-memory handoff consisting of the exact stable plan, an identifier-domain session ID, canonical logical history, and an optional provider-scoped continuation envelope. Initial history may contain system/user text, canonical assistant tool calls, and ordered tool-result messages. Logical text content is strict UTF-8 from 1 byte through 64 KiB; an assistant with only tool calls omits a text part instead of emitting an empty one. History is validated before chat, and every prior call ID is seeded into the run-wide reuse registry.
 
-An initial continuation is a cumulative envelope for that history. Each item must match provider, model, adapter, and exact session scope; target an assistant message and valid content slot; retain its exact readable, opaque, and framing values; and reference a valid same-message tool call when associated. A response continuation is a per-response delta. It must account one-for-one for the response reasoning parts at their exact message/content positions. Accepted deltas are appended once, in returned array order, to the cumulative envelope.
+An initial continuation is a cumulative envelope for that history. Each item must match provider, model, adapter, and exact session scope; target an assistant message and valid content slot; retain its exact readable, opaque, and framing values; and reference a valid same-message tool call when associated. Readable and opaque values may be empty while framing is non-empty; all three remain independently bounded. A response continuation is a per-response delta. It must account one-for-one for the response reasoning parts at their exact message/content positions. Accepted deltas are appended once, in returned array order, to the cumulative envelope.
 
 Reasoning payload values stay only in the provider continuation channel. The logical assistant history stores canonical text and tool calls, while message and continuation events retain hashes, placement, and association metadata. A successful outcome exposes the exact cumulative continuation candidate for #89's in-memory session handoff; failures expose no candidate.
 
@@ -69,7 +69,7 @@ The production file-access seam performs conservative component checks and fails
 
 ## Terminal and evidence
 
-`finish_review` is terminal and must be the only tool call in its response. Its schema is closed; summary/title/message whitespace and UTF-8 byte rules, severities, counts, line domains, duplicate findings, and duplicate evidence are validated locally.
+`finish_review` is terminal and must be the only tool call in its response. Its schema is closed; summary/title/message reject empty or fixed-whitespace-only values, including LF, CR, and CRLF combinations, while allowing multiline text containing a non-whitespace scalar. Their exact UTF-8 byte limits, severities, counts, line domains, duplicate findings, and duplicate evidence are validated locally.
 
 Every evidence reference must match an admitted current-run observation with the same reviewed identity, exact observation ID, normalized path, and an entirely returned line range. A forged ID, wrong path, uncaptured or truncated-away line, prior-run observation, duplicate evidence, or invalid terminal sequence fails without a publishable review or completed-session-eligible outcome.
 

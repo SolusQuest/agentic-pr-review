@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Text;
+using System.Text.Json;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Canonical;
 
@@ -70,6 +71,264 @@ internal sealed record AgentToolExecution(
 {
     internal static AgentToolExecution Failure(string code) =>
         new(false, code, null, null, null);
+}
+
+internal static class AgentToolResultAdmission
+{
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+
+    internal static bool IsFrozenFailureCode(string? code) =>
+        code is AgentFailureCodes.ToolPathInvalid or
+            AgentFailureCodes.ToolPathNotTracked or
+            AgentFailureCodes.ToolPathUnsafe or
+            AgentFailureCodes.ToolFileTooLarge or
+            AgentFailureCodes.ToolFileBinary or
+            AgentFailureCodes.ToolFileInvalidUtf8 or
+            AgentFailureCodes.ToolFileLoneCr or
+            AgentFailureCodes.ToolIoFailed or
+            AgentFailureCodes.ToolResultLimit;
+
+    internal static bool TryAdmit(
+        PreparedAgentToolCall call,
+        ReviewedIdentity expectedIdentity,
+        AgentToolExecution execution,
+        out string resultJson,
+        out AgentObservation observation)
+    {
+        resultJson = string.Empty;
+        observation = null!;
+        if (!execution.Succeeded ||
+            execution.FailureCode is not null ||
+            execution.ResultJson is null ||
+            execution.CanonicalResult is null ||
+            execution.Observation is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            resultJson = StrictUtf8.GetString(execution.CanonicalResult);
+            if (!StringComparer.Ordinal.Equals(resultJson, execution.ResultJson))
+            {
+                return false;
+            }
+
+            using var document = JsonDocument.Parse(execution.CanonicalResult);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            var admitted = call switch
+            {
+                PreparedReadFileCall read => TryAdmitRead(
+                    read,
+                    expectedIdentity,
+                    root,
+                    execution.CanonicalResult,
+                    execution.Observation),
+                PreparedSearchTextCall search => TryAdmitSearch(
+                    search,
+                    expectedIdentity,
+                    root,
+                    execution.CanonicalResult,
+                    execution.Observation),
+                _ => false,
+            };
+            if (!admitted)
+            {
+                resultJson = string.Empty;
+                return false;
+            }
+
+            observation = execution.Observation;
+            return true;
+        }
+        catch
+        {
+            resultJson = string.Empty;
+            observation = null!;
+            return false;
+        }
+    }
+
+    private static bool TryAdmitRead(
+        PreparedReadFileCall call,
+        ReviewedIdentity expectedIdentity,
+        JsonElement root,
+        byte[] canonical,
+        AgentObservation observation)
+    {
+        var lines = root.GetProperty("lines")
+            .EnumerateArray()
+            .Select(line => new ReadFileLine(
+                line.GetProperty("line").GetInt32(),
+                line.GetProperty("text").GetString()!))
+            .ToImmutableArray();
+        var result = new ReadFileResult(
+            root.GetProperty("status").GetString()!,
+            ReadIdentity(root.GetProperty("reviewed_identity")),
+            root.GetProperty("path").GetString()!,
+            root.GetProperty("raw_sha256").GetString()!,
+            root.GetProperty("requested_start_line").GetInt32(),
+            root.GetProperty("requested_line_count").GetInt32(),
+            NullableInt32(root.GetProperty("returned_start_line")),
+            NullableInt32(root.GetProperty("returned_end_line")),
+            lines,
+            root.GetProperty("truncated").GetBoolean(),
+            NullableString(root.GetProperty("truncation_reason")),
+            root.GetProperty("observation_id").GetString()!);
+        var returned = lines.Length == 0
+            ? EmptyReturnedLines()
+            : EmptyReturnedLines().Add(
+                result.Path,
+                lines.Select(line => line.Line).ToImmutableHashSet());
+        return result.ReviewedIdentity == expectedIdentity &&
+            result.Status is "ok" or "start_after_eof" &&
+            StringComparer.Ordinal.Equals(result.Path, call.Arguments.Path) &&
+            result.RequestedStartLine == call.Arguments.StartLine &&
+            result.RequestedLineCount == call.Arguments.LineCount &&
+            IsLowerHex(result.RawSha256, 64) &&
+            IsLowerHex(result.ObservationId, 64) &&
+            canonical.AsSpan().SequenceEqual(ReadFileResultWriter.Write(result)) &&
+            StringComparer.Ordinal.Equals(
+                result.ObservationId,
+                AgentCanonical.HashDomain(
+                    AgentCanonical.ReadObservationDomain,
+                    ReadFileResultWriter.Write(
+                        result with { ObservationId = null },
+                        includeObservationId: false))) &&
+            ObservationMatches(
+                observation,
+                expectedIdentity,
+                result.ObservationId,
+                returned);
+    }
+
+    private static bool TryAdmitSearch(
+        PreparedSearchTextCall call,
+        ReviewedIdentity expectedIdentity,
+        JsonElement root,
+        byte[] canonical,
+        AgentObservation observation)
+    {
+        var matches = root.GetProperty("matches")
+            .EnumerateArray()
+            .Select(match => new SearchMatch(
+                match.GetProperty("path").GetString()!,
+                match.GetProperty("raw_sha256").GetString()!,
+                match.GetProperty("line").GetInt32(),
+                match.GetProperty("text").GetString()!))
+            .ToImmutableArray();
+        var result = new SearchTextResult(
+            root.GetProperty("status").GetString()!,
+            ReadIdentity(root.GetProperty("reviewed_identity")),
+            root.GetProperty("query_sha256").GetString()!,
+            NullableString(root.GetProperty("path")),
+            root.GetProperty("files_scanned").GetInt32(),
+            root.GetProperty("raw_bytes_scanned").GetInt64(),
+            root.GetProperty("skipped_invalid_utf8").GetInt32(),
+            root.GetProperty("skipped_binary").GetInt32(),
+            root.GetProperty("skipped_lone_cr").GetInt32(),
+            root.GetProperty("skipped_oversized").GetInt32(),
+            matches,
+            root.GetProperty("truncated").GetBoolean(),
+            NullableString(root.GetProperty("truncation_reason")),
+            root.GetProperty("observation_id").GetString()!);
+        var returned = matches
+            .GroupBy(match => match.Path, StringComparer.Ordinal)
+            .ToImmutableDictionary(
+                group => group.Key,
+                group => group.Select(match => match.Line).ToImmutableHashSet(),
+                StringComparer.Ordinal);
+        return result.ReviewedIdentity == expectedIdentity &&
+            StringComparer.Ordinal.Equals(result.Status, "ok") &&
+            StringComparer.Ordinal.Equals(
+                result.QuerySha256,
+                AgentCanonical.QuerySha256(call.Arguments.Query)) &&
+            StringComparer.Ordinal.Equals(result.Path, call.Arguments.Path) &&
+            result.FilesScanned >= 0 &&
+            result.RawBytesScanned >= 0 &&
+            result.SkippedInvalidUtf8 >= 0 &&
+            result.SkippedBinary >= 0 &&
+            result.SkippedLoneCr >= 0 &&
+            result.SkippedOversized >= 0 &&
+            matches.All(match =>
+                RepositoryPath.IsValid(match.Path) &&
+                IsLowerHex(match.RawSha256, 64) &&
+                match.Line >= 1 &&
+                (call.Arguments.Path is null ||
+                    StringComparer.Ordinal.Equals(
+                        match.Path,
+                        call.Arguments.Path))) &&
+            IsLowerHex(result.ObservationId, 64) &&
+            canonical.AsSpan().SequenceEqual(SearchTextResultWriter.Write(result)) &&
+            StringComparer.Ordinal.Equals(
+                result.ObservationId,
+                AgentCanonical.HashDomain(
+                    AgentCanonical.SearchObservationDomain,
+                    SearchTextResultWriter.Write(
+                        result with { ObservationId = null },
+                        includeObservationId: false))) &&
+            ObservationMatches(
+                observation,
+                expectedIdentity,
+                result.ObservationId!,
+                returned);
+    }
+
+    private static ReviewedIdentity ReadIdentity(JsonElement element) =>
+        new(
+            element.GetProperty("repository_id").GetString()!,
+            element.GetProperty("review_target").GetInt64(),
+            element.GetProperty("base_sha").GetString()!,
+            element.GetProperty("head_sha").GetString()!);
+
+    private static int? NullableInt32(JsonElement element) =>
+        element.ValueKind == JsonValueKind.Null ? null : element.GetInt32();
+
+    private static string? NullableString(JsonElement element) =>
+        element.ValueKind == JsonValueKind.Null ? null : element.GetString();
+
+    private static ImmutableDictionary<string, ImmutableHashSet<int>>
+        EmptyReturnedLines() =>
+            ImmutableDictionary<string, ImmutableHashSet<int>>.Empty
+                .WithComparers(StringComparer.Ordinal);
+
+    private static bool ObservationMatches(
+        AgentObservation observation,
+        ReviewedIdentity expectedIdentity,
+        string observationId,
+        ImmutableDictionary<string, ImmutableHashSet<int>> returned)
+    {
+        if (observation.Identity != expectedIdentity ||
+            !StringComparer.Ordinal.Equals(
+                observation.ObservationId,
+                observationId) ||
+            observation.ReturnedLines.Count != returned.Count)
+        {
+            return false;
+        }
+
+        foreach (var pair in returned)
+        {
+            if (!observation.ReturnedLines.TryGetValue(pair.Key, out var lines) ||
+                !lines.SetEquals(pair.Value))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsLowerHex(string? value, int length) =>
+        value is not null &&
+        value.Length == length &&
+        value.All(character =>
+            character is >= '0' and <= '9' or >= 'a' and <= 'f');
 }
 
 internal interface IAgentToolExecutor

@@ -328,16 +328,37 @@ internal sealed class AgentLoop(
                     return Failure(stop, modelCalls, toolCalls, events);
                 }
 
-                if (!execution.Succeeded)
+                if (execution is null)
                 {
                     return Failure(
-                        execution.FailureCode ?? AgentFailureCodes.ToolIoFailed,
+                        AgentFailureCodes.ToolIoFailed,
                         modelCalls,
                         toolCalls,
                         events);
                 }
 
-                var canonicalResult = execution.CanonicalResult!;
+                if (!execution.Succeeded)
+                {
+                    return Failure(
+                        AgentToolResultAdmission.IsFrozenFailureCode(
+                            execution.FailureCode)
+                            ? execution.FailureCode!
+                            : AgentFailureCodes.ToolIoFailed,
+                        modelCalls,
+                        toolCalls,
+                        events);
+                }
+
+                if (execution.CanonicalResult is null)
+                {
+                    return Failure(
+                        AgentFailureCodes.ToolIoFailed,
+                        modelCalls,
+                        toolCalls,
+                        events);
+                }
+
+                var canonicalResult = execution.CanonicalResult;
                 if (canonicalResult.Length > AgentLimits.ToolResultBytes)
                 {
                     return Failure(
@@ -369,7 +390,20 @@ internal sealed class AgentLoop(
                         events);
                 }
 
-                var observation = execution.Observation!;
+                if (!AgentToolResultAdmission.TryAdmit(
+                        call,
+                        run.ReviewedIdentity,
+                        execution,
+                        out var resultJson,
+                        out var observation))
+                {
+                    return Failure(
+                        AgentFailureCodes.ToolIoFailed,
+                        modelCalls,
+                        toolCalls,
+                        events);
+                }
+
                 observations.Add(observation);
                 events.Add(new AgentToolResultEvent(
                     call.CallId,
@@ -379,7 +413,7 @@ internal sealed class AgentLoop(
                     canonicalResult.ToImmutableArray()));
                 messages.Add(new ProjectChatMessage(
                     "tool",
-                    [new ProjectToolResultContent(call.CallId, execution.ResultJson!)]));
+                    [new ProjectToolResultContent(call.CallId, resultJson)]));
                 contentParts++;
             }
 
@@ -435,12 +469,12 @@ internal sealed class AgentLoop(
             switch (content)
             {
                 case ProjectTextContent text
-                    when ValidContent(text.Text):
+                    when ValidTextContent(text.Text):
                     break;
                 case ProjectReasoningContent reasoning
-                    when ValidContent(reasoning.Text) &&
-                        ValidContent(reasoning.Opaque) &&
-                        ValidContent(reasoning.Framing) &&
+                    when ValidContinuationContent(reasoning.Text) &&
+                        ValidContinuationContent(reasoning.Opaque) &&
+                        ValidFramingContent(reasoning.Framing) &&
                         reasoning.MessagePosition >= 0 &&
                         reasoning.Position >= 0:
                     break;
@@ -454,6 +488,37 @@ internal sealed class AgentLoop(
                 default:
                     return AgentFailureCodes.ResponseInvalid;
             }
+        }
+
+        if (response.Usage is null ||
+            response.Usage.InputTokens < 0 ||
+            response.Usage.OutputTokens < 0)
+        {
+            return AgentFailureCodes.UsageInvalid;
+        }
+
+        long newInput;
+        long newOutput;
+        long newCombined;
+        try
+        {
+            newInput = checked(cumulativeInput + response.Usage.InputTokens);
+            newOutput = checked(cumulativeOutput + response.Usage.OutputTokens);
+            newCombined = checked(
+                cumulativeCombined +
+                response.Usage.InputTokens +
+                response.Usage.OutputTokens);
+        }
+        catch (OverflowException)
+        {
+            return AgentFailureCodes.UsageInvalid;
+        }
+
+        if (newInput > AgentLimits.InputTokens ||
+            newOutput > AgentLimits.OutputTokens ||
+            newCombined > AgentLimits.CombinedTokens)
+        {
+            return AgentFailureCodes.TokenLimit;
         }
 
         if (toolContents.Count is < 1 or > AgentLimits.ToolCallsPerResponse)
@@ -538,42 +603,23 @@ internal sealed class AgentLoop(
                 continue;
             }
 
-            var preflightFailure = toolExecutor.Preflight(call);
+            string? preflightFailure;
+            try
+            {
+                preflightFailure = toolExecutor.Preflight(call);
+            }
+            catch
+            {
+                return AgentFailureCodes.ToolIoFailed;
+            }
+
             if (preflightFailure is not null)
             {
-                return preflightFailure;
+                return AgentToolResultAdmission.IsFrozenFailureCode(
+                    preflightFailure)
+                    ? preflightFailure
+                    : AgentFailureCodes.ToolIoFailed;
             }
-        }
-
-        if (response.Usage is null ||
-            response.Usage.InputTokens < 0 ||
-            response.Usage.OutputTokens < 0)
-        {
-            return AgentFailureCodes.UsageInvalid;
-        }
-
-        long newInput;
-        long newOutput;
-        long newCombined;
-        try
-        {
-            newInput = checked(cumulativeInput + response.Usage.InputTokens);
-            newOutput = checked(cumulativeOutput + response.Usage.OutputTokens);
-            newCombined = checked(
-                cumulativeCombined +
-                response.Usage.InputTokens +
-                response.Usage.OutputTokens);
-        }
-        catch (OverflowException)
-        {
-            return AgentFailureCodes.UsageInvalid;
-        }
-
-        if (newInput > AgentLimits.InputTokens ||
-            newOutput > AgentLimits.OutputTokens ||
-            newCombined > AgentLimits.CombinedTokens)
-        {
-            return AgentFailureCodes.TokenLimit;
         }
 
         cumulativeInput = newInput;
@@ -944,7 +990,7 @@ internal sealed class AgentLoop(
             {
                 if (message.Contents.Any(content =>
                     content is not ProjectTextContent text ||
-                    !ValidContent(text.Text)))
+                    !ValidTextContent(text.Text)))
                 {
                     return false;
                 }
@@ -962,7 +1008,7 @@ internal sealed class AgentLoop(
             {
                 switch (content)
                 {
-                    case ProjectTextContent text when ValidContent(text.Text):
+                    case ProjectTextContent text when ValidTextContent(text.Text):
                         break;
                     case ProjectToolCallContent call
                         when TryValidatePriorCall(call, usedCallIds):
@@ -1147,8 +1193,16 @@ internal sealed class AgentLoop(
                         item.MessagePosition,
                         item.ContentPosition)).ToImmutableArray());
 
-    private static bool ValidContent(string? value) =>
+    private static bool ValidTextContent(string? value) =>
+        value is not null &&
+        Utf8Bytes(value) is >= 1 and <= AgentLimits.ContentBytes;
+
+    private static bool ValidContinuationContent(string? value) =>
         value is not null && Utf8Bytes(value) <= AgentLimits.ContentBytes;
+
+    private static bool ValidFramingContent(string? value) =>
+        value is not null &&
+        Utf8Bytes(value) is >= 1 and <= AgentLimits.ContentBytes;
 
     private static int Utf8Bytes(string value)
     {

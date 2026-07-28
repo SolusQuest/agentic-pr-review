@@ -134,7 +134,9 @@ Tool implementations must:
 - cap files scanned, bytes read, lines returned, and matches returned;
 - avoid executing reviewed code.
 
-The R2 implementation validates every tool call in a received assistant response, including lexical path and tracked-file allowlist preflight, before dispatching the first call. Linux file access opens with nonblocking and no-follow flags and proves a regular file through the opened descriptor before any seek or read, so FIFO and Unix-socket paths fail closed without hanging the run.
+The R2 implementation validates response usage before tool semantics, then validates every tool call in the received assistant response, including lexical path and tracked-file allowlist preflight, before dispatching the first call. A synchronous preflight exception maps to the frozen I/O failure without dispatch. Linux file access opens with nonblocking and no-follow flags and proves a regular file through the opened descriptor before any seek or read, so FIFO and Unix-socket paths fail closed without hanging the run.
+
+Successful tool execution has one authoritative canonical UTF-8 byte sequence. The model-visible result string is derived from those bytes, not supplied independently. Before the result becomes an event, observation, or later provider message, the Agent revalidates the registered result writer, reviewed identity, domain-separated observation ID, and exact returned-line evidence map. Null or inconsistent success values and non-taxonomy failure codes fail closed as `tool_io_failed`.
 
 The model cannot ask a tool to change the root, revision, allowlist, or head identity.
 

@@ -387,7 +387,8 @@ internal static class AgentTextValidation
     }
 
     private static bool IsFixedWhitespace(int scalar) =>
-        scalar is 0x0009 or 0x000B or 0x000C or 0x0020 or 0x0085 or
+        scalar is 0x0009 or 0x000A or 0x000B or 0x000C or 0x000D or
+            0x0020 or 0x0085 or
             0x00A0 or 0x1680 or 0x2028 or 0x2029 or 0x202F or 0x205F or
             0x3000 ||
         scalar is >= 0x2000 and <= 0x200A;
