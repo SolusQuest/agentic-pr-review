@@ -11,7 +11,7 @@ The detailed decision, rationale, migration sequence, tools, `Microsoft.Extensio
 
 ## Status
 
-This is the selected target direction. R1 removed the TypeScript business host and Claude Code CLI path, leaving no public Action. The current tree retains deterministic and ledger-oriented C# paths plus narrow M1-M4 TypeScript contract, state, publisher, and migration evidence until their R2-R4 owners replace them.
+This is the selected target direction. R1 removed the TypeScript business host and Claude Code CLI path, leaving no public Action. R2 has now selected the project-minimal in-memory Agent chat seam through a reasoning-enabled framework and Native AOT comparison; see [`ai-abstraction-decision.md`](./ai-abstraction-decision.md). The current tree retains deterministic and ledger-oriented C# paths plus narrow M1-M4 TypeScript contract, state, publisher, and migration evidence until their R2-R4 owners replace them.
 
 New work must distinguish:
 
@@ -128,7 +128,11 @@ Tools are implemented and enforced in C#. The model cannot construct commands or
 
 ## Microsoft.Extensions.AI
 
-R2 compares a pinned `Microsoft.Extensions.AI.Abstractions` dependency with project-minimal in-memory exchange types and selects the smaller option that passes the same Native AOT tool-loop proof. If adopted, `Microsoft.Extensions.AI.Abstractions` may provide `IChatClient` and chat/tool exchange types. It never owns:
+R2 compared `Microsoft.Extensions.AI.Abstractions` 10.8.1 with project-minimal exchange types under the same reasoning-enabled tool-loop, fresh-process restoration, and Native AOT proof. Both passed. Project-minimal exchange was selected because it preserves the same one-operation Agent capability and project ownership without an additional production package. The complete evidence and deletion gate are in [`ai-abstraction-decision.md`](./ai-abstraction-decision.md).
+
+The selection accounts for DeepSeek as the initial live provider and MiMo as the intended second provider. Multiple providers do not require MEAI ownership of the Agent boundary: each provider adapter still owns wire projection, reasoning continuation, capabilities, cache identity, usage mapping, and failures, while the Agent consumes one project-owned capability. The second real adapter is an evidence gate for reconsidering whether MEAI would materially reduce duplication.
+
+The comparison confirmed that an AI abstraction must never own:
 
 - the durable ledger;
 - the agent loop;
@@ -140,6 +144,8 @@ R2 compares a pinned `Microsoft.Extensions.AI.Abstractions` dependency with proj
 - terminal result validation.
 
 The initial production loop invokes the selected narrow chat-client abstraction directly and handles function-call content itself. It uses explicit tool schemas, explicit dispatch, project-owned DTOs, and source-generated JSON metadata. `FunctionInvokingChatClient`, reflection-driven tool schema generation, Microsoft Agent Framework, and Semantic Kernel are not part of the initial target.
+
+MEAI adoption and multi-agent orchestration are separate decisions. A main-agent/sub-agent topology does not by itself require MEAI; adopting Microsoft Agent Framework would require a later focused proof of orchestration ownership, scoped capabilities, session continuity, Native AOT, security, and provider-reasoning preservation. MEAI may be introduced behind the project-owned chat seam without changing the Agent loop or durable project-owned records if later provider or pipeline evidence justifies it.
 
 ## Runtime Replacement
 

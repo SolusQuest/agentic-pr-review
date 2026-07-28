@@ -19,6 +19,19 @@ emits IL3058. This is individually justified by the published Native AOT binary 
 embedded schemas and completing the deterministic fixture path under recurring CI. Do not replace
 this with a hand-written partial validator.
 
+The runtime now also contains the selected internal project-minimal Agent chat seam under
+`Agent/Chat`. It is not yet the production Agent loop or provider transport. The seam was selected
+by the reproducible two-candidate decision in
+[`docs/20_architecture/ai-abstraction-decision.md`](../docs/20_architecture/ai-abstraction-decision.md);
+the comparison fixture compiles the exact same selected source rather than a copied implementation.
+The comparison gate also verifies a checked-in, complete neutral source snapshot under the named
+test-only fixture's `NeutralEvidence` directory plus its adapter/API manifests, parses isolated
+`project.assets.json` files, rejects non-zero candidate warnings, and classifies every byte
+comparison failure without printing raw build logs or private absolute paths. The active project
+excludes the snapshot from normal compilation; the verifier builds it only as isolated evidence.
+The snapshot is ordinary reachable tree content, so reproducing the decision does not depend on an
+intermediate PR commit remaining reachable after squash merge or branch deletion.
+
 ## Local validation
 
 The framework-dependent and Native AOT bootstrap paths are exercised by a single Bash script
@@ -39,6 +52,12 @@ bash runtime/scripts/verify-runtime.sh aot
 bash runtime/scripts/verify-runtime.sh all
 # equivalently, from the repo root:
 npm run runtime:verify
+
+# reproduce both AI-abstraction candidates
+bash runtime/scripts/verify-ai-abstraction.sh all
+
+# execute the exact selected production source in framework and Native AOT modes
+bash runtime/scripts/verify-ai-abstraction.sh selected-production
 ```
 
 Result and trace outputs are compared to committed goldens by exact-byte `cmp`. Each smoke
@@ -47,7 +66,7 @@ stale output from participating in comparisons.
 
 ## Continuous integration
 
-Both the framework-dependent and `linux-x64` Native AOT paths run on every `pull_request`
-and on `push` to `main` via `.github/workflows/runtime-ci.yml`. The workflow installs the
-SDK from `global.json` and calls the same `verify-runtime.sh` subcommands used locally, so
-CI and contributor validation cannot drift.
+The direct runtime framework and `linux-x64` Native AOT paths, the two-candidate AI-abstraction
+comparison, and the selected-production parity path run on every `pull_request` and on `push` to
+`main` via `.github/workflows/runtime-ci.yml`. The workflow installs the SDK from `global.json`
+and calls the same scripts used locally, so CI and contributor validation cannot drift.
