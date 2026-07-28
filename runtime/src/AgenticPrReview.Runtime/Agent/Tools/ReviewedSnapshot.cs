@@ -1,0 +1,507 @@
+using System.Collections.Immutable;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+using AgenticPrReview.Runtime.Agent.Core;
+
+namespace AgenticPrReview.Runtime.Agent.Tools;
+
+internal sealed class ReviewedSnapshot
+{
+    private readonly ImmutableHashSet<string> _trackedFiles;
+
+    internal ReviewedSnapshot(
+        ReviewedIdentity identity,
+        string absoluteRoot,
+        IEnumerable<string> trackedFiles)
+    {
+        if (!identity.IsValid())
+        {
+            throw new ArgumentException("Reviewed identity is invalid.", nameof(identity));
+        }
+
+        var root = Path.GetFullPath(absoluteRoot);
+        if (!Path.IsPathFullyQualified(root) || !Directory.Exists(root))
+        {
+            throw new ArgumentException("Snapshot root must be an existing absolute directory.", nameof(absoluteRoot));
+        }
+
+        var builder = ImmutableHashSet.CreateBuilder<string>(StringComparer.Ordinal);
+        foreach (var trackedFile in trackedFiles)
+        {
+            if (!RepositoryPath.IsValid(trackedFile))
+            {
+                throw new ArgumentException("Tracked path is not canonical.", nameof(trackedFiles));
+            }
+
+            builder.Add(trackedFile);
+        }
+
+        Identity = identity;
+        AbsoluteRoot = Path.TrimEndingDirectorySeparator(root);
+        _trackedFiles = builder.ToImmutable();
+        OrderedTrackedFiles = _trackedFiles.Order(StringComparer.Ordinal).ToImmutableArray();
+    }
+
+    internal ReviewedIdentity Identity { get; }
+
+    internal string AbsoluteRoot { get; }
+
+    internal ImmutableArray<string> OrderedTrackedFiles { get; }
+
+    internal bool Contains(string path) => _trackedFiles.Contains(path);
+}
+
+internal static class RepositoryPath
+{
+    internal static bool IsValid(string path)
+    {
+        if (string.IsNullOrEmpty(path) || path[0] == '/')
+        {
+            return false;
+        }
+
+        try
+        {
+            if (new System.Text.UTF8Encoding(false, true).GetByteCount(path) >
+                AgentLimits.PathBytes)
+            {
+                return false;
+            }
+        }
+        catch (System.Text.EncoderFallbackException)
+        {
+            return false;
+        }
+
+        foreach (var character in path)
+        {
+            if (character is <= '\u001f' or '\u007f' ||
+                character is '\\' or ':' or '?' or '#' or '*' or '"' or
+                    '<' or '>' or '|')
+            {
+                return false;
+            }
+        }
+
+        foreach (var segment in path.Split('/'))
+        {
+            if (segment.Length == 0 ||
+                segment is "." or ".." ||
+                segment[^1] is '.' or ' ')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
+
+internal enum ReviewedFileAccessStatus
+{
+    Success,
+    Unsafe,
+    IoFailure,
+}
+
+internal readonly record struct ReviewedFileIdentity(
+    ulong Device,
+    ulong File);
+
+internal sealed record ReviewedFileProbe(
+    ReviewedFileAccessStatus Status,
+    long Length,
+    ReviewedFileIdentity Identity)
+{
+    internal static ReviewedFileProbe Unsafe() =>
+        new(ReviewedFileAccessStatus.Unsafe, 0, default);
+
+    internal static ReviewedFileProbe IoFailure() =>
+        new(ReviewedFileAccessStatus.IoFailure, 0, default);
+}
+
+internal sealed record ReviewedFileMetadata(
+    ReviewedFileAccessStatus Status,
+    long Length)
+{
+    internal static ReviewedFileMetadata Unsafe() =>
+        new(ReviewedFileAccessStatus.Unsafe, 0);
+
+    internal static ReviewedFileMetadata IoFailure() =>
+        new(ReviewedFileAccessStatus.IoFailure, 0);
+}
+
+internal sealed record ReviewedFileRead(
+    ReviewedFileAccessStatus Status,
+    byte[]? Bytes)
+{
+    internal static ReviewedFileRead Unsafe() =>
+        new(ReviewedFileAccessStatus.Unsafe, null);
+
+    internal static ReviewedFileRead IoFailure() =>
+        new(ReviewedFileAccessStatus.IoFailure, null);
+}
+
+internal interface IReviewedFileAccess
+{
+    ReviewedFileMetadata InspectMetadata(ReviewedSnapshot snapshot, string path);
+
+    ReviewedFileProbe Probe(ReviewedSnapshot snapshot, string path);
+
+    ValueTask<ReviewedFileRead> ReadAsync(
+        ReviewedSnapshot snapshot,
+        string path,
+        ReviewedFileProbe expected,
+        CancellationToken cancellationToken);
+}
+
+internal sealed class VerifiedReviewedFileAccess : IReviewedFileAccess
+{
+    public ReviewedFileMetadata InspectMetadata(
+        ReviewedSnapshot snapshot,
+        string path)
+    {
+        if (!TryResolveSafePath(snapshot, path, out var fullPath))
+        {
+            return ReviewedFileMetadata.Unsafe();
+        }
+
+        try
+        {
+            var length = new FileInfo(fullPath).Length;
+            return length >= 0
+                ? new ReviewedFileMetadata(
+                    ReviewedFileAccessStatus.Success,
+                    length)
+                : ReviewedFileMetadata.Unsafe();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return ReviewedFileMetadata.IoFailure();
+        }
+        catch (IOException)
+        {
+            return ReviewedFileMetadata.IoFailure();
+        }
+    }
+
+    public ReviewedFileProbe Probe(ReviewedSnapshot snapshot, string path)
+    {
+        if (!TryResolveSafePath(snapshot, path, out var fullPath))
+        {
+            return ReviewedFileProbe.Unsafe();
+        }
+
+        try
+        {
+            using var handle = OpenRead(fullPath);
+            if (!TryInspectRegular(handle, out var identity, out var length) ||
+                !TryResolveSafePath(snapshot, path, out _))
+            {
+                return ReviewedFileProbe.Unsafe();
+            }
+
+            return new ReviewedFileProbe(
+                ReviewedFileAccessStatus.Success,
+                length,
+                identity);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return ReviewedFileProbe.IoFailure();
+        }
+        catch (IOException)
+        {
+            return ReviewedFileProbe.IoFailure();
+        }
+    }
+
+    public async ValueTask<ReviewedFileRead> ReadAsync(
+        ReviewedSnapshot snapshot,
+        string path,
+        ReviewedFileProbe expected,
+        CancellationToken cancellationToken)
+    {
+        if (expected.Status != ReviewedFileAccessStatus.Success ||
+            !TryResolveSafePath(snapshot, path, out var fullPath))
+        {
+            return ReviewedFileRead.Unsafe();
+        }
+
+        try
+        {
+            using var handle = OpenRead(fullPath);
+            if (!TryInspectRegular(handle, out var openedIdentity, out var length) ||
+                openedIdentity != expected.Identity ||
+                length != expected.Length ||
+                length > int.MaxValue)
+            {
+                return ReviewedFileRead.Unsafe();
+            }
+
+            var bytes = new byte[(int)length];
+            var offset = 0;
+            while (offset < bytes.Length)
+            {
+                var read = await RandomAccess.ReadAsync(
+                    handle,
+                    bytes.AsMemory(offset),
+                    offset,
+                    cancellationToken);
+                if (read == 0)
+                {
+                    return ReviewedFileRead.Unsafe();
+                }
+
+                offset += read;
+            }
+
+            if (!TryResolveSafePath(snapshot, path, out var verifiedPath))
+            {
+                return ReviewedFileRead.Unsafe();
+            }
+
+            using var verificationHandle = OpenRead(verifiedPath);
+            if (!TryInspectRegular(
+                    verificationHandle,
+                    out var verifiedIdentity,
+                    out var verifiedLength) ||
+                verifiedIdentity != openedIdentity ||
+                verifiedLength != length)
+            {
+                return ReviewedFileRead.Unsafe();
+            }
+
+            return new ReviewedFileRead(ReviewedFileAccessStatus.Success, bytes);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return ReviewedFileRead.IoFailure();
+        }
+        catch (IOException)
+        {
+            return ReviewedFileRead.IoFailure();
+        }
+    }
+
+    private static SafeFileHandle OpenRead(string fullPath) =>
+        File.OpenHandle(
+            fullPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+    private static bool TryInspectRegular(
+        SafeFileHandle handle,
+        out ReviewedFileIdentity identity,
+        out long length)
+    {
+        identity = default;
+        length = 0;
+        try
+        {
+            var attributes = File.GetAttributes(handle);
+            if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
+            {
+                return false;
+            }
+
+            length = RandomAccess.GetLength(handle);
+            return length >= 0 &&
+                NativeReviewedFileIdentity.TryGet(handle, out identity);
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryResolveSafePath(
+        ReviewedSnapshot snapshot,
+        string path,
+        out string fullPath)
+    {
+        fullPath = string.Empty;
+        if (!RepositoryPath.IsValid(path))
+        {
+            return false;
+        }
+
+        var segments = path.Split('/');
+        var current = snapshot.AbsoluteRoot;
+        if (!IsSafeDirectory(current))
+        {
+            return false;
+        }
+
+        for (var index = 0; index < segments.Length - 1; index++)
+        {
+            current = Path.Combine(current, segments[index]);
+            if (!IsSafeDirectory(current))
+            {
+                return false;
+            }
+        }
+
+        fullPath = Path.GetFullPath(Path.Combine(current, segments[^1]));
+        var rootPrefix = snapshot.AbsoluteRoot + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        if (!fullPath.StartsWith(rootPrefix, comparison))
+        {
+            return false;
+        }
+
+        try
+        {
+            var file = new FileInfo(fullPath);
+            return file.Exists &&
+                (file.Attributes &
+                    (FileAttributes.Directory | FileAttributes.ReparsePoint | FileAttributes.Device)) == 0 &&
+                file.LinkTarget is null;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsSafeDirectory(string path)
+    {
+        try
+        {
+            var directory = new DirectoryInfo(path);
+            return directory.Exists &&
+                (directory.Attributes &
+                    (FileAttributes.ReparsePoint | FileAttributes.Device)) == 0 &&
+                directory.LinkTarget is null;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+}
+
+internal static partial class NativeReviewedFileIdentity
+{
+    internal static bool TryGet(
+        SafeFileHandle handle,
+        out ReviewedFileIdentity identity)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            if (!GetFileInformationByHandle(handle, out var info))
+            {
+                identity = default;
+                return false;
+            }
+
+            identity = new ReviewedFileIdentity(
+                info.VolumeSerialNumber,
+                ((ulong)info.FileIndexHigh << 32) | info.FileIndexLow);
+            return true;
+        }
+
+        if (OperatingSystem.IsLinux())
+        {
+            var descriptor = checked((int)handle.DangerousGetHandle());
+            if (FStat(descriptor, out var info) != 0 ||
+                (info.Mode & FileTypeMask) != RegularFile)
+            {
+                identity = default;
+                return false;
+            }
+
+            identity = new ReviewedFileIdentity(info.Device, info.Inode);
+            return true;
+        }
+
+        identity = default;
+        return false;
+    }
+
+    private const uint FileTypeMask = 0xF000;
+    private const uint RegularFile = 0x8000;
+
+    [LibraryImport(
+        "kernel32.dll",
+        EntryPoint = "GetFileInformationByHandle",
+        SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetFileInformationByHandle(
+        SafeFileHandle handle,
+        out ByHandleFileInformation information);
+
+    [LibraryImport("libc", EntryPoint = "fstat", SetLastError = true)]
+    private static partial int FStat(
+        int fileDescriptor,
+        out LinuxFileInformation information);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ByHandleFileInformation
+    {
+        internal uint FileAttributes;
+        internal FileTime CreationTime;
+        internal FileTime LastAccessTime;
+        internal FileTime LastWriteTime;
+        internal uint VolumeSerialNumber;
+        internal uint FileSizeHigh;
+        internal uint FileSizeLow;
+        internal uint NumberOfLinks;
+        internal uint FileIndexHigh;
+        internal uint FileIndexLow;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileTime
+    {
+        internal uint Low;
+        internal uint High;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private unsafe struct LinuxFileInformation
+    {
+        internal ulong Device;
+        internal ulong Inode;
+        internal ulong HardLinkCount;
+        internal uint Mode;
+        internal uint UserId;
+        internal uint GroupId;
+        internal int Padding;
+        internal ulong DeviceId;
+        internal long Size;
+        internal long BlockSize;
+        internal long BlockCount;
+        internal LinuxTimestamp AccessTime;
+        internal LinuxTimestamp ModificationTime;
+        internal LinuxTimestamp ChangeTime;
+        internal fixed long Reserved[3];
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LinuxTimestamp
+    {
+        internal long Seconds;
+        internal long Nanoseconds;
+    }
+}

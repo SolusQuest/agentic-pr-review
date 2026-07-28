@@ -1,6 +1,6 @@
 # Agent Runtime Architecture Rebaseline
 
-Status: selected target architecture; active when the coordinated documentation PR is merged; implementation pending.
+Status: selected target architecture; R1 is complete and R2 implementation is in progress.
 
 Drafted: 2026-07-24.
 
@@ -1072,7 +1072,7 @@ Deliver:
 - a recorded decision between a pinned `Microsoft.Extensions.AI.Abstractions` dependency and project-minimal exchange types, backed by the same Native AOT proof;
 - a fake chat client behind the selected narrow abstraction;
 - explicit `read_file` and `search_text` tools;
-- project-owned serial agent loop;
+- project-owned serial agent loop, specified by [`agent-loop-contract.md`](./agent-loop-contract.md);
 - terminal `finish_review`;
 - a tested core/adapter seam in which the core owns the logical request plan and logical prefix identity while the adapter owns provider-specific projection, continuation placement, request serialization, and any provider-specific cache identity;
 - project-owned logical message/tool/outcome records plus a separate provider-scoped continuation envelope;

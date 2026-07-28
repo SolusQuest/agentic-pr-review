@@ -120,6 +120,8 @@ The agent reviews one immutable logical snapshot identified by:
 
 The Agent receives a read-only review root or an equivalent no-write view enforced outside model control.
 
+The first executable R2 implementation and its fail-closed path/opened-object identity checks are specified by [`agent-loop-contract.md`](./agent-loop-contract.md).
+
 Tool implementations must:
 
 - accept only repository-relative paths;
@@ -222,7 +224,7 @@ The Agent must:
 - propagate cancellation through provider and tool operations;
 - keep provider transport objects outside logical messages and durable state.
 
-Architecture tests should reject references from Agent and tool modules to host secrets, GitHub clients, publisher code, or Actions integration.
+Architecture tests reject signature, method-body, dynamic-native-loading, and native-import references that would give Agent or tool modules Host secrets, GitHub clients, publisher code, Actions integration, ambient environment, arbitrary filesystem/network, or process capability. The exact R2 enforcement is recorded in [`agent-loop-contract.md`](./agent-loop-contract.md).
 
 ## Future Child-Process Boundary
 

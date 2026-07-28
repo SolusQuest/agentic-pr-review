@@ -9,7 +9,17 @@ internal sealed class MinimalChatClient(
     {
         var native = Materialize(request);
         var response = await backend.GetResponseAsync(native, cancellationToken);
-        return new ProjectChatResponse(ToProject(response.Message));
+        return new ProjectChatResponse(
+            ToProject(response.Message),
+            response.Usage is null
+                ? null
+                : new ProjectChatUsage(
+                    response.Usage.InputTokens,
+                    response.Usage.OutputTokens),
+            response.CapturedResponseBodyBytes,
+            response.Continuation is null
+                ? null
+                : ToProject(response.Continuation));
     }
 
     internal static MinimalChatRequest Materialize(ProjectChatRequest request)
@@ -42,7 +52,8 @@ internal sealed class MinimalChatClient(
                 tool.Name,
                 tool.Description,
                 tool.SchemaJson)).ToArray(),
-            continuation);
+            continuation,
+            request.ThinkingRequired);
     }
 
     private static MinimalChatMessage ToNative(
@@ -144,6 +155,20 @@ internal sealed class MinimalChatClient(
                 content.Text!),
             _ => throw new InvalidOperationException("Unsupported backend chat content."),
         }).ToArray());
+
+    private static ProjectContinuation ToProject(
+        MinimalChatContinuation continuation) => new(
+        continuation.ProviderId,
+        continuation.ModelId,
+        continuation.AdapterId,
+        continuation.SessionId,
+        continuation.Items.Select(item => new ProjectContinuationItem(
+            item.Readable,
+            item.Opaque,
+            item.Framing,
+            item.AssociatedCallId,
+            item.MessagePosition,
+            item.ContentPosition)).ToArray());
 }
 
 internal interface IMinimalChatBackend
@@ -156,7 +181,8 @@ internal interface IMinimalChatBackend
 internal sealed record MinimalChatRequest(
     MinimalChatMessage[] Messages,
     MinimalChatTool[] Tools,
-    MinimalChatContinuation? Continuation);
+    MinimalChatContinuation? Continuation,
+    bool ThinkingRequired = false);
 
 internal sealed record MinimalChatMessage(
     string Role,
@@ -193,4 +219,12 @@ internal sealed record MinimalChatContinuationItem(
     int MessagePosition,
     int ContentPosition);
 
-internal sealed record MinimalChatResponse(MinimalChatMessage Message);
+internal sealed record MinimalChatUsage(
+    long InputTokens,
+    long OutputTokens);
+
+internal sealed record MinimalChatResponse(
+    MinimalChatMessage Message,
+    MinimalChatUsage? Usage = null,
+    long? CapturedResponseBodyBytes = null,
+    MinimalChatContinuation? Continuation = null);

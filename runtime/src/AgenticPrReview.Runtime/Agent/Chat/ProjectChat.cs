@@ -10,7 +10,8 @@ internal interface IProjectChatClient
 internal sealed record ProjectChatRequest(
     ProjectChatMessage[] Messages,
     ProjectToolDefinition[] Tools,
-    ProjectContinuation? Continuation);
+    ProjectContinuation? Continuation,
+    bool ThinkingRequired = false);
 
 internal sealed record ProjectChatMessage(
     string Role,
@@ -41,7 +42,15 @@ internal sealed record ProjectToolResultContent(
     string Result)
     : ProjectChatContent("tool_result");
 
-internal sealed record ProjectChatResponse(ProjectChatMessage Message);
+internal sealed record ProjectChatUsage(
+    long InputTokens,
+    long OutputTokens);
+
+internal sealed record ProjectChatResponse(
+    ProjectChatMessage Message,
+    ProjectChatUsage? Usage = null,
+    long? CapturedResponseBodyBytes = null,
+    ProjectContinuation? Continuation = null);
 
 internal sealed record ProjectToolDefinition(
     string Name,
