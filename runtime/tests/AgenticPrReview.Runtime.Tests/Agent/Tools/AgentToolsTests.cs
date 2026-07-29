@@ -375,6 +375,8 @@ public sealed partial class AgentToolsTests
     [InlineData("{\"summary\":\"done\",\"findings\":[],\"extra\":0}", false)]
     [InlineData("{\"summary\":\"done\",\"summary\":\"done\",\"findings\":[]}", false)]
     [InlineData("{\"summary\":null,\"findings\":[]}", false)]
+    [InlineData("{\"summary\":\"done\",\"findings\":[null]}", false)]
+    [InlineData("{\"summary\":\"done\",\"findings\":[{\"severity\":\"high\",\"title\":\"bug\",\"message\":\"fix it\",\"evidence\":[null]}]}", false)]
     public void TerminalArgumentsAreClosedAndCanonical(
         string json,
         bool accepted)

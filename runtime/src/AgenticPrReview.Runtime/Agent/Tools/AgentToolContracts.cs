@@ -177,7 +177,8 @@ internal static class AgentToolArguments
             var findings = ImmutableArray.CreateBuilder<AgentFinding>(dto.Findings.Length);
             foreach (var finding in dto.Findings)
             {
-                if (finding.Severity is null ||
+                if (finding is null ||
+                    finding.Severity is null ||
                     finding.Title is null ||
                     finding.Message is null ||
                     finding.Evidence is null)
@@ -189,7 +190,9 @@ internal static class AgentToolArguments
                     finding.Evidence.Length);
                 foreach (var item in finding.Evidence)
                 {
-                    if (item.ObservationId is null || item.Path is null)
+                    if (item is null ||
+                        item.ObservationId is null ||
+                        item.Path is null)
                     {
                         return false;
                     }
@@ -431,7 +434,7 @@ internal sealed class FinishReviewArgumentsDto
 
     [JsonPropertyName("findings")]
     [JsonPropertyOrder(1)]
-    public FinishReviewFindingDto[]? Findings { get; set; }
+    public FinishReviewFindingDto?[]? Findings { get; set; }
 }
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
@@ -451,7 +454,7 @@ internal sealed class FinishReviewFindingDto
 
     [JsonPropertyName("evidence")]
     [JsonPropertyOrder(3)]
-    public FinishReviewEvidenceDto[]? Evidence { get; set; }
+    public FinishReviewEvidenceDto?[]? Evidence { get; set; }
 }
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]

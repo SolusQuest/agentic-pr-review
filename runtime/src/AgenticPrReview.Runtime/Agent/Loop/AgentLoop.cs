@@ -909,7 +909,7 @@ internal sealed class AgentLoop(
             if (itemBytes.Length > AgentLimits.ContinuationItemBytes ||
                 newAggregate > AgentLimits.ContinuationTotalBytes ||
                 existingEventCount + builder.Count + 1 >
-                    AgentLimits.SessionRecords)
+                    AgentLimits.SessionRecords - 1)
             {
                 continuationEvents = [];
                 return false;
@@ -1263,6 +1263,13 @@ internal sealed class AgentLoop(
         int toolCalls,
         ImmutableArray<AgentLogicalEvent>.Builder events)
     {
+        if (events.Count >= AgentLimits.SessionRecords)
+        {
+            events.RemoveRange(
+                AgentLimits.SessionRecords - 1,
+                events.Count - (AgentLimits.SessionRecords - 1));
+        }
+
         events.Add(new AgentFailureEvent(code));
         return AgentRunOutcome.Failure(
             code,

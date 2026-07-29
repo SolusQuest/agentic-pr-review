@@ -564,6 +564,31 @@ public sealed class AgentLoopTests
     }
 
     [Fact]
+    public async Task NullTerminalMembersFailWithStableTerminalCode()
+    {
+        var response = new ProjectChatResponse(
+            new ProjectChatMessage(
+                "assistant",
+                [
+                    new ProjectToolCallContent(
+                        "finish",
+                        "finish_review",
+                        "{\"summary\":\"done\",\"findings\":[null]}"),
+                ]),
+            new ProjectChatUsage(0, 0),
+            1);
+
+        var outcome = await new AgentLoop(
+            new ScriptedChatClient([response]),
+            new ScriptedToolExecutor()).RunAsync(
+                Request(),
+                CancellationToken.None);
+
+        AssertFailure(outcome, "agent_terminal_invalid");
+        Assert.IsType<AgentFailureEvent>(outcome.Events[^1]);
+    }
+
+    [Fact]
     public async Task CompleteResponseArgumentsAreValidatedBeforeFirstTool()
     {
         var response = new ProjectChatResponse(
@@ -1335,6 +1360,66 @@ public sealed class AgentLoopTests
         {
             AssertFailure(outcome, "agent_response_invalid");
         }
+    }
+
+    [Fact]
+    public async Task InitialContinuationReservesTheFailureRecord()
+    {
+        var messages = Enumerable.Range(0, AgentLimits.Messages / 2)
+            .SelectMany(index =>
+            {
+                var callId = $"prior-{index}";
+                return new ProjectChatMessage[]
+                {
+                    new(
+                        "assistant",
+                        [
+                            new ProjectToolCallContent(
+                                callId,
+                                "read_file",
+                                "{\"path\":\"a.txt\",\"start_line\":1,\"line_count\":400}"),
+                        ]),
+                    new(
+                        "tool",
+                        [new ProjectToolResultContent(callId, "{}")]),
+                };
+            })
+            .ToArray();
+        Assert.Equal(AgentLimits.Messages, messages.Length);
+
+        var continuationCount =
+            AgentLimits.SessionRecords - 1 - messages.Length;
+        var continuationItems = Enumerable.Range(0, continuationCount)
+            .Select(index =>
+            {
+                var itemsPerAssistant = AgentLimits.PartsPerMessage - 1;
+                return new ProjectContinuationItem(
+                    string.Empty,
+                    string.Empty,
+                    "f",
+                    null,
+                    (index / itemsPerAssistant) * 2,
+                    index % itemsPerAssistant + 1);
+            })
+            .ToArray();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var chat = new ScriptedChatClient([]);
+
+        var outcome = await new AgentLoop(
+            chat,
+            new ScriptedToolExecutor()).RunAsync(
+                Request() with
+                {
+                    InitialMessages = messages,
+                    Continuation = Continuation(continuationItems),
+                },
+                cancellation.Token);
+
+        AssertFailure(outcome, "agent_response_invalid");
+        Assert.True(outcome.Events.Length <= AgentLimits.SessionRecords);
+        Assert.IsType<AgentFailureEvent>(outcome.Events[^1]);
+        Assert.Empty(chat.Requests);
     }
 
     [Theory]
