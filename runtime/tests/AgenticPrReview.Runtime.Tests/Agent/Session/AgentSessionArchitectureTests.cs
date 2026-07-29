@@ -12,7 +12,7 @@ public sealed class AgentSessionArchitectureTests
     private const string SessionNamespace =
         "AgenticPrReview.Runtime.Agent.Session";
 
-    private static readonly string[] LegacyTypeNames =
+    private static readonly string[] RetiredTypeNames =
     [
         "ProviderSessionLedgerV1",
         "StateManifestV2",
@@ -20,7 +20,7 @@ public sealed class AgentSessionArchitectureTests
     ];
 
     [Fact]
-    public void SessionSurfaceIsInternalClosedAndDoesNotExposeLegacyTypes()
+    public void SessionSurfaceIsInternalClosedAndDoesNotExposeRetiredTypes()
     {
         var types = typeof(RuntimeApplication).Assembly.GetTypes()
             .Where(type => type.Namespace == SessionNamespace)
@@ -34,8 +34,8 @@ public sealed class AgentSessionArchitectureTests
             .ToArray();
         Assert.DoesNotContain(
             referencedNames,
-            name => LegacyTypeNames.Any(legacy =>
-                name.Contains(legacy, StringComparison.Ordinal)));
+            name => RetiredTypeNames.Any(retired =>
+                name.Contains(retired, StringComparison.Ordinal)));
         Assert.DoesNotContain(
             referencedNames,
             name =>
