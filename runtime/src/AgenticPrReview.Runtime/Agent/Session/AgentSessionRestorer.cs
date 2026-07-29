@@ -314,6 +314,14 @@ internal static class AgentSessionRequestReconstruction
         var items = new List<ProjectContinuationItem>();
         foreach (var run in document.CompletedRuns)
         {
+            var terminalOutcome = run.Records
+                .OfType<AgentSessionReviewOutcomeRecord>()
+                .SingleOrDefault();
+            if (terminalOutcome is null)
+            {
+                return false;
+            }
+
             var messagePositions =
                 new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (var record in run.Records)
@@ -326,6 +334,16 @@ internal static class AgentSessionRequestReconstruction
                             [new ProjectTextContent(context.Text)]));
                         break;
                     case AgentSessionAssistantMessageRecord assistant:
+                        if (StringComparer.Ordinal.Equals(
+                                assistant.Id,
+                                terminalOutcome.TerminalMessageId))
+                        {
+                            // A completed terminal response is an outcome, not
+                            // provider history: replaying its finish_review call
+                            // would leave the restored request unresolved.
+                            break;
+                        }
+
                         var absolutePosition = checked(
                             stablePrefixMessageCount + messages.Count);
                         messagePositions.Add(assistant.Id, absolutePosition);
@@ -356,6 +374,13 @@ internal static class AgentSessionRequestReconstruction
 
             foreach (var item in run.Continuation.Items)
             {
+                if (StringComparer.Ordinal.Equals(
+                        item.MessageId,
+                        terminalOutcome.TerminalMessageId))
+                {
+                    continue;
+                }
+
                 if (!messagePositions.TryGetValue(
                         item.MessageId,
                         out var messagePosition) ||
@@ -407,11 +432,6 @@ internal static class AgentSessionRequestReconstruction
                     call.CallId,
                     call.Name,
                     call.ArgumentsJson),
-            AgentSessionTerminalCallContent terminal =>
-                new ProjectToolCallContent(
-                    terminal.CallId,
-                    terminal.Name,
-                    terminal.ArgumentsJson),
             _ => throw new InvalidOperationException(
                 "Unsupported durable assistant content."),
         };
