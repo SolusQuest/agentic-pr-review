@@ -56,6 +56,59 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
+    public void MalformedTypedAuthorizationAndRestoreEnumsReturnStableCodes()
+    {
+        var malformedScope = RestrictedStateTestData.Scope() with
+        {
+            SessionId = null!,
+        };
+        var authorization = AuthorizedStateAccess.Authorize(
+            new RestrictedStateAccessRequest(
+                malformedScope,
+                malformedScope,
+                IsTrustedWorkflow: true,
+                IsSameRepository: true,
+                IsForkOrigin: false),
+            out var malformedAccess);
+
+        Assert.Equal(StateAction.Denied, authorization.Action);
+        Assert.Equal(
+            RestrictedStateCodes.AccessDenied,
+            authorization.Code);
+        Assert.Null(malformedAccess);
+
+        var access = RestrictedStateTestData.Access();
+        var service = Service(
+            new MemoryRestrictedStateStore(),
+            new TestKeyResolver(),
+            new TestSessionAdmission());
+        foreach (var request in new[]
+        {
+            new RestrictedStateRestoreRequest(
+                (RestrictedStateLocatorFamily)int.MaxValue,
+                RestrictedStateRestoreIntent.Automatic,
+                null,
+                RestrictedStateTestData.SessionContext()),
+            new RestrictedStateRestoreRequest(
+                RestrictedStateLocatorFamily.Current,
+                (RestrictedStateRestoreIntent)int.MaxValue,
+                null,
+                RestrictedStateTestData.SessionContext()),
+        })
+        {
+            var restore = service.Restore(
+                access,
+                request,
+                CancellationToken.None);
+
+            Assert.Equal(StateAction.Failed, restore.Result.Action);
+            Assert.Equal(
+                RestrictedStateCodes.EnvelopeInvalid,
+                restore.Result.Code);
+        }
+    }
+
+    [Fact]
     public void PrepareAcceptRestoreAndHandoffUseIndependentLineage()
     {
         var store = new MemoryRestrictedStateStore();
@@ -690,7 +743,10 @@ public sealed class RestrictedStateServiceTests
     {
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
-        var sessions = new TestSessionAdmission();
+        var sessions = new TestSessionAdmission
+        {
+            Reject = true,
+        };
         var access = RestrictedStateTestData.Access();
         var current = RestrictedStateTestData.Candidate(access, keys);
         store.Snapshot = new RestrictedStateSnapshot([current], null);
@@ -711,9 +767,26 @@ public sealed class RestrictedStateServiceTests
             CancellationToken.None);
 
         Assert.Equal(
-            RestrictedStateCodes.LineageMismatch,
+            RestrictedStateCodes.EnvelopeInvalid,
             result.Result.Code);
-        Assert.Equal(0, sessions.Calls);
+        Assert.Equal(1, sessions.Calls);
+        Assert.Null(store.Snapshot.Staging);
+
+        sessions.Reject = false;
+        var lineageResult = service.Prepare(
+            access,
+            new RestrictedStatePrepareRequest(
+                forged,
+                new byte[] { 2 },
+                RestrictedStateTestData.SessionContext(
+                    1,
+                    forged.EnvelopeSha256)),
+            CancellationToken.None);
+
+        Assert.Equal(
+            RestrictedStateCodes.LineageMismatch,
+            lineageResult.Result.Code);
+        Assert.Equal(2, sessions.Calls);
         Assert.Null(store.Snapshot.Staging);
     }
 
@@ -1063,10 +1136,11 @@ public sealed class RestrictedStateServiceTests
     {
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
+        var sessions = new TestSessionAdmission();
         var service = Service(
             store,
             keys,
-            new TestSessionAdmission());
+            sessions);
         var access = RestrictedStateTestData.Access();
         var first = PrepareAndAccept(
             service,
@@ -1116,6 +1190,8 @@ public sealed class RestrictedStateServiceTests
         {
             SessionSha256 = new string('a', 64),
         };
+        sessions.Reject = true;
+        var callsBeforeForged = sessions.Calls;
         var forged = service.Accept(
             access,
             forgedLineage,
@@ -1128,8 +1204,112 @@ public sealed class RestrictedStateServiceTests
         Assert.Equal(StateAction.Idempotent, acceptRetry.Action);
         Assert.Equal(StateAction.Idempotent, reconcileRetry.Action);
         Assert.Equal(
-            RestrictedStateCodes.LineageMismatch,
+            RestrictedStateCodes.EnvelopeInvalid,
             forged.Code);
+        Assert.Equal(callsBeforeForged + 1, sessions.Calls);
+    }
+
+    [Fact]
+    public void PresentCandidatesAuthenticateBeforeReceiptAndLineageDefects()
+    {
+        var store = new MemoryRestrictedStateStore();
+        var keys = new TestKeyResolver();
+        var sessions = new TestSessionAdmission();
+        var service = Service(store, keys, sessions);
+        var access = RestrictedStateTestData.Access();
+        var first = PrepareAndAccept(
+            service,
+            store,
+            access,
+            null,
+            0,
+            null);
+        var lineage = Lineage(first);
+        var prepared = service.Prepare(
+            access,
+            new RestrictedStatePrepareRequest(
+                lineage,
+                new byte[] { 2 },
+                RestrictedStateTestData.SessionContext(
+                    1,
+                    first.EnvelopeSha256)),
+            CancellationToken.None);
+        sessions.Reject = true;
+        var malformedReceipt = prepared.Receipt! with
+        {
+            Generation = 0,
+        };
+        var callsBeforeReceipt = sessions.Calls;
+
+        var receiptResult = service.Accept(
+            access,
+            lineage,
+            malformedReceipt,
+            RestrictedStateTestData.SessionContext(
+                1,
+                first.EnvelopeSha256),
+            CancellationToken.None);
+
+        Assert.Equal(
+            RestrictedStateCodes.EnvelopeInvalid,
+            receiptResult.Code);
+        Assert.Equal(callsBeforeReceipt + 1, sessions.Calls);
+        Assert.Single(store.Snapshot.Accepted);
+        Assert.NotNull(store.Snapshot.Staging);
+
+        sessions.Reject = false;
+        var malformedEnvelope = new byte[] { 0 };
+        var staging = store.Snapshot.Staging!;
+        var envelopeSha =
+            RestrictedStateEnvelope.EnvelopeSha256(malformedEnvelope);
+        var malformed = staging with
+        {
+            Envelope = malformedEnvelope,
+            EnvelopeSha256 = envelopeSha,
+            ObjectIdentity = RestrictedStateEnvelope.ObjectIdentity(
+                staging.Binding,
+                staging.SessionSha256,
+                envelopeSha),
+        };
+        store.Snapshot = store.Snapshot with
+        {
+            Staging = malformed,
+        };
+        var exactMalformedReceipt = new PreparedStateReceipt(
+            malformed.Binding.Generation,
+            malformed.SessionSha256,
+            malformed.EnvelopeSha256,
+            malformed.ObjectIdentity);
+        var wrongLineage = lineage with
+        {
+            SessionSha256 = new string('a', 64),
+        };
+
+        var aeadBeforeLineage = service.Accept(
+            access,
+            wrongLineage,
+            exactMalformedReceipt,
+            RestrictedStateTestData.SessionContext(
+                1,
+                first.EnvelopeSha256),
+            CancellationToken.None);
+        var reconcileBeforeLineage = service.Reconcile(
+            access,
+            wrongLineage,
+            exactMalformedReceipt,
+            RestrictedStateTestData.SessionContext(
+                1,
+                first.EnvelopeSha256),
+            CancellationToken.None);
+
+        Assert.Equal(
+            RestrictedStateCodes.EnvelopeInvalid,
+            aeadBeforeLineage.Code);
+        Assert.Equal(
+            RestrictedStateCodes.EnvelopeInvalid,
+            reconcileBeforeLineage.Code);
+        Assert.Single(store.Snapshot.Accepted);
+        Assert.NotNull(store.Snapshot.Staging);
     }
 
     private static RestrictedStateService Service(

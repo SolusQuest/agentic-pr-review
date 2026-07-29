@@ -12,7 +12,21 @@ internal sealed class AgentSessionRestrictedStateAdmission
     {
         if (access is null ||
             context is null ||
-            context.SessionContext is null)
+            context.SessionContext is null ||
+            !RestrictedStateValidation.IsLowerHex(
+                context.ProducerBaseSha,
+                40) ||
+            !RestrictedStateValidation.IsLowerHex(
+                context.ProducerHeadSha,
+                40) ||
+            context.Generation is < 0 or >
+                RestrictedStateFormat.MaximumGeneration ||
+            ((context.Generation == 0 &&
+                    context.PredecessorEnvelopeSha256 is not null) ||
+                (context.Generation > 0 &&
+                    !RestrictedStateValidation.IsLowerHex(
+                        context.PredecessorEnvelopeSha256,
+                        64))))
         {
             return RestrictedStateSessionAdmissionResult.Failure();
         }

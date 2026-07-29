@@ -250,6 +250,29 @@ internal sealed class MemoryRestrictedStateStore : IRestrictedStateStore
             : new RestrictedStateStoreRead(ReadFailure, null, null);
     }
 
+    public RestrictedStateStoreRawRead ReadRawVersion(
+        AuthorizedStateAccess access,
+        CancellationToken cancellationToken)
+    {
+        ReadCalls++;
+        cancellationToken.ThrowIfCancellationRequested();
+        if (ReadFailure != RestrictedStateStoreFailure.None)
+        {
+            return new RestrictedStateStoreRawRead(
+                ReadFailure,
+                null);
+        }
+
+        return new RestrictedStateStoreRawRead(
+            RestrictedStateStoreFailure.None,
+            version.Exists
+                ? new RestrictedStateRawVersion(
+                    version.Sha256,
+                    0,
+                    Exists: true)
+                : RestrictedStateRawVersion.Absent);
+    }
+
     public RestrictedStateStoreWrite CompareExchange(
         AuthorizedStateAccess access,
         RestrictedStateSnapshotVersion expected,
@@ -327,5 +350,31 @@ internal sealed class MemoryRestrictedStateStore : IRestrictedStateStore
             RestrictedStateStoreFailure.None,
             version,
             true);
+    }
+
+    public RestrictedStateStoreWrite CompareDeleteRaw(
+        AuthorizedStateAccess access,
+        RestrictedStateRawVersion expected,
+        CancellationToken cancellationToken)
+    {
+        var current = version.Exists
+            ? new RestrictedStateRawVersion(
+                version.Sha256,
+                0,
+                Exists: true)
+            : RestrictedStateRawVersion.Absent;
+        if (expected != current)
+        {
+            WriteCalls++;
+            return new RestrictedStateStoreWrite(
+                RestrictedStateStoreFailure.Conflict,
+                null,
+                false);
+        }
+
+        return CompareDelete(
+            access,
+            version,
+            cancellationToken);
     }
 }

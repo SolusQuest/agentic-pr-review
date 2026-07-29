@@ -17,6 +17,7 @@ internal static partial class RestrictedStateValidation
         IsUtf8(scope.RepositoryId, 1, 128) &&
         IsUtf8(scope.WorkflowIdentity, 1, 256) &&
         scope.ReviewTarget is >= 1 and <= RestrictedStateFormat.MaximumReviewTarget &&
+        scope.SessionId is not null &&
         SessionIdPattern().IsMatch(scope.SessionId) &&
         IsUtf8(scope.ProviderId, 1, 128) &&
         IsUtf8(scope.ModelId, 1, 128) &&
@@ -124,7 +125,9 @@ internal static partial class RestrictedStateValidation
 
             envelopeBytes = checked(envelopeBytes + candidate.Envelope.Length);
             metadataBytes = checked(
-                metadataBytes + EstimateMetadataBytes(candidate));
+                metadataBytes +
+                RestrictedStateSnapshotCodec.CandidateMetadataBytes(
+                    candidate));
             lastGeneration = candidate.Binding.Generation;
             lastEnvelopeSha = candidate.EnvelopeSha256;
         }
@@ -135,9 +138,12 @@ internal static partial class RestrictedStateValidation
             totalBytes = checked(
                 totalBytes +
                 snapshot.Staging.Envelope.Length +
-                EstimateMetadataBytes(snapshot.Staging));
+                RestrictedStateSnapshotCodec.CandidateMetadataBytes(
+                    snapshot.Staging));
             metadataBytes = checked(
-                metadataBytes + EstimateMetadataBytes(snapshot.Staging));
+                metadataBytes +
+                RestrictedStateSnapshotCodec.CandidateMetadataBytes(
+                    snapshot.Staging));
         }
 
         if (snapshot.Accepted.Length == 2)
@@ -193,21 +199,6 @@ internal static partial class RestrictedStateValidation
         return envelopeBytes <= AgentLimits.CandidateEnvelopeTotalBytes &&
             metadataBytes <= AgentLimits.CandidateMetadataBytes &&
             totalBytes <= AgentLimits.StateScopeTotalBytes;
-    }
-
-    internal static int EstimateMetadataBytes(
-        RestrictedStateCandidate candidate)
-    {
-        var scope = candidate.Binding.Scope;
-        return checked(
-            192 +
-            Utf8Length(scope.RepositoryId) +
-            Utf8Length(scope.WorkflowIdentity) +
-            Encoding.ASCII.GetByteCount(scope.SessionId) +
-            Utf8Length(scope.ProviderId) +
-            Utf8Length(scope.ModelId) +
-            Utf8Length(scope.AdapterId) +
-            Utf8Length(scope.BuildId));
     }
 
     internal static bool IsLowerHex(string? value, int length)

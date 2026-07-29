@@ -227,9 +227,31 @@ internal sealed record RestrictedStateStoreWrite(
         Committed;
 }
 
+internal sealed record RestrictedStateRawVersion(
+    string Identity,
+    long Length,
+    bool Exists)
+{
+    internal static RestrictedStateRawVersion Absent { get; } =
+        new(string.Empty, 0, false);
+}
+
+internal sealed record RestrictedStateStoreRawRead(
+    RestrictedStateStoreFailure Failure,
+    RestrictedStateRawVersion? Version)
+{
+    internal bool Succeeded =>
+        Failure == RestrictedStateStoreFailure.None &&
+        Version is not null;
+}
+
 internal interface IRestrictedStateStore
 {
     RestrictedStateStoreRead Read(
+        AuthorizedStateAccess access,
+        CancellationToken cancellationToken);
+
+    RestrictedStateStoreRawRead ReadRawVersion(
         AuthorizedStateAccess access,
         CancellationToken cancellationToken);
 
@@ -242,6 +264,11 @@ internal interface IRestrictedStateStore
     RestrictedStateStoreWrite CompareDelete(
         AuthorizedStateAccess access,
         RestrictedStateSnapshotVersion expected,
+        CancellationToken cancellationToken);
+
+    RestrictedStateStoreWrite CompareDeleteRaw(
+        AuthorizedStateAccess access,
+        RestrictedStateRawVersion expected,
         CancellationToken cancellationToken);
 }
 

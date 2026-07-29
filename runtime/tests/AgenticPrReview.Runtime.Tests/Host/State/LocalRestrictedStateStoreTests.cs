@@ -381,6 +381,329 @@ public sealed class LocalRestrictedStateStoreTests
     }
 
     [Fact]
+    public void RootSwapAfterFinalProofRollsBackReplacement()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var parent = Path.Join(
+            Path.GetTempPath(),
+            $"apr-state-final-swap-{Guid.NewGuid():N}");
+        var root = Path.Join(parent, "root");
+        var displaced = Path.Join(parent, "displaced");
+        var outside = Path.Join(parent, "outside");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(outside);
+        try
+        {
+            var access = RestrictedStateTestData.Access();
+            var initialStore = new LocalRestrictedStateStore(root);
+            var initial = initialStore.Read(
+                access,
+                CancellationToken.None);
+            var swapped = false;
+            var store = new LocalRestrictedStateStore(
+                root,
+                afterFinalRootProofTestHook: () =>
+                {
+                    if (swapped)
+                    {
+                        return;
+                    }
+
+                    swapped = true;
+                    Directory.Move(root, displaced);
+                    Directory.CreateSymbolicLink(root, outside);
+                });
+
+            var write = store.CompareExchange(
+                access,
+                initial.Version!,
+                new RestrictedStateSnapshot(
+                    [
+                        RestrictedStateTestData.Candidate(
+                            access,
+                            new TestKeyResolver()),
+                    ],
+                    null),
+                CancellationToken.None);
+
+            Assert.Equal(
+                RestrictedStateStoreFailure.Invalid,
+                write.Failure);
+            Assert.False(write.Committed);
+            Assert.Empty(
+                Directory.GetFiles(outside, "scope-*.aprstate"));
+            Assert.Empty(
+                Directory.GetFiles(displaced, "scope-*.aprstate"));
+            Assert.Empty(Directory.GetFiles(displaced, "*.tmp"));
+        }
+        finally
+        {
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RootSwapAfterFinalProofRollsBackDelete()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var parent = Path.Join(
+            Path.GetTempPath(),
+            $"apr-state-delete-swap-{Guid.NewGuid():N}");
+        var root = Path.Join(parent, "root");
+        var displaced = Path.Join(parent, "displaced");
+        var outside = Path.Join(parent, "outside");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(outside);
+        try
+        {
+            var access = RestrictedStateTestData.Access();
+            var initialStore = new LocalRestrictedStateStore(root);
+            var initial = initialStore.Read(
+                access,
+                CancellationToken.None);
+            var committed = initialStore.CompareExchange(
+                access,
+                initial.Version!,
+                new RestrictedStateSnapshot(
+                    [
+                        RestrictedStateTestData.Candidate(
+                            access,
+                            new TestKeyResolver()),
+                    ],
+                    null),
+                CancellationToken.None);
+            Assert.True(committed.Succeeded);
+            var swapped = false;
+            var store = new LocalRestrictedStateStore(
+                root,
+                afterFinalRootProofTestHook: () =>
+                {
+                    if (swapped)
+                    {
+                        return;
+                    }
+
+                    swapped = true;
+                    Directory.Move(root, displaced);
+                    Directory.CreateSymbolicLink(root, outside);
+                });
+
+            var deleted = store.CompareDelete(
+                access,
+                committed.Version!,
+                CancellationToken.None);
+
+            Assert.Equal(
+                RestrictedStateStoreFailure.Invalid,
+                deleted.Failure);
+            Assert.False(deleted.Committed);
+            Assert.Empty(
+                Directory.GetFiles(outside, "scope-*.aprstate"));
+            Assert.Single(
+                Directory.GetFiles(displaced, "scope-*.aprstate"));
+            Assert.Empty(
+                Directory.GetFiles(displaced, "*.delete"));
+        }
+        finally
+        {
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RootSwapAfterFinalProofRestoresPriorSnapshot()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var parent = Path.Join(
+            Path.GetTempPath(),
+            $"apr-state-replace-swap-{Guid.NewGuid():N}");
+        var root = Path.Join(parent, "root");
+        var displaced = Path.Join(parent, "displaced");
+        var outside = Path.Join(parent, "outside");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(outside);
+        try
+        {
+            var access = RestrictedStateTestData.Access();
+            var keys = new TestKeyResolver();
+            var initialStore = new LocalRestrictedStateStore(root);
+            var initial = initialStore.Read(
+                access,
+                CancellationToken.None);
+            var current = RestrictedStateTestData.Candidate(
+                access,
+                keys);
+            var committed = initialStore.CompareExchange(
+                access,
+                initial.Version!,
+                new RestrictedStateSnapshot([current], null),
+                CancellationToken.None);
+            Assert.True(committed.Succeeded);
+            var staging = RestrictedStateTestData.Candidate(
+                access,
+                keys,
+                1,
+                current.EnvelopeSha256,
+                plaintext: [2]);
+            var swapped = false;
+            var store = new LocalRestrictedStateStore(
+                root,
+                afterFinalRootProofTestHook: () =>
+                {
+                    if (swapped)
+                    {
+                        return;
+                    }
+
+                    swapped = true;
+                    Directory.Move(root, displaced);
+                    Directory.CreateSymbolicLink(root, outside);
+                });
+
+            var write = store.CompareExchange(
+                access,
+                committed.Version!,
+                new RestrictedStateSnapshot([current], staging),
+                CancellationToken.None);
+
+            Assert.Equal(
+                RestrictedStateStoreFailure.Invalid,
+                write.Failure);
+            Assert.False(write.Committed);
+            Assert.Empty(
+                Directory.GetFiles(outside, "scope-*.aprstate"));
+            Assert.Empty(
+                Directory.GetFiles(displaced, "*.rollback"));
+            var visible = new LocalRestrictedStateStore(displaced).Read(
+                access,
+                CancellationToken.None);
+            Assert.True(visible.Succeeded);
+            Assert.Equal(
+                current.EnvelopeSha256,
+                Assert.Single(visible.Snapshot!.Accepted)
+                    .EnvelopeSha256);
+            Assert.Null(visible.Snapshot.Staging);
+        }
+        finally
+        {
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TrustedResetPhysicallyDeletesMalformedRegularSnapshots()
+    {
+        WithRoot(root =>
+        {
+            var access = RestrictedStateTestData.Access();
+            var keys = new TestKeyResolver();
+            var store = new LocalRestrictedStateStore(root);
+            var initial = store.Read(access, CancellationToken.None);
+            Assert.True(store.CompareExchange(
+                access,
+                initial.Version!,
+                new RestrictedStateSnapshot(
+                    [RestrictedStateTestData.Candidate(access, keys)],
+                    null),
+                CancellationToken.None).Succeeded);
+            var path = Assert.Single(
+                Directory.GetFiles(root, "scope-*.aprstate"));
+            var valid = File.ReadAllBytes(path);
+            var malformedMagic = valid.ToArray();
+            malformedMagic[0] ^= 0xff;
+            var cases = new[]
+            {
+                valid[..^1],
+                malformedMagic,
+                valid.Concat(new byte[] { 0 }).ToArray(),
+                new byte[
+                    RestrictedStateSnapshotCodec.MaximumSnapshotBytes + 1],
+                valid,
+            };
+            var service = new RestrictedStateService(
+                store,
+                keys,
+                new TestSessionAdmission(),
+                () => 1_700_000_000);
+
+            foreach (var bytes in cases)
+            {
+                File.WriteAllBytes(path, bytes);
+
+                var reset = service.Reset(
+                    access,
+                    CancellationToken.None);
+
+                Assert.Equal(StateAction.Reset, reset.Action);
+                Assert.Equal(RestrictedStateCodes.Reset, reset.Code);
+                Assert.False(File.Exists(path));
+            }
+        });
+    }
+
+    [Fact]
+    public void RawDeleteRejectsStaleVersionAndUnsafeEntry()
+    {
+        WithRoot(root =>
+        {
+            var access = RestrictedStateTestData.Access();
+            var store = new LocalRestrictedStateStore(root);
+            var initial = store.Read(access, CancellationToken.None);
+            Assert.True(store.CompareExchange(
+                access,
+                initial.Version!,
+                new RestrictedStateSnapshot(
+                    [
+                        RestrictedStateTestData.Candidate(
+                            access,
+                            new TestKeyResolver()),
+                    ],
+                    null),
+                CancellationToken.None).Succeeded);
+            var path = Assert.Single(
+                Directory.GetFiles(root, "scope-*.aprstate"));
+            var stale = store.ReadRawVersion(
+                access,
+                CancellationToken.None);
+            Assert.True(stale.Succeeded);
+            File.WriteAllBytes(
+                path,
+                File.ReadAllBytes(path).Concat(new byte[] { 0 }).ToArray());
+
+            var conflict = store.CompareDeleteRaw(
+                access,
+                stale.Version!,
+                CancellationToken.None);
+
+            Assert.Equal(
+                RestrictedStateStoreFailure.Conflict,
+                conflict.Failure);
+            Assert.True(File.Exists(path));
+
+            File.Delete(path);
+            Directory.CreateDirectory(path);
+            var unsafeRead = store.ReadRawVersion(
+                access,
+                CancellationToken.None);
+            Assert.Equal(
+                RestrictedStateStoreFailure.Invalid,
+                unsafeRead.Failure);
+        });
+    }
+
+    [Fact]
     public void FullLogicalScopeByteLimitIsExactIncludingMetadata()
     {
         var access = RestrictedStateTestData.Access();
@@ -411,9 +734,9 @@ public sealed class LocalRestrictedStateStoreTests
             [2],
             new string('c', 64));
         var metadata =
-            RestrictedStateValidation.EstimateMetadataBytes(generation0) +
-            RestrictedStateValidation.EstimateMetadataBytes(generation1) +
-            RestrictedStateValidation.EstimateMetadataBytes(provisional);
+            IndependentCandidateMetadataBytes(generation0) +
+            IndependentCandidateMetadataBytes(generation1) +
+            IndependentCandidateMetadataBytes(provisional);
         var stagingLength =
             AgentLimits.StateScopeTotalBytes -
             (2 * AgentLimits.StateEnvelopeBytes) -
@@ -435,6 +758,26 @@ public sealed class LocalRestrictedStateStoreTests
         Assert.True(RestrictedStateValidation.IsValidSnapshot(exact));
         Assert.False(RestrictedStateValidation.IsValidSnapshot(
             exact with { Staging = overStaging }));
+    }
+
+    private static int IndependentCandidateMetadataBytes(
+        RestrictedStateCandidate candidate)
+    {
+        var scope = candidate.Binding.Scope;
+        var variableBytes =
+            System.Text.Encoding.UTF8.GetByteCount(scope.RepositoryId) +
+            System.Text.Encoding.UTF8.GetByteCount(scope.WorkflowIdentity) +
+            System.Text.Encoding.ASCII.GetByteCount(scope.SessionId) +
+            System.Text.Encoding.UTF8.GetByteCount(scope.ProviderId) +
+            System.Text.Encoding.UTF8.GetByteCount(scope.ModelId) +
+            System.Text.Encoding.UTF8.GetByteCount(scope.AdapterId) +
+            System.Text.Encoding.UTF8.GetByteCount(scope.BuildId);
+        return checked(
+            283 +
+            variableBytes +
+            (candidate.Binding.PredecessorEnvelopeSha256 is null
+                ? 0
+                : 32));
     }
 
     [Fact]

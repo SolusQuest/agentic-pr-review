@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
@@ -126,6 +127,120 @@ public sealed class AgentSessionStateBoundaryTests
                 envelopeSha256: null));
 
         Assert.False(admitted.Succeeded);
+    }
+
+    [Fact]
+    public async Task AuthenticatedRealSessionRejectsEveryNamedSemanticFamily()
+    {
+        var fixture = await BuildSessionAsync();
+        var run = fixture.Artifact.Document.CompletedRuns[0];
+        var context = Assert.IsType<AgentSessionReviewContextRecord>(
+            run.Records.First(
+                record => record is AgentSessionReviewContextRecord));
+        var outcome = Assert.IsType<AgentSessionReviewOutcomeRecord>(
+            run.Records.First(
+                record => record is AgentSessionReviewOutcomeRecord));
+        var contextIndex = run.Records.IndexOf(context);
+        var outcomeIndex = run.Records.IndexOf(outcome);
+        var mutations = new[]
+        {
+            ReplaceRecord(
+                fixture.Artifact.Document,
+                run,
+                contextIndex,
+                context with { Role = "assistant" }),
+            ReplaceRecord(
+                fixture.Artifact.Document,
+                run,
+                contextIndex,
+                context with { Framing = "json" }),
+            ReplaceRecord(
+                fixture.Artifact.Document,
+                run,
+                contextIndex,
+                context with { Sequence = context.Sequence + 1 }),
+            ReplaceRecord(
+                fixture.Artifact.Document,
+                run,
+                outcomeIndex,
+                outcome with { TerminalMessageId = "missing_message" }),
+            ReplaceRecord(
+                fixture.Artifact.Document,
+                run,
+                contextIndex,
+                context with
+                {
+                    Text = new string(
+                        'x',
+                        AgentLimits.SessionRecordBytes),
+                }),
+            fixture.Artifact.Document with
+            {
+                CompletedRuns =
+                [
+                    run with
+                    {
+                        Continuation = run.Continuation with
+                        {
+                            CodecId = "other_codec",
+                        },
+                    },
+                ],
+            },
+        };
+        var adapter = new AgentSessionRestrictedStateAdmission();
+
+        foreach (var document in mutations)
+        {
+            Assert.True(
+                AgentSessionCodec.TryWrite(
+                    document,
+                    out var artifact,
+                    out var writeFailure),
+                writeFailure);
+            var mutated = fixture with
+            {
+                Artifact = artifact!,
+            };
+
+            var admitted = adapter.Admit(
+                Access(document),
+                artifact!.Plaintext,
+                StateContext(mutated, envelopeSha256: null));
+
+            Assert.False(admitted.Succeeded);
+        }
+    }
+
+    [Fact]
+    public async Task MalformedTypedSessionContextsFailWithoutThrowing()
+    {
+        var fixture = await BuildSessionAsync();
+        var valid = StateContext(fixture, envelopeSha256: null);
+        var inner = valid.SessionContext;
+        AgentSessionStateAdmissionContext[] malformed =
+        [
+            inner with { TrustedRequest = null! },
+            inner with { SessionId = null! },
+            inner with { CurrentReviewedIdentity = null! },
+            inner with { CurrentReviewContext = null! },
+            inner with { ContinuationCodec = null! },
+            inner with
+            {
+                Transition = (AgentSessionHeadTransition)int.MaxValue,
+            },
+        ];
+        var adapter = new AgentSessionRestrictedStateAdmission();
+
+        foreach (var context in malformed)
+        {
+            var admitted = adapter.Admit(
+                Access(fixture.Artifact.Document),
+                fixture.Artifact.Plaintext,
+                valid with { SessionContext = context });
+
+            Assert.False(admitted.Succeeded);
+        }
     }
 
     [Fact]
@@ -310,6 +425,24 @@ public sealed class AgentSessionStateBoundaryTests
 
     private static ProjectChatMessage User(string text) =>
         new("user", [new ProjectTextContent(text)]);
+
+    private static AgentSessionDocument ReplaceRecord(
+        AgentSessionDocument document,
+        AgentSessionCompletedRun run,
+        int index,
+        AgentSessionRecord replacement) =>
+        document with
+        {
+            CompletedRuns =
+            [
+                run with
+                {
+                    Records = run.Records.SetItem(
+                        index,
+                        replacement),
+                },
+            ],
+        };
 
     private sealed record SessionFixture(
         AgentSessionArtifact Artifact,

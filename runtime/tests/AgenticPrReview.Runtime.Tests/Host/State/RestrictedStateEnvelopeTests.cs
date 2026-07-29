@@ -374,6 +374,108 @@ public sealed class RestrictedStateEnvelopeTests
     }
 
     [Fact]
+    public void IntegerTimeEndianAndWidthBoundariesAreExact()
+    {
+        var access = RestrictedStateTestData.Access();
+        var keys = new TestKeyResolver();
+        var minimum = RestrictedStateTestData.Binding() with
+        {
+            AcceptedAtUnixSeconds = 0,
+            ExpiresAtUnixSeconds = 1,
+        };
+        var maximum = RestrictedStateTestData.Binding(
+            generation: RestrictedStateFormat.MaximumGeneration,
+            predecessor: new string('a', 64)) with
+        {
+            AcceptedAtUnixSeconds =
+                RestrictedStateFormat.MaximumUnixSeconds -
+                RestrictedStateFormat.MaximumRetentionSeconds,
+            ExpiresAtUnixSeconds =
+                RestrictedStateFormat.MaximumUnixSeconds,
+        };
+        foreach (var binding in new[] { minimum, maximum })
+        {
+            Assert.True(RestrictedStateEnvelope.TryEncrypt(
+                access,
+                binding,
+                [1, 2, 3],
+                keys,
+                out var envelope,
+                out var code),
+                code);
+            Assert.True(RestrictedStateEnvelope.TryParse(
+                envelope,
+                out _));
+        }
+
+        foreach (var invalid in new[]
+        {
+            minimum with { AcceptedAtUnixSeconds = -1 },
+            minimum with { ExpiresAtUnixSeconds = 0 },
+            minimum with
+            {
+                ExpiresAtUnixSeconds =
+                    RestrictedStateFormat.MaximumRetentionSeconds + 1,
+            },
+            maximum with
+            {
+                ExpiresAtUnixSeconds =
+                    RestrictedStateFormat.MaximumUnixSeconds + 1,
+            },
+        })
+        {
+            Assert.False(RestrictedStateEnvelope.TryEncrypt(
+                access,
+                invalid,
+                [1],
+                keys,
+                out _,
+                out var code));
+            Assert.Equal(
+                RestrictedStateCodes.EnvelopeInvalid,
+                code);
+        }
+
+        Assert.True(RestrictedStateEnvelope.TryEncrypt(
+            access,
+            minimum,
+            [1, 2, 3],
+            keys,
+            out var canonical,
+            out _));
+        Assert.True(RestrictedStateEnvelope.TryParse(
+            canonical,
+            out var parsed));
+        var canonicalBytes = canonical!;
+        var parsedEnvelope = parsed!;
+        var alternateVersionEndian = canonicalBytes.ToArray();
+        (alternateVersionEndian[8], alternateVersionEndian[9]) =
+            (alternateVersionEndian[9], alternateVersionEndian[8]);
+        var alternateLengthEndian = canonicalBytes.ToArray();
+        Array.Reverse(
+            alternateLengthEndian,
+            parsedEnvelope.Header.Length - sizeof(uint),
+            sizeof(uint));
+        var alternateWidth = canonicalBytes
+            .Take(parsedEnvelope.Header.Length - sizeof(uint))
+            .Concat(new byte[] { 0 })
+            .Concat(
+                canonicalBytes[
+                    (parsedEnvelope.Header.Length - sizeof(uint))..])
+            .ToArray();
+
+        Assert.False(RestrictedStateEnvelope.TryParse(
+            alternateVersionEndian,
+            out _));
+        Assert.False(RestrictedStateEnvelope.TryParse(
+            alternateLengthEndian,
+            out _));
+        Assert.False(RestrictedStateEnvelope.TryParse(
+            alternateWidth,
+            out _));
+    }
+
+    [Fact]
     public void StateKeyCanaryIsNotPersistedOrReturned()
     {
         var canary = Encoding.ASCII.GetBytes(

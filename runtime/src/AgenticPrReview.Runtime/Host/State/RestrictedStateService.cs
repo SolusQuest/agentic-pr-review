@@ -92,40 +92,19 @@ internal sealed class RestrictedStateService
                 RestrictedStateCodes.EnumerationInvalid);
         }
 
+        var acceptedCurrent = read.Snapshot!.Accepted.FirstOrDefault();
         if (request.Lineage is not null &&
-            (!RestrictedStateValidation.IsValidLineage(
-                request.Lineage) ||
-                request.Lineage.Scope != access.Scope ||
-                request.Lineage.ExpiresAtUnixSeconds <= now))
+            acceptedCurrent is null)
+        {
+            return PrepareFailure(
+                RestrictedStateCodes.CurrentMissing);
+        }
+
+        if (request.Lineage is not null &&
+            request.Lineage.ExpiresAtUnixSeconds <= now)
         {
             return PrepareFailure(
                 RestrictedStateCodes.LineageMismatch);
-        }
-
-        var acceptedCurrent = read.Snapshot!.Accepted.FirstOrDefault();
-        if (request.Lineage is null)
-        {
-            if (acceptedCurrent is not null)
-            {
-                return PrepareFailure(RestrictedStateCodes.Conflict);
-            }
-        }
-        else
-        {
-            if (acceptedCurrent is null)
-            {
-                return PrepareFailure(
-                    RestrictedStateCodes.CurrentMissing);
-            }
-
-            if (!MatchesLineage(acceptedCurrent, request.Lineage))
-            {
-                return PrepareFailure(
-                    acceptedCurrent.Binding.Generation >
-                        request.Lineage.Generation
-                        ? RestrictedStateCodes.ReplayRejected
-                        : RestrictedStateCodes.LineageMismatch);
-            }
         }
 
         var admitted = Admit(
@@ -139,6 +118,34 @@ internal sealed class RestrictedStateService
         }
 
         var session = admitted.Session!;
+        if (request.Lineage is not null &&
+            (!RestrictedStateValidation.IsValidLineage(
+                request.Lineage) ||
+                request.Lineage.Scope != access.Scope))
+        {
+            ZeroSession(session);
+            return PrepareFailure(
+                RestrictedStateCodes.LineageMismatch);
+        }
+
+        if (request.Lineage is null)
+        {
+            if (acceptedCurrent is not null)
+            {
+                ZeroSession(session);
+                return PrepareFailure(RestrictedStateCodes.Conflict);
+            }
+        }
+        else if (!MatchesLineage(acceptedCurrent!, request.Lineage))
+        {
+            ZeroSession(session);
+            return PrepareFailure(
+                acceptedCurrent!.Binding.Generation >
+                    request.Lineage.Generation
+                    ? RestrictedStateCodes.ReplayRejected
+                    : RestrictedStateCodes.LineageMismatch);
+        }
+
         if (!TryValidatePreparedTransition(
                 access.Scope,
                 request.Lineage,
@@ -243,7 +250,9 @@ internal sealed class RestrictedStateService
         }
 
         if (request is null ||
-            request.SessionContext is null)
+            request.SessionContext is null ||
+            !Enum.IsDefined(request.LocatorFamily) ||
+            !Enum.IsDefined(request.Intent))
         {
             return RestoreFailure(
                 RestrictedStateCodes.EnvelopeInvalid);
@@ -424,12 +433,7 @@ internal sealed class RestrictedStateService
 
         var now = unixTimeSeconds();
         if (sessionContext is null ||
-            !RestrictedStateValidation.IsValidReceipt(receipt) ||
-            (lineage is not null &&
-                (!RestrictedStateValidation.IsValidLineage(lineage) ||
-                    lineage.Scope != access.Scope ||
-                    !lineage.TransitionAuthorized ||
-                    lineage.ExpiresAtUnixSeconds <= now)))
+            !RestrictedStateValidation.IsValidReceipt(receipt))
         {
             return Failure(RestrictedStateCodes.LineageMismatch);
         }
@@ -456,6 +460,20 @@ internal sealed class RestrictedStateService
             if (alreadyAccepted.Binding.ExpiresAtUnixSeconds <= now)
             {
                 return Failure(RestrictedStateCodes.Expired);
+            }
+
+            var authenticationCode = AuthenticateCandidate(
+                access,
+                alreadyAccepted,
+                sessionContext);
+            if (authenticationCode is not null)
+            {
+                return Failure(authenticationCode);
+            }
+
+            if (!IsValidAcceptanceLineage(access, lineage, now))
+            {
+                return Failure(RestrictedStateCodes.LineageMismatch);
             }
 
             var retryTransitionCode = ValidateAcceptanceTransition(
@@ -487,24 +505,30 @@ internal sealed class RestrictedStateService
                 }
             }
 
-            var authenticationCode = AuthenticateCandidate(
-                access,
-                alreadyAccepted,
-                sessionContext);
-            if (authenticationCode is not null)
-            {
-                return Failure(authenticationCode);
-            }
-
             return Success(
                 StateAction.Idempotent,
                 RestrictedStateCodes.Idempotent,
                 alreadyAccepted);
         }
 
-        if (snapshot.Accepted.Skip(1).Any(
-                candidate => ReceiptMatches(receipt, candidate)))
+        var replayedAccepted = snapshot.Accepted.Skip(1).FirstOrDefault(
+            candidate => ReceiptMatches(receipt, candidate));
+        if (replayedAccepted is not null)
         {
+            if (replayedAccepted.Binding.ExpiresAtUnixSeconds <= now)
+            {
+                return Failure(RestrictedStateCodes.Expired);
+            }
+
+            var authenticationCode = AuthenticateCandidate(
+                access,
+                replayedAccepted,
+                sessionContext);
+            if (authenticationCode is not null)
+            {
+                return Failure(authenticationCode);
+            }
+
             return Failure(RestrictedStateCodes.ReplayRejected);
         }
 
@@ -512,16 +536,6 @@ internal sealed class RestrictedStateService
         if (staging is null)
         {
             return Failure(RestrictedStateCodes.CurrentMissing);
-        }
-
-        if (!ReceiptMatches(receipt, staging))
-        {
-            if (receipt.Generation < staging.Binding.Generation)
-            {
-                return Failure(RestrictedStateCodes.ReplayRejected);
-            }
-
-            return Failure(RestrictedStateCodes.Conflict);
         }
 
         if (staging.Binding.ExpiresAtUnixSeconds <= now)
@@ -536,6 +550,19 @@ internal sealed class RestrictedStateService
         if (stagingAuthenticationCode is not null)
         {
             return Failure(stagingAuthenticationCode);
+        }
+
+        if (!ReceiptMatches(receipt, staging))
+        {
+            return Failure(
+                receipt.Generation < staging.Binding.Generation
+                    ? RestrictedStateCodes.ReplayRejected
+                    : RestrictedStateCodes.Conflict);
+        }
+
+        if (!IsValidAcceptanceLineage(access, lineage, now))
+        {
+            return Failure(RestrictedStateCodes.LineageMismatch);
         }
 
         var transitionCode = ValidateAcceptanceTransition(
@@ -609,12 +636,7 @@ internal sealed class RestrictedStateService
 
         var now = unixTimeSeconds();
         if (sessionContext is null ||
-            !RestrictedStateValidation.IsValidReceipt(receipt) ||
-            (lineage is not null &&
-                (!RestrictedStateValidation.IsValidLineage(lineage) ||
-                    lineage.Scope != access.Scope ||
-                    !lineage.TransitionAuthorized ||
-                    lineage.ExpiresAtUnixSeconds <= now)))
+            !RestrictedStateValidation.IsValidReceipt(receipt))
         {
             return Failure(RestrictedStateCodes.Conflict);
         }
@@ -633,14 +655,6 @@ internal sealed class RestrictedStateService
         var snapshot = read.Snapshot!;
         var acceptedCandidate = snapshot.Accepted.FirstOrDefault(
             candidate => ReceiptMatches(receipt, candidate));
-        if (acceptedCandidate is not null &&
-            !ReferenceEquals(
-                acceptedCandidate,
-                snapshot.Accepted[0]))
-        {
-            return Failure(RestrictedStateCodes.ReplayRejected);
-        }
-
         var candidate = acceptedCandidate is not null
             ? acceptedCandidate
             : snapshot.Staging is not null &&
@@ -655,6 +669,28 @@ internal sealed class RestrictedStateService
         if (candidate.Binding.ExpiresAtUnixSeconds <= now)
         {
             return Failure(RestrictedStateCodes.Expired);
+        }
+
+        var authenticationCode = AuthenticateCandidate(
+            access,
+            candidate,
+            sessionContext);
+        if (authenticationCode is not null)
+        {
+            return Failure(authenticationCode);
+        }
+
+        if (acceptedCandidate is not null &&
+            !ReferenceEquals(
+                acceptedCandidate,
+                snapshot.Accepted[0]))
+        {
+            return Failure(RestrictedStateCodes.ReplayRejected);
+        }
+
+        if (!IsValidAcceptanceLineage(access, lineage, now))
+        {
+            return Failure(RestrictedStateCodes.Conflict);
         }
 
         var transitionCode = ValidateAcceptanceTransition(
@@ -682,16 +718,10 @@ internal sealed class RestrictedStateService
             }
         }
 
-        var authenticationCode = AuthenticateCandidate(
-            access,
-            candidate,
-            sessionContext);
-        return authenticationCode is null
-            ? Success(
-                StateAction.Idempotent,
-                RestrictedStateCodes.Idempotent,
-                candidate)
-            : Failure(authenticationCode);
+        return Success(
+            StateAction.Idempotent,
+            RestrictedStateCodes.Idempotent,
+            candidate);
     }
 
     internal StateResult Reset(
@@ -703,13 +733,13 @@ internal sealed class RestrictedStateService
             return Failure(RestrictedStateCodes.Cancelled);
         }
 
-        var read = Read(access, cancellationToken);
+        var read = ReadRawVersion(access, cancellationToken);
         if (!read.Succeeded)
         {
             return Failure(MapReadFailure(read.Failure));
         }
 
-        var write = Delete(
+        var write = DeleteRaw(
             access,
             read.Version!,
             cancellationToken);
@@ -943,6 +973,58 @@ internal sealed class RestrictedStateService
         }
     }
 
+    private RestrictedStateStoreRawRead ReadRawVersion(
+        AuthorizedStateAccess access,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return store.ReadRawVersion(access, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return new RestrictedStateStoreRawRead(
+                RestrictedStateStoreFailure.Cancelled,
+                null);
+        }
+        catch (Exception exception) when (
+            IsBoundaryDomainException(exception))
+        {
+            return new RestrictedStateStoreRawRead(
+                RestrictedStateStoreFailure.Io,
+                null);
+        }
+    }
+
+    private RestrictedStateStoreWrite DeleteRaw(
+        AuthorizedStateAccess access,
+        RestrictedStateRawVersion expected,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return store.CompareDeleteRaw(
+                access,
+                expected,
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return new RestrictedStateStoreWrite(
+                RestrictedStateStoreFailure.Cancelled,
+                null,
+                false);
+        }
+        catch (Exception exception) when (
+            IsBoundaryDomainException(exception))
+        {
+            return new RestrictedStateStoreWrite(
+                RestrictedStateStoreFailure.Io,
+                null,
+                false);
+        }
+    }
+
     private static bool TryValidatePreparedTransition(
         RestrictedStateScope scope,
         AcceptedLineage? lineage,
@@ -1031,6 +1113,16 @@ internal sealed class RestrictedStateService
 
         return null;
     }
+
+    private static bool IsValidAcceptanceLineage(
+        AuthorizedStateAccess access,
+        AcceptedLineage? lineage,
+        long now) =>
+        lineage is null ||
+        (RestrictedStateValidation.IsValidLineage(lineage) &&
+            lineage.Scope == access.Scope &&
+            lineage.TransitionAuthorized &&
+            lineage.ExpiresAtUnixSeconds > now);
 
     private static bool MatchesLineage(
         RestrictedStateCandidate candidate,

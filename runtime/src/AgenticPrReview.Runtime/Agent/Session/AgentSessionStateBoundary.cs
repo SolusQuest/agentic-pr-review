@@ -60,6 +60,20 @@ internal static class AgentSessionStateBoundary
         AgentSessionStateAdmissionContext context)
     {
         if (context is null ||
+            context.TrustedRequest is null ||
+            context.SessionId is null ||
+            context.CurrentReviewedIdentity is null ||
+            context.CurrentReviewedIdentity.RepositoryId is null ||
+            context.CurrentReviewedIdentity.BaseSha is null ||
+            context.CurrentReviewedIdentity.HeadSha is null ||
+            !context.CurrentReviewedIdentity.IsValid() ||
+            context.CurrentReviewContext is null ||
+            context.ContinuationCodec is null ||
+            !Enum.IsDefined(context.Transition) ||
+            (context.EnvelopeSha256 is not null &&
+                !AgentSessionValidation.IsLowerHex(
+                    context.EnvelopeSha256,
+                    64)) ||
             !AgentSessionCodec.TryParseEnvelope(
                 plaintext,
                 out var parsed,
