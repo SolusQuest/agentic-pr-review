@@ -346,15 +346,26 @@ internal static class RestrictedStateEnvelope
             envelope);
 
     internal static string ObjectIdentity(
-        RestrictedStateScope scope,
+        RestrictedStateBinding binding,
+        string sessionSha256,
         string envelopeSha256)
     {
-        var binding = Encoding.UTF8.GetBytes(
-            $"{scope.RepositoryId}\n{scope.WorkflowIdentity}\n" +
-            $"{scope.ReviewTarget}\n{scope.SessionId}\n{envelopeSha256}");
+        if (!TryWriteBinding(binding, out var bindingBytes) ||
+            !RestrictedStateValidation.IsLowerHex(sessionSha256, 64) ||
+            !RestrictedStateValidation.IsLowerHex(envelopeSha256, 64))
+        {
+            throw new ArgumentException(
+                "A valid binding and fixed hashes are required.");
+        }
+
+        var writer = new ArrayBufferWriter<byte>(
+            checked(bindingBytes.Length + 64));
+        Write(writer, bindingBytes);
+        Write(writer, Convert.FromHexString(sessionSha256));
+        Write(writer, Convert.FromHexString(envelopeSha256));
         return AgentCanonical.HashDomain(
             "apr.state-object.r2",
-            binding);
+            writer.WrittenSpan);
     }
 
     private static byte[] WriteHeader(

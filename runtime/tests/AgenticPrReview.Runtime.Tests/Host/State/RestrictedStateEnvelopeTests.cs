@@ -90,17 +90,9 @@ public sealed class RestrictedStateEnvelopeTests
             out _));
         Assert.True(RestrictedStateEnvelope.TryParse(
             envelope,
-            out var parsed));
+            out _));
 
-        var mutationOffsets = new[]
-        {
-            0,
-            8,
-            10,
-            parsed!.Header.Length - 1,
-            parsed.Header.Length,
-            envelope!.Length - 1,
-        };
+        var mutationOffsets = Enumerable.Range(0, envelope!.Length);
         foreach (var offset in mutationOffsets)
         {
             var mutated = envelope.ToArray();
@@ -120,6 +112,7 @@ public sealed class RestrictedStateEnvelopeTests
                 {
                     RestrictedStateCodes.EnvelopeInvalid,
                     RestrictedStateCodes.AuthenticationFailed,
+                    RestrictedStateCodes.KeyUnavailable,
                 });
         }
 
@@ -137,6 +130,139 @@ public sealed class RestrictedStateEnvelopeTests
         Assert.Equal(
             RestrictedStateCodes.AuthenticationFailed,
             bindingCode);
+    }
+
+    [Fact]
+    public void EveryBindingFieldIsAuthenticatedAndChangesObjectIdentity()
+    {
+        var access = RestrictedStateTestData.Access();
+        var binding = RestrictedStateTestData.Binding(
+            generation: 1,
+            predecessor: new string('8', 64));
+        var keys = new TestKeyResolver();
+        var plaintext = new byte[] { 1, 2, 3 };
+        Assert.True(RestrictedStateEnvelope.TryEncrypt(
+            access,
+            binding,
+            plaintext,
+            keys,
+            out var envelope,
+            out _));
+        var envelopeSha =
+            RestrictedStateEnvelope.EnvelopeSha256(envelope!);
+        var sessionSha = AgentCanonical.HashDomain(
+            AgentCanonical.SessionDomain,
+            plaintext);
+        var identity = RestrictedStateEnvelope.ObjectIdentity(
+            binding,
+            sessionSha,
+            envelopeSha);
+
+        var scopes = new[]
+        {
+            binding.Scope with { RepositoryId = "repo-2" },
+            binding.Scope with { WorkflowIdentity = "workflow-2" },
+            binding.Scope with { ReviewTarget = 2 },
+            binding.Scope with { SessionId = "session_1" },
+            binding.Scope with { ProviderId = "provider-2" },
+            binding.Scope with { ModelId = "model-2" },
+            binding.Scope with { AdapterId = "adapter-2" },
+            binding.Scope with { PolicySha256 = new string('a', 64) },
+            binding.Scope with { LimitsSha256 = new string('b', 64) },
+            binding.Scope with { ToolsetSha256 = new string('c', 64) },
+            binding.Scope with { BuildId = "build-2" },
+        };
+        var mutations = scopes.Select(scope =>
+                binding with { Scope = scope })
+            .Concat(
+            [
+                binding with
+                {
+                    ProducerBaseSha = new string('6', 40),
+                },
+                binding with
+                {
+                    ProducerHeadSha = new string('7', 40),
+                },
+                binding with { Generation = 2 },
+                binding with
+                {
+                    PredecessorEnvelopeSha256 =
+                        new string('9', 64),
+                },
+                binding with
+                {
+                    AcceptedAtUnixSeconds =
+                        binding.AcceptedAtUnixSeconds + 1,
+                },
+                binding with
+                {
+                    ExpiresAtUnixSeconds =
+                        binding.ExpiresAtUnixSeconds - 1,
+                },
+            ]);
+
+        foreach (var mutated in mutations)
+        {
+            var mutatedAccess = RestrictedStateTestData.Access(
+                mutated.Scope);
+            Assert.False(RestrictedStateEnvelope.TryDecrypt(
+                mutatedAccess,
+                mutated,
+                envelope,
+                keys,
+                out _,
+                out var code));
+            Assert.Equal(
+                RestrictedStateCodes.AuthenticationFailed,
+                code);
+            Assert.NotEqual(
+                identity,
+                RestrictedStateEnvelope.ObjectIdentity(
+                    mutated,
+                    sessionSha,
+                    envelopeSha));
+        }
+
+        Assert.NotEqual(
+            identity,
+            RestrictedStateEnvelope.ObjectIdentity(
+                binding,
+                new string('d', 64),
+                envelopeSha));
+        Assert.NotEqual(
+            identity,
+            RestrictedStateEnvelope.ObjectIdentity(
+                binding,
+                sessionSha,
+                new string('e', 64)));
+    }
+
+    [Fact]
+    public void KeyIdAcceptsExactAsciiDomainAndRejectsNonAscii()
+    {
+        foreach (var keyId in new[]
+        {
+            "\0",
+            " ",
+            "\x7f",
+            new string('\0', 64),
+        })
+        {
+            Assert.True(RestrictedStateValidation.IsValidKeyId(keyId));
+            Assert.True(RestrictedStateEnvelope.TryBuildAadVector(
+                keyId,
+                new byte[RestrictedStateFormat.NonceBytes],
+                1,
+                RestrictedStateTestData.Binding(),
+                out _));
+        }
+
+        Assert.False(RestrictedStateValidation.IsValidKeyId(string.Empty));
+        Assert.False(RestrictedStateValidation.IsValidKeyId(
+            new string('a', 65)));
+        Assert.False(RestrictedStateValidation.IsValidKeyId("\x80"));
+        Assert.False(RestrictedStateValidation.IsValidKeyId("é"));
     }
 
     [Fact]

@@ -238,6 +238,11 @@ internal interface IRestrictedStateStore
         RestrictedStateSnapshotVersion expected,
         RestrictedStateSnapshot replacement,
         CancellationToken cancellationToken);
+
+    RestrictedStateStoreWrite CompareDelete(
+        AuthorizedStateAccess access,
+        RestrictedStateSnapshotVersion expected,
+        CancellationToken cancellationToken);
 }
 
 internal sealed class RestrictedStateKey : IDisposable
@@ -346,9 +351,7 @@ internal sealed record RestrictedStateRestoreRequest(
 internal sealed record RestrictedStatePrepareRequest(
     AcceptedLineage? Lineage,
     ReadOnlyMemory<byte> Plaintext,
-    RestrictedStateSessionAdmissionContext SessionContext,
-    long AcceptedAtUnixSeconds,
-    long ExpiresAtUnixSeconds);
+    RestrictedStateSessionAdmissionContext SessionContext);
 
 internal sealed record StateResult(
     StateAction Action,

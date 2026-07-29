@@ -94,7 +94,10 @@ internal static class RestrictedStateTestData
                 session),
             envelopeSha,
             RestrictedStateEnvelope.ObjectIdentity(
-                access.Scope,
+                binding,
+                AgentCanonical.HashDomain(
+                    AgentCanonical.SessionDomain,
+                    session),
                 envelopeSha),
             envelope!);
     }
@@ -117,6 +120,8 @@ internal sealed class TestKeyResolver : IRestrictedStateKeyResolver
     internal int WriteCalls { get; private set; }
     internal int ReadCalls { get; private set; }
     internal string CurrentKeyId { get; set; }
+    internal bool ThrowOnWrite { get; set; }
+    internal bool ThrowOnRead { get; set; }
 
     internal void AddApproved(string keyId, byte[] key) =>
         keys[keyId] = key.ToArray();
@@ -128,6 +133,11 @@ internal sealed class TestKeyResolver : IRestrictedStateKeyResolver
         out RestrictedStateKey? key)
     {
         WriteCalls++;
+        if (ThrowOnWrite)
+        {
+            throw new InvalidOperationException("Synthetic key write.");
+        }
+
         if (!keys.TryGetValue(CurrentKeyId, out var material))
         {
             key = null;
@@ -145,6 +155,11 @@ internal sealed class TestKeyResolver : IRestrictedStateKeyResolver
         out RestrictedStateKey? key)
     {
         ReadCalls++;
+        if (ThrowOnRead)
+        {
+            throw new InvalidOperationException("Synthetic key read.");
+        }
+
         if (!keys.TryGetValue(keyId, out var material))
         {
             key = null;
@@ -161,6 +176,7 @@ internal sealed class TestSessionAdmission
 {
     internal int Calls { get; private set; }
     internal bool Reject { get; set; }
+    internal bool Throw { get; set; }
 
     public RestrictedStateSessionAdmissionResult Admit(
         AuthorizedStateAccess access,
@@ -168,6 +184,12 @@ internal sealed class TestSessionAdmission
         RestrictedStateSessionAdmissionContext context)
     {
         Calls++;
+        if (Throw)
+        {
+            throw new InvalidOperationException(
+                "Synthetic session admission.");
+        }
+
         if (Reject || plaintext.IsEmpty)
         {
             return RestrictedStateSessionAdmissionResult.Failure();
@@ -199,6 +221,8 @@ internal sealed class MemoryRestrictedStateStore : IRestrictedStateStore
     internal int WriteCalls { get; private set; }
     internal RestrictedStateStoreFailure ReadFailure { get; set; }
     internal RestrictedStateStoreFailure WriteFailure { get; set; }
+    internal bool CommitOnWriteFailure { get; set; }
+    internal bool PersistOnWriteFailure { get; set; }
 
     internal RestrictedStateSnapshot Snapshot
     {
@@ -236,10 +260,18 @@ internal sealed class MemoryRestrictedStateStore : IRestrictedStateStore
         cancellationToken.ThrowIfCancellationRequested();
         if (WriteFailure != RestrictedStateStoreFailure.None)
         {
+            if (CommitOnWriteFailure || PersistOnWriteFailure)
+            {
+                snapshot = replacement;
+                version = new RestrictedStateSnapshotVersion(
+                    Guid.NewGuid().ToString("N"),
+                    true);
+            }
+
             return new RestrictedStateStoreWrite(
                 WriteFailure,
-                null,
-                false);
+                CommitOnWriteFailure ? version : null,
+                CommitOnWriteFailure);
         }
 
         if (expected != version)
@@ -254,6 +286,43 @@ internal sealed class MemoryRestrictedStateStore : IRestrictedStateStore
         version = new RestrictedStateSnapshotVersion(
             Guid.NewGuid().ToString("N"),
             true);
+        return new RestrictedStateStoreWrite(
+            RestrictedStateStoreFailure.None,
+            version,
+            true);
+    }
+
+    public RestrictedStateStoreWrite CompareDelete(
+        AuthorizedStateAccess access,
+        RestrictedStateSnapshotVersion expected,
+        CancellationToken cancellationToken)
+    {
+        WriteCalls++;
+        cancellationToken.ThrowIfCancellationRequested();
+        if (WriteFailure != RestrictedStateStoreFailure.None)
+        {
+            if (CommitOnWriteFailure)
+            {
+                snapshot = RestrictedStateSnapshot.Empty;
+                version = RestrictedStateSnapshotVersion.Absent;
+            }
+
+            return new RestrictedStateStoreWrite(
+                WriteFailure,
+                CommitOnWriteFailure ? version : null,
+                CommitOnWriteFailure);
+        }
+
+        if (expected != version)
+        {
+            return new RestrictedStateStoreWrite(
+                RestrictedStateStoreFailure.Conflict,
+                null,
+                false);
+        }
+
+        snapshot = RestrictedStateSnapshot.Empty;
+        version = RestrictedStateSnapshotVersion.Absent;
         return new RestrictedStateStoreWrite(
             RestrictedStateStoreFailure.None,
             version,

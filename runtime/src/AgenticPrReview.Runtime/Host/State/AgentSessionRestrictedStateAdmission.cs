@@ -21,6 +21,7 @@ internal sealed class AgentSessionRestrictedStateAdmission
             plaintext.Span,
             context.SessionContext);
         if (!admitted.Succeeded ||
+            !MatchesScope(admitted.Scope!, access.Scope) ||
             admitted.Generation != context.Generation ||
             !StringComparer.Ordinal.Equals(
                 admitted.ProducerBaseSha,
@@ -45,4 +46,39 @@ internal sealed class AgentSessionRestrictedStateAdmission
                 admitted.PredecessorEnvelopeSha256,
                 admitted.Value!));
     }
+
+    private static bool MatchesScope(
+        AgentSessionStateScope admitted,
+        RestrictedStateScope authorized) =>
+        StringComparer.Ordinal.Equals(
+            admitted.RepositoryId,
+            authorized.RepositoryId) &&
+        StringComparer.Ordinal.Equals(
+            admitted.WorkflowIdentity,
+            authorized.WorkflowIdentity) &&
+        admitted.ReviewTarget == authorized.ReviewTarget &&
+        StringComparer.Ordinal.Equals(
+            admitted.SessionId,
+            authorized.SessionId) &&
+        StringComparer.Ordinal.Equals(
+            admitted.ProviderId,
+            authorized.ProviderId) &&
+        StringComparer.Ordinal.Equals(
+            admitted.ModelId,
+            authorized.ModelId) &&
+        StringComparer.Ordinal.Equals(
+            admitted.AdapterId,
+            authorized.AdapterId) &&
+        StringComparer.Ordinal.Equals(
+            admitted.PolicySha256,
+            authorized.PolicySha256) &&
+        StringComparer.Ordinal.Equals(
+            admitted.LimitsSha256,
+            authorized.LimitsSha256) &&
+        StringComparer.Ordinal.Equals(
+            admitted.ToolsetSha256,
+            authorized.ToolsetSha256) &&
+        StringComparer.Ordinal.Equals(
+            admitted.BuildId,
+            authorized.BuildId);
 }

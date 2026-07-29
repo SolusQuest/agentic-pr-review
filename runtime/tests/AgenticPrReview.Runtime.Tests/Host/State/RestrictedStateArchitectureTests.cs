@@ -59,6 +59,30 @@ public sealed class RestrictedStateArchitectureTests
             method => Assert.Equal(
                 typeof(AuthorizedStateAccess),
                 method.GetParameters()[0].ParameterType));
+        var operations = typeof(RestrictedStateService)
+            .GetMethods(
+                BindingFlags.Instance |
+                BindingFlags.NonPublic |
+                BindingFlags.DeclaredOnly)
+            .Where(method => new[]
+            {
+                "Enumerate",
+                "Prepare",
+                "Restore",
+                "Accept",
+                "Reconcile",
+                "Reset",
+                "CleanupExpired",
+                "PrepareHandoff",
+            }.Contains(method.Name, StringComparer.Ordinal))
+            .OrderBy(method => method.Name, StringComparer.Ordinal)
+            .ToArray();
+        Assert.Equal(8, operations.Length);
+        Assert.All(
+            operations,
+            method => Assert.Equal(
+                typeof(AuthorizedStateAccess),
+                method.GetParameters()[0].ParameterType));
     }
 
     [Fact]
@@ -162,7 +186,6 @@ public sealed class RestrictedStateArchitectureTests
         Assert.Equal(
             new (string, string, string?)[]
             {
-                ("Close", "libc", "close"),
                 ("CreateFile", "kernel32.dll", "CreateFileW"),
                 ("FStat", "libc", "fstat"),
                 ("FSync", "libc", "fsync"),

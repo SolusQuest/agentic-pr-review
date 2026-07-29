@@ -15,8 +15,17 @@ internal sealed class LocalRestrictedStateStore : IRestrictedStateStore
     private static readonly ConcurrentDictionary<string, object> ScopeLocks =
         new(StringComparer.Ordinal);
     private readonly string configuredRoot;
+    private readonly Action? beforeWriteTestHook;
+    private readonly Action? afterTemporaryFlushTestHook;
+    private readonly Func<string, bool>? deleteTemporaryTestHook;
+    private readonly Func<string, bool>? syncDirectoryTestHook;
 
-    internal LocalRestrictedStateStore(string explicitTestOwnedRoot)
+    internal LocalRestrictedStateStore(
+        string explicitTestOwnedRoot,
+        Action? beforeWriteTestHook = null,
+        Action? afterTemporaryFlushTestHook = null,
+        Func<string, bool>? deleteTemporaryTestHook = null,
+        Func<string, bool>? syncDirectoryTestHook = null)
     {
         if (string.IsNullOrWhiteSpace(explicitTestOwnedRoot))
         {
@@ -26,6 +35,11 @@ internal sealed class LocalRestrictedStateStore : IRestrictedStateStore
         }
 
         configuredRoot = explicitTestOwnedRoot;
+        this.beforeWriteTestHook = beforeWriteTestHook;
+        this.afterTemporaryFlushTestHook =
+            afterTemporaryFlushTestHook;
+        this.deleteTemporaryTestHook = deleteTemporaryTestHook;
+        this.syncDirectoryTestHook = syncDirectoryTestHook;
     }
 
     public RestrictedStateStoreRead Read(
@@ -34,8 +48,36 @@ internal sealed class LocalRestrictedStateStore : IRestrictedStateStore
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (!TryResolveRoot(access, out var root) ||
-            !TryResolveScopePath(access, root, out var path) ||
-            !TryValidateRoot(root))
+            !TryResolveScopePath(access, root, out var path))
+        {
+            return ReadFailure(RestrictedStateStoreFailure.Invalid);
+        }
+
+        if (!TryCaptureRootProof(
+                root,
+                out var rootProof,
+                out var rootFailure))
+        {
+            return ReadFailure(rootFailure);
+        }
+
+        var guardOpen = NativeRestrictedStateFiles.OpenRootGuardNoFollow(
+            root,
+            out var rootGuard);
+        if (guardOpen != RestrictedStateOpenResult.Success ||
+            rootGuard is null)
+        {
+            return ReadFailure(MapOpenFailure(guardOpen));
+        }
+
+        using var readRootGuard = rootGuard;
+        if (!RootGuardMatchesProof(readRootGuard, rootProof) ||
+            !TryResolveScopePath(
+                access,
+                NativeRestrictedStateFiles.AnchoredRoot(
+                    root,
+                    readRootGuard),
+                out var operationPath))
         {
             return ReadFailure(RestrictedStateStoreFailure.Invalid);
         }
@@ -43,7 +85,15 @@ internal sealed class LocalRestrictedStateStore : IRestrictedStateStore
         lock (ScopeLocks.GetOrAdd(path, static _ => new object()))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ReadUnderLock(access, path, cancellationToken);
+            if (!RootProofIsCurrent(root, rootProof))
+            {
+                return ReadFailure(RestrictedStateStoreFailure.Invalid);
+            }
+
+            return ReadUnderLock(
+                access,
+                operationPath,
+                cancellationToken);
         }
     }
 
@@ -58,8 +108,37 @@ internal sealed class LocalRestrictedStateStore : IRestrictedStateStore
             replacement is null ||
             !RestrictedStateValidation.IsValidSnapshot(replacement) ||
             !TryResolveRoot(access, out var root) ||
-            !TryResolveScopePath(access, root, out var path) ||
-            !TryValidateRoot(root))
+            !TryResolveScopePath(access, root, out var path))
+        {
+            return WriteFailure(RestrictedStateStoreFailure.Invalid);
+        }
+
+        if (!TryCaptureRootProof(
+                root,
+                out var rootProof,
+                out var rootFailure))
+        {
+            return WriteFailure(rootFailure);
+        }
+
+        var guardOpen = NativeRestrictedStateFiles.OpenRootGuardNoFollow(
+            root,
+            out var rootGuard);
+        if (guardOpen != RestrictedStateOpenResult.Success ||
+            rootGuard is null)
+        {
+            return WriteFailure(MapOpenFailure(guardOpen));
+        }
+
+        using var writeRootGuard = rootGuard;
+        var operationRoot = NativeRestrictedStateFiles.AnchoredRoot(
+            root,
+            writeRootGuard);
+        if (!RootGuardMatchesProof(writeRootGuard, rootProof) ||
+            !TryResolveScopePath(
+                access,
+                operationRoot,
+                out var operationPath))
         {
             return WriteFailure(RestrictedStateStoreFailure.Invalid);
         }
@@ -67,9 +146,14 @@ internal sealed class LocalRestrictedStateStore : IRestrictedStateStore
         lock (ScopeLocks.GetOrAdd(path, static _ => new object()))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (!RootProofIsCurrent(root, rootProof))
+            {
+                return WriteFailure(RestrictedStateStoreFailure.Invalid);
+            }
+
             var current = ReadUnderLock(
                 access,
-                path,
+                operationPath,
                 cancellationToken);
             if (!current.Succeeded)
             {
@@ -90,10 +174,17 @@ internal sealed class LocalRestrictedStateStore : IRestrictedStateStore
                     RestrictedStateStoreFailure.Invalid);
             }
 
-            var temporaryPath = Path.Combine(
-                root,
+            beforeWriteTestHook?.Invoke();
+            if (!RootProofIsCurrent(root, rootProof))
+            {
+                return WriteFailure(RestrictedStateStoreFailure.Invalid);
+            }
+
+            var temporaryPath = Path.Join(
+                operationRoot,
                 $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
             var committed = false;
+            RestrictedStateStoreWrite result;
             try
             {
                 using (var stream = new FileStream(
@@ -108,42 +199,190 @@ internal sealed class LocalRestrictedStateStore : IRestrictedStateStore
                     stream.Flush(flushToDisk: true);
                 }
 
+                afterTemporaryFlushTestHook?.Invoke();
                 cancellationToken.ThrowIfCancellationRequested();
-                var attributes = File.GetAttributes(temporaryPath);
-                if ((attributes &
-                        (FileAttributes.Directory |
-                            FileAttributes.ReparsePoint)) != 0)
+                if (!RootProofIsCurrent(root, rootProof))
                 {
-                    return WriteFailure(
+                    result = WriteFailure(
                         RestrictedStateStoreFailure.Invalid);
-                }
-
-                if (expected.Exists)
-                {
-                    File.Move(
-                        temporaryPath,
-                        path,
-                        overwrite: true);
                 }
                 else
                 {
-                    File.Move(
-                        temporaryPath,
-                        path,
-                        overwrite: false);
+                    var attributes = File.GetAttributes(temporaryPath);
+                    if ((attributes &
+                        (FileAttributes.Directory |
+                            FileAttributes.ReparsePoint)) != 0)
+                    {
+                        result = WriteFailure(
+                            RestrictedStateStoreFailure.Invalid);
+                    }
+                    else
+                    {
+                        File.Move(
+                            temporaryPath,
+                            operationPath,
+                            overwrite: expected.Exists);
+                        committed = true;
+                        if (!RootProofIsCurrent(root, rootProof) ||
+                            !SyncDirectory(root, writeRootGuard))
+                        {
+                            result = WriteFailure(
+                                RestrictedStateStoreFailure.Io,
+                                committed: true);
+                        }
+                        else
+                        {
+                            var sha = SnapshotSha256(bytes);
+                            result = new RestrictedStateStoreWrite(
+                                RestrictedStateStoreFailure.None,
+                                new RestrictedStateSnapshotVersion(
+                                    sha,
+                                    true),
+                                Committed: true);
+                        }
+                    }
                 }
-
-                committed = true;
-                NativeRestrictedStateFiles.TrySyncDirectory(root);
-                var sha = SnapshotSha256(bytes);
-                return new RestrictedStateStoreWrite(
-                    RestrictedStateStoreFailure.None,
-                    new RestrictedStateSnapshotVersion(sha, true),
-                    Committed: true);
             }
             catch (OperationCanceledException) when (!committed)
             {
+                if (!TryDeleteTemporaryFile(temporaryPath))
+                {
+                    return WriteFailure(
+                        RestrictedStateStoreFailure.Cleanup);
+                }
+
                 throw;
+            }
+            catch (IOException)
+            {
+                result = WriteFailure(
+                    RestrictedStateStoreFailure.Io,
+                    committed);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                result = WriteFailure(
+                    RestrictedStateStoreFailure.Io,
+                    committed);
+            }
+
+            if (!committed &&
+                !TryDeleteTemporaryFile(temporaryPath))
+            {
+                return WriteFailure(
+                    RestrictedStateStoreFailure.Cleanup);
+            }
+
+            return result;
+        }
+    }
+
+    public RestrictedStateStoreWrite CompareDelete(
+        AuthorizedStateAccess access,
+        RestrictedStateSnapshotVersion expected,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (expected is null ||
+            !TryResolveRoot(access, out var root) ||
+            !TryResolveScopePath(access, root, out var path))
+        {
+            return WriteFailure(RestrictedStateStoreFailure.Invalid);
+        }
+
+        if (!TryCaptureRootProof(
+                root,
+                out var rootProof,
+                out var rootFailure))
+        {
+            return WriteFailure(rootFailure);
+        }
+
+        var guardOpen = NativeRestrictedStateFiles.OpenRootGuardNoFollow(
+            root,
+            out var rootGuard);
+        if (guardOpen != RestrictedStateOpenResult.Success ||
+            rootGuard is null)
+        {
+            return WriteFailure(MapOpenFailure(guardOpen));
+        }
+
+        using var deleteRootGuard = rootGuard;
+        var operationRoot = NativeRestrictedStateFiles.AnchoredRoot(
+            root,
+            deleteRootGuard);
+        if (!RootGuardMatchesProof(deleteRootGuard, rootProof) ||
+            !TryResolveScopePath(
+                access,
+                operationRoot,
+                out var operationPath))
+        {
+            return WriteFailure(RestrictedStateStoreFailure.Invalid);
+        }
+
+        lock (ScopeLocks.GetOrAdd(path, static _ => new object()))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!RootProofIsCurrent(root, rootProof))
+            {
+                return WriteFailure(RestrictedStateStoreFailure.Invalid);
+            }
+
+            var current = ReadUnderLock(
+                access,
+                operationPath,
+                cancellationToken);
+            if (!current.Succeeded)
+            {
+                return WriteFailure(current.Failure);
+            }
+
+            if (current.Version != expected)
+            {
+                return WriteFailure(
+                    RestrictedStateStoreFailure.Conflict);
+            }
+
+            if (!expected.Exists)
+            {
+                return new RestrictedStateStoreWrite(
+                    RestrictedStateStoreFailure.None,
+                    RestrictedStateSnapshotVersion.Absent,
+                    Committed: true);
+            }
+
+            var committed = false;
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var revalidated = ReadUnderLock(
+                    access,
+                    operationPath,
+                    cancellationToken);
+                if (!revalidated.Succeeded ||
+                    revalidated.Version != expected ||
+                    !RootProofIsCurrent(root, rootProof))
+                {
+                    return WriteFailure(
+                        revalidated.Succeeded
+                            ? RestrictedStateStoreFailure.Conflict
+                            : revalidated.Failure);
+                }
+
+                File.Delete(operationPath);
+                committed = true;
+                if (!RootProofIsCurrent(root, rootProof) ||
+                    !SyncDirectory(root, deleteRootGuard))
+                {
+                    return WriteFailure(
+                        RestrictedStateStoreFailure.Io,
+                        committed: true);
+                }
+
+                return new RestrictedStateStoreWrite(
+                    RestrictedStateStoreFailure.None,
+                    RestrictedStateSnapshotVersion.Absent,
+                    Committed: true);
             }
             catch (IOException)
             {
@@ -157,21 +396,6 @@ internal sealed class LocalRestrictedStateStore : IRestrictedStateStore
                     RestrictedStateStoreFailure.Io,
                     committed);
             }
-            finally
-            {
-                if (!committed)
-                {
-                    try
-                    {
-                        File.Delete(temporaryPath);
-                    }
-                    catch (Exception exception) when (
-                        exception is IOException or
-                            UnauthorizedAccessException)
-                    {
-                    }
-                }
-            }
         }
     }
 
@@ -180,7 +404,8 @@ internal sealed class LocalRestrictedStateStore : IRestrictedStateStore
         string path,
         CancellationToken cancellationToken)
     {
-        if (!File.Exists(path))
+        var openResult = TryOpenRead(path, out var firstHandle);
+        if (openResult == RestrictedStateOpenResult.NotFound)
         {
             return new RestrictedStateStoreRead(
                 RestrictedStateStoreFailure.None,
@@ -188,12 +413,20 @@ internal sealed class LocalRestrictedStateStore : IRestrictedStateStore
                 RestrictedStateSnapshotVersion.Absent);
         }
 
-        SafeFileHandle? firstHandle = null;
-        try
+        if (openResult != RestrictedStateOpenResult.Success ||
+            firstHandle is null)
         {
-            if (!TryOpenRead(path, out firstHandle) ||
-                firstHandle is null ||
-                !TryInspectRegular(
+            return ReadFailure(
+                openResult == RestrictedStateOpenResult.Io
+                    ? RestrictedStateStoreFailure.Io
+                    : RestrictedStateStoreFailure.Invalid);
+        }
+
+        using (firstHandle)
+        {
+            try
+            {
+                if (!TryInspectRegular(
                     firstHandle,
                     out var firstIdentity,
                     out var length) ||
@@ -239,28 +472,25 @@ internal sealed class LocalRestrictedStateStore : IRestrictedStateStore
                     RestrictedStateStoreFailure.Invalid);
             }
 
-            return new RestrictedStateStoreRead(
-                RestrictedStateStoreFailure.None,
-                snapshot,
-                new RestrictedStateSnapshotVersion(
-                    SnapshotSha256(bytes),
-                    true));
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (IOException)
-        {
-            return ReadFailure(RestrictedStateStoreFailure.Io);
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return ReadFailure(RestrictedStateStoreFailure.Io);
-        }
-        finally
-        {
-            firstHandle?.Dispose();
+                return new RestrictedStateStoreRead(
+                    RestrictedStateStoreFailure.None,
+                    snapshot,
+                    new RestrictedStateSnapshotVersion(
+                        SnapshotSha256(bytes),
+                        true));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (IOException)
+            {
+                return ReadFailure(RestrictedStateStoreFailure.Io);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return ReadFailure(RestrictedStateStoreFailure.Io);
+            }
         }
     }
 
@@ -300,68 +530,116 @@ internal sealed class LocalRestrictedStateStore : IRestrictedStateStore
         var scopeSha = AgentCanonical.HashDomain(
             "apr.state-scope.r2",
             scopeBytes);
-        path = Path.Combine(root, $"scope-{scopeSha}.aprstate");
+        path = Path.Join(root, $"scope-{scopeSha}.aprstate");
         return StringComparer.Ordinal.Equals(
             Path.GetDirectoryName(path),
             root);
     }
 
-    private static bool TryValidateRoot(string root)
+    private static bool TryCaptureRootProof(
+        string root,
+        out ImmutableArray<RestrictedStateRootEntry> proof,
+        out RestrictedStateStoreFailure failure)
     {
-        if (!Directory.Exists(root))
+        failure = RestrictedStateStoreFailure.Invalid;
+        try
         {
+            var entries = ImmutableArray.CreateBuilder<
+                RestrictedStateRootEntry>();
+            var current = new DirectoryInfo(root);
+            while (current is not null)
+            {
+                var open =
+                    NativeRestrictedStateFiles.OpenDirectoryNoFollow(
+                        current.FullName,
+                        out var handle);
+                if (open != RestrictedStateOpenResult.Success ||
+                    handle is null)
+                {
+                    proof = [];
+                    failure = open == RestrictedStateOpenResult.Io
+                        ? RestrictedStateStoreFailure.Io
+                        : RestrictedStateStoreFailure.Invalid;
+                    return false;
+                }
+
+                using (handle)
+                {
+                    var attributes = File.GetAttributes(handle);
+                    if ((attributes & FileAttributes.Directory) == 0 ||
+                        (attributes &
+                            FileAttributes.ReparsePoint) != 0 ||
+                        !NativeRestrictedStateFiles.TryGetIdentity(
+                            handle,
+                            expectDirectory: true,
+                            out var identity))
+                    {
+                        proof = [];
+                        return false;
+                    }
+
+                    entries.Add(new RestrictedStateRootEntry(
+                        current.FullName,
+                        identity));
+                }
+
+                current = current.Parent;
+            }
+
+            proof = entries.ToImmutable();
+            failure = RestrictedStateStoreFailure.None;
+            return true;
+        }
+        catch (Exception exception) when (
+            exception is IOException or
+                UnauthorizedAccessException or
+                ArgumentException)
+        {
+            proof = [];
+            failure = RestrictedStateStoreFailure.Io;
             return false;
         }
-
-        var current = new DirectoryInfo(root);
-        while (current is not null)
-        {
-            FileAttributes attributes;
-            try
-            {
-                attributes = current.Attributes;
-            }
-            catch (Exception exception) when (
-                exception is IOException or
-                    UnauthorizedAccessException)
-            {
-                return false;
-            }
-
-            if ((attributes & FileAttributes.Directory) == 0 ||
-                (attributes & FileAttributes.ReparsePoint) != 0)
-            {
-                return false;
-            }
-
-            current = current.Parent;
-        }
-
-        return true;
     }
+
+    private static bool RootProofIsCurrent(
+        string root,
+        ImmutableArray<RestrictedStateRootEntry> expected) =>
+        TryCaptureRootProof(root, out var actual, out _) &&
+        actual.SequenceEqual(expected);
+
+    private static bool RootGuardMatchesProof(
+        SafeFileHandle guard,
+        ImmutableArray<RestrictedStateRootEntry> proof) =>
+        !proof.IsDefaultOrEmpty &&
+        NativeRestrictedStateFiles.TryGetIdentity(
+            guard,
+            expectDirectory: true,
+            out var identity) &&
+        identity == proof[0].Identity;
 
     private static bool TryPathStillNamesIdentity(
         string path,
         RestrictedStateFileIdentity expected)
     {
-        SafeFileHandle? secondHandle = null;
-        try
+        var open = TryOpenRead(path, out var secondHandle);
+        if (open != RestrictedStateOpenResult.Success ||
+            secondHandle is null)
         {
-            return TryOpenRead(path, out secondHandle) &&
-                secondHandle is not null &&
+            return false;
+        }
+
+        using (secondHandle)
+        {
+            return
                 TryInspectRegular(
                     secondHandle,
                     out var actual,
                     out _) &&
                 actual == expected;
         }
-        finally
-        {
-            secondHandle?.Dispose();
-        }
     }
 
-    private static bool TryOpenRead(
+    private static RestrictedStateOpenResult TryOpenRead(
         string path,
         out SafeFileHandle? handle)
     {
@@ -369,27 +647,13 @@ internal sealed class LocalRestrictedStateStore : IRestrictedStateStore
         if (OperatingSystem.IsLinux() ||
             OperatingSystem.IsWindows())
         {
-            return NativeRestrictedStateFiles.TryOpenNoFollow(
+            return NativeRestrictedStateFiles.OpenFileNoFollow(
                 path,
                 out handle);
         }
 
-        try
-        {
-            handle = File.OpenHandle(
-                path,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.Read,
-                FileOptions.RandomAccess);
-            return true;
-        }
-        catch (Exception exception) when (
-            exception is IOException or
-                UnauthorizedAccessException)
-        {
-            return false;
-        }
+        handle = null;
+        return RestrictedStateOpenResult.Unsafe;
     }
 
     private static bool TryInspectRegular(
@@ -407,6 +671,7 @@ internal sealed class LocalRestrictedStateStore : IRestrictedStateStore
                         FileAttributes.ReparsePoint)) != 0 ||
                 !NativeRestrictedStateFiles.TryGetIdentity(
                     handle,
+                    expectDirectory: false,
                     out identity))
             {
                 return false;
@@ -427,6 +692,38 @@ internal sealed class LocalRestrictedStateStore : IRestrictedStateStore
         AgentCanonical.HashDomain(
             "apr.state-snapshot.r2",
             bytes);
+
+    private bool TryDeleteTemporaryFile(string path)
+    {
+        if (deleteTemporaryTestHook is not null)
+        {
+            return deleteTemporaryTestHook(path);
+        }
+
+        try
+        {
+            File.Delete(path);
+            return true;
+        }
+        catch (Exception exception) when (
+            exception is IOException or
+                UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private bool SyncDirectory(
+        string path,
+        SafeFileHandle rootGuard) =>
+        syncDirectoryTestHook?.Invoke(path) ??
+        NativeRestrictedStateFiles.TrySyncDirectory(rootGuard);
+
+    private static RestrictedStateStoreFailure MapOpenFailure(
+        RestrictedStateOpenResult result) =>
+        result == RestrictedStateOpenResult.Io
+            ? RestrictedStateStoreFailure.Io
+            : RestrictedStateStoreFailure.Invalid;
 
     private static RestrictedStateStoreRead ReadFailure(
         RestrictedStateStoreFailure failure) =>
@@ -632,27 +929,29 @@ internal static class RestrictedStateSnapshotCodec
             return false;
         }
 
+        var binding = new RestrictedStateBinding(
+            scope!,
+            producerBase!,
+            producerHead!,
+            generation,
+            predecessor,
+            acceptedAt,
+            expiresAt);
         if (!StringComparer.Ordinal.Equals(
                 envelopeSha,
                 RestrictedStateEnvelope.EnvelopeSha256(envelope)) ||
             !StringComparer.Ordinal.Equals(
                 objectIdentity,
                 RestrictedStateEnvelope.ObjectIdentity(
-                    scope!,
+                    binding,
+                    sessionSha!,
                     envelopeSha!)))
         {
             return false;
         }
 
         candidate = new RestrictedStateCandidate(
-            new RestrictedStateBinding(
-                scope!,
-                producerBase!,
-                producerHead!,
-                generation,
-                predecessor,
-                acceptedAt,
-                expiresAt),
+            binding,
             sessionSha!,
             envelopeSha!,
             objectIdentity!,
@@ -977,6 +1276,18 @@ internal readonly record struct RestrictedStateFileIdentity(
     ulong Device,
     ulong File);
 
+internal readonly record struct RestrictedStateRootEntry(
+    string Path,
+    RestrictedStateFileIdentity Identity);
+
+internal enum RestrictedStateOpenResult
+{
+    Success,
+    NotFound,
+    Unsafe,
+    Io,
+}
+
 internal static partial class NativeRestrictedStateFiles
 {
     private const int OpenReadOnly = 0;
@@ -986,13 +1297,21 @@ internal static partial class NativeRestrictedStateFiles
     private const int OpenDirectory = 0x10000;
     private const uint FileTypeMask = 0xF000;
     private const uint RegularFile = 0x8000;
+    private const uint DirectoryFile = 0x4000;
     private const uint GenericRead = 0x80000000;
     private const uint FileShareRead = 0x00000001;
+    private const uint FileShareWrite = 0x00000002;
+    private const uint FileShareDelete = 0x00000004;
     private const uint OpenExisting = 3;
+    private const uint FileFlagBackupSemantics = 0x02000000;
     private const uint FileFlagOpenReparsePoint = 0x00200000;
     private const uint FileFlagRandomAccess = 0x10000000;
+    private const int ErrorFileNotFound = 2;
+    private const int ErrorPathNotFound = 3;
+    private const int LinuxNoEntry = 2;
+    private const int LinuxSymbolicLinkLoop = 40;
 
-    internal static bool TryOpenNoFollow(
+    internal static RestrictedStateOpenResult OpenFileNoFollow(
         string path,
         out SafeFileHandle? handle)
     {
@@ -1001,19 +1320,21 @@ internal static partial class NativeRestrictedStateFiles
             handle = CreateFile(
                 path,
                 GenericRead,
-                FileShareRead,
+                FileShareRead | FileShareWrite | FileShareDelete,
                 0,
                 OpenExisting,
-                FileFlagOpenReparsePoint | FileFlagRandomAccess,
+                FileFlagBackupSemantics |
+                    FileFlagOpenReparsePoint |
+                    FileFlagRandomAccess,
                 0);
             if (handle.IsInvalid)
             {
                 handle.Dispose();
                 handle = null;
-                return false;
+                return MapOpenError(Marshal.GetLastPInvokeError());
             }
 
-            return true;
+            return RestrictedStateOpenResult.Success;
         }
 
         var descriptor = Open(
@@ -1025,15 +1346,98 @@ internal static partial class NativeRestrictedStateFiles
         if (descriptor < 0)
         {
             handle = null;
-            return false;
+            return MapOpenError(Marshal.GetLastPInvokeError());
         }
 
         handle = new SafeFileHandle((nint)descriptor, ownsHandle: true);
-        return true;
+        return RestrictedStateOpenResult.Success;
     }
+
+    internal static RestrictedStateOpenResult OpenDirectoryNoFollow(
+        string path,
+        out SafeFileHandle? handle)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            handle = CreateFile(
+                path,
+                0,
+                FileShareRead | FileShareWrite | FileShareDelete,
+                0,
+                OpenExisting,
+                FileFlagBackupSemantics | FileFlagOpenReparsePoint,
+                0);
+            if (handle.IsInvalid)
+            {
+                handle.Dispose();
+                handle = null;
+                return MapOpenError(Marshal.GetLastPInvokeError());
+            }
+
+            return RestrictedStateOpenResult.Success;
+        }
+
+        if (OperatingSystem.IsLinux())
+        {
+            var descriptor = Open(
+                path,
+                OpenReadOnly |
+                    OpenDirectory |
+                    OpenNoFollow |
+                    OpenCloseOnExec);
+            if (descriptor < 0)
+            {
+                handle = null;
+                return MapOpenError(Marshal.GetLastPInvokeError());
+            }
+
+            handle = new SafeFileHandle(
+                (nint)descriptor,
+                ownsHandle: true);
+            return RestrictedStateOpenResult.Success;
+        }
+
+        handle = null;
+        return RestrictedStateOpenResult.Unsafe;
+    }
+
+    internal static RestrictedStateOpenResult OpenRootGuardNoFollow(
+        string path,
+        out SafeFileHandle? handle)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return OpenDirectoryNoFollow(path, out handle);
+        }
+
+        handle = CreateFile(
+            path,
+            0,
+            FileShareRead | FileShareWrite,
+            0,
+            OpenExisting,
+            FileFlagBackupSemantics | FileFlagOpenReparsePoint,
+            0);
+        if (handle.IsInvalid)
+        {
+            handle.Dispose();
+            handle = null;
+            return MapOpenError(Marshal.GetLastPInvokeError());
+        }
+
+        return RestrictedStateOpenResult.Success;
+    }
+
+    internal static string AnchoredRoot(
+        string configuredRoot,
+        SafeFileHandle rootGuard) =>
+        OperatingSystem.IsLinux()
+            ? $"/proc/self/fd/{checked((int)rootGuard.DangerousGetHandle())}"
+            : configuredRoot;
 
     internal static bool TryGetIdentity(
         SafeFileHandle handle,
+        bool expectDirectory,
         out RestrictedStateFileIdentity identity)
     {
         if (OperatingSystem.IsWindows())
@@ -1053,8 +1457,11 @@ internal static partial class NativeRestrictedStateFiles
         if (OperatingSystem.IsLinux())
         {
             var descriptor = checked((int)handle.DangerousGetHandle());
+            var expectedType = expectDirectory
+                ? DirectoryFile
+                : RegularFile;
             if (FStat(descriptor, out var info) != 0 ||
-                (info.Mode & FileTypeMask) != RegularFile)
+                (info.Mode & FileTypeMask) != expectedType)
             {
                 identity = default;
                 return false;
@@ -1070,29 +1477,23 @@ internal static partial class NativeRestrictedStateFiles
         return false;
     }
 
-    internal static bool TrySyncDirectory(string path)
+    private static RestrictedStateOpenResult MapOpenError(int error) =>
+        error is ErrorFileNotFound or ErrorPathNotFound
+            ? RestrictedStateOpenResult.NotFound
+            : error == LinuxSymbolicLinkLoop
+                ? RestrictedStateOpenResult.Unsafe
+                : RestrictedStateOpenResult.Io;
+
+    internal static bool TrySyncDirectory(SafeFileHandle rootGuard)
     {
         if (!OperatingSystem.IsLinux())
         {
             return true;
         }
 
-        var descriptor = Open(
-            path,
-            OpenReadOnly | OpenDirectory | OpenCloseOnExec);
-        if (descriptor < 0)
-        {
-            return false;
-        }
-
-        try
-        {
-            return FSync(descriptor) == 0;
-        }
-        finally
-        {
-            Close(descriptor);
-        }
+        var descriptor = checked(
+            (int)rootGuard.DangerousGetHandle());
+        return FSync(descriptor) == 0;
     }
 
     [LibraryImport(
@@ -1129,9 +1530,6 @@ internal static partial class NativeRestrictedStateFiles
 
     [LibraryImport("libc", EntryPoint = "fsync", SetLastError = true)]
     private static partial int FSync(int fileDescriptor);
-
-    [LibraryImport("libc", EntryPoint = "close", SetLastError = true)]
-    private static partial int Close(int fileDescriptor);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct ByHandleFileInformation

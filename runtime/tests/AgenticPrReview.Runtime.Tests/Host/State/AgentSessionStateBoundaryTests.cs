@@ -38,6 +38,52 @@ public sealed class AgentSessionStateBoundaryTests
             admitted.Session.ProducerHeadSha);
         Assert.IsType<AgentSessionStateAdmittedValue>(
             admitted.Session.Value);
+
+        var store = new MemoryRestrictedStateStore();
+        var keys = new TestKeyResolver();
+        var service = new RestrictedStateService(
+            store,
+            keys,
+            adapter,
+            () => RestrictedStateTestData.Now);
+        var prepared = service.Prepare(
+            access,
+            new RestrictedStatePrepareRequest(
+                null,
+                fixture.Artifact.Plaintext,
+                stateContext),
+            CancellationToken.None);
+        Assert.Equal(StateAction.Prepared, prepared.Result.Action);
+        var accepted = service.Accept(
+            access,
+            null,
+            prepared.Receipt!,
+            stateContext,
+            CancellationToken.None);
+        Assert.Equal(StateAction.Accepted, accepted.Action);
+        var current = Assert.Single(store.Snapshot.Accepted);
+        var lineage = new AcceptedLineage(
+            access.Scope,
+            current.Binding.Generation,
+            current.SessionSha256,
+            current.EnvelopeSha256,
+            current.Binding.PredecessorEnvelopeSha256,
+            current.Binding.AcceptedAtUnixSeconds,
+            current.Binding.ExpiresAtUnixSeconds,
+            TransitionAuthorized: true);
+
+        var restored = service.Restore(
+            access,
+            new RestrictedStateRestoreRequest(
+                RestrictedStateLocatorFamily.Current,
+                RestrictedStateRestoreIntent.Explicit,
+                lineage,
+                stateContext),
+            CancellationToken.None);
+
+        Assert.Equal(StateAction.Restored, restored.Result.Action);
+        Assert.IsType<AgentSessionStateAdmittedValue>(
+            restored.Session!.Value);
     }
 
     [Fact]
@@ -80,6 +126,102 @@ public sealed class AgentSessionStateBoundaryTests
                 envelopeSha256: null));
 
         Assert.False(admitted.Succeeded);
+    }
+
+    [Fact]
+    public async Task EveryStableScopeSubstitutionIsRejectedBySessionAdmission()
+    {
+        var fixture = await BuildSessionAsync();
+        var document = fixture.Artifact.Document;
+        var original = Access(document).Scope;
+        var substitutions = new[]
+        {
+            original with { RepositoryId = "other-repo" },
+            original with { WorkflowIdentity = "other-workflow" },
+            original with { ReviewTarget = 2 },
+            original with { SessionId = "session_1" },
+            original with { ProviderId = "other-provider" },
+            original with { ModelId = "other-model" },
+            original with { AdapterId = "other-adapter" },
+            original with { PolicySha256 = new string('a', 64) },
+            original with { LimitsSha256 = new string('b', 64) },
+            original with { ToolsetSha256 = new string('c', 64) },
+            original with { BuildId = "other-build" },
+        };
+        var adapter = new AgentSessionRestrictedStateAdmission();
+
+        foreach (var substituted in substitutions)
+        {
+            var admitted = adapter.Admit(
+                RestrictedStateTestData.Access(substituted),
+                fixture.Artifact.Plaintext,
+                StateContext(fixture, envelopeSha256: null));
+
+            Assert.False(admitted.Succeeded);
+
+            var access = RestrictedStateTestData.Access(substituted);
+            var keys = new TestKeyResolver();
+            var binding = new RestrictedStateBinding(
+                substituted,
+                document.ProducerBaseSha,
+                document.ProducerHeadSha,
+                document.Generation,
+                document.PredecessorStateSha256,
+                RestrictedStateTestData.Now,
+                RestrictedStateTestData.Expires);
+            Assert.True(RestrictedStateEnvelope.TryEncrypt(
+                access,
+                binding,
+                fixture.Artifact.Plaintext,
+                keys,
+                out var envelope,
+                out var code),
+                code);
+            var envelopeSha =
+                RestrictedStateEnvelope.EnvelopeSha256(envelope!);
+            var candidate = new RestrictedStateCandidate(
+                binding,
+                fixture.Artifact.SessionSha256,
+                envelopeSha,
+                RestrictedStateEnvelope.ObjectIdentity(
+                    binding,
+                    fixture.Artifact.SessionSha256,
+                    envelopeSha),
+                envelope!);
+            var store = new MemoryRestrictedStateStore
+            {
+                Snapshot = new RestrictedStateSnapshot(
+                    [candidate],
+                    null),
+            };
+            var service = new RestrictedStateService(
+                store,
+                keys,
+                adapter,
+                () => RestrictedStateTestData.Now);
+            var lineage = new AcceptedLineage(
+                substituted,
+                binding.Generation,
+                candidate.SessionSha256,
+                candidate.EnvelopeSha256,
+                binding.PredecessorEnvelopeSha256,
+                binding.AcceptedAtUnixSeconds,
+                binding.ExpiresAtUnixSeconds,
+                TransitionAuthorized: true);
+
+            var restored = service.Restore(
+                access,
+                new RestrictedStateRestoreRequest(
+                    RestrictedStateLocatorFamily.Current,
+                    RestrictedStateRestoreIntent.Explicit,
+                    lineage,
+                    StateContext(fixture, envelopeSha256: null)),
+                CancellationToken.None);
+
+            Assert.Equal(
+                RestrictedStateCodes.EnvelopeInvalid,
+                restored.Result.Code);
+        }
     }
 
     private static async Task<SessionFixture> BuildSessionAsync()

@@ -12,9 +12,6 @@ internal static partial class RestrictedStateValidation
     [GeneratedRegex("^[A-Za-z0-9_-]{1,64}$", RegexOptions.CultureInvariant)]
     private static partial Regex SessionIdPattern();
 
-    [GeneratedRegex("^[\\x21-\\x7e]{1,64}$", RegexOptions.CultureInvariant)]
-    private static partial Regex KeyIdPattern();
-
     internal static bool IsValidScope(RestrictedStateScope scope) =>
         scope is not null &&
         IsUtf8(scope.RepositoryId, 1, 128) &&
@@ -65,7 +62,16 @@ internal static partial class RestrictedStateValidation
         IsLowerHex(candidate.ObjectIdentity, 64) &&
         candidate.Envelope is not null &&
         candidate.Envelope.Length > 0 &&
-        candidate.Envelope.Length <= AgentLimits.StateEnvelopeBytes;
+        candidate.Envelope.Length <= AgentLimits.StateEnvelopeBytes &&
+        StringComparer.Ordinal.Equals(
+            candidate.EnvelopeSha256,
+            RestrictedStateEnvelope.EnvelopeSha256(candidate.Envelope)) &&
+        StringComparer.Ordinal.Equals(
+            candidate.ObjectIdentity,
+            RestrictedStateEnvelope.ObjectIdentity(
+                candidate.Binding,
+                candidate.SessionSha256,
+                candidate.EnvelopeSha256));
 
     internal static bool IsValidReceipt(PreparedStateReceipt receipt) =>
         receipt is not null &&
@@ -76,7 +82,8 @@ internal static partial class RestrictedStateValidation
 
     internal static bool IsValidKeyId(string keyId) =>
         keyId is not null &&
-        KeyIdPattern().IsMatch(keyId);
+        keyId.Length is >= 1 and <= 64 &&
+        keyId.All(character => character <= 0x7f);
 
     internal static bool IsValidLifetime(
         long acceptedAtUnixSeconds,
@@ -122,13 +129,65 @@ internal static partial class RestrictedStateValidation
             lastEnvelopeSha = candidate.EnvelopeSha256;
         }
 
-        var totalBytes = envelopeBytes;
+        long totalBytes = checked(envelopeBytes + metadataBytes);
         if (snapshot.Staging is not null)
         {
             totalBytes = checked(
-                totalBytes + snapshot.Staging.Envelope.Length);
+                totalBytes +
+                snapshot.Staging.Envelope.Length +
+                EstimateMetadataBytes(snapshot.Staging));
             metadataBytes = checked(
                 metadataBytes + EstimateMetadataBytes(snapshot.Staging));
+        }
+
+        if (snapshot.Accepted.Length == 2)
+        {
+            var current = snapshot.Accepted[0];
+            var predecessor = snapshot.Accepted[1];
+            if (current.Binding.Generation !=
+                    predecessor.Binding.Generation + 1 ||
+                !StringComparer.Ordinal.Equals(
+                    current.Binding.PredecessorEnvelopeSha256,
+                    predecessor.EnvelopeSha256))
+            {
+                return false;
+            }
+        }
+
+        var sessions = snapshot.Accepted
+            .Select(candidate => candidate.SessionSha256)
+            .ToHashSet(StringComparer.Ordinal);
+        var envelopes = snapshot.Accepted
+            .Select(candidate => candidate.EnvelopeSha256)
+            .ToHashSet(StringComparer.Ordinal);
+        var objects = snapshot.Accepted
+            .Select(candidate => candidate.ObjectIdentity)
+            .ToHashSet(StringComparer.Ordinal);
+        if (sessions.Count != snapshot.Accepted.Length ||
+            envelopes.Count != snapshot.Accepted.Length ||
+            objects.Count != snapshot.Accepted.Length)
+        {
+            return false;
+        }
+
+        if (snapshot.Staging is not null)
+        {
+            var staging = snapshot.Staging;
+            if (sessions.Contains(staging.SessionSha256) ||
+                envelopes.Contains(staging.EnvelopeSha256) ||
+                objects.Contains(staging.ObjectIdentity) ||
+                (snapshot.Accepted.IsEmpty
+                    ? staging.Binding.Generation != 0 ||
+                        staging.Binding.PredecessorEnvelopeSha256 is not null
+                    : snapshot.Accepted[0].Binding.Generation == long.MaxValue ||
+                        staging.Binding.Generation !=
+                            snapshot.Accepted[0].Binding.Generation + 1 ||
+                        !StringComparer.Ordinal.Equals(
+                            staging.Binding.PredecessorEnvelopeSha256,
+                            snapshot.Accepted[0].EnvelopeSha256)))
+            {
+                return false;
+            }
         }
 
         return envelopeBytes <= AgentLimits.CandidateEnvelopeTotalBytes &&
@@ -158,16 +217,9 @@ internal static partial class RestrictedStateValidation
             return false;
         }
 
-        foreach (var character in value)
-        {
-            if (character is not (>= '0' and <= '9') and
-                not (>= 'a' and <= 'f'))
-            {
-                return false;
-            }
-        }
-
-        return true;
+        return value.All(character =>
+            character is (>= '0' and <= '9') or
+                (>= 'a' and <= 'f'));
     }
 
     internal static bool IsUtf8(

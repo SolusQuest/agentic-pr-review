@@ -17,8 +17,22 @@ internal sealed record AgentSessionStateAdmittedValue(
     AgentRunRequest RunRequest,
     AgentSessionArtifact Artifact);
 
+internal sealed record AgentSessionStateScope(
+    string RepositoryId,
+    string WorkflowIdentity,
+    long ReviewTarget,
+    string SessionId,
+    string ProviderId,
+    string ModelId,
+    string AdapterId,
+    string PolicySha256,
+    string LimitsSha256,
+    string ToolsetSha256,
+    string BuildId);
+
 internal sealed record AgentSessionStateAdmissionResult(
     AgentSessionStateAdmittedValue? Value,
+    AgentSessionStateScope? Scope,
     string? ProducerBaseSha,
     string? ProducerHeadSha,
     long Generation,
@@ -27,12 +41,13 @@ internal sealed record AgentSessionStateAdmissionResult(
 {
     internal bool Succeeded =>
         Value is not null &&
+        Scope is not null &&
         ProducerBaseSha is not null &&
         ProducerHeadSha is not null &&
         SessionSha256 is not null;
 
     internal static AgentSessionStateAdmissionResult Failure() =>
-        new(null, null, null, 0, null, null);
+        new(null, null, null, null, 0, null, null);
 }
 
 internal static class AgentSessionStateBoundary
@@ -86,6 +101,18 @@ internal static class AgentSessionStateBoundary
             new AgentSessionStateAdmittedValue(
                 restored.RunRequest!,
                 restored.Artifact!),
+            new AgentSessionStateScope(
+                root.RepositoryId!,
+                root.WorkflowIdentity!,
+                root.ReviewTarget,
+                root.SessionId!,
+                root.ProviderId!,
+                root.ModelId!,
+                root.AdapterId!,
+                root.PolicySha256!,
+                root.LimitsSha256!,
+                root.ToolsetSha256!,
+                root.BuildId!),
             root.ProducerBaseSha,
             root.ProducerHeadSha,
             root.Generation,
