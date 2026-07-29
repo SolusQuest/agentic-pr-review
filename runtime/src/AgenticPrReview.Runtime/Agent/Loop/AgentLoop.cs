@@ -1035,12 +1035,10 @@ internal sealed class AgentLoop(
                     return false;
                 }
             }
-            else
+
+            foreach (var call in calls)
             {
-                foreach (var call in calls)
-                {
-                    pendingResults.Enqueue(call.CallId);
-                }
+                pendingResults.Enqueue(call.CallId);
             }
         }
 

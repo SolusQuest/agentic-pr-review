@@ -115,17 +115,29 @@ public sealed class AgentSessionRoundTripTests
         Assert.Equal(
             artifact.SessionSha256,
             restore.RunRequest!.StablePlan.PriorSessionSha256);
-        Assert.Equal(3, restore.RunRequest.InitialMessages.Length);
-        Assert.Empty(restore.RunRequest.Continuation!.Items);
+        Assert.Equal(5, restore.RunRequest.InitialMessages.Length);
+        Assert.Single(restore.RunRequest.Continuation!.Items);
         var materialized = MinimalChatClient.Materialize(
             new ProjectChatRequest(
                 restore.RunRequest.InitialMessages,
                 AgentToolRegistry.Definitions.ToArray(),
                 restore.RunRequest.Continuation,
                 ThinkingRequired: true));
-        Assert.DoesNotContain(
+        var priorAssistant = Assert.Single(
             materialized.Messages,
             message => message.Role == "assistant");
+        Assert.Equal(
+            ["reasoning", "tool_call"],
+            priorAssistant.Contents.Select(content => content.Kind));
+        Assert.Equal("opaque-0", priorAssistant.Contents[0].Opaque);
+        var terminalResultMessage = Assert.Single(
+            materialized.Messages,
+            message => message.Role == "tool");
+        var terminalResult = Assert.Single(
+            terminalResultMessage.Contents);
+        Assert.Equal("tool_result", terminalResult.Kind);
+        Assert.Equal("finish0", terminalResult.CallId);
+        Assert.Equal("{}", terminalResult.Text);
     }
 
     [Fact]
@@ -217,8 +229,14 @@ public sealed class AgentSessionRoundTripTests
             [
                 "system",
                 "user",
+                "assistant",
+                "tool",
                 "user",
+                "assistant",
+                "tool",
                 "user",
+                "assistant",
+                "tool",
                 "user",
             ],
             restored.RunRequest!.InitialMessages.Select(message =>
@@ -231,12 +249,29 @@ public sealed class AgentSessionRoundTripTests
                 .Select(message =>
                     Assert.IsType<ProjectTextContent>(
                         Assert.Single(message.Contents)).Text));
-        Assert.DoesNotContain(
-            restored.RunRequest.InitialMessages,
-            message => StringComparer.Ordinal.Equals(
-                message.Role,
-                "assistant"));
-        Assert.Empty(restored.RunRequest.Continuation!.Items);
+        Assert.Equal(
+            ["finish0", "finish1", "finish2"],
+            restored.RunRequest.InitialMessages
+                .Where(message =>
+                    StringComparer.Ordinal.Equals(
+                        message.Role,
+                        "assistant"))
+                .Select(message =>
+                    Assert.Single(
+                        message.Contents
+                            .OfType<ProjectToolCallContent>())
+                        .CallId));
+        Assert.Equal(
+            [
+                ("opaque-0", "finish0", 2, 0),
+                ("opaque-2", "finish2", 8, 0),
+            ],
+            restored.RunRequest.Continuation!.Items.Select(item =>
+                (
+                    item.Opaque,
+                    item.AssociatedCallId!,
+                    item.MessagePosition,
+                    item.ContentPosition)));
         Assert.All(
             generation2.Artifact.Document.CompletedRuns,
             run => Assert.Equal(Identity(), run.ReviewedIdentity));
@@ -1798,11 +1833,23 @@ public sealed class AgentSessionRoundTripTests
         Assert.Equal(
             2,
             restored.RunRequest!.InitialMessages.Count(message =>
-                StringComparer.Ordinal.Equals(message.Role, "tool")));
+                StringComparer.Ordinal.Equals(message.Role, "tool") &&
+                Assert.IsType<ProjectToolResultContent>(
+                    Assert.Single(message.Contents)).CallId.StartsWith(
+                        "read",
+                        StringComparison.Ordinal)));
+        Assert.Equal(
+            2,
+            restored.RunRequest.InitialMessages.Count(message =>
+                StringComparer.Ordinal.Equals(message.Role, "tool") &&
+                Assert.IsType<ProjectToolResultContent>(
+                    Assert.Single(message.Contents)).CallId.StartsWith(
+                        "finish",
+                        StringComparison.Ordinal)));
     }
 
     [Fact]
-    public async Task TerminalContinuationIsDurableButNotReplayed()
+    public async Task DurableContinuationOrderAndPhysicalPlacementAreIndependent()
     {
         var trusted = Trusted();
         var plan = Materialize(trusted, prior: null);
@@ -1836,7 +1883,10 @@ public sealed class AgentSessionRoundTripTests
             trusted,
             AgentSessionHeadTransition.SameHead);
         Assert.True(restored.Succeeded, restored.Code);
-        Assert.Empty(restored.RunRequest!.Continuation!.Items);
+        Assert.Equal(
+            [1, 0],
+            restored.RunRequest!.Continuation!.Items
+                .Select(item => item.ContentPosition));
 
         var native = MinimalChatClient.Materialize(
             new ProjectChatRequest(
@@ -1844,13 +1894,227 @@ public sealed class AgentSessionRoundTripTests
                 AgentToolRegistry.Definitions.ToArray(),
                 restored.RunRequest.Continuation,
                 ThinkingRequired: true));
-        Assert.DoesNotContain(
+        var assistant = Assert.Single(
             native.Messages,
             message => message.Role == "assistant");
+        Assert.Equal(
+            ["reasoning", "reasoning", "tool_call"],
+            assistant.Contents.Select(content => content.Kind));
+        Assert.Equal("readable-0", assistant.Contents[0].Text);
+        Assert.Equal("readable-1", assistant.Contents[1].Text);
+        Assert.Equal([0, 1, 2], assistant.Contents.Select(
+            content => content.Position));
     }
 
     [Fact]
-    public async Task EveryTerminalContinuationSlotPositionIsElided()
+    public async Task CrossGenerationNonterminalPlacementRemainsExactAndClosed()
+    {
+        var trusted = Trusted();
+        var previous = await BuildGenerationAsync(
+            trusted,
+            previous: null,
+            "g0",
+            "finish0",
+            reasoning: true);
+        Assert.True(
+            AgentSessionRequestReconstruction.TryReconstructHistory(
+                previous.Artifact.Document,
+                SyntheticContinuationCodec.Instance,
+                Controls(trusted).Length,
+                out var history,
+                out var continuation,
+                out var failure),
+            failure);
+        var run = new AgentRunRequest(
+            Identity(),
+            Materialize(trusted, previous.Artifact.SessionSha256),
+            "session0",
+            [.. Controls(trusted), .. history!, User("g1")],
+            continuation);
+        const string readCallId = "read1";
+        const string readArguments =
+            "{\"path\":\"src/a.cs\",\"start_line\":1,\"line_count\":1}";
+        var first = new ProjectContinuationItem(
+            "readable-first",
+            "opaque-first",
+            "structured",
+            readCallId,
+            run.InitialMessages.Length,
+            0);
+        var second = new ProjectContinuationItem(
+            "readable-second",
+            "opaque-second",
+            "structured",
+            readCallId,
+            run.InitialMessages.Length,
+            1);
+        var responses = new Queue<ProjectChatResponse>(
+        [
+            new ProjectChatResponse(
+                new ProjectChatMessage(
+                    "assistant",
+                    [
+                        new ProjectReasoningContent(
+                            first.Readable,
+                            first.Opaque,
+                            first.Framing,
+                            first.AssociatedCallId,
+                            first.MessagePosition,
+                            first.ContentPosition),
+                        new ProjectReasoningContent(
+                            second.Readable,
+                            second.Opaque,
+                            second.Framing,
+                            second.AssociatedCallId,
+                            second.MessagePosition,
+                            second.ContentPosition),
+                        new ProjectToolCallContent(
+                            readCallId,
+                            AgentToolRegistry.ReadFileName,
+                            readArguments),
+                    ]),
+                new ProjectChatUsage(1, 1),
+                CapturedResponseBodyBytes: 1,
+                new ProjectContinuation(
+                    "provider",
+                    "model",
+                    "adapter",
+                    "session0",
+                    [second, first])),
+            new ProjectChatResponse(
+                new ProjectChatMessage(
+                    "assistant",
+                    [
+                        new ProjectToolCallContent(
+                            "finish1",
+                            AgentToolRegistry.FinishReviewName,
+                            FinishJson),
+                    ]),
+                new ProjectChatUsage(1, 1),
+                CapturedResponseBodyBytes: 1),
+        ]);
+        var outcome = await new AgentLoop(
+            new QueueChatClient(responses),
+            new MappedToolExecutor(
+                new Dictionary<string, AgentToolExecution>(
+                    StringComparer.Ordinal)
+                {
+                    [readCallId] = ReadExecution("src/a.cs", 'a'),
+                })).RunAsync(run, CancellationToken.None);
+        Assert.True(
+            outcome.CompletedSessionEligible,
+            outcome.Diagnostic?.Code);
+        var built = AgentSessionBuilder.Build(
+            new AgentSessionBuildInput(
+                run,
+                outcome,
+                trusted,
+                run.InitialMessages.Length - 1,
+                SyntheticContinuationCodec.Instance,
+                new AgentSessionPredecessor(
+                    previous.Artifact.Plaintext,
+                    previous.Artifact.SessionSha256,
+                    previous.EnvelopeSha256,
+                    previous.Artifact.Document.Generation,
+                    previous.Artifact.Document.ProducerBaseSha,
+                    previous.Artifact.Document.ProducerHeadSha,
+                    previous.Artifact.Document.PredecessorStateSha256),
+                AgentSessionHeadTransition.SameHead));
+        Assert.True(built.Succeeded, built.FailureCode);
+        var artifact = Assert.IsType<AgentSessionArtifact>(built.Artifact);
+        Assert.Equal(
+            [1, 0],
+            artifact.Document.CompletedRuns[1].Continuation.Items
+                .Select(item => item.ContentPosition));
+
+        var restored = Restore(
+            artifact,
+            trusted,
+            AgentSessionHeadTransition.SameHead);
+        Assert.True(restored.Succeeded, restored.Code);
+        var readItems = restored.RunRequest!.Continuation!.Items
+            .Where(item => StringComparer.Ordinal.Equals(
+                item.AssociatedCallId,
+                readCallId))
+            .ToArray();
+        Assert.Equal(
+            [1, 0],
+            readItems.Select(item => item.ContentPosition));
+        var readMessagePosition = Array.FindIndex(
+            restored.RunRequest.InitialMessages,
+            message => message.Contents
+                .OfType<ProjectToolCallContent>()
+                .Any(call => StringComparer.Ordinal.Equals(
+                    call.CallId,
+                    readCallId)));
+        Assert.True(readMessagePosition >= 0);
+        Assert.All(
+            readItems,
+            item => Assert.Equal(
+                readMessagePosition,
+                item.MessagePosition));
+
+        var materialized = MinimalChatClient.Materialize(
+            new ProjectChatRequest(
+                restored.RunRequest.InitialMessages,
+                AgentToolRegistry.Definitions.ToArray(),
+                restored.RunRequest.Continuation,
+                ThinkingRequired: true));
+        var replayedAssistant = Assert.Single(
+            materialized.Messages,
+            message => message.Role == "assistant" &&
+                message.Contents.Any(content =>
+                    StringComparer.Ordinal.Equals(
+                        content.CallId,
+                        readCallId)));
+        Assert.Equal(
+            ["reasoning", "reasoning", "tool_call"],
+            replayedAssistant.Contents.Select(content => content.Kind));
+        Assert.Equal(
+            ["readable-first", "readable-second"],
+            replayedAssistant.Contents
+                .OfType<MinimalChatContent>()
+                .Where(content => content.Kind == "reasoning")
+                .Select(content => content.Text));
+        Assert.Equal(
+            [0, 1, 2],
+            replayedAssistant.Contents.Select(content => content.Position));
+
+        var invalidPosition = restored.RunRequest.Continuation with
+        {
+            Items = restored.RunRequest.Continuation.Items
+                .Select(item => ReferenceEquals(item, readItems[0])
+                    ? item with
+                    {
+                        ContentPosition = AgentLimits.PartsPerMessage,
+                    }
+                    : item)
+                .ToArray(),
+        };
+        Assert.Throws<InvalidOperationException>(() =>
+            MinimalChatClient.Materialize(new ProjectChatRequest(
+                restored.RunRequest.InitialMessages,
+                AgentToolRegistry.Definitions.ToArray(),
+                invalidPosition,
+                ThinkingRequired: true)));
+        var invalidAssociation = restored.RunRequest.Continuation with
+        {
+            Items = restored.RunRequest.Continuation.Items
+                .Select(item => ReferenceEquals(item, readItems[0])
+                    ? item with { AssociatedCallId = "missing" }
+                    : item)
+                .ToArray(),
+        };
+        Assert.Throws<InvalidOperationException>(() =>
+            MinimalChatClient.Materialize(new ProjectChatRequest(
+                restored.RunRequest.InitialMessages,
+                AgentToolRegistry.Definitions.ToArray(),
+                invalidAssociation,
+                ThinkingRequired: true)));
+    }
+
+    [Fact]
+    public async Task EveryContinuationSlotPositionRoundTripsPhysically()
     {
         var trusted = Trusted();
         for (var slotPosition = 0;
@@ -1938,10 +2202,15 @@ public sealed class AgentSessionRoundTripTests
                     AgentToolRegistry.Definitions.ToArray(),
                     restored.RunRequest.Continuation,
                     ThinkingRequired: true));
-            Assert.Empty(restored.RunRequest.Continuation!.Items);
-            Assert.DoesNotContain(
+            var assistant = Assert.Single(
                 materialized.Messages,
                 message => message.Role == "assistant");
+            Assert.Equal(
+                "reasoning",
+                assistant.Contents[slotPosition].Kind);
+            Assert.Equal(
+                Enumerable.Range(0, AgentLimits.PartsPerMessage),
+                assistant.Contents.Select(content => content.Position));
         }
     }
 
@@ -2152,68 +2421,61 @@ public sealed class AgentSessionRoundTripTests
     }
 
     [Fact]
-    public async Task CumulativeSessionRecordCapIsExactAndNeverDropsHistory()
+    public async Task CumulativeSessionRecordCapNeverDropsHistory()
     {
         var trusted = Trusted();
-        BuiltGeneration? exact = null;
-        for (var index = 0; index < 29; index++)
+        BuiltGeneration? predecessor = null;
+        for (var index = 0; index < 19; index++)
         {
-            exact = await BuildGenerationWithContinuationCountAsync(
+            predecessor = await BuildGenerationWithContinuationCountAsync(
                 trusted,
-                exact,
-                string.Concat("exact-", index),
+                predecessor,
+                string.Concat("predecessor-", index),
                 string.Concat("finish", index),
-                index < 21 ? 6 : 5);
-        }
-
-        exact = await BuildGenerationWithContinuationCountAsync(
-            trusted,
-            exact,
-            "exact-final",
-            "finish29",
-            continuationCount: 0);
-        Assert.Equal(
-            AgentLimits.SessionRecords,
-            exact.Artifact.Document.CompletedRuns.Sum(run =>
-                run.Records.Length + run.Continuation.Items.Length));
-
-        BuiltGeneration? overPredecessor = null;
-        for (var index = 0; index < 30; index++)
-        {
-            overPredecessor =
-                await BuildGenerationWithContinuationCountAsync(
-                    trusted,
-                    overPredecessor,
-                    string.Concat("over-", index),
-                    string.Concat("finish", index),
-                    index < 14 ? 6 : 5);
+                index < 6 ? 11 : 10);
         }
 
         var validOverPredecessor = Assert.IsType<BuiltGeneration>(
-            overPredecessor);
+            predecessor);
         Assert.Equal(
-            AgentLimits.SessionRecords - 2,
+            AgentLimits.SessionRecords - 3,
             validOverPredecessor.Artifact.Document.CompletedRuns.Sum(run =>
                 run.Records.Length + run.Continuation.Items.Length));
         var predecessorBytes =
             validOverPredecessor.Artifact.Plaintext.ToArray();
-        var over = await AppendGenerationAsync(
-            trusted,
-            validOverPredecessor,
-            "over-final",
-            "finish30",
-            continuationCount: 0);
+        Assert.True(
+            AgentSessionRequestReconstruction.TryReconstructHistory(
+                validOverPredecessor.Artifact.Document,
+                SyntheticContinuationCodec.Instance,
+                Controls(trusted).Length,
+                out var history,
+                out var continuation,
+                out var failure),
+            failure);
+        var run = new AgentRunRequest(
+            Identity(),
+            Materialize(
+                trusted,
+                validOverPredecessor.Artifact.SessionSha256),
+            "session0",
+            [.. Controls(trusted), .. history!, User("over-final")],
+            continuation);
+        var over = await LoopWithContinuationCount(
+            "finish19",
+            continuationCount: 0).RunAsync(
+                run,
+                CancellationToken.None);
+        Assert.False(over.CompletedSessionEligible);
         Assert.Equal(
-            AgentSessionCodes.ConstructionLimit,
-            over.FailureCode);
-        Assert.Null(over.Artifact);
+            AgentFailureCodes.ResponseInvalid,
+            over.Diagnostic?.Code);
         Assert.Equal(
             predecessorBytes,
             validOverPredecessor.Artifact.Plaintext);
     }
 
     [Fact]
-    public async Task TerminalMessageElisionPreservesNextMessageCapacity()
+    public async Task ConstructionRejectsHistoryWithoutNextMessageCapacity()
     {
         var trusted = Trusted();
         var generation0Run = new AgentRunRequest(
@@ -2244,11 +2506,11 @@ public sealed class AgentSessionRoundTripTests
             trusted,
             AgentSessionHeadTransition.SameHead);
         Assert.True(restored.Succeeded, restored.Code);
-        Assert.Equal(33, restored.RunRequest!.InitialMessages.Length);
+        Assert.Equal(35, restored.RunRequest!.InitialMessages.Length);
 
         var generation1Outcome = await CompleteToolRoundsAsync(
             restored.RunRequest,
-            [4, 4, 4, 4, 4, 3],
+            [4, 4, 4, 4, 3, 2],
             "finish1");
         Assert.True(generation1Outcome.CompletedSessionEligible);
         var generation1 = AgentSessionBuilder.Build(
@@ -2267,20 +2529,15 @@ public sealed class AgentSessionRoundTripTests
                     predecessorArtifact.Document.ProducerHeadSha,
                     predecessorArtifact.Document.PredecessorStateSha256),
                 AgentSessionHeadTransition.SameHead));
-        Assert.True(generation1.Succeeded, generation1.FailureCode);
-        var generation1Restore = Restore(
-            Assert.IsType<AgentSessionArtifact>(generation1.Artifact),
-            trusted,
-            AgentSessionHeadTransition.SameHead);
-        Assert.True(generation1Restore.Succeeded, generation1Restore.Code);
-        Assert.True(
-            generation1Restore.RunRequest!.InitialMessages.Length <
-                AgentLimits.Messages);
+        Assert.Equal(
+            AgentSessionCodes.ConstructionLimit,
+            generation1.FailureCode);
+        Assert.Null(generation1.Artifact);
         Assert.Equal(predecessorBytes, predecessorArtifact.Plaintext);
     }
 
     [Fact]
-    public async Task TerminalPartsDoNotConsumeRestoredContextCapacity()
+    public async Task ConstructionReservesNextContextPartCapacity()
     {
         var trusted = Trusted();
         var run = new AgentRunRequest(
@@ -2342,26 +2599,14 @@ public sealed class AgentSessionRoundTripTests
             SyntheticContinuationCodec.Instance,
             Predecessor: null,
             AgentSessionHeadTransition.SameHead));
-        Assert.True(built.Succeeded, built.FailureCode);
-        var restored = Restore(
-            Assert.IsType<AgentSessionArtifact>(built.Artifact),
-            trusted,
-            AgentSessionHeadTransition.SameHead);
-        Assert.True(restored.Succeeded, restored.Code);
-        Assert.True(
-            restored.RunRequest!.InitialMessages.Sum(message =>
-                message.Contents.Length) <= AgentLimits.PartsTotal);
-        Assert.DoesNotContain(
-            restored.RunRequest.InitialMessages.SelectMany(message =>
-                message.Contents),
-            content => content is ProjectToolCallContent call &&
-                StringComparer.Ordinal.Equals(
-                    call.Name,
-                    AgentToolRegistry.FinishReviewName));
+        Assert.Equal(
+            AgentSessionCodes.ConstructionLimit,
+            built.FailureCode);
+        Assert.Null(built.Artifact);
     }
 
     [Fact]
-    public async Task TerminalBytesDoNotConsumeNextRequestCapacity()
+    public async Task ConstructionReservesNextRequestByteCapacity()
     {
         var policy = new string('p', AgentLimits.ContentBytes);
         var trusted = Trusted() with
@@ -2453,21 +2698,10 @@ public sealed class AgentSessionRoundTripTests
             SyntheticContinuationCodec.Instance,
             Predecessor: null,
             AgentSessionHeadTransition.SameHead));
-        Assert.True(built.Succeeded, built.FailureCode);
-        var restored = Restore(
-            Assert.IsType<AgentSessionArtifact>(built.Artifact),
-            trusted,
-            AgentSessionHeadTransition.SameHead);
-        Assert.True(restored.Succeeded, restored.Code);
-        var restoredRequestBytes = AgentRequestWriter.Write(
-            new ProjectChatRequest(
-                restored.RunRequest!.InitialMessages,
-                AgentToolRegistry.Definitions.ToArray(),
-                restored.RunRequest.Continuation,
-                ThinkingRequired: true));
-        Assert.True(
-            restoredRequestBytes.Length <= AgentLimits.RequestBytes,
-            restoredRequestBytes.Length.ToString(CultureInfo.InvariantCulture));
+        Assert.Equal(
+            AgentSessionCodes.ConstructionLimit,
+            built.FailureCode);
+        Assert.Null(built.Artifact);
     }
 
     [Fact]
@@ -3797,7 +4031,9 @@ public sealed class AgentSessionRoundTripTests
             new MappedToolExecutor(executions)).RunAsync(
                 run,
                 CancellationToken.None);
-        Assert.True(outcome.CompletedSessionEligible);
+        Assert.True(
+            outcome.CompletedSessionEligible,
+            outcome.Diagnostic?.Code);
         return outcome;
     }
 

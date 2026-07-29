@@ -81,6 +81,8 @@ Canonical bytes and observation hashes are necessary but not sufficient for a st
 
 A terminal assistant message contains zero or more text/continuation slots plus exactly one terminal call and no non-terminal call. It is followed by exactly one `review_outcome`, bound one-to-one to the terminal message/call. Terminal arguments are re-read through the closed `finish_review` reader. SESSION reconstructs that run's observations from its admitted tool results and reruns `TerminalReviewValidator`; a hash-self-consistent terminal that cites an unknown, prior-run, wrong-identity, wrong-path, out-of-range, truncated-away, duplicate, or otherwise ungrounded observation is rejected.
 
+Provider-facing reconstruction retains that physical terminal assistant message and every admitted continuation item anchored to it. It then projects the bound `review_outcome` as one immediately following `tool` message containing exactly one `ProjectToolResultContent` with the terminal call ID and fixed result JSON `{}`. This synthetic closure carries no review authority or outcome data and is not a durable logical record; the validated terminal call and `review_outcome` remain the only durable terminal authority. Its sole purpose is to close the historical `finish_review` call under provider and `AgentLoop` call/result grammar without rewriting, compacting, or discarding terminal text or continuation. Every historical call, including `finish_review`, must therefore have its immediately following result in a reconstructed request.
+
 The legal grammar is:
 
 ```text
@@ -130,7 +132,7 @@ Construction requires the actual initial request to be exactly:
 
 ```text
 the single Host-materialized policy system message
-+ all deterministically reconstructed predecessor logical history, when generation N+1
++ all deterministically reconstructed predecessor logical history and terminal-closure projections, when generation N+1
 + exactly one current review-context user message
 ```
 
@@ -138,7 +140,7 @@ The complete initial `AgentPlanEvent` and `AgentMessageEvent` prefix must match 
 
 Provider-neutral request equality is proven with `AgentRequestWriter.Write`. Physical provider placement is a separate proof through `MinimalChatClient.Materialize`; the provider-neutral writer is not treated as a placement oracle.
 
-Before publishing an appended session, construction parses the newly encoded artifact through the production history-reconstruction path, materializes its new stable plan, and proves that the reconstructed request can still accept a minimal valid next user context within the message-count, total-content-part, and request-byte limits. Failure returns `session_construction_limit`, publishes no artifact, and leaves the accepted predecessor usable.
+Before publishing an appended session, construction parses the newly encoded artifact through the production history-reconstruction path, materializes its new stable plan, and proves that the reconstructed request can still accept a minimal valid next user context within the message-count, total-content-part, and request-byte limits. Each reconstructed terminal closure counts as one message and one content part in this proof. Failure returns `session_construction_limit`, publishes no artifact, and leaves the accepted predecessor usable.
 
 ## Restore decisions and failure precedence
 
@@ -222,7 +224,7 @@ The cumulative generation golden uses review texts `g0`, `g1`, and `g2`, termina
 | 1          |           4,162 | `e289e6fe6c095c10924761e8fdf85f0ffddd2409af9974d8b01fc84824f1a2d6` |
 | 2          |           6,015 | `44e434665aff7155f6f92db085427c15d22576545b3c4c723271f0bbd39596a1` |
 
-Focused tests pin these vectors, complete framing/root property order, canonical read/write equality, generation 0→1→2 predecessor run bytes, both predecessor hashes, generation-2-only reconstruction after the oldest envelope is unavailable, direct terminal and tool-round grammars, continuation placement, the exact cumulative 256/257 boundary without predecessor mutation, and semantic terminal re-admission.
+Focused tests pin these vectors, complete framing/root property order, canonical read/write equality, generation 0→1→2 predecessor run bytes, both predecessor hashes, generation-2-only reconstruction after the oldest envelope is unavailable, direct terminal and tool-round grammars, provider-valid terminal closure, replayable multi-item continuation placement across generations, cumulative record/request bounds without predecessor mutation, and semantic terminal re-admission.
 
 ## Security exclusions and downstream handoff
 
