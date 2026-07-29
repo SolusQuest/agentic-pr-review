@@ -270,7 +270,7 @@ internal static class AgentSessionRestorer
         return true;
     }
 
-    private static bool TryValidateReconstructedRequest(
+    internal static bool TryValidateReconstructedRequest(
         AgentRunRequest runRequest)
     {
         try

@@ -1070,7 +1070,7 @@ internal sealed class AgentLoop(
                 }
                 break;
             case AgentToolRegistry.SearchTextName:
-                if (AgentToolArguments.TrySearchText(
+                if (AgentToolArguments.TrySearchTextCanonical(
                     call.ArgumentsJson,
                     out var search))
                 {

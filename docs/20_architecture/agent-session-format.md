@@ -77,6 +77,8 @@ Every record property order is `kind`, `id`, `sequence`, the kind-specific field
 
 A non-terminal assistant message contains zero or more text/continuation slots and one through eight tool calls, with no terminal call. It is followed immediately by one ordered `tool_result` record per physical call. Each result binds the same assistant message ID and call ID. `result_json` is the exact canonical admitted read/search result and is at most 32 KiB.
 
+Canonical bytes and observation hashes are necessary but not sufficient for a stored result. SESSION re-admits every `read_file` result under the complete tool contract: status, requested/returned range, contiguous line numbering, UTF-8 byte accounting, count cap, and the exact truncation reason must agree. It similarly re-admits every `search_text` result under status, selected path, query match, deterministic path/line order, duplicate exclusion, per-path raw-byte identity, scan/skip/match caps, and the exact truncation reason. The internal canonical form records an absent search path as `path: null`; provider-facing input still omits the absent optional property. A self-consistent result that could not have been produced by the approved tool semantics is rejected before its observation can ground a finding.
+
 A terminal assistant message contains zero or more text/continuation slots plus exactly one terminal call and no non-terminal call. It is followed by exactly one `review_outcome`, bound one-to-one to the terminal message/call. Terminal arguments are re-read through the closed `finish_review` reader. SESSION reconstructs that run's observations from its admitted tool results and reruns `TerminalReviewValidator`; a hash-self-consistent terminal that cites an unknown, prior-run, wrong-identity, wrong-path, out-of-range, truncated-away, duplicate, or otherwise ungrounded observation is rejected.
 
 The legal grammar is:
@@ -122,19 +124,21 @@ The total decoded continuation payload retained across all completed runs is at 
 
 Stable scope is repository, review target, workflow authorization/source, selected policy bytes/hash, provider, model, adapter, toolset, limits, build, and session identity. Stored producer identity is the prior base/head, generation, predecessor envelope hash, and prior session hash. Current dynamic identity is the new reviewed base/head. A Host transition fact is exactly `same_head` or `verified_ahead`; `unknown`, `diverged`, and `unrelated` fail.
 
-One Host-authoritative stable-request materializer is shared by construction and restore. It consumes trusted policy bytes, ordered trusted system/control messages, workflow/source identity, fixed ordered tool definitions, central limits, required-thinking `true`, provider/model/adapter identity, build identity, repository, review target, and prior session hash. It recomputes policy/toolset/limits/stable-plan hashes.
+One Host-authoritative stable-request materializer is shared by construction and restore. It consumes the exact trusted policy bytes, workflow/source identity, fixed ordered tool definitions, central limits, required-thinking `true`, provider/model/adapter identity, build identity, repository, review target, and prior session hash. It strictly decodes the policy bytes as UTF-8 and derives exactly one `system` message containing exactly one text content. There is no independent system/control-message input that can vary while retaining the same policy hash. The materializer recomputes policy/toolset/limits/stable-plan hashes.
 
 Construction requires the actual initial request to be exactly:
 
 ```text
-Host-materialized stable control messages
+the single Host-materialized policy system message
 + all deterministically reconstructed predecessor logical history, when generation N+1
 + exactly one current review-context user message
 ```
 
-The complete initial `AgentPlanEvent` and `AgentMessageEvent` prefix must match that request. A correct claimed policy hash with missing, extra, altered, or reordered control messages is rejected. A correct predecessor hash with altered history or continuation is rejected. Restore uses the same materializer, adds validated historical logical records, appends the new dynamic review context, and creates a stable plan whose `prior_session_sha256` is the restored session hash.
+The complete initial `AgentPlanEvent` and `AgentMessageEvent` prefix must match that request. Missing, extra, altered, or reordered stable messages are rejected even if a caller supplies the correct claimed policy hash. A correct predecessor hash with altered history or continuation is rejected. Restore uses the same materializer, adds validated historical logical records, appends the new dynamic review context, and creates a stable plan whose `prior_session_sha256` is the restored session hash.
 
 Provider-neutral request equality is proven with `AgentRequestWriter.Write`. Physical provider placement is a separate proof through `MinimalChatClient.Materialize`; the provider-neutral writer is not treated as a placement oracle.
+
+Before publishing an appended session, construction parses the newly encoded artifact through the production history-reconstruction path, materializes its new stable plan, and proves that the reconstructed request can still accept a minimal valid next user context within the message-count, total-content-part, and request-byte limits. Failure returns `session_construction_limit`, publishes no artifact, and leaves the accepted predecessor usable.
 
 ## Restore decisions and failure precedence
 
@@ -149,7 +153,7 @@ The Host classifies locator family before SESSION sees candidate bytes.
 
 There is no scope-mismatch reset or best-effort replay. A selected-current artifact cannot become non-current because its inner magic, namespace, or discriminator was altered.
 
-When defects conflict, evaluation order is Host locator/reset, current framing/size/canonical bytes, stable scope, accepted producer/predecessor facts, Host transition, record grammar/classification/association and semantic terminal grounding, continuation codec admission, then request reconstruction. No failure returns an `AgentRunRequest` or invokes provider code.
+When defects conflict, evaluation order is Host locator/reset, current framing/size/canonical bytes, stable scope, accepted producer/predecessor facts, Host transition, record grammar/classification/association and semantic terminal grounding, continuation codec admission, then request reconstruction. Closed continuation-codec domain failures, including RFC 8785 canonicalization failures, become `session_continuation_invalid`; malformed terminal findings shapes remain bounded record failures. No failure returns an `AgentRunRequest` or invokes provider code.
 
 Stable SESSION outcomes are:
 

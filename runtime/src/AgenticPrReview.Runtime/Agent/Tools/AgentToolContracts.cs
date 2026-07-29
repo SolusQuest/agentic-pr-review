@@ -101,6 +101,17 @@ internal static class AgentToolArguments
 
     internal static bool TrySearchText(
         string json,
+        out SearchTextArguments? arguments) =>
+        TrySearchText(json, allowCanonicalNullPath: false, out arguments);
+
+    internal static bool TrySearchTextCanonical(
+        string json,
+        out SearchTextArguments? arguments) =>
+        TrySearchText(json, allowCanonicalNullPath: true, out arguments);
+
+    private static bool TrySearchText(
+        string json,
+        bool allowCanonicalNullPath,
         out SearchTextArguments? arguments)
     {
         arguments = null;
@@ -130,7 +141,7 @@ internal static class AgentToolArguments
             }
 
             var absent = WriteSearchText(dto.Query, null, false);
-            var present = dto.Path is null
+            var present = dto.Path is null && !allowCanonicalNullPath
                 ? null
                 : WriteSearchText(dto.Query, dto.Path, true);
             if (!input.AsSpan().SequenceEqual(absent) &&

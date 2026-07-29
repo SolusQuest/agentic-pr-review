@@ -10,6 +10,8 @@ namespace AgenticPrReview.Runtime.Agent.Session;
 
 internal static class AgentStableRequestMaterializer
 {
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+
     internal static bool TryMaterialize(
         AgentSessionTrustedRequest trusted,
         string? priorSessionSha256,
@@ -19,7 +21,6 @@ internal static class AgentStableRequestMaterializer
         if (trusted is null ||
             trusted.TrustedPolicyBytes is null ||
             trusted.TrustedPolicyBytes.Length > AgentLimits.RequestBytes ||
-            trusted.ControlMessages is null ||
             !AgentValueDomains.IsUtf8(trusted.RepositoryId, 1, 128) ||
             trusted.ReviewTarget < 1 ||
             !AgentValueDomains.IsUtf8(trusted.WorkflowIdentity, 1, 256) ||
@@ -31,8 +32,8 @@ internal static class AgentStableRequestMaterializer
                 !AgentSessionValidation.IsLowerHex(
                     priorSessionSha256,
                     64)) ||
-            !TryCloneControlMessages(
-                trusted.ControlMessages,
+            !TryMaterializeControlMessages(
+                trusted.TrustedPolicyBytes,
                 out var controlMessages))
         {
             return false;
@@ -56,66 +57,35 @@ internal static class AgentStableRequestMaterializer
         return true;
     }
 
-    private static bool TryCloneControlMessages(
-        ProjectChatMessage[] messages,
-        out ProjectChatMessage[]? cloned)
+    private static bool TryMaterializeControlMessages(
+        byte[] trustedPolicyBytes,
+        out ProjectChatMessage[]? messages)
     {
-        cloned = null;
-        if (messages.Length >= AgentLimits.Messages)
+        messages = null;
+        string policyText;
+        try
+        {
+            policyText = StrictUtf8.GetString(trustedPolicyBytes);
+        }
+        catch (DecoderFallbackException)
         {
             return false;
         }
 
-        var totalParts = 0;
-        var result = new ProjectChatMessage[messages.Length];
-        for (var messageIndex = 0;
-            messageIndex < messages.Length;
-            messageIndex++)
+        if (!AgentValueDomains.IsUtf8(
+                policyText,
+                1,
+                AgentLimits.ContentBytes))
         {
-            var message = messages[messageIndex];
-            if (message is null ||
-                !StringComparer.Ordinal.Equals(message.Role, "system") ||
-                message.Contents is null ||
-                message.Contents.Length is < 1 or > AgentLimits.PartsPerMessage)
-            {
-                return false;
-            }
-
-            try
-            {
-                totalParts = checked(totalParts + message.Contents.Length);
-            }
-            catch (OverflowException)
-            {
-                return false;
-            }
-
-            if (totalParts > AgentLimits.PartsTotal)
-            {
-                return false;
-            }
-
-            var contents = new ProjectChatContent[message.Contents.Length];
-            for (var contentIndex = 0;
-                contentIndex < message.Contents.Length;
-                contentIndex++)
-            {
-                if (message.Contents[contentIndex] is not ProjectTextContent text ||
-                    !AgentValueDomains.IsUtf8(
-                        text.Text,
-                        1,
-                        AgentLimits.ContentBytes))
-                {
-                    return false;
-                }
-
-                contents[contentIndex] = new ProjectTextContent(text.Text);
-            }
-
-            result[messageIndex] = new ProjectChatMessage("system", contents);
+            return false;
         }
 
-        cloned = result;
+        messages =
+        [
+            new ProjectChatMessage(
+                "system",
+                [new ProjectTextContent(policyText)]),
+        ];
         return true;
     }
 }
@@ -616,7 +586,9 @@ internal static class AgentSessionValidation
             AgentToolRegistry.ReadFileName =>
                 AgentToolArguments.TryReadFile(call.ArgumentsJson, out _),
             AgentToolRegistry.SearchTextName =>
-                AgentToolArguments.TrySearchText(call.ArgumentsJson, out _),
+                AgentToolArguments.TrySearchTextCanonical(
+                    call.ArgumentsJson,
+                    out _),
             _ => false,
         };
     }
@@ -738,6 +710,9 @@ internal static class AgentSessionValidation
                             readArguments.StartLine ||
                         readResult.RequestedLineCount !=
                             readArguments.LineCount ||
+                        !HasValidReadResultSemantics(
+                            readArguments,
+                            readResult) ||
                         !IsLowerHex(readResult.RawSha256, 64) ||
                         !IsLowerHex(readResult.ObservationId, 64) ||
                         !canonical.AsSpan().SequenceEqual(
@@ -766,7 +741,7 @@ internal static class AgentSessionValidation
                     return true;
 
                 case AgentToolRegistry.SearchTextName:
-                    if (!AgentToolArguments.TrySearchText(
+                    if (!AgentToolArguments.TrySearchTextCanonical(
                             call.ArgumentsJson,
                             out var searchArguments))
                     {
@@ -840,14 +815,9 @@ internal static class AgentSessionValidation
                         searchResult.SkippedBinary < 0 ||
                         searchResult.SkippedLoneCr < 0 ||
                         searchResult.SkippedOversized < 0 ||
-                        matches.Any(match =>
-                            !RepositoryPath.IsValid(match.Path) ||
-                            !IsLowerHex(match.RawSha256, 64) ||
-                            match.Line < 1 ||
-                            (searchArguments.Path is not null &&
-                                !StringComparer.Ordinal.Equals(
-                                    match.Path,
-                                    searchArguments.Path))) ||
+                        !HasValidSearchResultSemantics(
+                            searchArguments,
+                            searchResult) ||
                         !IsLowerHex(searchResult.ObservationId, 64) ||
                         !canonical.AsSpan().SequenceEqual(
                             SearchTextResultWriter.Write(searchResult)) ||
@@ -884,6 +854,216 @@ internal static class AgentSessionValidation
         {
             return false;
         }
+    }
+
+    private static bool HasValidReadResultSemantics(
+        ReadFileArguments arguments,
+        ReadFileResult result)
+    {
+        if (result.Lines.Length > arguments.LineCount ||
+            result.Lines.Length > AgentLimits.ReadFileLines)
+        {
+            return false;
+        }
+
+        if (StringComparer.Ordinal.Equals(
+                result.Status,
+                "start_after_eof"))
+        {
+            return result.ReturnedStartLine is null &&
+                result.ReturnedEndLine is null &&
+                result.Lines.Length == 0 &&
+                !result.Truncated &&
+                result.TruncationReason is null;
+        }
+
+        if (!StringComparer.Ordinal.Equals(result.Status, "ok"))
+        {
+            return false;
+        }
+
+        if (result.Lines.Length == 0)
+        {
+            return result.ReturnedStartLine is null &&
+                result.ReturnedEndLine is null &&
+                result.Truncated &&
+                StringComparer.Ordinal.Equals(
+                    result.TruncationReason,
+                    "result_bytes");
+        }
+
+        if (result.ReturnedStartLine != arguments.StartLine)
+        {
+            return false;
+        }
+
+        int expectedEnd;
+        try
+        {
+            expectedEnd = checked(
+                arguments.StartLine + result.Lines.Length - 1);
+        }
+        catch (OverflowException)
+        {
+            return false;
+        }
+
+        if (result.ReturnedEndLine != expectedEnd)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < result.Lines.Length; index++)
+        {
+            int expectedLine;
+            try
+            {
+                expectedLine = checked(arguments.StartLine + index);
+            }
+            catch (OverflowException)
+            {
+                return false;
+            }
+
+            var line = result.Lines[index];
+            if (line.Line != expectedLine ||
+                !AgentValueDomains.IsUtf8(
+                    line.Text,
+                    0,
+                    AgentLimits.ContentBytes))
+            {
+                return false;
+            }
+        }
+
+        if (!result.Truncated)
+        {
+            return result.TruncationReason is null;
+        }
+
+        return result.TruncationReason switch
+        {
+            "line_count" =>
+                result.Lines.Length == arguments.LineCount,
+            "result_bytes" =>
+                result.Lines.Length < arguments.LineCount,
+            _ => false,
+        };
+    }
+
+    private static bool HasValidSearchResultSemantics(
+        SearchTextArguments arguments,
+        SearchTextResult result)
+    {
+        if (!StringComparer.Ordinal.Equals(result.Status, "ok") ||
+            result.FilesScanned is < 0 or > AgentLimits.SearchFiles ||
+            result.RawBytesScanned is < 0 or > AgentLimits.SearchRawBytes ||
+            result.SkippedInvalidUtf8 < 0 ||
+            result.SkippedBinary < 0 ||
+            result.SkippedLoneCr < 0 ||
+            result.SkippedOversized < 0 ||
+            result.Matches.Length > AgentLimits.SearchMatches)
+        {
+            return false;
+        }
+
+        long skipped;
+        try
+        {
+            skipped = checked(
+                (long)result.SkippedInvalidUtf8 +
+                result.SkippedBinary +
+                result.SkippedLoneCr +
+                result.SkippedOversized);
+        }
+        catch (OverflowException)
+        {
+            return false;
+        }
+
+        if (skipped > result.FilesScanned)
+        {
+            return false;
+        }
+
+        if (arguments.Path is not null &&
+            (result.FilesScanned != 1 ||
+                result.RawBytesScanned > AgentLimits.SearchFileBytes ||
+                skipped != 0))
+        {
+            return false;
+        }
+
+        var matchedPaths = new HashSet<string>(StringComparer.Ordinal);
+        var rawHashes = new Dictionary<string, string>(
+            StringComparer.Ordinal);
+        string? priorPath = null;
+        var priorLine = 0;
+        foreach (var match in result.Matches)
+        {
+            if (!RepositoryPath.IsValid(match.Path) ||
+                !IsLowerHex(match.RawSha256, 64) ||
+                match.Line < 1 ||
+                !AgentValueDomains.IsUtf8(
+                    match.Text,
+                    0,
+                    AgentLimits.ContentBytes) ||
+                !match.Text.Contains(
+                    arguments.Query,
+                    StringComparison.Ordinal) ||
+                (arguments.Path is not null &&
+                    !StringComparer.Ordinal.Equals(
+                        match.Path,
+                        arguments.Path)) ||
+                (rawHashes.TryGetValue(match.Path, out var rawHash) &&
+                    !StringComparer.Ordinal.Equals(
+                        rawHash,
+                        match.RawSha256)))
+            {
+                return false;
+            }
+
+            if (priorPath is not null)
+            {
+                var pathOrder = StringComparer.Ordinal.Compare(
+                    priorPath,
+                    match.Path);
+                if (pathOrder > 0 ||
+                    (pathOrder == 0 && match.Line <= priorLine))
+                {
+                    return false;
+                }
+            }
+
+            matchedPaths.Add(match.Path);
+            rawHashes[match.Path] = match.RawSha256;
+            priorPath = match.Path;
+            priorLine = match.Line;
+        }
+
+        if (matchedPaths.Count + skipped > result.FilesScanned)
+        {
+            return false;
+        }
+
+        if (!result.Truncated)
+        {
+            return result.TruncationReason is null;
+        }
+
+        return result.TruncationReason switch
+        {
+            "files_scanned" =>
+                arguments.Path is null &&
+                result.FilesScanned == AgentLimits.SearchFiles,
+            "bytes_scanned" =>
+                arguments.Path is null,
+            "matches" =>
+                result.Matches.Length == AgentLimits.SearchMatches,
+            "result_bytes" =>
+                result.Matches.Length < AgentLimits.SearchMatches,
+            _ => false,
+        };
     }
 
     private static bool TryValidateContinuation(

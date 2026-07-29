@@ -4,6 +4,7 @@ using System.Text.Json;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
+using AgenticPrReview.Runtime.Canonical;
 
 namespace AgenticPrReview.Runtime.Agent.Session;
 
@@ -61,7 +62,6 @@ internal sealed record AgentSessionTrustedRequest(
     long ReviewTarget,
     string WorkflowIdentity,
     byte[] TrustedPolicyBytes,
-    ProjectChatMessage[] ControlMessages,
     string BuildId,
     string ProviderId,
     string ModelId,
@@ -220,7 +220,8 @@ internal static class AgentContinuationCodecBoundary
             InvalidOperationException or
             JsonException or
             NotSupportedException or
-            OverflowException;
+            OverflowException or
+            Rfc8785CanonicalizationException;
 }
 
 internal sealed record AgentSessionDocument(

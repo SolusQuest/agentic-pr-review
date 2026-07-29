@@ -199,7 +199,62 @@ internal static class AgentSessionBuilder
                     : AgentSessionCodes.RecordInvalid);
         }
 
+        if (!TryValidateNextRequestCapacity(
+                input,
+                artifact!,
+                out var nextRequestFailure))
+        {
+            return AgentSessionBuildResult.Failure(nextRequestFailure);
+        }
+
         return AgentSessionBuildResult.Success(artifact!);
+    }
+
+    private static bool TryValidateNextRequestCapacity(
+        AgentSessionBuildInput input,
+        AgentSessionArtifact artifact,
+        out string failureCode)
+    {
+        failureCode = AgentSessionCodes.ConstructionLimit;
+        if (!AgentStableRequestMaterializer.TryMaterialize(
+                input.TrustedRequest,
+                artifact.SessionSha256,
+                out var nextStable))
+        {
+            return false;
+        }
+
+        if (!AgentSessionRequestReconstruction.TryReconstructHistory(
+                artifact.Document,
+                input.ContinuationCodec,
+                nextStable!.ControlMessages.Length,
+                out var history,
+                out var continuation,
+                out var reconstructionFailure))
+        {
+            if (StringComparer.Ordinal.Equals(
+                    reconstructionFailure,
+                    AgentSessionCodes.ContinuationInvalid))
+            {
+                failureCode = AgentSessionCodes.ContinuationInvalid;
+            }
+
+            return false;
+        }
+
+        var messages = nextStable.ControlMessages
+            .Concat(history!)
+            .Append(new ProjectChatMessage(
+                "user",
+                [new ProjectTextContent("x")]))
+            .ToArray();
+        var nextRequest = new AgentRunRequest(
+            input.Run.ReviewedIdentity,
+            nextStable.StablePlan,
+            input.Run.SessionId,
+            messages,
+            continuation);
+        return AgentSessionRestorer.TryValidateReconstructedRequest(nextRequest);
     }
 
     private static bool TryPreparePredecessor(
@@ -1248,9 +1303,16 @@ internal static class AgentSessionBuilder
         try
         {
             using var document = JsonDocument.Parse(terminalBytes);
-            findingsJson = document.RootElement
-                .GetProperty("findings")
-                .GetRawText();
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty(
+                    "findings",
+                    out var findings) ||
+                findings.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+
+            findingsJson = findings.GetRawText();
             return true;
         }
         catch (JsonException)
