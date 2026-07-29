@@ -232,13 +232,12 @@ public sealed class AgentSessionStateBoundaryTests
         ];
         var adapter = new AgentSessionRestrictedStateAdmission();
 
-        foreach (var context in malformed)
-        {
-            var admitted = adapter.Admit(
+        foreach (var admitted in malformed.Select(context =>
+            adapter.Admit(
                 Access(fixture.Artifact.Document),
                 fixture.Artifact.Plaintext,
-                valid with { SessionContext = context });
-
+                valid with { SessionContext = context })))
+        {
             Assert.False(admitted.Succeeded);
         }
     }

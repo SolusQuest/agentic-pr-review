@@ -82,7 +82,7 @@ public sealed class RestrictedStateServiceTests
             new MemoryRestrictedStateStore(),
             new TestKeyResolver(),
             new TestSessionAdmission());
-        foreach (var request in new[]
+        foreach (var restore in new[]
         {
             new RestrictedStateRestoreRequest(
                 (RestrictedStateLocatorFamily)int.MaxValue,
@@ -94,13 +94,11 @@ public sealed class RestrictedStateServiceTests
                 (RestrictedStateRestoreIntent)int.MaxValue,
                 null,
                 RestrictedStateTestData.SessionContext()),
-        })
+        }.Select(request => service.Restore(
+            access,
+            request,
+            CancellationToken.None)))
         {
-            var restore = service.Restore(
-                access,
-                request,
-                CancellationToken.None);
-
             Assert.Equal(StateAction.Failed, restore.Result.Action);
             Assert.Equal(
                 RestrictedStateCodes.EnvelopeInvalid,
