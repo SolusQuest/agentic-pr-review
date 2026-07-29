@@ -55,7 +55,7 @@ Construction never truncates, compacts, summarizes, normalizes, reorders, or del
 
 ## Logical records
 
-Every record property order is `kind`, `id`, `sequence`, the kind-specific fields below, `role`, `framing`, `classification`. Record IDs and provider call IDs use `[A-Za-z0-9_-]{1,64}` and are unique across the cumulative session. Sequence values are contiguous zero-based Int32 values within each run. Each run contains at most 256 records and each canonical record is at most 512 KiB.
+Every record property order is `kind`, `id`, `sequence`, the kind-specific fields below, `role`, `framing`, `classification`. Record IDs and provider call IDs use `[A-Za-z0-9_-]{1,64}` and are unique across the cumulative session. Sequence values are contiguous zero-based Int32 values within each run. The cumulative sum of logical records plus continuation items across every completed run is at most 256; this is one session cap, not a per-run allowance. Each canonical record is at most 512 KiB.
 
 | Kind                | Kind-specific fields in exact order                                                      | role        | framing              | classification            |
 | ------------------- | ---------------------------------------------------------------------------------------- | ----------- | -------------------- | ------------------------- |
@@ -210,7 +210,15 @@ For codec `r2-synthetic`, discriminator `current-1`, item `c0`, encoding `utf8`,
 
 The deterministic generation-zero fixture with one synthetic opaque continuation item is 2,627 plaintext bytes and has session digest `c0236fe3c10bfedbced813778507d8c9cca7e0a84f0b4a749535bb01c2e95b6a` under `apr.session.r2`.
 
-Focused tests pin these vectors, complete framing/root property order, canonical read/write equality, generation 0→1→2 predecessor run bytes, both predecessor hashes, direct terminal and tool-round grammars, continuation placement, and semantic terminal re-admission.
+The cumulative generation golden uses review texts `g0`, `g1`, and `g2`, terminal call IDs `finish0`, `finish1`, and `finish2`, and synthetic continuation in generations 0 and 2. Its complete plaintext vectors are:
+
+| Generation | Plaintext bytes | `session_sha256`                                                   |
+| ---------- | --------------: | ------------------------------------------------------------------ |
+| 0          |           2,607 | `40fb1abbcb7b9c96f2e27c6520eeb1144822c37ba6b6082e8013c97f9d77d31d` |
+| 1          |           4,162 | `e289e6fe6c095c10924761e8fdf85f0ffddd2409af9974d8b01fc84824f1a2d6` |
+| 2          |           6,015 | `44e434665aff7155f6f92db085427c15d22576545b3c4c723271f0bbd39596a1` |
+
+Focused tests pin these vectors, complete framing/root property order, canonical read/write equality, generation 0→1→2 predecessor run bytes, both predecessor hashes, generation-2-only reconstruction after the oldest envelope is unavailable, direct terminal and tool-round grammars, continuation placement, the exact cumulative 256/257 boundary without predecessor mutation, and semantic terminal re-admission.
 
 ## Security exclusions and downstream handoff
 

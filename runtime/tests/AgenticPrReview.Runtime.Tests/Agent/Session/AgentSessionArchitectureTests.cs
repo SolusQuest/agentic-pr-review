@@ -58,6 +58,7 @@ public sealed class AgentSessionArchitectureTests
             AgentSessionJsonContext.Default.Options.UnmappedMemberHandling);
         JsonTypeInfo[] metadata =
         [
+            AgentSessionJsonContext.Default.AgentSessionEnvelopeRootDto,
             AgentSessionJsonContext.Default.AgentSessionRootDto,
             AgentSessionJsonContext.Default.AgentSessionReviewContextDto,
             AgentSessionJsonContext.Default.AgentSessionAssistantMessageDto,
@@ -76,6 +77,39 @@ public sealed class AgentSessionArchitectureTests
             Assert.NotNull(typeInfo);
             Assert.NotEqual(JsonTypeInfoKind.None, typeInfo.Kind);
         });
+    }
+
+    [Fact]
+    public void SessionOutcomeTaxonomyIsExactlyFrozen()
+    {
+        var codes = typeof(AgentSessionCodes)
+            .GetFields(
+                BindingFlags.Static |
+                BindingFlags.NonPublic)
+            .Select(field => Assert.IsType<string>(
+                field.GetRawConstantValue()))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            new[]
+            {
+                "session_association_invalid",
+                "session_bootstrap_absent",
+                "session_bootstrap_incompatible",
+                "session_classification_invalid",
+                "session_construction_limit",
+                "session_continuation_invalid",
+                "session_current_malformed",
+                "session_current_oversized",
+                "session_explicit_incompatible",
+                "session_explicit_missing",
+                "session_record_invalid",
+                "session_reset_explicit",
+                "session_scope_mismatch",
+                "session_transition_rejected",
+            },
+            codes);
     }
 
     [Fact]

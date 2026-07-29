@@ -43,12 +43,44 @@ internal static class AgentSessionRestorer
                 AgentSessionCodes.CurrentMalformed);
         }
 
-        if (!AgentSessionCodec.TryParse(
+        if (!AgentSessionCodec.TryParseEnvelope(
                 input.Plaintext,
-                out var artifact,
+                out var parsed,
                 out var parseFailure))
         {
             return AgentSessionRestoreResult.Failure(parseFailure);
+        }
+
+        if (!AgentSessionValidation.TryValidateEnvelopeRoot(
+                parsed!.Root,
+                out var envelopeFailure))
+        {
+            return AgentSessionRestoreResult.Failure(envelopeFailure);
+        }
+
+        if (!TryValidateScope(input, parsed, out var scopeFailure))
+        {
+            return AgentSessionRestoreResult.Failure(scopeFailure);
+        }
+
+        if (!TryValidateProducer(input, parsed))
+        {
+            return AgentSessionRestoreResult.Failure(
+                AgentSessionCodes.ScopeMismatch);
+        }
+
+        if (!TryValidateTransition(input, parsed.Root))
+        {
+            return AgentSessionRestoreResult.Failure(
+                AgentSessionCodes.TransitionRejected);
+        }
+
+        if (!AgentSessionCodec.TryConvertEnvelope(
+                parsed,
+                out var artifact,
+                out var conversionFailure))
+        {
+            return AgentSessionRestoreResult.Failure(conversionFailure);
         }
 
         var document = artifact!.Document;
@@ -57,23 +89,6 @@ internal static class AgentSessionRestorer
                 out var rootFailure))
         {
             return AgentSessionRestoreResult.Failure(rootFailure);
-        }
-
-        if (!TryValidateScope(input, artifact, out var scopeFailure))
-        {
-            return AgentSessionRestoreResult.Failure(scopeFailure);
-        }
-
-        if (!TryValidateProducer(input, artifact))
-        {
-            return AgentSessionRestoreResult.Failure(
-                AgentSessionCodes.ScopeMismatch);
-        }
-
-        if (!TryValidateTransition(input, document))
-        {
-            return AgentSessionRestoreResult.Failure(
-                AgentSessionCodes.TransitionRejected);
         }
 
         if (!AgentSessionValidation.TryValidateRecords(
@@ -134,50 +149,50 @@ internal static class AgentSessionRestorer
 
     private static bool TryValidateScope(
         AgentSessionRestoreInput input,
-        AgentSessionArtifact artifact,
+        AgentSessionParsedEnvelope parsed,
         out string failureCode)
     {
         failureCode = AgentSessionCodes.ScopeMismatch;
-        var document = artifact.Document;
+        var root = parsed.Root;
         if (!AgentStableRequestMaterializer.TryMaterialize(
                 input.TrustedRequest,
-                document.PriorSessionSha256,
+                root.PriorSessionSha256,
                 out var storedStable) ||
             !StringComparer.Ordinal.Equals(
-                document.SessionId,
+                root.SessionId,
                 input.SessionId) ||
             !StringComparer.Ordinal.Equals(
-                document.RepositoryId,
+                root.RepositoryId,
                 storedStable!.StablePlan.RepositoryId) ||
-            document.ReviewTarget != storedStable.StablePlan.ReviewTarget ||
+            root.ReviewTarget != storedStable.StablePlan.ReviewTarget ||
             !StringComparer.Ordinal.Equals(
-                document.WorkflowIdentity,
+                root.WorkflowIdentity,
                 storedStable.StablePlan.WorkflowIdentity) ||
             !StringComparer.Ordinal.Equals(
-                document.ProviderId,
+                root.ProviderId,
                 storedStable.StablePlan.ProviderId) ||
             !StringComparer.Ordinal.Equals(
-                document.ModelId,
+                root.ModelId,
                 storedStable.StablePlan.ModelId) ||
             !StringComparer.Ordinal.Equals(
-                document.AdapterId,
+                root.AdapterId,
                 storedStable.StablePlan.AdapterId) ||
             !StringComparer.Ordinal.Equals(
-                document.PolicySha256,
+                root.PolicySha256,
                 storedStable.StablePlan.PolicySha256) ||
             !StringComparer.Ordinal.Equals(
-                document.BuildId,
+                root.BuildId,
                 storedStable.StablePlan.BuildId) ||
             !StringComparer.Ordinal.Equals(
-                document.ToolsetSha256,
+                root.ToolsetSha256,
                 storedStable.StablePlan.ToolsetSha256) ||
             !StringComparer.Ordinal.Equals(
-                document.LimitsSha256,
+                root.LimitsSha256,
                 storedStable.StablePlan.LimitsSha256) ||
             !StringComparer.Ordinal.Equals(
                 input.CurrentReviewedIdentity.RepositoryId,
-                document.RepositoryId) ||
-            input.CurrentReviewedIdentity.ReviewTarget != document.ReviewTarget ||
+                root.RepositoryId) ||
+            input.CurrentReviewedIdentity.ReviewTarget != root.ReviewTarget ||
             !input.CurrentReviewedIdentity.IsValid())
         {
             return false;
@@ -189,44 +204,44 @@ internal static class AgentSessionRestorer
 
     private static bool TryValidateProducer(
         AgentSessionRestoreInput input,
-        AgentSessionArtifact artifact)
+        AgentSessionParsedEnvelope parsed)
     {
         var accepted = input.AcceptedState;
-        var document = artifact.Document;
+        var root = parsed.Root;
         return accepted is not null &&
-            accepted.Generation == document.Generation &&
+            accepted.Generation == root.Generation &&
             AgentSessionValidation.IsLowerHex(
                 accepted.SessionSha256,
                 64) &&
             StringComparer.Ordinal.Equals(
                 accepted.SessionSha256,
-                artifact.SessionSha256) &&
+                parsed.SessionSha256) &&
             AgentSessionValidation.IsLowerHex(
                 accepted.EnvelopeSha256,
                 64) &&
             StringComparer.Ordinal.Equals(
                 accepted.ProducerBaseSha,
-                document.ProducerBaseSha) &&
+                root.ProducerBaseSha) &&
             StringComparer.Ordinal.Equals(
                 accepted.ProducerHeadSha,
-                document.ProducerHeadSha) &&
+                root.ProducerHeadSha) &&
             StringComparer.Ordinal.Equals(
                 accepted.PredecessorStateSha256,
-                document.PredecessorStateSha256);
+                root.PredecessorStateSha256);
     }
 
     private static bool TryValidateTransition(
         AgentSessionRestoreInput input,
-        AgentSessionDocument document) =>
+        AgentSessionEnvelopeRootDto root) =>
         input.Transition switch
         {
             AgentSessionHeadTransition.SameHead =>
                 StringComparer.Ordinal.Equals(
                     input.CurrentReviewedIdentity.BaseSha,
-                    document.ProducerBaseSha) &&
+                    root.ProducerBaseSha) &&
                 StringComparer.Ordinal.Equals(
                     input.CurrentReviewedIdentity.HeadSha,
-                    document.ProducerHeadSha),
+                    root.ProducerHeadSha),
             AgentSessionHeadTransition.VerifiedAhead => true,
             _ => false,
         };
@@ -344,7 +359,8 @@ internal static class AgentSessionRequestReconstruction
                 if (!messagePositions.TryGetValue(
                         item.MessageId,
                         out var messagePosition) ||
-                    !continuationCodec.TryDecode(
+                    !AgentContinuationCodecBoundary.TryDecode(
+                        continuationCodec,
                         item.Encoding,
                         item.PayloadBytes,
                         out var value) ||

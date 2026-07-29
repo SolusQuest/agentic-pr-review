@@ -1,4 +1,6 @@
 using System.Collections.Immutable;
+using System.Text;
+using System.Text.Json;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
@@ -30,7 +32,6 @@ internal static class AgentSessionCodes
     internal const string AssociationInvalid = "session_association_invalid";
     internal const string ContinuationInvalid = "session_continuation_invalid";
     internal const string ConstructionLimit = "session_construction_limit";
-    internal const string Restored = "session_restored";
 }
 
 internal enum AgentSessionLocatorFamily
@@ -114,6 +115,11 @@ internal sealed record AgentSessionArtifact(
     string SessionSha256,
     AgentSessionDocument Document);
 
+internal sealed record AgentSessionParsedEnvelope(
+    byte[] Plaintext,
+    string SessionSha256,
+    AgentSessionEnvelopeRootDto Root);
+
 internal sealed record AgentSessionBuildResult(
     string? FailureCode,
     AgentSessionArtifact? Artifact)
@@ -128,19 +134,19 @@ internal sealed record AgentSessionBuildResult(
 }
 
 internal sealed record AgentSessionRestoreResult(
-    string Code,
+    string? Code,
     AgentRunRequest? RunRequest,
     AgentSessionArtifact? Artifact)
 {
     internal bool Succeeded =>
-        StringComparer.Ordinal.Equals(Code, AgentSessionCodes.Restored) &&
+        Code is null &&
         RunRequest is not null &&
         Artifact is not null;
 
     internal static AgentSessionRestoreResult Success(
         AgentRunRequest runRequest,
         AgentSessionArtifact artifact) =>
-        new(AgentSessionCodes.Restored, runRequest, artifact);
+        new(null, runRequest, artifact);
 
     internal static AgentSessionRestoreResult Failure(string code) =>
         new(code, null, null);
@@ -170,6 +176,52 @@ internal sealed record AgentContinuationCodecValue(
 internal sealed record AgentContinuationEncodedPayload(
     string Encoding,
     byte[] Bytes);
+
+internal static class AgentContinuationCodecBoundary
+{
+    internal static bool TryEncode(
+        IAgentContinuationCodec codec,
+        AgentContinuationCodecValue value,
+        out AgentContinuationEncodedPayload? payload)
+    {
+        payload = null;
+        try
+        {
+            return codec.TryEncode(value, out payload);
+        }
+        catch (Exception exception) when (IsCodecDomainException(exception))
+        {
+            return false;
+        }
+    }
+
+    internal static bool TryDecode(
+        IAgentContinuationCodec codec,
+        string encoding,
+        ReadOnlySpan<byte> payload,
+        out AgentContinuationCodecValue? value)
+    {
+        value = null;
+        try
+        {
+            return codec.TryDecode(encoding, payload, out value);
+        }
+        catch (Exception exception) when (IsCodecDomainException(exception))
+        {
+            return false;
+        }
+    }
+
+    private static bool IsCodecDomainException(Exception exception) =>
+        exception is ArgumentException or
+            DecoderFallbackException or
+            EncoderFallbackException or
+            FormatException or
+            InvalidOperationException or
+            JsonException or
+            NotSupportedException or
+            OverflowException;
+}
 
 internal sealed record AgentSessionDocument(
     string Namespace,

@@ -10,6 +10,28 @@ namespace AgenticPrReview.Runtime.Agent.Session;
 internal static class AgentSessionCodec
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+    private static readonly string[] RootProperties =
+    [
+        "namespace",
+        "discriminator",
+        "session_id",
+        "repository_id",
+        "review_target",
+        "workflow_identity",
+        "provider_id",
+        "model_id",
+        "adapter_id",
+        "policy_sha256",
+        "build_id",
+        "toolset_sha256",
+        "limits_sha256",
+        "producer_base_sha",
+        "producer_head_sha",
+        "generation",
+        "predecessor_state_sha256",
+        "prior_session_sha256",
+        "completed_runs",
+    ];
     private static ReadOnlySpan<byte> Magic => "APRSES01"u8;
 
     internal static bool TryWrite(
@@ -75,6 +97,23 @@ internal static class AgentSessionCodec
         out string failureCode)
     {
         artifact = null;
+        if (!TryParseEnvelope(
+                plaintext,
+                out var parsed,
+                out failureCode))
+        {
+            return false;
+        }
+
+        return TryConvertEnvelope(parsed!, out artifact, out failureCode);
+    }
+
+    internal static bool TryParseEnvelope(
+        ReadOnlySpan<byte> plaintext,
+        out AgentSessionParsedEnvelope? parsed,
+        out string failureCode)
+    {
+        parsed = null;
         if (plaintext.Length > AgentLimits.SessionPlaintextBytes)
         {
             failureCode = AgentSessionCodes.CurrentOversized;
@@ -100,6 +139,83 @@ internal static class AgentSessionCodec
         try
         {
             var json = plaintext[AgentSessionFormat.FramingBytes..];
+            using var document = JsonDocument.Parse(
+                json.ToArray(),
+                new JsonDocumentOptions
+                {
+                    AllowTrailingCommas = false,
+                    CommentHandling = JsonCommentHandling.Disallow,
+                    MaxDepth = 64,
+                });
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement
+                    .EnumerateObject()
+                    .Select(property => property.Name)
+                    .SequenceEqual(RootProperties))
+            {
+                return false;
+            }
+
+            var writer = new Rfc8785Writer(
+                Math.Min(json.Length, 16 * 1024))
+            {
+                DiscardLimit =
+                    AgentLimits.SessionPlaintextBytes -
+                    AgentSessionFormat.FramingBytes,
+            };
+            WriteCanonicalPreservingOrder(
+                ref writer,
+                document.RootElement,
+                depth: 0);
+            if (writer.Exceeded ||
+                !json.SequenceEqual(writer.ToImmutableArray().AsSpan()))
+            {
+                return false;
+            }
+
+            var dto = JsonSerializer.Deserialize(
+                json,
+                AgentSessionJsonContext.Default.AgentSessionEnvelopeRootDto);
+            if (dto?.CompletedRuns is null)
+            {
+                return false;
+            }
+
+            parsed = new AgentSessionParsedEnvelope(
+                plaintext.ToArray(),
+                AgentCanonical.HashDomain(
+                    AgentCanonical.SessionDomain,
+                    plaintext),
+                dto);
+            failureCode = string.Empty;
+            return true;
+        }
+        catch (Exception exception) when (
+            exception is JsonException or
+            NotSupportedException or
+            FormatException or
+            InvalidOperationException or
+            OverflowException or
+            DecoderFallbackException or
+            EncoderFallbackException or
+            Rfc8785CanonicalizationException)
+        {
+            failureCode = AgentSessionCodes.CurrentMalformed;
+            return false;
+        }
+    }
+
+    internal static bool TryConvertEnvelope(
+        AgentSessionParsedEnvelope parsed,
+        out AgentSessionArtifact? artifact,
+        out string failureCode)
+    {
+        artifact = null;
+        failureCode = AgentSessionCodes.CurrentMalformed;
+        try
+        {
+            var json = parsed.Plaintext.AsSpan(
+                AgentSessionFormat.FramingBytes);
             var dto = JsonSerializer.Deserialize(
                 json,
                 AgentSessionJsonContext.Default.AgentSessionRootDto);
@@ -110,7 +226,7 @@ internal static class AgentSessionCodec
                 return false;
             }
 
-            if (!plaintext.SequenceEqual(canonical!.Plaintext))
+            if (!parsed.Plaintext.SequenceEqual(canonical!.Plaintext))
             {
                 failureCode = AgentSessionCodes.CurrentMalformed;
                 return false;
@@ -130,6 +246,89 @@ internal static class AgentSessionCodec
         {
             failureCode = AgentSessionCodes.CurrentMalformed;
             return false;
+        }
+    }
+
+    private static void WriteCanonicalPreservingOrder(
+        ref Rfc8785Writer writer,
+        JsonElement element,
+        int depth)
+    {
+        if (depth > 64)
+        {
+            throw new Rfc8785CanonicalizationException(
+                Rfc8785RejectionReason.DepthLimitExceeded,
+                "Session JSON exceeds the canonical depth bound.");
+        }
+
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                writer.WriteObjectStart();
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var property in element.EnumerateObject())
+                {
+                    if (!seen.Add(property.Name))
+                    {
+                        throw new Rfc8785CanonicalizationException(
+                            Rfc8785RejectionReason.DuplicateProperty,
+                            "Session JSON contains a duplicate property.");
+                    }
+
+                    writer.WriteProperty(property.Name);
+                    WriteCanonicalPreservingOrder(
+                        ref writer,
+                        property.Value,
+                        depth + 1);
+                }
+
+                writer.WriteObjectEnd();
+                return;
+            case JsonValueKind.Array:
+                writer.WriteArrayStart();
+                var index = 0;
+                foreach (var item in element.EnumerateArray())
+                {
+                    if (index > 0)
+                    {
+                        writer.WriteComma();
+                    }
+
+                    WriteCanonicalPreservingOrder(
+                        ref writer,
+                        item,
+                        depth + 1);
+                    index++;
+                }
+
+                writer.WriteArrayEnd();
+                return;
+            case JsonValueKind.String:
+                writer.WriteString(element.GetString()!);
+                return;
+            case JsonValueKind.Number:
+                if (element.TryGetInt64(out var integer))
+                {
+                    writer.WriteNumber(integer);
+                }
+                else
+                {
+                    writer.WriteNumber(element.GetDouble());
+                }
+
+                return;
+            case JsonValueKind.True:
+                writer.WriteBoolean(true);
+                return;
+            case JsonValueKind.False:
+                writer.WriteBoolean(false);
+                return;
+            case JsonValueKind.Null:
+                writer.WriteNull();
+                return;
+            default:
+                throw new InvalidOperationException(
+                    "Session JSON contains an unsupported value kind.");
         }
     }
 
@@ -592,10 +791,18 @@ internal static class AgentSessionCodec
                     StrictUtf8.GetString(payloadBytes),
                     payload);
             case "base64":
-                payloadBytes = Convert.FromBase64String(payload);
-                return StringComparer.Ordinal.Equals(
-                    Convert.ToBase64String(payloadBytes),
-                    payload);
+                try
+                {
+                    payloadBytes = Convert.FromBase64String(payload);
+                    return StringComparer.Ordinal.Equals(
+                        Convert.ToBase64String(payloadBytes),
+                        payload);
+                }
+                catch (FormatException)
+                {
+                    payloadBytes = null;
+                    return false;
+                }
             default:
                 return false;
         }

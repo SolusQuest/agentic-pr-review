@@ -16,6 +16,29 @@ internal static class AgentSessionBuilder
     internal static AgentSessionBuildResult Build(
         AgentSessionBuildInput input)
     {
+        try
+        {
+            return BuildCore(input);
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or
+            DecoderFallbackException or
+            EncoderFallbackException or
+            FormatException or
+            InvalidOperationException or
+            JsonException or
+            NotSupportedException or
+            OverflowException or
+            Rfc8785CanonicalizationException)
+        {
+            return AgentSessionBuildResult.Failure(
+                AgentSessionCodes.RecordInvalid);
+        }
+    }
+
+    private static AgentSessionBuildResult BuildCore(
+        AgentSessionBuildInput input)
+    {
         if (input is null ||
             input.Run is null ||
             input.Outcome is null ||
@@ -142,6 +165,12 @@ internal static class AgentSessionBuilder
             input.Predecessor?.EnvelopeSha256,
             input.Predecessor?.SessionSha256,
             completedRuns);
+        if (ExceedsConstructionLimits(document))
+        {
+            return AgentSessionBuildResult.Failure(
+                AgentSessionCodes.ConstructionLimit);
+        }
+
         if (!AgentSessionValidation.TryValidateRoot(
                 document,
                 out var rootFailure))
@@ -590,29 +619,31 @@ internal static class AgentSessionBuilder
                 }
 
                 callEvents.Add(call);
-                var argumentsJson = StrictUtf8.GetString(
-                    call.CanonicalArguments.AsSpan());
-                if (StringComparer.Ordinal.Equals(
-                        call.Name,
-                        AgentToolRegistry.FinishReviewName))
+                if (!TryDecodeCanonicalBytes(
+                        call.CanonicalArguments.AsSpan(),
+                        out var argumentsJson))
                 {
-                    contents[callPart.Position] =
+                    failureCode = AgentSessionCodes.RecordInvalid;
+                    return false;
+                }
+
+                contents[callPart.Position] =
+                    StringComparer.Ordinal.Equals(
+                        call.Name,
+                        AgentToolRegistry.FinishReviewName)
+                    ?
                         new AgentSessionTerminalCallContent(
                             callPart.Position,
                             call.CallId,
                             call.Name,
-                            argumentsJson,
-                            call.ArgumentsSha256);
-                }
-                else
-                {
-                    contents[callPart.Position] =
+                            argumentsJson!,
+                            call.ArgumentsSha256)
+                    :
                         new AgentSessionToolCallContent(
                             callPart.Position,
                             call.CallId,
                             call.Name,
-                            argumentsJson);
-                }
+                            argumentsJson!);
 
                 eventIndex++;
                 if (!StringComparer.Ordinal.Equals(
@@ -697,7 +728,6 @@ internal static class AgentSessionBuilder
                     "validated_terminal",
                     "validated_terminal_data"));
                 terminalSeen = true;
-                expectedMessageIndex++;
                 break;
             }
 
@@ -710,10 +740,15 @@ internal static class AgentSessionBuilder
                     return false;
                 }
 
-                var call = callEvents[callIndex];
                 var result = resultEvents[callIndex];
-                var resultJson = StrictUtf8.GetString(
-                    result.CanonicalResult.AsSpan());
+                if (!TryDecodeCanonicalBytes(
+                        result.CanonicalResult.AsSpan(),
+                        out var resultJson))
+                {
+                    failureCode = AgentSessionCodes.RecordInvalid;
+                    return false;
+                }
+
                 records.Add(new AgentSessionToolResultRecord(
                     RecordId(runOrdinal, records.Count),
                     records.Count,
@@ -721,7 +756,7 @@ internal static class AgentSessionBuilder
                     result.CallId,
                     result.Name,
                     result.ObservationId,
-                    resultJson,
+                    resultJson!,
                     "tool",
                     "tool_result",
                     "untrusted_tool_data"));
@@ -773,23 +808,35 @@ internal static class AgentSessionBuilder
 
         var items = ImmutableArray.CreateBuilder<AgentSessionContinuationItem>(
             suffix.Length);
+        long totalBytes = 0;
         for (var index = 0; index < suffix.Length; index++)
         {
             var candidate = suffix[index];
             if (!messageIds.TryGetValue(
                     candidate.MessagePosition,
                     out var messageId) ||
-                !codec.TryEncode(
+                !AgentContinuationCodecBoundary.TryEncode(
+                    codec,
                     new AgentContinuationCodecValue(
                         candidate.Readable,
                         candidate.Opaque,
                         candidate.Framing),
                     out var encoded) ||
                 encoded is null ||
-                encoded.Bytes is null ||
-                encoded.Bytes.Length > AgentLimits.ContinuationItemBytes ||
-                encoded.Encoding is not ("utf8" or "base64") ||
-                !codec.TryDecode(
+                encoded.Bytes is null)
+            {
+                return false;
+            }
+
+            if (encoded.Bytes.Length > AgentLimits.ContinuationItemBytes)
+            {
+                failureCode = AgentSessionCodes.ConstructionLimit;
+                return false;
+            }
+
+            if (encoded.Encoding is not ("utf8" or "base64") ||
+                !AgentContinuationCodecBoundary.TryDecode(
+                    codec,
                     encoded.Encoding,
                     encoded.Bytes,
                     out var decoded) ||
@@ -807,6 +854,23 @@ internal static class AgentSessionBuilder
                 return false;
             }
 
+            try
+            {
+                totalBytes = checked(totalBytes + encoded.Bytes.Length);
+            }
+            catch (OverflowException)
+            {
+                failureCode = AgentSessionCodes.ConstructionLimit;
+                return false;
+            }
+
+            if (encoded.Bytes.Length > AgentLimits.ContinuationItemBytes ||
+                totalBytes > AgentLimits.ContinuationTotalBytes)
+            {
+                failureCode = AgentSessionCodes.ConstructionLimit;
+                return false;
+            }
+
             string payload;
             try
             {
@@ -816,7 +880,7 @@ internal static class AgentSessionBuilder
                     ? StrictUtf8.GetString(encoded.Bytes)
                     : Convert.ToBase64String(encoded.Bytes);
             }
-            catch (EncoderFallbackException)
+            catch (DecoderFallbackException)
             {
                 return false;
             }
@@ -844,6 +908,62 @@ internal static class AgentSessionBuilder
             items.MoveToImmutable());
         failureCode = string.Empty;
         return true;
+    }
+
+    private static bool TryDecodeCanonicalBytes(
+        ReadOnlySpan<byte> bytes,
+        out string? value)
+    {
+        value = null;
+        try
+        {
+            value = StrictUtf8.GetString(bytes);
+            return true;
+        }
+        catch (DecoderFallbackException)
+        {
+            return false;
+        }
+    }
+
+    private static bool ExceedsConstructionLimits(
+        AgentSessionDocument document)
+    {
+        if (document.CompletedRuns.Length >
+            AgentSessionFormat.MaximumCompletedRuns)
+        {
+            return true;
+        }
+
+        long entries = 0;
+        long continuationBytes = 0;
+        try
+        {
+            foreach (var run in document.CompletedRuns)
+            {
+                entries = checked(
+                    entries +
+                    run.Records.Length +
+                    run.Continuation.Items.Length);
+                foreach (var item in run.Continuation.Items)
+                {
+                    continuationBytes = checked(
+                        continuationBytes + item.PayloadBytes.Length);
+                    if (item.PayloadBytes.Length >
+                        AgentLimits.ContinuationItemBytes)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        catch (OverflowException)
+        {
+            return true;
+        }
+
+        return entries > AgentLimits.SessionRecords ||
+            continuationBytes > AgentLimits.ContinuationTotalBytes;
     }
 
     private static bool SameRootScope(

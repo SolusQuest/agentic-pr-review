@@ -111,6 +111,7 @@ public sealed class AgentSessionRoundTripTests
                 SyntheticContinuationCodec.Instance));
 
         Assert.True(restore.Succeeded, restore.Code);
+        Assert.Null(restore.Code);
         Assert.Equal(
             artifact.SessionSha256,
             restore.RunRequest!.StablePlan.PriorSessionSha256);
@@ -153,6 +154,30 @@ public sealed class AgentSessionRoundTripTests
             "g2",
             "finish2",
             reasoning: true);
+        Assert.Equal(
+            [
+                (
+                    2607,
+                    "40fb1abbcb7b9c96f2e27c6520eeb1144822c37ba6b6082e8013c97f9d77d31d"),
+                (
+                    4162,
+                    "e289e6fe6c095c10924761e8fdf85f0ffddd2409af9974d8b01fc84824f1a2d6"),
+                (
+                    6015,
+                    "44e434665aff7155f6f92db085427c15d22576545b3c4c723271f0bbd39596a1"),
+            ],
+            new[]
+            {
+                (
+                    generation0.Artifact.Plaintext.Length,
+                    generation0.Artifact.SessionSha256),
+                (
+                    generation1.Artifact.Plaintext.Length,
+                    generation1.Artifact.SessionSha256),
+                (
+                    generation2.Artifact.Plaintext.Length,
+                    generation2.Artifact.SessionSha256),
+            });
 
         Assert.Equal(2, generation2.Artifact.Document.Generation);
         Assert.Equal(3, generation2.Artifact.Document.CompletedRuns.Length);
@@ -172,6 +197,12 @@ public sealed class AgentSessionRoundTripTests
             generation1.EnvelopeSha256,
             generation2.Artifact.Document.PredecessorStateSha256);
         Assert.Equal(
+            generation0.Artifact.SessionSha256,
+            generation1.Artifact.Document.PriorSessionSha256);
+        Assert.Equal(
+            generation0.EnvelopeSha256,
+            generation1.Artifact.Document.PredecessorStateSha256);
+        Assert.Equal(
             RunJson(generation0.Artifact, 0),
             RunJson(generation1.Artifact, 0));
         Assert.Equal(
@@ -180,6 +211,59 @@ public sealed class AgentSessionRoundTripTests
         Assert.Equal(
             RunJson(generation1.Artifact, 1),
             RunJson(generation2.Artifact, 1));
+
+        var restored = Restore(
+            generation2,
+            trusted,
+            AgentSessionHeadTransition.SameHead);
+        Assert.True(restored.Succeeded, restored.Code);
+        Assert.Equal(
+            [
+                "system",
+                "user",
+                "assistant",
+                "user",
+                "assistant",
+                "user",
+                "assistant",
+                "user",
+            ],
+            restored.RunRequest!.InitialMessages.Select(message =>
+                message.Role));
+        Assert.Equal(
+            ["g0", "g1", "g2", "next"],
+            restored.RunRequest.InitialMessages
+                .Where(message =>
+                    StringComparer.Ordinal.Equals(message.Role, "user"))
+                .Select(message =>
+                    Assert.IsType<ProjectTextContent>(
+                        Assert.Single(message.Contents)).Text));
+        Assert.Equal(
+            ["finish0", "finish1", "finish2"],
+            restored.RunRequest.InitialMessages
+                .Where(message =>
+                    StringComparer.Ordinal.Equals(
+                        message.Role,
+                        "assistant"))
+                .Select(message =>
+                    Assert.Single(
+                        message.Contents
+                            .OfType<ProjectToolCallContent>())
+                        .CallId));
+        Assert.Equal(
+            [
+                ("opaque-0", "finish0", 2, 0),
+                ("opaque-2", "finish2", 6, 0),
+            ],
+            restored.RunRequest.Continuation!.Items.Select(item =>
+                (
+                    item.Opaque,
+                    item.AssociatedCallId!,
+                    item.MessagePosition,
+                    item.ContentPosition)));
+        Assert.All(
+            generation2.Artifact.Document.CompletedRuns,
+            run => Assert.Equal(Identity(), run.ReviewedIdentity));
     }
 
     [Theory]
@@ -216,6 +300,46 @@ public sealed class AgentSessionRoundTripTests
             AgentSessionHeadTransition.SameHead));
         Assert.Equal(AgentSessionCodes.RecordInvalid, built.FailureCode);
         Assert.Null(built.Artifact);
+    }
+
+    [Fact]
+    public async Task FailedCancelledDeadlineBudgetAndPartialRunsProduceNoBytes()
+    {
+        var trusted = Trusted();
+        var completed = await CompleteOneReadAsync(trusted);
+        string[] failureCodes =
+        [
+            AgentFailureCodes.Cancelled,
+            AgentFailureCodes.DeadlineExceeded,
+            AgentFailureCodes.ModelLimit,
+            AgentFailureCodes.TokenLimit,
+            AgentFailureCodes.ToolLimit,
+        ];
+        foreach (var code in failureCodes)
+        {
+            var partialEvents = completed.Outcome.Events
+                .TakeWhile(logical =>
+                    logical is not AgentTerminalEvent)
+                .ToImmutableArray();
+            var failed = AgentRunOutcome.Failure(
+                code,
+                modelCalls: 1,
+                toolCalls: 1,
+                partialEvents);
+            var built = AgentSessionBuilder.Build(
+                new AgentSessionBuildInput(
+                    completed.Run,
+                    failed,
+                    trusted,
+                    completed.Run.InitialMessages.Length - 1,
+                    SyntheticContinuationCodec.Instance,
+                    Predecessor: null,
+                    AgentSessionHeadTransition.SameHead));
+            Assert.Equal(
+                AgentSessionCodes.RecordInvalid,
+                built.FailureCode);
+            Assert.Null(built.Artifact);
+        }
     }
 
     [Fact]
@@ -439,6 +563,76 @@ public sealed class AgentSessionRoundTripTests
     }
 
     [Fact]
+    public async Task ScopeProducerAndTransitionPrecedeRawRecordConversion()
+    {
+        var trusted = Trusted();
+        var built = await BuildGenerationAsync(
+            trusted,
+            previous: null,
+            "g0",
+            "finish0",
+            reasoning: true);
+        var unknownRecord = RawMutation(
+            built.Artifact,
+            "\"kind\":\"review_context\"",
+            "\"kind\":\"unknown_record\"");
+        Assert.Equal(
+            AgentSessionCodes.ScopeMismatch,
+            Restore(
+                unknownRecord,
+                built.EnvelopeSha256,
+                trusted with { ProviderId = "other-provider" },
+                AgentSessionHeadTransition.SameHead).Code);
+
+        var producerMismatch = AgentSessionRestorer.Restore(
+            new AgentSessionRestoreInput(
+                AgentSessionLocatorFamily.Current,
+                AgentSessionRestoreIntent.Automatic,
+                ExplicitReset: false,
+                unknownRecord.Plaintext,
+                new AgentSessionAcceptedState(
+                    0,
+                    unknownRecord.SessionSha256,
+                    built.EnvelopeSha256,
+                    new string('9', 40),
+                    built.Artifact.Document.ProducerHeadSha,
+                    PredecessorStateSha256: null),
+                trusted,
+                "session0",
+                Identity(),
+                User("next"),
+                AgentSessionHeadTransition.SameHead,
+                SyntheticContinuationCodec.Instance));
+        Assert.Equal(
+            AgentSessionCodes.ScopeMismatch,
+            producerMismatch.Code);
+
+        var unknownContent = RawMutation(
+            built.Artifact,
+            "\"kind\":\"continuation_slot\"",
+            "\"kind\":\"unknown_content\"");
+        Assert.Equal(
+            AgentSessionCodes.TransitionRejected,
+            Restore(
+                unknownContent,
+                built.EnvelopeSha256,
+                trusted,
+                AgentSessionHeadTransition.Unknown).Code);
+
+        var malformedContinuation = RawMutation(
+            built.Artifact,
+            "\"item_id\":\"c0_0\"",
+            "\"unknown\":0,\"item_id\":\"c0_0\"");
+        Assert.Equal(
+            AgentSessionCodes.ScopeMismatch,
+            Restore(
+                malformedContinuation,
+                built.EnvelopeSha256,
+                trusted with { BuildId = "other-build" },
+                AgentSessionHeadTransition.SameHead).Code);
+    }
+
+    [Fact]
     public async Task StableScopeSubstitutionAlwaysFailsClosed()
     {
         var trusted = Trusted();
@@ -463,13 +657,13 @@ public sealed class AgentSessionRoundTripTests
             trusted with { BuildId = "other-build" },
         ];
 
-        foreach (var substitution in substitutions)
+        foreach (var result in substitutions.Select(substitution =>
+                     Restore(
+                         built.Artifact,
+                         built.EnvelopeSha256,
+                         substitution,
+                         AgentSessionHeadTransition.SameHead)))
         {
-            var result = Restore(
-                built.Artifact,
-                built.EnvelopeSha256,
-                substitution,
-                AgentSessionHeadTransition.SameHead);
             Assert.Equal(AgentSessionCodes.ScopeMismatch, result.Code);
             Assert.Null(result.RunRequest);
         }
@@ -593,6 +787,26 @@ public sealed class AgentSessionRoundTripTests
                 "{\"namespace\":",
                 "{\"unknown\":0,\"namespace\":",
                 StringComparison.Ordinal))),
+            Frame(Encoding.UTF8.GetBytes(jsonText.Replace(
+                "{\"namespace\":\"agentic-pr-review/agent-session\"",
+                "{\"namespace\":\"agentic-pr-review/agent-session\",\"namespace\":\"agentic-pr-review/agent-session\"",
+                StringComparison.Ordinal))),
+            Frame(Encoding.UTF8.GetBytes(jsonText.Replace(
+                "\"repository_id\":\"repo\"",
+                "\"repository_id\":\"\\u0072epo\"",
+                StringComparison.Ordinal))),
+            Frame(Encoding.UTF8.GetBytes(jsonText.Replace(
+                "\"review_target\":1",
+                "\"review_target\":1.0",
+                StringComparison.Ordinal))),
+            Frame(Encoding.UTF8.GetBytes(jsonText.Replace(
+                "\"review_target\":1",
+                "\"review_target\":1e0",
+                StringComparison.Ordinal))),
+            Frame(Encoding.UTF8.GetBytes(jsonText.Replace(
+                "\"review_target\":1",
+                "\"review_target\":-0",
+                StringComparison.Ordinal))),
         };
 
         foreach (var mutation in mutations)
@@ -603,6 +817,213 @@ public sealed class AgentSessionRoundTripTests
                 out var failure));
             Assert.Null(parsed);
             Assert.Equal(AgentSessionCodes.CurrentMalformed, failure);
+        }
+    }
+
+    [Fact]
+    public async Task RequiredRootFieldsRejectMissingNullTypeAndDomainMutations()
+    {
+        var built = await BuildGenerationAsync(
+            Trusted(),
+            previous: null,
+            "g0",
+            "finish0",
+            reasoning: false);
+        var json = Encoding.UTF8.GetString(
+            built.Artifact.Plaintext[AgentSessionFormat.FramingBytes..]);
+        (string Name, string WrongType, string OutOfDomain)[] vectors =
+        [
+            ("namespace", "0", "\"\""),
+            ("discriminator", "0", "\"\""),
+            ("session_id", "0", "\"\""),
+            ("repository_id", "0", "\"\""),
+            ("review_target", "\"1\"", "0"),
+            ("workflow_identity", "0", "\"\""),
+            ("provider_id", "0", "\"\""),
+            ("model_id", "0", "\"\""),
+            ("adapter_id", "0", "\"\""),
+            ("policy_sha256", "0", "\"x\""),
+            ("build_id", "0", "\"\""),
+            ("toolset_sha256", "0", "\"x\""),
+            ("limits_sha256", "0", "\"x\""),
+            ("producer_base_sha", "0", "\"x\""),
+            ("producer_head_sha", "0", "\"x\""),
+            ("generation", "\"0\"", "-1"),
+            ("completed_runs", "{}", "[]"),
+        ];
+        using var document = JsonDocument.Parse(json);
+        foreach (var vector in vectors)
+        {
+            var raw = document.RootElement
+                .GetProperty(vector.Name)
+                .GetRawText();
+            string[] mutations =
+            [
+                RemoveRootProperty(json, vector.Name, raw),
+                ReplaceRootProperty(json, vector.Name, raw, "null"),
+                ReplaceRootProperty(
+                    json,
+                    vector.Name,
+                    raw,
+                    vector.WrongType),
+                ReplaceRootProperty(
+                    json,
+                    vector.Name,
+                    raw,
+                    vector.OutOfDomain),
+            ];
+            foreach (var mutation in mutations)
+            {
+                var plaintext = Frame(Encoding.UTF8.GetBytes(mutation));
+                var restored = AgentSessionRestorer.Restore(
+                    new AgentSessionRestoreInput(
+                        AgentSessionLocatorFamily.Current,
+                        AgentSessionRestoreIntent.Automatic,
+                        ExplicitReset: false,
+                        plaintext,
+                        new AgentSessionAcceptedState(
+                            0,
+                            AgentCanonical.HashDomain(
+                                AgentCanonical.SessionDomain,
+                                plaintext),
+                            built.EnvelopeSha256,
+                            built.Artifact.Document.ProducerBaseSha,
+                            built.Artifact.Document.ProducerHeadSha,
+                            PredecessorStateSha256: null),
+                        Trusted(),
+                        "session0",
+                        Identity(),
+                        User("next"),
+                        AgentSessionHeadTransition.SameHead,
+                        SyntheticContinuationCodec.Instance));
+                Assert.Equal(
+                    AgentSessionCodes.CurrentMalformed,
+                    restored.Code);
+                Assert.Null(restored.RunRequest);
+            }
+        }
+
+        var generation1 = await BuildGenerationAsync(
+            Trusted(),
+            built,
+            "g1",
+            "finish1",
+            reasoning: false);
+        var generation1Json = Encoding.UTF8.GetString(
+            generation1.Artifact.Plaintext[
+                AgentSessionFormat.FramingBytes..]);
+        using var generation1Document =
+            JsonDocument.Parse(generation1Json);
+        foreach (var name in new[]
+                 {
+                     "predecessor_state_sha256",
+                     "prior_session_sha256",
+                 })
+        {
+            var raw = generation1Document.RootElement
+                .GetProperty(name)
+                .GetRawText();
+            foreach (var mutation in new[]
+                     {
+                         RemoveRootProperty(generation1Json, name, raw),
+                         ReplaceRootProperty(
+                             generation1Json,
+                             name,
+                             raw,
+                             "null"),
+                         ReplaceRootProperty(
+                             generation1Json,
+                             name,
+                             raw,
+                             "0"),
+                         ReplaceRootProperty(
+                             generation1Json,
+                             name,
+                             raw,
+                             "\"x\""),
+                     })
+            {
+                var plaintext = Frame(Encoding.UTF8.GetBytes(mutation));
+                var restored = AgentSessionRestorer.Restore(
+                    new AgentSessionRestoreInput(
+                        AgentSessionLocatorFamily.Current,
+                        AgentSessionRestoreIntent.Automatic,
+                        ExplicitReset: false,
+                        plaintext,
+                        new AgentSessionAcceptedState(
+                            1,
+                            AgentCanonical.HashDomain(
+                                AgentCanonical.SessionDomain,
+                                plaintext),
+                            generation1.EnvelopeSha256,
+                            generation1.Artifact.Document.ProducerBaseSha,
+                            generation1.Artifact.Document.ProducerHeadSha,
+                            generation1.Artifact.Document
+                                .PredecessorStateSha256),
+                        Trusted(),
+                        "session0",
+                        Identity(),
+                        User("next"),
+                        AgentSessionHeadTransition.SameHead,
+                        SyntheticContinuationCodec.Instance));
+                Assert.Equal(
+                    AgentSessionCodes.CurrentMalformed,
+                    restored.Code);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Base64PayloadRejectsUrlUnpaddedAndWhitespaceForms()
+    {
+        var built = await BuildSizedContinuationAsync([2]);
+        Assert.True(built.Succeeded, built.FailureCode);
+        var artifact = built.Artifact!;
+        var run = artifact.Document.CompletedRuns[0];
+        var item = Assert.Single(run.Continuation.Items);
+        byte[] payloadBytes = [0xfb, 0xff];
+        var canonicalItem = item with
+        {
+            Encoding = "base64",
+            Payload = "+/8=",
+            PayloadBytes = payloadBytes,
+            PayloadSha256 = AgentSessionCodec.ContinuationPayloadSha256(
+                run.Continuation.CodecId,
+                run.Continuation.CodecDiscriminator,
+                item.ItemId,
+                "base64",
+                payloadBytes),
+        };
+        var canonical = Rewrite(
+            artifact.Document,
+            run with
+            {
+                Continuation = run.Continuation with
+                {
+                    Items = [canonicalItem],
+                },
+            });
+        (string Old, string Replacement)[] mutations =
+        [
+            ("\"payload\":\"+/8=\"", "\"payload\":\"-_8=\""),
+            ("\"payload\":\"+/8=\"", "\"payload\":\"+/8\""),
+            ("\"payload\":\"+/8=\"", "\"payload\":\"+ /8=\""),
+            ("\"encoding\":\"base64\"", "\"encoding\":\"base64url\""),
+        ];
+        foreach (var mutation in mutations)
+        {
+            var invalid = RawMutation(
+                canonical,
+                mutation.Old,
+                mutation.Replacement);
+            Assert.False(AgentSessionCodec.TryParse(
+                invalid.Plaintext,
+                out var parsed,
+                out var failure));
+            Assert.Null(parsed);
+            Assert.Equal(
+                AgentSessionCodes.ContinuationInvalid,
+                failure);
         }
     }
 
@@ -811,8 +1232,6 @@ public sealed class AgentSessionRoundTripTests
             [.. trusted.ControlMessages, User("review")]);
         const string firstArguments =
             "{\"path\":\"src/a.cs\",\"start_line\":1,\"line_count\":1}";
-        const string secondArguments =
-            "{\"path\":\"src/b.cs\",\"start_line\":1,\"line_count\":1}";
         var continuationItem = new ProjectContinuationItem(
             "readable-grouped",
             "opaque-grouped",
@@ -841,7 +1260,7 @@ public sealed class AgentSessionRoundTripTests
                         new ProjectToolCallContent(
                             "read1",
                             AgentToolRegistry.ReadFileName,
-                            secondArguments),
+                            firstArguments),
                     ]),
                 new ProjectChatUsage(1, 1),
                 CapturedResponseBodyBytes: 1,
@@ -867,7 +1286,7 @@ public sealed class AgentSessionRoundTripTests
             StringComparer.Ordinal)
         {
             ["read0"] = ReadExecution("src/a.cs", 'a'),
-            ["read1"] = ReadExecution("src/b.cs", 'b'),
+            ["read1"] = ReadExecution("src/a.cs", 'a'),
         };
         var outcome = await new AgentLoop(
             new QueueChatClient(responses),
@@ -905,6 +1324,11 @@ public sealed class AgentSessionRoundTripTests
                 grouped.Id,
                 Assert.IsType<AgentSessionToolResultRecord>(
                     record).SourceMessageId));
+        Assert.Single(
+            records
+                .OfType<AgentSessionToolResultRecord>()
+                .Select(result => result.ObservationId)
+                .Distinct(StringComparer.Ordinal));
 
         var restored = Restore(
             artifact,
@@ -922,6 +1346,33 @@ public sealed class AgentSessionRoundTripTests
         Assert.Equal(
             ["text", "reasoning", "tool_call", "tool_call"],
             priorAssistant.Contents.Select(content => content.Kind));
+    }
+
+    [Fact]
+    public async Task RepeatedObservationAcrossGenerationsRemainsGrounded()
+    {
+        var trusted = Trusted();
+        var generation0 = await BuildGroundedGenerationAsync(trusted);
+        var generation1 = await BuildGroundedGenerationAsync(
+            trusted,
+            generation0);
+
+        var results = generation1.Artifact.Document.CompletedRuns
+            .SelectMany(run => run.Records)
+            .OfType<AgentSessionToolResultRecord>()
+            .ToArray();
+        Assert.Equal(2, results.Length);
+        Assert.Equal(results[0].ObservationId, results[1].ObservationId);
+
+        var restored = Restore(
+            generation1,
+            trusted,
+            AgentSessionHeadTransition.SameHead);
+        Assert.True(restored.Succeeded, restored.Code);
+        Assert.Equal(
+            2,
+            restored.RunRequest!.InitialMessages.Count(message =>
+                StringComparer.Ordinal.Equals(message.Role, "tool")));
     }
 
     [Fact]
@@ -1090,7 +1541,16 @@ public sealed class AgentSessionRoundTripTests
         [
             new("雪\"\\\n", string.Empty, "readable"),
             new(string.Empty, "signed:AA==\nredacted", "opaque"),
-            new("résumé", "signature-Ω", "structured"),
+            new(
+                "résumé",
+                SyntheticContinuationCodec.StructuredOpaque(
+                    "opaque-Ω",
+                    "signature-Ω",
+                    [
+                        new("first", "雪\"\\\n"),
+                        new("second", "value-2"),
+                    ]),
+                "structured"),
             new(string.Empty, string.Empty, "structured"),
         ];
         foreach (var fixture in fixtures)
@@ -1162,6 +1622,135 @@ public sealed class AgentSessionRoundTripTests
     }
 
     [Fact]
+    public void SyntheticStructuredCodecPreservesSignatureAndOrderedFields()
+    {
+        SyntheticField[] firstOrder =
+        [
+            new("first", "雪\"\\\n"),
+            new("second", "value-2"),
+        ];
+        SyntheticField[] secondOrder =
+        [
+            firstOrder[1],
+            firstOrder[0],
+        ];
+        var first = new AgentContinuationCodecValue(
+            "résumé",
+            SyntheticContinuationCodec.StructuredOpaque(
+                "opaque-Ω",
+                "signature-Ω",
+                firstOrder),
+            "structured");
+        var second = first with
+        {
+            Opaque = SyntheticContinuationCodec.StructuredOpaque(
+                "opaque-Ω",
+                "signature-Ω",
+                secondOrder),
+        };
+
+        Assert.True(SyntheticContinuationCodec.Instance.TryEncode(
+            first,
+            out var firstPayload));
+        Assert.True(SyntheticContinuationCodec.Instance.TryEncode(
+            second,
+            out var secondPayload));
+        Assert.False(firstPayload!.Bytes.SequenceEqual(secondPayload!.Bytes));
+        Assert.True(SyntheticContinuationCodec.Instance.TryDecode(
+            firstPayload.Encoding,
+            firstPayload.Bytes,
+            out var decoded));
+        Assert.Equal(first, decoded);
+        using (var document = JsonDocument.Parse(firstPayload.Bytes))
+        {
+            var root = document.RootElement;
+            Assert.Equal(
+                "signature-Ω",
+                root.GetProperty("signature").GetString());
+            Assert.Equal(
+                ["first", "second"],
+                root.GetProperty("fields")
+                    .EnumerateArray()
+                    .Select(field =>
+                        field.GetProperty("name").GetString()));
+        }
+
+        var thirtyTwo = Enumerable.Range(0, 32)
+            .Select(index => new SyntheticField(
+                string.Concat("field-", index),
+                string.Concat("value-", index)))
+            .ToArray();
+        var thirtyThree = thirtyTwo
+            .Append(new SyntheticField("field-32", "value-32"))
+            .ToArray();
+        Assert.True(SyntheticContinuationCodec.Instance.TryEncode(
+            first with
+            {
+                Opaque = SyntheticContinuationCodec.StructuredOpaque(
+                    "opaque",
+                    "signature",
+                    thirtyTwo),
+            },
+            out _));
+        Assert.False(SyntheticContinuationCodec.Instance.TryEncode(
+            first with
+            {
+                Opaque = SyntheticContinuationCodec.StructuredOpaque(
+                    "opaque",
+                    "signature",
+                    thirtyThree),
+            },
+            out _));
+        Assert.True(SyntheticContinuationCodec.Instance.TryEncode(
+            first with
+            {
+                Opaque = SyntheticContinuationCodec.StructuredOpaque(
+                    "opaque",
+                    "signature",
+                    [new("field", new string('x', 8 * 1024))]),
+            },
+            out _));
+        Assert.False(SyntheticContinuationCodec.Instance.TryEncode(
+            first with
+            {
+                Opaque = SyntheticContinuationCodec.StructuredOpaque(
+                    "opaque",
+                    "signature",
+                    [new("field", new string('x', 8 * 1024 + 1))]),
+            },
+            out _));
+        Assert.False(SyntheticContinuationCodec.Instance.TryEncode(
+            first with
+            {
+                Opaque = SyntheticContinuationCodec.StructuredOpaque(
+                    "opaque",
+                    "signature",
+                    [new("duplicate", "a"), new("duplicate", "b")]),
+            },
+            out _));
+
+        string[] malformed =
+        [
+            "{\"kind\":\"structured\",\"readable\":\"r\",\"framing\":\"structured\",\"opaque\":\"o\",\"signature\":\"s\",\"fields\":[]}",
+            "{\"kind\":\"structured\",\"framing\":\"structured\",\"readable\":\"r\",\"opaque\":\"o\",\"signature\":\"s\",\"fields\":[],\"unknown\":0}",
+            "{\"kind\":\"structured\",\"framing\":\"structured\",\"readable\":\"r\",\"opaque\":\"o\",\"signature\":\"s\",\"fields\":null}",
+            "{\"kind\":\"structured\",\"framing\":\"structured\",\"readable\":\"r\",\"opaque\":\"o\",\"signature\":\"s\",\"fields\":[{\"value\":\"v\",\"name\":\"n\"}]}",
+        ];
+        foreach (var json in malformed)
+        {
+            Assert.False(SyntheticContinuationCodec.Instance.TryDecode(
+                "utf8",
+                Encoding.UTF8.GetBytes(json),
+                out _));
+        }
+
+        Assert.False(SyntheticContinuationCodec.Instance.TryDecode(
+            "base64",
+            firstPayload.Bytes,
+            out _));
+    }
+
+    [Fact]
     public async Task ContinuationItemAndAggregateCapsAreExact()
     {
         var exactItem = await BuildSizedContinuationAsync(
@@ -1171,7 +1760,7 @@ public sealed class AgentSessionRoundTripTests
         var overItem = await BuildSizedContinuationAsync(
             [AgentLimits.ContinuationItemBytes + 1]);
         Assert.Equal(
-            AgentSessionCodes.ContinuationInvalid,
+            AgentSessionCodes.ConstructionLimit,
             overItem.FailureCode);
         Assert.Null(overItem.Artifact);
 
@@ -1195,9 +1784,232 @@ public sealed class AgentSessionRoundTripTests
             52_429,
         ]);
         Assert.Equal(
-            AgentSessionCodes.ContinuationInvalid,
+            AgentSessionCodes.ConstructionLimit,
             overAggregate.FailureCode);
         Assert.Null(overAggregate.Artifact);
+    }
+
+    [Fact]
+    public async Task CumulativeSessionRecordCapIsExactAndNeverDropsHistory()
+    {
+        var trusted = Trusted();
+        BuiltGeneration? exact = null;
+        for (var index = 0; index < 29; index++)
+        {
+            exact = await BuildGenerationWithContinuationCountAsync(
+                trusted,
+                exact,
+                string.Concat("exact-", index),
+                string.Concat("finish", index),
+                index < 21 ? 6 : 5);
+        }
+
+        exact = await BuildGenerationWithContinuationCountAsync(
+            trusted,
+            exact,
+            "exact-final",
+            "finish29",
+            continuationCount: 0);
+        Assert.Equal(
+            AgentLimits.SessionRecords,
+            exact.Artifact.Document.CompletedRuns.Sum(run =>
+                run.Records.Length + run.Continuation.Items.Length));
+
+        BuiltGeneration? overPredecessor = null;
+        for (var index = 0; index < 30; index++)
+        {
+            overPredecessor =
+                await BuildGenerationWithContinuationCountAsync(
+                    trusted,
+                    overPredecessor,
+                    string.Concat("over-", index),
+                    string.Concat("finish", index),
+                    index < 14 ? 6 : 5);
+        }
+
+        var validOverPredecessor = Assert.IsType<BuiltGeneration>(
+            overPredecessor);
+        Assert.Equal(
+            AgentLimits.SessionRecords - 2,
+            validOverPredecessor.Artifact.Document.CompletedRuns.Sum(run =>
+                run.Records.Length + run.Continuation.Items.Length));
+        var predecessorBytes =
+            validOverPredecessor.Artifact.Plaintext.ToArray();
+        var over = await AppendGenerationAsync(
+            trusted,
+            validOverPredecessor,
+            "over-final",
+            "finish30",
+            continuationCount: 0);
+        Assert.Equal(
+            AgentSessionCodes.ConstructionLimit,
+            over.FailureCode);
+        Assert.Null(over.Artifact);
+        Assert.Equal(
+            predecessorBytes,
+            validOverPredecessor.Artifact.Plaintext);
+    }
+
+    [Fact]
+    public async Task MalformedSuccessfulOutcomeBytesAndCodecFailuresAreContained()
+    {
+        var trusted = Trusted();
+        var terminal = await CompleteAsync(
+            trusted,
+            priorSessionSha256: null,
+            previous: null,
+            currentText: "terminal containment",
+            callId: "finish0",
+            reasoning: false);
+        var invalidCallOutcome = MutateCanonicalEventBytes(
+            terminal.Outcome,
+            mutateCall: true);
+        var invalidCall = AgentSessionBuilder.Build(
+            new AgentSessionBuildInput(
+                terminal.Run,
+                invalidCallOutcome,
+                trusted,
+                terminal.Run.InitialMessages.Length - 1,
+                SyntheticContinuationCodec.Instance,
+                Predecessor: null,
+                AgentSessionHeadTransition.SameHead));
+        Assert.Equal(
+            AgentSessionCodes.RecordInvalid,
+            invalidCall.FailureCode);
+        Assert.Null(invalidCall.Artifact);
+
+        var grounded = await CompleteOneReadAsync(trusted);
+        var invalidResultOutcome = MutateCanonicalEventBytes(
+            grounded.Outcome,
+            mutateCall: false);
+        var invalidResult = AgentSessionBuilder.Build(
+            new AgentSessionBuildInput(
+                grounded.Run,
+                invalidResultOutcome,
+                trusted,
+                grounded.Run.InitialMessages.Length - 1,
+                SyntheticContinuationCodec.Instance,
+                Predecessor: null,
+                AgentSessionHeadTransition.SameHead));
+        Assert.Equal(
+            AgentSessionCodes.RecordInvalid,
+            invalidResult.FailureCode);
+        Assert.Null(invalidResult.Artifact);
+
+        var continuation = await CompleteAsync(
+            trusted,
+            priorSessionSha256: null,
+            previous: null,
+            currentText: "codec containment",
+            callId: "finish0",
+            reasoning: true);
+        foreach (var codec in new IAgentContinuationCodec[]
+                 {
+                     InvalidUtf8ContinuationCodec.Instance,
+                     ThrowingContinuationCodec.Instance,
+                 })
+        {
+            var result = AgentSessionBuilder.Build(
+                new AgentSessionBuildInput(
+                    continuation.Run,
+                    continuation.Outcome,
+                    trusted,
+                    continuation.Run.InitialMessages.Length - 1,
+                    codec,
+                    Predecessor: null,
+                    AgentSessionHeadTransition.SameHead));
+            Assert.Equal(
+                AgentSessionCodes.ContinuationInvalid,
+                result.FailureCode);
+            Assert.Null(result.Artifact);
+        }
+
+        var valid = AgentSessionBuilder.Build(
+            new AgentSessionBuildInput(
+                continuation.Run,
+                continuation.Outcome,
+                trusted,
+                continuation.Run.InitialMessages.Length - 1,
+                SyntheticContinuationCodec.Instance,
+                Predecessor: null,
+                AgentSessionHeadTransition.SameHead));
+        Assert.True(valid.Succeeded, valid.FailureCode);
+        var validArtifact = valid.Artifact!;
+        var throwingRestore = AgentSessionRestorer.Restore(
+            new AgentSessionRestoreInput(
+                AgentSessionLocatorFamily.Current,
+                AgentSessionRestoreIntent.Automatic,
+                ExplicitReset: false,
+                validArtifact.Plaintext,
+                new AgentSessionAcceptedState(
+                    0,
+                    validArtifact.SessionSha256,
+                    new string('e', 64),
+                    validArtifact.Document.ProducerBaseSha,
+                    validArtifact.Document.ProducerHeadSha,
+                    PredecessorStateSha256: null),
+                trusted,
+                "session0",
+                Identity(),
+                User("next"),
+                AgentSessionHeadTransition.SameHead,
+                ThrowingContinuationCodec.Instance));
+        Assert.Equal(
+            AgentSessionCodes.ContinuationInvalid,
+            throwingRestore.Code);
+        Assert.Null(throwingRestore.RunRequest);
+    }
+
+    [Fact]
+    public void RepresentativeOldM4PayloadNeverReachesCurrentParser()
+    {
+        var oldPayload = Encoding.UTF8.GetBytes(
+            "{\"contractVersion\":\"ProviderSessionLedgerV1\",\"records\":[]}");
+        foreach (var entry in new[]
+                 {
+                     (
+                         Family: AgentSessionLocatorFamily.NonCurrent,
+                         Intent: AgentSessionRestoreIntent.Automatic,
+                         Expected: AgentSessionCodes.BootstrapIncompatible),
+                     (
+                         Family: AgentSessionLocatorFamily.NonCurrent,
+                         Intent: AgentSessionRestoreIntent.Explicit,
+                         Expected: AgentSessionCodes.ExplicitIncompatible),
+                 })
+        {
+            var result = AgentSessionRestorer.Restore(
+                new AgentSessionRestoreInput(
+                    entry.Family,
+                    entry.Intent,
+                    ExplicitReset: false,
+                    oldPayload,
+                    AcceptedState: null,
+                    Trusted(),
+                    "session0",
+                    Identity(),
+                    User("next"),
+                    AgentSessionHeadTransition.SameHead,
+                    ThrowingContinuationCodec.Instance));
+            Assert.Equal(entry.Expected, result.Code);
+            Assert.Null(result.RunRequest);
+        }
+
+        var selectedCurrent = AgentSessionRestorer.Restore(
+            new AgentSessionRestoreInput(
+                AgentSessionLocatorFamily.Current,
+                AgentSessionRestoreIntent.Automatic,
+                ExplicitReset: false,
+                oldPayload,
+                AcceptedState: null,
+                Trusted(),
+                "session0",
+                Identity(),
+                User("next"),
+                AgentSessionHeadTransition.SameHead,
+                ThrowingContinuationCodec.Instance));
+        Assert.Equal(
+            AgentSessionCodes.CurrentMalformed,
+            selectedCurrent.Code);
     }
 
     [Fact]
@@ -1450,6 +2262,37 @@ public sealed class AgentSessionRoundTripTests
         return framed;
     }
 
+    private static string ReplaceRootProperty(
+        string json,
+        string name,
+        string oldValue,
+        string newValue)
+    {
+        var oldProperty = string.Concat("\"", name, "\":", oldValue);
+        var newProperty = string.Concat("\"", name, "\":", newValue);
+        var mutated = json.Replace(
+            oldProperty,
+            newProperty,
+            StringComparison.Ordinal);
+        Assert.NotEqual(json, mutated);
+        return mutated;
+    }
+
+    private static string RemoveRootProperty(
+        string json,
+        string name,
+        string value)
+    {
+        var property = string.Concat("\"", name, "\":", value);
+        var index = json.IndexOf(property, StringComparison.Ordinal);
+        Assert.True(index >= 0);
+        var start = index > 0 && json[index - 1] == ','
+            ? index - 1
+            : index;
+        var length = property.Length + (start == index ? 1 : 0);
+        return json.Remove(start, length);
+    }
+
     private static string RunJson(
         AgentSessionArtifact artifact,
         int runOrdinal)
@@ -1477,6 +2320,27 @@ public sealed class AgentSessionRoundTripTests
             out var failure),
             failure);
         return artifact!;
+    }
+
+    private static AgentSessionArtifact RawMutation(
+        AgentSessionArtifact artifact,
+        string oldValue,
+        string newValue)
+    {
+        var json = Encoding.UTF8.GetString(
+            artifact.Plaintext[AgentSessionFormat.FramingBytes..]);
+        var mutated = json.Replace(
+            oldValue,
+            newValue,
+            StringComparison.Ordinal);
+        Assert.NotEqual(json, mutated);
+        var plaintext = Frame(Encoding.UTF8.GetBytes(mutated));
+        return new AgentSessionArtifact(
+            plaintext,
+            AgentCanonical.HashDomain(
+                AgentCanonical.SessionDomain,
+                plaintext),
+            artifact.Document);
     }
 
     private static AgentSessionRestoreResult Restore(
@@ -1579,10 +2443,161 @@ public sealed class AgentSessionRoundTripTests
             AgentSessionHeadTransition.SameHead));
     }
 
-    private static async Task<BuiltGeneration> BuildGroundedGenerationAsync(
+    private static async Task<CompletedRun> CompleteOneReadAsync(
         AgentSessionTrustedRequest trusted)
     {
+        const string readJson =
+            "{\"path\":\"src/a.cs\",\"start_line\":1,\"line_count\":1}";
+        var responses = new Queue<ProjectChatResponse>(
+        [
+            new ProjectChatResponse(
+                new ProjectChatMessage(
+                    "assistant",
+                    [
+                        new ProjectToolCallContent(
+                            "read0",
+                            AgentToolRegistry.ReadFileName,
+                            readJson),
+                    ]),
+                new ProjectChatUsage(1, 1),
+                CapturedResponseBodyBytes: 1),
+            new ProjectChatResponse(
+                new ProjectChatMessage(
+                    "assistant",
+                    [
+                        new ProjectToolCallContent(
+                            "finish0",
+                            AgentToolRegistry.FinishReviewName,
+                            FinishJson),
+                    ]),
+                new ProjectChatUsage(1, 1),
+                CapturedResponseBodyBytes: 1),
+        ]);
+        var run = new AgentRunRequest(
+            Identity(),
+            Materialize(trusted, prior: null),
+            "session0",
+            [.. trusted.ControlMessages, User("review")]);
+        var outcome = await new AgentLoop(
+            new QueueChatClient(responses),
+            new MappedToolExecutor(
+                new Dictionary<string, AgentToolExecution>(
+                    StringComparer.Ordinal)
+                {
+                    ["read0"] = ReadExecution("src/a.cs", 'a'),
+                })).RunAsync(run, CancellationToken.None);
+        Assert.True(outcome.CompletedSessionEligible);
+        return new CompletedRun(run, outcome);
+    }
+
+    private static AgentRunOutcome MutateCanonicalEventBytes(
+        AgentRunOutcome outcome,
+        bool mutateCall)
+    {
+        var invalidBytes = ImmutableArray.Create((byte)0xff);
+        var events = outcome.Events;
+        if (mutateCall)
+        {
+            var eventIndex = Enumerable.Range(0, events.Length).First(
+                index => events[index] is AgentToolCallEvent);
+            var call = Assert.IsType<AgentToolCallEvent>(events[eventIndex]);
+            var hash = StringComparer.Ordinal.Equals(
+                call.Name,
+                AgentToolRegistry.FinishReviewName)
+                ? AgentCanonical.HashDomain(
+                    AgentCanonical.TerminalDomain,
+                    invalidBytes.AsSpan())
+                : AgentCanonical.HashRaw(invalidBytes.AsSpan());
+            events = events.SetItem(
+                eventIndex,
+                call with
+                {
+                    ArgumentsSha256 = hash,
+                    CanonicalArguments = invalidBytes,
+                });
+            var messageIndex = Enumerable.Range(0, events.Length).First(
+                index =>
+                    events[index] is AgentMessageEvent message &&
+                    message.Contents
+                        .OfType<AgentToolCallReferencePart>()
+                        .Any(reference =>
+                            StringComparer.Ordinal.Equals(
+                                reference.CallId,
+                                call.CallId)));
+            var message = Assert.IsType<AgentMessageEvent>(
+                events[messageIndex]);
+            events = events.SetItem(
+                messageIndex,
+                message with
+                {
+                    Contents = message.Contents
+                        .Select(part =>
+                            part is AgentToolCallReferencePart reference &&
+                            StringComparer.Ordinal.Equals(
+                                reference.CallId,
+                                call.CallId)
+                                ? reference with
+                                {
+                                    ArgumentsSha256 = hash,
+                                }
+                                : part)
+                        .ToImmutableArray(),
+                });
+        }
+        else
+        {
+            var eventIndex = Enumerable.Range(0, events.Length).First(
+                index => events[index] is AgentToolResultEvent);
+            var result = Assert.IsType<AgentToolResultEvent>(
+                events[eventIndex]);
+            events = events.SetItem(
+                eventIndex,
+                result with
+                {
+                    ResultSha256 = AgentCanonical.HashRaw(
+                        invalidBytes.AsSpan()),
+                    CanonicalResult = invalidBytes,
+                });
+        }
+
+        return outcome with { Events = events };
+    }
+
+    private static async Task<BuiltGeneration> BuildGroundedGenerationAsync(
+        AgentSessionTrustedRequest trusted,
+        BuiltGeneration? previous = null)
+    {
         var identity = Identity();
+        var generation = previous?.Artifact.Document.Generation + 1 ?? 0;
+        var readCallId = string.Concat("read", generation);
+        var finishCallId = string.Concat("finish", generation);
+        ProjectChatMessage[] history = [];
+        ProjectContinuation? continuation = null;
+        AgentSessionPredecessor? predecessor = null;
+        string? prior = null;
+        if (previous is not null)
+        {
+            Assert.True(
+                AgentSessionRequestReconstruction.TryReconstructHistory(
+                    previous.Artifact.Document,
+                    SyntheticContinuationCodec.Instance,
+                    trusted.ControlMessages.Length,
+                    out var reconstructed,
+                    out continuation,
+                    out var reconstructionFailure),
+                reconstructionFailure);
+            history = reconstructed!;
+            prior = previous.Artifact.SessionSha256;
+            predecessor = new AgentSessionPredecessor(
+                previous.Artifact.Plaintext,
+                previous.Artifact.SessionSha256,
+                previous.EnvelopeSha256,
+                previous.Artifact.Document.Generation,
+                previous.Artifact.Document.ProducerBaseSha,
+                previous.Artifact.Document.ProducerHeadSha,
+                previous.Artifact.Document.PredecessorStateSha256);
+        }
+
         const string readJson =
             "{\"path\":\"src/a.cs\",\"start_line\":1,\"line_count\":1}";
         Assert.True(AgentToolArguments.TryReadFile(
@@ -1636,9 +2651,9 @@ public sealed class AgentSessionRoundTripTests
             new ProjectChatResponse(
                 new ProjectChatMessage(
                     "assistant",
-                    [
-                        new ProjectToolCallContent(
-                            "read0",
+                        [
+                            new ProjectToolCallContent(
+                            readCallId,
                             AgentToolRegistry.ReadFileName,
                             Encoding.UTF8.GetString(
                                 readArguments!.CanonicalBytes)),
@@ -1648,9 +2663,9 @@ public sealed class AgentSessionRoundTripTests
             new ProjectChatResponse(
                 new ProjectChatMessage(
                     "assistant",
-                    [
-                        new ProjectToolCallContent(
-                            "finish0",
+                        [
+                            new ProjectToolCallContent(
+                            finishCallId,
                             AgentToolRegistry.FinishReviewName,
                             Encoding.UTF8.GetString(terminalBytes)),
                     ]),
@@ -1659,9 +2674,14 @@ public sealed class AgentSessionRoundTripTests
         ]);
         var run = new AgentRunRequest(
             identity,
-            Materialize(trusted, prior: null),
+            Materialize(trusted, prior),
             "session0",
-            [.. trusted.ControlMessages, User("review")]);
+            [
+                .. trusted.ControlMessages,
+                .. history,
+                User(string.Concat("review-", generation)),
+            ],
+            continuation);
         var outcome = await new AgentLoop(
             new QueueChatClient(responses),
             new FixedToolExecutor(new AgentToolExecution(
@@ -1677,12 +2697,12 @@ public sealed class AgentSessionRoundTripTests
             trusted,
             run.InitialMessages.Length - 1,
             SyntheticContinuationCodec.Instance,
-            Predecessor: null,
+            predecessor,
             AgentSessionHeadTransition.SameHead));
         Assert.True(built.Succeeded, built.FailureCode);
         return new BuiltGeneration(
             built.Artifact!,
-            new string('e', 64));
+            new string(generation == 0 ? 'e' : 'f', 64));
     }
 
     private static AgentToolExecution ReadExecution(
@@ -1830,14 +2850,20 @@ public sealed class AgentSessionRoundTripTests
                 var messagePosition = request.Messages.Length;
                 var first = new ProjectContinuationItem(
                     "readable-0",
-                    "opaque-0",
+                    SyntheticContinuationCodec.StructuredOpaque(
+                        "opaque-0",
+                        "signature-0",
+                        [new("first", "1"), new("second", "2")]),
                     "structured",
                     "finish0",
                     messagePosition,
                     0);
                 var second = new ProjectContinuationItem(
                     "readable-1",
-                    "opaque-1",
+                    SyntheticContinuationCodec.StructuredOpaque(
+                        "opaque-1",
+                        "signature-1",
+                        [new("second", "2"), new("first", "1")]),
                     "structured",
                     "finish0",
                     messagePosition,
@@ -1881,7 +2907,43 @@ public sealed class AgentSessionRoundTripTests
         BuiltGeneration? previous,
         string currentText,
         string callId,
-        bool reasoning)
+        bool reasoning) =>
+        await BuildGenerationWithContinuationCountAsync(
+            trusted,
+            previous,
+            currentText,
+            callId,
+            reasoning ? 1 : 0);
+
+    private static async Task<BuiltGeneration>
+        BuildGenerationWithContinuationCountAsync(
+            AgentSessionTrustedRequest trusted,
+            BuiltGeneration? previous,
+            string currentText,
+            string callId,
+            int continuationCount)
+    {
+        var built = await AppendGenerationAsync(
+            trusted,
+            previous,
+            currentText,
+            callId,
+            continuationCount);
+        Assert.True(built.Succeeded, built.FailureCode);
+        return new BuiltGeneration(
+            built.Artifact!,
+            new string(
+                "abcdef"[
+                    (int)(built.Artifact!.Document.Generation % 6)],
+                64));
+    }
+
+    private static async Task<AgentSessionBuildResult> AppendGenerationAsync(
+        AgentSessionTrustedRequest trusted,
+        BuiltGeneration? previous,
+        string currentText,
+        string callId,
+        int continuationCount)
     {
         ProjectChatMessage[]? history = null;
         ProjectContinuation? continuation = null;
@@ -1913,14 +2975,14 @@ public sealed class AgentSessionRoundTripTests
             Assert.Equal(prior, stable.PriorSessionSha256);
         }
 
-        var completed = await CompleteAsync(
+        var completed = await CompleteWithContinuationCountAsync(
             trusted,
             prior,
             (history ?? [], continuation),
             currentText,
             callId,
-            reasoning);
-        var built = AgentSessionBuilder.Build(new AgentSessionBuildInput(
+            continuationCount);
+        return AgentSessionBuilder.Build(new AgentSessionBuildInput(
             completed.Run,
             completed.Outcome,
             trusted,
@@ -1928,22 +2990,33 @@ public sealed class AgentSessionRoundTripTests
             SyntheticContinuationCodec.Instance,
             predecessor,
             AgentSessionHeadTransition.SameHead));
-        Assert.True(built.Succeeded, built.FailureCode);
-        return new BuiltGeneration(
-            built.Artifact!,
-            new string(
-                (char)('a' + built.Artifact!.Document.Generation),
-                64));
     }
 
-    private static async Task<CompletedRun> CompleteAsync(
+    private static Task<CompletedRun> CompleteAsync(
         AgentSessionTrustedRequest trusted,
         string? priorSessionSha256,
         (ProjectChatMessage[] History, ProjectContinuation? Continuation)?
             previous,
         string currentText,
         string callId,
-        bool reasoning)
+        bool reasoning) =>
+        CompleteWithContinuationCountAsync(
+            trusted,
+            priorSessionSha256,
+            previous,
+            currentText,
+            callId,
+            reasoning ? 1 : 0);
+
+    private static async Task<CompletedRun>
+        CompleteWithContinuationCountAsync(
+            AgentSessionTrustedRequest trusted,
+            string? priorSessionSha256,
+            (ProjectChatMessage[] History, ProjectContinuation? Continuation)?
+                previous,
+            string currentText,
+            string callId,
+            int continuationCount)
     {
         var plan = Materialize(trusted, priorSessionSha256);
         var run = new AgentRunRequest(
@@ -1956,7 +3029,9 @@ public sealed class AgentSessionRoundTripTests
                 User(currentText),
             ],
             previous?.Continuation);
-        var outcome = await Loop(callId, reasoning).RunAsync(
+        var outcome = await LoopWithContinuationCount(
+            callId,
+            continuationCount).RunAsync(
             run,
             CancellationToken.None);
         Assert.True(outcome.CompletedSessionEligible);
@@ -1964,33 +3039,53 @@ public sealed class AgentSessionRoundTripTests
     }
 
     private static AgentLoop Loop(string callId, bool reasoning) =>
+        LoopWithContinuationCount(callId, reasoning ? 1 : 0);
+
+    private static AgentLoop LoopWithContinuationCount(
+        string callId,
+        int continuationCount) =>
         new(
             new OneResponseChatClient(request =>
             {
                 var contents = new List<ProjectChatContent>();
                 ProjectContinuation? continuation = null;
-                if (reasoning)
+                if (continuationCount > 0)
                 {
-                    var item = new ProjectContinuationItem(
-                        string.Concat("readable-", callId[^1]),
-                        string.Concat("opaque-", callId[^1]),
-                        "structured",
-                        callId,
-                        request.Messages.Length,
-                        0);
-                    contents.Add(new ProjectReasoningContent(
-                        item.Readable,
-                        item.Opaque,
-                        item.Framing,
-                        item.AssociatedCallId,
-                        item.MessagePosition,
-                        item.ContentPosition));
+                    var items = Enumerable.Range(0, continuationCount)
+                        .Select(index => new ProjectContinuationItem(
+                            continuationCount == 1
+                                ? string.Concat("readable-", callId[^1])
+                                : string.Concat(
+                                    "readable-",
+                                    callId[^1],
+                                    "-",
+                                    index),
+                            continuationCount == 1
+                                ? string.Concat("opaque-", callId[^1])
+                                : string.Concat(
+                                    "opaque-",
+                                    callId[^1],
+                                    "-",
+                                    index),
+                            "structured",
+                            callId,
+                            request.Messages.Length,
+                            index))
+                        .ToArray();
+                    contents.AddRange(items.Select(item =>
+                        (ProjectChatContent)new ProjectReasoningContent(
+                            item.Readable,
+                            item.Opaque,
+                            item.Framing,
+                            item.AssociatedCallId,
+                            item.MessagePosition,
+                            item.ContentPosition)));
                     continuation = new ProjectContinuation(
                         "provider",
                         "model",
                         "adapter",
                         "session0",
-                        [item]);
+                        items);
                 }
 
                 contents.Add(new ProjectToolCallContent(
@@ -2157,6 +3252,66 @@ public sealed class AgentSessionRoundTripTests
         }
     }
 
+    private sealed class InvalidUtf8ContinuationCodec
+        : IAgentContinuationCodec
+    {
+        internal static InvalidUtf8ContinuationCodec Instance { get; } =
+            new();
+
+        public string CodecId => "r2-invalid-utf8";
+
+        public string CodecDiscriminator => "current-1";
+
+        public bool TryEncode(
+            AgentContinuationCodecValue value,
+            out AgentContinuationEncodedPayload? payload)
+        {
+            payload = new AgentContinuationEncodedPayload(
+                "utf8",
+                [0xff]);
+            return true;
+        }
+
+        public bool TryDecode(
+            string encoding,
+            ReadOnlySpan<byte> payload,
+            out AgentContinuationCodecValue? value)
+        {
+            value = new AgentContinuationCodecValue(
+                "readable-0",
+                "opaque-0",
+                "structured");
+            return true;
+        }
+    }
+
+    private sealed class ThrowingContinuationCodec
+        : IAgentContinuationCodec
+    {
+        internal static ThrowingContinuationCodec Instance { get; } = new();
+
+        public string CodecId => "r2-synthetic";
+
+        public string CodecDiscriminator => "current-1";
+
+        public bool TryEncode(
+            AgentContinuationCodecValue value,
+            out AgentContinuationEncodedPayload? payload)
+        {
+            payload = null;
+            throw new InvalidOperationException("synthetic codec failure");
+        }
+
+        public bool TryDecode(
+            string encoding,
+            ReadOnlySpan<byte> payload,
+            out AgentContinuationCodecValue? value)
+        {
+            value = null;
+            throw new InvalidOperationException("synthetic codec failure");
+        }
+    }
+
     private sealed class SyntheticContinuationCodec
         : IAgentContinuationCodec
     {
@@ -2186,17 +3341,42 @@ public sealed class AgentSessionRoundTripTests
                     writer.WriteString(value.Opaque);
                     break;
                 case "structured":
+                    if (!TryReadStructuredOpaque(
+                            value.Opaque,
+                            out var opaque,
+                            out var signature,
+                            out var fields))
+                    {
+                        payload = null;
+                        return false;
+                    }
+
                     writer.WriteString("structured");
                     writer.WriteProperty("framing");
                     writer.WriteString(value.Framing);
                     writer.WriteProperty("readable");
                     writer.WriteString(value.Readable);
                     writer.WriteProperty("opaque");
-                    writer.WriteString(value.Opaque);
+                    writer.WriteString(opaque!);
                     writer.WriteProperty("signature");
-                    writer.WriteString(string.Empty);
+                    writer.WriteString(signature!);
                     writer.WriteProperty("fields");
                     writer.WriteArrayStart();
+                    for (var index = 0; index < fields.Length; index++)
+                    {
+                        if (index > 0)
+                        {
+                            writer.WriteComma();
+                        }
+
+                        writer.WriteObjectStart();
+                        writer.WriteProperty("name");
+                        writer.WriteString(fields[index].Name);
+                        writer.WriteProperty("value");
+                        writer.WriteString(fields[index].Value);
+                        writer.WriteObjectEnd();
+                    }
+
                     writer.WriteArrayEnd();
                     break;
                 default:
@@ -2240,7 +3420,6 @@ public sealed class AgentSessionRoundTripTests
                                 text,
                                 string.Empty,
                                 "readable");
-                            return true;
                         }
 
                         break;
@@ -2253,7 +3432,6 @@ public sealed class AgentSessionRoundTripTests
                                 string.Empty,
                                 opaque,
                                 "opaque");
-                            return true;
                         }
 
                         break;
@@ -2265,36 +3443,214 @@ public sealed class AgentSessionRoundTripTests
                             "opaque",
                             "signature",
                             "fields",
-                        ]) &&
-                        root.GetProperty("signature").GetString() ==
-                            string.Empty &&
-                        root.GetProperty("fields").GetArrayLength() == 0:
+                        ]):
                         var readable =
                             root.GetProperty("readable").GetString();
                         var structuredOpaque =
                             root.GetProperty("opaque").GetString();
+                        var signature =
+                            root.GetProperty("signature").GetString();
                         var framing =
                             root.GetProperty("framing").GetString();
                         if (readable is not null &&
                             structuredOpaque is not null &&
-                            framing is not null)
+                            signature is not null &&
+                            framing is not null &&
+                            ValidUtf8(framing, 1, 64) &&
+                            TryReadFields(
+                                root.GetProperty("fields"),
+                                out var fields))
                         {
                             value = new AgentContinuationCodecValue(
                                 readable,
-                                structuredOpaque,
+                                signature.Length == 0 && fields.Length == 0
+                                    ? structuredOpaque
+                                    : StructuredOpaque(
+                                        structuredOpaque,
+                                        signature,
+                                        fields),
                                 framing);
-                            return true;
                         }
 
                         break;
+                }
+
+                if (value is not null &&
+                    TryEncode(value, out var canonical) &&
+                    canonical is not null &&
+                    StringComparer.Ordinal.Equals(
+                        canonical.Encoding,
+                        encoding) &&
+                    payload.SequenceEqual(canonical.Bytes))
+                {
+                    return true;
                 }
             }
             catch (Exception exception) when (
                 exception is JsonException or InvalidOperationException)
             {
+                return false;
             }
 
             return false;
         }
+
+        internal static string StructuredOpaque(
+            string opaque,
+            string signature,
+            IReadOnlyList<SyntheticField> fields)
+        {
+            var writer = new Rfc8785Writer(256);
+            WriteStructuredOpaque(
+                ref writer,
+                opaque,
+                signature,
+                fields);
+            return Encoding.UTF8.GetString(
+                writer.ToImmutableArray().AsSpan());
+        }
+
+        private static bool TryReadStructuredOpaque(
+            string value,
+            out string? opaque,
+            out string? signature,
+            out ImmutableArray<SyntheticField> fields)
+        {
+            opaque = value;
+            signature = string.Empty;
+            fields = [];
+            if (!value.StartsWith("{\"opaque\":", StringComparison.Ordinal))
+            {
+                return ValidUtf8(value, 0, AgentLimits.ContentBytes);
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(value);
+                var root = document.RootElement;
+                if (root.ValueKind != JsonValueKind.Object ||
+                    !root.EnumerateObject()
+                        .Select(property => property.Name)
+                        .SequenceEqual(["opaque", "signature", "fields"]) ||
+                    root.GetProperty("opaque").GetString() is not { } parsedOpaque ||
+                    root.GetProperty("signature").GetString() is not { } parsedSignature ||
+                    !TryReadFields(root.GetProperty("fields"), out fields))
+                {
+                    return false;
+                }
+
+                var canonical = StructuredOpaque(
+                    parsedOpaque,
+                    parsedSignature,
+                    fields);
+                if (!StringComparer.Ordinal.Equals(canonical, value))
+                {
+                    return false;
+                }
+
+                opaque = parsedOpaque;
+                signature = parsedSignature;
+                return true;
+            }
+            catch (Exception exception) when (
+                exception is JsonException or InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
+        private static bool TryReadFields(
+            JsonElement element,
+            out ImmutableArray<SyntheticField> fields)
+        {
+            fields = [];
+            if (element.ValueKind != JsonValueKind.Array ||
+                element.GetArrayLength() > 32)
+            {
+                return false;
+            }
+
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            var builder = ImmutableArray.CreateBuilder<SyntheticField>(
+                element.GetArrayLength());
+            foreach (var item in element.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object ||
+                    !item.EnumerateObject()
+                        .Select(property => property.Name)
+                        .SequenceEqual(["name", "value"]) ||
+                    item.GetProperty("name").GetString() is not { } name ||
+                    item.GetProperty("value").GetString() is not { } value ||
+                    !ValidFieldName(name) ||
+                    !names.Add(name) ||
+                    !ValidUtf8(value, 0, 8 * 1024))
+                {
+                    return false;
+                }
+
+                builder.Add(new SyntheticField(name, value));
+            }
+
+            fields = builder.MoveToImmutable();
+            return true;
+        }
+
+        private static void WriteStructuredOpaque(
+            ref Rfc8785Writer writer,
+            string opaque,
+            string signature,
+            IReadOnlyList<SyntheticField> fields)
+        {
+            writer.WriteObjectStart();
+            writer.WriteProperty("opaque");
+            writer.WriteString(opaque);
+            writer.WriteProperty("signature");
+            writer.WriteString(signature);
+            writer.WriteProperty("fields");
+            writer.WriteArrayStart();
+            for (var index = 0; index < fields.Count; index++)
+            {
+                if (index > 0)
+                {
+                    writer.WriteComma();
+                }
+
+                writer.WriteObjectStart();
+                writer.WriteProperty("name");
+                writer.WriteString(fields[index].Name);
+                writer.WriteProperty("value");
+                writer.WriteString(fields[index].Value);
+                writer.WriteObjectEnd();
+            }
+
+            writer.WriteArrayEnd();
+            writer.WriteObjectEnd();
+        }
+
+        private static bool ValidFieldName(string value) =>
+            value.Length is >= 1 and <= 64 &&
+            value.All(character =>
+                character is >= 'A' and <= 'Z' or
+                    >= 'a' and <= 'z' or
+                    >= '0' and <= '9' or
+                    '_' or '.' or '-');
+
+        private static bool ValidUtf8(
+            string value,
+            int minimumBytes,
+            int maximumBytes)
+        {
+            try
+            {
+                var length = new UTF8Encoding(false, true).GetByteCount(value);
+                return length >= minimumBytes && length <= maximumBytes;
+            }
+            catch (EncoderFallbackException)
+            {
+                return false;
+            }
+        }
     }
+
+    private sealed record SyntheticField(string Name, string Value);
 }

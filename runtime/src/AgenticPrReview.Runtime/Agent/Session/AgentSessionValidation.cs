@@ -124,6 +124,63 @@ internal static class AgentSessionValidation
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
+    internal static bool TryValidateEnvelopeRoot(
+        AgentSessionEnvelopeRootDto root,
+        out string failureCode)
+    {
+        failureCode = AgentSessionCodes.CurrentMalformed;
+        if (root.Namespace is null ||
+            root.Discriminator is null ||
+            root.SessionId is null ||
+            root.RepositoryId is null ||
+            root.WorkflowIdentity is null ||
+            root.ProviderId is null ||
+            root.ModelId is null ||
+            root.AdapterId is null ||
+            root.PolicySha256 is null ||
+            root.BuildId is null ||
+            root.ToolsetSha256 is null ||
+            root.LimitsSha256 is null ||
+            root.ProducerBaseSha is null ||
+            root.ProducerHeadSha is null ||
+            root.CompletedRuns is null ||
+            !StringComparer.Ordinal.Equals(
+                root.Namespace,
+                AgentSessionFormat.Namespace) ||
+            !StringComparer.Ordinal.Equals(
+                root.Discriminator,
+                AgentSessionFormat.Discriminator) ||
+            !AgentValueDomains.IsIdentifier(root.SessionId) ||
+            !AgentValueDomains.IsUtf8(root.RepositoryId, 1, 128) ||
+            root.ReviewTarget < 1 ||
+            !AgentValueDomains.IsUtf8(root.WorkflowIdentity, 1, 256) ||
+            !AgentValueDomains.IsUtf8(root.ProviderId, 1, 128) ||
+            !AgentValueDomains.IsUtf8(root.ModelId, 1, 128) ||
+            !AgentValueDomains.IsUtf8(root.AdapterId, 1, 128) ||
+            !IsLowerHex(root.PolicySha256, 64) ||
+            !AgentValueDomains.IsUtf8(root.BuildId, 1, 256) ||
+            !IsLowerHex(root.ToolsetSha256, 64) ||
+            !IsLowerHex(root.LimitsSha256, 64) ||
+            !IsLowerHex(root.ProducerBaseSha, 40) ||
+            !IsLowerHex(root.ProducerHeadSha, 40) ||
+            root.Generation < 0 ||
+            root.CompletedRuns.Length is < 1 or >
+                AgentSessionFormat.MaximumCompletedRuns ||
+            root.Generation != root.CompletedRuns.Length - 1L ||
+            (root.Generation == 0 &&
+                (root.PredecessorStateSha256 is not null ||
+                    root.PriorSessionSha256 is not null)) ||
+            (root.Generation > 0 &&
+                (!IsLowerHex(root.PredecessorStateSha256, 64) ||
+                    !IsLowerHex(root.PriorSessionSha256, 64))))
+        {
+            return false;
+        }
+
+        failureCode = string.Empty;
+        return true;
+    }
+
     internal static bool TryValidateRoot(
         AgentSessionDocument document,
         out string failureCode)
@@ -233,15 +290,31 @@ internal static class AgentSessionValidation
         var identifiers = document.CompletedRuns
             .Select(run => run.RunId)
             .ToHashSet(StringComparer.Ordinal);
-        var observationIds = new HashSet<string>(StringComparer.Ordinal);
         long continuationBytes = 0;
+        long sessionRecords = 0;
         foreach (var run in document.CompletedRuns)
         {
+            try
+            {
+                sessionRecords = checked(
+                    sessionRecords +
+                    run.Records.Length +
+                    run.Continuation.Items.Length);
+            }
+            catch (OverflowException)
+            {
+                return false;
+            }
+
+            if (sessionRecords > AgentLimits.SessionRecords)
+            {
+                return false;
+            }
+
             if (!TryValidateRun(
                     run,
                     continuationCodec,
                     identifiers,
-                    observationIds,
                     ref continuationBytes,
                     out failureCode))
             {
@@ -279,7 +352,6 @@ internal static class AgentSessionValidation
         AgentSessionCompletedRun run,
         IAgentContinuationCodec continuationCodec,
         HashSet<string> identifiers,
-        HashSet<string> observationIds,
         ref long continuationBytes,
         out string failureCode)
     {
@@ -413,8 +485,7 @@ internal static class AgentSessionValidation
                     return false;
                 }
 
-                if (toolResultBytes > AgentLimits.ToolResultsTotalBytes ||
-                    !observationIds.Add(result.ObservationId))
+                if (toolResultBytes > AgentLimits.ToolResultsTotalBytes)
                 {
                     return false;
                 }
@@ -877,7 +948,8 @@ internal static class AgentSessionValidation
                             StringComparer.Ordinal.Equals(
                                 terminal.CallId,
                                 item.AssociatedCallId))) ||
-                !codec.TryDecode(
+                !AgentContinuationCodecBoundary.TryDecode(
+                    codec,
                     item.Encoding,
                     item.PayloadBytes,
                     out var value) ||

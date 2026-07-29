@@ -3,6 +3,66 @@ using System.Text.Json.Serialization;
 
 namespace AgenticPrReview.Runtime.Agent.Session;
 
+internal sealed class AgentSessionEnvelopeRootDto
+{
+    [JsonPropertyName("namespace")]
+    public string? Namespace { get; set; }
+
+    [JsonPropertyName("discriminator")]
+    public string? Discriminator { get; set; }
+
+    [JsonPropertyName("session_id")]
+    public string? SessionId { get; set; }
+
+    [JsonPropertyName("repository_id")]
+    public string? RepositoryId { get; set; }
+
+    [JsonPropertyName("review_target")]
+    public long ReviewTarget { get; set; }
+
+    [JsonPropertyName("workflow_identity")]
+    public string? WorkflowIdentity { get; set; }
+
+    [JsonPropertyName("provider_id")]
+    public string? ProviderId { get; set; }
+
+    [JsonPropertyName("model_id")]
+    public string? ModelId { get; set; }
+
+    [JsonPropertyName("adapter_id")]
+    public string? AdapterId { get; set; }
+
+    [JsonPropertyName("policy_sha256")]
+    public string? PolicySha256 { get; set; }
+
+    [JsonPropertyName("build_id")]
+    public string? BuildId { get; set; }
+
+    [JsonPropertyName("toolset_sha256")]
+    public string? ToolsetSha256 { get; set; }
+
+    [JsonPropertyName("limits_sha256")]
+    public string? LimitsSha256 { get; set; }
+
+    [JsonPropertyName("producer_base_sha")]
+    public string? ProducerBaseSha { get; set; }
+
+    [JsonPropertyName("producer_head_sha")]
+    public string? ProducerHeadSha { get; set; }
+
+    [JsonPropertyName("generation")]
+    public long Generation { get; set; }
+
+    [JsonPropertyName("predecessor_state_sha256")]
+    public string? PredecessorStateSha256 { get; set; }
+
+    [JsonPropertyName("prior_session_sha256")]
+    public string? PriorSessionSha256 { get; set; }
+
+    [JsonPropertyName("completed_runs")]
+    public JsonElement[]? CompletedRuns { get; set; }
+}
+
 internal sealed class AgentSessionRootDto
 {
     [JsonPropertyName("namespace")]
@@ -436,6 +496,7 @@ internal sealed class AgentSessionSearchMatchDto
     GenerationMode = JsonSourceGenerationMode.Metadata,
     PropertyNamingPolicy = JsonKnownNamingPolicy.Unspecified,
     UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
+[JsonSerializable(typeof(AgentSessionEnvelopeRootDto))]
 [JsonSerializable(typeof(AgentSessionRootDto))]
 [JsonSerializable(typeof(AgentSessionReviewContextDto))]
 [JsonSerializable(typeof(AgentSessionAssistantMessageDto))]
