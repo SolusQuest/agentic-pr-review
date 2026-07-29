@@ -201,18 +201,6 @@ internal sealed class AgentLoop(
             }
 
             var terminalResponse = preparedCalls[0] is PreparedFinishReviewCall;
-            var additionalRecords =
-                1 +
-                (response.Continuation?.Items?.Length ?? 0) +
-                preparedCalls.Length * 2;
-            if (events.Count + additionalRecords > AgentLimits.SessionRecords)
-            {
-                return Failure(
-                    AgentFailureCodes.ResponseInvalid,
-                    modelCalls,
-                    toolCalls,
-                    events);
-            }
 
             if (!TryMergeResponseContinuation(
                     continuation,
@@ -222,7 +210,6 @@ internal sealed class AgentLoop(
                     response.Message,
                     messages.Count,
                     usedCallIds,
-                    events.Count,
                     ref continuationBytes,
                     out var mergedContinuation,
                     out var continuationEvents))
@@ -726,7 +713,6 @@ internal sealed class AgentLoop(
         if (newContentParts > AgentLimits.PartsTotal ||
             !TryCreateContinuationEvents(
                 continuation.Items,
-                events.Count,
                 aggregateBytes,
                 out var newAggregate,
                 out var continuationEvents))
@@ -748,7 +734,6 @@ internal sealed class AgentLoop(
         ProjectChatMessage rawMessage,
         int messagePosition,
         IReadOnlySet<string> usedCallIds,
-        int existingEventCount,
         ref long aggregateBytes,
         out ProjectContinuation? merged,
         out ImmutableArray<AgentContinuationEvent> continuationEvents)
@@ -803,7 +788,6 @@ internal sealed class AgentLoop(
 
         if (!TryCreateContinuationEvents(
                 delta.Items,
-                existingEventCount + 1,
                 aggregateBytes,
                 out var newAggregate,
                 out continuationEvents))
@@ -879,7 +863,6 @@ internal sealed class AgentLoop(
 
     private static bool TryCreateContinuationEvents(
         IReadOnlyList<ProjectContinuationItem> items,
-        int existingEventCount,
         long aggregateBytes,
         out long newAggregate,
         out ImmutableArray<AgentContinuationEvent> continuationEvents)
@@ -907,9 +890,7 @@ internal sealed class AgentLoop(
             }
 
             if (itemBytes.Length > AgentLimits.ContinuationItemBytes ||
-                newAggregate > AgentLimits.ContinuationTotalBytes ||
-                existingEventCount + builder.Count + 1 >
-                    AgentLimits.SessionRecords - 1)
+                newAggregate > AgentLimits.ContinuationTotalBytes)
             {
                 continuationEvents = [];
                 return false;
@@ -1035,12 +1016,10 @@ internal sealed class AgentLoop(
                     return false;
                 }
             }
-            else
+
+            foreach (var call in calls)
             {
-                foreach (var call in calls)
-                {
-                    pendingResults.Enqueue(call.CallId);
-                }
+                pendingResults.Enqueue(call.CallId);
             }
         }
 
@@ -1070,7 +1049,7 @@ internal sealed class AgentLoop(
                 }
                 break;
             case AgentToolRegistry.SearchTextName:
-                if (AgentToolArguments.TrySearchText(
+                if (AgentToolArguments.TrySearchTextCanonical(
                     call.ArgumentsJson,
                     out var search))
                 {
@@ -1263,13 +1242,6 @@ internal sealed class AgentLoop(
         int toolCalls,
         ImmutableArray<AgentLogicalEvent>.Builder events)
     {
-        if (events.Count >= AgentLimits.SessionRecords)
-        {
-            events.RemoveRange(
-                AgentLimits.SessionRecords - 1,
-                events.Count - (AgentLimits.SessionRecords - 1));
-        }
-
         events.Add(new AgentFailureEvent(code));
         return AgentRunOutcome.Failure(
             code,

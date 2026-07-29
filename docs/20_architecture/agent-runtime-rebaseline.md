@@ -4,7 +4,7 @@ Status: selected target architecture; R1 is complete and R2 implementation is in
 
 Drafted: 2026-07-24.
 
-Last revised: 2026-07-27.
+Last revised: 2026-07-29.
 
 Activation record: [PR #76](https://github.com/SolusQuest/agentic-pr-review/pull/76); its merge commit is the normative activation point.
 
@@ -541,6 +541,8 @@ This process-level proof deliberately excludes GitHub Actions artifact selection
 Mid-run crash recovery is not part of the first guarantee.
 
 ### Durable Session Content
+
+The exact R2 plaintext namespace, framing, canonical record grammar, continuation envelope, restore table, diagnostics, and construction/reconstruction invariants are normative in [`agent-session-format.md`](./agent-session-format.md). SESSION implements that bounded in-memory format; #87 owns encrypted storage and accepted-lineage transport, and #88 owns the final fresh-process executable proof.
 
 The session state must contain enough canonical logical content to reconstruct the provider conversation that the project intends to reuse:
 
