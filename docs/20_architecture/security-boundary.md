@@ -265,6 +265,8 @@ Workflow-level per-PR concurrency remains defense in depth. It does not replace 
 
 The project-owned durable session state is a restricted logical artifact, not a raw provider transcript or HTTP capture. New Agent state uses a namespace and current-format discriminator distinct from old M4 state. Automatic selection never interprets old bytes as current; non-current candidates bootstrap observably, while an explicitly supplied incompatible artifact fails closed.
 
+The exact current plaintext format, data/control classifications, continuation bindings, restore outcomes, and no-admission failure order are normative in [`agent-session-format.md`](./agent-session-format.md). SESSION is a pure bounded in-memory boundary. #87 owns authenticated encryption, storage authorization, selection, lineage, retention, and deletion; #88 owns the final fresh-process Native AOT fixture and transport oracle.
+
 It may contain:
 
 - project-owned canonical instruction, policy, toolset, provider, model, adapter, and cache identities;
