@@ -278,6 +278,7 @@ internal static class AgentSessionValidation
 
             if (sessionRecords > AgentLimits.SessionRecords)
             {
+                failureCode = AgentSessionCodes.RecordInvalid;
                 return false;
             }
 

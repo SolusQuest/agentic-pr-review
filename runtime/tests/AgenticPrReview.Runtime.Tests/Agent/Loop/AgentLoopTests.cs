@@ -1363,7 +1363,7 @@ public sealed class AgentLoopTests
     }
 
     [Fact]
-    public async Task InitialContinuationReservesTheFailureRecord()
+    public async Task InitialContinuationDoesNotUseDurableSessionRecordBudget()
     {
         var messages = Enumerable.Range(0, AgentLimits.Messages / 2)
             .SelectMany(index =>
@@ -1416,8 +1416,8 @@ public sealed class AgentLoopTests
                 },
                 cancellation.Token);
 
-        AssertFailure(outcome, "agent_response_invalid");
-        Assert.True(outcome.Events.Length <= AgentLimits.SessionRecords);
+        AssertFailure(outcome, "agent_cancelled");
+        Assert.True(outcome.Events.Length > AgentLimits.SessionRecords);
         Assert.IsType<AgentFailureEvent>(outcome.Events[^1]);
         Assert.Empty(chat.Requests);
     }

@@ -2421,7 +2421,7 @@ public sealed class AgentSessionRoundTripTests
     }
 
     [Fact]
-    public async Task CumulativeSessionRecordCapNeverDropsHistory()
+    public async Task CumulativeSessionRecordCapIsExactAndNeverDropsHistory()
     {
         var trusted = Trusted();
         BuiltGeneration? predecessor = null;
@@ -2443,35 +2443,54 @@ public sealed class AgentSessionRoundTripTests
                 run.Records.Length + run.Continuation.Items.Length));
         var predecessorBytes =
             validOverPredecessor.Artifact.Plaintext.ToArray();
-        Assert.True(
-            AgentSessionRequestReconstruction.TryReconstructHistory(
-                validOverPredecessor.Artifact.Document,
-                SyntheticContinuationCodec.Instance,
-                Controls(trusted).Length,
-                out var history,
-                out var continuation,
-                out var failure),
-            failure);
-        var run = new AgentRunRequest(
-            Identity(),
-            Materialize(
-                trusted,
-                validOverPredecessor.Artifact.SessionSha256),
-            "session0",
-            [.. Controls(trusted), .. history!, User("over-final")],
-            continuation);
-        var over = await LoopWithContinuationCount(
+        var appendAtBoundary = await AppendGenerationAsync(
+            trusted,
+            validOverPredecessor,
+            "boundary-final",
             "finish19",
-            continuationCount: 0).RunAsync(
-                run,
-                CancellationToken.None);
-        Assert.False(over.CompletedSessionEligible);
+            continuationCount: 0);
         Assert.Equal(
-            AgentFailureCodes.ResponseInvalid,
-            over.Diagnostic?.Code);
+            AgentSessionCodes.ConstructionLimit,
+            appendAtBoundary.FailureCode);
+        Assert.Null(appendAtBoundary.Artifact);
         Assert.Equal(
             predecessorBytes,
             validOverPredecessor.Artifact.Plaintext);
+
+        var exact = AddTerminalContinuationItems(
+            validOverPredecessor.Artifact.Document,
+            count: 3);
+        Assert.Equal(
+            AgentLimits.SessionRecords,
+            exact.CompletedRuns.Sum(run =>
+                run.Records.Length + run.Continuation.Items.Length));
+        Assert.True(
+            AgentSessionValidation.TryValidateRecords(
+                exact,
+                SyntheticContinuationCodec.Instance,
+                out var exactFailure),
+            exactFailure);
+        Assert.True(
+            AgentSessionCodec.TryWrite(
+                exact,
+                out var exactArtifact,
+                out var writeFailure),
+            writeFailure);
+        Assert.NotEmpty(exactArtifact!.Plaintext);
+
+        var over = AddTerminalContinuationItems(
+            validOverPredecessor.Artifact.Document,
+            count: 4);
+        Assert.Equal(
+            AgentLimits.SessionRecords + 1,
+            over.CompletedRuns.Sum(run =>
+                run.Records.Length + run.Continuation.Items.Length));
+        Assert.False(
+            AgentSessionValidation.TryValidateRecords(
+                over,
+                SyntheticContinuationCodec.Instance,
+                out var overFailure));
+        Assert.Equal(AgentSessionCodes.RecordInvalid, overFailure);
     }
 
     [Fact]
@@ -4400,6 +4419,86 @@ public sealed class AgentSessionRoundTripTests
         return new BuiltGeneration(
             built.Artifact!,
             new string('e', 64));
+    }
+
+    private static AgentSessionDocument AddTerminalContinuationItems(
+        AgentSessionDocument document,
+        int count)
+    {
+        var runIndex = document.CompletedRuns.Length - 1;
+        var run = document.CompletedRuns[runIndex];
+        var terminalMessage = Assert.Single(
+            run.Records.OfType<AgentSessionAssistantMessageRecord>(),
+            message => message.Contents.Any(content =>
+                content is AgentSessionTerminalCallContent));
+        var terminal = Assert.IsType<AgentSessionTerminalCallContent>(
+            terminalMessage.Contents[^1]);
+        Assert.Equal(
+            terminalMessage.Contents.Length - 1,
+            terminal.ContentPosition);
+        var template = run.Continuation.Items[0];
+        var newItems =
+            ImmutableArray.CreateBuilder<AgentSessionContinuationItem>(count);
+        var newSlots =
+            ImmutableArray.CreateBuilder<AgentSessionAssistantContent>(count);
+        for (var index = 0; index < count; index++)
+        {
+            var itemId = string.Concat("limit-boundary-", index);
+            var contentPosition = terminal.ContentPosition + index;
+            var payloadBytes = template.PayloadBytes.ToArray();
+            newItems.Add(template with
+            {
+                ItemId = itemId,
+                PayloadBytes = payloadBytes,
+                PayloadSha256 =
+                    AgentSessionCodec.ContinuationPayloadSha256(
+                        run.Continuation.CodecId,
+                        run.Continuation.CodecDiscriminator,
+                        itemId,
+                        template.Encoding,
+                        payloadBytes),
+                MessageId = terminalMessage.Id,
+                ContentPosition = contentPosition,
+                AssociatedCallId = terminal.CallId,
+            });
+            newSlots.Add(new AgentSessionContinuationSlotContent(
+                contentPosition,
+                itemId));
+        }
+
+        var updatedMessage = terminalMessage with
+        {
+            Contents =
+            [
+                .. terminalMessage.Contents.Take(terminal.ContentPosition),
+                .. newSlots,
+                terminal with
+                {
+                    ContentPosition = terminal.ContentPosition + count,
+                },
+            ],
+        };
+        var updatedRun = run with
+        {
+            Records = run.Records
+                .Select(record =>
+                    StringComparer.Ordinal.Equals(
+                        record.Id,
+                        terminalMessage.Id)
+                            ? (AgentSessionRecord)updatedMessage
+                            : record)
+                .ToImmutableArray(),
+            Continuation = run.Continuation with
+            {
+                Items = [.. run.Continuation.Items, .. newItems],
+            },
+        };
+        return document with
+        {
+            CompletedRuns = document.CompletedRuns.SetItem(
+                runIndex,
+                updatedRun),
+        };
     }
 
     private static async Task<BuiltGeneration> BuildGenerationAsync(

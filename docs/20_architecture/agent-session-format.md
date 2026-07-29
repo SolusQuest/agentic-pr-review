@@ -83,6 +83,8 @@ A terminal assistant message contains zero or more text/continuation slots plus 
 
 Provider-facing reconstruction retains that physical terminal assistant message and every admitted continuation item anchored to it. It then projects the bound `review_outcome` as one immediately following `tool` message containing exactly one `ProjectToolResultContent` with the terminal call ID and fixed result JSON `{}`. This synthetic closure carries no review authority or outcome data and is not a durable logical record; the validated terminal call and `review_outcome` remain the only durable terminal authority. Its sole purpose is to close the historical `finish_review` call under provider and `AgentLoop` call/result grammar without rewriting, compacting, or discarding terminal text or continuation. Every historical call, including `finish_review`, must therefore have its immediately following result in a reconstructed request.
 
+`AgentLimits.SessionRecords` applies only to the cumulative durable `records` plus continuation `items` admitted by SESSION construction and validation. `AgentLoop` logical events also contain the stable plan, reconstructed control/current messages, and synthetic terminal closures, so event-stream length is not a SESSION record count and cannot preempt the SESSION builder's authoritative capacity decision. Event memory remains bounded by the independent message, total-part, model-call, tool-call, continuation-item, continuation-byte, and request-byte authorities.
+
 The legal grammar is:
 
 ```text
@@ -224,7 +226,7 @@ The cumulative generation golden uses review texts `g0`, `g1`, and `g2`, termina
 | 1          |           4,162 | `e289e6fe6c095c10924761e8fdf85f0ffddd2409af9974d8b01fc84824f1a2d6` |
 | 2          |           6,015 | `44e434665aff7155f6f92db085427c15d22576545b3c4c723271f0bbd39596a1` |
 
-Focused tests pin these vectors, complete framing/root property order, canonical read/write equality, generation 0→1→2 predecessor run bytes, both predecessor hashes, generation-2-only reconstruction after the oldest envelope is unavailable, direct terminal and tool-round grammars, provider-valid terminal closure, replayable multi-item continuation placement across generations, cumulative record/request bounds without predecessor mutation, and semantic terminal re-admission.
+Focused tests pin these vectors, complete framing/root property order, canonical read/write equality, generation 0→1→2 predecessor run bytes, both predecessor hashes, generation-2-only reconstruction after the oldest envelope is unavailable, direct terminal and tool-round grammars, provider-valid terminal closure, replayable multi-item continuation placement across generations, exact cumulative 256/257 durable-record validation, builder-owned append-capacity failure without predecessor mutation, and semantic terminal re-admission.
 
 ## Security exclusions and downstream handoff
 
