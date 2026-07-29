@@ -873,7 +873,8 @@ internal sealed class RestrictedStateService
                 null,
                 null);
         }
-        catch (Exception)
+        catch (Exception exception) when (
+            IsBoundaryDomainException(exception))
         {
             return new RestrictedStateStoreRead(
                 RestrictedStateStoreFailure.Io,
@@ -903,7 +904,8 @@ internal sealed class RestrictedStateService
                 null,
                 false);
         }
-        catch (Exception)
+        catch (Exception exception) when (
+            IsBoundaryDomainException(exception))
         {
             return new RestrictedStateStoreWrite(
                 RestrictedStateStoreFailure.Io,
@@ -931,7 +933,8 @@ internal sealed class RestrictedStateService
                 null,
                 false);
         }
-        catch (Exception)
+        catch (Exception exception) when (
+            IsBoundaryDomainException(exception))
         {
             return new RestrictedStateStoreWrite(
                 RestrictedStateStoreFailure.Io,
@@ -1131,7 +1134,8 @@ internal sealed class RestrictedStateService
         {
             return sessionAdmission.Admit(access, plaintext, context);
         }
-        catch (Exception)
+        catch (Exception exception) when (
+            IsBoundaryDomainException(exception))
         {
             return RestrictedStateSessionAdmissionResult.Failure();
         }
@@ -1155,7 +1159,8 @@ internal sealed class RestrictedStateService
                 out envelope,
                 out code);
         }
-        catch (Exception)
+        catch (Exception exception) when (
+            IsBoundaryDomainException(exception))
         {
             envelope = null;
             code = RestrictedStateCodes.KeyUnavailable;
@@ -1181,7 +1186,8 @@ internal sealed class RestrictedStateService
                 out plaintext,
                 out code);
         }
-        catch (Exception)
+        catch (Exception exception) when (
+            IsBoundaryDomainException(exception))
         {
             plaintext = null;
             code = RestrictedStateCodes.KeyUnavailable;
@@ -1286,4 +1292,16 @@ internal sealed class RestrictedStateService
             _ => RestrictedStateCodes.IoFailed,
         };
 
+    private static bool IsBoundaryDomainException(
+        Exception exception) =>
+        exception is IOException or
+            UnauthorizedAccessException or
+            ObjectDisposedException or
+            InvalidOperationException or
+            ArgumentException or
+            NotSupportedException or
+            CryptographicException or
+            TimeoutException or
+            FormatException or
+            OverflowException;
 }
