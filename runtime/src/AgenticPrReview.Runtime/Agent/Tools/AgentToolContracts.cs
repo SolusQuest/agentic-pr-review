@@ -144,8 +144,13 @@ internal static class AgentToolArguments
             var present = dto.Path is null && !allowCanonicalNullPath
                 ? null
                 : WriteSearchText(dto.Query, dto.Path, true);
-            if (!input.AsSpan().SequenceEqual(absent) &&
-                (present is null || !input.AsSpan().SequenceEqual(present)))
+            var accepted = allowCanonicalNullPath
+                ? present is not null &&
+                    input.AsSpan().SequenceEqual(present)
+                : input.AsSpan().SequenceEqual(absent) ||
+                    present is not null &&
+                    input.AsSpan().SequenceEqual(present);
+            if (!accepted)
             {
                 return false;
             }

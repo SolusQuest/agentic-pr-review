@@ -581,14 +581,30 @@ internal static class AgentSessionValidation
             return false;
         }
 
+        byte[] argumentsBytes;
+        try
+        {
+            argumentsBytes = StrictUtf8.GetBytes(call.ArgumentsJson);
+        }
+        catch (EncoderFallbackException)
+        {
+            return false;
+        }
+
         return call.Name switch
         {
             AgentToolRegistry.ReadFileName =>
-                AgentToolArguments.TryReadFile(call.ArgumentsJson, out _),
+                AgentToolArguments.TryReadFile(
+                    call.ArgumentsJson,
+                    out var read) &&
+                argumentsBytes.AsSpan().SequenceEqual(
+                    read!.CanonicalBytes),
             AgentToolRegistry.SearchTextName =>
                 AgentToolArguments.TrySearchTextCanonical(
                     call.ArgumentsJson,
-                    out _),
+                    out var search) &&
+                argumentsBytes.AsSpan().SequenceEqual(
+                    search!.CanonicalBytes),
             _ => false,
         };
     }
@@ -930,7 +946,8 @@ internal static class AgentSessionValidation
                 !AgentValueDomains.IsUtf8(
                     line.Text,
                     0,
-                    AgentLimits.ContentBytes))
+                    AgentLimits.ContentBytes) ||
+                line.Text.IndexOfAny(['\0', '\r', '\n']) >= 0)
             {
                 return false;
             }
@@ -986,6 +1003,32 @@ internal static class AgentSessionValidation
             return false;
         }
 
+        long rawByteCapacity;
+        try
+        {
+            rawByteCapacity = checked(
+                (long)(result.FilesScanned - result.SkippedOversized) *
+                AgentLimits.SearchFileBytes);
+        }
+        catch (OverflowException)
+        {
+            return false;
+        }
+
+        if (result.RawBytesScanned > rawByteCapacity ||
+            (result.FilesScanned == 0 &&
+                (result.RawBytesScanned != 0 ||
+                    skipped != 0 ||
+                    result.Matches.Length != 0 ||
+                    result.Truncated ||
+                    result.TruncationReason is not null)) ||
+            (result.Matches.Length != 0 &&
+                (result.FilesScanned == 0 ||
+                    result.RawBytesScanned == 0)))
+        {
+            return false;
+        }
+
         if (arguments.Path is not null &&
             (result.FilesScanned != 1 ||
                 result.RawBytesScanned > AgentLimits.SearchFileBytes ||
@@ -1008,6 +1051,7 @@ internal static class AgentSessionValidation
                     match.Text,
                     0,
                     AgentLimits.ContentBytes) ||
+                match.Text.IndexOfAny(['\0', '\r', '\n']) >= 0 ||
                 !match.Text.Contains(
                     arguments.Query,
                     StringComparison.Ordinal) ||
@@ -1057,7 +1101,10 @@ internal static class AgentSessionValidation
                 arguments.Path is null &&
                 result.FilesScanned == AgentLimits.SearchFiles,
             "bytes_scanned" =>
-                arguments.Path is null,
+                arguments.Path is null &&
+                result.RawBytesScanned >
+                    AgentLimits.SearchRawBytes -
+                    AgentLimits.SearchFileBytes,
             "matches" =>
                 result.Matches.Length == AgentLimits.SearchMatches,
             "result_bytes" =>

@@ -219,6 +219,7 @@ internal static class AgentContinuationCodecBoundary
             FormatException or
             InvalidOperationException or
             JsonException or
+            KeyNotFoundException or
             NotSupportedException or
             OverflowException or
             Rfc8785CanonicalizationException;
