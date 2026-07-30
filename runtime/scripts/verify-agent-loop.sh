@@ -215,11 +215,19 @@ _run_positive() {
   _copy_repository "${root}"
   if ! _run_fixture "${mode}" "${root}" "${root}/bootstrap.log" \
       bootstrap --output "${root}/bootstrap.json"; then
-    _fail "APR_AGENT_BOOTSTRAP_FAILED ${mode}"
+    local stable_reason="no_stable_reason"
+    if [[ -f "${root}/failure.code" ]]; then
+      IFS= read -r stable_reason <"${root}/failure.code"
+    fi
+    _fail "APR_AGENT_BOOTSTRAP_FAILED ${mode} ${stable_reason}"
   fi
   if ! _run_fixture "${mode}" "${root}" "${root}/continue.log" \
       continue --output "${root}/continue.json"; then
-    _fail "APR_AGENT_CONTINUE_FAILED ${mode}"
+    local stable_reason="no_stable_reason"
+    if [[ -f "${root}/failure.code" ]]; then
+      IFS= read -r stable_reason <"${root}/failure.code"
+    fi
+    _fail "APR_AGENT_CONTINUE_FAILED ${mode} ${stable_reason}"
   fi
   cmp -s -- "${root}/bootstrap.json" "${EXPECTED_BOOTSTRAP}" ||
     _fail "APR_AGENT_BOOTSTRAP_GOLDEN_MISMATCH ${mode}"
