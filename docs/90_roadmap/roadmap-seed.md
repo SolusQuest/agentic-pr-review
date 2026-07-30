@@ -229,6 +229,8 @@ Exit criteria:
 
 Goal: answer the hard runtime questions with the smallest executable agent slice.
 
+Implementation status: the focused R2 children have supplied the selected project-minimal chat seam, explicit loop/tools, current SESSION, restricted encrypted STATE, and issue #88's two-fresh-process framework and Linux x64 Native AOT product proof. The obsolete two-candidate comparison fixture and test-only MEAI dependency were removed after the replacement passed. R3 now owns the live provider path and quality evidence; R4 owns production GitHub/Actions Host, state transport, publisher, and wrapper migration.
+
 Entry criteria:
 
 - R2 parent refinement may proceed in parallel with R1;

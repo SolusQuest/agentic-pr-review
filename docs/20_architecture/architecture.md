@@ -11,7 +11,7 @@ The detailed decision, rationale, migration sequence, tools, `Microsoft.Extensio
 
 ## Status
 
-This is the selected target direction. R1 removed the TypeScript business host and Claude Code CLI path, leaving no public Action. R2 has now selected the project-minimal in-memory Agent chat seam through a reasoning-enabled framework and Native AOT comparison; see [`ai-abstraction-decision.md`](./ai-abstraction-decision.md). The current tree retains deterministic and ledger-oriented C# paths plus narrow M1-M4 TypeScript contract, state, publisher, and migration evidence until their R2-R4 owners replace them.
+This is the selected target direction. R1 removed the TypeScript business host and Claude Code CLI path, leaving no public Action. R2 now has a real project-minimal Agent product path: the selected chat seam, explicit loop and tools, current SESSION format, restricted encrypted STATE, and two-fresh-process framework and Linux x64 Native AOT proof. The earlier two-candidate comparison infrastructure is deleted; see [`ai-abstraction-decision.md`](./ai-abstraction-decision.md). The current tree retains deterministic and single-shot live C# paths plus narrow M1-M4 TypeScript invocation, state, publisher, and migration families only for their named R3/R4 consumers.
 
 New work must distinguish:
 
@@ -128,7 +128,7 @@ Tools are implemented and enforced in C#. The model cannot construct commands or
 
 ## Microsoft.Extensions.AI
 
-R2 compared `Microsoft.Extensions.AI.Abstractions` 10.8.1 with project-minimal exchange types under the same reasoning-enabled tool-loop, fresh-process restoration, and Native AOT proof. Both passed. Project-minimal exchange was selected because it preserves the same one-operation Agent capability and project ownership without an additional production package. The complete evidence and deletion gate are in [`ai-abstraction-decision.md`](./ai-abstraction-decision.md).
+R2 compared `Microsoft.Extensions.AI.Abstractions` 10.8.1 with project-minimal exchange types under the same reasoning-enabled tool-loop, fresh-process restoration, and Native AOT proof. Both passed. Project-minimal exchange was selected because it preserves the same one-operation Agent capability and project ownership without an additional production package. The real product proof has now replaced that comparison and its fixture/package are deleted. The historical evidence and completed deletion gate are in [`ai-abstraction-decision.md`](./ai-abstraction-decision.md).
 
 The selection accounts for DeepSeek as the initial live provider and MiMo as the intended second provider. Multiple providers do not require MEAI ownership of the Agent boundary: each provider adapter still owns wire projection, reasoning continuation, capabilities, cache identity, usage mapping, and failures, while the Agent consumes one project-owned capability. The second real adapter is an evidence gate for reconsidering whether MEAI would materially reduce duplication.
 

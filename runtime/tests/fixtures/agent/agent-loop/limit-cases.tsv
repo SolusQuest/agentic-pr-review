@@ -1,0 +1,17 @@
+case	status	action	code	model_calls	tool_calls	provider_requests	store_calls	session_admissions	state_mutation	lineage_mutation
+caller-cancellation	failed	loop	agent_cancelled	0	0	0	0	0	false	false
+deadline-before-model	failed	loop	agent_deadline_exceeded	0	0	0	0	0	false	false
+deadline-after-tool	failed	loop	agent_deadline_exceeded	1	1	1	0	0	false	false
+model-limit	failed	loop	agent_model_limit	8	8	8	0	0	false	false
+tool-limit	failed	loop	agent_tool_limit	4	24	4	0	0	false	false
+token-limit	failed	loop	agent_token_limit	1	0	1	0	0	false	false
+request-cap	passed	loop	none	1	1	1	0	0	false	false
+request-cap-plus-one	failed	loop	agent_request_too_large	0	0	0	0	0	false	false
+response-cap	passed	loop	none	1	1	1	0	0	false	false
+response-cap-plus-one	failed	loop	agent_response_too_large	1	0	1	0	0	false	false
+response-cap-plus-two	failed	loop	agent_response_too_large	1	0	1	0	0	false	false
+tool-result-cap	failed	loop	tool_result_limit	1	1	1	0	0	false	false
+tool-result-aggregate	failed	loop	tool_result_limit	2	9	2	0	0	false	false
+session-construction-limit	failed	session_build	session_construction_limit	1	1	0	0	0	false	false
+continuation-limit	failed	loop	agent_response_invalid	1	0	0	0	0	false	false
+state-capacity-limit	failed	state_enumerate	state_enumeration_invalid	0	0	0	1	0	false	false
