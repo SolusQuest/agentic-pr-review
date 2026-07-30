@@ -218,6 +218,12 @@ _run_positive() {
     local stable_reason="no_stable_reason"
     if [[ -f "${root}/failure.code" ]]; then
       IFS= read -r stable_reason <"${root}/failure.code"
+    elif [[ -f "${root}/bootstrap.log" ]]; then
+      local stable_log_line
+      IFS= read -r stable_log_line <"${root}/bootstrap.log"
+      if [[ "${stable_log_line}" =~ ^APR_[A-Z0-9_]+$ ]]; then
+        stable_reason="${stable_log_line}"
+      fi
     fi
     _fail "APR_AGENT_BOOTSTRAP_FAILED ${mode} ${stable_reason}"
   fi
@@ -226,6 +232,12 @@ _run_positive() {
     local stable_reason="no_stable_reason"
     if [[ -f "${root}/failure.code" ]]; then
       IFS= read -r stable_reason <"${root}/failure.code"
+    elif [[ -f "${root}/continue.log" ]]; then
+      local stable_log_line
+      IFS= read -r stable_log_line <"${root}/continue.log"
+      if [[ "${stable_log_line}" =~ ^APR_[A-Z0-9_]+$ ]]; then
+        stable_reason="${stable_log_line}"
+      fi
     fi
     _fail "APR_AGENT_CONTINUE_FAILED ${mode} ${stable_reason}"
   fi
