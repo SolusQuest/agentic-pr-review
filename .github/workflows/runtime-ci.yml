@@ -35,7 +35,10 @@ jobs:
         run: bash runtime/scripts/verify-runtime.sh aot
 
       - name: R2 Agent loop framework and Native AOT proof
-        run: bash runtime/scripts/verify-agent-loop.sh all
+        run: |
+          bash runtime/scripts/verify-agent-loop.sh test
+          bash runtime/scripts/verify-agent-loop.sh framework
+          bash runtime/scripts/verify-agent-loop.sh aot
 
   integration:
     runs-on: ubuntu-latest
