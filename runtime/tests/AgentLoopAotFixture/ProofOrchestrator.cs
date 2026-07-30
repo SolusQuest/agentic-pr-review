@@ -562,21 +562,33 @@ internal static class ProofOrchestrator
                 entry.Value));
         }
 
-        foreach (var path in Directory.EnumerateFiles(
-            command.Root,
-            "*",
-            SearchOption.AllDirectories))
+        var fixedArtifacts = new[]
         {
-            if (StringComparer.OrdinalIgnoreCase.Equals(
-                Path.GetExtension(path),
-                ".log"))
-            {
-                continue;
-            }
-
+            ProofPaths.StartupNonce(command),
+            ProofPaths.Lineage(command),
+            Path.Join(
+                ProofPaths.RepositoryRoot(command),
+                ProofScenario.ReviewedPath),
+        };
+        foreach (var path in fixedArtifacts.Where(File.Exists))
+        {
             yield return System.Text.Encoding.UTF8.GetBytes(
                 Path.GetFileName(path));
             yield return File.ReadAllBytes(path);
+        }
+
+        var stateRoot = ProofPaths.StateRoot(command);
+        if (Directory.Exists(stateRoot))
+        {
+            foreach (var path in Directory.EnumerateFiles(
+                stateRoot,
+                "*",
+                SearchOption.AllDirectories))
+            {
+                yield return System.Text.Encoding.UTF8.GetBytes(
+                    Path.GetFileName(path));
+                yield return File.ReadAllBytes(path);
+            }
         }
     }
 

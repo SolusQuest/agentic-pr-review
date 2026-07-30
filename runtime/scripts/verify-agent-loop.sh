@@ -37,6 +37,11 @@ _cleanup() {
 }
 trap _cleanup EXIT
 
+_script_error() {
+  printf 'APR_AGENT_SCRIPT_ERROR line=%s\n' "$1" >&2
+}
+trap '_script_error "${LINENO}"' ERR
+
 _new_tempdir() {
   local __outvar="$1"
   local __directory
