@@ -390,7 +390,6 @@ internal static class StateNegativeProofRunner
             StringComparer.Ordinal.Equals(
                 restore.Result.EnvelopeSha256,
                 prepared.Lineage.EnvelopeSha256) &&
-            after.Snapshot.Staging is not null &&
             StringComparer.Ordinal.Equals(
                 after.Snapshot.Staging.EnvelopeSha256,
                 prepared.Receipt.EnvelopeSha256);
