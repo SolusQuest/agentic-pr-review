@@ -1,0 +1,31 @@
+{
+  "instructions": "Review the supplied source with reasoning enabled. Use only the ordered tools and finish with a structured result.",
+  "tools": [
+    {
+      "name": "read_file",
+      "description": "Read a bounded inclusive line range from a supplied file.",
+      "schemaJson": "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"path\",\"startLine\",\"endLine\"],\"properties\":{\"path\":{\"type\":\"string\"},\"startLine\":{\"type\":\"integer\",\"minimum\":1},\"endLine\":{\"type\":\"integer\",\"minimum\":1}}}"
+    },
+    {
+      "name": "search_text",
+      "description": "Search a supplied file for an exact text query.",
+      "schemaJson": "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"path\",\"query\"],\"properties\":{\"path\":{\"type\":\"string\"},\"query\":{\"type\":\"string\"}}}"
+    },
+    {
+      "name": "finish_review",
+      "description": "Finish the review with a summary and ordered findings.",
+      "schemaJson": "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"summary\",\"findings\"],\"properties\":{\"summary\":{\"type\":\"string\"},\"findings\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}}"
+    }
+  ],
+  "userRequest": "Inspect src/Widget.cs, establish the prior-only fact, and finish the synthetic review.",
+  "files": [
+    {
+      "path": "src/Widget.cs",
+      "content": "namespace Fixture;\ninternal static class Widget\n{\n    internal const string Fact = \"PRIOR_ONLY_FACT_81_9f6d3a\";\n}"
+    }
+  ],
+  "searchQuery": "PRIOR_ONLY_FACT_81_9f6d3a",
+  "providerId": "synthetic-provider",
+  "modelId": "synthetic-thinking-model",
+  "sessionId": "synthetic-session-81"
+}

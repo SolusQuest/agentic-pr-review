@@ -1,0 +1,3 @@
+candidate	path	gitBlobObjectId	gitBlobBytes	scope
+Minimal	runtime/tests/AiAbstractionAotFixture/Candidates/Minimal/Adapter/MinimalCandidateAdapter.cs	97d83c2dcf579e62685153a0fec9b106f502ccbf	5037	adapter-only; FakeBackend and shared harness excluded
+MicrosoftExtensionsAI	runtime/tests/AiAbstractionAotFixture/Candidates/MicrosoftExtensionsAI/Adapter/MicrosoftExtensionsAiCandidateAdapter.cs	dda777b71ecb06d7a4e719866b456f65e977e8fe	8580	adapter-only; FakeBackend and shared harness excluded
