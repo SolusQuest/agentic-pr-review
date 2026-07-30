@@ -248,12 +248,12 @@ internal static class NegativeProofRunner
             new NeverToolExecutor(),
             time).RunAsync(Run(), CancellationToken.None);
         return !outcome.CompletedSessionEligible &&
-            StringComparer.Ordinal.Equals(
-                outcome.Diagnostic?.Code,
-                AgentFailureCodes.DeadlineExceeded) &&
-            chat.Invocations == 0 &&
-            outcome.Diagnostic.ModelCalls == 0 &&
-            outcome.Diagnostic.ToolCalls == 0;
+            HasDiagnostic(
+                outcome,
+                AgentFailureCodes.DeadlineExceeded,
+                modelCalls: 0,
+                toolCalls: 0) &&
+            chat.Invocations == 0;
     }
 
     private static async Task<bool> DeadlineAfterToolAsync(
@@ -292,11 +292,11 @@ internal static class NegativeProofRunner
             tool,
             time).RunAsync(Run(identity), CancellationToken.None);
         return !outcome.CompletedSessionEligible &&
-            StringComparer.Ordinal.Equals(
-                outcome.Diagnostic?.Code,
-                AgentFailureCodes.DeadlineExceeded) &&
-            outcome.Diagnostic.ModelCalls == 1 &&
-            outcome.Diagnostic.ToolCalls == 1 &&
+            HasDiagnostic(
+                outcome,
+                AgentFailureCodes.DeadlineExceeded,
+                modelCalls: 1,
+                toolCalls: 1) &&
             server.Captures.Count == 1 &&
             tool.Executions == 1 &&
             !File.Exists(ProofPaths.Lineage(command)) &&
@@ -311,11 +311,11 @@ internal static class NegativeProofRunner
             new SyntheticTimeProvider(ProofScenario.Now))
             .RunAsync(Run(), CancellationToken.None);
         return !outcome.CompletedSessionEligible &&
-            StringComparer.Ordinal.Equals(
-                outcome.Diagnostic?.Code,
-                AgentFailureCodes.ChatFailed) &&
-            outcome.Diagnostic.ModelCalls == 1 &&
-            outcome.Diagnostic.ToolCalls == 0;
+            HasDiagnostic(
+                outcome,
+                AgentFailureCodes.ChatFailed,
+                modelCalls: 1,
+                toolCalls: 0);
     }
 
     private static async Task<bool> RequestBytesAsync(
@@ -345,11 +345,11 @@ internal static class NegativeProofRunner
             ? outcome.CompletedSessionEligible &&
                 server.Captures.Count == 1
             : !outcome.CompletedSessionEligible &&
-                StringComparer.Ordinal.Equals(
-                    outcome.Diagnostic?.Code,
-                    AgentFailureCodes.RequestTooLarge) &&
-                outcome.Diagnostic.ModelCalls == 0 &&
-                outcome.Diagnostic.ToolCalls == 0 &&
+                HasDiagnostic(
+                    outcome,
+                    AgentFailureCodes.RequestTooLarge,
+                    modelCalls: 0,
+                    toolCalls: 0) &&
                 server.Captures.Count == 0;
     }
 
@@ -379,11 +379,11 @@ internal static class NegativeProofRunner
             ? outcome.CompletedSessionEligible &&
                 server.Captures.Count == 1
             : !outcome.CompletedSessionEligible &&
-                StringComparer.Ordinal.Equals(
-                    outcome.Diagnostic?.Code,
-                    AgentFailureCodes.ResponseTooLarge) &&
-                outcome.Diagnostic.ModelCalls == 1 &&
-                outcome.Diagnostic.ToolCalls == 0 &&
+                HasDiagnostic(
+                    outcome,
+                    AgentFailureCodes.ResponseTooLarge,
+                    modelCalls: 1,
+                    toolCalls: 0) &&
                 server.Captures.Count == 1;
     }
 
@@ -440,11 +440,11 @@ internal static class NegativeProofRunner
             new SyntheticTimeProvider(ProofScenario.Now))
             .RunAsync(Run(), CancellationToken.None);
         return !outcome.CompletedSessionEligible &&
-            StringComparer.Ordinal.Equals(
-                outcome.Diagnostic?.Code,
-                AgentFailureCodes.TokenLimit) &&
-            outcome.Diagnostic.ModelCalls == 1 &&
-            outcome.Diagnostic.ToolCalls == 0 &&
+            HasDiagnostic(
+                outcome,
+                AgentFailureCodes.TokenLimit,
+                modelCalls: 1,
+                toolCalls: 0) &&
             server.Captures.Count == 1;
     }
 
@@ -479,11 +479,11 @@ internal static class NegativeProofRunner
             new SyntheticTimeProvider(ProofScenario.Now))
             .RunAsync(Run(identity), CancellationToken.None);
         return !outcome.CompletedSessionEligible &&
-            StringComparer.Ordinal.Equals(
-                outcome.Diagnostic?.Code,
-                AgentFailureCodes.ModelLimit) &&
-            outcome.Diagnostic.ModelCalls == AgentLimits.ModelCalls &&
-            outcome.Diagnostic.ToolCalls == AgentLimits.ModelCalls &&
+            HasDiagnostic(
+                outcome,
+                AgentFailureCodes.ModelLimit,
+                AgentLimits.ModelCalls,
+                AgentLimits.ModelCalls) &&
             server.Captures.Count == AgentLimits.ModelCalls;
     }
 
@@ -517,11 +517,11 @@ internal static class NegativeProofRunner
             new SyntheticTimeProvider(ProofScenario.Now))
             .RunAsync(Run(identity), CancellationToken.None);
         return !outcome.CompletedSessionEligible &&
-            StringComparer.Ordinal.Equals(
-                outcome.Diagnostic?.Code,
-                AgentFailureCodes.ToolLimit) &&
-            outcome.Diagnostic.ModelCalls == 4 &&
-            outcome.Diagnostic.ToolCalls == AgentLimits.ToolCalls &&
+            HasDiagnostic(
+                outcome,
+                AgentFailureCodes.ToolLimit,
+                modelCalls: 4,
+                toolCalls: AgentLimits.ToolCalls) &&
             server.Captures.Count == 4;
     }
 
@@ -592,11 +592,11 @@ internal static class NegativeProofRunner
             new SyntheticTimeProvider(ProofScenario.Now))
             .RunAsync(Run(identity), CancellationToken.None);
         return !outcome.CompletedSessionEligible &&
-            StringComparer.Ordinal.Equals(
-                outcome.Diagnostic?.Code,
-                AgentFailureCodes.ToolResultLimit) &&
-            outcome.Diagnostic.ModelCalls == (aggregate ? 2 : 1) &&
-            outcome.Diagnostic.ToolCalls == (aggregate ? 9 : 1) &&
+            HasDiagnostic(
+                outcome,
+                AgentFailureCodes.ToolResultLimit,
+                modelCalls: aggregate ? 2 : 1,
+                toolCalls: aggregate ? 9 : 1) &&
             server.Captures.Count == (aggregate ? 2 : 1) &&
             !File.Exists(ProofPaths.Lineage(command)) &&
             !Directory.Exists(ProofPaths.StateRoot(command));
@@ -736,13 +736,13 @@ internal static class NegativeProofRunner
             new SyntheticTimeProvider(ProofScenario.Now))
             .RunAsync(Run(identity), CancellationToken.None);
         return !outcome.CompletedSessionEligible &&
-            StringComparer.Ordinal.Equals(
-                outcome.Diagnostic?.Code,
+            HasDiagnostic(
+                outcome,
                 unknownTool
                     ? AgentFailureCodes.UnknownTool
-                    : AgentFailureCodes.ToolPathNotTracked) &&
-            outcome.Diagnostic.ModelCalls == 1 &&
-            outcome.Diagnostic.ToolCalls == 0 &&
+                    : AgentFailureCodes.ToolPathNotTracked,
+                modelCalls: 1,
+                toolCalls: 0) &&
             server.Captures.Count == 1 &&
             !File.Exists(ProofPaths.Lineage(command)) &&
             !Directory.Exists(ProofPaths.StateRoot(command));
@@ -765,11 +765,11 @@ internal static class NegativeProofRunner
             new SyntheticTimeProvider(ProofScenario.Now))
             .RunAsync(Run(), CancellationToken.None);
         return !outcome.CompletedSessionEligible &&
-            StringComparer.Ordinal.Equals(
-                outcome.Diagnostic?.Code,
-                AgentFailureCodes.TerminalInvalid) &&
-            outcome.Diagnostic.ModelCalls == 1 &&
-            outcome.Diagnostic.ToolCalls == 1 &&
+            HasDiagnostic(
+                outcome,
+                AgentFailureCodes.TerminalInvalid,
+                modelCalls: 1,
+                toolCalls: 1) &&
             server.Captures.Count == 1 &&
             !File.Exists(ProofPaths.Lineage(command)) &&
             !Directory.Exists(ProofPaths.StateRoot(command));
@@ -792,14 +792,27 @@ internal static class NegativeProofRunner
             new SyntheticTimeProvider(ProofScenario.Now))
             .RunAsync(Run(identity), CancellationToken.None);
         return !outcome.CompletedSessionEligible &&
-            StringComparer.Ordinal.Equals(
-                outcome.Diagnostic?.Code,
-                AgentFailureCodes.ChatFailed) &&
-            outcome.Diagnostic.ModelCalls == 2 &&
-            outcome.Diagnostic.ToolCalls == 1 &&
+            HasDiagnostic(
+                outcome,
+                AgentFailureCodes.ChatFailed,
+                modelCalls: 2,
+                toolCalls: 1) &&
             chat.Invocations == 2 &&
             !File.Exists(ProofPaths.Lineage(command)) &&
             !Directory.Exists(ProofPaths.StateRoot(command));
+    }
+
+    private static bool HasDiagnostic(
+        AgentRunOutcome outcome,
+        string code,
+        int modelCalls,
+        int toolCalls)
+    {
+        var diagnostic = outcome.Diagnostic;
+        return diagnostic is not null &&
+            StringComparer.Ordinal.Equals(diagnostic.Code, code) &&
+            diagnostic.ModelCalls == modelCalls &&
+            diagnostic.ToolCalls == toolCalls;
     }
 
     private static AgentRunRequest Run(
