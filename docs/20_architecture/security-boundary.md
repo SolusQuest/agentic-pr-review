@@ -102,7 +102,7 @@ GitHub or Actions canaries must also be absent from:
 
 Provider credential canaries may appear only in the intended provider authorization location. They are forbidden from all model-visible, durable, logged, and published channels.
 
-When encrypted state is selected, the state-encryption canary may appear only at the Host-owned cryptographic boundary. It must not enter state bytes, Agent inputs, provider requests, model-visible content, logs, diagnostics, or publications.
+The R2 encrypted-state contract is defined by [`restricted-state-format.md`](./restricted-state-format.md). Its state-encryption canary may appear only at the Host-owned cryptographic boundary. It must not enter state bytes, Agent inputs, provider requests, model-visible content, logs, diagnostics, handoff receipts, or publications. Authorization is represented by a Host-owned capability and precedes storage existence, enumeration, key, crypto, SESSION, Agent/provider, deletion, or handoff work.
 
 R4 additionally runs an integrated Action canary with GitHub/Actions-shaped Host credentials in the same C# process as the Agent and provider adapter. Authorization denial must occur before state decryption, provider construction, provider network activity, or publication, and all Host credential canaries remain absent from provider, model, tool, state, diagnostic, log, output, summary, annotation, and child-environment channels.
 

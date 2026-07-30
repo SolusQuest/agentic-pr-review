@@ -1085,6 +1085,7 @@ Deliver:
 - a selected restricted storage class covering visibility, authorization, deletion, fork/untrusted access, and encryption requirements;
 - a storage-conformance interface and negative test matrix for any later production transport;
 - local authenticated-encrypted state round-trip, tamper rejection, key separation, cross-scope substitution rejection, and stale-replay rejection;
+- the exact restricted state envelope, Host binding, independent lineage, retention, outcomes, and trusted local conformance behavior defined by [`restricted-state-format.md`](./restricted-state-format.md);
 - Native AOT publish-and-run;
 - secret-canary test across provider request, model messages, tool definitions/results, session state, result, trace, logs, diagnostics, and any child environment;
 - fake outbound provider transport capture of the complete URI, headers, and body;
