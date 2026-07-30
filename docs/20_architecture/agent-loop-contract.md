@@ -2,9 +2,9 @@
 
 Status: R2 LOOP implementation contract introduced by issue [#86](https://github.com/SolusQuest/agentic-pr-review/issues/86).
 
-Last revised: 2026-07-28.
+Last revised: 2026-07-30.
 
-This document records the first executable product Agent core. It applies the normative R2 annex in parent issue [#78](https://github.com/SolusQuest/agentic-pr-review/issues/78) without creating a public package or compatibility contract. Durable session/state, encrypted storage, live provider wire behavior, final two-process Native AOT proof, CI replacement, and comparison-fixture deletion remain with #89, #87, R3, and #88.
+This document records the first executable product Agent core. It applies the normative R2 annex in parent issue [#78](https://github.com/SolusQuest/agentic-pr-review/issues/78) without creating a public package or compatibility contract. Issues #89 and #87 supplied the durable SESSION and restricted STATE implementations; issue #88 integrated them with this loop in the final two-process framework and Native AOT proof, replaced the comparison CI truth, and deleted the comparison fixture. Live provider wire behavior remains with R3.
 
 ## Product boundary
 
@@ -93,6 +93,6 @@ Scanner self-tests contain method-body-only forbidden calls, forbidden ordinary-
 
 ## Validation and handoff
 
-The LOOP change requires Release runtime build/test, runtime script validation, both retained AI-abstraction comparison modes, complete runtime verification, repository checks, and distribution checks. The #81 comparison fixture remains rollback evidence and compiles the exact production Chat sources until #88 owns its deletion.
+The active LOOP gate is `bash runtime/scripts/verify-agent-loop.sh all`. It runs focused Release tests and the same real product path in framework-dependent and Linux x64 Native AOT modes, including exact loopback transport, continuation, state, authorization, canary, cancellation, and limit cases. The #81 comparison fixture is retired; historical selection evidence remains in `ai-abstraction-decision.md`.
 
-On merge, #89 receives the next edit right for the Chat seam, limits authority, logical records/request interfaces, runtime/test projects, and related architecture sections. No state, storage, provider, publisher, workflow, or public Action ownership is implied by this contract.
+R3 receives the next edit right for the Chat seam and provider adapter needed to replace the single-shot live DeepSeek path. R4 receives Host transport, GitHub authorization, publisher, wrapper, and old cross-language migration responsibilities. No public Action or live provider surface is created by the R2 proof.

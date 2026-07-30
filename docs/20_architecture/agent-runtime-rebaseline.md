@@ -1,16 +1,26 @@
 # Agent Runtime Architecture Rebaseline
 
-Status: selected target architecture; R1 is complete and R2 implementation is in progress.
+Status: selected target architecture; R1 is complete and the R2 executable Agent slice is implemented and verified.
 
 Drafted: 2026-07-24.
 
-Last revised: 2026-07-29.
+Last revised: 2026-07-30.
 
 Activation record: [PR #76](https://github.com/SolusQuest/agentic-pr-review/pull/76); its merge commit is the normative activation point.
 
 This document records the architecture rebaseline for the project-owned code review agent. It supersedes the earlier long-term assumption that TypeScript remains the business-capable GitHub Action host and C# remains behind a broad language-neutral protocol. Existing M1-M4 documents continue to describe the implementation currently on `main` until migration work removes or replaces those surfaces.
 
 The breaking-reset governance gate and post-merge transition are tracked by [issue #75](https://github.com/SolusQuest/agentic-pr-review/issues/75). The coordinated documentation PR #76 references that issue without closing it; the issue remains open until the authorized GitHub metadata transition and R1/R2 parent creation are complete.
+
+## R2 Implementation Record And Remaining Migration Inventory
+
+Issue #88 completes the R2 product-path proof. `runtime/scripts/verify-agent-loop.sh all` runs the real selected `MinimalChatClient`, `AgentLoop`, tool executor, current SESSION implementation, and restricted STATE implementation through focused tests, framework-dependent Release, and Linux x64 Native AOT with reflection-based JSON serialization disabled. Two fresh invocations prove grounded thinking/tool execution, completed-session-only encrypted acceptance, exact continuation reconstruction, a prior-only fact, verified-ahead generation 1, independent Host lineage, exact five-header loopback transport, nine named canary classes, and the owned fail-closed matrix. This is synthetic conformance evidence, not live provider quality or production GitHub workflow transport evidence.
+
+The two-candidate fixture, its neutral snapshot/manifests, API reader, selector/matrix, verifier, and test-only `Microsoft.Extensions.AI.Abstractions` dependency were deleted only after the replacement proof passed in both modes. `ProjectChat.cs` and `MinimalChatClient.cs` remain the selected product seam.
+
+R3 owns `Application/LiveRuntimeApplication.cs`, `Execution/ILiveProviderExecutor.cs`, and `Execution/DeepSeekLiveProviderExecutor.cs`: it replaces the single-shot provider path with the real thinking/tool adapter, adds the remaining initial live tools, proves real provider continuation and quality, and removes superseded ledger/provider metadata only when no later consumer remains.
+
+R4 owns the retained deterministic CLI/application/protocol/storage path, C# `Ledger/**` and `Prefix/**`, TypeScript runtime-invocation/live-runtime-invocation/state-v2/state-acceptance/publisher families, GitHub reads and publication, production restricted-state transport and keys, the thin Node bridge, and the final public wrapper. Those families are not R2 comparison infrastructure and were deliberately retained for their named migration consumers.
 
 ## Decision Summary
 
@@ -542,7 +552,7 @@ Mid-run crash recovery is not part of the first guarantee.
 
 ### Durable Session Content
 
-The exact R2 plaintext namespace, framing, canonical record grammar, continuation envelope, restore table, diagnostics, and construction/reconstruction invariants are normative in [`agent-session-format.md`](./agent-session-format.md). SESSION implements that bounded in-memory format; #87 owns encrypted storage and accepted-lineage transport, and #88 owns the final fresh-process executable proof.
+The exact R2 plaintext namespace, framing, canonical record grammar, continuation envelope, restore table, diagnostics, and construction/reconstruction invariants are normative in [`agent-session-format.md`](./agent-session-format.md). SESSION implements that bounded in-memory format; #87 owns encrypted storage and accepted-lineage transport, and #88 has completed the final fresh-process executable proof. R3 consumes the format through a live provider adapter and R4 supplies production workflow transport.
 
 The session state must contain enough canonical logical content to reconstruct the provider conversation that the project intends to reuse:
 

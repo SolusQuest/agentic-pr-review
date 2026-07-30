@@ -1,1 +1,0 @@
-Microsoft.Extensions.AI.Abstractions/10.8.1

@@ -60,6 +60,11 @@ state-header-key-id
 state-header-length
 state-old-format-disguise
 state-current-downgrade
+state-accepted-newer-present
+state-accepted-newer-hidden
+state-outcome-unknown-retry
+state-randomized-envelope-conflict
+state-cleanup-failure
 state-capacity-limit
 session-construction-limit
 continuation-limit

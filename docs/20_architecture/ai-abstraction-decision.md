@@ -1,6 +1,6 @@
 # AI Abstraction Decision
 
-Status: selected and implemented in PR #85; pending merge.
+Status: selected and implemented in PR #85; real product-path replacement verified and comparison infrastructure retired by issue #88.
 
 Decision date: 2026-07-27.
 
@@ -10,7 +10,7 @@ Tracking: [issue #81](https://github.com/SolusQuest/agentic-pr-review/issues/81)
 
 The production Agent boundary uses project-minimal in-memory exchange types. The selected non-streaming capability and its private mapping types live under `runtime/src/AgenticPrReview.Runtime/Agent/Chat/**`.
 
-`Microsoft.Extensions.AI.Abstractions` is not a production dependency. Version 10.8.1 remains in the isolated comparison fixture only so the decision can be reproduced until the replacement gate below is satisfied.
+`Microsoft.Extensions.AI.Abstractions` is not a production or test dependency. Version 10.8.1 was used only by the now-retired isolated comparison fixture. The real project-owned Agent loop, current SESSION format, restricted STATE service, and fresh-process proof now supply the active abstraction evidence.
 
 This choice does not assign the Agent loop, tool dispatch, durable state, provider projection, budgets, terminal semantics, or side effects to the abstraction. Those concerns remain project-owned.
 
@@ -173,15 +173,13 @@ Multi-agent or main-agent/sub-agent topology by itself is not a MEAI adoption tr
 
 ## Non-Selected Candidate Disposition
 
-The Microsoft.Extensions.AI candidate remains only under `runtime/tests/AiAbstractionAotFixture/**`. It is excluded from the production project graph and cannot be selected at production runtime. Retention keeps the exact comparison reproducible while the selected seam is still only a spike-level vertical slice.
+Issue #88 satisfied the deletion gate. The replacement proof passed through the real selected `MinimalChatClient`, `AgentLoop`, current SESSION implementation, and restricted STATE implementation in framework-dependent Release and Linux x64 Native AOT modes before the comparison paths were removed. `runtime/tests/AiAbstractionAotFixture/**`, `runtime/tests/fixtures/agent/ai-abstraction/**`, `runtime/tools/AiApiManifest/**`, `runtime/scripts/verify-ai-abstraction.sh`, the candidate selector/matrix, and the test-only MEAI package are no longer in the tree.
 
-The deletion gate is mandatory: #78 Phase 2 must assign removal of the dual-candidate fixture, its `NeutralEvidence/**` snapshot, and its non-selected package to the focused child that replaces this proof with the real selected Agent loop and fresh-process Agent-session fixture. R2 cannot close until that ownership is assigned and the replacement evidence is green. Retention beyond that gate requires a new explicit maintenance decision.
+The selected `Agent/Chat/ProjectChat.cs` and `Agent/Chat/MinimalChatClient.cs` remain product code. Future MEAI adoption remains reversible only through a new evidence-backed gate that proves value without delegating the project-owned loop, durable session semantics, capability boundaries, or provider continuation contract.
 
-## Frozen Evidence Manifests
+## Retired Frozen Evidence Record
 
-The neutral source manifest fixes the adapter-only path, Git blob object ID, and Git blob byte count for each candidate at `405e0468fc15dc932970b378081ae030028409fe`. The complete source tree used by that comparison is preserved under the named test-only comparison fixture at `runtime/tests/AiAbstractionAotFixture/NeutralEvidence/`, with every file bound by `neutral-snapshot-manifest.tsv`. The active comparison project disables default compile items and does not include `NeutralEvidence/**`; the verifier builds the snapshot only in isolated evidence roots. CI verifies the snapshot's exact file set, blob identities, and sizes from reachable tree content; it does not require the intermediate PR commit or source branch to remain reachable.
-
-The verifier builds that tree-contained neutral snapshot in isolated candidate roots. A checked-in deterministic metadata reader uses portable-PDB sequence points to identify types and members originating in each candidate's `Adapter` source directory. It then scans the IL of those adapter-source methods and records only `MemberReference` rows owned by `Microsoft.Extensions.AI.Abstractions`. Project-owned and external-package surfaces are emitted as four independent, ordinally sorted TSV manifests and compared byte-for-byte with the checked-in files. The rows retain exact metadata signature blobs rather than manually normalized signatures.
+The retired neutral source manifest fixed the adapter-only path, Git blob object ID, and Git blob byte count for each candidate at `405e0468fc15dc932970b378081ae030028409fe`. The comparison verifier built that snapshot in isolated candidate roots and used portable-PDB sequence points plus IL `MemberReference` rows to distinguish project-owned adapter surface from the external package surface. The following historical hashes remain decision evidence, but the manifests and comparison executable are intentionally absent from the current tree because the product proof has replaced them.
 
 | Neutral API manifest                          | Rows | SHA-256                                                            |
 | --------------------------------------------- | ---: | ------------------------------------------------------------------ |
@@ -190,31 +188,29 @@ The verifier builds that tree-contained neutral snapshot in isolated candidate r
 | Microsoft.Extensions.AI project-owned adapter |   30 | `b92b0da4fd8700480cd45d12435a0ad08197e65bf311d2230d44c9cc9c2e7e6f` |
 | Microsoft.Extensions.AI package references    |   32 | `dcd1c72b7462be0403bd2a248700f62d8498f105a293478015617fc9b74f2986` |
 
-Minimal's empty package manifest is an explicit checked-in header-only artifact. The project manifest names the actual neutral types, including `MinimalCandidateAdapter`, `MinimalRequest`, `MinimalMessage`, `MinimalContent`, `MinimalTool`, and `MinimalContinuation`; it does not substitute the later selected-production `MinimalChat*` types. The MEAI package manifest reflects actual metadata references reached by the neutral adapter rather than a manually curated API inventory.
+Minimal's retired empty package manifest was an explicit header-only artifact. The project manifest named the actual neutral types, including `MinimalCandidateAdapter`, `MinimalRequest`, `MinimalMessage`, `MinimalContent`, `MinimalTool`, and `MinimalContinuation`; it did not substitute the later selected-production `MinimalChat*` types. The retired MEAI package manifest reflected actual metadata references reached by the neutral adapter rather than a manually curated API inventory.
 
-The verifier parses `project.assets.json` rather than grepping raw JSON. It retains every entry and the digest of each complete sorted graph. It then separates SDK-provided ILCompiler/ILLink/runtime-pack infrastructure, whose patch follows the repository's `latestPatch` SDK policy, and compares the remaining candidate-owned or production-owned managed closure exactly. Minimal's candidate-owned closure is empty, production rejects every `Microsoft.Extensions.AI*` package, and MEAI permits exactly `Microsoft.Extensions.AI.Abstractions/10.8.1`. Native AOT runs retain a sorted publish-file name/byte manifest in CI output in addition to aggregate executable and directory bytes.
+The retired verifier parsed `project.assets.json` rather than grepping raw JSON. It retained every entry and the digest of each complete sorted graph, separated SDK-provided ILCompiler/ILLink/runtime-pack infrastructure, and compared the remaining candidate-owned or production-owned managed closure exactly. Minimal's candidate-owned closure was empty, production rejected every `Microsoft.Extensions.AI*` package, and MEAI permitted exactly `Microsoft.Extensions.AI.Abstractions/10.8.1`.
 
-These manifests distinguish candidate adapter source, test harness source, package API surface, resolved package graph, and publish output. They do not redefine the already-frozen selection order, and the corrected source metric does not change the selected candidate.
+These historical manifests distinguished candidate adapter source, test harness source, package API surface, resolved package graph, and publish output. They do not redefine the already-frozen selection order, and their retirement does not change the selected candidate.
 
 ## Open Questions
 
 These questions remain for later owned work and do not invalidate the selection:
 
-- the exact production provider request and response projection;
-- the final Agent loop, budget, and terminal-result types;
-- the final durable logical records and provider-scoped continuation envelope;
-- restricted-state transport, encryption, authorization, and cross-workflow proof;
+- the exact live DeepSeek request and response projection owned by R3;
+- live-provider quality, telemetry, and failure behavior owned by R3;
+- production GitHub ancestry, authorization, key provisioning, and restricted-state transport owned by R4;
 - whether later real-provider requirements justify revisiting the private backend mapping.
 
 ## Reproduction
 
 ```bash
-bash runtime/scripts/verify-ai-abstraction.sh all
-bash runtime/scripts/verify-ai-abstraction.sh selected-production
+bash runtime/scripts/verify-agent-loop.sh all
 bash runtime/scripts/verify-runtime.sh all
-dotnet test runtime/tests/AgenticPrReview.Runtime.Tests/AgenticPrReview.Runtime.Tests.csproj --nologo
+dotnet test runtime/tests/AgenticPrReview.Runtime.Tests/AgenticPrReview.Runtime.Tests.csproj --configuration Release --nologo
 npm run check
 npm run dist:check
 ```
 
-`all` executes both candidates in framework and Native AOT modes. `selected-production` executes the same common fixture through the exact selected production source in both modes. Existing direct runtime validation remains a separate gate.
+The Agent verifier executes the real selected product path through focused tests, framework-dependent Release, Linux x64 Native AOT, and retired-surface inventory checks. Existing direct runtime validation remains a separate gate.

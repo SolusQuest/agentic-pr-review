@@ -400,14 +400,14 @@ _assert_replacement_inventory() {
     runtime/tests/fixtures/agent/ai-abstraction \
     runtime/tools/AiApiManifest \
     runtime/scripts/verify-ai-abstraction.sh; do
-    [[ ! -e "${REPO_ROOT}/${path}" ]] ||
+    [[ -z "$(git -C "${REPO_ROOT}" ls-files -- "${path}")" ]] ||
       _fail "APR_AGENT_COMPARISON_PATH_REMAINS ${path}"
   done
-  grep -Riq "Microsoft.Extensions.AI" \
-    "${REPO_ROOT}/runtime/tests/AgenticPrReview.Runtime.Tests" &&
+  grep -Riq --include='*.csproj' \
+    '<PackageReference Include="Microsoft.Extensions.AI' \
+    "${REPO_ROOT}/runtime" &&
     _fail APR_AGENT_COMPARISON_DEPENDENCY_REMAINS
-  [[ ! -e "${REPO_ROOT}/action.yml" &&
-     ! -e "${REPO_ROOT}/dist/index.js" ]] ||
+  [[ -z "$(git -C "${REPO_ROOT}" ls-files -- action.yml dist/index.js)" ]] ||
     _fail APR_AGENT_PUBLIC_ACTION_PRESENT
   printf 'APR_AGENT_REPLACEMENT_INVENTORY_OK\n'
 }
