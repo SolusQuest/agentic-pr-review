@@ -935,6 +935,70 @@ public sealed class RestrictedStateServiceTests
         Assert.Empty(result.Candidates);
     }
 
+    [Fact]
+    public void EnumerationValidatesStagingFramingBeforeReturningAccepted()
+    {
+        var store = new MemoryRestrictedStateStore();
+        var keys = new TestKeyResolver();
+        var access = RestrictedStateTestData.Access();
+        var current = RestrictedStateTestData.Candidate(access, keys);
+        var staging = RestrictedStateTestData.Candidate(
+            access,
+            keys,
+            1,
+            current.EnvelopeSha256,
+            plaintext: [2]);
+        store.Snapshot = new RestrictedStateSnapshot(
+            [current],
+            staging);
+        var service = Service(
+            store,
+            keys,
+            new TestSessionAdmission());
+
+        var valid = service.Enumerate(
+            access,
+            CancellationToken.None);
+
+        Assert.Equal(StateAction.Enumerated, valid.Result.Action);
+        Assert.Equal(
+            RestrictedStateCodes.Enumerated,
+            valid.Result.Code);
+        Assert.Equal(current, Assert.Single(valid.Candidates));
+
+        var malformedEnvelope = new byte[] { 0 };
+        var envelopeSha =
+            RestrictedStateEnvelope.EnvelopeSha256(
+                malformedEnvelope);
+        var malformedStaging = staging with
+        {
+            Envelope = malformedEnvelope,
+            EnvelopeSha256 = envelopeSha,
+            ObjectIdentity = RestrictedStateEnvelope.ObjectIdentity(
+                staging.Binding,
+                staging.SessionSha256,
+                envelopeSha),
+        };
+        store.Snapshot = new RestrictedStateSnapshot(
+            [current],
+            malformedStaging);
+        Assert.True(
+            RestrictedStateValidation.IsValidSnapshot(
+                store.Snapshot));
+
+        var malformed = service.Enumerate(
+            access,
+            CancellationToken.None);
+
+        Assert.Equal(StateAction.Failed, malformed.Result.Action);
+        Assert.Equal(
+            RestrictedStateCodes.EnumerationInvalid,
+            malformed.Result.Code);
+        Assert.Empty(malformed.Candidates);
+        Assert.Equal(malformedStaging, store.Snapshot.Staging);
+        Assert.Equal(0, store.WriteCalls);
+    }
+
     [Theory]
     [InlineData(
         (int)RestrictedStateStoreFailure.Cancelled,

@@ -42,6 +42,10 @@ internal sealed class RestrictedStateService
             snapshot.Accepted.Any(candidate =>
                 !RestrictedStateEnvelope.TryParse(
                     candidate.Envelope,
+                    out _)) ||
+            (snapshot.Staging is not null &&
+                !RestrictedStateEnvelope.TryParse(
+                    snapshot.Staging.Envelope,
                     out _)))
         {
             return EnumerationFailure(
