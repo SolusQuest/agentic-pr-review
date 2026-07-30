@@ -1,0 +1,12 @@
+outcome	case
+agent_cancelled	caller-cancellation
+agent_deadline_exceeded	deadline-before-model,deadline-after-tool
+agent_model_limit	model-limit
+agent_tool_limit	tool-limit
+agent_token_limit	token-limit
+agent_request_too_large	request-cap,request-cap-plus-one
+agent_response_too_large	response-cap,response-cap-plus-one
+tool_result_limit	tool-result-cap,tool-result-aggregate
+session_construction_limit	session-construction-limit
+session_construction_limit	continuation-limit
+state_enumeration_invalid	state-capacity-limit
