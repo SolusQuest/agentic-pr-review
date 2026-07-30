@@ -37,6 +37,8 @@ internal static class NegativeProofRunner
                 "passed\tloop\tnone\t1\t1\t1\t0\t0\tfalse\tfalse",
             ["response-cap-plus-one"] =
                 "failed\tloop\tagent_response_too_large\t1\t0\t1\t0\t0\tfalse\tfalse",
+            ["response-cap-plus-two"] =
+                "failed\tloop\tagent_response_too_large\t1\t0\t1\t0\t0\tfalse\tfalse",
             ["tool-result-cap"] =
                 "failed\tloop\ttool_result_limit\t1\t1\t1\t0\t0\tfalse\tfalse",
             ["tool-result-aggregate"] =
@@ -119,6 +121,10 @@ internal static class NegativeProofRunner
             "response-cap-plus-one" => await ResponseBytesAsync(
                 command,
                 AgentLimits.ResponseBytes + 1,
+                shouldSucceed: false),
+            "response-cap-plus-two" => await ResponseBytesAsync(
+                command,
+                AgentLimits.ResponseBytes + 2,
                 shouldSucceed: false),
             "response-length-disagreement" =>
                 await ResponseLengthDisagreementAsync(command),

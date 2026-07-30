@@ -9,6 +9,7 @@ request-cap	passed	loop	none	1	1	1	0	0	false	false
 request-cap-plus-one	failed	loop	agent_request_too_large	0	0	0	0	0	false	false
 response-cap	passed	loop	none	1	1	1	0	0	false	false
 response-cap-plus-one	failed	loop	agent_response_too_large	1	0	1	0	0	false	false
+response-cap-plus-two	failed	loop	agent_response_too_large	1	0	1	0	0	false	false
 tool-result-cap	failed	loop	tool_result_limit	1	1	1	0	0	false	false
 tool-result-aggregate	failed	loop	tool_result_limit	2	9	2	0	0	false	false
 session-construction-limit	failed	session_build	session_construction_limit	1	1	0	0	0	false	false

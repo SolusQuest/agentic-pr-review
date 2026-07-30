@@ -219,12 +219,6 @@ internal sealed class LoopbackProviderBackend : IMinimalChatBackend, IDisposable
             stream,
             AgentLimits.ResponseBytes + 1,
             cancellationToken);
-        if (response.Content.Headers.ContentLength is { } declared &&
-            declared != captured.Length)
-        {
-            throw new ProviderProtocolException();
-        }
-
         if (captured.Length > AgentLimits.ResponseBytes)
         {
             return new MinimalChatResponse(
@@ -242,6 +236,12 @@ internal sealed class LoopbackProviderBackend : IMinimalChatBackend, IDisposable
                         0)]),
                 new MinimalChatUsage(0, 0),
                 captured.Length);
+        }
+
+        if (response.Content.Headers.ContentLength is { } declared &&
+            declared != captured.Length)
+        {
+            throw new ProviderProtocolException();
         }
 
         ProviderResponseDto? parsed;
