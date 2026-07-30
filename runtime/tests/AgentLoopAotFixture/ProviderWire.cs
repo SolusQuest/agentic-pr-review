@@ -78,27 +78,59 @@ internal sealed record ProviderServerResponse(
     string? Location = null);
 
 internal sealed record ProviderCapture(
+    string RequestTarget,
     byte[] Body,
-    string[] HeaderNames);
+    string[] HeaderNames,
+    string[] HeaderValues);
 
 internal sealed class ProviderProtocolException : Exception;
 
 internal static class ProviderEndpoint
 {
-    internal static bool IsAllowed(Uri endpoint) =>
-        endpoint.IsAbsoluteUri &&
+    private const string Prefix = "http://127.0.0.1:";
+    private const string Suffix = "/v1/chat/completions";
+
+    internal static bool IsAllowed(Uri endpoint)
+    {
+        if (!endpoint.IsAbsoluteUri ||
+            !endpoint.OriginalString.StartsWith(Prefix, StringComparison.Ordinal) ||
+            !endpoint.OriginalString.EndsWith(Suffix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var portText = endpoint.OriginalString[
+            Prefix.Length..^Suffix.Length];
+        if (portText.Length == 0 ||
+            portText.Any(character => character is < '0' or > '9') ||
+            !int.TryParse(
+                portText,
+                System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var originalPort) ||
+            originalPort is < 1 or > 65_535 ||
+            !StringComparer.Ordinal.Equals(
+                portText,
+                originalPort.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture)))
+        {
+            return false;
+        }
+
+        return
         StringComparer.OrdinalIgnoreCase.Equals(endpoint.Scheme, Uri.UriSchemeHttp) &&
         StringComparer.Ordinal.Equals(endpoint.Host, "127.0.0.1") &&
-        endpoint.Port is >= 1 and <= 65_535 &&
+        endpoint.Port == originalPort &&
         StringComparer.Ordinal.Equals(
             endpoint.AbsolutePath,
-            "/v1/chat/completions") &&
+            Suffix) &&
         string.IsNullOrEmpty(endpoint.UserInfo) &&
         string.IsNullOrEmpty(endpoint.Query) &&
         string.IsNullOrEmpty(endpoint.Fragment) &&
         StringComparer.Ordinal.Equals(
             endpoint.GetComponents(UriComponents.Host, UriFormat.UriEscaped),
             "127.0.0.1");
+    }
 }
 
 internal sealed class LoopbackProviderBackend : IMinimalChatBackend, IDisposable
@@ -425,8 +457,10 @@ internal sealed class StrictLoopbackServer : IAsyncDisposable
             }
 
             captures.Add(new ProviderCapture(
+                Endpoint.OriginalString,
                 request.Body,
-                request.HeaderNames));
+                request.HeaderNames,
+                request.HeaderValues));
             var scripted = scripts[index](request.Body);
             await WriteResponseAsync(stream, scripted, stop.Token);
         }
@@ -520,7 +554,8 @@ internal sealed class StrictLoopbackServer : IAsyncDisposable
 
         return new CapturedRequest(
             received.GetRange(bodyStart, contentLength).ToArray(),
-            names);
+            names,
+            values);
     }
 
     private static async Task WriteResponseAsync(
@@ -569,5 +604,6 @@ internal sealed class StrictLoopbackServer : IAsyncDisposable
 
     private sealed record CapturedRequest(
         byte[] Body,
-        string[] HeaderNames);
+        string[] HeaderNames,
+        string[] HeaderValues);
 }

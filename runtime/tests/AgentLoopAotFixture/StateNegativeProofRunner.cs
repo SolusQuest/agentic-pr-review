@@ -77,18 +77,10 @@ internal static class StateNegativeProofRunner
                 invalidAssociation: false,
                 invalidClassification: false,
                 stale: false),
-            "state-classification-invalid" => RestoreDefect(
-                command,
-                noLineage: false,
-                invalidAssociation: false,
-                invalidClassification: true,
-                stale: false),
-            "state-association-invalid" => RestoreDefect(
-                command,
-                noLineage: false,
-                invalidAssociation: true,
-                invalidClassification: false,
-                stale: false),
+            "state-classification-invalid" =>
+                RestoreSessionDefect(command, invalidClassification: true),
+            "state-association-invalid" =>
+                RestoreSessionDefect(command, invalidClassification: false),
             "state-stale-replay" => RestoreDefect(
                 command,
                 noLineage: false,
@@ -98,9 +90,7 @@ internal static class StateNegativeProofRunner
             "state-cross-scope" => EnvelopeCrossScope(command),
             "state-oversize" => EnvelopeOversize(),
             "state-old-format-disguise" =>
-                !RestrictedStateEnvelope.TryParse(
-                    "{\"kind\":\"synthetic-non-current\"}"u8,
-                    out _),
+                RestoreEnvelopeMutation(command, command.Case!),
             "state-accepted-newer-present" =>
                 await AcceptedNewerPresentAsync(command),
             "state-accepted-newer-hidden" =>
@@ -109,12 +99,12 @@ internal static class StateNegativeProofRunner
                 await OutcomeUnknownRetryAsync(command),
             "state-randomized-envelope-conflict" =>
                 await RandomizedEnvelopeConflictAsync(command),
-            "state-cleanup-failure" => CleanupFailure(command),
+            "state-cleanup-failure" => await CleanupFailureAsync(command),
             "state-capacity-limit" => StateCapacity(command),
             "session-construction-limit" =>
-                await ContinuationLimitAsync(),
+                await SessionConstructionLimitAsync(),
             "continuation-limit" => await ContinuationLimitAsync(),
-            _ => EnvelopeMutation(command, command.Case!),
+            _ => RestoreEnvelopeMutation(command, command.Case!),
         };
     }
 
@@ -322,31 +312,88 @@ internal static class StateNegativeProofRunner
                 RestrictedStateCodes.Conflict);
     }
 
-    private static bool CleanupFailure(ProofCommand command)
+    private static async Task<bool> CleanupFailureAsync(ProofCommand command)
     {
-        var authorization = ProofState.Authorize(
-            trusted: true,
-            sameRepository: true,
-            fork: false,
-            out var access);
-        if (authorization.Action != StateAction.Authorized ||
-            access is null)
+        var prepared = await PrepareNextAsync(command);
+        if (prepared is null)
         {
             return false;
         }
 
-        var store = new CleanupFailureStore();
-        var service = new RestrictedStateService(
-            store,
+        var local = new LocalRestrictedStateStore(
+            ProofPaths.StateRoot(command));
+        var before = local.Read(
+            prepared.Access,
+            CancellationToken.None);
+        if (!before.Succeeded ||
+            before.Snapshot is null ||
+            before.Version is null ||
+            before.Snapshot.Accepted.Length != 1 ||
+            before.Snapshot.Staging is null)
+        {
+            return false;
+        }
+
+        var failingStore = new CleanupFailureStore(local);
+        var failingService = new RestrictedStateService(
+            failingStore,
             new SyntheticStateKeyResolver("issue88-proof"),
             new AgentSessionRestrictedStateAdmission(),
             () => ProofScenario.Now);
-        var result = service.Reset(access, CancellationToken.None);
-        return result.Action == StateAction.Failed &&
-            StringComparer.Ordinal.Equals(
+        var result = failingService.Accept(
+            prepared.Access,
+            prepared.Lineage,
+            prepared.Receipt,
+            prepared.Context,
+            CancellationToken.None);
+        var after = local.Read(
+            prepared.Access,
+            CancellationToken.None);
+        if (result.Action != StateAction.Failed ||
+            !StringComparer.Ordinal.Equals(
                 result.Code,
-                RestrictedStateCodes.CleanupFailed) &&
-            store.DeleteCalls == 1;
+                RestrictedStateCodes.CleanupFailed) ||
+            failingStore.AcceptWrites != 1 ||
+            !after.Succeeded ||
+            after.Snapshot is null ||
+            after.Version is null ||
+            !StringComparer.Ordinal.Equals(
+                before.Version.Sha256,
+                after.Version.Sha256) ||
+            after.Snapshot.Accepted.Length != 1 ||
+            after.Snapshot.Staging is null ||
+            !StringComparer.Ordinal.Equals(
+                after.Snapshot.Accepted[0].EnvelopeSha256,
+                prepared.Lineage.EnvelopeSha256))
+        {
+            return false;
+        }
+
+        var restore = new RestrictedStateService(
+            local,
+            new SyntheticStateKeyResolver("issue88-proof"),
+            new AgentSessionRestrictedStateAdmission(),
+            () => ProofScenario.Now).Restore(
+                prepared.Access,
+                new RestrictedStateRestoreRequest(
+                    RestrictedStateLocatorFamily.Current,
+                    RestrictedStateRestoreIntent.Explicit,
+                    prepared.Lineage,
+                    Context(
+                        prepared.Lineage,
+                        ProofScenario.ContinueIdentity(),
+                        AgentSessionHeadTransition.VerifiedAhead,
+                        envelopeSha256: null)),
+                CancellationToken.None);
+        return restore.Result.Action == StateAction.Restored &&
+            restore.Session?.Value is not null &&
+            StringComparer.Ordinal.Equals(
+                restore.Result.EnvelopeSha256,
+                prepared.Lineage.EnvelopeSha256) &&
+            after.Snapshot.Staging is not null &&
+            StringComparer.Ordinal.Equals(
+                after.Snapshot.Staging.EnvelopeSha256,
+                prepared.Receipt.EnvelopeSha256);
     }
 
     private static async Task<PreparedNextState?> PrepareNextAsync(
@@ -549,26 +596,223 @@ internal static class StateNegativeProofRunner
             result.Session is null;
     }
 
-    private static bool EnvelopeMutation(
+    private static bool RestoreSessionDefect(
+        ProofCommand command,
+        bool invalidClassification)
+    {
+        if (!TryContext(
+                command,
+                out var access,
+                out var lineage,
+                out var service,
+                out var store,
+                out var admission))
+        {
+            return false;
+        }
+
+        var local = new LocalRestrictedStateStore(
+            ProofPaths.StateRoot(command));
+        var read = local.Read(access!, CancellationToken.None);
+        var current = read.Snapshot?.Accepted.FirstOrDefault();
+        var lineageBytes = File.ReadAllBytes(ProofPaths.Lineage(command));
+        var keys = new SyntheticStateKeyResolver("issue88-proof");
+        if (!read.Succeeded ||
+            read.Version is null ||
+            read.Snapshot is null ||
+            current is null ||
+            !RestrictedStateEnvelope.TryDecrypt(
+                access!,
+                current.Binding,
+                current.Envelope,
+                keys,
+                out var plaintext,
+                out _) ||
+            plaintext is null ||
+            !AgentSessionCodec.TryParse(
+                plaintext,
+                out var artifact,
+                out _) ||
+            artifact is null)
+        {
+            return false;
+        }
+
+        var runs = artifact.Document.CompletedRuns.ToArray();
+        var mutated = false;
+        for (var runIndex = 0;
+            runIndex < runs.Length && !mutated;
+            runIndex++)
+        {
+            var records = runs[runIndex].Records.ToArray();
+            for (var recordIndex = 0;
+                recordIndex < records.Length;
+                recordIndex++)
+            {
+                if (invalidClassification)
+                {
+                    records[recordIndex] = WithClassification(
+                        records[recordIndex],
+                        "invalid-classification");
+                    mutated = true;
+                    break;
+                }
+
+                if (records[recordIndex] is
+                    AgentSessionToolResultRecord toolResultRecord)
+                {
+                    records[recordIndex] = toolResultRecord with
+                    {
+                        SourceMessageId = "missing-assistant-message",
+                    };
+                    mutated = true;
+                    break;
+                }
+            }
+
+            if (mutated)
+            {
+                runs[runIndex] = runs[runIndex] with
+                {
+                    Records = records.ToImmutableArray(),
+                };
+            }
+        }
+
+        var document = artifact.Document with
+        {
+            CompletedRuns = runs.ToImmutableArray(),
+        };
+        if (!mutated ||
+            !AgentSessionCodec.TryWrite(
+                document,
+                out var invalidArtifact,
+                out _) ||
+            invalidArtifact is null ||
+            !RestrictedStateEnvelope.TryEncrypt(
+                access!,
+                current.Binding,
+                invalidArtifact.Plaintext,
+                keys,
+                out var invalidEnvelope,
+                out _) ||
+            invalidEnvelope is null)
+        {
+            return false;
+        }
+
+        var invalidEnvelopeSha =
+            RestrictedStateEnvelope.EnvelopeSha256(invalidEnvelope);
+        var invalidCandidate = new RestrictedStateCandidate(
+            current.Binding,
+            invalidArtifact.SessionSha256,
+            invalidEnvelopeSha,
+            RestrictedStateEnvelope.ObjectIdentity(
+                current.Binding,
+                invalidArtifact.SessionSha256,
+                invalidEnvelopeSha),
+            invalidEnvelope);
+        var replacement = read.Snapshot with
+        {
+            Accepted = read.Snapshot.Accepted.SetItem(0, invalidCandidate),
+        };
+        var injected = local.CompareExchange(
+            access!,
+            read.Version,
+            replacement,
+            CancellationToken.None);
+        if (!injected.Committed || injected.Version is null)
+        {
+            return false;
+        }
+
+        var context = Context(
+            lineage!,
+            ProofScenario.ContinueIdentity(),
+            AgentSessionHeadTransition.VerifiedAhead,
+            envelopeSha256: null);
+        var result = service!.Restore(
+            access!,
+            new RestrictedStateRestoreRequest(
+                RestrictedStateLocatorFamily.Current,
+                RestrictedStateRestoreIntent.Explicit,
+                lineage,
+                context),
+            CancellationToken.None);
+        var after = local.Read(access!, CancellationToken.None);
+        return result.Result.Action == StateAction.Failed &&
+            StringComparer.Ordinal.Equals(
+                result.Result.Code,
+                RestrictedStateCodes.EnvelopeInvalid) &&
+            result.Session is null &&
+            store!.Calls == 1 &&
+            admission!.Calls == 1 &&
+            after.Succeeded &&
+            after.Version is not null &&
+            StringComparer.Ordinal.Equals(
+                after.Version.Sha256,
+                injected.Version.Sha256) &&
+            File.ReadAllBytes(ProofPaths.Lineage(command))
+                .AsSpan()
+                .SequenceEqual(lineageBytes);
+    }
+
+    private static AgentSessionRecord WithClassification(
+        AgentSessionRecord record,
+        string classification) =>
+        record switch
+        {
+            AgentSessionReviewContextRecord value =>
+                value with { Classification = classification },
+            AgentSessionAssistantMessageRecord value =>
+                value with { Classification = classification },
+            AgentSessionToolResultRecord value =>
+                value with { Classification = classification },
+            AgentSessionReviewOutcomeRecord value =>
+                value with { Classification = classification },
+            _ => throw new InvalidOperationException(),
+        };
+
+    private static bool RestoreEnvelopeMutation(
         ProofCommand command,
         string @case)
     {
-        if (!TryCandidate(
+        if (!TryContext(
                 command,
                 out var access,
-                out var candidate))
+                out var lineage,
+                out var service,
+                out var store,
+                out var admission))
+        {
+            return false;
+        }
+
+        var local = new LocalRestrictedStateStore(
+            ProofPaths.StateRoot(command));
+        var read = local.Read(access!, CancellationToken.None);
+        var candidate = read.Snapshot?.Accepted.FirstOrDefault();
+        var lineageBytes = File.ReadAllBytes(ProofPaths.Lineage(command));
+        if (!read.Succeeded ||
+            read.Version is null ||
+            read.Snapshot is null ||
+            candidate is null)
         {
             return false;
         }
 
         byte[] bytes;
-        if (@case == "state-truncation")
+        if (@case == "state-old-format-disguise")
         {
-            bytes = candidate!.Envelope[..^1];
+            bytes = "{\"kind\":\"synthetic-non-current\"}"u8.ToArray();
+        }
+        else if (@case == "state-truncation")
+        {
+            bytes = candidate.Envelope[..^1];
         }
         else
         {
-            bytes = candidate!.Envelope.ToArray();
+            bytes = candidate.Envelope.ToArray();
             switch (@case)
             {
                 case "state-tamper":
@@ -617,19 +861,64 @@ internal static class StateNegativeProofRunner
             }
         }
 
-        var keys = new SyntheticStateKeyResolver("issue88-proof");
-        var decrypted = RestrictedStateEnvelope.TryDecrypt(
+        var envelopeSha = RestrictedStateEnvelope.EnvelopeSha256(bytes);
+        var invalidCandidate = candidate with
+        {
+            EnvelopeSha256 = envelopeSha,
+            ObjectIdentity = RestrictedStateEnvelope.ObjectIdentity(
+                candidate.Binding,
+                candidate.SessionSha256,
+                envelopeSha),
+            Envelope = bytes,
+        };
+        var replacement = read.Snapshot with
+        {
+            Accepted = read.Snapshot.Accepted.SetItem(0, invalidCandidate),
+        };
+        var injected = local.CompareExchange(
             access!,
-            candidate!.Binding,
-            bytes,
-            keys,
-            out var plaintext,
-            out var code);
-        return !decrypted &&
-            plaintext is null &&
-            code is RestrictedStateCodes.EnvelopeInvalid or
-                RestrictedStateCodes.AuthenticationFailed or
-                RestrictedStateCodes.KeyUnavailable;
+            read.Version,
+            replacement,
+            CancellationToken.None);
+        if (!injected.Committed || injected.Version is null)
+        {
+            return false;
+        }
+
+        var result = service!.Restore(
+            access!,
+            new RestrictedStateRestoreRequest(
+                RestrictedStateLocatorFamily.Current,
+                RestrictedStateRestoreIntent.Explicit,
+                lineage,
+                Context(
+                    lineage!,
+                    ProofScenario.ContinueIdentity(),
+                    AgentSessionHeadTransition.VerifiedAhead,
+                    envelopeSha256: null)),
+            CancellationToken.None);
+        var after = local.Read(access!, CancellationToken.None);
+        var expectedCode = @case switch
+        {
+            "state-tamper" => RestrictedStateCodes.AuthenticationFailed,
+            "state-header-key-id" => RestrictedStateCodes.KeyUnavailable,
+            _ => RestrictedStateCodes.EnvelopeInvalid,
+        };
+        return result.Result.Action == StateAction.Failed &&
+            StringComparer.Ordinal.Equals(
+                result.Result.Code,
+                expectedCode) &&
+            result.Session is null &&
+            store!.Calls == 1 &&
+            admission!.Calls == 0 &&
+            after.Succeeded &&
+            after.Version is not null &&
+            StringComparer.Ordinal.Equals(
+                after.Version.Sha256,
+                injected.Version.Sha256) &&
+            File.ReadAllBytes(ProofPaths.Lineage(command))
+                .AsSpan()
+                .SequenceEqual(lineageBytes);
     }
 
     private static bool EnvelopeCrossScope(ProofCommand command)
@@ -672,31 +961,111 @@ internal static class StateNegativeProofRunner
 
     private static bool StateCapacity(ProofCommand command)
     {
-        if (!TryCandidate(
-                command,
-                out var access,
-                out var candidate))
+        var authorization = ProofState.Authorize(
+            trusted: true,
+            sameRepository: true,
+            fork: false,
+            out var access);
+        if (authorization.Action != StateAction.Authorized ||
+            access is null)
         {
             return false;
         }
 
-        var keys = new SyntheticStateKeyResolver("issue88-proof");
-        var plaintext = new byte[AgentLimits.SessionPlaintextBytes + 1];
-        return !RestrictedStateEnvelope.TryEncrypt(
-                access!,
-                candidate!.Binding,
-                plaintext,
-                keys,
-                out var envelope,
-                out var code) &&
-            envelope is null &&
+        var local = new LocalRestrictedStateStore(
+            ProofPaths.StateRoot(command));
+        var read = local.Read(access, CancellationToken.None);
+        var candidate = read.Snapshot?.Accepted.FirstOrDefault();
+        if (!read.Succeeded ||
+            read.Version is null ||
+            candidate is null)
+        {
+            return false;
+        }
+
+        var overCapacity = new RestrictedStateSnapshot(
+            [candidate, candidate, candidate],
+            null);
+        var rejectedWrite = local.CompareExchange(
+            access,
+            read.Version,
+            overCapacity,
+            CancellationToken.None);
+        if (rejectedWrite.Committed ||
+            rejectedWrite.Failure != RestrictedStateStoreFailure.Invalid)
+        {
+            return false;
+        }
+
+        var store = new FixedSnapshotStore(overCapacity);
+        var service = new RestrictedStateService(
+            store,
+            new SyntheticStateKeyResolver("issue88-proof"),
+            new AgentSessionRestrictedStateAdmission(),
+            () => ProofScenario.Now);
+        var result = service.Enumerate(access, CancellationToken.None);
+        return result.Result.Action == StateAction.Failed &&
             StringComparer.Ordinal.Equals(
-                code,
-                RestrictedStateCodes.EnvelopeInvalid) &&
-            keys.Accesses == 0;
+                result.Result.Code,
+                RestrictedStateCodes.EnumerationInvalid) &&
+            result.Candidates.IsEmpty &&
+            store.ReadCalls == 1 &&
+            local.Read(access, CancellationToken.None).Version?.Sha256 ==
+                read.Version.Sha256;
     }
 
     private static async Task<bool> ContinuationLimitAsync()
+    {
+        var run = Run();
+        var outcome = await new AgentLoop(
+            new OneResponseChatClient(request =>
+            {
+                var position = request.Messages.Length;
+                var item = new ProjectContinuationItem(
+                    new string('r', 32 * 1024),
+                    new string('o', 32 * 1024),
+                    new string('f', 2 * 1024),
+                    "finish-continuation",
+                    position,
+                    0);
+                return new ProjectChatResponse(
+                    new ProjectChatMessage(
+                        "assistant",
+                        [
+                            new ProjectReasoningContent(
+                                item.Readable,
+                                item.Opaque,
+                                item.Framing,
+                                item.AssociatedCallId,
+                                item.MessagePosition,
+                                item.ContentPosition),
+                            new ProjectToolCallContent(
+                                "finish-continuation",
+                                AgentToolRegistry.FinishReviewName,
+                                FinishJson),
+                        ]),
+                    new ProjectChatUsage(1, 1),
+                    CapturedResponseBodyBytes: 1,
+                    new ProjectContinuation(
+                        ProofScenario.ProviderId,
+                        ProofScenario.ModelId,
+                        ProofScenario.AdapterId,
+                        ProofScenario.SessionId,
+                        [item]));
+            }),
+            new NeverToolExecutor()).RunAsync(
+                run,
+                CancellationToken.None);
+        return !outcome.CompletedSessionEligible &&
+            outcome.Diagnostic is
+            {
+                Code: AgentFailureCodes.ResponseInvalid,
+                ModelCalls: 1,
+                ToolCalls: 0,
+            };
+    }
+
+    private static async Task<bool> SessionConstructionLimitAsync()
     {
         var run = Run();
         var outcome = await new AgentLoop(
@@ -889,17 +1258,64 @@ internal static class StateNegativeProofRunner
         AgentSessionArtifact Artifact,
         PreparedStateReceipt Receipt);
 
-    private sealed class CleanupFailureStore : IRestrictedStateStore
+    private sealed class CleanupFailureStore(
+        IRestrictedStateStore inner) : IRestrictedStateStore
     {
-        internal int DeleteCalls { get; private set; }
+        internal int AcceptWrites { get; private set; }
 
         public RestrictedStateStoreRead Read(
             AuthorizedStateAccess access,
             CancellationToken cancellationToken) =>
-            new(
-                RestrictedStateStoreFailure.Invalid,
-                Snapshot: null,
-                Version: null);
+            inner.Read(access, cancellationToken);
+
+        public RestrictedStateStoreRawRead ReadRawVersion(
+            AuthorizedStateAccess access,
+            CancellationToken cancellationToken) =>
+            inner.ReadRawVersion(access, cancellationToken);
+
+        public RestrictedStateStoreWrite CompareExchange(
+            AuthorizedStateAccess access,
+            RestrictedStateSnapshotVersion expected,
+            RestrictedStateSnapshot replacement,
+            CancellationToken cancellationToken)
+        {
+            AcceptWrites++;
+            return new RestrictedStateStoreWrite(
+                RestrictedStateStoreFailure.Cleanup,
+                Version: null,
+                Committed: false);
+        }
+
+        public RestrictedStateStoreWrite CompareDelete(
+            AuthorizedStateAccess access,
+            RestrictedStateSnapshotVersion expected,
+            CancellationToken cancellationToken) =>
+            inner.CompareDelete(access, expected, cancellationToken);
+
+        public RestrictedStateStoreWrite CompareDeleteRaw(
+            AuthorizedStateAccess access,
+            RestrictedStateRawVersion expected,
+            CancellationToken cancellationToken) =>
+            inner.CompareDeleteRaw(access, expected, cancellationToken);
+    }
+
+    private sealed class FixedSnapshotStore(
+        RestrictedStateSnapshot snapshot) : IRestrictedStateStore
+    {
+        internal int ReadCalls { get; private set; }
+
+        public RestrictedStateStoreRead Read(
+            AuthorizedStateAccess access,
+            CancellationToken cancellationToken)
+        {
+            ReadCalls++;
+            return new RestrictedStateStoreRead(
+                RestrictedStateStoreFailure.None,
+                snapshot,
+                new RestrictedStateSnapshotVersion(
+                    new string('0', 64),
+                    Exists: true));
+        }
 
         public RestrictedStateStoreRawRead ReadRawVersion(
             AuthorizedStateAccess access,
@@ -913,31 +1329,19 @@ internal static class StateNegativeProofRunner
             RestrictedStateSnapshotVersion expected,
             RestrictedStateSnapshot replacement,
             CancellationToken cancellationToken) =>
-            new(
-                RestrictedStateStoreFailure.Invalid,
-                Version: null,
-                Committed: false);
+            throw new InvalidOperationException();
 
         public RestrictedStateStoreWrite CompareDelete(
             AuthorizedStateAccess access,
             RestrictedStateSnapshotVersion expected,
             CancellationToken cancellationToken) =>
-            new(
-                RestrictedStateStoreFailure.Invalid,
-                Version: null,
-                Committed: false);
+            throw new InvalidOperationException();
 
         public RestrictedStateStoreWrite CompareDeleteRaw(
             AuthorizedStateAccess access,
             RestrictedStateRawVersion expected,
-            CancellationToken cancellationToken)
-        {
-            DeleteCalls++;
-            return new RestrictedStateStoreWrite(
-                RestrictedStateStoreFailure.Cleanup,
-                Version: null,
-                Committed: false);
-        }
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException();
     }
 
     private sealed class OneResponseChatClient(

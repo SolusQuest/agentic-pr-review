@@ -11,6 +11,18 @@ internal static class ProofEnvironment
 {
     internal static ProofEnvironmentResult Validate(ProofCommand command)
     {
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        if (!StringComparer.FromComparison(comparison).Equals(
+                Path.TrimEndingDirectorySeparator(
+                    Path.GetFullPath(Environment.CurrentDirectory)),
+                Path.TrimEndingDirectorySeparator(
+                    Path.GetFullPath(command.Root))))
+        {
+            return Failure(ProofCodes.EnvironmentInvalid);
+        }
+
         string[] expected;
         try
         {
@@ -41,18 +53,18 @@ internal static class ProofEnvironment
             }
         }
 
-        var expectedOrdered = expected.Order(StringComparer.Ordinal).ToArray();
-        var actualOrdered = actual.Keys.Order(StringComparer.Ordinal).ToArray();
-        if (!expectedOrdered.SequenceEqual(actualOrdered, StringComparer.Ordinal))
-        {
-            return Failure(ProofCodes.EnvironmentInvalid);
-        }
-
         if (actual.Any(pair =>
             CanarySet.ContainsCanary(pair.Key) ||
             CanarySet.ContainsCanary(pair.Value)))
         {
             return Failure(ProofCodes.EnvironmentCanary);
+        }
+
+        var expectedOrdered = expected.Order(StringComparer.Ordinal).ToArray();
+        var actualOrdered = actual.Keys.Order(StringComparer.Ordinal).ToArray();
+        if (!expectedOrdered.SequenceEqual(actualOrdered, StringComparer.Ordinal))
+        {
+            return Failure(ProofCodes.EnvironmentInvalid);
         }
 
         return new ProofEnvironmentResult(true, "APR_AGENT_ENVIRONMENT_OK", 0);

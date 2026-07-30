@@ -13,6 +13,42 @@ namespace AgenticPrReview.Runtime.AgentLoopAotFixture;
 
 internal static class NegativeProofRunner
 {
+    private static readonly IReadOnlyDictionary<string, string>
+        LimitObservations = new Dictionary<string, string>(
+            StringComparer.Ordinal)
+        {
+            ["caller-cancellation"] =
+                "failed\tloop\tagent_cancelled\t0\t0\t0\t0\t0\tfalse\tfalse",
+            ["deadline-before-model"] =
+                "failed\tloop\tagent_deadline_exceeded\t0\t0\t0\t0\t0\tfalse\tfalse",
+            ["deadline-after-tool"] =
+                "failed\tloop\tagent_deadline_exceeded\t1\t1\t1\t0\t0\tfalse\tfalse",
+            ["model-limit"] =
+                "failed\tloop\tagent_model_limit\t8\t8\t8\t0\t0\tfalse\tfalse",
+            ["tool-limit"] =
+                "failed\tloop\tagent_tool_limit\t4\t24\t4\t0\t0\tfalse\tfalse",
+            ["token-limit"] =
+                "failed\tloop\tagent_token_limit\t1\t0\t1\t0\t0\tfalse\tfalse",
+            ["request-cap"] =
+                "passed\tloop\tnone\t1\t1\t1\t0\t0\tfalse\tfalse",
+            ["request-cap-plus-one"] =
+                "failed\tloop\tagent_request_too_large\t0\t0\t0\t0\t0\tfalse\tfalse",
+            ["response-cap"] =
+                "passed\tloop\tnone\t1\t1\t1\t0\t0\tfalse\tfalse",
+            ["response-cap-plus-one"] =
+                "failed\tloop\tagent_response_too_large\t1\t0\t1\t0\t0\tfalse\tfalse",
+            ["tool-result-cap"] =
+                "failed\tloop\ttool_result_limit\t1\t1\t1\t0\t0\tfalse\tfalse",
+            ["tool-result-aggregate"] =
+                "failed\tloop\ttool_result_limit\t2\t9\t2\t0\t0\tfalse\tfalse",
+            ["session-construction-limit"] =
+                "failed\tsession_build\tsession_construction_limit\t1\t1\t0\t0\t0\tfalse\tfalse",
+            ["continuation-limit"] =
+                "failed\tloop\tagent_response_invalid\t1\t0\t0\t0\t0\tfalse\tfalse",
+            ["state-capacity-limit"] =
+                "failed\tstate_enumerate\tstate_enumeration_invalid\t0\t0\t0\t1\t0\tfalse\tfalse",
+        };
+
     private static readonly HashSet<string> EndpointCases =
         new(StringComparer.Ordinal)
         {
@@ -23,6 +59,12 @@ internal static class NegativeProofRunner
             "endpoint-query",
             "endpoint-fragment",
             "endpoint-encoded-host",
+            "endpoint-abbreviated-host",
+            "endpoint-integer-host",
+            "endpoint-hex-host",
+            "endpoint-octal-host",
+            "endpoint-leading-zero-host",
+            "endpoint-trailing-dot-host",
         };
 
     internal static async Task<int> RunAsync(ProofCommand command)
@@ -31,14 +73,17 @@ internal static class NegativeProofRunner
         var passed = @case switch
         {
             "authorization-untrusted" => Authorization(
+                command,
                 trusted: false,
                 sameRepository: true,
                 fork: false),
             "authorization-fork" => Authorization(
+                command,
                 trusted: true,
                 sameRepository: true,
                 fork: true),
             "authorization-cross-repository" => Authorization(
+                command,
                 trusted: true,
                 sameRepository: false,
                 fork: false),
@@ -122,6 +167,16 @@ internal static class NegativeProofRunner
             "invalid-terminal" => await InvalidTerminalAsync(command),
             "post-tool-chat-failure" =>
                 await PostToolChatFailureAsync(command),
+            "canary-leak-model" =>
+                CanaryScanner.RejectsRepresentativeLeak("model"),
+            "canary-leak-durable" =>
+                CanaryScanner.RejectsRepresentativeLeak("durable"),
+            "canary-leak-transport" =>
+                CanaryScanner.RejectsRepresentativeLeak("transport"),
+            "canary-leak-diagnostic" =>
+                CanaryScanner.RejectsRepresentativeLeak("diagnostic"),
+            "canary-leak-environment" =>
+                CanaryScanner.RejectsRepresentativeLeak("environment"),
             _ when EndpointCases.Contains(@case) => Endpoint(@case),
             _ when StateNegativeProofRunner.Handles(@case) =>
                 await StateNegativeProofRunner.RunAsync(command),
@@ -138,26 +193,56 @@ internal static class NegativeProofRunner
             " ",
             @case,
             "\n");
+        if (LimitObservations.TryGetValue(@case, out var observation))
+        {
+            report = string.Concat(
+                report,
+                "LIMIT\t",
+                @case,
+                "\t",
+                observation,
+                "\n");
+        }
         ProofFiles.WriteNew(command.Output, Encoding.ASCII.GetBytes(report));
         Console.Write(report);
         return 0;
     }
 
     private static bool Authorization(
+        ProofCommand command,
         bool trusted,
         bool sameRepository,
         bool fork)
     {
-        var result = ProofState.Authorize(
+        var reachability = new AuthorizationReachability();
+        var result = ProofState.EnterAuthorizedComposition(
             trusted,
             sameRepository,
             fork,
-            out var access);
+            _ =>
+            {
+                reachability.StateRootInspections++;
+                reachability.StoreFactories++;
+                reachability.KeyFactories++;
+                reachability.SessionAdmissionFactories++;
+                reachability.AgentFactories++;
+                reachability.ChatFactories++;
+                reachability.ProviderFactories++;
+                reachability.ToolFactories++;
+                return true;
+            },
+            out var access,
+            out var entered);
         return result.Action == StateAction.Denied &&
             StringComparer.Ordinal.Equals(
                 result.Code,
                 RestrictedStateCodes.AccessDenied) &&
-            access is null;
+            access is null &&
+            !entered &&
+            reachability.Total == 0 &&
+            !File.Exists(ProofPaths.StartupNonce(command)) &&
+            !File.Exists(ProofPaths.Lineage(command)) &&
+            !Directory.Exists(ProofPaths.StateRoot(command));
     }
 
     private static bool BootstrapNonCurrent(ProofCommand command) =>
@@ -291,7 +376,9 @@ internal static class NegativeProofRunner
             new MinimalChatClient(backend),
             tool,
             time).RunAsync(Run(identity), CancellationToken.None);
-        return !outcome.CompletedSessionEligible &&
+        var resultEvents =
+            outcome.Events.OfType<AgentToolResultEvent>().Count();
+        var passed = !outcome.CompletedSessionEligible &&
             HasDiagnostic(
                 outcome,
                 AgentFailureCodes.DeadlineExceeded,
@@ -299,8 +386,11 @@ internal static class NegativeProofRunner
                 toolCalls: 1) &&
             server.Captures.Count == 1 &&
             tool.Executions == 1 &&
+            resultEvents == 1 &&
             !File.Exists(ProofPaths.Lineage(command)) &&
             !Directory.Exists(ProofPaths.StateRoot(command));
+
+        return passed;
     }
 
     private static async Task<bool> ChatFailureAsync(IProjectChatClient chat)
@@ -697,6 +787,18 @@ internal static class NegativeProofRunner
                 "http://127.0.0.1:1234/v1/chat/completions#fragment",
             "endpoint-encoded-host" =>
                 "http://127%2e0%2e0%2e1:1234/v1/chat/completions",
+            "endpoint-abbreviated-host" =>
+                "http://127.1:1234/v1/chat/completions",
+            "endpoint-integer-host" =>
+                "http://2130706433:1234/v1/chat/completions",
+            "endpoint-hex-host" =>
+                "http://0x7f000001:1234/v1/chat/completions",
+            "endpoint-octal-host" =>
+                "http://0177.0.0.1:1234/v1/chat/completions",
+            "endpoint-leading-zero-host" =>
+                "http://127.000.000.001:1234/v1/chat/completions",
+            "endpoint-trailing-dot-host" =>
+                "http://127.0.0.1.:1234/v1/chat/completions",
             _ => throw new InvalidOperationException(),
         };
         return !Uri.TryCreate(value, UriKind.Absolute, out var endpoint) ||
@@ -993,6 +1095,35 @@ internal static class NegativeProofRunner
             throw new InvalidOperationException();
     }
 
+    private sealed class AuthorizationReachability
+    {
+        internal int StateRootInspections { get; set; }
+
+        internal int StoreFactories { get; set; }
+
+        internal int KeyFactories { get; set; }
+
+        internal int SessionAdmissionFactories { get; set; }
+
+        internal int AgentFactories { get; set; }
+
+        internal int ChatFactories { get; set; }
+
+        internal int ProviderFactories { get; set; }
+
+        internal int ToolFactories { get; set; }
+
+        internal int Total =>
+            StateRootInspections +
+            StoreFactories +
+            KeyFactories +
+            SessionAdmissionFactories +
+            AgentFactories +
+            ChatFactories +
+            ProviderFactories +
+            ToolFactories;
+    }
+
     private sealed class AdvancingToolExecutor(
         IAgentToolExecutor inner,
         SyntheticTimeProvider time) : IAgentToolExecutor
@@ -1008,7 +1139,7 @@ internal static class NegativeProofRunner
         {
             Executions++;
             var result = await inner.ExecuteAsync(call, cancellationToken);
-            time.Advance(
+            time.AdvanceAfterNextRead(
                 TimeSpan.FromSeconds(AgentLimits.DeadlineSeconds + 1));
             return result;
         }

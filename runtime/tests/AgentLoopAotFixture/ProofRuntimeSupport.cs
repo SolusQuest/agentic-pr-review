@@ -357,6 +357,29 @@ internal static class HostLineage
 
 internal static class ProofState
 {
+    internal static StateResult EnterAuthorizedComposition(
+        bool trusted,
+        bool sameRepository,
+        bool fork,
+        Func<AuthorizedStateAccess, bool> enter,
+        out AuthorizedStateAccess? access,
+        out bool entered)
+    {
+        entered = false;
+        var result = Authorize(
+            trusted,
+            sameRepository,
+            fork,
+            out access);
+        if (result.Action != StateAction.Authorized || access is null)
+        {
+            return result;
+        }
+
+        entered = enter(access);
+        return result;
+    }
+
     internal static StateResult Authorize(
         bool trusted,
         bool sameRepository,

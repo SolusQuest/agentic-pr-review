@@ -105,20 +105,41 @@ public sealed class AgentProofContractTests
                 "header-trace",
                 "header-github",
                 "header-ambient",
+                "endpoint-abbreviated-host",
+                "endpoint-integer-host",
+                "endpoint-hex-host",
+                "endpoint-octal-host",
+                "endpoint-leading-zero-host",
+                "endpoint-trailing-dot-host",
+                "canary-leak-model",
+                "canary-leak-durable",
+                "canary-leak-transport",
+                "canary-leak-diagnostic",
+                "canary-leak-environment",
             }.ToHashSet(StringComparer.Ordinal));
 
         var limitLines = File.ReadAllLines(
             Path.Combine(FixtureRoot, "limit-cases.tsv"));
-        Assert.Equal("outcome\tcase", limitLines[0]);
+        Assert.Equal(
+            "case\tstatus\taction\tcode\tmodel_calls\ttool_calls\tprovider_requests\tstore_calls\tsession_admissions\tstate_mutation\tlineage_mutation",
+            limitLines[0]);
+        var limitCases = new HashSet<string>(StringComparer.Ordinal);
         Assert.All(
             limitLines.Skip(1),
             line =>
             {
                 var fields = line.Split('\t');
-                Assert.Equal(2, fields.Length);
-                Assert.All(
-                    fields[1].Split(','),
-                    @case => Assert.Contains(@case, cases));
+                Assert.Equal(11, fields.Length);
+                Assert.True(limitCases.Add(fields[0]));
+                Assert.Contains(fields[0], cases);
+                Assert.Contains(fields[1], new[] { "passed", "failed" });
+                Assert.True(int.TryParse(fields[4], out _));
+                Assert.True(int.TryParse(fields[5], out _));
+                Assert.True(int.TryParse(fields[6], out _));
+                Assert.True(int.TryParse(fields[7], out _));
+                Assert.True(int.TryParse(fields[8], out _));
+                Assert.Contains(fields[9], new[] { "true", "false" });
+                Assert.Contains(fields[10], new[] { "true", "false" });
             });
     }
 

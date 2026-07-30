@@ -33,6 +33,11 @@ path-rejection
 tool-rejection
 invalid-terminal
 post-tool-chat-failure
+canary-leak-model
+canary-leak-durable
+canary-leak-transport
+canary-leak-diagnostic
+canary-leak-environment
 endpoint-https
 endpoint-host
 endpoint-path
@@ -40,6 +45,12 @@ endpoint-userinfo
 endpoint-query
 endpoint-fragment
 endpoint-encoded-host
+endpoint-abbreviated-host
+endpoint-integer-host
+endpoint-hex-host
+endpoint-octal-host
+endpoint-leading-zero-host
+endpoint-trailing-dot-host
 head-same
 head-unknown
 head-diverged

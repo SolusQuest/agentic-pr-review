@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Collections;
 using System.Security.Cryptography;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
@@ -13,19 +14,22 @@ internal static class ProofOrchestrator
 {
     internal static async Task<int> BootstrapAsync(ProofCommand command)
     {
-        WriteStartupNonce(command);
-        var authorization = ProofState.Authorize(
+        var authorization = ProofState.EnterAuthorizedComposition(
             trusted: true,
             sameRepository: true,
             fork: false,
-            out var access);
+            _ => true,
+            out var access,
+            out var entered);
         if (authorization.Action != StateAction.Authorized ||
-            access is null)
+            access is null ||
+            !entered)
         {
             WriteFailureCode(command, "bootstrap_authorization", 0);
             return Fail();
         }
 
+        WriteStartupNonce(command);
         var keyResolver = new SyntheticStateKeyResolver("issue88-proof");
         var localStore = new LocalRestrictedStateStore(
             ProofPaths.StateRoot(command));
@@ -102,7 +106,8 @@ internal static class ProofOrchestrator
             materialized!.StablePlan,
             ProofScenario.SessionId,
             [.. materialized.ControlMessages, context]);
-        var providerCanary = CanarySet.Provider("issue88-proof-bootstrap");
+        var canaries = ProofCanaryValues.Create("issue88-proof");
+        var providerCanary = canaries.Provider;
         await using var server = StrictLoopbackServer.Start(
             providerCanary,
             [ProviderScripts.BootstrapRead, ProviderScripts.BootstrapFinish]);
@@ -219,22 +224,43 @@ internal static class ProofOrchestrator
                 "completed_session_only",
                 "encrypted_state_accepted",
                 "provider_canary_authorization_only",
+                "nine_canary_channel_scan",
             ]);
-        ProofFiles.WriteNew(command.Output, [.. ProofJson.Write(output), (byte)'\n']);
+        var outputBytes = ProofJson.Write(output);
+        if (!CanaryScanner.VerifyPositive(
+                canaries,
+                server.Endpoint,
+                server.Captures,
+                ForbiddenCanaryChannels(
+                    command,
+                    built.Artifact,
+                    outcome,
+                    prepared.Receipt,
+                    outputBytes)))
+        {
+            CryptographicOperations.ZeroMemory(canaries.StateKey);
+            WriteFailureCode(command, "bootstrap_canary_scan", 0);
+            return Fail();
+        }
+
+        CryptographicOperations.ZeroMemory(canaries.StateKey);
+        ProofFiles.WriteNew(command.Output, [.. outputBytes, (byte)'\n']);
         Console.WriteLine(ProofCodes.BootstrapOk);
         return 0;
     }
 
     internal static async Task<int> ContinueAsync(ProofCommand command)
     {
-        WriteStartupNonce(command);
-        var authorization = ProofState.Authorize(
+        var authorization = ProofState.EnterAuthorizedComposition(
             trusted: true,
             sameRepository: true,
             fork: false,
-            out var access);
+            _ => true,
+            out var access,
+            out var entered);
         if (authorization.Action != StateAction.Authorized ||
             access is null ||
+            !entered ||
             !HostLineage.TryRead(
                 command,
                 access.Scope,
@@ -247,6 +273,7 @@ internal static class ProofOrchestrator
             return Fail();
         }
 
+        WriteStartupNonce(command);
         var keyResolver = new SyntheticStateKeyResolver("issue88-proof");
         var store = new CountingStateStore(
             new LocalRestrictedStateStore(ProofPaths.StateRoot(command)));
@@ -294,7 +321,8 @@ internal static class ProofOrchestrator
 
         var admitted = restored.Session.Value;
         var run = admitted.RunRequest;
-        var providerCanary = CanarySet.Provider("issue88-proof-continue");
+        var canaries = ProofCanaryValues.Create("issue88-proof");
+        var providerCanary = canaries.Provider;
         await using var server = StrictLoopbackServer.Start(
             providerCanary,
             [ProviderScripts.ContinueFinish]);
@@ -421,8 +449,27 @@ internal static class ProofOrchestrator
                 "exact_continuation_reconstructed",
                 "prior_only_fact_used",
                 "next_generation_accepted",
+                "nine_canary_channel_scan",
             ]);
-        ProofFiles.WriteNew(command.Output, [.. ProofJson.Write(output), (byte)'\n']);
+        var outputBytes = ProofJson.Write(output);
+        if (!CanaryScanner.VerifyPositive(
+                canaries,
+                server.Endpoint,
+                server.Captures,
+                ForbiddenCanaryChannels(
+                    command,
+                    built.Artifact,
+                    outcome,
+                    prepared.Receipt,
+                    outputBytes)))
+        {
+            CryptographicOperations.ZeroMemory(canaries.StateKey);
+            WriteFailureCode(command, "continue_canary_scan", 0);
+            return Fail();
+        }
+
+        CryptographicOperations.ZeroMemory(canaries.StateKey);
+        ProofFiles.WriteNew(command.Output, [.. outputBytes, (byte)'\n']);
         Console.WriteLine(ProofCodes.ContinueOk);
         return 0;
     }
@@ -474,6 +521,63 @@ internal static class ProofOrchestrator
         }
 
         return normalized.SessionSha256;
+    }
+
+    private static IEnumerable<byte[]> ForbiddenCanaryChannels(
+        ProofCommand command,
+        AgentSessionArtifact artifact,
+        AgentRunOutcome outcome,
+        PreparedStateReceipt receipt,
+        byte[] output)
+    {
+        yield return artifact.Plaintext;
+        yield return output;
+        yield return System.Text.Encoding.UTF8.GetBytes(string.Join(
+            "\n",
+            receipt.Generation.ToString(
+                System.Globalization.CultureInfo.InvariantCulture),
+            receipt.SessionSha256,
+            receipt.EnvelopeSha256,
+            receipt.ObjectIdentity));
+
+        foreach (var logicalEvent in outcome.Events)
+        {
+            switch (logicalEvent)
+            {
+                case AgentToolCallEvent call:
+                    yield return call.CanonicalArguments.ToArray();
+                    break;
+                case AgentToolResultEvent result:
+                    yield return result.CanonicalResult.ToArray();
+                    break;
+            }
+        }
+
+        foreach (DictionaryEntry entry in
+            Environment.GetEnvironmentVariables())
+        {
+            yield return System.Text.Encoding.UTF8.GetBytes(string.Concat(
+                entry.Key,
+                "=",
+                entry.Value));
+        }
+
+        foreach (var path in Directory.EnumerateFiles(
+            command.Root,
+            "*",
+            SearchOption.AllDirectories))
+        {
+            if (StringComparer.OrdinalIgnoreCase.Equals(
+                Path.GetExtension(path),
+                ".log"))
+            {
+                continue;
+            }
+
+            yield return System.Text.Encoding.UTF8.GetBytes(
+                Path.GetFileName(path));
+            yield return File.ReadAllBytes(path);
+        }
     }
 
     private static void WriteStartupNonce(ProofCommand command)

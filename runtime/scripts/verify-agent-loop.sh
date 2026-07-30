@@ -137,7 +137,8 @@ _environment_manifest() {
 
 _run_closed_process() {
   local timeout_seconds="$1"
-  shift
+  local controlled_root="$2"
+  shift 2
   local -a environment=()
   while [[ "$1" != "APR_AGENT_COMMAND" ]]; do
     environment+=("$1")
@@ -150,7 +151,7 @@ _run_closed_process() {
       const marker = process.argv.indexOf("APR_AGENT_COMMAND");
       if (marker < 0 || marker + 1 >= process.argv.length) process.exit(125);
       const environment = {};
-      for (const entry of process.argv.slice(2, marker)) {
+      for (const entry of process.argv.slice(3, marker)) {
         const separator = entry.indexOf("=");
         if (separator < 1) process.exit(125);
         environment[entry.slice(0, separator)] = entry.slice(separator + 1);
@@ -160,14 +161,19 @@ _run_closed_process() {
         process.argv.slice(marker + 2),
         {
           env: environment,
+          cwd: process.argv[2],
           stdio: "inherit",
           timeout: Number(process.argv[1]) * 1000,
           windowsHide: true,
         });
       process.exit(result.status === null ? 124 : result.status);
-    ' "${timeout_seconds}" "${environment[@]}" APR_AGENT_COMMAND "$@"
+    ' "${timeout_seconds}" "${controlled_root}" \
+      "${environment[@]}" APR_AGENT_COMMAND "$@"
   else
-    timeout "${timeout_seconds}s" env -i "${environment[@]}" "$@"
+    (
+      cd -- "${controlled_root}"
+      timeout "${timeout_seconds}s" env -i "${environment[@]}" "$@"
+    )
   fi
 }
 
@@ -194,7 +200,8 @@ _run_fixture() {
       fi
     done
   fi
-  if ! _run_closed_process 45 "${environment[@]}" APR_AGENT_COMMAND \
+  if ! _run_closed_process 45 "${root}" \
+      "${environment[@]}" APR_AGENT_COMMAND \
       "${RUNNER[@]}" "${arguments[@]}" >"${log}" 2>&1; then
     return 1
   fi
@@ -224,6 +231,9 @@ _run_positive() {
     _fail "APR_AGENT_BOOTSTRAP_REPORT_INVALID ${mode}"
   grep -Fxq APR_AGENT_CONTINUE_OK "${root}/continue.log" ||
     _fail "APR_AGENT_CONTINUE_REPORT_INVALID ${mode}"
+  if grep -Raq 'apr-canary-' "${root}"; then
+    _fail "APR_AGENT_CANARY_PUBLISHED ${mode}"
+  fi
   printf 'APR_AGENT_POSITIVE_OK %s\n' "${mode}"
 }
 
@@ -259,6 +269,18 @@ _run_negatives() {
       _fail "APR_AGENT_NEGATIVE_REPORT_INVALID ${mode} ${scenario}"
     cmp -s -- "${root}/negative.log" "${root}/negative.txt" ||
       _fail "APR_AGENT_NEGATIVE_OUTPUT_MISMATCH ${mode} ${scenario}"
+    local expected_limit
+    expected_limit="$(
+      awk -F '\t' -v scenario="${scenario}" \
+        'NR > 1 && $1 == scenario { print "LIMIT\t" $0 }' \
+        "${LIMIT_CASES}"
+    )"
+    if [[ -n "${expected_limit}" ]]; then
+      grep -Fxq "${expected_limit}" "${root}/negative.txt" ||
+        _fail "APR_AGENT_LIMIT_OBSERVATION_MISMATCH ${mode} ${scenario}"
+    elif grep -q '^LIMIT' "${root}/negative.txt"; then
+      _fail "APR_AGENT_LIMIT_OBSERVATION_UNDECLARED ${mode} ${scenario}"
+    fi
     if _requires_seed_state "${scenario}"; then
       local lineage_after
       lineage_after="$(sha256sum "${root}/host-lineage.json" | awk '{print $1}')"
@@ -267,6 +289,9 @@ _run_negatives() {
     elif [[ -e "${root}/host-lineage.json" ||
             -d "${root}/restricted-state" ]]; then
       _fail "APR_AGENT_REJECTED_STATE_CREATED ${mode} ${scenario}"
+    fi
+    if grep -Raq 'apr-canary-' "${root}"; then
+      _fail "APR_AGENT_NEGATIVE_CANARY_PUBLISHED ${mode} ${scenario}"
     fi
   done <"${NEGATIVE_CASES}"
   printf 'APR_AGENT_NEGATIVES_OK %s\n' "${mode}"
@@ -282,7 +307,8 @@ _run_environment_negatives() {
   local -a base
   mapfile -d '' -t base < <(_closed_environment "${mode}" "${root}")
   local log="${root}/unallowlisted.log"
-  if _run_closed_process 10 "${base[@]}" "APR_UNRELATED=present" \
+  if _run_closed_process 10 "${root}" \
+      "${base[@]}" "APR_UNRELATED=present" \
       APR_AGENT_COMMAND "${RUNNER[@]}" bootstrap --mode "${mode}" --root "${root}" \
       --output "${root}/unallowlisted.json" \
       --environment-manifest "${manifest}" >"${log}" 2>&1; then
@@ -295,31 +321,50 @@ _run_environment_negatives() {
   for canary_class in \
     github actions provider state-encryption unrelated-workflow runner \
     package-registry cloud signing; do
-    local canary_root="${root}/${canary_class}"
-    mkdir -p -- "${canary_root}"
-    local -a contaminated
-    mapfile -d '' -t contaminated < <(
-      _closed_environment "${mode}" "${canary_root}" |
-        while IFS= read -r -d '' entry; do
-          if [[ "${entry}" == HOME=* ]]; then
-            printf '%s\0' "HOME=apr-canary-${canary_class}-environment"
-          else
-            printf '%s\0' "${entry}"
-          fi
-        done
-    )
-    log="${canary_root}/run.log"
-    if _run_closed_process 10 "${contaminated[@]}" APR_AGENT_COMMAND \
-        "${RUNNER[@]}" bootstrap --mode "${mode}" --root "${canary_root}" \
-        --output "${canary_root}/proof.json" \
-        --environment-manifest "${manifest}" >"${log}" 2>&1; then
-      _fail "APR_AGENT_ENVIRONMENT_CANARY_ACCEPTED ${mode} ${canary_class}"
-    fi
-    grep -Fxq APR_AGENT_ENVIRONMENT_CANARY "${log}" ||
-      _fail "APR_AGENT_ENVIRONMENT_CANARY_CODE ${mode} ${canary_class}"
-    [[ ! -e "${canary_root}/host-lineage.json" &&
-       ! -d "${canary_root}/restricted-state" ]] ||
-      _fail "APR_AGENT_ENVIRONMENT_CANARY_STATE ${mode} ${canary_class}"
+    local route
+    for route in unallowlisted-name allowlisted-value ambient-value; do
+      local canary_root="${root}/${canary_class}/${route}"
+      mkdir -p -- "${canary_root}"
+      local -a contaminated
+      mapfile -d '' -t contaminated < <(
+        _closed_environment "${mode}" "${canary_root}" |
+          while IFS= read -r -d '' entry; do
+            if [[ "${route}" == "allowlisted-value" &&
+                  "${entry}" == HOME=* ]]; then
+              printf '%s\0' \
+                "HOME=apr-canary-${canary_class}-allowlisted"
+            else
+              printf '%s\0' "${entry}"
+            fi
+          done
+      )
+      if [[ "${route}" == "unallowlisted-name" ]]; then
+        contaminated+=(
+          "apr-canary-${canary_class}-name=synthetic"
+        )
+      elif [[ "${route}" == "ambient-value" ]]; then
+        contaminated+=(
+          "APR_UNRELATED=apr-canary-${canary_class}-ambient"
+        )
+      fi
+      log="${canary_root}/run.log"
+      if _run_closed_process 10 "${canary_root}" \
+          "${contaminated[@]}" APR_AGENT_COMMAND \
+          "${RUNNER[@]}" bootstrap --mode "${mode}" \
+          --root "${canary_root}" \
+          --output "${canary_root}/proof.json" \
+          --environment-manifest "${manifest}" >"${log}" 2>&1; then
+        _fail \
+          "APR_AGENT_ENVIRONMENT_CANARY_ACCEPTED ${mode} ${canary_class} ${route}"
+      fi
+      grep -Fxq APR_AGENT_ENVIRONMENT_CANARY "${log}" ||
+        _fail \
+          "APR_AGENT_ENVIRONMENT_CANARY_CODE ${mode} ${canary_class} ${route}"
+      [[ ! -e "${canary_root}/host-lineage.json" &&
+         ! -d "${canary_root}/restricted-state" ]] ||
+        _fail \
+          "APR_AGENT_ENVIRONMENT_CANARY_STATE ${mode} ${canary_class} ${route}"
+    done
   done
   printf 'APR_AGENT_ENVIRONMENT_OK %s\n' "${mode}"
 }
@@ -330,18 +375,31 @@ _verify_case_manifests() {
   fi
   local header
   IFS= read -r header <"${LIMIT_CASES}"
-  [[ "${header}" == $'outcome\tcase' ]] ||
+  [[ "${header}" == $'case\tstatus\taction\tcode\tmodel_calls\ttool_calls\tprovider_requests\tstore_calls\tsession_admissions\tstate_mutation\tlineage_mutation' ]] ||
     _fail APR_AGENT_LIMIT_MANIFEST_INVALID
-  local outcome cases scenario
-  while IFS=$'\t' read -r outcome cases; do
-    [[ -n "${outcome}" && -n "${cases}" ]] ||
+  local scenario status action code model_calls tool_calls
+  local provider_requests store_calls session_admissions
+  local state_mutation lineage_mutation
+  while IFS=$'\t' read -r scenario status action code model_calls tool_calls \
+      provider_requests store_calls session_admissions state_mutation \
+      lineage_mutation; do
+    [[ -n "${scenario}" &&
+       "${status}" =~ ^(passed|failed)$ &&
+       -n "${action}" &&
+       -n "${code}" &&
+       "${model_calls}" =~ ^[0-9]+$ &&
+       "${tool_calls}" =~ ^[0-9]+$ &&
+       "${provider_requests}" =~ ^[0-9]+$ &&
+       "${store_calls}" =~ ^[0-9]+$ &&
+       "${session_admissions}" =~ ^[0-9]+$ &&
+       "${state_mutation}" =~ ^(true|false)$ &&
+       "${lineage_mutation}" =~ ^(true|false)$ ]] ||
       _fail APR_AGENT_LIMIT_MANIFEST_INVALID
-    IFS=',' read -ra split_cases <<<"${cases}"
-    for scenario in "${split_cases[@]}"; do
-      grep -Fxq "${scenario}" "${NEGATIVE_CASES}" ||
-        _fail "APR_AGENT_LIMIT_CASE_MISSING ${outcome}"
-    done
+    grep -Fxq "${scenario}" "${NEGATIVE_CASES}" ||
+      _fail "APR_AGENT_LIMIT_CASE_MISSING ${code}"
   done < <(tail -n +2 "${LIMIT_CASES}")
+  [[ -z "$(cut -f1 "${LIMIT_CASES}" | tail -n +2 | sort | uniq -d)" ]] ||
+    _fail APR_AGENT_LIMIT_CASE_DUPLICATE
 }
 
 _build_framework() {
