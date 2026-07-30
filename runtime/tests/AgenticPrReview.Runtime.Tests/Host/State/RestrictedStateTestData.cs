@@ -176,6 +176,7 @@ internal sealed class TestSessionAdmission
 {
     internal int Calls { get; private set; }
     internal bool Reject { get; set; }
+    internal int? RejectOnCall { get; set; }
     internal bool Throw { get; set; }
 
     public RestrictedStateSessionAdmissionResult Admit(
@@ -190,7 +191,9 @@ internal sealed class TestSessionAdmission
                 "Synthetic session admission.");
         }
 
-        if (Reject || plaintext.IsEmpty)
+        if (Reject ||
+            Calls == RejectOnCall ||
+            plaintext.IsEmpty)
         {
             return RestrictedStateSessionAdmissionResult.Failure();
         }

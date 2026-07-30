@@ -159,6 +159,7 @@ public sealed class RestrictedStateServiceTests
         var handoff = service.PrepareHandoff(
             access,
             lineage,
+            RestrictedStateTestData.SessionContext(),
             CancellationToken.None);
         Assert.Equal(StateAction.HandoffReady, handoff.Result.Action);
         Assert.Equal(
@@ -637,6 +638,7 @@ public sealed class RestrictedStateServiceTests
         var handoff = service.PrepareHandoff(
             access,
             expired,
+            RestrictedStateTestData.SessionContext(),
             CancellationToken.None);
 
         Assert.Equal(
@@ -784,7 +786,7 @@ public sealed class RestrictedStateServiceTests
         Assert.Equal(
             RestrictedStateCodes.LineageMismatch,
             lineageResult.Result.Code);
-        Assert.Equal(2, sessions.Calls);
+        Assert.Equal(3, sessions.Calls);
         Assert.Null(store.Snapshot.Staging);
     }
 
@@ -1080,6 +1082,7 @@ public sealed class RestrictedStateServiceTests
         var result = service.PrepareHandoff(
             access,
             Lineage(current),
+            RestrictedStateTestData.SessionContext(),
             CancellationToken.None);
 
         Assert.Equal(expectedAction, result.Result.Action);
@@ -1310,6 +1313,274 @@ public sealed class RestrictedStateServiceTests
         Assert.NotNull(store.Snapshot.Staging);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ProducerBindingTamperCannotInfluenceLineageSelectedOperations(
+        bool mutateHead)
+    {
+        var access = RestrictedStateTestData.Access();
+        var keys = new TestKeyResolver();
+        var sessions = new TestSessionAdmission();
+        var current = RestrictedStateTestData.Candidate(access, keys);
+        var binding = mutateHead
+            ? current.Binding with
+            {
+                ProducerHeadSha = new string('7', 40),
+            }
+            : current.Binding with
+            {
+                ProducerBaseSha = new string('6', 40),
+            };
+        var tampered = Rebind(current, binding);
+        var lineage = Lineage(current);
+
+        var prepareStore = new MemoryRestrictedStateStore
+        {
+            Snapshot = new RestrictedStateSnapshot([tampered], null),
+        };
+        var prepare = Service(prepareStore, keys, sessions).Prepare(
+            access,
+            new RestrictedStatePrepareRequest(
+                lineage,
+                new byte[] { 2 },
+                RestrictedStateTestData.SessionContext(
+                    1,
+                    current.EnvelopeSha256)),
+            CancellationToken.None);
+
+        var staging = RestrictedStateTestData.Candidate(
+            access,
+            keys,
+            1,
+            current.EnvelopeSha256,
+            plaintext: [2]);
+        var acceptStore = new MemoryRestrictedStateStore
+        {
+            Snapshot = new RestrictedStateSnapshot(
+                [tampered],
+                staging),
+        };
+        var accept = Service(acceptStore, keys, sessions).Accept(
+            access,
+            lineage,
+            Receipt(staging),
+            RestrictedStateTestData.SessionContext(
+                1,
+                current.EnvelopeSha256),
+            CancellationToken.None);
+
+        var handoffStore = new MemoryRestrictedStateStore
+        {
+            Snapshot = new RestrictedStateSnapshot([tampered], null),
+        };
+        var handoff = Service(handoffStore, keys, sessions).PrepareHandoff(
+            access,
+            lineage,
+            RestrictedStateTestData.SessionContext(),
+            CancellationToken.None);
+
+        Assert.Equal(
+            RestrictedStateCodes.AuthenticationFailed,
+            prepare.Result.Code);
+        Assert.Null(prepareStore.Snapshot.Staging);
+        Assert.Equal(
+            RestrictedStateCodes.AuthenticationFailed,
+            accept.Code);
+        Assert.Equal(tampered, Assert.Single(acceptStore.Snapshot.Accepted));
+        Assert.Equal(staging, acceptStore.Snapshot.Staging);
+        Assert.Equal(
+            RestrictedStateCodes.AuthenticationFailed,
+            handoff.Result.Code);
+        Assert.Null(handoff.Receipt);
+        Assert.Equal(4, keys.ReadCalls);
+        Assert.Equal(2, sessions.Calls);
+        Assert.Equal(0, prepareStore.WriteCalls);
+        Assert.Equal(0, acceptStore.WriteCalls);
+        Assert.Equal(0, handoffStore.WriteCalls);
+    }
+
+    [Fact]
+    public void LineageSelectedCandidatesRequireSessionReadmission()
+    {
+        var access = RestrictedStateTestData.Access();
+        var current = RestrictedStateTestData.Candidate(
+            access,
+            new TestKeyResolver());
+        var lineage = Lineage(current);
+
+        var prepareStore = new MemoryRestrictedStateStore
+        {
+            Snapshot = new RestrictedStateSnapshot([current], null),
+        };
+        var prepareSessions = new TestSessionAdmission
+        {
+            RejectOnCall = 2,
+        };
+        var prepare = Service(
+            prepareStore,
+            new TestKeyResolver(),
+            prepareSessions).Prepare(
+                access,
+                new RestrictedStatePrepareRequest(
+                    lineage,
+                    new byte[] { 2 },
+                    RestrictedStateTestData.SessionContext(
+                        1,
+                        current.EnvelopeSha256)),
+                CancellationToken.None);
+
+        var acceptKeys = new TestKeyResolver();
+        var acceptedCurrent = RestrictedStateTestData.Candidate(
+            access,
+            acceptKeys);
+        var staging = RestrictedStateTestData.Candidate(
+            access,
+            acceptKeys,
+            1,
+            acceptedCurrent.EnvelopeSha256,
+            plaintext: [2]);
+        var acceptStore = new MemoryRestrictedStateStore
+        {
+            Snapshot = new RestrictedStateSnapshot(
+                [acceptedCurrent],
+                staging),
+        };
+        var acceptSessions = new TestSessionAdmission
+        {
+            RejectOnCall = 2,
+        };
+        var accept = Service(
+            acceptStore,
+            acceptKeys,
+            acceptSessions).Accept(
+                access,
+                Lineage(acceptedCurrent),
+                Receipt(staging),
+                RestrictedStateTestData.SessionContext(
+                    1,
+                    acceptedCurrent.EnvelopeSha256),
+                CancellationToken.None);
+
+        var handoffKeys = new TestKeyResolver();
+        var handoffCurrent = RestrictedStateTestData.Candidate(
+            access,
+            handoffKeys);
+        var handoffStore = new MemoryRestrictedStateStore
+        {
+            Snapshot = new RestrictedStateSnapshot(
+                [handoffCurrent],
+                null),
+        };
+        var handoffSessions = new TestSessionAdmission
+        {
+            RejectOnCall = 1,
+        };
+        var handoff = Service(
+            handoffStore,
+            handoffKeys,
+            handoffSessions).PrepareHandoff(
+                access,
+                Lineage(handoffCurrent),
+                RestrictedStateTestData.SessionContext(),
+                CancellationToken.None);
+
+        Assert.Equal(
+            RestrictedStateCodes.EnvelopeInvalid,
+            prepare.Result.Code);
+        Assert.Equal(2, prepareSessions.Calls);
+        Assert.Null(prepareStore.Snapshot.Staging);
+        Assert.Equal(
+            RestrictedStateCodes.EnvelopeInvalid,
+            accept.Code);
+        Assert.Equal(2, acceptSessions.Calls);
+        Assert.Equal(
+            acceptedCurrent,
+            Assert.Single(acceptStore.Snapshot.Accepted));
+        Assert.Equal(staging, acceptStore.Snapshot.Staging);
+        Assert.Equal(
+            RestrictedStateCodes.EnvelopeInvalid,
+            handoff.Result.Code);
+        Assert.Equal(1, handoffSessions.Calls);
+        Assert.Null(handoff.Receipt);
+    }
+
+    [Fact]
+    public void RetryAndReconcileAuthenticateLineagePredecessor()
+    {
+        var store = new MemoryRestrictedStateStore();
+        var keys = new TestKeyResolver();
+        var sessions = new TestSessionAdmission();
+        var service = Service(store, keys, sessions);
+        var access = RestrictedStateTestData.Access();
+        var first = PrepareAndAccept(
+            service,
+            store,
+            access,
+            null,
+            0,
+            null);
+        var lineage = Lineage(first);
+        var prepared = service.Prepare(
+            access,
+            new RestrictedStatePrepareRequest(
+                lineage,
+                new byte[] { 2 },
+                RestrictedStateTestData.SessionContext(
+                    1,
+                    first.EnvelopeSha256)),
+            CancellationToken.None);
+        Assert.Equal(
+            StateAction.Accepted,
+            service.Accept(
+                access,
+                lineage,
+                prepared.Receipt!,
+                RestrictedStateTestData.SessionContext(
+                    1,
+                    first.EnvelopeSha256),
+                CancellationToken.None).Action);
+
+        var current = store.Snapshot.Accepted[0];
+        var tamperedPredecessor = Rebind(
+            store.Snapshot.Accepted[1],
+            store.Snapshot.Accepted[1].Binding with
+            {
+                ProducerHeadSha = new string('7', 40),
+            });
+        store.Snapshot = new RestrictedStateSnapshot(
+            [current, tamperedPredecessor],
+            null);
+
+        var accept = service.Accept(
+            access,
+            lineage,
+            prepared.Receipt!,
+            RestrictedStateTestData.SessionContext(
+                1,
+                first.EnvelopeSha256),
+            CancellationToken.None);
+        var reconcile = service.Reconcile(
+            access,
+            lineage,
+            prepared.Receipt!,
+            RestrictedStateTestData.SessionContext(
+                1,
+                first.EnvelopeSha256),
+            CancellationToken.None);
+
+        Assert.Equal(
+            RestrictedStateCodes.AuthenticationFailed,
+            accept.Code);
+        Assert.Equal(
+            RestrictedStateCodes.AuthenticationFailed,
+            reconcile.Code);
+        Assert.Equal(
+            tamperedPredecessor,
+            store.Snapshot.Accepted[1]);
+        Assert.Null(store.Snapshot.Staging);
+    }
+
     private static RestrictedStateService Service(
         MemoryRestrictedStateStore store,
         TestKeyResolver keys,
@@ -1361,6 +1632,14 @@ public sealed class RestrictedStateServiceTests
             candidate.Binding.AcceptedAtUnixSeconds,
             candidate.Binding.ExpiresAtUnixSeconds,
             TransitionAuthorized: true);
+
+    private static PreparedStateReceipt Receipt(
+        RestrictedStateCandidate candidate) =>
+        new(
+            candidate.Binding.Generation,
+            candidate.SessionSha256,
+            candidate.EnvelopeSha256,
+            candidate.ObjectIdentity);
 
     private static RestrictedStateCandidate Rebind(
         RestrictedStateCandidate candidate,

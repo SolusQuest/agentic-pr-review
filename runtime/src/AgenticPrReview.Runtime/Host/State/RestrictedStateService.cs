@@ -128,6 +128,19 @@ internal sealed class RestrictedStateService
                 RestrictedStateCodes.LineageMismatch);
         }
 
+        if (request.Lineage is not null)
+        {
+            var currentAuthenticationCode = AuthenticateCandidate(
+                access,
+                acceptedCurrent!,
+                request.SessionContext);
+            if (currentAuthenticationCode is not null)
+            {
+                ZeroSession(session);
+                return PrepareFailure(currentAuthenticationCode);
+            }
+        }
+
         if (request.Lineage is null)
         {
             if (acceptedCurrent is not null)
@@ -498,6 +511,16 @@ internal sealed class RestrictedStateService
                         RestrictedStateCodes.CurrentMissing);
                 }
 
+                var predecessorAuthenticationCode =
+                    AuthenticateCandidate(
+                        access,
+                        predecessor,
+                        sessionContext);
+                if (predecessorAuthenticationCode is not null)
+                {
+                    return Failure(predecessorAuthenticationCode);
+                }
+
                 if (!MatchesLineage(predecessor, lineage))
                 {
                     return Failure(
@@ -587,6 +610,15 @@ internal sealed class RestrictedStateService
             if (previous is null)
             {
                 return Failure(RestrictedStateCodes.CurrentMissing);
+            }
+
+            var previousAuthenticationCode = AuthenticateCandidate(
+                access,
+                previous,
+                sessionContext);
+            if (previousAuthenticationCode is not null)
+            {
+                return Failure(previousAuthenticationCode);
             }
 
             if (!MatchesLineage(previous, lineage))
@@ -712,6 +744,15 @@ internal sealed class RestrictedStateService
                 return Failure(RestrictedStateCodes.CurrentMissing);
             }
 
+            var predecessorAuthenticationCode = AuthenticateCandidate(
+                access,
+                predecessor,
+                sessionContext);
+            if (predecessorAuthenticationCode is not null)
+            {
+                return Failure(predecessorAuthenticationCode);
+            }
+
             if (!MatchesLineage(predecessor, lineage))
             {
                 return Failure(RestrictedStateCodes.LineageMismatch);
@@ -829,6 +870,7 @@ internal sealed class RestrictedStateService
     internal RestrictedStateHandoffResult PrepareHandoff(
         AuthorizedStateAccess access,
         AcceptedLineage lineage,
+        RestrictedStateSessionAdmissionContext sessionContext,
         CancellationToken cancellationToken)
     {
         if (cancellationToken.IsCancellationRequested)
@@ -836,7 +878,8 @@ internal sealed class RestrictedStateService
             return HandoffFailure(RestrictedStateCodes.Cancelled);
         }
 
-        if (!RestrictedStateValidation.IsValidLineage(lineage) ||
+        if (sessionContext is null ||
+            !RestrictedStateValidation.IsValidLineage(lineage) ||
             lineage.Scope != access.Scope ||
             !lineage.TransitionAuthorized ||
             lineage.ExpiresAtUnixSeconds <= unixTimeSeconds())
@@ -862,6 +905,15 @@ internal sealed class RestrictedStateService
         {
             return HandoffFailure(
                 RestrictedStateCodes.CurrentMissing);
+        }
+
+        var authenticationCode = AuthenticateCandidate(
+            access,
+            current,
+            sessionContext);
+        if (authenticationCode is not null)
+        {
+            return HandoffFailure(authenticationCode);
         }
 
         if (!StringComparer.Ordinal.Equals(
