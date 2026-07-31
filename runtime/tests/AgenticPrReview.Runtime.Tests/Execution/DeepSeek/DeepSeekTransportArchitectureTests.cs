@@ -5,6 +5,7 @@ using System.Reflection.PortableExecutable;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using AgenticPrReview.Runtime;
+using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 
 namespace AgenticPrReview.Runtime.Tests.Execution.DeepSeek;
@@ -169,6 +170,66 @@ public sealed partial class DeepSeekTransportArchitectureTests
         }
 
         Assert.Empty(callers);
+    }
+
+    [Fact]
+    public void RawCredentialValueIsReadOnlyByTheConcreteTransport()
+    {
+        var readers = new List<string>();
+        var violations = new List<string>();
+        foreach (var type in typeof(RuntimeApplication).Assembly.GetTypes())
+        {
+            foreach (var method in DeclaredExecutableMembers(type))
+            {
+                foreach (var member in ResolveMethodBodyMembers(method))
+                {
+                    if (member.DeclaringType != typeof(DeepSeekCredential) ||
+                        !StringComparer.Ordinal.Equals(
+                            member.Name,
+                            "get_Value"))
+                    {
+                        continue;
+                    }
+
+                    var reader = $"{type.FullName}.{method.Name}";
+                    readers.Add(reader);
+                    if (!IsConcreteTransport(type))
+                    {
+                        violations.Add(reader);
+                    }
+                }
+            }
+        }
+
+        Assert.NotEmpty(readers);
+        Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void RequestWriterHasNoCredentialOrTransportCapability()
+    {
+        var types = new[]
+        {
+            typeof(DeepSeekRequestWriter),
+            typeof(DeepSeekRequestWriteResult),
+        };
+        var forbidden = new[]
+        {
+            typeof(DeepSeekCredential),
+            typeof(DeepSeekTransport),
+            typeof(IDeepSeekTransport),
+            typeof(HttpClient),
+            typeof(HttpMessageHandler),
+            typeof(AgentToolRegistry),
+            typeof(DeepSeekProviderContract),
+            typeof(DeepSeekLiveProviderExecutor),
+        };
+        var references = types
+            .SelectMany(ReferencedTypes)
+            .SelectMany(ExpandTypeGraph)
+            .ToArray();
+
+        Assert.DoesNotContain(references, forbidden.Contains);
     }
 
     [Fact]
