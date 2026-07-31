@@ -308,7 +308,10 @@ internal sealed record AgentSessionCompletedRun(
     ReviewedIdentity ReviewedIdentity,
     string StablePlanSha256,
     ImmutableArray<AgentSessionRecord> Records,
-    AgentSessionContinuation Continuation);
+    AgentSessionContinuation Continuation)
+{
+    public override string ToString() => "agent_session_completed_run";
+}
 
 internal abstract record AgentSessionRecord(
     string Kind,
@@ -332,7 +335,10 @@ internal sealed record AgentSessionReviewContextRecord(
         Sequence,
         Role,
         Framing,
-        Classification);
+        Classification)
+{
+    public override string ToString() => "agent_session_review_context";
+}
 
 internal sealed record AgentSessionAssistantMessageRecord(
     string Id,
@@ -348,7 +354,10 @@ internal sealed record AgentSessionAssistantMessageRecord(
         Sequence,
         Role,
         Framing,
-        Classification);
+        Classification)
+{
+    public override string ToString() => "agent_session_assistant_message";
+}
 
 internal sealed record AgentSessionToolResultRecord(
     string Id,
@@ -367,7 +376,10 @@ internal sealed record AgentSessionToolResultRecord(
         Sequence,
         Role,
         Framing,
-        Classification);
+        Classification)
+{
+    public override string ToString() => "agent_session_tool_result";
+}
 
 internal sealed record AgentSessionReviewOutcomeRecord(
     string Id,
@@ -386,7 +398,10 @@ internal sealed record AgentSessionReviewOutcomeRecord(
         Sequence,
         Role,
         Framing,
-        Classification);
+        Classification)
+{
+    public override string ToString() => "agent_session_review_outcome";
+}
 
 internal abstract record AgentSessionAssistantContent(
     string Kind,
@@ -395,19 +410,28 @@ internal abstract record AgentSessionAssistantContent(
 internal sealed record AgentSessionTextContent(
     int ContentPosition,
     string Text)
-    : AgentSessionAssistantContent("text", ContentPosition);
+    : AgentSessionAssistantContent("text", ContentPosition)
+{
+    public override string ToString() => "agent_session_text_content";
+}
 
 internal sealed record AgentSessionContinuationSlotContent(
     int ContentPosition,
     string ContinuationItemId)
-    : AgentSessionAssistantContent("continuation_slot", ContentPosition);
+    : AgentSessionAssistantContent("continuation_slot", ContentPosition)
+{
+    public override string ToString() => "agent_session_continuation_slot";
+}
 
 internal sealed record AgentSessionToolCallContent(
     int ContentPosition,
     string CallId,
     string Name,
     string ArgumentsJson)
-    : AgentSessionAssistantContent("tool_call", ContentPosition);
+    : AgentSessionAssistantContent("tool_call", ContentPosition)
+{
+    public override string ToString() => "agent_session_tool_call";
+}
 
 internal sealed record AgentSessionTerminalCallContent(
     int ContentPosition,
@@ -415,7 +439,10 @@ internal sealed record AgentSessionTerminalCallContent(
     string Name,
     string ArgumentsJson,
     string ArgumentsSha256)
-    : AgentSessionAssistantContent("terminal_call", ContentPosition);
+    : AgentSessionAssistantContent("terminal_call", ContentPosition)
+{
+    public override string ToString() => "agent_session_terminal_call";
+}
 
 internal sealed record AgentSessionContinuation(
     string CodecId,

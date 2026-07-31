@@ -714,35 +714,117 @@ public sealed class DeepSeekChatBackendTests
     public void TouchedDiagnosticSurfacesDoNotPrintCanaries()
     {
         const string canary = "APR106-REASONING-CANARY";
+        const string providerText = "APR106-PROVIDER-TEXT-CANARY";
+        const string arguments = "APR106-ARGUMENTS-CANARY";
+        const string result = "APR106-RESULT-CANARY";
+        const string reviewContext = "APR106-REVIEW-CONTEXT-CANARY";
+        const string findings = "APR106-FINDINGS-CANARY";
+        const string identity = "APR106-IDENTITY-CANARY";
+        const string authorization = "APR106-AUTHORIZATION-CANARY";
+        string[] canaries =
+        [
+            canary,
+            providerText,
+            arguments,
+            result,
+            reviewContext,
+            findings,
+            identity,
+            authorization,
+        ];
         object[] values =
         [
-            new ProjectTextContent(canary),
+            new ProjectTextContent(providerText),
             new ProjectReasoningContent(canary, canary, canary, canary, 1, 0),
-            new ProjectToolCallContent(canary, canary, canary),
-            new ProjectToolResultContent(canary, canary),
+            new ProjectToolCallContent(canary, canary, arguments),
+            new ProjectToolResultContent(canary, result),
             new ProjectContinuationItem(canary, canary, canary, canary, 1, 0),
-            new ProjectContinuation(canary, canary, canary, canary, []),
+            new ProjectContinuation(identity, identity, identity, identity, []),
             new MinimalChatContent(canary, canary, canary, canary, canary,
                 canary, canary, 1, 0),
             new MinimalChatContinuationItem(canary, canary, canary, canary, 1, 0),
-            new MinimalChatContinuation(canary, canary, canary, canary, []),
+            new MinimalChatContinuation(identity, identity, identity, identity, []),
             new AgentContinuationCandidateItem(canary, canary, canary, canary, 1, 0),
-            new AgentContinuationCandidate(canary, canary, canary, canary, []),
+            new AgentContinuationCandidate(identity, identity, identity, identity, []),
+            new AgentTextPart(providerText),
+            new AgentMessageEvent(
+                0,
+                "assistant",
+                [new AgentTextPart(providerText)]),
             new AgentContinuationCodecValue(canary, canary, canary),
             new AgentSessionContinuationItem(canary, "utf8", canary, [],
                 new string('a', 64), canary, 0, canary),
             new AgentSessionContinuation(canary, canary, []),
-            new DeepSeekAdapterContext(canary, canary, canary, canary),
+            new AgentSessionCompletedRun(
+                identity,
+                0,
+                new ReviewedIdentity(identity, 1, new string('0', 40),
+                    new string('1', 40)),
+                authorization,
+                [],
+                new AgentSessionContinuation(canary, canary, [])),
+            new AgentSessionReviewContextRecord(
+                "r0",
+                0,
+                new ReviewedIdentity("repo", 1, new string('0', 40),
+                    new string('1', 40)),
+                reviewContext,
+                "user",
+                "text",
+                authorization),
+            new AgentSessionToolResultRecord(
+                "r1",
+                1,
+                "m0",
+                "call0",
+                "read_file",
+                new string('a', 64),
+                result,
+                "tool",
+                "tool_result",
+                authorization),
+            new AgentSessionReviewOutcomeRecord(
+                "r2",
+                2,
+                "m1",
+                "finish0",
+                new string('b', 64),
+                providerText,
+                findings,
+                "assistant",
+                "validated_terminal",
+                authorization),
+            new AgentSessionAssistantMessageRecord(
+                "r3",
+                3,
+                0,
+                [new AgentSessionTextContent(0, providerText)],
+                "assistant",
+                "message",
+                authorization),
+            new AgentSessionTextContent(0, providerText),
+            new AgentSessionContinuationSlotContent(0, identity),
+            new AgentSessionToolCallContent(1, "call0", "read_file", arguments),
+            new AgentSessionTerminalCallContent(
+                1,
+                "finish0",
+                "finish_review",
+                arguments,
+                new string('c', 64)),
+            new DeepSeekAdapterContext(identity, identity, identity, identity),
             new DeepSeekChatBackendException(),
             new AgentDiagnostic(AgentFailureCodes.ResponseInvalid, 0, 0),
         ];
 
         foreach (var value in values)
         {
-            Assert.DoesNotContain(
-                canary,
-                value.ToString(),
-                StringComparison.Ordinal);
+            foreach (var secret in canaries)
+            {
+                Assert.DoesNotContain(
+                    secret,
+                    value.ToString(),
+                    StringComparison.Ordinal);
+            }
         }
     }
 

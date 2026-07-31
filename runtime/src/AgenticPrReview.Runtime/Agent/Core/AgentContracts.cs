@@ -210,12 +210,18 @@ internal sealed record AgentMessageEvent(
     int MessageIndex,
     string Role,
     ImmutableArray<AgentMessagePart> Contents)
-    : AgentLogicalEvent("message");
+    : AgentLogicalEvent("message")
+{
+    public override string ToString() => "agent_message_event";
+}
 
 internal abstract record AgentMessagePart(string Kind);
 
 internal sealed record AgentTextPart(string Text)
-    : AgentMessagePart("text");
+    : AgentMessagePart("text")
+{
+    public override string ToString() => "agent_text_part";
+}
 
 internal sealed record AgentReasoningReferencePart(
     string ReadableSha256,

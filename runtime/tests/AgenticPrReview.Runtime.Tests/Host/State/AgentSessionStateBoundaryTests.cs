@@ -1,10 +1,12 @@
 using System.Collections.Immutable;
+using System.Text;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
+using AgenticPrReview.Runtime.Canonical;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.State;
 
@@ -257,7 +259,44 @@ public sealed class AgentSessionStateBoundaryTests
             out var mutatedArtifact,
             out var writeFailure),
             writeFailure);
-        var mutated = fixture with { Artifact = mutatedArtifact! };
+        AssertAuthenticatedEnvelopeInvalid(
+            fixture with { Artifact = mutatedArtifact! });
+    }
+
+    [Fact]
+    public async Task AuthenticatedWrongContinuationTokenIsStateEnvelopeInvalid()
+    {
+        var fixture = await BuildSessionAsync();
+        var json = Encoding.UTF8.GetString(
+            fixture.Artifact.Plaintext[AgentSessionFormat.FramingBytes..]);
+        var mutatedJson = json.Replace(
+            "\"associated_call_id\":null",
+            "\"associated_call_id\":{}",
+            StringComparison.Ordinal);
+        Assert.NotEqual(json, mutatedJson);
+        var jsonBytes = Encoding.UTF8.GetBytes(mutatedJson);
+        var plaintext = new byte[
+            AgentSessionFormat.FramingBytes + jsonBytes.Length];
+        "APRSES01"u8.CopyTo(plaintext);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(
+            plaintext.AsSpan(8, 4),
+            checked((uint)jsonBytes.Length));
+        jsonBytes.CopyTo(plaintext, AgentSessionFormat.FramingBytes);
+        var artifact = new AgentSessionArtifact(
+            plaintext,
+            AgentCanonical.HashDomain(
+                AgentCanonical.SessionDomain,
+                plaintext),
+            fixture.Artifact.Document);
+
+        AssertAuthenticatedEnvelopeInvalid(
+            fixture with { Artifact = artifact });
+    }
+
+    private static void AssertAuthenticatedEnvelopeInvalid(
+        SessionFixture fixture)
+    {
+        var document = fixture.Artifact.Document;
         var access = Access(document);
         var keys = new TestKeyResolver();
         var scope = access.Scope;
@@ -272,7 +311,7 @@ public sealed class AgentSessionStateBoundaryTests
         Assert.True(RestrictedStateEnvelope.TryEncrypt(
             access,
             binding,
-            mutatedArtifact!.Plaintext,
+            fixture.Artifact.Plaintext,
             keys,
             out var envelope,
             out var encryptCode),
@@ -280,11 +319,11 @@ public sealed class AgentSessionStateBoundaryTests
         var envelopeSha = RestrictedStateEnvelope.EnvelopeSha256(envelope!);
         var candidate = new RestrictedStateCandidate(
             binding,
-            mutatedArtifact.SessionSha256,
+            fixture.Artifact.SessionSha256,
             envelopeSha,
             RestrictedStateEnvelope.ObjectIdentity(
                 binding,
-                mutatedArtifact.SessionSha256,
+                fixture.Artifact.SessionSha256,
                 envelopeSha),
             envelope!);
         var store = new MemoryRestrictedStateStore
@@ -312,7 +351,7 @@ public sealed class AgentSessionStateBoundaryTests
                 RestrictedStateLocatorFamily.Current,
                 RestrictedStateRestoreIntent.Explicit,
                 lineage,
-                StateContext(mutated, envelopeSha256: null)),
+                StateContext(fixture, envelopeSha256: null)),
             CancellationToken.None);
 
         Assert.Equal(

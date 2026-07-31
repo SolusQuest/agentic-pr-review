@@ -212,6 +212,12 @@ internal static class AgentSessionCodec
     {
         artifact = null;
         failureCode = AgentSessionCodes.CurrentMalformed;
+        if (!DeclaredContinuationTokensAreValid(parsed.Root.CompletedRuns!))
+        {
+            failureCode = AgentSessionCodes.ContinuationInvalid;
+            return false;
+        }
+
         try
         {
             var json = parsed.Plaintext.AsSpan(
@@ -248,6 +254,127 @@ internal static class AgentSessionCodec
             return false;
         }
     }
+
+    private static bool DeclaredContinuationTokensAreValid(
+        IEnumerable<JsonElement> runs)
+    {
+        foreach (var run in runs)
+        {
+            if (run.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            if (run.TryGetProperty("records", out var records) &&
+                records.ValueKind == JsonValueKind.Array &&
+                !DeclaredContinuationSlotTokensAreValid(records))
+            {
+                return false;
+            }
+
+            if (run.TryGetProperty("continuation", out var continuation) &&
+                !DeclaredContinuationObjectTokensAreValid(continuation))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool DeclaredContinuationSlotTokensAreValid(
+        JsonElement records)
+    {
+        foreach (var record in records.EnumerateArray())
+        {
+            if (record.ValueKind != JsonValueKind.Object ||
+                !record.TryGetProperty("kind", out var recordKind) ||
+                recordKind.ValueKind != JsonValueKind.String ||
+                !StringComparer.Ordinal.Equals(
+                    recordKind.GetString(),
+                    "assistant_message") ||
+                !record.TryGetProperty("contents", out var contents) ||
+                contents.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var content in contents.EnumerateArray())
+            {
+                if (content.ValueKind != JsonValueKind.Object ||
+                    !content.TryGetProperty("kind", out var contentKind) ||
+                    contentKind.ValueKind != JsonValueKind.String ||
+                    !StringComparer.Ordinal.Equals(
+                        contentKind.GetString(),
+                        "continuation_slot"))
+                {
+                    continue;
+                }
+
+                if (!HasInt32(content, "content_position") ||
+                    !HasKind(
+                        content,
+                        "continuation_item_id",
+                        JsonValueKind.String))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static bool DeclaredContinuationObjectTokensAreValid(
+        JsonElement continuation)
+    {
+        if (continuation.ValueKind != JsonValueKind.Object ||
+            !HasKind(continuation, "codec_id", JsonValueKind.String) ||
+            !HasKind(
+                continuation,
+                "codec_discriminator",
+                JsonValueKind.String) ||
+            !continuation.TryGetProperty("items", out var items) ||
+            items.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (var item in items.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object ||
+                !HasKind(item, "item_id", JsonValueKind.String) ||
+                !HasKind(item, "encoding", JsonValueKind.String) ||
+                !HasKind(item, "payload", JsonValueKind.String) ||
+                !HasKind(item, "payload_sha256", JsonValueKind.String) ||
+                !HasKind(item, "message_id", JsonValueKind.String) ||
+                !HasInt32(item, "content_position") ||
+                !item.TryGetProperty(
+                    "associated_call_id",
+                    out var associatedCallId) ||
+                associatedCallId.ValueKind is not (
+                    JsonValueKind.Null or JsonValueKind.String))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool HasKind(
+        JsonElement element,
+        string propertyName,
+        JsonValueKind expectedKind) =>
+        element.TryGetProperty(propertyName, out var property) &&
+        property.ValueKind == expectedKind;
+
+    private static bool HasInt32(
+        JsonElement element,
+        string propertyName) =>
+        element.TryGetProperty(propertyName, out var property) &&
+        property.ValueKind == JsonValueKind.Number &&
+        property.TryGetInt32(out _);
 
     private static void WriteCanonicalPreservingOrder(
         ref Rfc8785Writer writer,
