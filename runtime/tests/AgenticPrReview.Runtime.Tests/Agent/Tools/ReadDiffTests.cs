@@ -576,22 +576,23 @@ public sealed class ReadDiffTests
             []));
 
         var finalPageArguments = Call(
-            "{\"path\":\"a.txt\",\"start_hunk\":181}").Arguments;
+            "{\"path\":\"a.txt\",\"start_hunk\":200,\"hunk_count\":1}")
+            .Arguments;
         var finalPage = new ReadDiffResult(
             "ok",
             Identity,
             "a.txt",
             new string('a', 64),
             false,
-            181,
-            20,
-            181,
             200,
-            Enumerable.Range(1, 20).Select(ContextHunk).ToImmutableArray(),
+            1,
+            200,
+            200,
+            [ContextHunk(200)],
             false,
             null,
             null);
-        var returnedLines = Enumerable.Range(1, 20);
+        var returnedLines = new[] { 200 };
         Assert.True(TryAdmit(finalPageArguments, finalPage, returnedLines));
         Assert.False(TryAdmit(
             finalPageArguments,
