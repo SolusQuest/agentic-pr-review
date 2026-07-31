@@ -35,7 +35,7 @@ public sealed class AgentLoopTests
         var request = Assert.Single(chat.Requests);
         Assert.True(request.ThinkingRequired);
         Assert.Equal(
-            ["read_file", "search_text", "finish_review"],
+            ["list_files", "search_text", "read_file", "finish_review"],
             request.Tools.Select(tool => tool.Name));
         Assert.Single(outcome.Events.OfType<AgentTerminalEvent>());
     }
@@ -646,6 +646,72 @@ public sealed class AgentLoopTests
         AssertFailure(outcome, "tool_path_not_tracked");
         Assert.Equal(["one", "two"], executor.PreflightOrder);
         Assert.Empty(executor.Order);
+    }
+
+    [Fact]
+    public async Task LaterInvalidListCursorFailsBeforeAnEarlierSiblingDispatch()
+    {
+        var response = new ProjectChatResponse(
+            new ProjectChatMessage(
+                "assistant",
+                [
+                    new ProjectToolCallContent(
+                        "one",
+                        "read_file",
+                        "{\"path\":\"a.txt\"}"),
+                    new ProjectToolCallContent(
+                        "two",
+                        "list_files",
+                        "{\"after\":\"missing.txt\"}"),
+                ]),
+            new ProjectChatUsage(1, 1),
+            1);
+        var executor = new ScriptedToolExecutor(
+            preflight: call =>
+                call.CallId == "two" ? "tool_cursor_invalid" : null);
+
+        var outcome = await new AgentLoop(
+            new ScriptedChatClient([response]),
+            executor).RunAsync(Request(), CancellationToken.None);
+
+        AssertFailure(outcome, "tool_cursor_invalid");
+        Assert.Equal(["one", "two"], executor.PreflightOrder);
+        Assert.Empty(executor.Order);
+    }
+
+    [Fact]
+    public async Task ListFilesRunsThroughTheRealSerialLoopWithCanonicalArguments()
+    {
+        var chat = new ScriptedChatClient([
+            Response(
+                new ProjectToolCallContent(
+                    "list",
+                    "list_files",
+                    "{}"),
+                1,
+                1),
+            Response(TerminalCall("finish", "done"), 1, 1),
+        ]);
+        var executor = new ScriptedToolExecutor(call =>
+        {
+            var list = Assert.IsType<PreparedListFilesCall>(call);
+            return ListFilesSuccess(list.Arguments);
+        });
+
+        var outcome = await new AgentLoop(chat, executor).RunAsync(
+            Request(),
+            CancellationToken.None);
+
+        Assert.True(outcome.Succeeded);
+        var callEvent = Assert.Single(
+            outcome.Events.OfType<AgentToolCallEvent>(),
+            item => item.Name == "list_files");
+        Assert.Equal(
+            "{\"prefix\":null,\"after\":null}",
+            Encoding.UTF8.GetString(callEvent.CanonicalArguments.AsSpan()));
+        Assert.Single(
+            outcome.Events.OfType<AgentToolResultEvent>(),
+            item => item.Name == "list_files");
     }
 
     [Fact]
@@ -1866,6 +1932,7 @@ public sealed class AgentLoopTests
         int line) =>
         call switch
         {
+            PreparedListFilesCall list => ListFilesSuccess(list.Arguments),
             PreparedReadFileCall read => ReadSuccess(
                 read.Arguments,
                 path,
@@ -1876,6 +1943,37 @@ public sealed class AgentLoopTests
                 line),
             _ => AgentToolExecution.Failure(AgentFailureCodes.UnknownTool),
         };
+
+    private static AgentToolExecution ListFilesSuccess(
+        ListFilesArguments arguments)
+    {
+        var withoutObservation = new ListFilesResult(
+            "ok",
+            Identity,
+            arguments.Prefix,
+            arguments.After,
+            [],
+            false,
+            null,
+            null);
+        var observationId = AgentCanonical.HashDomain(
+            AgentCanonical.ListFilesObservationDomain,
+            ListFilesResultWriter.Write(
+                withoutObservation,
+                includeObservationId: false));
+        var result = withoutObservation with { ObservationId = observationId };
+        var canonical = ListFilesResultWriter.Write(result);
+        return new AgentToolExecution(
+            true,
+            null,
+            Encoding.UTF8.GetString(canonical),
+            canonical,
+            new AgentObservation(
+                observationId,
+                Identity,
+                ImmutableDictionary<string, ImmutableHashSet<int>>.Empty
+                    .WithComparers(StringComparer.Ordinal)));
+    }
 
     private static AgentToolExecution ReadSuccess(
         string path,

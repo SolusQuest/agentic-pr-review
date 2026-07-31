@@ -10,10 +10,13 @@ namespace AgenticPrReview.Runtime.Agent.Tools;
 
 internal static class AgentToolRegistry
 {
+    internal const string ListFilesName = "list_files";
     internal const string ReadFileName = "read_file";
     internal const string SearchTextName = "search_text";
     internal const string FinishReviewName = "finish_review";
 
+    internal const string ListFilesDescription =
+        "List tracked repository paths from the reviewed snapshot in ordinal order.";
     internal const string ReadFileDescription =
         "Read a bounded line range from one tracked UTF-8 file in the reviewed snapshot.";
     internal const string SearchTextDescription =
@@ -21,6 +24,8 @@ internal static class AgentToolRegistry
     internal const string FinishReviewDescription =
         "Finish the review with validated grounded findings.";
 
+    internal const string ListFilesSchema =
+        "{\"type\":\"object\",\"properties\":{\"prefix\":{\"type\":\"string\"},\"after\":{\"type\":\"string\"}},\"additionalProperties\":false}";
     internal const string ReadFileSchema =
         "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"start_line\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":2147483647},\"line_count\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":400}},\"required\":[\"path\"],\"additionalProperties\":false}";
     internal const string SearchTextSchema =
@@ -30,11 +35,17 @@ internal static class AgentToolRegistry
 
     internal static ImmutableArray<ProjectToolDefinition> Definitions { get; } =
     [
-        new(ReadFileName, ReadFileDescription, ReadFileSchema),
+        new(ListFilesName, ListFilesDescription, ListFilesSchema),
         new(SearchTextName, SearchTextDescription, SearchTextSchema),
+        new(ReadFileName, ReadFileDescription, ReadFileSchema),
         new(FinishReviewName, FinishReviewDescription, FinishReviewSchema),
     ];
 }
+
+internal sealed record ListFilesArguments(
+    string? Prefix,
+    string? After,
+    byte[] CanonicalBytes);
 
 internal sealed record ReadFileArguments(
     string Path,
@@ -54,6 +65,77 @@ internal sealed record FinishReviewArguments(
 
 internal static class AgentToolArguments
 {
+    internal static bool TryListFiles(
+        string json,
+        out ListFilesArguments? arguments) =>
+        TryListFiles(json, allowCanonicalNulls: false, out arguments);
+
+    internal static bool TryListFilesCanonical(
+        string json,
+        out ListFilesArguments? arguments) =>
+        TryListFiles(json, allowCanonicalNulls: true, out arguments);
+
+    private static bool TryListFiles(
+        string json,
+        bool allowCanonicalNulls,
+        out ListFilesArguments? arguments)
+    {
+        arguments = null;
+        var input = StrictInputBytes(json);
+        if (input is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var dto = JsonSerializer.Deserialize(
+                input,
+                AgentToolJsonContext.Default.ListFilesArgumentsDto);
+            if (dto is null ||
+                (dto.Prefix is not null && !RepositoryPath.IsValid(dto.Prefix)) ||
+                (dto.After is not null && !RepositoryPath.IsValid(dto.After)))
+            {
+                return false;
+            }
+
+            var accepted = allowCanonicalNulls
+                ? input.AsSpan().SequenceEqual(
+                    WriteListFiles(dto.Prefix, dto.After, true, true))
+                : input.AsSpan().SequenceEqual(
+                    WriteListFiles(dto.Prefix, dto.After, false, false)) ||
+                    dto.Prefix is not null &&
+                    input.AsSpan().SequenceEqual(
+                        WriteListFiles(dto.Prefix, dto.After, true, false)) ||
+                    dto.After is not null &&
+                    input.AsSpan().SequenceEqual(
+                        WriteListFiles(dto.Prefix, dto.After, false, true)) ||
+                    dto.Prefix is not null &&
+                    dto.After is not null &&
+                    input.AsSpan().SequenceEqual(
+                        WriteListFiles(dto.Prefix, dto.After, true, true));
+            if (!accepted)
+            {
+                return false;
+            }
+
+            var canonical = WriteListFiles(dto.Prefix, dto.After, true, true);
+            arguments = new ListFilesArguments(
+                dto.Prefix,
+                dto.After,
+                canonical);
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+        catch (Rfc8785CanonicalizationException)
+        {
+            return false;
+        }
+    }
+
     internal static bool TryReadFile(
         string json,
         out ReadFileArguments? arguments)
@@ -386,6 +468,44 @@ internal static class AgentToolArguments
         writer.WriteObjectEnd();
         return writer.ToImmutableArray().ToArray();
     }
+
+    internal static byte[] WriteListFiles(
+        string? prefix,
+        string? after,
+        bool includePrefix,
+        bool includeAfter)
+    {
+        var writer = new Rfc8785Writer(128);
+        writer.WriteObjectStart();
+        if (includePrefix)
+        {
+            writer.WriteProperty("prefix");
+            if (prefix is null)
+            {
+                writer.WriteNull();
+            }
+            else
+            {
+                writer.WriteString(prefix);
+            }
+        }
+
+        if (includeAfter)
+        {
+            writer.WriteProperty("after");
+            if (after is null)
+            {
+                writer.WriteNull();
+            }
+            else
+            {
+                writer.WriteString(after);
+            }
+        }
+
+        writer.WriteObjectEnd();
+        return writer.ToImmutableArray().ToArray();
+    }
 }
 
 internal static class AgentTextValidation
@@ -411,6 +531,18 @@ internal static class AgentTextValidation
             0x00A0 or 0x1680 or 0x2028 or 0x2029 or 0x202F or 0x205F or
             0x3000 ||
         scalar is >= 0x2000 and <= 0x200A;
+}
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+internal sealed class ListFilesArgumentsDto
+{
+    [JsonPropertyName("prefix")]
+    [JsonPropertyOrder(0)]
+    public string? Prefix { get; set; }
+
+    [JsonPropertyName("after")]
+    [JsonPropertyOrder(1)]
+    public string? After { get; set; }
 }
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
@@ -497,6 +629,7 @@ internal sealed class FinishReviewEvidenceDto
     GenerationMode = JsonSourceGenerationMode.Metadata,
     PropertyNamingPolicy = JsonKnownNamingPolicy.Unspecified,
     UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
+[JsonSerializable(typeof(ListFilesArgumentsDto))]
 [JsonSerializable(typeof(ReadFileArgumentsDto))]
 [JsonSerializable(typeof(SearchTextArgumentsDto))]
 [JsonSerializable(typeof(FinishReviewArgumentsDto))]

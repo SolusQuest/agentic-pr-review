@@ -13,6 +13,7 @@ internal static class AgentCanonical
     internal const string QueryDomain = "apr.query.r2";
     internal const string ReadObservationDomain = "apr.observation.read.r2";
     internal const string SearchObservationDomain = "apr.observation.search.r2";
+    internal const string ListFilesObservationDomain = "apr.observation.list-files.r3";
     internal const string TerminalDomain = "apr.terminal.r2";
     internal const string ContinuationDomain = "apr.continuation.r2";
     internal const string SessionDomain = "apr.session.r2";

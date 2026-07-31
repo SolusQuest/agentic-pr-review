@@ -8,7 +8,7 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Core;
 public sealed class AgentContractTests
 {
     [Fact]
-    public void LimitsRegistryIsTheCompleteFrozenR2Authority()
+    public void LimitsRegistryIsTheCompleteFrozenAuthority()
     {
         var expected = new (string Name, long Value, string Unit)[]
         {
@@ -53,11 +53,14 @@ public sealed class AgentContractTests
             ("candidate_metadata_bytes", 16_384, "bytes"),
             ("candidate_envelope_total_bytes", 4_194_304, "bytes"),
             ("state_scope_total_bytes", 6_291_456, "bytes"),
+            ("tracked_files", 20_000, "count"),
+            ("tracked_files_metadata_bytes", 8_388_608, "bytes"),
+            ("list_files_entries", 100, "count"),
         };
 
-        Assert.Equal(41, AgentLimits.Registry.Length);
+        Assert.Equal(44, AgentLimits.Registry.Length);
         Assert.Equal(
-            Enumerable.Range(1, 41),
+            Enumerable.Range(1, 44),
             AgentLimits.Registry.Select(row => row.Ordinal));
         Assert.Equal(
             expected,
@@ -72,6 +75,7 @@ public sealed class AgentContractTests
     [InlineData("apr.query.r2", "7dea65bf0eb5067d3983f64cec21183229ed106f0d44b0371822ae5017fbe92c")]
     [InlineData("apr.observation.read.r2", "29e82b21b618e8859c7e1d8a54784bc843e66bce498274fe705e6824c8fb9cc1")]
     [InlineData("apr.observation.search.r2", "8eb931687a9850ec01aa8cc526dd8c7a845ccba9f4b3109c8ff038c9285497a8")]
+    [InlineData("apr.observation.list-files.r3", "0dafdac15bfa06c382fa561d45135ccecec3c26ae48ec96855607b0d18ca33d0")]
     [InlineData("apr.terminal.r2", "62fdb2e3884625096b9d88c93167b2f79ffe57f1c4e5bd56da3b3c1ea952f705")]
     [InlineData("apr.continuation.r2", "39712cc1233e5beafe94ca09fd714f576bb94db59867755abac8681556ef7854")]
     [InlineData("apr.session.r2", "09fdc5c02229991e8830926ea79ca9ee4052dde3d7da179260af013d71830783")]
@@ -90,13 +94,13 @@ public sealed class AgentContractTests
     {
         Assert.Collection(
             AgentToolRegistry.Definitions,
-            read =>
+            list =>
             {
-                Assert.Equal("read_file", read.Name);
+                Assert.Equal("list_files", list.Name);
                 Assert.Equal(
-                    "Read a bounded line range from one tracked UTF-8 file in the reviewed snapshot.",
-                    read.Description);
-                Assert.Equal(AgentToolRegistry.ReadFileSchema, read.SchemaJson);
+                    "List tracked repository paths from the reviewed snapshot in ordinal order.",
+                    list.Description);
+                Assert.Equal(AgentToolRegistry.ListFilesSchema, list.SchemaJson);
             },
             search =>
             {
@@ -105,6 +109,14 @@ public sealed class AgentContractTests
                     "Search for a case-sensitive literal in tracked UTF-8 files in the reviewed snapshot.",
                     search.Description);
                 Assert.Equal(AgentToolRegistry.SearchTextSchema, search.SchemaJson);
+            },
+            read =>
+            {
+                Assert.Equal("read_file", read.Name);
+                Assert.Equal(
+                    "Read a bounded line range from one tracked UTF-8 file in the reviewed snapshot.",
+                    read.Description);
+                Assert.Equal(AgentToolRegistry.ReadFileSchema, read.SchemaJson);
             },
             finish =>
             {
@@ -116,10 +128,10 @@ public sealed class AgentContractTests
             });
 
         Assert.Equal(
-            "e9cafa28d7fbb556afbde2f1a4db21add27372a3f4d341b1e7069c2be14f3593",
+            "0f39d9c2687d2ad236de3dd28becf6ae907a80021595289296aa4b8d69722f36",
             AgentCanonical.LimitsSha256());
         Assert.Equal(
-            "f5b9cabf064bb71f3729512d69beaa844801f9759b285132b3b2c203caeb89a0",
+            "33b23928d25d5a62e3006e5f97425cb0a6809bfc42632bad58abd7d4980f9c8b",
             AgentCanonical.ToolsetSha256(AgentToolRegistry.Definitions));
 
         var original = AgentCanonical.ToolsetSha256(AgentToolRegistry.Definitions);
@@ -131,7 +143,7 @@ public sealed class AgentContractTests
             original,
             AgentCanonical.ToolsetSha256(
                 definitions.Select((tool, index) =>
-                    index == 0 ? tool with { Name = "read-file" } : tool).ToArray()));
+                    index == 0 ? tool with { Name = "list-files" } : tool).ToArray()));
         Assert.NotEqual(
             original,
             AgentCanonical.ToolsetSha256(
@@ -142,7 +154,7 @@ public sealed class AgentContractTests
             original,
             AgentCanonical.ToolsetSha256(
                 definitions.Select((tool, index) =>
-                    index == 2 ? tool with { SchemaJson = "{}" } : tool).ToArray()));
+                    index == 3 ? tool with { SchemaJson = "{}" } : tool).ToArray()));
     }
 
     [Fact]
