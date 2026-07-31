@@ -213,9 +213,13 @@ internal static partial class AgentToolResultAdmission
                 result.ReturnedEndHunk <= AgentLimits.DiffHunksPerFile &&
                 ReadDiffHunksAreOrdered(result.Hunks) &&
                 (result.Truncated
-                    ? result.NextStartHunk == result.ReturnedEndHunk + 1
+                    ? result.ReturnedEndHunk < AgentLimits.DiffHunksPerFile &&
+                        result.NextStartHunk == result.ReturnedEndHunk + 1
                     : result.NextStartHunk is null),
-            "empty" or "eof" => IsLowerHex(result.PatchSha256, 64) &&
+            "empty" => IsLowerHex(result.PatchSha256, 64) &&
+                ReadDiffEmptyPageIsAdmissible(result),
+            "eof" => result.RequestedStartHunk > 1 &&
+                IsLowerHex(result.PatchSha256, 64) &&
                 ReadDiffEmptyPageIsAdmissible(result),
             "unavailable" or "binary" => result.PatchSha256 is null &&
                 !result.SourceTruncated &&

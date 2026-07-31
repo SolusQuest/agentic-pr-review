@@ -142,8 +142,9 @@ public sealed class ReadDiffTests
             "eof",
             new string('a', 64),
             sourceTruncated: false,
-            "{\"status\":\"eof\",\"reviewed_identity\":{\"repository_id\":\"repo\",\"review_target\":1,\"base_sha\":\"0000000000000000000000000000000000000000\",\"head_sha\":\"1111111111111111111111111111111111111111\"},\"path\":\"a.txt\",\"patch_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"source_truncated\":false,\"requested_start_hunk\":1,\"requested_hunk_count\":20,\"returned_start_hunk\":null,\"returned_end_hunk\":null,\"hunks\":[],\"truncated\":false,\"next_start_hunk\":null}",
-            "e528611626fa177d4ee7881db4cb99b67711d9728f62352de01270a139430367");
+            "{\"status\":\"eof\",\"reviewed_identity\":{\"repository_id\":\"repo\",\"review_target\":1,\"base_sha\":\"0000000000000000000000000000000000000000\",\"head_sha\":\"1111111111111111111111111111111111111111\"},\"path\":\"a.txt\",\"patch_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"source_truncated\":false,\"requested_start_hunk\":2,\"requested_hunk_count\":20,\"returned_start_hunk\":null,\"returned_end_hunk\":null,\"hunks\":[],\"truncated\":false,\"next_start_hunk\":null}",
+            "ffca329194594ef2479e438414ce8a09feb6bf31e7fd01d62ea6cd89d154ea19",
+            requestedStartHunk: 2);
         AssertEmptyPageOracle(
             "unavailable",
             null,
@@ -548,6 +549,61 @@ public sealed class ReadDiffTests
     }
 
     [Fact]
+    public void ResultAdmissionRejectsImpossibleEofAndPostLimitContinuation()
+    {
+        var eofAtFirst = Call("{\"path\":\"a.txt\"}").Arguments;
+        var eof = new ReadDiffResult(
+            "eof",
+            Identity,
+            "a.txt",
+            new string('a', 64),
+            false,
+            1,
+            20,
+            null,
+            null,
+            [],
+            false,
+            null,
+            null);
+        Assert.False(TryAdmit(eofAtFirst, eof, []));
+
+        var eofAtSecond = Call(
+            "{\"path\":\"a.txt\",\"start_hunk\":2}").Arguments;
+        Assert.True(TryAdmit(
+            eofAtSecond,
+            eof with { RequestedStartHunk = 2 },
+            []));
+
+        var finalPageArguments = Call(
+            "{\"path\":\"a.txt\",\"start_hunk\":181}").Arguments;
+        var finalPage = new ReadDiffResult(
+            "ok",
+            Identity,
+            "a.txt",
+            new string('a', 64),
+            false,
+            181,
+            20,
+            181,
+            200,
+            Enumerable.Range(1, 20).Select(ContextHunk).ToImmutableArray(),
+            false,
+            null,
+            null);
+        var returnedLines = Enumerable.Range(1, 20);
+        Assert.True(TryAdmit(finalPageArguments, finalPage, returnedLines));
+        Assert.False(TryAdmit(
+            finalPageArguments,
+            finalPage with
+            {
+                Truncated = true,
+                NextStartHunk = 201,
+            },
+            returnedLines));
+    }
+
+    [Fact]
     public async Task CancellationPrecedesPageMaterialization()
     {
         var source = Source("a.txt", false, [ContextHunk(1)]);
@@ -656,7 +712,8 @@ public sealed class ReadDiffTests
         string? patchSha256,
         bool sourceTruncated,
         string expectedPreimage,
-        string expectedObservationId)
+        string expectedObservationId,
+        int requestedStartHunk = 1)
     {
         var result = new ReadDiffResult(
             status,
@@ -664,7 +721,7 @@ public sealed class ReadDiffTests
             "a.txt",
             patchSha256,
             sourceTruncated,
-            1,
+            requestedStartHunk,
             20,
             null,
             null,
