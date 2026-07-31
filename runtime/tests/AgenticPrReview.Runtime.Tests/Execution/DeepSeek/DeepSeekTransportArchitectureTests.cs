@@ -231,6 +231,49 @@ public sealed partial class DeepSeekTransportArchitectureTests
     }
 
     [Fact]
+    public void FinalBackendHasOnlyTheReviewedCompositionCapabilities()
+    {
+        var types = new[]
+        {
+            typeof(DeepSeekAdapterContext),
+            typeof(DeepSeekReasoningContinuationCodec),
+            typeof(DeepSeekChatBackend),
+            typeof(DeepSeekChatBackendException),
+        };
+        var forbidden = new[]
+        {
+            typeof(DeepSeekCredential),
+            typeof(DeepSeekTransport),
+            typeof(DeepSeekProviderContract),
+            typeof(DeepSeekLiveProviderExecutor),
+            typeof(HttpClient),
+            typeof(HttpMessageHandler),
+            typeof(Environment),
+        };
+
+        Assert.Empty(FindForbiddenCapabilities(types, forbidden));
+        var constructor = Assert.Single(
+            typeof(DeepSeekChatBackend).GetConstructors(
+                BindingFlags.Instance |
+                BindingFlags.Public |
+                BindingFlags.NonPublic));
+        Assert.Equal(
+            [typeof(DeepSeekAdapterContext), typeof(IDeepSeekTransport)],
+            constructor.GetParameters()
+                .Select(parameter => parameter.ParameterType)
+                .ToArray());
+        Assert.All(
+            typeof(DeepSeekAdapterContext).GetProperties(
+                BindingFlags.Instance |
+                BindingFlags.NonPublic |
+                BindingFlags.Public),
+            property => Assert.False(property.CanWrite));
+        Assert.All(
+            types,
+            type => Assert.False(typeof(IDisposable).IsAssignableFrom(type)));
+    }
+
+    [Fact]
     public void RequestWriterCapabilityScannerChecksMethodBodies()
     {
         var violations = FindForbiddenCapabilities(

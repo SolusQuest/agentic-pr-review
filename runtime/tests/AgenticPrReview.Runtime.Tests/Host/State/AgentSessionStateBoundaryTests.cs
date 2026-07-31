@@ -5,6 +5,7 @@ using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
+using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.State;
 
 namespace AgenticPrReview.Runtime.Tests.Host.State;
@@ -39,6 +40,20 @@ public sealed class AgentSessionStateBoundaryTests
             admitted.Session.ProducerHeadSha);
         Assert.IsType<AgentSessionStateAdmittedValue>(
             admitted.Session.Value);
+        var continuation = Assert.Single(
+            fixture.Artifact.Document.CompletedRuns).Continuation;
+        Assert.Equal(
+            DeepSeekReasoningContinuationCodec.Id,
+            continuation.CodecId);
+        Assert.Equal(
+            DeepSeekReasoningContinuationCodec.Discriminator,
+            continuation.CodecDiscriminator);
+        var continuationItem = Assert.Single(continuation.Items);
+        Assert.Equal("utf8", continuationItem.Encoding);
+        Assert.Equal("state reasoning", continuationItem.Payload);
+        Assert.Equal(
+            "state reasoning"u8.ToArray(),
+            continuationItem.PayloadBytes);
 
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
@@ -213,6 +228,100 @@ public sealed class AgentSessionStateBoundaryTests
     }
 
     [Fact]
+    public async Task AuthenticatedContinuationDefectIsStateEnvelopeInvalid()
+    {
+        var fixture = await BuildSessionAsync();
+        var run = Assert.Single(fixture.Artifact.Document.CompletedRuns);
+        var item = Assert.Single(run.Continuation.Items);
+        var document = fixture.Artifact.Document with
+        {
+            CompletedRuns =
+            [
+                run with
+                {
+                    Continuation = run.Continuation with
+                    {
+                        Items =
+                        [
+                            item with
+                            {
+                                AssociatedCallId = "finish0",
+                            },
+                        ],
+                    },
+                },
+            ],
+        };
+        Assert.True(AgentSessionCodec.TryWrite(
+            document,
+            out var mutatedArtifact,
+            out var writeFailure),
+            writeFailure);
+        var mutated = fixture with { Artifact = mutatedArtifact! };
+        var access = Access(document);
+        var keys = new TestKeyResolver();
+        var scope = access.Scope;
+        var binding = new RestrictedStateBinding(
+            scope,
+            document.ProducerBaseSha,
+            document.ProducerHeadSha,
+            document.Generation,
+            document.PredecessorStateSha256,
+            RestrictedStateTestData.Now,
+            RestrictedStateTestData.Expires);
+        Assert.True(RestrictedStateEnvelope.TryEncrypt(
+            access,
+            binding,
+            mutatedArtifact!.Plaintext,
+            keys,
+            out var envelope,
+            out var encryptCode),
+            encryptCode);
+        var envelopeSha = RestrictedStateEnvelope.EnvelopeSha256(envelope!);
+        var candidate = new RestrictedStateCandidate(
+            binding,
+            mutatedArtifact.SessionSha256,
+            envelopeSha,
+            RestrictedStateEnvelope.ObjectIdentity(
+                binding,
+                mutatedArtifact.SessionSha256,
+                envelopeSha),
+            envelope!);
+        var store = new MemoryRestrictedStateStore
+        {
+            Snapshot = new RestrictedStateSnapshot([candidate], null),
+        };
+        var service = new RestrictedStateService(
+            store,
+            keys,
+            new AgentSessionRestrictedStateAdmission(),
+            () => RestrictedStateTestData.Now);
+        var lineage = new AcceptedLineage(
+            scope,
+            binding.Generation,
+            candidate.SessionSha256,
+            candidate.EnvelopeSha256,
+            binding.PredecessorEnvelopeSha256,
+            binding.AcceptedAtUnixSeconds,
+            binding.ExpiresAtUnixSeconds,
+            TransitionAuthorized: true);
+
+        var restored = service.Restore(
+            access,
+            new RestrictedStateRestoreRequest(
+                RestrictedStateLocatorFamily.Current,
+                RestrictedStateRestoreIntent.Explicit,
+                lineage,
+                StateContext(mutated, envelopeSha256: null)),
+            CancellationToken.None);
+
+        Assert.Equal(
+            RestrictedStateCodes.EnvelopeInvalid,
+            restored.Result.Code);
+        Assert.Null(restored.Session);
+    }
+
+    [Fact]
     public async Task MalformedTypedSessionContextsFailWithoutThrowing()
     {
         var fixture = await BuildSessionAsync();
@@ -346,9 +455,9 @@ public sealed class AgentSessionStateBoundaryTests
             "workflow",
             "trusted policy"u8.ToArray(),
             "build",
-            "provider",
-            "model",
-            "adapter");
+            DeepSeekAdapterContext.Provider,
+            DeepSeekAdapterContext.Model,
+            DeepSeekAdapterContext.Adapter);
         Assert.True(AgentStableRequestMaterializer.TryMaterialize(
             trusted,
             priorSessionSha256: null,
@@ -377,7 +486,7 @@ public sealed class AgentSessionStateBoundaryTests
                 outcome,
                 trusted,
                 run.InitialMessages.Length - 1,
-                EmptyContinuationCodec.Instance,
+                DeepSeekReasoningContinuationCodec.Instance,
                 Predecessor: null,
                 AgentSessionHeadTransition.SameHead));
         Assert.True(built.Succeeded, built.FailureCode);
@@ -419,7 +528,7 @@ public sealed class AgentSessionStateBoundaryTests
                 fixture.Identity,
                 User("next synthetic review context"),
                 AgentSessionHeadTransition.SameHead,
-                EmptyContinuationCodec.Instance,
+                DeepSeekReasoningContinuationCodec.Instance,
                 envelopeSha256));
 
     private static ProjectChatMessage User(string text) =>
@@ -458,13 +567,34 @@ public sealed class AgentSessionStateBoundaryTests
                     new ProjectChatMessage(
                         "assistant",
                         [
+                            new ProjectReasoningContent(
+                                "state reasoning",
+                                string.Empty,
+                                DeepSeekReasoningContinuationCodec.FramingName,
+                                AssociatedCallId: null,
+                                MessagePosition: request.Messages.Length,
+                                Position: 0),
                             new ProjectToolCallContent(
                                 "finish0",
                                 AgentToolRegistry.FinishReviewName,
                                 FinishJson),
                         ]),
                     new ProjectChatUsage(1, 1),
-                    CapturedResponseBodyBytes: 1));
+                    CapturedResponseBodyBytes: 1,
+                    new ProjectContinuation(
+                        DeepSeekAdapterContext.Provider,
+                        DeepSeekAdapterContext.Model,
+                        DeepSeekAdapterContext.Adapter,
+                        "session_0",
+                        [
+                            new ProjectContinuationItem(
+                                "state reasoning",
+                                string.Empty,
+                                DeepSeekReasoningContinuationCodec.FramingName,
+                                AssociatedCallId: null,
+                                MessagePosition: request.Messages.Length,
+                                ContentPosition: 0),
+                        ])));
     }
 
     private sealed class NeverToolExecutor : IAgentToolExecutor

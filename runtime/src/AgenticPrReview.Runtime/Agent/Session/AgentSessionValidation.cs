@@ -503,6 +503,11 @@ internal static class AgentSessionValidation
             var content = message.Contents[index];
             if (content.ContentPosition != index)
             {
+                if (content is AgentSessionContinuationSlotContent)
+                {
+                    failureCode = AgentSessionCodes.ContinuationInvalid;
+                }
+
                 return false;
             }
 
@@ -513,9 +518,15 @@ internal static class AgentSessionValidation
                         text.Text,
                         1,
                         AgentLimits.ContentBytes):
-                case AgentSessionContinuationSlotContent slot
-                    when AgentValueDomains.IsIdentifier(
-                        slot.ContinuationItemId):
+                    break;
+                case AgentSessionContinuationSlotContent slot:
+                    if (!AgentValueDomains.IsIdentifier(
+                            slot.ContinuationItemId))
+                    {
+                        failureCode = AgentSessionCodes.ContinuationInvalid;
+                        return false;
+                    }
+
                     break;
                 case AgentSessionToolCallContent call
                     when AgentValueDomains.IsIdentifier(call.CallId) &&
@@ -1154,8 +1165,14 @@ internal static class AgentSessionValidation
         }
 
         var slots = new HashSet<(string MessageId, int Position)>();
-        foreach (var item in continuation.Items)
+        var structureItems =
+            ImmutableArray.CreateBuilder<AgentContinuationStructureItem>(
+                continuation.Items.Length);
+        for (var itemOrdinal = 0;
+            itemOrdinal < continuation.Items.Length;
+            itemOrdinal++)
         {
+            var item = continuation.Items[itemOrdinal];
             if (!AgentValueDomains.IsIdentifier(item.ItemId) ||
                 !identifiers.Add(item.ItemId) ||
                 item.Encoding is not ("utf8" or "base64") ||
@@ -1229,6 +1246,13 @@ internal static class AgentSessionValidation
             {
                 return false;
             }
+
+            structureItems.Add(new AgentContinuationStructureItem(
+                itemOrdinal,
+                message.MessageOrdinal,
+                item.ContentPosition,
+                item.AssociatedCallId,
+                value));
         }
 
         var allSlots = assistantMessages.Values
@@ -1239,7 +1263,28 @@ internal static class AgentSessionValidation
             .Select(entry =>
                 (entry.Id, entry.Content.ContentPosition))
             .ToHashSet();
-        return allSlots.SetEquals(slots);
+        if (!allSlots.SetEquals(slots))
+        {
+            return false;
+        }
+
+        var structureMessages = assistantMessages.Values
+            .OrderBy(message => message.MessageOrdinal)
+            .Select(message => new AgentContinuationStructureMessage(
+                message.MessageOrdinal,
+                message.Contents
+                    .OfType<AgentSessionContinuationSlotContent>()
+                    .Select(slot => slot.ContentPosition)
+                    .ToImmutableArray(),
+                message.Contents.Count(content =>
+                    content is AgentSessionToolCallContent or
+                        AgentSessionTerminalCallContent)))
+            .ToImmutableArray();
+        return AgentContinuationCodecBoundary.TryValidateStructure(
+            codec,
+            new AgentContinuationStructure(
+                structureMessages,
+                structureItems.MoveToImmutable()));
     }
 
     private static bool HasExactClassification(AgentSessionRecord record) =>

@@ -671,6 +671,7 @@ internal static class AgentSessionCodec
                     text.Text);
                 return true;
             case "continuation_slot":
+                failureCode = AgentSessionCodes.ContinuationInvalid;
                 var slot = JsonSerializer.Deserialize(
                     element,
                     AgentSessionJsonContext.Default

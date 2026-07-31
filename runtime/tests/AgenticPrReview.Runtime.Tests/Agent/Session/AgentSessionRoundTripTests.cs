@@ -1119,6 +1119,35 @@ public sealed class AgentSessionRoundTripTests
     }
 
     [Fact]
+    public async Task MalformedDeclaredContinuationSlotUsesContinuationCode()
+    {
+        var trusted = Trusted();
+        var built = await BuildGenerationAsync(
+            trusted,
+            previous: null,
+            "g0",
+            "finish0",
+            reasoning: true);
+        var assistant = Assert.IsType<AgentSessionAssistantMessageRecord>(
+            built.Artifact.Document.CompletedRuns[0].Records[1]);
+        var slot = Assert.IsType<AgentSessionContinuationSlotContent>(
+            assistant.Contents[0]);
+        var malformed = RawMutation(
+            built.Artifact,
+            string.Concat(
+                ",\"continuation_item_id\":",
+                JsonSerializer.Serialize(slot.ContinuationItemId)),
+            string.Empty);
+
+        Assert.False(AgentSessionCodec.TryParse(
+            malformed.Plaintext,
+            out var parsed,
+            out var failure));
+        Assert.Null(parsed);
+        Assert.Equal(AgentSessionCodes.ContinuationInvalid, failure);
+    }
+
+    [Fact]
     public async Task ClosedKindsOrderingOrdinalsAndAssociationsRejectMutation()
     {
         var trusted = Trusted();
@@ -1205,7 +1234,7 @@ public sealed class AgentSessionRoundTripTests
                     }),
             });
         Assert.Equal(
-            AgentSessionCodes.RecordInvalid,
+            AgentSessionCodes.ContinuationInvalid,
             Restore(
                 movedSlot,
                 trusted,
