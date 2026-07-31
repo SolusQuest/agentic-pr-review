@@ -245,7 +245,7 @@ public sealed partial class DeepSeekTransportArchitectureTests
     }
 
     [Fact]
-    public void TransportSurfaceContainsNoLaterLeafContracts()
+    public void PredecessorSurfacesContainNoLaterLeafContracts()
     {
         var forbiddenFragments = new[]
         {
@@ -254,24 +254,45 @@ public sealed partial class DeepSeekTransportArchitectureTests
             "ProjectChatResponse",
             "ProviderUsage",
             "Parser",
+            "DeepSeekParsed",
+            "DeepSeekResponseParse",
             "JsonDocument",
             "JsonSerializer",
             "AgentRunOutcome",
             "Agent.Session",
             "Host.State",
         };
-        var references = typeof(RuntimeApplication).Assembly.GetTypes()
-            .Where(type => type.Namespace?.StartsWith(
-                DeepSeekNamespace,
-                StringComparison.Ordinal) == true)
+        var predecessorTypes = new[]
+            {
+                typeof(DeepSeekCredential),
+                typeof(DeepSeekTransportPolicy),
+                typeof(DeepSeekTransportOutcome),
+                typeof(DeepSeekHttpStatusClass),
+                typeof(DeepSeekTransportResult),
+                typeof(IDeepSeekTransport),
+                typeof(DeepSeekTransport),
+                typeof(DeepSeekRequestWriteOutcome),
+                typeof(DeepSeekRequestWriteResult),
+                typeof(DeepSeekRequestWriter),
+            }
+            .SelectMany(type => new[] { type }.Concat(type.GetNestedTypes(
+                BindingFlags.Public | BindingFlags.NonPublic)))
+            .ToArray();
+        var references = predecessorTypes
             .SelectMany(ReferencedTypes)
             .SelectMany(ExpandTypeGraph)
             .Select(TypeName)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
+        var bodyReferences = predecessorTypes
+            .SelectMany(DeclaredExecutableMembers)
+            .SelectMany(ResolveMethodBodyMembers)
+            .Select(member => TypeName(member as Type ?? member.DeclaringType!))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
 
         Assert.DoesNotContain(
-            references,
+            references.Concat(bodyReferences),
             name => forbiddenFragments.Any(fragment =>
                 name.Contains(fragment, StringComparison.OrdinalIgnoreCase)));
     }
