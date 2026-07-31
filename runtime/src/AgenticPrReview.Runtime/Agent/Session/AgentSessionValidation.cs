@@ -606,6 +606,14 @@ internal static class AgentSessionValidation
                     out var search) &&
                 argumentsBytes.AsSpan().SequenceEqual(
                     search!.CanonicalBytes),
+            AgentToolRegistry.ListFilesName or
+            AgentToolRegistry.ListChangedFilesName or
+            AgentToolRegistry.ReadDiffName =>
+                AgentSessionToolObservationAdmission.TryValidateArguments(
+                    call.CallId,
+                    call.Name,
+                    call.ArgumentsJson,
+                    argumentsBytes),
             _ => false,
         };
     }
@@ -860,6 +868,15 @@ internal static class AgentSessionValidation
                         expectedIdentity,
                         searchReturned);
                     return true;
+                case AgentToolRegistry.ListFilesName:
+                case AgentToolRegistry.ListChangedFilesName:
+                case AgentToolRegistry.ReadDiffName:
+                    return AgentSessionToolObservationAdmission.TryAdmit(
+                        call,
+                        stored,
+                        expectedIdentity,
+                        canonical,
+                        out observation);
                 default:
                     return false;
             }
