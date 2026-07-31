@@ -5,6 +5,7 @@ using System.Reflection.PortableExecutable;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using AgenticPrReview.Runtime;
+using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 
 namespace AgenticPrReview.Runtime.Tests.Execution.DeepSeek;
@@ -172,6 +173,78 @@ public sealed partial class DeepSeekTransportArchitectureTests
     }
 
     [Fact]
+    public void RawCredentialValueIsReadOnlyByTheConcreteTransport()
+    {
+        var readers = new List<string>();
+        var violations = new List<string>();
+        foreach (var type in typeof(RuntimeApplication).Assembly.GetTypes())
+        {
+            foreach (var method in DeclaredExecutableMembers(type))
+            {
+                foreach (var member in ResolveMethodBodyMembers(method))
+                {
+                    if (member.DeclaringType != typeof(DeepSeekCredential) ||
+                        !StringComparer.Ordinal.Equals(
+                            member.Name,
+                            "get_Value"))
+                    {
+                        continue;
+                    }
+
+                    var reader = $"{type.FullName}.{method.Name}";
+                    readers.Add(reader);
+                    if (!IsConcreteTransport(type))
+                    {
+                        violations.Add(reader);
+                    }
+                }
+            }
+        }
+
+        Assert.NotEmpty(readers);
+        Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void RequestWriterHasNoCredentialOrTransportCapability()
+    {
+        var types = new[]
+            {
+                typeof(DeepSeekRequestWriter),
+                typeof(DeepSeekRequestWriteResult),
+            }
+            .SelectMany(type => new[] { type }.Concat(type.GetNestedTypes(
+                BindingFlags.Public | BindingFlags.NonPublic)))
+            .ToArray();
+        var forbidden = new[]
+        {
+            typeof(DeepSeekCredential),
+            typeof(DeepSeekTransport),
+            typeof(IDeepSeekTransport),
+            typeof(HttpClient),
+            typeof(HttpMessageHandler),
+            typeof(AgentToolRegistry),
+            typeof(DeepSeekProviderContract),
+            typeof(DeepSeekLiveProviderExecutor),
+        };
+        Assert.Empty(FindForbiddenCapabilities(types, forbidden));
+    }
+
+    [Fact]
+    public void RequestWriterCapabilityScannerChecksMethodBodies()
+    {
+        var violations = FindForbiddenCapabilities(
+            [typeof(RequestWriterCapabilityFixture)],
+            [typeof(DeepSeekTransport)]);
+
+        Assert.Contains(
+            violations,
+            violation => violation.Contains(
+                $"{typeof(DeepSeekTransport).FullName}.Create",
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void TransportSurfaceContainsNoLaterLeafContracts()
     {
         var forbiddenFragments = new[]
@@ -267,6 +340,48 @@ public sealed partial class DeepSeekTransportArchitectureTests
     {
         _ = Environment.GetEnvironmentVariable("APR_DEEPSEEK_ARCH_FIXTURE");
         return NativeLibrary.Load("apr-deepseek-architecture-fixture");
+    }
+
+    private static class RequestWriterCapabilityFixture
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        internal static object BodyOnlyForbiddenCapability() =>
+            DeepSeekTransport.Create(
+                DeepSeekCredential.Create("architecture-scanner-fixture"));
+    }
+
+    private static string[] FindForbiddenCapabilities(
+        IEnumerable<Type> types,
+        IReadOnlyCollection<Type> forbidden)
+    {
+        var violations = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var type in types)
+        {
+            foreach (var referenced in ReferencedTypes(type)
+                         .SelectMany(ExpandTypeGraph))
+            {
+                if (forbidden.Contains(referenced))
+                {
+                    violations.Add(
+                        $"{type.FullName}:signature->{TypeName(referenced)}");
+                }
+            }
+
+            foreach (var method in DeclaredExecutableMembers(type))
+            {
+                foreach (var member in ResolveMethodBodyMembers(method))
+                {
+                    if (member.DeclaringType is not null &&
+                        forbidden.Contains(member.DeclaringType))
+                    {
+                        violations.Add(
+                            $"{type.FullName}.{method.Name}->{FormatMember(member)}");
+                    }
+                }
+            }
+        }
+
+        return violations.Order(StringComparer.Ordinal).ToArray();
     }
 
     private sealed class ForbiddenConstructorParameterFixture(

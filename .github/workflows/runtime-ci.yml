@@ -4,6 +4,12 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      expected_head_sha:
+        description: Exact merged main SHA authorized for the DeepSeek probe
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -62,3 +68,34 @@ jobs:
 
       - name: Run host/runtime integration matrix
         run: npm run runtime:integration
+
+  deepseek-compatibility-probe:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify exact authorized main head
+        env:
+          ACTUAL_HEAD_SHA: ${{ github.sha }}
+          EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
+        run: |
+          [[ "${EXPECTED_HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${EXPECTED_HEAD_SHA}" == "${ACTUAL_HEAD_SHA}" ]]
+
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Build compatibility probe without provider credentials
+        run: bash runtime/scripts/probe-deepseek-request.sh build
+
+      - name: Run bounded DeepSeek compatibility probe
+        env:
+          AGENTIC_REVIEW_DEEPSEEK_API_KEY: ${{ secrets.AGENTIC_REVIEW_DEEPSEEK_API_KEY }}
+        run: bash runtime/scripts/probe-deepseek-request.sh run
