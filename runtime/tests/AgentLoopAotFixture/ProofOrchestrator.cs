@@ -100,7 +100,7 @@ internal static class ProofOrchestrator
 
         var identity = ProofScenario.BootstrapIdentity();
         var context = ProofScenario.User(
-            "Review the synthetic snapshot. Use each R3 observation tool before finishing.");
+            "Review the synthetic snapshot. Use read_file and each R3 observation tool before finishing.");
         var run = new AgentRunRequest(
             identity,
             materialized!.StablePlan,
@@ -226,7 +226,7 @@ internal static class ProofOrchestrator
             [
                 "authorization_before_capabilities",
                 "automatic_bootstrap_no_store",
-                "real_snapshot_r3_tools_grounded_finish",
+                "real_snapshot_read_file_and_r3_tools_grounded_finish",
                 "completed_session_only",
                 "encrypted_state_accepted",
                 "provider_canary_authorization_only",

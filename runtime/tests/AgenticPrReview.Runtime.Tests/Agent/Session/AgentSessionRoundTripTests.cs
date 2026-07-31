@@ -1376,7 +1376,7 @@ public sealed class AgentSessionRoundTripTests
     {
         var trusted = Trusted();
         var built = await BuildGroundedR3GenerationAsync(trusted);
-        foreach (var artifact in new[]
+        foreach (var restored in new[]
                  {
                      (CallId: "list0", Arguments: "{}"),
                      (CallId: "changed0", Arguments: "{}"),
@@ -1384,12 +1384,12 @@ public sealed class AgentSessionRoundTripTests
                  }.Select(mutation => MutateToolCallArguments(
                      built.Artifact,
                      mutation.Arguments,
-                     mutation.CallId)))
+                     mutation.CallId))
+                 .Select(artifact => Restore(
+                     artifact,
+                     trusted,
+                     AgentSessionHeadTransition.SameHead)))
         {
-            var restored = Restore(
-                artifact,
-                trusted,
-                AgentSessionHeadTransition.SameHead);
             Assert.Equal(AgentSessionCodes.RecordInvalid, restored.Code);
             Assert.Null(restored.RunRequest);
         }
