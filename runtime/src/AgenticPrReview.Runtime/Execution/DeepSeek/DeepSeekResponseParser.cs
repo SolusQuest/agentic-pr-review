@@ -483,7 +483,7 @@ internal static class DeepSeekResponseParser
         }
 
         if (detail.ValueKind != JsonValueKind.Object ||
-            !HasOnlyProperties(detail, [counterName]))
+            !HasOnlyProperties(detail, new[] { counterName }))
         {
             return false;
         }

@@ -1,10 +1,12 @@
 using System.Collections.Immutable;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Execution;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
+using AgenticPrReview.Runtime.Host.State;
 
 namespace AgenticPrReview.Runtime.Tests.Execution.DeepSeek;
 
@@ -151,8 +153,64 @@ public sealed partial class DeepSeekTransportArchitectureTests
                     nameof(DeepSeekParsedToolResponse.Calls),
                     BindingFlags.Instance |
                     BindingFlags.NonPublic)!
-                .PropertyType);
+            .PropertyType);
     }
+
+    [Fact]
+    public void ResponseParserScannerDetectsBodyOnlyStateCapability()
+    {
+        var parserTypes = new[]
+            {
+                typeof(DeepSeekResponseParser),
+                typeof(DeepSeekResponseParseOutcome),
+                typeof(DeepSeekResponseParseResult),
+                typeof(DeepSeekParsedToolResponse),
+                typeof(DeepSeekParsedToolCall),
+                typeof(DeepSeekParsedUsage),
+            }
+            .SelectMany(type => new[] { type }.Concat(type.GetNestedTypes(
+                BindingFlags.Public | BindingFlags.NonPublic)))
+            .ToArray();
+        var allowedAgentTypes = new HashSet<Type>
+        {
+            typeof(AgentLimits),
+            typeof(AgentValueDomains),
+        };
+        var allowedDeepSeekTypes = new HashSet<Type>(parserTypes)
+        {
+            typeof(DeepSeekTransportResult),
+            typeof(DeepSeekTransportOutcome),
+            typeof(DeepSeekTransportPolicy),
+            typeof(DeepSeekRequestWriter),
+        };
+        var method = typeof(DeepSeekTransportArchitectureTests).GetMethod(
+            nameof(BodyOnlyStateCapabilityFixture),
+            BindingFlags.Static | BindingFlags.NonPublic)!;
+        var violations = new List<string>();
+        foreach (var member in ResolveMethodBodyMembers(method))
+        {
+            var referenced = member as Type ?? member.DeclaringType;
+            if (referenced is not null)
+            {
+                AddParserViolation(
+                    violations,
+                    $"body:{method.Name}->{TypeName(referenced)}",
+                    referenced,
+                    allowedAgentTypes,
+                    allowedDeepSeekTypes);
+            }
+        }
+
+        Assert.Contains(
+            violations,
+            violation => violation.Contains(
+                typeof(RestrictedStateScope).FullName!,
+                StringComparison.Ordinal));
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Type BodyOnlyStateCapabilityFixture() =>
+        typeof(RestrictedStateScope);
 
     private static void AddParserViolation(
         List<string> violations,
@@ -170,6 +228,10 @@ public sealed partial class DeepSeekTransportArchitectureTests
         var name = TypeName(candidate);
         var forbidden =
             name.StartsWith("System.Net.", StringComparison.Ordinal) ||
+            name.StartsWith("System.IO.", StringComparison.Ordinal) ||
+            name.StartsWith(
+                "System.Diagnostics.Process",
+                StringComparison.Ordinal) ||
             candidate == typeof(Environment) ||
             candidate == typeof(IServiceProvider) ||
             candidate == typeof(DeepSeekCredential) ||
@@ -184,6 +246,9 @@ public sealed partial class DeepSeekTransportArchitectureTests
             name.StartsWith(
                 "AgenticPrReview.Runtime.Execution.DeepSeek",
                 StringComparison.Ordinal) &&
+            !allowedDeepSeekTypes.Contains(candidate) ||
+            candidate.Assembly == typeof(DeepSeekResponseParser).Assembly &&
+            !allowedAgentTypes.Contains(candidate) &&
             !allowedDeepSeekTypes.Contains(candidate);
         if (forbidden)
         {
