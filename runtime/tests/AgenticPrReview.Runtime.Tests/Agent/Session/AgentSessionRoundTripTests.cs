@@ -1376,17 +1376,16 @@ public sealed class AgentSessionRoundTripTests
     {
         var trusted = Trusted();
         var built = await BuildGroundedR3GenerationAsync(trusted);
-        foreach (var mutation in new[]
+        foreach (var artifact in new[]
                  {
                      (CallId: "list0", Arguments: "{}"),
                      (CallId: "changed0", Arguments: "{}"),
                      (CallId: "diff0", Arguments: "{\"path\":\"src/a.cs\"}"),
-                 })
+                 }.Select(mutation => MutateToolCallArguments(
+                     built.Artifact,
+                     mutation.Arguments,
+                     mutation.CallId)))
         {
-            var artifact = MutateToolCallArguments(
-                built.Artifact,
-                mutation.Arguments,
-                mutation.CallId);
             var restored = Restore(
                 artifact,
                 trusted,
