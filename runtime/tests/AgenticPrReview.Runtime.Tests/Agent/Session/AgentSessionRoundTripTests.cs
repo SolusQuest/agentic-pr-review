@@ -1248,6 +1248,106 @@ public sealed class AgentSessionRoundTripTests
     }
 
     [Fact]
+    public async Task EarlierSessionFailuresPrecedeWrongContinuationTokens()
+    {
+        var trusted = Trusted();
+        var built = await BuildGenerationAsync(
+            trusted,
+            previous: null,
+            "g0",
+            "finish0",
+            reasoning: true);
+        var run = Assert.Single(built.Artifact.Document.CompletedRuns);
+        var item = Assert.Single(run.Continuation.Items);
+        var context = Assert.IsType<AgentSessionReviewContextRecord>(
+            run.Records[0]);
+        var outcome = Assert.IsType<AgentSessionReviewOutcomeRecord>(
+            run.Records[^1]);
+        var assistant = Assert.IsType<AgentSessionAssistantMessageRecord>(
+            run.Records[1]);
+        var slot = Assert.IsType<AgentSessionContinuationSlotContent>(
+            assistant.Contents[0]);
+        var wrongContinuationToken = RawMutation(
+            built.Artifact,
+            string.Concat(
+                "\"associated_call_id\":",
+                item.AssociatedCallId is null
+                    ? "null"
+                    : CanonicalJsonString(item.AssociatedCallId)),
+            "\"associated_call_id\":{}");
+        var wrongClassification = RawMutation(
+            wrongContinuationToken,
+            string.Concat(
+                "\"classification\":",
+                CanonicalJsonString(context.Classification)),
+            "\"classification\":\"wrong\"");
+        var wrongSlotToken = RawMutation(
+            built.Artifact,
+            string.Concat(
+                "\"kind\":\"continuation_slot\",\"content_position\":",
+                slot.ContentPosition),
+            "\"kind\":\"continuation_slot\",\"content_position\":\"0\"");
+        var wrongClassificationAndSlot = RawMutation(
+            wrongSlotToken,
+            string.Concat(
+                "\"classification\":",
+                CanonicalJsonString(context.Classification)),
+            "\"classification\":\"wrong\"");
+        var wrongAssociation = RawMutation(
+            wrongContinuationToken,
+            string.Concat(
+                "\"terminal_message_id\":",
+                CanonicalJsonString(outcome.TerminalMessageId)),
+            "\"terminal_message_id\":\"missing\"");
+
+        (AgentSessionRestoreResult Result, string Expected)[] cases =
+        [
+            (
+                Restore(
+                    wrongClassification,
+                    trusted,
+                    AgentSessionHeadTransition.SameHead),
+                AgentSessionCodes.ClassificationInvalid),
+            (
+                Restore(
+                    wrongAssociation,
+                    trusted,
+                    AgentSessionHeadTransition.SameHead),
+                AgentSessionCodes.AssociationInvalid),
+            (
+                Restore(
+                    wrongClassificationAndSlot,
+                    trusted,
+                    AgentSessionHeadTransition.SameHead),
+                AgentSessionCodes.ClassificationInvalid),
+            (
+                Restore(
+                    wrongContinuationToken,
+                    trusted,
+                    AgentSessionHeadTransition.SameHead),
+                AgentSessionCodes.ContinuationInvalid),
+            (
+                Restore(
+                    wrongContinuationToken,
+                    trusted with { BuildId = "other-build" },
+                    AgentSessionHeadTransition.SameHead),
+                AgentSessionCodes.ScopeMismatch),
+            (
+                Restore(
+                    wrongContinuationToken,
+                    trusted,
+                    AgentSessionHeadTransition.Unknown),
+                AgentSessionCodes.TransitionRejected),
+        ];
+
+        foreach (var entry in cases)
+        {
+            Assert.Equal(entry.Expected, entry.Result.Code);
+            Assert.Null(entry.Result.RunRequest);
+        }
+    }
+
+    [Fact]
     public async Task ClosedKindsOrderingOrdinalsAndAssociationsRejectMutation()
     {
         var trusted = Trusted();

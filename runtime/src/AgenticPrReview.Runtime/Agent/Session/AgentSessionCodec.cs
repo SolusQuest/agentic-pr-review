@@ -212,12 +212,6 @@ internal static class AgentSessionCodec
     {
         artifact = null;
         failureCode = AgentSessionCodes.CurrentMalformed;
-        if (!DeclaredContinuationTokensAreValid(parsed.Root.CompletedRuns!))
-        {
-            failureCode = AgentSessionCodes.ContinuationInvalid;
-            return false;
-        }
-
         try
         {
             var json = parsed.Plaintext.AsSpan(
@@ -226,7 +220,12 @@ internal static class AgentSessionCodec
                 json,
                 AgentSessionJsonContext.Default.AgentSessionRootDto);
             if (dto is null ||
-                !TryConvertRoot(dto, out var document, out failureCode) ||
+                !TryConvertRoot(
+                    dto,
+                    deferContinuationSlots: false,
+                    convertContinuation: true,
+                    out var document,
+                    out failureCode) ||
                 !TryWrite(document!, out var canonical, out _))
             {
                 return false;
@@ -255,74 +254,51 @@ internal static class AgentSessionCodec
         }
     }
 
-    private static bool DeclaredContinuationTokensAreValid(
-        IEnumerable<JsonElement> runs)
+    internal static bool TryValidateRecordGrammarBeforeContinuation(
+        AgentSessionParsedEnvelope parsed,
+        out string failureCode)
     {
-        foreach (var run in runs)
+        failureCode = AgentSessionCodes.CurrentMalformed;
+        try
         {
-            if (run.ValueKind != JsonValueKind.Object)
-            {
-                continue;
-            }
-
-            if (run.TryGetProperty("records", out var records) &&
-                records.ValueKind == JsonValueKind.Array &&
-                !DeclaredContinuationSlotTokensAreValid(records))
+            var json = parsed.Plaintext.AsSpan(
+                AgentSessionFormat.FramingBytes);
+            var dto = JsonSerializer.Deserialize(
+                json,
+                AgentSessionJsonContext.Default.AgentSessionRootDto);
+            if (dto is null ||
+                !TryConvertRoot(
+                    dto,
+                    deferContinuationSlots: true,
+                    convertContinuation: false,
+                    out var document,
+                    out failureCode))
             {
                 return false;
             }
 
-            if (run.TryGetProperty("continuation", out var continuation) &&
-                !DeclaredContinuationObjectTokensAreValid(continuation))
+            if (!AgentSessionValidation.TryValidateRoot(
+                    document!,
+                    out failureCode))
             {
                 return false;
             }
+
+            return AgentSessionValidation.TryValidateRecordGrammar(
+                document!,
+                out failureCode);
         }
-
-        return true;
-    }
-
-    private static bool DeclaredContinuationSlotTokensAreValid(
-        JsonElement records)
-    {
-        foreach (var record in records.EnumerateArray())
+        catch (Exception exception) when (
+            exception is JsonException or
+            NotSupportedException or
+            FormatException or
+            OverflowException or
+            EncoderFallbackException or
+            Rfc8785CanonicalizationException)
         {
-            if (record.ValueKind != JsonValueKind.Object ||
-                !record.TryGetProperty("kind", out var recordKind) ||
-                recordKind.ValueKind != JsonValueKind.String ||
-                !StringComparer.Ordinal.Equals(
-                    recordKind.GetString(),
-                    "assistant_message") ||
-                !record.TryGetProperty("contents", out var contents) ||
-                contents.ValueKind != JsonValueKind.Array)
-            {
-                continue;
-            }
-
-            foreach (var content in contents.EnumerateArray())
-            {
-                if (content.ValueKind != JsonValueKind.Object ||
-                    !content.TryGetProperty("kind", out var contentKind) ||
-                    contentKind.ValueKind != JsonValueKind.String ||
-                    !StringComparer.Ordinal.Equals(
-                        contentKind.GetString(),
-                        "continuation_slot"))
-                {
-                    continue;
-                }
-
-                if (!HasInt32(content, "content_position") ||
-                    !HasKind(
-                        content,
-                        "continuation_item_id",
-                        JsonValueKind.String))
-                {
-                    return false;
-                }
-            }
+            failureCode = AgentSessionCodes.CurrentMalformed;
+            return false;
         }
-
-        return true;
     }
 
     private static bool DeclaredContinuationObjectTokensAreValid(
@@ -509,6 +485,8 @@ internal static class AgentSessionCodec
 
     private static bool TryConvertRoot(
         AgentSessionRootDto dto,
+        bool deferContinuationSlots,
+        bool convertContinuation,
         out AgentSessionDocument? document,
         out string failureCode)
     {
@@ -538,7 +516,12 @@ internal static class AgentSessionCodec
         foreach (var run in dto.CompletedRuns)
         {
             if (run is null ||
-                !TryConvertRun(run, out var converted, out failureCode))
+                !TryConvertRun(
+                    run,
+                    deferContinuationSlots,
+                    convertContinuation,
+                    out var converted,
+                    out failureCode))
             {
                 return false;
             }
@@ -571,6 +554,8 @@ internal static class AgentSessionCodec
 
     private static bool TryConvertRun(
         AgentSessionRunDto dto,
+        bool deferContinuationSlots,
+        bool convertContinuation,
         out AgentSessionCompletedRun? run,
         out string failureCode)
     {
@@ -580,8 +565,7 @@ internal static class AgentSessionCodec
             dto.ReviewedIdentity is null ||
             !TryConvertIdentity(dto.ReviewedIdentity, out var identity) ||
             dto.StablePlanSha256 is null ||
-            dto.Records is null ||
-            dto.Continuation is null)
+            dto.Records is null)
         {
             return false;
         }
@@ -590,7 +574,11 @@ internal static class AgentSessionCodec
             dto.Records.Length);
         foreach (var element in dto.Records)
         {
-            if (!TryConvertRecord(element, out var record, out failureCode))
+            if (!TryConvertRecord(
+                    element,
+                    deferContinuationSlots,
+                    out var record,
+                    out failureCode))
             {
                 return false;
             }
@@ -598,12 +586,36 @@ internal static class AgentSessionCodec
             records.Add(record!);
         }
 
-        if (!TryConvertContinuation(
-                dto.Continuation,
-                out var continuation,
-                out failureCode))
+        AgentSessionContinuation continuation;
+        if (convertContinuation)
         {
-            return false;
+            failureCode = AgentSessionCodes.ContinuationInvalid;
+            if (!DeclaredContinuationObjectTokensAreValid(
+                    dto.Continuation))
+            {
+                return false;
+            }
+
+            var continuationDto = JsonSerializer.Deserialize(
+                dto.Continuation,
+                AgentSessionJsonContext.Default.AgentSessionContinuationDto);
+            if (continuationDto is null ||
+                !TryConvertContinuation(
+                    continuationDto,
+                    out var convertedContinuation,
+                    out failureCode))
+            {
+                return false;
+            }
+
+            continuation = convertedContinuation!;
+        }
+        else
+        {
+            continuation = new AgentSessionContinuation(
+                "deferred_continuation",
+                "deferred_continuation",
+                []);
         }
 
         run = new AgentSessionCompletedRun(
@@ -612,12 +624,13 @@ internal static class AgentSessionCodec
             identity!,
             dto.StablePlanSha256,
             records.MoveToImmutable(),
-            continuation!);
+            continuation);
         return true;
     }
 
     private static bool TryConvertRecord(
         JsonElement element,
+        bool deferContinuationSlots,
         out AgentSessionRecord? record,
         out string failureCode)
     {
@@ -679,10 +692,14 @@ internal static class AgentSessionCodec
                 var contents =
                     ImmutableArray.CreateBuilder<AgentSessionAssistantContent>(
                         message.Contents.Length);
-                foreach (var contentElement in message.Contents)
+                for (var contentIndex = 0;
+                    contentIndex < message.Contents.Length;
+                    contentIndex++)
                 {
                     if (!TryConvertContent(
-                            contentElement,
+                            message.Contents[contentIndex],
+                            deferContinuationSlots,
+                            contentIndex,
                             out var content,
                             out failureCode))
                     {
@@ -770,6 +787,8 @@ internal static class AgentSessionCodec
 
     private static bool TryConvertContent(
         JsonElement element,
+        bool deferContinuationSlot,
+        int contentIndex,
         out AgentSessionAssistantContent? content,
         out string failureCode)
     {
@@ -799,6 +818,23 @@ internal static class AgentSessionCodec
                 return true;
             case "continuation_slot":
                 failureCode = AgentSessionCodes.ContinuationInvalid;
+                if (deferContinuationSlot)
+                {
+                    content = new AgentSessionContinuationSlotContent(
+                        contentIndex,
+                        "deferred_continuation_item");
+                    return true;
+                }
+
+                if (!HasInt32(element, "content_position") ||
+                    !HasKind(
+                        element,
+                        "continuation_item_id",
+                        JsonValueKind.String))
+                {
+                    return false;
+                }
+
                 var slot = JsonSerializer.Deserialize(
                     element,
                     AgentSessionJsonContext.Default

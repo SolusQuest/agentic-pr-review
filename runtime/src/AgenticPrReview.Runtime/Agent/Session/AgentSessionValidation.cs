@@ -247,7 +247,14 @@ internal static class AgentSessionValidation
         IAgentContinuationCodec continuationCodec,
         out string failureCode)
     {
-        failureCode = AgentSessionCodes.RecordInvalid;
+        if (!TryValidateRecordGrammar(
+                document,
+                out var state,
+                out failureCode))
+        {
+            return false;
+        }
+
         if (continuationCodec is null ||
             !AgentValueDomains.IsIdentifier(continuationCodec.CodecId) ||
             !AgentValueDomains.IsIdentifier(
@@ -257,18 +264,17 @@ internal static class AgentSessionValidation
             return false;
         }
 
-        var identifiers = document.CompletedRuns
-            .Select(run => run.RunId)
-            .ToHashSet(StringComparer.Ordinal);
         long continuationBytes = 0;
-        long sessionRecords = 0;
-        foreach (var run in document.CompletedRuns)
+        var sessionRecords = state!.RecordCount;
+        for (var runIndex = 0;
+            runIndex < document.CompletedRuns.Length;
+            runIndex++)
         {
+            var run = document.CompletedRuns[runIndex];
             try
             {
                 sessionRecords = checked(
                     sessionRecords +
-                    run.Records.Length +
                     run.Continuation.Items.Length);
             }
             catch (OverflowException)
@@ -282,10 +288,11 @@ internal static class AgentSessionValidation
                 return false;
             }
 
-            if (!TryValidateRun(
+            if (!TryValidateContinuation(
                     run,
+                    state.AssistantMessages[runIndex],
                     continuationCodec,
-                    identifiers,
+                    state.Identifiers,
                     ref continuationBytes,
                     out failureCode))
             {
@@ -293,6 +300,58 @@ internal static class AgentSessionValidation
             }
         }
 
+        failureCode = string.Empty;
+        return true;
+    }
+
+    internal static bool TryValidateRecordGrammar(
+        AgentSessionDocument document,
+        out string failureCode) =>
+        TryValidateRecordGrammar(document, out _, out failureCode);
+
+    private static bool TryValidateRecordGrammar(
+        AgentSessionDocument document,
+        out RecordGrammarState? state,
+        out string failureCode)
+    {
+        state = null;
+        failureCode = AgentSessionCodes.RecordInvalid;
+        var identifiers = document.CompletedRuns
+            .Select(run => run.RunId)
+            .ToHashSet(StringComparer.Ordinal);
+        var assistantMessages = ImmutableArray.CreateBuilder<
+            IReadOnlyDictionary<string, AgentSessionAssistantMessageRecord>>(
+                document.CompletedRuns.Length);
+        long sessionRecords = 0;
+        foreach (var run in document.CompletedRuns)
+        {
+            try
+            {
+                sessionRecords = checked(
+                    sessionRecords + run.Records.Length);
+            }
+            catch (OverflowException)
+            {
+                return false;
+            }
+
+            if (sessionRecords > AgentLimits.SessionRecords ||
+                !TryValidateRunRecords(
+                    run,
+                    identifiers,
+                    out var runAssistantMessages,
+                    out failureCode))
+            {
+                return false;
+            }
+
+            assistantMessages.Add(runAssistantMessages!);
+        }
+
+        state = new RecordGrammarState(
+            identifiers,
+            assistantMessages.MoveToImmutable(),
+            sessionRecords);
         failureCode = string.Empty;
         return true;
     }
@@ -319,13 +378,15 @@ internal static class AgentSessionValidation
         value.All(character =>
             character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
-    private static bool TryValidateRun(
+    private static bool TryValidateRunRecords(
         AgentSessionCompletedRun run,
-        IAgentContinuationCodec continuationCodec,
         HashSet<string> identifiers,
-        ref long continuationBytes,
+        out IReadOnlyDictionary<
+            string,
+            AgentSessionAssistantMessageRecord>? assistantMessages,
         out string failureCode)
     {
+        assistantMessages = null;
         failureCode = AgentSessionCodes.RecordInvalid;
         if (run.Records.Length is < 3 or > AgentLimits.SessionRecords)
         {
@@ -362,7 +423,7 @@ internal static class AgentSessionValidation
         }
 
         var observations = new List<AgentObservation>();
-        var assistantMessages =
+        var messages =
             new Dictionary<string, AgentSessionAssistantMessageRecord>(
                 StringComparer.Ordinal);
         var recordIndex = 1;
@@ -384,7 +445,7 @@ internal static class AgentSessionValidation
                 return false;
             }
 
-            assistantMessages.Add(message.Id, message);
+            messages.Add(message.Id, message);
             messageOrdinal++;
             recordIndex++;
             if (terminalCall is not null)
@@ -466,20 +527,21 @@ internal static class AgentSessionValidation
             }
         }
 
-        if (!terminalSeen ||
-            !TryValidateContinuation(
-                run,
-                assistantMessages,
-                continuationCodec,
-                identifiers,
-                ref continuationBytes,
-                out failureCode))
+        if (!terminalSeen)
         {
             return false;
         }
 
+        assistantMessages = messages;
         return true;
     }
+
+    private sealed record RecordGrammarState(
+        HashSet<string> Identifiers,
+        ImmutableArray<IReadOnlyDictionary<
+            string,
+            AgentSessionAssistantMessageRecord>> AssistantMessages,
+        long RecordCount);
 
     private static bool TryValidateMessageContents(
         AgentSessionAssistantMessageRecord message,

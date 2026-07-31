@@ -75,6 +75,13 @@ internal static class AgentSessionRestorer
                 AgentSessionCodes.TransitionRejected);
         }
 
+        if (!AgentSessionCodec.TryValidateRecordGrammarBeforeContinuation(
+                parsed,
+                out var recordGrammarFailure))
+        {
+            return AgentSessionRestoreResult.Failure(recordGrammarFailure);
+        }
+
         if (!AgentSessionCodec.TryConvertEnvelope(
                 parsed,
                 out var artifact,

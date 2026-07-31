@@ -141,7 +141,7 @@ internal sealed class AgentSessionRunDto
     public JsonElement[]? Records { get; set; }
 
     [JsonPropertyName("continuation")]
-    public AgentSessionContinuationDto? Continuation { get; set; }
+    public JsonElement Continuation { get; set; }
 }
 
 internal sealed class AgentSessionReviewedIdentityDto
@@ -506,6 +506,7 @@ internal sealed class AgentSessionSearchMatchDto
 [JsonSerializable(typeof(AgentSessionContinuationSlotDto))]
 [JsonSerializable(typeof(AgentSessionToolCallDto))]
 [JsonSerializable(typeof(AgentSessionTerminalCallDto))]
+[JsonSerializable(typeof(AgentSessionContinuationDto))]
 [JsonSerializable(typeof(AgentSessionReadFileResultDto))]
 [JsonSerializable(typeof(AgentSessionSearchTextResultDto))]
 internal sealed partial class AgentSessionJsonContext : JsonSerializerContext;
