@@ -12,11 +12,12 @@ public sealed class DeepSeekCompatibilityProbeTests
     {
         const string reasoningCanary = "probe-reasoning-canary";
         const string argumentsCanary = "{\"value\":\"probe\"}";
+        const string finalCanary = "probe-final-content-canary";
         var transport = new QueueTransport(
             DeepSeekTransportResult.Success(FirstResponse(
                 reasoningCanary,
                 argumentsCanary)),
-            DeepSeekTransportResult.Success("{}"u8.ToArray()));
+            DeepSeekTransportResult.Success(FinalResponse(finalCanary)));
 
         var result = await DeepSeekCompatibilityProbeRunner.RunAsync(
             transport,
@@ -57,6 +58,45 @@ public sealed class DeepSeekCompatibilityProbeTests
         Assert.DoesNotContain(
             DeepSeekCompatibilityProbeRunner.ToolResult,
             result.ToString());
+        Assert.DoesNotContain(finalCanary, result.ToString());
+    }
+
+    public static TheoryData<string> InvalidFinalResponses => new()
+    {
+        "{}",
+        "{\"choices\":[]}",
+        "{\"choices\":[null]}",
+        "{\"choices\":[{\"index\":0,\"message\":{" +
+            "\"role\":\"assistant\",\"content\":null}," +
+            "\"finish_reason\":\"stop\"}]}",
+        "{\"choices\":[{\"index\":0,\"message\":{" +
+            "\"role\":\"assistant\",\"content\":\"done\"}," +
+            "\"finish_reason\":\"tool_calls\"}]}",
+        "{\"choices\":[{\"index\":0,\"message\":{" +
+            "\"role\":\"assistant\",\"content\":\"done\"," +
+            "\"tool_calls\":[{\"id\":\"call-2\"}]}," +
+            "\"finish_reason\":\"stop\"}]}",
+        "{\"choices\":[{\"index\":0,\"index\":0,\"message\":{" +
+            "\"role\":\"assistant\",\"content\":\"done\"}," +
+            "\"finish_reason\":\"stop\"}]}",
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidFinalResponses))]
+    public async Task RejectsInvalidFinalTurnWithoutRetry(string finalResponse)
+    {
+        var transport = new QueueTransport(
+            DeepSeekTransportResult.Success(FirstResponse("reasoning", "{}")),
+            DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(finalResponse)));
+
+        var result = await DeepSeekCompatibilityProbeRunner.RunAsync(
+            transport,
+            CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("APR_DEEPSEEK_PROBE_SECOND_RESPONSE_INVALID", result.Code);
+        Assert.Equal(2, transport.Bodies.Count);
+        Assert.DoesNotContain(finalResponse, result.ToString());
     }
 
     [Theory]
@@ -135,6 +175,13 @@ public sealed class DeepSeekCompatibilityProbeTests
             "\"function\":{\"name\":\"compatibility_echo\"," +
             "\"arguments\":" + JsonSerializer.Serialize(arguments) + "}}]}," +
             "\"finish_reason\":\"tool_calls\"}]}" );
+
+    private static byte[] FinalResponse(string content) =>
+        Encoding.UTF8.GetBytes(
+            "{\"choices\":[{\"index\":0,\"message\":{" +
+            "\"role\":\"assistant\",\"content\":" +
+            JsonSerializer.Serialize(content) + "}," +
+            "\"finish_reason\":\"stop\"}]}" );
 
     private static string[] RootPropertyNames(byte[] body)
     {

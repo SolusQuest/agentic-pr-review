@@ -84,7 +84,9 @@ internal static class DeepSeekCompatibilityProbeRunner
         var secondResponse = await transport.SendAsync(
             secondProjection.Body.ToArray(),
             cancellationToken);
-        if (secondResponse.Outcome != DeepSeekTransportOutcome.Success)
+        if (secondResponse.Outcome != DeepSeekTransportOutcome.Success ||
+            !secondResponse.HasBody ||
+            !TryInspectFinalResponse(secondResponse.Body))
         {
             return DeepSeekCompatibilityProbeResult.Failure(
                 "APR_DEEPSEEK_PROBE_SECOND_RESPONSE_INVALID");
@@ -222,6 +224,58 @@ internal static class DeepSeekCompatibilityProbeRunner
 
             turn = new ProbeAssistantTurn(content!, reasoning!, [call!]);
             return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryInspectFinalResponse(ImmutableArray<byte> body)
+    {
+        try
+        {
+            var bytes = body.ToArray();
+            if (HasDuplicateProperties(bytes))
+            {
+                return false;
+            }
+
+            using var document = JsonDocument.Parse(bytes);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("choices", out var choices) ||
+                choices.ValueKind != JsonValueKind.Array ||
+                choices.GetArrayLength() != 1)
+            {
+                return false;
+            }
+
+            var choice = choices[0];
+            if (choice.ValueKind != JsonValueKind.Object ||
+                !RequiredInt(choice, "index", 0) ||
+                !RequiredString(choice, "finish_reason", "stop") ||
+                !choice.TryGetProperty("message", out var message) ||
+                message.ValueKind != JsonValueKind.Object ||
+                !RequiredString(message, "role", "assistant") ||
+                !TryReadUtf8String(
+                    message,
+                    "content",
+                    0,
+                    64 * 1024,
+                    out _))
+            {
+                return false;
+            }
+
+            if (!message.TryGetProperty("tool_calls", out var toolCalls))
+            {
+                return true;
+            }
+
+            return toolCalls.ValueKind == JsonValueKind.Null ||
+                toolCalls.ValueKind == JsonValueKind.Array &&
+                toolCalls.GetArrayLength() == 0;
         }
         catch (JsonException)
         {
