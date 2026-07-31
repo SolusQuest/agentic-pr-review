@@ -21,6 +21,7 @@ internal static class AgentFailureCodes
     internal const string TerminalInvalid = "agent_terminal_invalid";
     internal const string ToolPathInvalid = "tool_path_invalid";
     internal const string ToolPathNotTracked = "tool_path_not_tracked";
+    internal const string ToolCursorInvalid = "tool_cursor_invalid";
     internal const string ToolPathUnsafe = "tool_path_unsafe";
     internal const string ToolFileTooLarge = "tool_file_too_large";
     internal const string ToolFileBinary = "tool_file_binary";

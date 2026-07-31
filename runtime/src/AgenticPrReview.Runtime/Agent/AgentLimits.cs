@@ -51,6 +51,9 @@ internal static class AgentLimits
     internal const int CandidateMetadataBytes = 16 * 1024;
     internal const int CandidateEnvelopeTotalBytes = 4 * 1024 * 1024;
     internal const int StateScopeTotalBytes = 6 * 1024 * 1024;
+    internal const int TrackedFiles = 20_000;
+    internal const int TrackedFilesMetadataBytes = 8 * 1024 * 1024;
+    internal const int ListFilesEntries = 100;
 
     internal static ImmutableArray<AgentLimit> Registry { get; } =
     [
@@ -95,5 +98,8 @@ internal static class AgentLimits
         new(39, "candidate_metadata_bytes", CandidateMetadataBytes, "bytes"),
         new(40, "candidate_envelope_total_bytes", CandidateEnvelopeTotalBytes, "bytes"),
         new(41, "state_scope_total_bytes", StateScopeTotalBytes, "bytes"),
+        new(42, "tracked_files", TrackedFiles, "count"),
+        new(43, "tracked_files_metadata_bytes", TrackedFilesMetadataBytes, "bytes"),
+        new(44, "list_files_entries", ListFilesEntries, "count"),
     ];
 }

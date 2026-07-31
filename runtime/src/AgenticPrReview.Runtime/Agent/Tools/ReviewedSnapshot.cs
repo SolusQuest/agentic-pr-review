@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Runtime.InteropServices;
+using System.Text;
 using Microsoft.Win32.SafeHandles;
 using AgenticPrReview.Runtime.Agent.Core;
 
@@ -26,11 +27,31 @@ internal sealed class ReviewedSnapshot
         }
 
         var builder = ImmutableHashSet.CreateBuilder<string>(StringComparer.Ordinal);
+        var strictUtf8 = new UTF8Encoding(false, true);
+        var trackedFileCount = 0;
+        long trackedFilesMetadataBytes = 0;
         foreach (var trackedFile in trackedFiles)
         {
+            trackedFileCount = checked(trackedFileCount + 1);
+            if (trackedFileCount > AgentLimits.TrackedFiles)
+            {
+                throw new ArgumentException(
+                    "Tracked file count exceeds the stable snapshot limit.",
+                    nameof(trackedFiles));
+            }
+
             if (!RepositoryPath.IsValid(trackedFile))
             {
                 throw new ArgumentException("Tracked path is not canonical.", nameof(trackedFiles));
+            }
+
+            trackedFilesMetadataBytes = checked(
+                trackedFilesMetadataBytes + strictUtf8.GetByteCount(trackedFile));
+            if (trackedFilesMetadataBytes > AgentLimits.TrackedFilesMetadataBytes)
+            {
+                throw new ArgumentException(
+                    "Tracked file metadata exceeds the stable snapshot limit.",
+                    nameof(trackedFiles));
             }
 
             builder.Add(trackedFile);
