@@ -187,9 +187,9 @@ public sealed class ReadDiffTests
         var renamed = await ExecuteAsync(snapshot, "{\"path\":\"new.txt\"}");
         Assert.Equal("unavailable", Status(renamed));
 
-        foreach (var path in new[] { "unchanged.txt", "old.txt" })
+        foreach (var call in new[] { "unchanged.txt", "old.txt" }
+            .Select(path => Call("{\"path\":\"" + path + "\"}")))
         {
-            var call = Call("{\"path\":\"" + path + "\"}");
             Assert.Equal(
                 AgentFailureCodes.ToolPathNotTracked,
                 executor.Preflight(call));
