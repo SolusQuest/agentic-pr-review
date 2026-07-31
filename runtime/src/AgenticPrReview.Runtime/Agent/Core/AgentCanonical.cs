@@ -17,6 +17,8 @@ internal static class AgentCanonical
     internal const string DiffSourceDomain = "apr.diff-source.r3";
     internal const string ListChangedFilesObservationDomain =
         "apr.observation.list-changed-files.r3";
+    internal const string ReadDiffObservationDomain =
+        "apr.observation.read-diff.r3";
     internal const string TerminalDomain = "apr.terminal.r2";
     internal const string ContinuationDomain = "apr.continuation.r2";
     internal const string SessionDomain = "apr.session.r2";

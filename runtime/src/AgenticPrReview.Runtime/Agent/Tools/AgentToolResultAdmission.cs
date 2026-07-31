@@ -68,6 +68,12 @@ internal static partial class AgentToolResultAdmission
                     root,
                     execution.CanonicalResult,
                     execution.Observation),
+                PreparedReadDiffCall diff => TryAdmitReadDiff(
+                    diff,
+                    expectedIdentity,
+                    root,
+                    execution.CanonicalResult,
+                    execution.Observation),
                 PreparedReadFileCall read => TryAdmitRead(
                     read,
                     expectedIdentity,

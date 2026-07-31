@@ -59,6 +59,7 @@ public sealed class AgentContractTests
             ("list_changed_files_entries", 100, "count"),
             ("changed_files", 200, "count"),
             ("changed_files_metadata_bytes", 262_144, "bytes"),
+            ("read_diff_hunks", 20, "count"),
             ("diff_hunks_per_file", 200, "count"),
             ("diff_lines_per_hunk", 1_000, "lines"),
             ("diff_line_text_bytes", 4_096, "bytes"),
@@ -66,9 +67,9 @@ public sealed class AgentContractTests
             ("diff_snapshot_bytes", 8_388_608, "bytes"),
         };
 
-        Assert.Equal(52, AgentLimits.Registry.Length);
+        Assert.Equal(53, AgentLimits.Registry.Length);
         Assert.Equal(
-            Enumerable.Range(1, 47).Concat(Enumerable.Range(49, 5)),
+            Enumerable.Range(1, 53),
             AgentLimits.Registry.Select(row => row.Ordinal));
         Assert.Equal(
             expected,
@@ -86,6 +87,7 @@ public sealed class AgentContractTests
     [InlineData("apr.observation.list-files.r3", "0dafdac15bfa06c382fa561d45135ccecec3c26ae48ec96855607b0d18ca33d0")]
     [InlineData("apr.diff-source.r3", "473c5f08ba3a85b7c9998363f958d238b90bbcc514dcaebb0f5c4ced42dbe86e")]
     [InlineData("apr.observation.list-changed-files.r3", "b925be602c32373267a1ce761d3fd6aa81e5a1a1c439b39ef90b54c7fb318d62")]
+    [InlineData("apr.observation.read-diff.r3", "56ccd746e8f4d1cdccbca2cc371be2bf5c1d7f6b064ce5fd90360494e2c9c8b5")]
     [InlineData("apr.terminal.r2", "62fdb2e3884625096b9d88c93167b2f79ffe57f1c4e5bd56da3b3c1ea952f705")]
     [InlineData("apr.continuation.r2", "39712cc1233e5beafe94ca09fd714f576bb94db59867755abac8681556ef7854")]
     [InlineData("apr.session.r2", "09fdc5c02229991e8830926ea79ca9ee4052dde3d7da179260af013d71830783")]
@@ -122,6 +124,14 @@ public sealed class AgentContractTests
                     AgentToolRegistry.ListChangedFilesSchema,
                     changed.SchemaJson);
             },
+            diff =>
+            {
+                Assert.Equal("read_diff", diff.Name);
+                Assert.Equal(
+                    "Read bounded complete diff hunks for one changed path in the reviewed snapshot.",
+                    diff.Description);
+                Assert.Equal(AgentToolRegistry.ReadDiffSchema, diff.SchemaJson);
+            },
             search =>
             {
                 Assert.Equal("search_text", search.Name);
@@ -148,10 +158,10 @@ public sealed class AgentContractTests
             });
 
         Assert.Equal(
-            "09deb3e4db4b6ade240903fcdbe56a65ad863658f0ead46d096b5e3e18c7ad68",
+            "587f64e18c085116482ac10369858f2f563de207b8dce215725194f52fff68b6",
             AgentCanonical.LimitsSha256());
         Assert.Equal(
-            "cfd005d61d68dee38a4a539612c6f650bd0001b7b1223006cd1d14a0b75ddd88",
+            "66ba6ceb1ddd5c2aef95e613bef43b4675c986d4756c05bf350a09badb9c535c",
             AgentCanonical.ToolsetSha256(AgentToolRegistry.Definitions));
 
         var original = AgentCanonical.ToolsetSha256(AgentToolRegistry.Definitions);
@@ -174,7 +184,7 @@ public sealed class AgentContractTests
             original,
             AgentCanonical.ToolsetSha256(
                 definitions.Select((tool, index) =>
-                    index == 3 ? tool with { SchemaJson = "{}" } : tool).ToArray()));
+                    index == 2 ? tool with { SchemaJson = "{}" } : tool).ToArray()));
     }
 
     [Fact]

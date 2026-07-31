@@ -480,7 +480,7 @@ internal static class ReviewedDiffSourceWriter
         writer.WriteObjectEnd();
     }
 
-    private static void WriteHunk(
+    internal static void WriteHunk(
         ref Rfc8785Writer writer,
         ReviewedDiffHunk hunk)
     {

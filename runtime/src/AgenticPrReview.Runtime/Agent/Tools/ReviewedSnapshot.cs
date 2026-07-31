@@ -203,6 +203,39 @@ internal sealed class ReviewedSnapshot
 
     internal bool ContainsChangedPath(string path) => _changedFiles.Contains(path);
 
+    internal bool TryGetChangedFile(
+        string path,
+        out ReviewedChangedFile change)
+    {
+        var low = 0;
+        var high = OrderedChangedFiles.Length;
+        while (low < high)
+        {
+            var middle = low + (high - low) / 2;
+            var comparison = StringComparer.Ordinal.Compare(
+                OrderedChangedFiles[middle].Path,
+                path);
+            if (comparison < 0)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle;
+            }
+        }
+
+        if (low < OrderedChangedFiles.Length &&
+            StringComparer.Ordinal.Equals(OrderedChangedFiles[low].Path, path))
+        {
+            change = OrderedChangedFiles[low];
+            return true;
+        }
+
+        change = null!;
+        return false;
+    }
+
     internal bool TryGetDiffSource(
         string path,
         out ReviewedDiffSource source) =>
