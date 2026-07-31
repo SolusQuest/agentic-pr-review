@@ -209,10 +209,13 @@ public sealed partial class DeepSeekTransportArchitectureTests
     public void RequestWriterHasNoCredentialOrTransportCapability()
     {
         var types = new[]
-        {
-            typeof(DeepSeekRequestWriter),
-            typeof(DeepSeekRequestWriteResult),
-        };
+            {
+                typeof(DeepSeekRequestWriter),
+                typeof(DeepSeekRequestWriteResult),
+            }
+            .SelectMany(type => new[] { type }.Concat(type.GetNestedTypes(
+                BindingFlags.Public | BindingFlags.NonPublic)))
+            .ToArray();
         var forbidden = new[]
         {
             typeof(DeepSeekCredential),
@@ -224,12 +227,21 @@ public sealed partial class DeepSeekTransportArchitectureTests
             typeof(DeepSeekProviderContract),
             typeof(DeepSeekLiveProviderExecutor),
         };
-        var references = types
-            .SelectMany(ReferencedTypes)
-            .SelectMany(ExpandTypeGraph)
-            .ToArray();
+        Assert.Empty(FindForbiddenCapabilities(types, forbidden));
+    }
 
-        Assert.DoesNotContain(references, forbidden.Contains);
+    [Fact]
+    public void RequestWriterCapabilityScannerChecksMethodBodies()
+    {
+        var violations = FindForbiddenCapabilities(
+            [typeof(RequestWriterCapabilityFixture)],
+            [typeof(DeepSeekTransport)]);
+
+        Assert.Contains(
+            violations,
+            violation => violation.Contains(
+                $"{typeof(DeepSeekTransport).FullName}.Create",
+                StringComparison.Ordinal));
     }
 
     [Fact]
@@ -328,6 +340,48 @@ public sealed partial class DeepSeekTransportArchitectureTests
     {
         _ = Environment.GetEnvironmentVariable("APR_DEEPSEEK_ARCH_FIXTURE");
         return NativeLibrary.Load("apr-deepseek-architecture-fixture");
+    }
+
+    private static class RequestWriterCapabilityFixture
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        internal static object BodyOnlyForbiddenCapability() =>
+            DeepSeekTransport.Create(
+                DeepSeekCredential.Create("architecture-scanner-fixture"));
+    }
+
+    private static string[] FindForbiddenCapabilities(
+        IEnumerable<Type> types,
+        IReadOnlyCollection<Type> forbidden)
+    {
+        var violations = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var type in types)
+        {
+            foreach (var referenced in ReferencedTypes(type)
+                         .SelectMany(ExpandTypeGraph))
+            {
+                if (forbidden.Contains(referenced))
+                {
+                    violations.Add(
+                        $"{type.FullName}:signature->{TypeName(referenced)}");
+                }
+            }
+
+            foreach (var method in DeclaredExecutableMembers(type))
+            {
+                foreach (var member in ResolveMethodBodyMembers(method))
+                {
+                    if (member.DeclaringType is not null &&
+                        forbidden.Contains(member.DeclaringType))
+                    {
+                        violations.Add(
+                            $"{type.FullName}.{method.Name}->{FormatMember(member)}");
+                    }
+                }
+            }
+        }
+
+        return violations.Order(StringComparer.Ordinal).ToArray();
     }
 
     private sealed class ForbiddenConstructorParameterFixture(

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 
@@ -284,6 +285,74 @@ public sealed class DeepSeekRequestWriterTests
             tools[1].GetProperty("function").GetProperty("name").GetString());
     }
 
+    [Fact]
+    public void ProjectsMoreThanOneRunToolCallLimitAcrossRestoredHistory()
+    {
+        var messages = new List<MinimalChatMessage>
+        {
+            new("user", [Text("review")]),
+        };
+        for (var index = 0; index <= AgentLimits.ToolCalls; index++)
+        {
+            if (index == AgentLimits.ToolCalls)
+            {
+                messages.Add(new MinimalChatMessage(
+                    "user",
+                    [Text("review-run-2")]));
+            }
+
+            var callId = $"call-{index}";
+            messages.Add(new MinimalChatMessage(
+                "assistant",
+                [Call(callId, "read_file", "{}")]));
+            messages.Add(new MinimalChatMessage(
+                "tool",
+                [Result(callId, "{}")]));
+        }
+
+        var result = DeepSeekRequestWriter.Write(BuildRequest(messages.ToArray()));
+
+        Assert.Equal(DeepSeekRequestWriteOutcome.Success, result.Outcome);
+        using var document = JsonDocument.Parse(result.Body.ToArray());
+        Assert.Equal(
+            2 + ((AgentLimits.ToolCalls + 1) * 2),
+            document.RootElement.GetProperty("messages").GetArrayLength());
+    }
+
+    [Fact]
+    public void ProjectsCrossRunToolResultsAboveOneRunAggregateLimit()
+    {
+        const int historicalResults = 9;
+        var resultText = new string('r', 30 * 1024);
+        var messages = new List<MinimalChatMessage>
+        {
+            new("user", [Text("review")]),
+        };
+        for (var index = 0; index < historicalResults; index++)
+        {
+            if (index == 8)
+            {
+                messages.Add(new MinimalChatMessage(
+                    "user",
+                    [Text("review-run-2")]));
+            }
+
+            var callId = $"call-{index}";
+            messages.Add(new MinimalChatMessage(
+                "assistant",
+                [Call(callId, "read_file", "{}")]));
+            messages.Add(new MinimalChatMessage(
+                "tool",
+                [Result(callId, resultText)]));
+        }
+
+        var result = DeepSeekRequestWriter.Write(BuildRequest(messages.ToArray()));
+
+        Assert.Equal(DeepSeekRequestWriteOutcome.Success, result.Outcome);
+        Assert.True(result.Body.Length > AgentLimits.ToolResultsTotalBytes);
+        Assert.True(result.Body.Length < DeepSeekTransportPolicy.RequestBodyMaxBytes);
+    }
+
     [Theory]
     [InlineData("[]")]
     [InlineData("true")]
@@ -354,28 +423,94 @@ public sealed class DeepSeekRequestWriterTests
     [Fact]
     public async Task ProductTransportCapturesTheExactProjectedRequest()
     {
-        const string keyCanary = "apr-provider-key-canary-104";
-        var handler = new CaptureHandler();
-        using var transport = DeepSeekTransport.CreateForTesting(
-            DeepSeekCredential.Create(keyCanary),
-            handler,
-            TimeSpan.FromSeconds(5));
-        var request = BuildRequest(
-            [new MinimalChatMessage("user", [Text("review")])]);
-        var projected = DeepSeekRequestWriter.Write(request);
+        const string providerCanary =
+            "apr104-provider-6c7541949e6a4c21a7e7";
+        var ambientCanaries = new Dictionary<string, string>(
+            StringComparer.Ordinal)
+        {
+            ["GITHUB_TOKEN"] = "apr104-github-c91f6afbb13042c49a42",
+            ["ACTIONS_RUNTIME_TOKEN"] =
+                "apr104-actions-3674419116bb4ce887a4",
+            ["APR_STATE_ENCRYPTION_KEY"] =
+                "apr104-state-a610dad497a54907a60f",
+            ["APR_UNRELATED_WORKFLOW_SECRET"] =
+                "apr104-unrelated-3125098213264ce28409",
+            ["AGENTIC_REVIEW_DEEPSEEK_API_KEY"] = providerCanary,
+        };
+        var previous = ambientCanaries.Keys.ToDictionary(
+            name => name,
+            Environment.GetEnvironmentVariable,
+            StringComparer.Ordinal);
+        try
+        {
+            foreach (var canary in ambientCanaries)
+            {
+                Environment.SetEnvironmentVariable(canary.Key, canary.Value);
+            }
 
-        var result = await transport.SendAsync(
-            projected.Body.ToArray(),
-            CancellationToken.None);
+            var handler = new CaptureHandler();
+            using var transport = DeepSeekTransport.CreateForTesting(
+                DeepSeekCredential.Create(providerCanary),
+                handler,
+                TimeSpan.FromSeconds(5));
+            var request = BuildRequest(
+                [new MinimalChatMessage("user", [Text("review")])]);
+            var projected = DeepSeekRequestWriter.Write(request);
 
-        Assert.Equal(DeepSeekTransportOutcome.Success, result.Outcome);
-        Assert.Equal(DeepSeekTransportPolicy.Endpoint, handler.Uri?.AbsoluteUri);
-        Assert.Equal($"Bearer {keyCanary}", handler.Authorization);
-        Assert.Equal("application/json", handler.ContentType);
-        Assert.Equal(projected.Body.ToArray(), handler.Body);
-        Assert.DoesNotContain(
-            keyCanary,
-            Encoding.UTF8.GetString(handler.Body!));
+            var result = await transport.SendAsync(
+                projected.Body.ToArray(),
+                CancellationToken.None);
+
+            Assert.Equal(DeepSeekTransportOutcome.Success, result.Outcome);
+            Assert.Equal(HttpMethod.Post.Method, handler.Method);
+            Assert.Equal(
+                DeepSeekTransportPolicy.Endpoint,
+                handler.Uri?.AbsoluteUri);
+            Assert.Equal(
+                ["Authorization", "Content-Type"],
+                handler.Headers.Keys.Order(StringComparer.Ordinal).ToArray());
+            Assert.Equal(
+                [$"Bearer {providerCanary}"],
+                handler.Headers["Authorization"]);
+            Assert.Equal(["application/json"], handler.Headers["Content-Type"]);
+            Assert.Equal(projected.Body.ToArray(), handler.Body);
+
+            var body = Encoding.UTF8.GetString(handler.Body!);
+            var allHeaders = string.Join(
+                "\n",
+                handler.Headers.SelectMany(header => header.Value.Select(value =>
+                    $"{header.Key}:{value}")));
+            var completeCapture = string.Concat(allHeaders, "\n", body);
+            Assert.Equal(1, CountOccurrences(completeCapture, providerCanary));
+            Assert.DoesNotContain(
+                providerCanary,
+                string.Join(
+                    "\n",
+                    handler.Headers
+                        .Where(header => !StringComparer.OrdinalIgnoreCase.Equals(
+                            header.Key,
+                            "Authorization"))
+                        .SelectMany(header => header.Value)),
+                StringComparison.Ordinal);
+            Assert.DoesNotContain(providerCanary, body, StringComparison.Ordinal);
+            foreach (var canary in ambientCanaries.Values
+                         .Where(value => !StringComparer.Ordinal.Equals(
+                             value,
+                             providerCanary)))
+            {
+                Assert.DoesNotContain(
+                    canary,
+                    completeCapture,
+                    StringComparison.Ordinal);
+            }
+        }
+        finally
+        {
+            foreach (var value in previous)
+            {
+                Environment.SetEnvironmentVariable(value.Key, value.Value);
+            }
+        }
     }
 
     [Fact]
@@ -507,6 +642,22 @@ public sealed class DeepSeekRequestWriterTests
             : null;
     }
 
+    private static int CountOccurrences(string value, string needle)
+    {
+        var count = 0;
+        var offset = 0;
+        while ((offset = value.IndexOf(
+                   needle,
+                   offset,
+                   StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            offset += needle.Length;
+        }
+
+        return count;
+    }
+
     private sealed class CountingTransport : IDeepSeekTransport
     {
         internal int Calls { get; private set; }
@@ -527,8 +678,9 @@ public sealed class DeepSeekRequestWriterTests
     private sealed class CaptureHandler : HttpMessageHandler
     {
         internal Uri? Uri { get; private set; }
-        internal string? Authorization { get; private set; }
-        internal string? ContentType { get; private set; }
+        internal string? Method { get; private set; }
+        internal Dictionary<string, string[]> Headers { get; } =
+            new(StringComparer.OrdinalIgnoreCase);
         internal byte[]? Body { get; private set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(
@@ -536,8 +688,17 @@ public sealed class DeepSeekRequestWriterTests
             CancellationToken cancellationToken)
         {
             Uri = request.RequestUri;
-            Authorization = request.Headers.GetValues("Authorization").Single();
-            ContentType = request.Content?.Headers.ContentType?.MediaType;
+            Method = request.Method.Method;
+            foreach (var header in request.Headers)
+            {
+                Headers[header.Key] = header.Value.ToArray();
+            }
+
+            foreach (var header in request.Content!.Headers)
+            {
+                Headers[header.Key] = header.Value.ToArray();
+            }
+
             Body = await request.Content!.ReadAsByteArrayAsync(cancellationToken);
             return new HttpResponseMessage(HttpStatusCode.OK)
             {

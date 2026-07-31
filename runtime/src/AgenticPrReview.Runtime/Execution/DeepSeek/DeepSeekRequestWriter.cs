@@ -140,8 +140,6 @@ internal static class DeepSeekRequestWriter
         var usedCallIds = new HashSet<string>(StringComparer.Ordinal);
         var pendingResults = new Queue<string>();
         var parts = 0;
-        var calls = 0;
-        var resultBytes = 0;
         for (var messageIndex = 0;
              messageIndex < request.Messages.Length;
              messageIndex++)
@@ -189,8 +187,7 @@ internal static class DeepSeekRequestWriter
                         message,
                         messageIndex,
                         usedCallIds,
-                        pendingResults,
-                        ref calls))
+                        pendingResults))
                 {
                     return false;
                 }
@@ -202,8 +199,7 @@ internal static class DeepSeekRequestWriter
                 !ValidateToolResult(
                     message,
                     messageIndex,
-                    pendingResults,
-                    ref resultBytes))
+                    pendingResults))
             {
                 return false;
             }
@@ -238,8 +234,7 @@ internal static class DeepSeekRequestWriter
         MinimalChatMessage message,
         int messageIndex,
         HashSet<string> usedCallIds,
-        Queue<string> pendingResults,
-        ref int totalCalls)
+        Queue<string> pendingResults)
     {
         var textCount = 0;
         var reasoningCount = 0;
@@ -315,17 +310,7 @@ internal static class DeepSeekRequestWriter
             return false;
         }
 
-        try
-        {
-            totalCalls = checked(totalCalls + localCalls.Count);
-        }
-        catch (OverflowException)
-        {
-            return false;
-        }
-
-        if (totalCalls > AgentLimits.ToolCalls ||
-            associatedCalls.Any(callId => !localCalls.Contains(
+        if (associatedCalls.Any(callId => !localCalls.Contains(
                 callId,
                 StringComparer.Ordinal)))
         {
@@ -343,8 +328,7 @@ internal static class DeepSeekRequestWriter
     private static bool ValidateToolResult(
         MinimalChatMessage message,
         int messageIndex,
-        Queue<string> pendingResults,
-        ref int totalResultBytes)
+        Queue<string> pendingResults)
     {
         if (message.Contents.Length != 1 || pendingResults.Count == 0)
         {
@@ -364,7 +348,7 @@ internal static class DeepSeekRequestWriter
                 content.Text,
                 1,
                 AgentLimits.ToolResultBytes,
-                out var bytes) ||
+                out _) ||
             !StringComparer.Ordinal.Equals(
                 pendingResults.Dequeue(),
                 content.CallId))
@@ -372,16 +356,7 @@ internal static class DeepSeekRequestWriter
             return false;
         }
 
-        try
-        {
-            totalResultBytes = checked(totalResultBytes + bytes);
-        }
-        catch (OverflowException)
-        {
-            return false;
-        }
-
-        return totalResultBytes <= AgentLimits.ToolResultsTotalBytes;
+        return true;
     }
 
     private static bool TryValidateTools(
