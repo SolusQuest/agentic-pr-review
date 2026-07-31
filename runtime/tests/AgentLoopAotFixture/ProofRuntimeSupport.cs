@@ -46,6 +46,40 @@ internal static class ProofScenario
         new string('2', 40),
         new string('3', 40));
 
+    internal static ReviewedDiffSource BootstrapDiffSource(
+        ReviewedIdentity identity) => new(
+        identity,
+        ReviewedPath,
+        previousPath: null,
+        "modified",
+        sourceTruncated: false,
+        [
+            new ReviewedDiffHunk(
+                oldStart: 0,
+                oldCount: 0,
+                newStart: 1,
+                newCount: 1,
+                [
+                    new ReviewedDiffLine(
+                        "addition",
+                        OldLine: null,
+                        NewLine: 1,
+                        PriorOnlyFact),
+                ]),
+        ]);
+
+    internal static ReviewedChangedFile BootstrapChangedFile(
+        ReviewedDiffSource source) => new(
+        ReviewedPath,
+        PreviousPath: null,
+        "modified",
+        Additions: 1,
+        Deletions: 0,
+        Changes: 1,
+        "available",
+        source.PatchSha256,
+        SourceTruncated: false);
+
     internal static AgentSessionTrustedRequest Trusted() => new(
         RepositoryId,
         ReviewTarget,

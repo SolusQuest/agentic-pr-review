@@ -27,7 +27,7 @@ public sealed class AgentProofContractTests
             "bootstrap",
             expectedGeneration: 0,
             expectedModelCalls: 2,
-            expectedToolCalls: 2);
+            expectedToolCalls: 5);
         AssertGolden(
             continuation,
             "continue",

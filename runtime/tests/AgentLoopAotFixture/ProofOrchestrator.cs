@@ -100,7 +100,7 @@ internal static class ProofOrchestrator
 
         var identity = ProofScenario.BootstrapIdentity();
         var context = ProofScenario.User(
-            "Review the synthetic snapshot. Use a repository tool before finishing.");
+            "Review the synthetic snapshot. Use read_file and each R3 observation tool before finishing.");
         var run = new AgentRunRequest(
             identity,
             materialized!.StablePlan,
@@ -110,15 +110,21 @@ internal static class ProofOrchestrator
         var providerCanary = canaries.Provider;
         await using var server = StrictLoopbackServer.Start(
             providerCanary,
-            [ProviderScripts.BootstrapRead, ProviderScripts.BootstrapFinish]);
+            [
+                ProviderScripts.BootstrapR3Observations,
+                ProviderScripts.BootstrapFinish,
+            ]);
         using var backend = new LoopbackProviderBackend(
             server.Endpoint,
             providerCanary);
         var chat = new MinimalChatClient(backend);
+        var diffSource = ProofScenario.BootstrapDiffSource(identity);
         var snapshot = new ReviewedSnapshot(
             identity,
             ProofPaths.RepositoryRoot(command),
-            [ProofScenario.ReviewedPath]);
+            [ProofScenario.ReviewedPath],
+            [ProofScenario.BootstrapChangedFile(diffSource)],
+            [diffSource]);
         var loop = new AgentLoop(
             chat,
             new SnapshotToolExecutor(
@@ -220,7 +226,7 @@ internal static class ProofOrchestrator
             [
                 "authorization_before_capabilities",
                 "automatic_bootstrap_no_store",
-                "real_snapshot_tool_grounded_finish",
+                "real_snapshot_read_file_and_r3_tools_grounded_finish",
                 "completed_session_only",
                 "encrypted_state_accepted",
                 "provider_canary_authorization_only",

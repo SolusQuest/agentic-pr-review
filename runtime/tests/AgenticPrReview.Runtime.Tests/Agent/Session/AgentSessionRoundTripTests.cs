@@ -1312,6 +1312,288 @@ public sealed class AgentSessionRoundTripTests
         Assert.Null(restored.RunRequest);
     }
 
+    [Fact]
+    public async Task R3ToolSessionBuildsRestoresAndPreservesCanonicalRecords()
+    {
+        var trusted = Trusted();
+        var built = await BuildGroundedR3GenerationAsync(trusted);
+        var records = built.Artifact.Document.CompletedRuns[0].Records;
+        var calls = records
+            .OfType<AgentSessionAssistantMessageRecord>()
+            .SelectMany(message => message.Contents)
+            .OfType<AgentSessionToolCallContent>()
+            .ToArray();
+        Assert.Equal(
+            [
+                AgentToolRegistry.ListFilesName,
+                AgentToolRegistry.ListChangedFilesName,
+                AgentToolRegistry.ReadDiffName,
+            ],
+            calls.Select(call => call.Name));
+        Assert.Equal(
+            [
+                "{\"prefix\":null,\"after\":null}",
+                "{\"after\":null}",
+                "{\"path\":\"src/a.cs\",\"start_hunk\":1,\"hunk_count\":20}",
+            ],
+            calls.Select(call => call.ArgumentsJson));
+
+        var storedResults = records
+            .OfType<AgentSessionToolResultRecord>()
+            .ToDictionary(result => result.CallId, StringComparer.Ordinal);
+        Assert.Equal(3, storedResults.Count);
+        var restored = Restore(
+            built,
+            trusted,
+            AgentSessionHeadTransition.SameHead);
+        Assert.True(restored.Succeeded, restored.Code);
+        var restoredCalls = restored.RunRequest!.InitialMessages
+            .SelectMany(message => message.Contents)
+            .OfType<ProjectToolCallContent>()
+            .Where(call => !StringComparer.Ordinal.Equals(
+                call.Name,
+                AgentToolRegistry.FinishReviewName))
+            .ToArray();
+        Assert.Equal(
+            calls.Select(call =>
+                (call.CallId, call.Name, call.ArgumentsJson)),
+            restoredCalls.Select(call =>
+                (call.CallId, call.Name, call.ArgumentsJson)));
+        var restoredResults = restored.RunRequest.InitialMessages
+            .SelectMany(message => message.Contents)
+            .OfType<ProjectToolResultContent>()
+            .Where(result => storedResults.ContainsKey(result.CallId))
+            .ToArray();
+        Assert.Equal(
+            storedResults.Values.Select(result =>
+                (result.CallId, result.ResultJson)),
+            restoredResults.Select(result =>
+                (result.CallId, result.Result)));
+    }
+
+    [Fact]
+    public async Task StoredR3ToolArgumentsRequireCanonicalDefaultsAndNulls()
+    {
+        var trusted = Trusted();
+        var built = await BuildGroundedR3GenerationAsync(trusted);
+        foreach (var restored in new[]
+                 {
+                     (CallId: "list0", Arguments: "{}"),
+                     (CallId: "changed0", Arguments: "{}"),
+                     (CallId: "diff0", Arguments: "{\"path\":\"src/a.cs\"}"),
+                 }.Select(mutation => MutateToolCallArguments(
+                     built.Artifact,
+                     mutation.Arguments,
+                     mutation.CallId))
+                 .Select(artifact => Restore(
+                     artifact,
+                     trusted,
+                     AgentSessionHeadTransition.SameHead)))
+        {
+            Assert.Equal(AgentSessionCodes.RecordInvalid, restored.Code);
+            Assert.Null(restored.RunRequest);
+        }
+    }
+
+    [Fact]
+    public async Task R3ConstructionRejectsSelfConsistentImpossibleResultEvent()
+    {
+        var trusted = Trusted();
+        var completed = await CompleteGroundedR3Async(trusted);
+        var invalid = Sign(new ListFilesResult(
+            "ok",
+            Identity(),
+            Prefix: null,
+            After: null,
+            ["src/a.cs", "src/a.cs"],
+            Truncated: false,
+            NextAfter: null,
+            ObservationId: null));
+        var canonical = ListFilesResultWriter.Write(invalid);
+        var resultIndex = Enumerable.Range(
+                0,
+                completed.Outcome.Events.Length)
+            .Single(index =>
+                completed.Outcome.Events[index] is AgentToolResultEvent
+                    result &&
+                StringComparer.Ordinal.Equals(result.CallId, "list0"));
+        var stored = Assert.IsType<AgentToolResultEvent>(
+            completed.Outcome.Events[resultIndex]);
+        var mutated = completed.Outcome with
+        {
+            Events = completed.Outcome.Events.SetItem(
+                resultIndex,
+                stored with
+                {
+                    ObservationId = invalid.ObservationId!,
+                    ResultSha256 = AgentCanonical.HashRaw(canonical),
+                    CanonicalResult = canonical.ToImmutableArray(),
+                }),
+        };
+        var built = AgentSessionBuilder.Build(
+            new AgentSessionBuildInput(
+                completed.Run,
+                mutated,
+                trusted,
+                completed.Run.InitialMessages.Length - 1,
+                SyntheticContinuationCodec.Instance,
+                Predecessor: null,
+                AgentSessionHeadTransition.SameHead));
+        Assert.Equal(AgentSessionCodes.AssociationInvalid, built.FailureCode);
+        Assert.Null(built.Artifact);
+    }
+
+    [Fact]
+    public async Task R3UnknownDurableToolNameFailsBeforeReconstruction()
+    {
+        var trusted = Trusted();
+        var built = await BuildGroundedR3GenerationAsync(trusted);
+        var mutated = MutateToolName(
+            built.Artifact,
+            "list0",
+            "list_files_alias");
+        var restored = Restore(
+            mutated,
+            trusted,
+            AgentSessionHeadTransition.SameHead);
+        Assert.Equal(AgentSessionCodes.RecordInvalid, restored.Code);
+        Assert.Null(restored.RunRequest);
+    }
+
+    [Fact]
+    public void R3DurableAdmissionRejectsImpossibleFiniteDomainResults()
+    {
+        var listCall = new AgentSessionToolCallContent(
+            0,
+            "list0",
+            AgentToolRegistry.ListFilesName,
+            "{\"prefix\":null,\"after\":null}");
+        var duplicateList = Sign(new ListFilesResult(
+            "ok",
+            Identity(),
+            Prefix: null,
+            After: null,
+            ["src/a.cs", "src/a.cs"],
+            Truncated: false,
+            NextAfter: null,
+            ObservationId: null));
+        Assert.False(TryAdmitStored(listCall, duplicateList));
+
+        var changedCall = new AgentSessionToolCallContent(
+            0,
+            "changed0",
+            AgentToolRegistry.ListChangedFilesName,
+            "{\"after\":null}");
+        var invalidChange = new ReviewedChangedFile(
+            "src/a.cs",
+            PreviousPath: null,
+            "modified",
+            Additions: 1,
+            Deletions: 1,
+            Changes: 1,
+            "available",
+            new string('a', 64),
+            SourceTruncated: false);
+        var changed = Sign(new ListChangedFilesResult(
+            "ok",
+            Identity(),
+            After: null,
+            [invalidChange],
+            Truncated: false,
+            NextAfter: null,
+            ObservationId: null));
+        Assert.False(TryAdmitStored(changedCall, changed));
+
+        var eofCall = new AgentSessionToolCallContent(
+            0,
+            "diff0",
+            AgentToolRegistry.ReadDiffName,
+            "{\"path\":\"src/a.cs\",\"start_hunk\":1,\"hunk_count\":20}");
+        var eof = Sign(new ReadDiffResult(
+            "eof",
+            Identity(),
+            "src/a.cs",
+            new string('a', 64),
+            SourceTruncated: false,
+            RequestedStartHunk: 1,
+            RequestedHunkCount: AgentLimits.ReadDiffHunks,
+            ReturnedStartHunk: null,
+            ReturnedEndHunk: null,
+            Hunks: [],
+            Truncated: false,
+            NextStartHunk: null,
+            ObservationId: null));
+        Assert.False(TryAdmitStored(eofCall, eof));
+
+        var finalCall = new AgentSessionToolCallContent(
+            0,
+            "diff0",
+            AgentToolRegistry.ReadDiffName,
+            "{\"path\":\"src/a.cs\",\"start_hunk\":200,\"hunk_count\":1}");
+        var finalPage = Sign(new ReadDiffResult(
+            "ok",
+            Identity(),
+            "src/a.cs",
+            new string('a', 64),
+            SourceTruncated: false,
+            RequestedStartHunk: AgentLimits.DiffHunksPerFile,
+            RequestedHunkCount: 1,
+            ReturnedStartHunk: AgentLimits.DiffHunksPerFile,
+            ReturnedEndHunk: AgentLimits.DiffHunksPerFile,
+            Hunks: [ContextHunk(AgentLimits.DiffHunksPerFile)],
+            Truncated: true,
+            NextStartHunk: AgentLimits.DiffHunksPerFile + 1,
+            ObservationId: null));
+        Assert.False(TryAdmitStored(finalCall, finalPage));
+    }
+
+    [Fact]
+    public async Task RestoredReadDiffEvidenceRejectsSparseAndPriorRunRanges()
+    {
+        var trusted = Trusted();
+        var generation0 = await BuildGroundedR3GenerationAsync(trusted);
+        var diffResult = generation0.Artifact.Document.CompletedRuns[0].Records
+            .OfType<AgentSessionToolResultRecord>()
+            .Single(result => StringComparer.Ordinal.Equals(
+                result.CallId,
+                "diff0"));
+        var sparse = MutateTerminalEvidence(
+            generation0.Artifact,
+            runOrdinal: 0,
+            new AgentEvidence(
+                diffResult.ObservationId,
+                "src/a.cs",
+                10,
+                12));
+        var sparseRestore = Restore(
+            sparse,
+            trusted,
+            AgentSessionHeadTransition.SameHead);
+        Assert.Equal(AgentSessionCodes.AssociationInvalid, sparseRestore.Code);
+        Assert.Null(sparseRestore.RunRequest);
+
+        var generation1 = await BuildGenerationAsync(
+            trusted,
+            generation0,
+            "later run",
+            "finish1",
+            reasoning: false);
+        var priorRun = MutateTerminalEvidence(
+            generation1.Artifact,
+            runOrdinal: 1,
+            new AgentEvidence(
+                diffResult.ObservationId,
+                "src/a.cs",
+                10,
+                10));
+        var priorRestore = Restore(
+            new BuiltGeneration(priorRun, generation1.EnvelopeSha256),
+            trusted,
+            AgentSessionHeadTransition.SameHead);
+        Assert.Equal(AgentSessionCodes.AssociationInvalid, priorRestore.Code);
+        Assert.Null(priorRestore.RunRequest);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -3904,6 +4186,248 @@ public sealed class AgentSessionRoundTripTests
         }
     }
 
+    private static async Task<BuiltGeneration>
+        BuildGroundedR3GenerationAsync(
+            AgentSessionTrustedRequest trusted)
+    {
+        var completed = await CompleteGroundedR3Async(trusted);
+        var built = AgentSessionBuilder.Build(
+            new AgentSessionBuildInput(
+                completed.Run,
+                completed.Outcome,
+                trusted,
+                completed.Run.InitialMessages.Length - 1,
+                SyntheticContinuationCodec.Instance,
+                Predecessor: null,
+                AgentSessionHeadTransition.SameHead));
+        Assert.True(built.Succeeded, built.FailureCode);
+        return new BuiltGeneration(
+            built.Artifact!,
+            new string('e', 64));
+    }
+
+    private static async Task<CompletedRun> CompleteGroundedR3Async(
+        AgentSessionTrustedRequest trusted)
+    {
+        var root = Directory.CreateTempSubdirectory(
+            "apr102-session-r3-");
+        try
+        {
+            var identity = Identity();
+            var firstHunk = new ReviewedDiffHunk(
+                oldStart: 11,
+                oldCount: 1,
+                newStart: 10,
+                newCount: 1,
+                [
+                    new ReviewedDiffLine(
+                        "deletion",
+                        OldLine: 11,
+                        NewLine: null,
+                        "deleted line"),
+                    new ReviewedDiffLine(
+                        "addition",
+                        OldLine: null,
+                        NewLine: 10,
+                        "line 10"),
+                ]);
+            var secondHunk = new ReviewedDiffHunk(
+                oldStart: 12,
+                oldCount: 0,
+                newStart: 12,
+                newCount: 1,
+                [
+                    new ReviewedDiffLine(
+                        "addition",
+                        OldLine: null,
+                        NewLine: 12,
+                        "line 12"),
+                ]);
+            var source = new ReviewedDiffSource(
+                identity,
+                "src/a.cs",
+                previousPath: null,
+                "modified",
+                sourceTruncated: false,
+                [firstHunk, secondHunk]);
+            var change = new ReviewedChangedFile(
+                "src/a.cs",
+                PreviousPath: null,
+                "modified",
+                Additions: 2,
+                Deletions: 1,
+                Changes: 3,
+                "available",
+                source.PatchSha256,
+                SourceTruncated: false);
+            var executor = new SnapshotToolExecutor(
+                new ReviewedSnapshot(
+                    identity,
+                    root.FullName,
+                    ["src/a.cs"],
+                    [change],
+                    [source]),
+                new VerifiedReviewedFileAccess());
+            Assert.True(AgentToolArguments.TryReadDiff(
+                "{\"path\":\"src/a.cs\"}",
+                out var diffArguments));
+            var preview = await executor.ExecuteAsync(
+                new PreparedReadDiffCall("diff0", diffArguments!),
+                CancellationToken.None);
+            Assert.True(preview.Succeeded, preview.FailureCode);
+            var terminalBytes = AgentToolArguments.WriteFinishReview(
+                "complete",
+                [
+                    new AgentFinding(
+                        "high",
+                        "grounded",
+                        "grounded message",
+                        [
+                            new AgentEvidence(
+                                preview.Observation!.ObservationId,
+                                "src/a.cs",
+                                10,
+                                10),
+                        ]),
+                ]);
+            var responses = new Queue<ProjectChatResponse>(
+            [
+                new ProjectChatResponse(
+                    new ProjectChatMessage(
+                        "assistant",
+                        [
+                            new ProjectToolCallContent(
+                                "list0",
+                                AgentToolRegistry.ListFilesName,
+                                "{}"),
+                            new ProjectToolCallContent(
+                                "changed0",
+                                AgentToolRegistry.ListChangedFilesName,
+                                "{}"),
+                            new ProjectToolCallContent(
+                                "diff0",
+                                AgentToolRegistry.ReadDiffName,
+                                "{\"path\":\"src/a.cs\"}"),
+                        ]),
+                    new ProjectChatUsage(1, 1),
+                    CapturedResponseBodyBytes: 1),
+                new ProjectChatResponse(
+                    new ProjectChatMessage(
+                        "assistant",
+                        [
+                            new ProjectToolCallContent(
+                                "finish0",
+                                AgentToolRegistry.FinishReviewName,
+                                Encoding.UTF8.GetString(terminalBytes)),
+                        ]),
+                    new ProjectChatUsage(1, 1),
+                    CapturedResponseBodyBytes: 1),
+            ]);
+            var run = new AgentRunRequest(
+                identity,
+                Materialize(trusted, prior: null),
+                "session0",
+                [.. Controls(trusted), User("review-r3")]);
+            var outcome = await new AgentLoop(
+                new QueueChatClient(responses),
+                executor).RunAsync(run, CancellationToken.None);
+            Assert.True(
+                outcome.CompletedSessionEligible,
+                outcome.Diagnostic?.Code);
+            return new CompletedRun(run, outcome);
+        }
+        finally
+        {
+            root.Delete(recursive: true);
+        }
+    }
+
+    private static ListFilesResult Sign(ListFilesResult result)
+    {
+        var observationId = AgentCanonical.HashDomain(
+            AgentCanonical.ListFilesObservationDomain,
+            ListFilesResultWriter.Write(
+                result,
+                includeObservationId: false));
+        return result with { ObservationId = observationId };
+    }
+
+    private static ListChangedFilesResult Sign(
+        ListChangedFilesResult result)
+    {
+        var observationId = AgentCanonical.HashDomain(
+            AgentCanonical.ListChangedFilesObservationDomain,
+            ListChangedFilesResultWriter.Write(
+                result,
+                includeObservationId: false));
+        return result with { ObservationId = observationId };
+    }
+
+    private static ReadDiffResult Sign(ReadDiffResult result)
+    {
+        var observationId = AgentCanonical.HashDomain(
+            AgentCanonical.ReadDiffObservationDomain,
+            ReadDiffResultWriter.Write(
+                result,
+                includeObservationId: false));
+        return result with { ObservationId = observationId };
+    }
+
+    private static bool TryAdmitStored(
+        AgentSessionToolCallContent call,
+        ListFilesResult result) =>
+        TryAdmitStored(
+            call,
+            result.ObservationId!,
+            ListFilesResultWriter.Write(result));
+
+    private static bool TryAdmitStored(
+        AgentSessionToolCallContent call,
+        ListChangedFilesResult result) =>
+        TryAdmitStored(
+            call,
+            result.ObservationId!,
+            ListChangedFilesResultWriter.Write(result));
+
+    private static bool TryAdmitStored(
+        AgentSessionToolCallContent call,
+        ReadDiffResult result) =>
+        TryAdmitStored(
+            call,
+            result.ObservationId!,
+            ReadDiffResultWriter.Write(result));
+
+    private static bool TryAdmitStored(
+        AgentSessionToolCallContent call,
+        string observationId,
+        byte[] canonical)
+    {
+        var result = new AgentSessionToolResultRecord(
+            "result0",
+            Sequence: 0,
+            "message0",
+            call.CallId,
+            call.Name,
+            observationId,
+            Encoding.UTF8.GetString(canonical),
+            "tool",
+            "tool_result",
+            "untrusted_tool_data");
+        return AgentSessionToolObservationAdmission.TryAdmit(
+            call,
+            result,
+            Identity(),
+            canonical,
+            out _);
+    }
+
+    private static ReviewedDiffHunk ContextHunk(int line) => new(
+        line,
+        1,
+        line,
+        1,
+        [new ReviewedDiffLine("context", line, line, "line")]);
+
     private static AgentToolExecution ReadExecution(
         string path,
         char rawHashCharacter)
@@ -4248,7 +4772,8 @@ public sealed class AgentSessionRoundTripTests
 
     private static AgentSessionArtifact MutateToolCallArguments(
         AgentSessionArtifact artifact,
-        string argumentsJson)
+        string argumentsJson,
+        string? callId = null)
     {
         var run = artifact.Document.CompletedRuns[0];
         var messageIndex = Enumerable.Range(0, run.Records.Length).First(
@@ -4258,8 +4783,12 @@ public sealed class AgentSessionRoundTripTests
                     content is AgentSessionToolCallContent));
         var message = Assert.IsType<AgentSessionAssistantMessageRecord>(
             run.Records[messageIndex]);
-        var call = Assert.Single(
-            message.Contents.OfType<AgentSessionToolCallContent>());
+        var toolCalls = message.Contents
+            .OfType<AgentSessionToolCallContent>();
+        var call = callId is null
+            ? Assert.Single(toolCalls)
+            : Assert.Single(toolCalls, candidate =>
+                StringComparer.Ordinal.Equals(candidate.CallId, callId));
         var callIndex = message.Contents.IndexOf(call);
         var mutatedCall = call with
         {
@@ -4273,6 +4802,121 @@ public sealed class AgentSessionRoundTripTests
                     callIndex,
                     mutatedCall),
             });
+        return Rewrite(
+            artifact.Document,
+            run with { Records = records });
+    }
+
+    private static AgentSessionArtifact MutateToolName(
+        AgentSessionArtifact artifact,
+        string callId,
+        string name)
+    {
+        var run = artifact.Document.CompletedRuns[0];
+        var messageIndex = Enumerable.Range(0, run.Records.Length).Single(
+            index => run.Records[index] is
+                AgentSessionAssistantMessageRecord message &&
+                message.Contents
+                    .OfType<AgentSessionToolCallContent>()
+                    .Any(call => StringComparer.Ordinal.Equals(
+                        call.CallId,
+                        callId)));
+        var message = Assert.IsType<AgentSessionAssistantMessageRecord>(
+            run.Records[messageIndex]);
+        var call = Assert.Single(
+            message.Contents.OfType<AgentSessionToolCallContent>(),
+            candidate => StringComparer.Ordinal.Equals(
+                candidate.CallId,
+                callId));
+        var callIndex = message.Contents.IndexOf(call);
+        var resultIndex = Enumerable.Range(0, run.Records.Length).Single(
+            index => run.Records[index] is AgentSessionToolResultRecord
+                result &&
+                StringComparer.Ordinal.Equals(result.CallId, callId));
+        var result = Assert.IsType<AgentSessionToolResultRecord>(
+            run.Records[resultIndex]);
+        var records = run.Records
+            .SetItem(
+                messageIndex,
+                message with
+                {
+                    Contents = message.Contents.SetItem(
+                        callIndex,
+                        call with { Name = name }),
+                })
+            .SetItem(
+                resultIndex,
+                result with { Name = name });
+        return Rewrite(
+            artifact.Document,
+            run with { Records = records });
+    }
+
+    private static AgentSessionArtifact MutateTerminalEvidence(
+        AgentSessionArtifact artifact,
+        int runOrdinal,
+        AgentEvidence evidence)
+    {
+        var run = artifact.Document.CompletedRuns[runOrdinal];
+        var terminalMessageIndex = Enumerable.Range(0, run.Records.Length)
+            .Single(index =>
+                run.Records[index] is AgentSessionAssistantMessageRecord
+                    message &&
+                message.Contents.Any(content =>
+                    content is AgentSessionTerminalCallContent));
+        var terminalMessage = Assert.IsType<
+            AgentSessionAssistantMessageRecord>(
+                run.Records[terminalMessageIndex]);
+        var terminal = Assert.Single(
+            terminalMessage.Contents.OfType<
+                AgentSessionTerminalCallContent>());
+        Assert.True(AgentToolArguments.TryFinishReview(
+            terminal.ArgumentsJson,
+            out var original));
+        var terminalBytes = AgentToolArguments.WriteFinishReview(
+            original!.Summary,
+            [
+                new AgentFinding(
+                    "high",
+                    "grounded",
+                    "grounded message",
+                    [evidence]),
+            ]);
+        var terminalSha256 = AgentCanonical.HashDomain(
+            AgentCanonical.TerminalDomain,
+            terminalBytes);
+        using var terminalDocument = JsonDocument.Parse(terminalBytes);
+        var findingsJson = terminalDocument.RootElement
+            .GetProperty("findings")
+            .GetRawText();
+        var terminalContentIndex = terminalMessage.Contents.IndexOf(terminal);
+        var outcomeIndex = Enumerable.Range(0, run.Records.Length)
+            .Single(index =>
+                run.Records[index] is AgentSessionReviewOutcomeRecord);
+        var outcome = Assert.IsType<AgentSessionReviewOutcomeRecord>(
+            run.Records[outcomeIndex]);
+        var records = run.Records
+            .SetItem(
+                terminalMessageIndex,
+                terminalMessage with
+                {
+                    Contents = terminalMessage.Contents.SetItem(
+                        terminalContentIndex,
+                        terminal with
+                        {
+                            ArgumentsJson =
+                                Encoding.UTF8.GetString(terminalBytes),
+                            ArgumentsSha256 = terminalSha256,
+                        }),
+                })
+            .SetItem(
+                outcomeIndex,
+                outcome with
+                {
+                    TerminalSha256 = terminalSha256,
+                    Summary = original.Summary,
+                    FindingsJson = findingsJson,
+                });
         return Rewrite(
             artifact.Document,
             run with { Records = records });

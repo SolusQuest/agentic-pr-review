@@ -52,29 +52,123 @@ internal static class ProviderScripts
         return Json(response);
     }
 
+    internal static ProviderServerResponse BootstrapR3Observations(
+        byte[] requestBody)
+    {
+        var messagePosition = MessageCount(requestBody);
+        var response = new ProviderResponseDto(
+            new ProviderMessageDto(
+                "assistant",
+                [
+                    new ProviderContentDto(
+                        "reasoning",
+                        null,
+                        null,
+                        ProofScenario.ContinuationReadable,
+                        ProofScenario.ContinuationOpaque,
+                        ProofScenario.ContinuationFraming,
+                        "read0",
+                        messagePosition,
+                        0),
+                    new ProviderContentDto(
+                        "tool_call",
+                        "read0",
+                        AgentToolRegistry.ReadFileName,
+                        "{\"path\":\"reviewed/fact.txt\"}",
+                        null,
+                        null,
+                        null,
+                        messagePosition,
+                        1),
+                    new ProviderContentDto(
+                        "tool_call",
+                        "list0",
+                        AgentToolRegistry.ListFilesName,
+                        "{}",
+                        null,
+                        null,
+                        null,
+                        messagePosition,
+                        2),
+                    new ProviderContentDto(
+                        "tool_call",
+                        "changed0",
+                        AgentToolRegistry.ListChangedFilesName,
+                        "{}",
+                        null,
+                        null,
+                        null,
+                        messagePosition,
+                        3),
+                    new ProviderContentDto(
+                        "tool_call",
+                        "diff0",
+                        AgentToolRegistry.ReadDiffName,
+                        "{\"path\":\"reviewed/fact.txt\"}",
+                        null,
+                        null,
+                        null,
+                        messagePosition,
+                        4),
+                ]),
+            new ProviderUsageDto(11, 7),
+            new ProviderContinuationDto(
+                ProofScenario.ProviderId,
+                ProofScenario.ModelId,
+                ProofScenario.AdapterId,
+                ProofScenario.SessionId,
+                [
+                    new ProviderContinuationItemDto(
+                        ProofScenario.ContinuationReadable,
+                        ProofScenario.ContinuationOpaque,
+                        ProofScenario.ContinuationFraming,
+                        "read0",
+                        messagePosition,
+                        0),
+                ]));
+        return Json(response);
+    }
+
     internal static ProviderServerResponse BootstrapFinish(byte[] requestBody)
     {
         using var document = JsonDocument.Parse(requestBody);
-        var toolResult = document.RootElement
+        var toolResults = document.RootElement
             .GetProperty("messages")
             .EnumerateArray()
-            .Last()
-            .GetProperty("contents")[0]
-            .GetProperty("text")
-            .GetString();
-        if (toolResult is null ||
-            !toolResult.Contains(
+            .SelectMany(message =>
+                message.GetProperty("contents").EnumerateArray())
+            .Where(content =>
+                StringComparer.Ordinal.Equals(
+                    content.GetProperty("kind").GetString(),
+                    "tool_result") &&
+                content.GetProperty("call_id").GetString() is
+                    "read0" or "diff0")
+            .ToDictionary(
+                content => content.GetProperty("call_id").GetString()!,
+                content => content.GetProperty("text").GetString()!,
+                StringComparer.Ordinal);
+        if (toolResults.Count != 2 ||
+            !toolResults.TryGetValue("read0", out var readResult) ||
+            !toolResults.TryGetValue("diff0", out var diffResult) ||
+            !readResult.Contains(
+                ProofScenario.PriorOnlyFact,
+                StringComparison.Ordinal) ||
+            !diffResult.Contains(
                 ProofScenario.PriorOnlyFact,
                 StringComparison.Ordinal))
         {
             throw new ProviderProtocolException();
         }
 
-        using var resultDocument = JsonDocument.Parse(toolResult);
-        var observation = resultDocument.RootElement
+        using var readDocument = JsonDocument.Parse(readResult);
+        using var diffDocument = JsonDocument.Parse(diffResult);
+        var readObservation = readDocument.RootElement
             .GetProperty("observation_id")
             .GetString();
-        if (observation is null)
+        var diffObservation = diffDocument.RootElement
+            .GetProperty("observation_id")
+            .GetString();
+        if (readObservation is null || diffObservation is null)
         {
             throw new ProviderProtocolException();
         }
@@ -85,7 +179,11 @@ internal static class ProviderScripts
             "\"title\":\"Synthetic prior fact\",",
             "\"message\":\"The reviewed snapshot contains the synthetic marker.\",",
             "\"evidence\":[{\"observation_id\":\"",
-            observation,
+            readObservation,
+            "\",\"path\":\"",
+            ProofScenario.ReviewedPath,
+            "\",\"start_line\":1,\"end_line\":1},{\"observation_id\":\"",
+            diffObservation,
             "\",\"path\":\"",
             ProofScenario.ReviewedPath,
             "\",\"start_line\":1,\"end_line\":1}]}]}");
@@ -112,7 +210,8 @@ internal static class ProviderScripts
     {
         using var document = JsonDocument.Parse(requestBody);
         var root = document.RootElement;
-        var priorFactPresent = root.GetProperty("messages")
+        var messages = root.GetProperty("messages");
+        var priorFactPresent = messages
             .EnumerateArray()
             .SelectMany(message =>
                 message.GetProperty("contents").EnumerateArray())
@@ -122,7 +221,61 @@ internal static class ProviderScripts
                 text.GetString()!.Contains(
                     ProofScenario.PriorOnlyFact,
                     StringComparison.Ordinal));
+        var restoredCalls = messages
+            .EnumerateArray()
+            .SelectMany(message =>
+                message.GetProperty("contents").EnumerateArray())
+            .Where(content =>
+                StringComparer.Ordinal.Equals(
+                    content.GetProperty("kind").GetString(),
+                    "tool_call") &&
+                content.GetProperty("call_id").GetString() is
+                    "read0" or "list0" or "changed0" or "diff0")
+            .Select(content => (
+                CallId: content.GetProperty("call_id").GetString(),
+                Name: content.GetProperty("name").GetString(),
+                Arguments: content.GetProperty("text").GetString()))
+            .ToArray();
+        var expectedCalls = new[]
+        {
+            (
+                CallId: (string?)"read0",
+                Name: (string?)AgentToolRegistry.ReadFileName,
+                Arguments: (string?)"{\"path\":\"reviewed/fact.txt\",\"start_line\":1,\"line_count\":400}"),
+            (
+                CallId: (string?)"list0",
+                Name: (string?)AgentToolRegistry.ListFilesName,
+                Arguments: (string?)"{\"prefix\":null,\"after\":null}"),
+            (
+                CallId: (string?)"changed0",
+                Name: (string?)AgentToolRegistry.ListChangedFilesName,
+                Arguments: (string?)"{\"after\":null}"),
+            (
+                CallId: (string?)"diff0",
+                Name: (string?)AgentToolRegistry.ReadDiffName,
+                Arguments: (string?)"{\"path\":\"reviewed/fact.txt\",\"start_hunk\":1,\"hunk_count\":20}"),
+        };
+        var restoredResultIds = messages
+            .EnumerateArray()
+            .SelectMany(message =>
+                message.GetProperty("contents").EnumerateArray())
+            .Where(content => StringComparer.Ordinal.Equals(
+                content.GetProperty("kind").GetString(),
+                "tool_result"))
+            .Select(content => content.GetProperty("call_id").GetString())
+            .Where(callId =>
+                callId is "read0" or "list0" or "changed0" or "diff0")
+            .ToArray();
         if (!priorFactPresent ||
+            !restoredCalls.SequenceEqual(expectedCalls) ||
+            !restoredResultIds.SequenceEqual(
+                new string?[]
+                {
+                    "read0",
+                    "list0",
+                    "changed0",
+                    "diff0",
+                }) ||
             !root.TryGetProperty("continuation", out var continuation) ||
             continuation.ValueKind != JsonValueKind.Object)
         {
