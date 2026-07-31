@@ -53,6 +53,19 @@ internal sealed class DeepSeekTransportResult
         int? discardedErrorCount,
         ImmutableArray<byte> body)
     {
+        if (!ValidState(
+                outcome,
+                status,
+                statusClass,
+                actualCount,
+                capturedCount,
+                discardedErrorCount,
+                body))
+        {
+            throw new ArgumentException(
+                "The DeepSeek transport result state is invalid.");
+        }
+
         Outcome = outcome;
         Status = status;
         StatusClass = statusClass;
@@ -80,14 +93,25 @@ internal sealed class DeepSeekTransportResult
         null,
         default);
 
-    internal static DeepSeekTransportResult Success(byte[] body) => new(
-        DeepSeekTransportOutcome.Success,
-        200,
-        null,
-        null,
-        body.Length,
-        null,
-        ImmutableArray.CreateRange(body));
+    internal static DeepSeekTransportResult Success(byte[] body)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        if (body.Length > DeepSeekTransportPolicy.SuccessBodyMaxBytes)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(body),
+                "The success body exceeds the transport result cap.");
+        }
+
+        return new DeepSeekTransportResult(
+            DeepSeekTransportOutcome.Success,
+            200,
+            null,
+            null,
+            body.Length,
+            null,
+            ImmutableArray.CreateRange(body));
+    }
 
     internal static DeepSeekTransportResult ResponseTooLarge() => new(
         DeepSeekTransportOutcome.ResponseTooLarge,
@@ -100,7 +124,24 @@ internal sealed class DeepSeekTransportResult
 
     internal static DeepSeekTransportResult HttpFailure(
         DeepSeekHttpStatusClass statusClass,
-        int discardedErrorCount) => new(
+        int discardedErrorCount)
+    {
+        if (!Enum.IsDefined(statusClass))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(statusClass),
+                "The HTTP status class is not defined.");
+        }
+
+        if (discardedErrorCount is < 0 or
+            > DeepSeekTransportPolicy.ErrorBodyDiscardMaxBytes)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(discardedErrorCount),
+                "The discarded error count is outside the result cap.");
+        }
+
+        return new DeepSeekTransportResult(
             DeepSeekTransportOutcome.HttpFailure,
             null,
             statusClass,
@@ -108,6 +149,7 @@ internal sealed class DeepSeekTransportResult
             null,
             discardedErrorCount,
             default);
+    }
 
     internal static DeepSeekTransportResult ConnectTimeout() => new(
         DeepSeekTransportOutcome.ConnectTimeout,
@@ -152,4 +194,59 @@ internal sealed class DeepSeekTransportResult
         DeepSeekTransportOutcome.TransportFailure => "transport_failure",
         _ => nameof(DeepSeekTransportResult),
     };
+
+    private static bool ValidState(
+        DeepSeekTransportOutcome outcome,
+        int? status,
+        DeepSeekHttpStatusClass? statusClass,
+        int? actualCount,
+        int? capturedCount,
+        int? discardedErrorCount,
+        ImmutableArray<byte> body) =>
+        outcome switch
+        {
+            DeepSeekTransportOutcome.RequestRejected =>
+                status is null &&
+                statusClass is null &&
+                actualCount == DeepSeekTransportPolicy.RequestRejectedCount &&
+                capturedCount is null &&
+                discardedErrorCount is null &&
+                body.IsDefault,
+            DeepSeekTransportOutcome.Success =>
+                status == 200 &&
+                statusClass is null &&
+                actualCount is null &&
+                capturedCount is >= 0 and
+                    <= DeepSeekTransportPolicy.SuccessBodyMaxBytes &&
+                !body.IsDefault &&
+                capturedCount == body.Length &&
+                discardedErrorCount is null,
+            DeepSeekTransportOutcome.ResponseTooLarge =>
+                status is null &&
+                statusClass is null &&
+                actualCount is null &&
+                capturedCount ==
+                    DeepSeekTransportPolicy.ResponseTooLargeCount &&
+                discardedErrorCount is null &&
+                body.IsDefault,
+            DeepSeekTransportOutcome.HttpFailure =>
+                status is null &&
+                statusClass is not null &&
+                Enum.IsDefined(statusClass.Value) &&
+                actualCount is null &&
+                capturedCount is null &&
+                discardedErrorCount is >= 0 and
+                    <= DeepSeekTransportPolicy.ErrorBodyDiscardMaxBytes &&
+                body.IsDefault,
+            DeepSeekTransportOutcome.ConnectTimeout or
+            DeepSeekTransportOutcome.ProviderTimeout or
+            DeepSeekTransportOutcome.TransportFailure =>
+                status is null &&
+                statusClass is null &&
+                actualCount is null &&
+                capturedCount is null &&
+                discardedErrorCount is null &&
+                body.IsDefault,
+            _ => false,
+        };
 }

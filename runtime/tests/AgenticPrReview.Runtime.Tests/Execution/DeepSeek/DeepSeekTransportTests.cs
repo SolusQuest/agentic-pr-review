@@ -1,5 +1,10 @@
 using System.Net;
+using System.Net.Security;
+using System.Net.Sockets;
 using System.Reflection;
+using System.Security.Authentication;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 
@@ -112,6 +117,17 @@ public sealed class DeepSeekTransportTests
         Assert.Null(handler.Credentials);
         Assert.False(handler.PreAuthenticate);
         Assert.Equal(TimeSpan.FromSeconds(15), handler.ConnectTimeout);
+        Assert.Equal(0, handler.MaxResponseDrainSize);
+        Assert.Equal(TimeSpan.Zero, handler.ResponseDrainTimeout);
+        Assert.NotNull(handler.RequestHeaderEncodingSelector);
+        using var request = new HttpRequestMessage();
+        Assert.Equal(
+            Encoding.UTF8.CodePage,
+            handler.RequestHeaderEncodingSelector!(
+                "Authorization",
+                request)!.CodePage);
+        Assert.Null(
+            handler.RequestHeaderEncodingSelector("Host", request));
         Assert.NotNull(handler.ActivityHeadersPropagator);
 
         using var transport = DeepSeekTransport.Create(
@@ -123,6 +139,75 @@ public sealed class DeepSeekTransportTests
             .GetValue(transport)!;
         Assert.Equal(Timeout.InfiniteTimeSpan, client.Timeout);
         Assert.Empty(client.DefaultRequestHeaders);
+    }
+
+    [Fact]
+    public async Task ProductionHandlerSerializesMultibyteCredentialAsUtf8()
+    {
+        const string credential = "clé-密钥-😀";
+        await using var server = new TlsLoopbackServer(
+            status: 200,
+            responsePrefix: [],
+            responseTail: [],
+            delayTail: false);
+        using var handler = DeepSeekTransport.CreateHandler(
+            TestTimeout,
+            server.ConnectAsync);
+        server.TrustCertificateFor(handler);
+        using var transport = DeepSeekTransport.CreateForTesting(
+            DeepSeekCredential.Create(credential),
+            handler,
+            TestTimeout);
+
+        var result = await transport.SendAsync(
+            new byte[] { 1 },
+            default);
+        var request = await server.RequestBytes;
+        await server.Completion;
+
+        Assert.Equal(DeepSeekTransportOutcome.Success, result.Outcome);
+        var authorization = Encoding.UTF8.GetBytes(
+            $"Authorization: Bearer {credential}\r\n");
+        Assert.Equal(1, CountOccurrences(request, authorization));
+    }
+
+    [Fact]
+    public async Task ProductionHandlerDoesNotDrainPastErrorCapOnDispose()
+    {
+        var prefix = PatternBytes(
+            DeepSeekTransportPolicy.ErrorBodyDiscardMaxBytes);
+        var tail = PatternBytes(512);
+        await using var server = new TlsLoopbackServer(
+            status: 500,
+            responsePrefix: prefix,
+            responseTail: tail,
+            delayTail: true);
+        using var handler = DeepSeekTransport.CreateHandler(
+            TestTimeout,
+            server.ConnectAsync);
+        server.TrustCertificateFor(handler);
+        using var transport = DeepSeekTransport.CreateForTesting(
+            DeepSeekCredential.Create("key"),
+            handler,
+            TestTimeout);
+
+        var result = await transport.SendAsync(
+            new byte[] { 1 },
+            default);
+        var clientStream = server.ClientStream!;
+        var readsAtReturn = clientStream.ReadCalls;
+
+        Assert.Equal(DeepSeekTransportOutcome.HttpFailure, result.Outcome);
+        Assert.Equal(
+            DeepSeekTransportPolicy.ErrorBodyDiscardMaxBytes,
+            result.DiscardedErrorCount);
+        Assert.Equal(0, clientStream.ActiveReads);
+
+        server.ReleaseTail();
+        await server.Completion;
+        await Task.Delay(100);
+
+        Assert.Equal(readsAtReturn, clientStream.ReadCalls);
     }
 
     [Fact]
@@ -484,6 +569,39 @@ public sealed class DeepSeekTransportTests
         Assert.True(result.HasBody);
     }
 
+    [Fact]
+    public void ResultFactoriesRejectOutOfContractStates()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            DeepSeekTransportResult.Success(
+                new byte[
+                    DeepSeekTransportPolicy.SuccessBodyMaxBytes + 1]));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            DeepSeekTransportResult.HttpFailure(
+                (DeepSeekHttpStatusClass)999,
+                0));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            DeepSeekTransportResult.HttpFailure(
+                DeepSeekHttpStatusClass.BadRequest,
+                -1));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            DeepSeekTransportResult.HttpFailure(
+                DeepSeekHttpStatusClass.BadRequest,
+                DeepSeekTransportPolicy.ErrorBodyDiscardMaxBytes + 1));
+    }
+
+    [Fact]
+    public void ResultFactoryOwnsSuccessBody()
+    {
+        var source = new byte[] { 1, 2, 3 };
+
+        var result = DeepSeekTransportResult.Success(source);
+        source[0] = 9;
+
+        Assert.Equal(new byte[] { 1, 2, 3 }, result.Body);
+        Assert.Equal(3, result.CapturedCount);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(13)]
@@ -692,6 +810,22 @@ public sealed class DeepSeekTransportTests
         {
             count++;
             offset += fragment.Length;
+        }
+
+        return count;
+    }
+
+    private static int CountOccurrences(byte[] value, byte[] fragment)
+    {
+        var count = 0;
+        for (var offset = 0;
+             offset <= value.Length - fragment.Length;
+             offset++)
+        {
+            if (value.AsSpan(offset, fragment.Length).SequenceEqual(fragment))
+            {
+                count++;
+            }
         }
 
         return count;
@@ -957,5 +1091,348 @@ public sealed class DeepSeekTransportTests
             Memory<byte> buffer,
             CancellationToken cancellationToken = default) =>
             ValueTask.FromException<int>(exception);
+    }
+
+    private sealed class TlsLoopbackServer : IAsyncDisposable
+    {
+        private readonly TcpListener _listener;
+        private readonly X509Certificate2 _certificate;
+        private readonly byte[] _responsePrefix;
+        private readonly byte[] _responseTail;
+        private readonly bool _delayTail;
+        private readonly int _status;
+        private readonly CancellationTokenSource _timeout =
+            new(TimeSpan.FromSeconds(10));
+        private readonly TaskCompletionSource<byte[]> _requestBytes = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _releaseTail = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly Task _serverTask;
+
+        internal TlsLoopbackServer(
+            int status,
+            byte[] responsePrefix,
+            byte[] responseTail,
+            bool delayTail)
+        {
+            _status = status;
+            _responsePrefix = responsePrefix;
+            _responseTail = responseTail;
+            _delayTail = delayTail;
+            _certificate = CreateCertificate();
+            _listener = new TcpListener(IPAddress.Loopback, 0);
+            _listener.Start();
+            _serverTask = RunAsync();
+        }
+
+        internal Task<byte[]> RequestBytes => _requestBytes.Task;
+        internal Task Completion => _serverTask;
+        internal CountingNetworkStream? ClientStream { get; private set; }
+
+        internal async ValueTask<Stream> ConnectAsync(
+            SocketsHttpConnectionContext _,
+            CancellationToken cancellationToken)
+        {
+            var socket = new Socket(
+                AddressFamily.InterNetwork,
+                SocketType.Stream,
+                ProtocolType.Tcp);
+            try
+            {
+                await socket.ConnectAsync(
+                    (IPEndPoint)_listener.LocalEndpoint,
+                    cancellationToken);
+                var stream = new CountingNetworkStream(
+                    new NetworkStream(socket, ownsSocket: true));
+                ClientStream = stream;
+                return stream;
+            }
+            catch
+            {
+                socket.Dispose();
+                throw;
+            }
+        }
+
+        internal void TrustCertificateFor(SocketsHttpHandler handler)
+        {
+            handler.SslOptions.RemoteCertificateValidationCallback =
+                static (_, _, _, _) => true;
+        }
+
+        internal void ReleaseTail() => _releaseTail.TrySetResult();
+
+        public async ValueTask DisposeAsync()
+        {
+            ReleaseTail();
+            _timeout.Cancel();
+            _listener.Stop();
+            try
+            {
+                await _serverTask;
+            }
+            catch
+            {
+            }
+
+            _timeout.Dispose();
+            _certificate.Dispose();
+        }
+
+        private async Task RunAsync()
+        {
+            try
+            {
+                using var client = await _listener.AcceptTcpClientAsync(
+                    _timeout.Token);
+                await using var tls = new SslStream(
+                    client.GetStream(),
+                    leaveInnerStreamOpen: false);
+                await tls.AuthenticateAsServerAsync(
+                    new SslServerAuthenticationOptions
+                    {
+                        EnabledSslProtocols =
+                            SslProtocols.Tls12 | SslProtocols.Tls13,
+                        ServerCertificate = _certificate,
+                    },
+                    _timeout.Token);
+                var request = await ReadRequestAsync(tls, _timeout.Token);
+                _requestBytes.TrySetResult(request);
+
+                var statusText = _status == 200
+                    ? "OK"
+                    : "Internal Server Error";
+                var responseHeader = Encoding.ASCII.GetBytes(
+                    $"HTTP/1.1 {_status} {statusText}\r\n" +
+                    $"Content-Length: " +
+                    $"{_responsePrefix.Length + _responseTail.Length}\r\n" +
+                    "\r\n");
+                await tls.WriteAsync(responseHeader, _timeout.Token);
+                await tls.WriteAsync(_responsePrefix, _timeout.Token);
+                await tls.FlushAsync(_timeout.Token);
+
+                if (_delayTail)
+                {
+                    await _releaseTail.Task.WaitAsync(_timeout.Token);
+                }
+
+                try
+                {
+                    await tls.WriteAsync(_responseTail, _timeout.Token);
+                    await tls.FlushAsync(_timeout.Token);
+                }
+                catch (Exception exception)
+                    when (exception is IOException or
+                        ObjectDisposedException or
+                        OperationCanceledException)
+                {
+                }
+            }
+            catch (Exception exception)
+            {
+                _requestBytes.TrySetException(exception);
+                throw;
+            }
+            finally
+            {
+                _listener.Stop();
+            }
+        }
+
+        private static async Task<byte[]> ReadRequestAsync(
+            Stream stream,
+            CancellationToken cancellationToken)
+        {
+            using var request = new MemoryStream();
+            var buffer = new byte[4 * 1024];
+            while (true)
+            {
+                var read = await stream.ReadAsync(
+                    buffer,
+                    cancellationToken);
+                if (read == 0)
+                {
+                    throw new IOException(
+                        "The loopback request ended before its body.");
+                }
+
+                await request.WriteAsync(
+                    buffer.AsMemory(0, read),
+                    cancellationToken);
+                var bytes = request.ToArray();
+                var headerEnd = FindSequence(
+                    bytes,
+                    "\r\n\r\n"u8);
+                if (headerEnd < 0)
+                {
+                    continue;
+                }
+
+                var headerLength = headerEnd + 4;
+                var header = Encoding.ASCII.GetString(
+                    bytes,
+                    0,
+                    headerLength);
+                var contentLength = header
+                    .Split("\r\n", StringSplitOptions.RemoveEmptyEntries)
+                    .Where(line => line.StartsWith(
+                        "Content-Length:",
+                        StringComparison.OrdinalIgnoreCase))
+                    .Select(line => int.Parse(
+                        line["Content-Length:".Length..].Trim(),
+                        System.Globalization.CultureInfo.InvariantCulture))
+                    .Single();
+                if (bytes.Length >= headerLength + contentLength)
+                {
+                    return bytes;
+                }
+            }
+        }
+
+        private static int FindSequence(
+            byte[] value,
+            ReadOnlySpan<byte> sequence)
+        {
+            for (var offset = 0;
+                 offset <= value.Length - sequence.Length;
+                 offset++)
+            {
+                if (value.AsSpan(offset, sequence.Length)
+                    .SequenceEqual(sequence))
+                {
+                    return offset;
+                }
+            }
+
+            return -1;
+        }
+
+        private static X509Certificate2 CreateCertificate()
+        {
+            using var key = RSA.Create(2048);
+            var request = new CertificateRequest(
+                "CN=api.deepseek.com",
+                key,
+                HashAlgorithmName.SHA256,
+                RSASignaturePadding.Pkcs1);
+            var alternativeNames = new SubjectAlternativeNameBuilder();
+            alternativeNames.AddDnsName("api.deepseek.com");
+            request.CertificateExtensions.Add(alternativeNames.Build());
+            using var generated = request.CreateSelfSigned(
+                DateTimeOffset.UtcNow.AddDays(-1),
+                DateTimeOffset.UtcNow.AddDays(1));
+            const string password = "loopback-test";
+            return X509CertificateLoader.LoadPkcs12(
+                generated.Export(
+                    X509ContentType.Pkcs12,
+                    password),
+                password,
+                X509KeyStorageFlags.Exportable |
+                    X509KeyStorageFlags.UserKeySet);
+        }
+    }
+
+    private sealed class CountingNetworkStream(Stream inner) : Stream
+    {
+        private long _readCalls;
+        private int _activeReads;
+
+        internal long ReadCalls => Interlocked.Read(ref _readCalls);
+        internal int ActiveReads => Volatile.Read(ref _activeReads);
+
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => inner.CanSeek;
+        public override bool CanWrite => inner.CanWrite;
+        public override long Length => inner.Length;
+        public override long Position
+        {
+            get => inner.Position;
+            set => inner.Position = value;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            Interlocked.Increment(ref _readCalls);
+            Interlocked.Increment(ref _activeReads);
+            try
+            {
+                return inner.Read(buffer, offset, count);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _activeReads);
+            }
+        }
+
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _readCalls);
+            Interlocked.Increment(ref _activeReads);
+            try
+            {
+                return await inner.ReadAsync(buffer, cancellationToken);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _activeReads);
+            }
+        }
+
+        public override Task<int> ReadAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken) =>
+            ReadAsync(
+                buffer.AsMemory(offset, count),
+                cancellationToken).AsTask();
+
+        public override void Flush() => inner.Flush();
+
+        public override Task FlushAsync(
+            CancellationToken cancellationToken) =>
+            inner.FlushAsync(cancellationToken);
+
+        public override long Seek(long offset, SeekOrigin origin) =>
+            inner.Seek(offset, origin);
+
+        public override void SetLength(long value) =>
+            inner.SetLength(value);
+
+        public override void Write(
+            byte[] buffer,
+            int offset,
+            int count) =>
+            inner.Write(buffer, offset, count);
+
+        public override ValueTask WriteAsync(
+            ReadOnlyMemory<byte> buffer,
+            CancellationToken cancellationToken = default) =>
+            inner.WriteAsync(buffer, cancellationToken);
+
+        public override Task WriteAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken) =>
+            inner.WriteAsync(buffer, offset, count, cancellationToken);
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                inner.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            await inner.DisposeAsync();
+            GC.SuppressFinalize(this);
+        }
     }
 }

@@ -1,10 +1,15 @@
 using System.Diagnostics;
 using System.Net;
+using System.Text;
 
 namespace AgenticPrReview.Runtime.Execution.DeepSeek;
 
 internal sealed class DeepSeekTransport : IDeepSeekTransport
 {
+    private static readonly UTF8Encoding StrictUtf8 = new(
+        encoderShouldEmitUTF8Identifier: false,
+        throwOnInvalidBytes: true);
+
     private readonly DeepSeekCredential _credential;
     private readonly HttpClient _client;
     private readonly TimeSpan _providerTimeout;
@@ -71,7 +76,15 @@ internal sealed class DeepSeekTransport : IDeepSeekTransport
             ConnectCallback = connectCallback,
             ConnectTimeout = connectTimeout,
             Credentials = null,
+            MaxResponseDrainSize = 0,
             PreAuthenticate = false,
+            RequestHeaderEncodingSelector = static (headerName, _) =>
+                StringComparer.OrdinalIgnoreCase.Equals(
+                    headerName,
+                    "Authorization")
+                    ? StrictUtf8
+                    : null,
+            ResponseDrainTimeout = TimeSpan.Zero,
             UseCookies = false,
             UseProxy = false,
         };
