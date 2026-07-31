@@ -56,11 +56,19 @@ public sealed class AgentContractTests
             ("tracked_files", 20_000, "count"),
             ("tracked_files_metadata_bytes", 8_388_608, "bytes"),
             ("list_files_entries", 100, "count"),
+            ("list_changed_files_entries", 100, "count"),
+            ("changed_files", 200, "count"),
+            ("changed_files_metadata_bytes", 262_144, "bytes"),
+            ("diff_hunks_per_file", 200, "count"),
+            ("diff_lines_per_hunk", 1_000, "lines"),
+            ("diff_line_text_bytes", 4_096, "bytes"),
+            ("diff_source_bytes_per_file", 524_288, "bytes"),
+            ("diff_snapshot_bytes", 8_388_608, "bytes"),
         };
 
-        Assert.Equal(44, AgentLimits.Registry.Length);
+        Assert.Equal(52, AgentLimits.Registry.Length);
         Assert.Equal(
-            Enumerable.Range(1, 44),
+            Enumerable.Range(1, 47).Concat(Enumerable.Range(49, 5)),
             AgentLimits.Registry.Select(row => row.Ordinal));
         Assert.Equal(
             expected,
@@ -76,6 +84,8 @@ public sealed class AgentContractTests
     [InlineData("apr.observation.read.r2", "29e82b21b618e8859c7e1d8a54784bc843e66bce498274fe705e6824c8fb9cc1")]
     [InlineData("apr.observation.search.r2", "8eb931687a9850ec01aa8cc526dd8c7a845ccba9f4b3109c8ff038c9285497a8")]
     [InlineData("apr.observation.list-files.r3", "0dafdac15bfa06c382fa561d45135ccecec3c26ae48ec96855607b0d18ca33d0")]
+    [InlineData("apr.diff-source.r3", "473c5f08ba3a85b7c9998363f958d238b90bbcc514dcaebb0f5c4ced42dbe86e")]
+    [InlineData("apr.observation.list-changed-files.r3", "b925be602c32373267a1ce761d3fd6aa81e5a1a1c439b39ef90b54c7fb318d62")]
     [InlineData("apr.terminal.r2", "62fdb2e3884625096b9d88c93167b2f79ffe57f1c4e5bd56da3b3c1ea952f705")]
     [InlineData("apr.continuation.r2", "39712cc1233e5beafe94ca09fd714f576bb94db59867755abac8681556ef7854")]
     [InlineData("apr.session.r2", "09fdc5c02229991e8830926ea79ca9ee4052dde3d7da179260af013d71830783")]
@@ -101,6 +111,16 @@ public sealed class AgentContractTests
                     "List tracked repository paths from the reviewed snapshot in ordinal order.",
                     list.Description);
                 Assert.Equal(AgentToolRegistry.ListFilesSchema, list.SchemaJson);
+            },
+            changed =>
+            {
+                Assert.Equal("list_changed_files", changed.Name);
+                Assert.Equal(
+                    "List bounded changed-file metadata from the reviewed snapshot in ordinal path order.",
+                    changed.Description);
+                Assert.Equal(
+                    AgentToolRegistry.ListChangedFilesSchema,
+                    changed.SchemaJson);
             },
             search =>
             {
@@ -128,10 +148,10 @@ public sealed class AgentContractTests
             });
 
         Assert.Equal(
-            "0f39d9c2687d2ad236de3dd28becf6ae907a80021595289296aa4b8d69722f36",
+            "09deb3e4db4b6ade240903fcdbe56a65ad863658f0ead46d096b5e3e18c7ad68",
             AgentCanonical.LimitsSha256());
         Assert.Equal(
-            "33b23928d25d5a62e3006e5f97425cb0a6809bfc42632bad58abd7d4980f9c8b",
+            "cfd005d61d68dee38a4a539612c6f650bd0001b7b1223006cd1d14a0b75ddd88",
             AgentCanonical.ToolsetSha256(AgentToolRegistry.Definitions));
 
         var original = AgentCanonical.ToolsetSha256(AgentToolRegistry.Definitions);

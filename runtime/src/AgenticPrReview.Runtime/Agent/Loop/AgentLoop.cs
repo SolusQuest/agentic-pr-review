@@ -558,6 +558,18 @@ internal sealed class AgentLoop(
 
                     prepared.Add(new PreparedListFilesCall(call.CallId, list!));
                     break;
+                case AgentToolRegistry.ListChangedFilesName:
+                    if (!AgentToolArguments.TryListChangedFiles(
+                            call.ArgumentsJson,
+                            out var changed))
+                    {
+                        return AgentFailureCodes.ToolArgumentsInvalid;
+                    }
+
+                    prepared.Add(new PreparedListChangedFilesCall(
+                        call.CallId,
+                        changed!));
+                    break;
                 case AgentToolRegistry.ReadFileName:
                     if (!AgentToolArguments.TryReadFile(
                             call.ArgumentsJson,
@@ -1056,6 +1068,17 @@ internal sealed class AgentLoop(
                         out var list))
                 {
                     prepared = new PreparedListFilesCall(call.CallId, list!);
+                }
+
+                break;
+            case AgentToolRegistry.ListChangedFilesName:
+                if (AgentToolArguments.TryListChangedFilesCanonical(
+                        call.ArgumentsJson,
+                        out var changed))
+                {
+                    prepared = new PreparedListChangedFilesCall(
+                        call.CallId,
+                        changed!);
                 }
 
                 break;

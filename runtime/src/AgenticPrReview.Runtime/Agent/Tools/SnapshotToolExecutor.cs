@@ -14,6 +14,8 @@ internal sealed partial class SnapshotToolExecutor(
         call switch
         {
             PreparedListFilesCall list => ValidateListFiles(list.Arguments),
+            PreparedListChangedFilesCall changed =>
+                ValidateListChangedFiles(changed.Arguments),
             PreparedReadFileCall read => ValidatePath(read.Arguments.Path),
             PreparedSearchTextCall { Arguments.Path: { } path } =>
                 ValidatePath(path),
@@ -28,6 +30,8 @@ internal sealed partial class SnapshotToolExecutor(
         {
             PreparedListFilesCall list => ValueTask.FromResult(
                 ExecuteListFiles(list, cancellationToken)),
+            PreparedListChangedFilesCall changed => ValueTask.FromResult(
+                ExecuteListChangedFiles(changed, cancellationToken)),
             PreparedReadFileCall read => ExecuteReadAsync(read, cancellationToken),
             PreparedSearchTextCall search => ExecuteSearchAsync(search, cancellationToken),
             _ => ValueTask.FromResult(AgentToolExecution.Failure(
