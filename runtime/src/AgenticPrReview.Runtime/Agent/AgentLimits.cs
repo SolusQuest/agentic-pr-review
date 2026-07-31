@@ -54,6 +54,14 @@ internal static class AgentLimits
     internal const int TrackedFiles = 20_000;
     internal const int TrackedFilesMetadataBytes = 8 * 1024 * 1024;
     internal const int ListFilesEntries = 100;
+    internal const int ListChangedFilesEntries = 100;
+    internal const int ChangedFiles = 200;
+    internal const int ChangedFilesMetadataBytes = 256 * 1024;
+    internal const int DiffHunksPerFile = 200;
+    internal const int DiffLinesPerHunk = 1_000;
+    internal const int DiffLineTextBytes = 4_096;
+    internal const int DiffSourceBytesPerFile = 512 * 1024;
+    internal const int DiffSnapshotBytes = 8 * 1024 * 1024;
 
     internal static ImmutableArray<AgentLimit> Registry { get; } =
     [
@@ -101,5 +109,13 @@ internal static class AgentLimits
         new(42, "tracked_files", TrackedFiles, "count"),
         new(43, "tracked_files_metadata_bytes", TrackedFilesMetadataBytes, "bytes"),
         new(44, "list_files_entries", ListFilesEntries, "count"),
+        new(45, "list_changed_files_entries", ListChangedFilesEntries, "count"),
+        new(46, "changed_files", ChangedFiles, "count"),
+        new(47, "changed_files_metadata_bytes", ChangedFilesMetadataBytes, "bytes"),
+        new(49, "diff_hunks_per_file", DiffHunksPerFile, "count"),
+        new(50, "diff_lines_per_hunk", DiffLinesPerHunk, "lines"),
+        new(51, "diff_line_text_bytes", DiffLineTextBytes, "bytes"),
+        new(52, "diff_source_bytes_per_file", DiffSourceBytesPerFile, "bytes"),
+        new(53, "diff_snapshot_bytes", DiffSnapshotBytes, "bytes"),
     ];
 }

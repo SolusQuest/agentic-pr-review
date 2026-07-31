@@ -6,12 +6,15 @@ namespace AgenticPrReview.Runtime.Agent.Tools;
 internal static class AgentToolRegistry
 {
     internal const string ListFilesName = "list_files";
+    internal const string ListChangedFilesName = "list_changed_files";
     internal const string ReadFileName = "read_file";
     internal const string SearchTextName = "search_text";
     internal const string FinishReviewName = "finish_review";
 
     internal const string ListFilesDescription =
         "List tracked repository paths from the reviewed snapshot in ordinal order.";
+    internal const string ListChangedFilesDescription =
+        "List bounded changed-file metadata from the reviewed snapshot in ordinal path order.";
     internal const string ReadFileDescription =
         "Read a bounded line range from one tracked UTF-8 file in the reviewed snapshot.";
     internal const string SearchTextDescription =
@@ -21,6 +24,8 @@ internal static class AgentToolRegistry
 
     internal const string ListFilesSchema =
         "{\"type\":\"object\",\"properties\":{\"prefix\":{\"type\":\"string\"},\"after\":{\"type\":\"string\"}},\"additionalProperties\":false}";
+    internal const string ListChangedFilesSchema =
+        "{\"type\":\"object\",\"properties\":{\"after\":{\"type\":\"string\"}},\"additionalProperties\":false}";
     internal const string ReadFileSchema =
         "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"start_line\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":2147483647},\"line_count\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":400}},\"required\":[\"path\"],\"additionalProperties\":false}";
     internal const string SearchTextSchema =
@@ -31,6 +36,10 @@ internal static class AgentToolRegistry
     internal static ImmutableArray<ProjectToolDefinition> Definitions { get; } =
     [
         new(ListFilesName, ListFilesDescription, ListFilesSchema),
+        new(
+            ListChangedFilesName,
+            ListChangedFilesDescription,
+            ListChangedFilesSchema),
         new(SearchTextName, SearchTextDescription, SearchTextSchema),
         new(ReadFileName, ReadFileDescription, ReadFileSchema),
         new(FinishReviewName, FinishReviewDescription, FinishReviewSchema),

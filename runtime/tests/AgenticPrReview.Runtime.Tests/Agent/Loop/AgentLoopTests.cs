@@ -35,7 +35,13 @@ public sealed class AgentLoopTests
         var request = Assert.Single(chat.Requests);
         Assert.True(request.ThinkingRequired);
         Assert.Equal(
-            ["list_files", "search_text", "read_file", "finish_review"],
+            [
+                "list_files",
+                "list_changed_files",
+                "search_text",
+                "read_file",
+                "finish_review",
+            ],
             request.Tools.Select(tool => tool.Name));
         Assert.Single(outcome.Events.OfType<AgentTerminalEvent>());
     }
@@ -680,6 +686,37 @@ public sealed class AgentLoopTests
     }
 
     [Fact]
+    public async Task LaterInvalidChangedCursorFailsBeforeAnEarlierSiblingDispatch()
+    {
+        var response = new ProjectChatResponse(
+            new ProjectChatMessage(
+                "assistant",
+                [
+                    new ProjectToolCallContent(
+                        "one",
+                        "read_file",
+                        "{\"path\":\"a.txt\"}"),
+                    new ProjectToolCallContent(
+                        "two",
+                        "list_changed_files",
+                        "{\"after\":\"missing.txt\"}"),
+                ]),
+            new ProjectChatUsage(1, 1),
+            1);
+        var executor = new ScriptedToolExecutor(
+            preflight: call =>
+                call.CallId == "two" ? "tool_cursor_invalid" : null);
+
+        var outcome = await new AgentLoop(
+            new ScriptedChatClient([response]),
+            executor).RunAsync(Request(), CancellationToken.None);
+
+        AssertFailure(outcome, "tool_cursor_invalid");
+        Assert.Equal(["one", "two"], executor.PreflightOrder);
+        Assert.Empty(executor.Order);
+    }
+
+    [Fact]
     public async Task ListFilesRunsThroughTheRealSerialLoopWithCanonicalArguments()
     {
         var chat = new ScriptedChatClient([
@@ -712,6 +749,126 @@ public sealed class AgentLoopTests
         Assert.Single(
             outcome.Events.OfType<AgentToolResultEvent>(),
             item => item.Name == "list_files");
+    }
+
+    [Fact]
+    public async Task ListChangedFilesRunsThroughTheRealSerialLoopWithCanonicalArguments()
+    {
+        var chat = new ScriptedChatClient([
+            Response(
+                new ProjectToolCallContent(
+                    "changed",
+                    "list_changed_files",
+                    "{}"),
+                1,
+                1),
+            Response(TerminalCall("finish", "done"), 1, 1),
+        ]);
+        var executor = new ScriptedToolExecutor(call =>
+        {
+            var changed = Assert.IsType<PreparedListChangedFilesCall>(call);
+            return ListChangedFilesSuccess(changed.Arguments);
+        });
+
+        var outcome = await new AgentLoop(chat, executor).RunAsync(
+            Request(),
+            CancellationToken.None);
+
+        Assert.True(outcome.Succeeded);
+        var callEvent = Assert.Single(
+            outcome.Events.OfType<AgentToolCallEvent>(),
+            item => item.Name == "list_changed_files");
+        Assert.Equal(
+            "{\"after\":null}",
+            Encoding.UTF8.GetString(callEvent.CanonicalArguments.AsSpan()));
+        Assert.Single(
+            outcome.Events.OfType<AgentToolResultEvent>(),
+            item => item.Name == "list_changed_files");
+    }
+
+    [Fact]
+    public async Task ChangedMetadataObservationCannotGroundTerminalEvidence()
+    {
+        Assert.True(AgentToolArguments.TryListChangedFiles("{}", out var arguments));
+        var execution = ListChangedFilesSuccess(arguments!);
+        var observationId = execution.Observation!.ObservationId;
+        var chat = new ScriptedChatClient([
+            Response(
+                new ProjectToolCallContent(
+                    "changed",
+                    "list_changed_files",
+                    "{}"),
+                1,
+                1),
+            Response(
+                new ProjectToolCallContent(
+                    "finish",
+                    "finish_review",
+                    "{\"summary\":\"done\",\"findings\":[{\"severity\":\"high\",\"title\":\"bug\",\"message\":\"fix\",\"evidence\":[{\"observation_id\":\"" +
+                    observationId +
+                    "\",\"path\":\"a.txt\",\"start_line\":1,\"end_line\":1}]}]}"),
+                1,
+                1),
+        ]);
+
+        var outcome = await new AgentLoop(
+            chat,
+            new ScriptedToolExecutor(_ => execution)).RunAsync(
+                Request(),
+                CancellationToken.None);
+
+        AssertFailure(outcome, "agent_terminal_invalid");
+    }
+
+    [Theory]
+    [InlineData("{\"after\":null}", true)]
+    [InlineData("{}", false)]
+    public async Task InitialHistoryRequiresCanonicalListChangedFilesArguments(
+        string argumentsJson,
+        bool accepted)
+    {
+        var request = Request() with
+        {
+            InitialMessages =
+            [
+                new ProjectChatMessage(
+                    "user",
+                    [new ProjectTextContent("prior review")]),
+                new ProjectChatMessage(
+                    "assistant",
+                    [
+                        new ProjectToolCallContent(
+                            "prior-changed",
+                            "list_changed_files",
+                            argumentsJson),
+                    ]),
+                new ProjectChatMessage(
+                    "tool",
+                    [new ProjectToolResultContent("prior-changed", "{}")]),
+                new ProjectChatMessage(
+                    "user",
+                    [new ProjectTextContent("continue")]),
+            ],
+        };
+        var chat = new ScriptedChatClient([
+            Response(TerminalCall("finish", "done"), 0, 0),
+        ]);
+
+        var outcome = await new AgentLoop(
+            chat,
+            new ScriptedToolExecutor()).RunAsync(
+                request,
+                CancellationToken.None);
+
+        if (accepted)
+        {
+            Assert.True(outcome.Succeeded);
+        }
+        else
+        {
+            AssertFailure(outcome, "agent_response_invalid");
+            Assert.Empty(chat.Requests);
+        }
     }
 
     [Fact]
@@ -1933,6 +2090,8 @@ public sealed class AgentLoopTests
         call switch
         {
             PreparedListFilesCall list => ListFilesSuccess(list.Arguments),
+            PreparedListChangedFilesCall changed =>
+                ListChangedFilesSuccess(changed.Arguments),
             PreparedReadFileCall read => ReadSuccess(
                 read.Arguments,
                 path,
@@ -1963,6 +2122,36 @@ public sealed class AgentLoopTests
                 includeObservationId: false));
         var result = withoutObservation with { ObservationId = observationId };
         var canonical = ListFilesResultWriter.Write(result);
+        return new AgentToolExecution(
+            true,
+            null,
+            Encoding.UTF8.GetString(canonical),
+            canonical,
+            new AgentObservation(
+                observationId,
+                Identity,
+                ImmutableDictionary<string, ImmutableHashSet<int>>.Empty
+                    .WithComparers(StringComparer.Ordinal)));
+    }
+
+    private static AgentToolExecution ListChangedFilesSuccess(
+        ListChangedFilesArguments arguments)
+    {
+        var withoutObservation = new ListChangedFilesResult(
+            "ok",
+            Identity,
+            arguments.After,
+            [],
+            false,
+            null,
+            null);
+        var observationId = AgentCanonical.HashDomain(
+            AgentCanonical.ListChangedFilesObservationDomain,
+            ListChangedFilesResultWriter.Write(
+                withoutObservation,
+                includeObservationId: false));
+        var result = withoutObservation with { ObservationId = observationId };
+        var canonical = ListChangedFilesResultWriter.Write(result);
         return new AgentToolExecution(
             true,
             null,

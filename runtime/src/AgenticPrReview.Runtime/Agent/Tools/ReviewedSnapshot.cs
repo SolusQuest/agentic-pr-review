@@ -9,12 +9,26 @@ namespace AgenticPrReview.Runtime.Agent.Tools;
 internal sealed class ReviewedSnapshot
 {
     private readonly ImmutableHashSet<string> _trackedFiles;
+    private readonly ImmutableHashSet<string> _changedFiles;
 
     internal ReviewedSnapshot(
         ReviewedIdentity identity,
         string absoluteRoot,
         IEnumerable<string> trackedFiles)
+        : this(identity, absoluteRoot, trackedFiles, [], [])
     {
+    }
+
+    internal ReviewedSnapshot(
+        ReviewedIdentity identity,
+        string absoluteRoot,
+        IEnumerable<string> trackedFiles,
+        IEnumerable<ReviewedChangedFile> changedFiles,
+        IEnumerable<ReviewedDiffSource> diffSources)
+    {
+        ArgumentNullException.ThrowIfNull(trackedFiles);
+        ArgumentNullException.ThrowIfNull(changedFiles);
+        ArgumentNullException.ThrowIfNull(diffSources);
         if (!identity.IsValid())
         {
             throw new ArgumentException("Reviewed identity is invalid.", nameof(identity));
@@ -57,10 +71,122 @@ internal sealed class ReviewedSnapshot
             builder.Add(trackedFile);
         }
 
+        var trackedSet = builder.ToImmutable();
+        var changedByPath = new Dictionary<string, ReviewedChangedFile>(
+            StringComparer.Ordinal);
+        var changedFileCount = 0;
+        long changedFilesMetadataBytes = 0;
+        foreach (var changedFile in changedFiles)
+        {
+            changedFileCount = checked(changedFileCount + 1);
+            if (changedFileCount > AgentLimits.ChangedFiles)
+            {
+                throw new ArgumentException(
+                    "Changed file count exceeds the stable snapshot limit.",
+                    nameof(changedFiles));
+            }
+
+            if (!ReviewedChangedFileValidation.IsShapeValid(changedFile) ||
+                !ReviewedChangedFileValidation.MembershipIsValid(
+                    changedFile,
+                    trackedSet) ||
+                !changedByPath.TryAdd(changedFile.Path, changedFile))
+            {
+                throw new ArgumentException(
+                    "Changed file metadata is invalid or incoherent.",
+                    nameof(changedFiles));
+            }
+
+            changedFilesMetadataBytes = checked(
+                changedFilesMetadataBytes +
+                ReviewedChangedFileWriter.Write(changedFile).Length);
+            if (changedFilesMetadataBytes > AgentLimits.ChangedFilesMetadataBytes)
+            {
+                throw new ArgumentException(
+                    "Changed file metadata exceeds the stable snapshot limit.",
+                    nameof(changedFiles));
+            }
+        }
+
+        var sourceByPath = new Dictionary<string, ReviewedDiffSource>(
+            StringComparer.Ordinal);
+        var sourceCount = 0;
+        long diffSnapshotBytes = 0;
+        foreach (var source in diffSources)
+        {
+            sourceCount = checked(sourceCount + 1);
+            if (sourceCount > AgentLimits.ChangedFiles ||
+                source is null ||
+                source.ReviewedIdentity != identity ||
+                !sourceByPath.TryAdd(source.Path, source))
+            {
+                throw new ArgumentException(
+                    "Diff source membership or identity is invalid.",
+                    nameof(diffSources));
+            }
+
+            diffSnapshotBytes = checked(
+                diffSnapshotBytes + source.CanonicalBytes.Length);
+            if (diffSnapshotBytes > AgentLimits.DiffSnapshotBytes)
+            {
+                throw new ArgumentException(
+                    "Diff source aggregate exceeds the stable snapshot limit.",
+                    nameof(diffSources));
+            }
+        }
+
+        var availableCount = 0;
+        foreach (var change in changedByPath.Values)
+        {
+            if (change.PatchStatus != "available")
+            {
+                if (sourceByPath.ContainsKey(change.Path))
+                {
+                    throw new ArgumentException(
+                        "A non-available change has a diff source.",
+                        nameof(diffSources));
+                }
+
+                continue;
+            }
+
+            availableCount = checked(availableCount + 1);
+            if (!sourceByPath.TryGetValue(change.Path, out var source) ||
+                !StringComparer.Ordinal.Equals(source.Path, change.Path) ||
+                !StringComparer.Ordinal.Equals(
+                    source.PreviousPath,
+                    change.PreviousPath) ||
+                !StringComparer.Ordinal.Equals(source.Status, change.Status) ||
+                source.SourceTruncated != change.SourceTruncated ||
+                !StringComparer.Ordinal.Equals(
+                    source.PatchSha256,
+                    change.PatchSha256) ||
+                !CountsAreCoherent(change, source))
+            {
+                throw new ArgumentException(
+                    "Available change and diff source are incoherent.",
+                    nameof(diffSources));
+            }
+        }
+
+        if (availableCount != sourceByPath.Count)
+        {
+            throw new ArgumentException(
+                "Diff source membership is not one-to-one.",
+                nameof(diffSources));
+        }
+
         Identity = identity;
         AbsoluteRoot = Path.TrimEndingDirectorySeparator(root);
-        _trackedFiles = builder.ToImmutable();
+        _trackedFiles = trackedSet;
         OrderedTrackedFiles = _trackedFiles.Order(StringComparer.Ordinal).ToImmutableArray();
+        OrderedChangedFiles = changedByPath.Values
+            .OrderBy(change => change.Path, StringComparer.Ordinal)
+            .ToImmutableArray();
+        _changedFiles = OrderedChangedFiles
+            .Select(change => change.Path)
+            .ToImmutableHashSet(StringComparer.Ordinal);
+        DiffByChangedPath = sourceByPath.ToImmutableDictionary(StringComparer.Ordinal);
     }
 
     internal ReviewedIdentity Identity { get; }
@@ -69,7 +195,27 @@ internal sealed class ReviewedSnapshot
 
     internal ImmutableArray<string> OrderedTrackedFiles { get; }
 
+    internal ImmutableArray<ReviewedChangedFile> OrderedChangedFiles { get; }
+
+    internal ImmutableDictionary<string, ReviewedDiffSource> DiffByChangedPath { get; }
+
     internal bool Contains(string path) => _trackedFiles.Contains(path);
+
+    internal bool ContainsChangedPath(string path) => _changedFiles.Contains(path);
+
+    internal bool TryGetDiffSource(
+        string path,
+        out ReviewedDiffSource source) =>
+        DiffByChangedPath.TryGetValue(path, out source!);
+
+    private static bool CountsAreCoherent(
+        ReviewedChangedFile change,
+        ReviewedDiffSource source) =>
+        source.SourceTruncated
+            ? source.RepresentedAdditions <= change.Additions &&
+                source.RepresentedDeletions <= change.Deletions
+            : source.RepresentedAdditions == change.Additions &&
+                source.RepresentedDeletions == change.Deletions;
 }
 
 internal static class RepositoryPath
