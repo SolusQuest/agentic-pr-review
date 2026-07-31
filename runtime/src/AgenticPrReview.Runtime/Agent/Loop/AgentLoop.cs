@@ -570,6 +570,16 @@ internal sealed class AgentLoop(
                         call.CallId,
                         changed!));
                     break;
+                case AgentToolRegistry.ReadDiffName:
+                    if (!AgentToolArguments.TryReadDiff(
+                            call.ArgumentsJson,
+                            out var diff))
+                    {
+                        return AgentFailureCodes.ToolArgumentsInvalid;
+                    }
+
+                    prepared.Add(new PreparedReadDiffCall(call.CallId, diff!));
+                    break;
                 case AgentToolRegistry.ReadFileName:
                     if (!AgentToolArguments.TryReadFile(
                             call.ArgumentsJson,
@@ -1079,6 +1089,15 @@ internal sealed class AgentLoop(
                     prepared = new PreparedListChangedFilesCall(
                         call.CallId,
                         changed!);
+                }
+
+                break;
+            case AgentToolRegistry.ReadDiffName:
+                if (AgentToolArguments.TryReadDiff(
+                        call.ArgumentsJson,
+                        out var diff))
+                {
+                    prepared = new PreparedReadDiffCall(call.CallId, diff!);
                 }
 
                 break;

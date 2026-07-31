@@ -7,6 +7,7 @@ internal static class AgentToolRegistry
 {
     internal const string ListFilesName = "list_files";
     internal const string ListChangedFilesName = "list_changed_files";
+    internal const string ReadDiffName = "read_diff";
     internal const string ReadFileName = "read_file";
     internal const string SearchTextName = "search_text";
     internal const string FinishReviewName = "finish_review";
@@ -15,6 +16,8 @@ internal static class AgentToolRegistry
         "List tracked repository paths from the reviewed snapshot in ordinal order.";
     internal const string ListChangedFilesDescription =
         "List bounded changed-file metadata from the reviewed snapshot in ordinal path order.";
+    internal const string ReadDiffDescription =
+        "Read bounded complete diff hunks for one changed path in the reviewed snapshot.";
     internal const string ReadFileDescription =
         "Read a bounded line range from one tracked UTF-8 file in the reviewed snapshot.";
     internal const string SearchTextDescription =
@@ -26,6 +29,8 @@ internal static class AgentToolRegistry
         "{\"type\":\"object\",\"properties\":{\"prefix\":{\"type\":\"string\"},\"after\":{\"type\":\"string\"}},\"additionalProperties\":false}";
     internal const string ListChangedFilesSchema =
         "{\"type\":\"object\",\"properties\":{\"after\":{\"type\":\"string\"}},\"additionalProperties\":false}";
+    internal const string ReadDiffSchema =
+        "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"start_hunk\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":2147483647},\"hunk_count\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":20}},\"required\":[\"path\"],\"additionalProperties\":false}";
     internal const string ReadFileSchema =
         "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"start_line\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":2147483647},\"line_count\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":400}},\"required\":[\"path\"],\"additionalProperties\":false}";
     internal const string SearchTextSchema =
@@ -40,6 +45,7 @@ internal static class AgentToolRegistry
             ListChangedFilesName,
             ListChangedFilesDescription,
             ListChangedFilesSchema),
+        new(ReadDiffName, ReadDiffDescription, ReadDiffSchema),
         new(SearchTextName, SearchTextDescription, SearchTextSchema),
         new(ReadFileName, ReadFileDescription, ReadFileSchema),
         new(FinishReviewName, FinishReviewDescription, FinishReviewSchema),

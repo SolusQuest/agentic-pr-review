@@ -16,6 +16,7 @@ internal sealed partial class SnapshotToolExecutor(
             PreparedListFilesCall list => ValidateListFiles(list.Arguments),
             PreparedListChangedFilesCall changed =>
                 ValidateListChangedFiles(changed.Arguments),
+            PreparedReadDiffCall diff => ValidateReadDiff(diff.Arguments),
             PreparedReadFileCall read => ValidatePath(read.Arguments.Path),
             PreparedSearchTextCall { Arguments.Path: { } path } =>
                 ValidatePath(path),
@@ -32,6 +33,8 @@ internal sealed partial class SnapshotToolExecutor(
                 ExecuteListFiles(list, cancellationToken)),
             PreparedListChangedFilesCall changed => ValueTask.FromResult(
                 ExecuteListChangedFiles(changed, cancellationToken)),
+            PreparedReadDiffCall diff => ValueTask.FromResult(
+                ExecuteReadDiff(diff, cancellationToken)),
             PreparedReadFileCall read => ExecuteReadAsync(read, cancellationToken),
             PreparedSearchTextCall search => ExecuteSearchAsync(search, cancellationToken),
             _ => ValueTask.FromResult(AgentToolExecution.Failure(

@@ -8,6 +8,7 @@ namespace AgenticPrReview.Runtime.Agent.Tools;
     UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
 [JsonSerializable(typeof(ListFilesArgumentsDto))]
 [JsonSerializable(typeof(ListChangedFilesArgumentsDto))]
+[JsonSerializable(typeof(ReadDiffArgumentsDto))]
 [JsonSerializable(typeof(ReadFileArgumentsDto))]
 [JsonSerializable(typeof(SearchTextArgumentsDto))]
 [JsonSerializable(typeof(FinishReviewArgumentsDto))]
