@@ -1,0 +1,251 @@
+{
+  "kind": "apr-r3-quality-corpus",
+  "cases": [
+    {
+      "id": "must-find-read-diff",
+      "kind": "must_find",
+      "reviewed_identity": {
+        "repository_id": "synthetic/r3-quality",
+        "review_target": 11001,
+        "base_sha": "1111111111111111111111111111111111111111",
+        "head_sha": "2222222222222222222222222222222222222222"
+      },
+      "initial_context": "Review the synthetic change. If you report the defect, include token APR110_FINDING_Q7M4 in the finding title or message.",
+      "process_one_context": null,
+      "files": [
+        {
+          "path": "src/CacheGate.cs",
+          "content": "namespace SyntheticQuality;\ninternal static class CacheGate\n{\n    internal static string Select(string? value) => value!.Trim(); // APR110_TARGET_Q7M4\n}\n"
+        }
+      ],
+      "change": {
+        "changed_file": {
+          "path": "src/CacheGate.cs",
+          "previous_path": null,
+          "status": "modified",
+          "additions": 1,
+          "deletions": 1,
+          "changes": 2,
+          "patch_status": "available",
+          "source_truncated": false
+        },
+        "diff_source": {
+          "path": "src/CacheGate.cs",
+          "previous_path": null,
+          "status": "modified",
+          "source_truncated": false,
+          "hunks": [
+            {
+              "old_start": 1,
+              "old_count": 5,
+              "new_start": 1,
+              "new_count": 5,
+              "lines": [
+                {
+                  "kind": "context",
+                  "old_line": 1,
+                  "new_line": 1,
+                  "text": "namespace SyntheticQuality;"
+                },
+                {
+                  "kind": "context",
+                  "old_line": 2,
+                  "new_line": 2,
+                  "text": "internal static class CacheGate"
+                },
+                { "kind": "context", "old_line": 3, "new_line": 3, "text": "{" },
+                {
+                  "kind": "deletion",
+                  "old_line": 4,
+                  "new_line": null,
+                  "text": "    internal static string Select(string? value) => value.Trim();"
+                },
+                {
+                  "kind": "addition",
+                  "old_line": null,
+                  "new_line": 4,
+                  "text": "    internal static string Select(string? value) => value!.Trim(); // APR110_TARGET_Q7M4"
+                },
+                { "kind": "context", "old_line": 5, "new_line": 5, "text": "}" }
+              ]
+            }
+          ]
+        }
+      },
+      "expectation": {
+        "required_tool": "read_diff",
+        "required_start_hunk": 1,
+        "required_hunk_count": 20,
+        "required_observation_id": "03a00cfd78a9da418cc9d5952e7a77d63d8ebd07c590c5ef7146732e12da52b4",
+        "evidence": {
+          "path": "src/CacheGate.cs",
+          "start_line": 4,
+          "end_line": 4
+        },
+        "expected_severity": "high",
+        "target_marker": "APR110_TARGET_Q7M4",
+        "expected_finding_token": "APR110_FINDING_Q7M4"
+      }
+    },
+    {
+      "id": "must-not-find-safe-line",
+      "kind": "must_not_find",
+      "reviewed_identity": {
+        "repository_id": "synthetic/r3-quality",
+        "review_target": 11002,
+        "base_sha": "3333333333333333333333333333333333333333",
+        "head_sha": "4444444444444444444444444444444444444444"
+      },
+      "initial_context": "Review the synthetic readiness change and report only actionable defects grounded in admitted repository evidence.",
+      "process_one_context": null,
+      "files": [
+        {
+          "path": "src/ReadyGate.cs",
+          "content": "namespace SyntheticQuality;\ninternal static class ReadyGate\n{\n    internal static bool IsReady(bool ready) => ready; // APR110_SAFE_K2R8\n}\n"
+        }
+      ],
+      "change": {
+        "changed_file": {
+          "path": "src/ReadyGate.cs",
+          "previous_path": null,
+          "status": "modified",
+          "additions": 1,
+          "deletions": 1,
+          "changes": 2,
+          "patch_status": "available",
+          "source_truncated": false
+        },
+        "diff_source": {
+          "path": "src/ReadyGate.cs",
+          "previous_path": null,
+          "status": "modified",
+          "source_truncated": false,
+          "hunks": [
+            {
+              "old_start": 1,
+              "old_count": 5,
+              "new_start": 1,
+              "new_count": 5,
+              "lines": [
+                {
+                  "kind": "context",
+                  "old_line": 1,
+                  "new_line": 1,
+                  "text": "namespace SyntheticQuality;"
+                },
+                {
+                  "kind": "context",
+                  "old_line": 2,
+                  "new_line": 2,
+                  "text": "internal static class ReadyGate"
+                },
+                { "kind": "context", "old_line": 3, "new_line": 3, "text": "{" },
+                {
+                  "kind": "deletion",
+                  "old_line": 4,
+                  "new_line": null,
+                  "text": "    internal static bool IsReady(bool ready) => !ready;"
+                },
+                {
+                  "kind": "addition",
+                  "old_line": null,
+                  "new_line": 4,
+                  "text": "    internal static bool IsReady(bool ready) => ready; // APR110_SAFE_K2R8"
+                },
+                { "kind": "context", "old_line": 5, "new_line": 5, "text": "}" }
+              ]
+            }
+          ]
+        }
+      },
+      "expectation": {
+        "required_tool": "read_diff",
+        "required_start_hunk": 1,
+        "required_hunk_count": 20,
+        "required_observation_id": "a217f4888ff3a7a47f53d089dea73717d93a2bc8d99d8e6eb408375c21d08488",
+        "path": "src/ReadyGate.cs",
+        "prohibited_lines": [4]
+      }
+    },
+    {
+      "id": "continuation-prior-only",
+      "kind": "continuation",
+      "reviewed_identity": {
+        "repository_id": "synthetic/r3-quality",
+        "review_target": 11003,
+        "base_sha": "5555555555555555555555555555555555555555",
+        "head_sha": "6666666666666666666666666666666666666666"
+      },
+      "initial_context": "Continue the synthetic review using only the restored prior session and the current bounded inputs.",
+      "process_one_context": "The prior review established APR110_PRIOR_ONLY_6V3N as the bounded retry fact.",
+      "files": [
+        {
+          "path": "src/RetryBudget.cs",
+          "content": "namespace SyntheticQuality;\ninternal static class RetryBudget\n{\n    internal const int Maximum = 3;\n}\n"
+        }
+      ],
+      "change": {
+        "changed_file": {
+          "path": "src/RetryBudget.cs",
+          "previous_path": null,
+          "status": "modified",
+          "additions": 1,
+          "deletions": 1,
+          "changes": 2,
+          "patch_status": "available",
+          "source_truncated": false
+        },
+        "diff_source": {
+          "path": "src/RetryBudget.cs",
+          "previous_path": null,
+          "status": "modified",
+          "source_truncated": false,
+          "hunks": [
+            {
+              "old_start": 1,
+              "old_count": 5,
+              "new_start": 1,
+              "new_count": 5,
+              "lines": [
+                {
+                  "kind": "context",
+                  "old_line": 1,
+                  "new_line": 1,
+                  "text": "namespace SyntheticQuality;"
+                },
+                {
+                  "kind": "context",
+                  "old_line": 2,
+                  "new_line": 2,
+                  "text": "internal static class RetryBudget"
+                },
+                { "kind": "context", "old_line": 3, "new_line": 3, "text": "{" },
+                {
+                  "kind": "deletion",
+                  "old_line": 4,
+                  "new_line": null,
+                  "text": "    internal const int Maximum = 2;"
+                },
+                {
+                  "kind": "addition",
+                  "old_line": null,
+                  "new_line": 4,
+                  "text": "    internal const int Maximum = 3;"
+                },
+                { "kind": "context", "old_line": 5, "new_line": 5, "text": "}" }
+              ]
+            }
+          ]
+        }
+      },
+      "expectation": {
+        "prior_only_marker": "APR110_PRIOR_ONLY_6V3N",
+        "fresh_input_names": [
+          "current-review-context.json",
+          "reviewed-snapshot.json",
+          "state-locator.json"
+        ]
+      }
+    }
+  ]
+}
