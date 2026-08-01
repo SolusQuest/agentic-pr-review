@@ -292,6 +292,16 @@ internal sealed class LiveAgentStateCommitCoordinator(
                         R3LiveAgentCodes.CompositionFailed);
                 }
 
+                if (TryReceiptBearingPrepareFailure(
+                        prepare,
+                        builtArtifact,
+                        candidate.StateAdmissionContext,
+                        out var prepareFailureCode))
+                {
+                    return LiveAgentStateCommitResult.Failure(
+                        prepareFailureCode!);
+                }
+
                 if (!TryPreparedReceipt(
                         prepare,
                         builtArtifact,
@@ -649,13 +659,8 @@ internal sealed class LiveAgentStateCommitCoordinator(
         var eligible = prepared || ioFailure;
         if (!eligible ||
             candidateReceipt is null ||
-            !RestrictedStateValidation.IsValidReceipt(candidateReceipt) ||
-            (prepared && !MatchesIdentity(result, candidateReceipt)) ||
-            candidateReceipt.Generation != context.Generation ||
-            candidateReceipt.Generation != built.Document.Generation ||
-            !StringComparer.Ordinal.Equals(
-                candidateReceipt.SessionSha256,
-                built.SessionSha256))
+            !MatchesPreparedReceipt(candidateReceipt, built, context) ||
+            (prepared && !MatchesIdentity(result, candidateReceipt)))
         {
             return false;
         }
@@ -664,6 +669,51 @@ internal sealed class LiveAgentStateCommitCoordinator(
         preparedAt = observed;
         return true;
     }
+
+    private static bool TryReceiptBearingPrepareFailure(
+        LiveAgentStatePrepareObservation prepare,
+        AgentSessionArtifact built,
+        RestrictedStateSessionAdmissionContext context,
+        out string? code)
+    {
+        code = null;
+        var result = prepare.Outcome.Result;
+        var receipt = prepare.Outcome.Receipt;
+        if (result.Action != StateAction.Failed ||
+            result.Generation is not null ||
+            result.SessionSha256 is not null ||
+            result.EnvelopeSha256 is not null ||
+            receipt is null ||
+            !IsReceiptBearingWriteFailure(result.Code) ||
+            !MatchesPreparedReceipt(receipt, built, context))
+        {
+            return false;
+        }
+
+        code = result.Code;
+        return true;
+    }
+
+    private static bool IsReceiptBearingWriteFailure(string code) =>
+        StringComparer.Ordinal.Equals(code, RestrictedStateCodes.Cancelled) ||
+        StringComparer.Ordinal.Equals(code, RestrictedStateCodes.Conflict) ||
+        StringComparer.Ordinal.Equals(
+            code,
+            RestrictedStateCodes.CleanupFailed) ||
+        StringComparer.Ordinal.Equals(
+            code,
+            RestrictedStateCodes.EnumerationInvalid);
+
+    private static bool MatchesPreparedReceipt(
+        PreparedStateReceipt receipt,
+        AgentSessionArtifact built,
+        RestrictedStateSessionAdmissionContext context) =>
+        RestrictedStateValidation.IsValidReceipt(receipt) &&
+        receipt.Generation == context.Generation &&
+        receipt.Generation == built.Document.Generation &&
+        StringComparer.Ordinal.Equals(
+            receipt.SessionSha256,
+            built.SessionSha256);
 
     private static bool HasValidPrepareClock(
         LiveAgentStatePrepareObservation prepare) =>

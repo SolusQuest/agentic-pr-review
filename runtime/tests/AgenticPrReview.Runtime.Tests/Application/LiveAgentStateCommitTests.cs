@@ -190,6 +190,34 @@ public sealed partial class R3LiveAgentApplicationTests
             CancellationToken.None);
     }
 
+    [Theory]
+    [InlineData(RestrictedStateCodes.Cancelled)]
+    [InlineData(RestrictedStateCodes.Conflict)]
+    [InlineData(RestrictedStateCodes.CleanupFailed)]
+    [InlineData(RestrictedStateCodes.EnumerationInvalid)]
+    public async Task ReceiptBearingPrepareFailurePreservesExactCode(
+        string expectedCode)
+    {
+        var captured = await CaptureGroundedCandidate();
+        var transaction = new ScriptedStateTransaction
+        {
+            ReceiptBearingPrepareFailureCode = expectedCode,
+        };
+        var sink = new CapturingLineageSink(
+            LiveAgentLineagePublicationOutcome.Ready);
+
+        var result = Commit(captured, transaction, sink);
+
+        Assert.Equal(expectedCode, result.Code);
+        Assert.Null(result.AcceptedGeneration);
+        Assert.False(result.HandoffReady);
+        Assert.NotNull(transaction.Receipt);
+        Assert.Equal(1, transaction.PrepareCalls);
+        Assert.Equal(0, transaction.ReconcileCalls);
+        Assert.Equal(0, transaction.AcceptCalls);
+        Assert.Equal(0, sink.CallCount);
+    }
+
     [Fact]
     public async Task AcceptOutcomeUnknownHasOneReconcileAndOneSameReceiptRetry()
     {
@@ -392,13 +420,17 @@ public sealed partial class R3LiveAgentApplicationTests
             result.AcceptedGeneration);
     }
 
-    [Fact]
-    public async Task MalformedReceiptStopsBeforeAcceptAndPublication()
+    [Theory]
+    [InlineData(null)]
+    [InlineData(RestrictedStateCodes.Conflict)]
+    public async Task MalformedReceiptStopsBeforeAcceptAndPublication(
+        string? prepareFailureCode)
     {
         var captured = await CaptureGroundedCandidate();
         var transaction = new ScriptedStateTransaction
         {
             ForgeSessionHash = true,
+            ReceiptBearingPrepareFailureCode = prepareFailureCode,
         };
         var sink = new CapturingLineageSink(
             LiveAgentLineagePublicationOutcome.Ready);
@@ -592,6 +624,8 @@ public sealed partial class R3LiveAgentApplicationTests
 
         internal bool PrepareIoFailed { get; init; }
 
+        internal string? ReceiptBearingPrepareFailureCode { get; init; }
+
         internal bool EarlyPrepareCancellation { get; init; }
 
         internal bool ForgeSessionHash { get; init; }
@@ -647,7 +681,11 @@ public sealed partial class R3LiveAgentApplicationTests
                     artifact!.Plaintext);
             }
 
-            var result = PrepareIoFailed
+            var result = ReceiptBearingPrepareFailureCode is not null
+                ? StateResult.Create(
+                    StateAction.Failed,
+                    ReceiptBearingPrepareFailureCode)
+                : PrepareIoFailed
                 ? StateResult.Create(
                     StateAction.Failed,
                     RestrictedStateCodes.IoFailed)
