@@ -614,24 +614,39 @@ public sealed partial class R3LiveAgentApplicationTests
             BindingFlags.Public |
             BindingFlags.NonPublic |
             BindingFlags.DeclaredOnly);
+        (string Name, Type Type)[] expected =
+        [
+            ("ContinuationCodec", typeof(IAgentContinuationCodec)),
+            ("CurrentReviewContextIndex", typeof(int)),
+            ("Outcome", typeof(AgentRunOutcome)),
+            ("Predecessor", typeof(AgentSessionPredecessor)),
+            ("Run", typeof(AgentRunRequest)),
+            ("StateAdmissionContext",
+                typeof(RestrictedStateSessionAdmissionContext)),
+            ("Transition", typeof(AgentSessionHeadTransition)),
+            ("TrustedRequest", typeof(AgentSessionTrustedRequest)),
+        ];
+        var propertyShape = properties
+            .Select(property => (property.Name, property.PropertyType))
+            .OrderBy(property => property.Name, StringComparer.Ordinal)
+            .ToArray();
+        var fieldShape = typeof(LiveAgentCandidate).GetFields(
+                BindingFlags.Instance |
+                BindingFlags.Public |
+                BindingFlags.NonPublic |
+                BindingFlags.DeclaredOnly)
+            .Select(field => (field.Name, field.FieldType))
+            .OrderBy(field => field.Name, StringComparer.Ordinal)
+            .ToArray();
+        var expectedFields = expected
+            .Select(property =>
+                ($"<{property.Name}>k__BackingField", property.Type))
+            .ToArray();
 
-        Assert.Equal(
-            [
-                "ContinuationCodec",
-                "CurrentReviewContextIndex",
-                "Outcome",
-                "Predecessor",
-                "Run",
-                "StateAdmissionContext",
-                "Transition",
-                "TrustedRequest",
-            ],
-            properties.Select(property => property.Name)
-                .Order(StringComparer.Ordinal));
+        Assert.Equal(expected, propertyShape);
+        Assert.Equal(expectedFields, fieldShape);
         Assert.All(properties, property =>
             Assert.False(property.GetMethod!.IsPublic));
-        Assert.Empty(typeof(LiveAgentCandidate).GetFields(
-            BindingFlags.Instance | BindingFlags.Public));
     }
 
     private static R3LiveAgentDependencies Dependencies(
