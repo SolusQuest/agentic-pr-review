@@ -39,11 +39,13 @@ public sealed partial class R3LiveAgentApplicationTests
             new R3LiveAgentSecrets(ProviderSecret, StateSecret));
         var handler = new GroundedReviewHandler(ProviderSecret);
         var transportFactory = new TestingTransportFactory(handler);
+        var commitCoordinator = new CapturingStateCommitCoordinator();
         var dependencies = new R3LiveAgentDependencies(
             secrets,
             new R3LiveAgentStateRestorer(),
             transportFactory,
             new CountingFileAccessFactory(),
+            commitCoordinator,
             TimeProvider.System);
         var request = Request(
             snapshot.Path,
@@ -61,8 +63,8 @@ public sealed partial class R3LiveAgentApplicationTests
         Assert.Equal(2, execution.Result.ToolCalls);
         Assert.NotNull(execution.Result.StablePlanSha256);
         Assert.NotNull(execution.Result.TerminalSha256);
-        Assert.NotNull(execution.AuthorizedStateAccess);
-        var candidate = Assert.IsType<LiveAgentCandidate>(execution.Candidate);
+        var candidate = Assert.IsType<LiveAgentCandidate>(
+            commitCoordinator.Candidate);
         Assert.True(candidate.Outcome.CompletedSessionEligible);
         Assert.Null(candidate.Predecessor);
         Assert.Same(
@@ -75,7 +77,7 @@ public sealed partial class R3LiveAgentApplicationTests
         Assert.Equal("system", candidate.Run.InitialMessages[0].Role);
         Assert.Equal("user", candidate.Run.InitialMessages[1].Role);
         Assert.Equal(request.AuthorizedScope,
-            execution.AuthorizedStateAccess!.Scope);
+            commitCoordinator.Access!.Scope);
         Assert.Equal(1, secrets.CallCount);
         Assert.Equal(2, handler.Requests.Count);
         Assert.DoesNotContain(
@@ -110,6 +112,7 @@ public sealed partial class R3LiveAgentApplicationTests
             restorer,
             transport,
             files,
+            new CapturingStateCommitCoordinator(),
             new ThrowingTimeProvider());
         var valid = Request(
             snapshotRoot: null!,
@@ -133,8 +136,6 @@ public sealed partial class R3LiveAgentApplicationTests
             .RunAsync(denied, CancellationToken.None);
 
         Assert.Equal(RestrictedStateCodes.AccessDenied, execution.Result.Code);
-        Assert.Null(execution.Candidate);
-        Assert.Null(execution.AuthorizedStateAccess);
         Assert.Equal(0, secrets.CallCount);
         Assert.Equal(0, restorer.CallCount);
         Assert.Equal(0, transport.CallCount);
@@ -216,6 +217,7 @@ public sealed partial class R3LiveAgentApplicationTests
                 restorer,
                 transport,
                 files,
+                new CapturingStateCommitCoordinator(),
                 TimeProvider.System));
 
         var execution = await application.RunAsync(
@@ -224,8 +226,6 @@ public sealed partial class R3LiveAgentApplicationTests
 
         Assert.Equal(RestrictedStateCodes.LineageMismatch,
             execution.Result.Code);
-        Assert.Null(execution.Candidate);
-        Assert.Null(execution.AuthorizedStateAccess);
         Assert.Equal(1, restorer.CallCount);
         Assert.Equal(0, transport.CallCount);
         Assert.Equal(0, files.CallCount);
@@ -251,6 +251,7 @@ public sealed partial class R3LiveAgentApplicationTests
                 bootstrap,
                 invalidTransport,
                 invalidFiles,
+                new CapturingStateCommitCoordinator(),
                 TimeProvider.System))
             .RunAsync(
                 Request(
@@ -258,7 +259,6 @@ public sealed partial class R3LiveAgentApplicationTests
                     Path.Join(snapshot.Path, "state")),
                 CancellationToken.None);
         Assert.Equal(R3LiveAgentCodes.InputInvalid, invalid.Result.Code);
-        Assert.Null(invalid.Candidate);
         Assert.Equal(0, invalidTransport.CallCount);
         Assert.Equal(0, invalidFiles.CallCount);
 
@@ -275,12 +275,12 @@ public sealed partial class R3LiveAgentApplicationTests
                 cancelledRestorer,
                 cancelledTransport,
                 cancelledFiles,
+                new CapturingStateCommitCoordinator(),
                 TimeProvider.System))
             .RunAsync(
                 Request(snapshot.Path, Path.Join(snapshot.Path, "state")),
                 cancelled.Token);
         Assert.Equal(AgentFailureCodes.Cancelled, cancellation.Result.Code);
-        Assert.Null(cancellation.Candidate);
         Assert.Equal(0, cancelledRestorer.CallCount);
         Assert.Equal(0, cancelledTransport.CallCount);
         Assert.Equal(0, cancelledFiles.CallCount);
@@ -307,6 +307,7 @@ public sealed partial class R3LiveAgentApplicationTests
             restorer,
             transport,
             files,
+            new CapturingStateCommitCoordinator(),
             TimeProvider.System);
 
         var execution = await new R3LiveAgentApplication(dependencies)
@@ -315,8 +316,6 @@ public sealed partial class R3LiveAgentApplicationTests
                 CancellationToken.None);
 
         Assert.Equal(R3LiveAgentCodes.SecretInvalid, execution.Result.Code);
-        Assert.Null(execution.Candidate);
-        Assert.Null(execution.AuthorizedStateAccess);
         Assert.Equal(1, secrets.CallCount);
         Assert.Equal(0, restorer.CallCount);
         Assert.Equal(0, transport.CallCount);
@@ -370,7 +369,11 @@ public sealed partial class R3LiveAgentApplicationTests
                 envelopeSha),
             admitted));
         var handler = new GroundedReviewHandler(ProviderSecret);
-        var dependencies = Dependencies(restorer, handler);
+        var commitCoordinator = new CapturingStateCommitCoordinator();
+        var dependencies = Dependencies(
+            restorer,
+            handler,
+            commitCoordinator);
         var restoredContext = bootstrap.StateAdmissionContext with
         {
             Generation = 1,
@@ -385,14 +388,15 @@ public sealed partial class R3LiveAgentApplicationTests
         var execution = await new R3LiveAgentApplication(dependencies)
             .RunAsync(request, CancellationToken.None);
 
-        var candidate = Assert.IsType<LiveAgentCandidate>(execution.Candidate);
+        var candidate = Assert.IsType<LiveAgentCandidate>(
+            commitCoordinator.Candidate);
         Assert.Same(restoredRun, candidate.Run);
         Assert.Same(artifactPlaintext, candidate.Predecessor!.Plaintext);
         Assert.Equal(artifact.SessionSha256,
             candidate.Predecessor.SessionSha256);
         Assert.Equal(envelopeSha, candidate.Predecessor.EnvelopeSha256);
         Assert.All(redundantPlaintext, value => Assert.Equal(0, value));
-        Assert.Contains(artifactPlaintext, value => value != 0);
+        Assert.All(artifactPlaintext, value => Assert.Equal(0, value));
         Assert.Equal(1, restorer.CallCount);
     }
 
@@ -441,7 +445,11 @@ public sealed partial class R3LiveAgentApplicationTests
                 envelopeSha),
             admitted));
         var handler = new UngroundedReviewHandler();
-        var dependencies = Dependencies(restorer, handler);
+        var commitCoordinator = new CapturingStateCommitCoordinator();
+        var dependencies = Dependencies(
+            restorer,
+            handler,
+            commitCoordinator);
         var request = CopyWithState(
             bootstrap,
             RestrictedStateLocatorFamily.Current,
@@ -456,10 +464,9 @@ public sealed partial class R3LiveAgentApplicationTests
             .RunAsync(request, CancellationToken.None);
 
         Assert.Equal(AgentFailureCodes.TerminalInvalid, execution.Result.Code);
-        Assert.Null(execution.Candidate);
-        Assert.Null(execution.AuthorizedStateAccess);
         Assert.All(redundantPlaintext, value => Assert.Equal(0, value));
         Assert.All(artifactPlaintext, value => Assert.Equal(0, value));
+        Assert.Equal(0, commitCoordinator.CallCount);
     }
 
     [Fact]
@@ -474,10 +481,18 @@ public sealed partial class R3LiveAgentApplicationTests
         Directory.CreateDirectory(stateRoot);
         var firstRequest = Request(snapshot.Path, stateRoot);
         var firstHandler = new GroundedReviewHandler(ProviderSecret);
+        var firstCommit = new CapturingStateCommitCoordinator();
         var first = await new R3LiveAgentApplication(
-            Dependencies(new R3LiveAgentStateRestorer(), firstHandler))
+            Dependencies(
+                new R3LiveAgentStateRestorer(),
+                firstHandler,
+                firstCommit))
             .RunAsync(firstRequest, CancellationToken.None);
-        var firstCandidate = Assert.IsType<LiveAgentCandidate>(first.Candidate);
+        Assert.Equal(R3LiveAgentCodes.Completed, first.Result.Code);
+        var firstCandidate = Assert.IsType<LiveAgentCandidate>(
+            firstCommit.Candidate);
+        var firstAccess = Assert.IsType<AuthorizedStateAccess>(
+            firstCommit.Access);
         var built = AgentSessionBuilder.Build(new AgentSessionBuildInput(
             firstCandidate.Run,
             firstCandidate.Outcome,
@@ -499,7 +514,7 @@ public sealed partial class R3LiveAgentApplicationTests
                 new AgentSessionRestrictedStateAdmission(),
                 () => now);
             var prepared = service.Prepare(
-                first.AuthorizedStateAccess!,
+                firstAccess,
                 new RestrictedStatePrepareRequest(
                     Lineage: null,
                     built.Artifact!.Plaintext,
@@ -509,7 +524,7 @@ public sealed partial class R3LiveAgentApplicationTests
             var receipt = Assert.IsType<PreparedStateReceipt>(
                 prepared.Receipt);
             var accepted = service.Accept(
-                first.AuthorizedStateAccess!,
+                firstAccess,
                 lineage: null,
                 receipt,
                 firstCandidate.StateAdmissionContext,
@@ -517,7 +532,7 @@ public sealed partial class R3LiveAgentApplicationTests
             Assert.Equal(StateAction.Accepted, accepted.Action);
 
             var lineage = new AcceptedLineage(
-                first.AuthorizedStateAccess!.Scope,
+                firstAccess.Scope,
                 receipt.Generation,
                 receipt.SessionSha256,
                 receipt.EnvelopeSha256,
@@ -547,7 +562,7 @@ public sealed partial class R3LiveAgentApplicationTests
                 lineage,
                 nextContext);
             var expected = service.Restore(
-                first.AuthorizedStateAccess!,
+                firstAccess,
                 restoreRequest,
                 CancellationToken.None);
             Assert.Equal(StateAction.Restored, expected.Result.Action);
@@ -571,15 +586,17 @@ public sealed partial class R3LiveAgentApplicationTests
                     ["a.txt"],
                     [],
                     []);
+                var secondCommit = new CapturingStateCommitCoordinator();
                 var second = await new R3LiveAgentApplication(
                     Dependencies(
                         new R3LiveAgentStateRestorer(),
-                        secondHandler))
+                        secondHandler,
+                        secondCommit))
                     .RunAsync(secondRequest, CancellationToken.None);
                 Assert.True(
-                    second.Candidate is LiveAgentCandidate,
+                    secondCommit.Candidate is LiveAgentCandidate,
                     secondHandler.Failure?.ToString() ?? second.Result.Code);
-                var candidate = (LiveAgentCandidate)second.Candidate!;
+                var candidate = (LiveAgentCandidate)secondCommit.Candidate!;
                 var expectedRun = expected.Session!.Value.RunRequest;
 
                 Assert.Equal(expectedRun.ReviewedIdentity,
@@ -590,8 +607,11 @@ public sealed partial class R3LiveAgentApplicationTests
                     ProviderNeutralRequestBytes(expectedRun),
                     ProviderNeutralRequestBytes(candidate.Run));
                 Assert.Equal(
-                    expected.Session.Value.Artifact.Plaintext,
-                    candidate.Predecessor!.Plaintext);
+                    expected.Session.Value.Artifact.SessionSha256,
+                    candidate.Predecessor!.SessionSha256);
+                Assert.All(
+                    candidate.Predecessor.Plaintext,
+                    value => Assert.Equal(0, value));
                 Assert.Equal(expectedRun.InitialMessages.Length - 1,
                     candidate.CurrentReviewContextIndex);
             }
@@ -651,13 +671,15 @@ public sealed partial class R3LiveAgentApplicationTests
 
     private static R3LiveAgentDependencies Dependencies(
         IR3LiveAgentStateRestorer restorer,
-        HttpMessageHandler handler) =>
+        HttpMessageHandler handler,
+        ILiveAgentStateCommitCoordinator? stateCommitCoordinator = null) =>
         new(
             new CountingSecretSource(
                 new R3LiveAgentSecrets(ProviderSecret, StateSecret)),
             restorer,
             new TestingTransportFactory(handler),
             new CountingFileAccessFactory(),
+            stateCommitCoordinator ?? new CapturingStateCommitCoordinator(),
             TimeProvider.System);
 
     private static R3LiveAgentRequest Request(
@@ -765,6 +787,7 @@ public sealed partial class R3LiveAgentApplicationTests
                 restorer,
                 transport,
                 files,
+                new CapturingStateCommitCoordinator(),
                 new ThrowingTimeProvider()))
             .RunAsync(request, CancellationToken.None);
         Assert.Equal(0, secrets.CallCount);
@@ -836,6 +859,36 @@ public sealed partial class R3LiveAgentApplicationTests
         {
             CallCount++;
             return secrets;
+        }
+    }
+
+    private sealed class CapturingStateCommitCoordinator
+        : ILiveAgentStateCommitCoordinator
+    {
+        internal int CallCount { get; private set; }
+
+        internal LiveAgentCandidate? Candidate { get; private set; }
+
+        internal AuthorizedStateAccess? Access { get; private set; }
+
+        public LiveAgentStateCommitResult Commit(
+            LiveAgentCandidate candidate,
+            AuthorizedStateAccess access,
+            AcceptedLineage? priorLineage,
+            AgentSessionHeadTransition authorizedTransition,
+            string stateRoot,
+            IRestrictedStateKeyResolver keyResolver,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            Candidate = candidate;
+            Access = access;
+            return new LiveAgentStateCommitResult(
+                R3LiveAgentCodes.Completed,
+                0,
+                new string('c', 64),
+                new string('d', 64),
+                handoffReady: true);
         }
     }
 

@@ -12,6 +12,10 @@ internal static class R3LiveAgentCodes
     internal const string InputInvalid = "r3_live_input_invalid";
     internal const string SecretInvalid = "r3_live_secret_invalid";
     internal const string CompositionFailed = "r3_live_composition_failed";
+    internal const string HandoffUnavailable =
+        "r3_live_handoff_unavailable";
+    internal const string HandoffCleanupFailed =
+        "r3_live_handoff_cleanup_failed";
 }
 
 internal sealed class R3LiveAgentSecrets(
@@ -217,6 +221,7 @@ internal sealed class R3LiveAgentDependencies(
     IR3LiveAgentStateRestorer stateRestorer,
     IR3LiveAgentTransportFactory transportFactory,
     IR3LiveAgentReviewedFileAccessFactory reviewedFileAccessFactory,
+    ILiveAgentStateCommitCoordinator stateCommitCoordinator,
     TimeProvider timeProvider)
 {
     internal IR3LiveAgentSecretSource SecretSource { get; } = secretSource;
@@ -230,15 +235,26 @@ internal sealed class R3LiveAgentDependencies(
         get;
     } = reviewedFileAccessFactory;
 
+    internal ILiveAgentStateCommitCoordinator StateCommitCoordinator { get; } =
+        stateCommitCoordinator;
+
     internal TimeProvider TimeProvider { get; } = timeProvider;
 
-    internal static R3LiveAgentDependencies CreateDefault() =>
-        new(
+    internal static R3LiveAgentDependencies CreateDefault(
+        ILiveAgentAcceptedLineageSink lineageSink)
+    {
+        var timeProvider = TimeProvider.System;
+        return new(
             new R3LiveAgentEnvironmentSecretSource(),
             new R3LiveAgentStateRestorer(),
             new R3LiveAgentTransportFactory(),
             new R3LiveAgentReviewedFileAccessFactory(),
-            TimeProvider.System);
+            new LiveAgentStateCommitCoordinator(
+                new LiveAgentStateTransactionFactory(timeProvider),
+                new AgentSessionRestrictedStateAdmission(),
+                lineageSink),
+            timeProvider);
+    }
 
     public override string ToString() => "r3_live_agent_dependencies";
 }

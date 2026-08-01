@@ -1,6 +1,6 @@
 # Restricted encrypted Agent state
 
-Status: normative R2 current-format security and storage-conformance contract implemented by issue [#87](https://github.com/SolusQuest/agentic-pr-review/issues/87).
+Status: normative R2 current-format security and storage-conformance contract implemented by issue [#87](https://github.com/SolusQuest/agentic-pr-review/issues/87) and connected to the bounded R3 live commit by issue [#108](https://github.com/SolusQuest/agentic-pr-review/issues/108).
 
 This document is the durable copy of the restricted encrypted state contract refined under [#78](https://github.com/SolusQuest/agentic-pr-review/issues/78). It protects the current SESSION plaintext defined by [`agent-session-format.md`](./agent-session-format.md). It fixes authorization, authenticated framing, Host binding, lineage, retention, transition outcomes, and local conformance behavior. It deliberately does not choose a production GitHub Actions artifact, cache, or object transport.
 
@@ -23,6 +23,14 @@ The independent Host input `AcceptedLineage` contains the stable scope, accepted
 With no lineage, only generation 0 with a null predecessor may be prepared and accepted. With lineage generation N and envelope H, restore considers only exact envelope H. Hiding or deleting H never makes an older candidate current. Generation N+1 must name H as its predecessor and pass exact compare-and-swap admission. Generation arithmetic is checked and cannot overflow.
 
 `PreparedStateReceipt` contains generation, session SHA-256, envelope SHA-256, and exact prepared object identity. The object identity is a domain-separated digest over the complete canonical Host binding followed by the decoded session and envelope hashes; changing any scope, producer, generation, predecessor, timestamp, session, or envelope field changes the identity. Encryption occurs once per prepare. The receipt is created before the store write, so an outcome-unknown failure can be reconciled against the exact persisted object. Reconciliation decrypts and re-admits the matching object before reporting it idempotent; it never re-encrypts the same generation with a fresh nonce. A same-generation operation is idempotent only when session hash, envelope hash, and object identity match. The same semantic plaintext encrypted with another nonce is a conflict, not another accepted object.
+
+### R3 live commit boundary
+
+Issue [#108](https://github.com/SolusQuest/agentic-pr-review/issues/108) connects only a fully grounded live-Agent completion to this existing transaction. The Host consumes the exact non-serializable candidate and its separately created `AuthorizedStateAccess` while the original key resolver remains alive. It calls the SESSION builder and Prepare once. An outcome-unknown Prepare may Reconcile once by the exact receipt; an outcome-unknown Accept may Reconcile once and retry Accept once with that same receipt. It never re-prepares, resets, enumerates, cleans up, or invokes the local handoff operation as part of this commit.
+
+Caller cancellation is honored before the first Accept. Once an Accept outcome may have crossed the atomic commit boundary, the bounded receipt reconciliation runs independently so later cancellation cannot disguise an accepted generation. After receipt-matching accepted or idempotent success, the commit-known state is absorbing: lineage validation, atomic publication, cancellation, or cleanup failure preserves the accepted generation and hashes. Only confirmed independent-lineage publication is handoff-ready; every unavailable, unknown, cancelled, exceptional, or cleanup-failed publication outcome is handoff-unavailable and cannot authorize a later process launch.
+
+The independent-lineage sink introduced by #108 is typed and Host-only. It receives no key, SESSION plaintext, candidate, provider outcome, state root, store, or process capability. Issue [#109](https://github.com/SolusQuest/agentic-pr-review/issues/109) owns the concrete lineage path, codec, filesystem validation, and fresh-process launch. This boundary adds no public protocol or production transport.
 
 `session_sha256` is the SESSION digest over complete plaintext under domain `apr.session.r2`. `envelope_sha256` is the digest over the complete raw `APRAST01` envelope under domain `apr.state-envelope.r2`. Locator, predecessor, replay, and CAS use envelope identity. Semantic reconciliation checks both hashes.
 

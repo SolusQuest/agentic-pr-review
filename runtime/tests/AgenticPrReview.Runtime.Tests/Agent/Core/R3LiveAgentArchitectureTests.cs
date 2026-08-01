@@ -40,6 +40,38 @@ public sealed partial class AgentCapabilityArchitectureTests
     }
 
     [Fact]
+    public void LiveAgentHostCommitHasAnExactStateMutationAllowlist()
+    {
+        var calls = HostCommitTypes()
+            .SelectMany(type => DeclaredExecutableMembers(type)
+                .SelectMany(method => ResolveMethodBodyMembers(method)
+                    .OfType<MethodInfo>()
+                    .Where(member => member.DeclaringType ==
+                            typeof(RestrictedStateService) ||
+                        member.DeclaringType == typeof(AgentSessionBuilder))
+                    .Select(member =>
+                        $"{type.FullName}|{member.DeclaringType!.Name}." +
+                            member.Name)))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            [
+                "AgenticPrReview.Runtime.LiveAgentStateCommitCoordinator|AgentSessionBuilder.Build",
+                "AgenticPrReview.Runtime.LiveAgentStateTransaction|RestrictedStateService.Accept",
+                "AgenticPrReview.Runtime.LiveAgentStateTransaction|RestrictedStateService.Prepare",
+                "AgenticPrReview.Runtime.LiveAgentStateTransaction|RestrictedStateService.Reconcile",
+            ],
+            calls);
+        Assert.DoesNotContain(
+            calls,
+            call => call.Contains("PrepareHandoff", StringComparison.Ordinal) ||
+                call.Contains("CleanupExpired", StringComparison.Ordinal) ||
+                call.Contains("Enumerate", StringComparison.Ordinal) ||
+                call.Contains("Reset", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void R3LiveApplicationDoesNotReferenceRetiredOrBroadCapabilities()
     {
         var violations = FindR3CapabilityViolations(R3LiveTypes());
@@ -131,6 +163,8 @@ public sealed partial class AgentCapabilityArchitectureTests
         var types = new[]
         {
             typeof(LiveAgentCandidate),
+            typeof(LiveAgentStateCommitResult),
+            typeof(LiveAgentStatePrepareObservation),
             typeof(R3LiveAgentResult),
             typeof(R3LiveAgentExecution),
         };
@@ -169,11 +203,29 @@ public sealed partial class AgentCapabilityArchitectureTests
         AssertExactInternalAutoPropertyStorage(
             typeof(R3LiveAgentResult),
             [
+                ("AcceptedEnvelopeSha256", typeof(string)),
+                ("AcceptedGeneration", typeof(long?)),
+                ("AcceptedSessionSha256", typeof(string)),
                 ("Code", typeof(string)),
+                ("HandoffReady", typeof(bool)),
                 ("ModelCalls", typeof(int)),
                 ("StablePlanSha256", typeof(string)),
                 ("TerminalSha256", typeof(string)),
                 ("ToolCalls", typeof(int)),
+            ]);
+        AssertExactInternalAutoPropertyStorage(
+            typeof(R3LiveAgentExecution),
+            [
+                ("Result", typeof(R3LiveAgentResult)),
+            ]);
+        AssertExactInternalAutoPropertyStorage(
+            typeof(LiveAgentStateCommitResult),
+            [
+                ("AcceptedEnvelopeSha256", typeof(string)),
+                ("AcceptedGeneration", typeof(long?)),
+                ("AcceptedSessionSha256", typeof(string)),
+                ("Code", typeof(string)),
+                ("HandoffReady", typeof(bool)),
             ]);
     }
 
@@ -187,6 +239,16 @@ public sealed partial class AgentCapabilityArchitectureTests
                     StringComparer.Ordinal.Equals(
                         type.Name,
                         nameof(LiveAgentCandidate))))
+            .SelectMany(IncludeTypeAndNestedTypesRecursively)
+            .Distinct();
+
+    private static IEnumerable<Type> HostCommitTypes() =>
+        typeof(RuntimeApplication).Assembly.GetTypes()
+            .Where(type =>
+                type.Namespace == "AgenticPrReview.Runtime" &&
+                type.Name.StartsWith(
+                    "LiveAgentState",
+                    StringComparison.Ordinal))
             .SelectMany(IncludeTypeAndNestedTypesRecursively)
             .Distinct();
 
