@@ -7,7 +7,17 @@ internal sealed class MinimalChatClient(
         ProjectChatRequest request,
         CancellationToken cancellationToken)
     {
-        var native = Materialize(request);
+        MinimalChatRequest native;
+        try
+        {
+            native = Materialize(request);
+        }
+        catch (Exception exception) when (
+            IsNormalizationDomainException(exception))
+        {
+            throw new ProjectChatNormalizationException();
+        }
+
         var response = await backend.GetResponseAsync(native, cancellationToken);
         try
         {
@@ -23,7 +33,8 @@ internal sealed class MinimalChatClient(
                     ? null
                     : ToProject(response.Continuation));
         }
-        catch
+        catch (Exception exception) when (
+            IsNormalizationDomainException(exception))
         {
             throw new ProjectChatNormalizationException();
         }
@@ -202,6 +213,15 @@ internal sealed class MinimalChatClient(
             item.AssociatedCallId,
             item.MessagePosition,
             item.ContentPosition)).ToArray());
+
+    private static bool IsNormalizationDomainException(Exception exception) =>
+        exception is ArgumentException or
+            FormatException or
+            IndexOutOfRangeException or
+            InvalidOperationException or
+            KeyNotFoundException or
+            NullReferenceException or
+            OverflowException;
 }
 
 internal interface IMinimalChatBackend
@@ -219,7 +239,10 @@ internal sealed record MinimalChatRequest(
 
 internal sealed record MinimalChatMessage(
     string Role,
-    MinimalChatContent[] Contents);
+    MinimalChatContent[] Contents)
+{
+    public override string ToString() => "minimal_chat_message";
+}
 
 internal sealed record MinimalChatContent(
     string Kind,
@@ -230,7 +253,10 @@ internal sealed record MinimalChatContent(
     string? Framing,
     string? AssociatedCallId,
     int MessagePosition,
-    int Position);
+    int Position)
+{
+    public override string ToString() => "minimal_chat_content";
+}
 
 internal sealed record MinimalChatTool(
     string Name,
@@ -242,7 +268,10 @@ internal sealed record MinimalChatContinuation(
     string ModelId,
     string AdapterId,
     string SessionId,
-    MinimalChatContinuationItem[] Items);
+    MinimalChatContinuationItem[] Items)
+{
+    public override string ToString() => "minimal_chat_continuation";
+}
 
 internal sealed record MinimalChatContinuationItem(
     string Readable,
@@ -250,7 +279,10 @@ internal sealed record MinimalChatContinuationItem(
     string Framing,
     string? AssociatedCallId,
     int MessagePosition,
-    int ContentPosition);
+    int ContentPosition)
+{
+    public override string ToString() => "minimal_chat_continuation_item";
+}
 
 internal sealed record MinimalChatUsage(
     long InputTokens,

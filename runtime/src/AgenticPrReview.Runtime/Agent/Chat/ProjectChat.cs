@@ -23,12 +23,18 @@ internal sealed record ProjectChatRequest(
 
 internal sealed record ProjectChatMessage(
     string Role,
-    ProjectChatContent[] Contents);
+    ProjectChatContent[] Contents)
+{
+    public override string ToString() => "project_chat_message";
+}
 
 internal abstract record ProjectChatContent(string Kind);
 
 internal sealed record ProjectTextContent(string Text)
-    : ProjectChatContent("text");
+    : ProjectChatContent("text")
+{
+    public override string ToString() => "project_text_content";
+}
 
 internal sealed record ProjectReasoningContent(
     string Text,
@@ -37,18 +43,27 @@ internal sealed record ProjectReasoningContent(
     string? AssociatedCallId,
     int MessagePosition,
     int Position)
-    : ProjectChatContent("reasoning");
+    : ProjectChatContent("reasoning")
+{
+    public override string ToString() => "project_reasoning_content";
+}
 
 internal sealed record ProjectToolCallContent(
     string CallId,
     string Name,
     string ArgumentsJson)
-    : ProjectChatContent("tool_call");
+    : ProjectChatContent("tool_call")
+{
+    public override string ToString() => "project_tool_call_content";
+}
 
 internal sealed record ProjectToolResultContent(
     string CallId,
     string Result)
-    : ProjectChatContent("tool_result");
+    : ProjectChatContent("tool_result")
+{
+    public override string ToString() => "project_tool_result_content";
+}
 
 internal sealed record ProjectChatUsage(
     long InputTokens,
@@ -70,7 +85,10 @@ internal sealed record ProjectContinuation(
     string ModelId,
     string AdapterId,
     string SessionId,
-    ProjectContinuationItem[] Items);
+    ProjectContinuationItem[] Items)
+{
+    public override string ToString() => "project_continuation";
+}
 
 internal sealed record ProjectContinuationItem(
     string Readable,
@@ -78,4 +96,7 @@ internal sealed record ProjectContinuationItem(
     string Framing,
     string? AssociatedCallId,
     int MessagePosition,
-    int ContentPosition);
+    int ContentPosition)
+{
+    public override string ToString() => "project_continuation_item";
+}

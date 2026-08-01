@@ -168,10 +168,44 @@ internal interface IAgentContinuationCodec
         out AgentContinuationCodecValue? value);
 }
 
+internal interface IAgentContinuationStructurePolicy
+{
+    bool TryValidate(AgentContinuationStructure structure);
+}
+
+internal sealed record AgentContinuationStructure(
+    ImmutableArray<AgentContinuationStructureMessage> Messages,
+    ImmutableArray<AgentContinuationStructureItem> Items)
+{
+    public override string ToString() => "agent_continuation_structure";
+}
+
+internal sealed record AgentContinuationStructureMessage(
+    int MessageOrdinal,
+    ImmutableArray<int> ContinuationPositions,
+    int CallCount)
+{
+    public override string ToString() =>
+        "agent_continuation_structure_message";
+}
+
+internal sealed record AgentContinuationStructureItem(
+    int ItemOrdinal,
+    int MessageOrdinal,
+    int ContentPosition,
+    string? AssociatedCallId,
+    AgentContinuationCodecValue Value)
+{
+    public override string ToString() => "agent_continuation_structure_item";
+}
+
 internal sealed record AgentContinuationCodecValue(
     string Readable,
     string Opaque,
-    string Framing);
+    string Framing)
+{
+    public override string ToString() => "agent_continuation_codec_value";
+}
 
 internal sealed record AgentContinuationEncodedPayload(
     string Encoding,
@@ -212,6 +246,25 @@ internal static class AgentContinuationCodecBoundary
         }
     }
 
+    internal static bool TryValidateStructure(
+        IAgentContinuationCodec codec,
+        AgentContinuationStructure structure)
+    {
+        if (codec is not IAgentContinuationStructurePolicy policy)
+        {
+            return true;
+        }
+
+        try
+        {
+            return policy.TryValidate(structure);
+        }
+        catch (Exception exception) when (IsCodecDomainException(exception))
+        {
+            return false;
+        }
+    }
+
     private static bool IsCodecDomainException(Exception exception) =>
         exception is ArgumentException or
             DecoderFallbackException or
@@ -244,7 +297,10 @@ internal sealed record AgentSessionDocument(
     long Generation,
     string? PredecessorStateSha256,
     string? PriorSessionSha256,
-    ImmutableArray<AgentSessionCompletedRun> CompletedRuns);
+    ImmutableArray<AgentSessionCompletedRun> CompletedRuns)
+{
+    public override string ToString() => "agent_session_document";
+}
 
 internal sealed record AgentSessionCompletedRun(
     string RunId,
@@ -252,7 +308,10 @@ internal sealed record AgentSessionCompletedRun(
     ReviewedIdentity ReviewedIdentity,
     string StablePlanSha256,
     ImmutableArray<AgentSessionRecord> Records,
-    AgentSessionContinuation Continuation);
+    AgentSessionContinuation Continuation)
+{
+    public override string ToString() => "agent_session_completed_run";
+}
 
 internal abstract record AgentSessionRecord(
     string Kind,
@@ -276,7 +335,10 @@ internal sealed record AgentSessionReviewContextRecord(
         Sequence,
         Role,
         Framing,
-        Classification);
+        Classification)
+{
+    public override string ToString() => "agent_session_review_context";
+}
 
 internal sealed record AgentSessionAssistantMessageRecord(
     string Id,
@@ -292,7 +354,10 @@ internal sealed record AgentSessionAssistantMessageRecord(
         Sequence,
         Role,
         Framing,
-        Classification);
+        Classification)
+{
+    public override string ToString() => "agent_session_assistant_message";
+}
 
 internal sealed record AgentSessionToolResultRecord(
     string Id,
@@ -311,7 +376,10 @@ internal sealed record AgentSessionToolResultRecord(
         Sequence,
         Role,
         Framing,
-        Classification);
+        Classification)
+{
+    public override string ToString() => "agent_session_tool_result";
+}
 
 internal sealed record AgentSessionReviewOutcomeRecord(
     string Id,
@@ -330,7 +398,10 @@ internal sealed record AgentSessionReviewOutcomeRecord(
         Sequence,
         Role,
         Framing,
-        Classification);
+        Classification)
+{
+    public override string ToString() => "agent_session_review_outcome";
+}
 
 internal abstract record AgentSessionAssistantContent(
     string Kind,
@@ -339,19 +410,28 @@ internal abstract record AgentSessionAssistantContent(
 internal sealed record AgentSessionTextContent(
     int ContentPosition,
     string Text)
-    : AgentSessionAssistantContent("text", ContentPosition);
+    : AgentSessionAssistantContent("text", ContentPosition)
+{
+    public override string ToString() => "agent_session_text_content";
+}
 
 internal sealed record AgentSessionContinuationSlotContent(
     int ContentPosition,
     string ContinuationItemId)
-    : AgentSessionAssistantContent("continuation_slot", ContentPosition);
+    : AgentSessionAssistantContent("continuation_slot", ContentPosition)
+{
+    public override string ToString() => "agent_session_continuation_slot";
+}
 
 internal sealed record AgentSessionToolCallContent(
     int ContentPosition,
     string CallId,
     string Name,
     string ArgumentsJson)
-    : AgentSessionAssistantContent("tool_call", ContentPosition);
+    : AgentSessionAssistantContent("tool_call", ContentPosition)
+{
+    public override string ToString() => "agent_session_tool_call";
+}
 
 internal sealed record AgentSessionTerminalCallContent(
     int ContentPosition,
@@ -359,12 +439,18 @@ internal sealed record AgentSessionTerminalCallContent(
     string Name,
     string ArgumentsJson,
     string ArgumentsSha256)
-    : AgentSessionAssistantContent("terminal_call", ContentPosition);
+    : AgentSessionAssistantContent("terminal_call", ContentPosition)
+{
+    public override string ToString() => "agent_session_terminal_call";
+}
 
 internal sealed record AgentSessionContinuation(
     string CodecId,
     string CodecDiscriminator,
-    ImmutableArray<AgentSessionContinuationItem> Items);
+    ImmutableArray<AgentSessionContinuationItem> Items)
+{
+    public override string ToString() => "agent_session_continuation";
+}
 
 internal sealed record AgentSessionContinuationItem(
     string ItemId,
@@ -374,4 +460,7 @@ internal sealed record AgentSessionContinuationItem(
     string PayloadSha256,
     string MessageId,
     int ContentPosition,
-    string? AssociatedCallId);
+    string? AssociatedCallId)
+{
+    public override string ToString() => "agent_session_continuation_item";
+}

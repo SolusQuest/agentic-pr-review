@@ -220,7 +220,12 @@ internal static class AgentSessionCodec
                 json,
                 AgentSessionJsonContext.Default.AgentSessionRootDto);
             if (dto is null ||
-                !TryConvertRoot(dto, out var document, out failureCode) ||
+                !TryConvertRoot(
+                    dto,
+                    deferContinuationSlots: false,
+                    convertContinuation: true,
+                    out var document,
+                    out failureCode) ||
                 !TryWrite(document!, out var canonical, out _))
             {
                 return false;
@@ -248,6 +253,104 @@ internal static class AgentSessionCodec
             return false;
         }
     }
+
+    internal static bool TryValidateRecordGrammarBeforeContinuation(
+        AgentSessionParsedEnvelope parsed,
+        out string failureCode)
+    {
+        failureCode = AgentSessionCodes.CurrentMalformed;
+        try
+        {
+            var json = parsed.Plaintext.AsSpan(
+                AgentSessionFormat.FramingBytes);
+            var dto = JsonSerializer.Deserialize(
+                json,
+                AgentSessionJsonContext.Default.AgentSessionRootDto);
+            if (dto is null ||
+                !TryConvertRoot(
+                    dto,
+                    deferContinuationSlots: true,
+                    convertContinuation: false,
+                    out var document,
+                    out failureCode))
+            {
+                return false;
+            }
+
+            if (!AgentSessionValidation.TryValidateRoot(
+                    document!,
+                    out failureCode))
+            {
+                return false;
+            }
+
+            return AgentSessionValidation.TryValidateRecordGrammar(
+                document!,
+                out failureCode);
+        }
+        catch (Exception exception) when (
+            exception is JsonException or
+            NotSupportedException or
+            FormatException or
+            OverflowException or
+            EncoderFallbackException or
+            Rfc8785CanonicalizationException)
+        {
+            failureCode = AgentSessionCodes.CurrentMalformed;
+            return false;
+        }
+    }
+
+    private static bool DeclaredContinuationObjectTokensAreValid(
+        JsonElement continuation)
+    {
+        if (continuation.ValueKind != JsonValueKind.Object ||
+            !HasKind(continuation, "codec_id", JsonValueKind.String) ||
+            !HasKind(
+                continuation,
+                "codec_discriminator",
+                JsonValueKind.String) ||
+            !continuation.TryGetProperty("items", out var items) ||
+            items.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (var item in items.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object ||
+                !HasKind(item, "item_id", JsonValueKind.String) ||
+                !HasKind(item, "encoding", JsonValueKind.String) ||
+                !HasKind(item, "payload", JsonValueKind.String) ||
+                !HasKind(item, "payload_sha256", JsonValueKind.String) ||
+                !HasKind(item, "message_id", JsonValueKind.String) ||
+                !HasInt32(item, "content_position") ||
+                !item.TryGetProperty(
+                    "associated_call_id",
+                    out var associatedCallId) ||
+                associatedCallId.ValueKind is not (
+                    JsonValueKind.Null or JsonValueKind.String))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool HasKind(
+        JsonElement element,
+        string propertyName,
+        JsonValueKind expectedKind) =>
+        element.TryGetProperty(propertyName, out var property) &&
+        property.ValueKind == expectedKind;
+
+    private static bool HasInt32(
+        JsonElement element,
+        string propertyName) =>
+        element.TryGetProperty(propertyName, out var property) &&
+        property.ValueKind == JsonValueKind.Number &&
+        property.TryGetInt32(out _);
 
     private static void WriteCanonicalPreservingOrder(
         ref Rfc8785Writer writer,
@@ -382,6 +485,8 @@ internal static class AgentSessionCodec
 
     private static bool TryConvertRoot(
         AgentSessionRootDto dto,
+        bool deferContinuationSlots,
+        bool convertContinuation,
         out AgentSessionDocument? document,
         out string failureCode)
     {
@@ -411,7 +516,12 @@ internal static class AgentSessionCodec
         foreach (var run in dto.CompletedRuns)
         {
             if (run is null ||
-                !TryConvertRun(run, out var converted, out failureCode))
+                !TryConvertRun(
+                    run,
+                    deferContinuationSlots,
+                    convertContinuation,
+                    out var converted,
+                    out failureCode))
             {
                 return false;
             }
@@ -444,6 +554,8 @@ internal static class AgentSessionCodec
 
     private static bool TryConvertRun(
         AgentSessionRunDto dto,
+        bool deferContinuationSlots,
+        bool convertContinuation,
         out AgentSessionCompletedRun? run,
         out string failureCode)
     {
@@ -453,8 +565,7 @@ internal static class AgentSessionCodec
             dto.ReviewedIdentity is null ||
             !TryConvertIdentity(dto.ReviewedIdentity, out var identity) ||
             dto.StablePlanSha256 is null ||
-            dto.Records is null ||
-            dto.Continuation is null)
+            dto.Records is null)
         {
             return false;
         }
@@ -463,7 +574,11 @@ internal static class AgentSessionCodec
             dto.Records.Length);
         foreach (var element in dto.Records)
         {
-            if (!TryConvertRecord(element, out var record, out failureCode))
+            if (!TryConvertRecord(
+                    element,
+                    deferContinuationSlots,
+                    out var record,
+                    out failureCode))
             {
                 return false;
             }
@@ -471,12 +586,36 @@ internal static class AgentSessionCodec
             records.Add(record!);
         }
 
-        if (!TryConvertContinuation(
-                dto.Continuation,
-                out var continuation,
-                out failureCode))
+        AgentSessionContinuation continuation;
+        if (convertContinuation)
         {
-            return false;
+            failureCode = AgentSessionCodes.ContinuationInvalid;
+            if (!DeclaredContinuationObjectTokensAreValid(
+                    dto.Continuation))
+            {
+                return false;
+            }
+
+            var continuationDto = JsonSerializer.Deserialize(
+                dto.Continuation,
+                AgentSessionJsonContext.Default.AgentSessionContinuationDto);
+            if (continuationDto is null ||
+                !TryConvertContinuation(
+                    continuationDto,
+                    out var convertedContinuation,
+                    out failureCode))
+            {
+                return false;
+            }
+
+            continuation = convertedContinuation!;
+        }
+        else
+        {
+            continuation = new AgentSessionContinuation(
+                "deferred_continuation",
+                "deferred_continuation",
+                []);
         }
 
         run = new AgentSessionCompletedRun(
@@ -485,12 +624,13 @@ internal static class AgentSessionCodec
             identity!,
             dto.StablePlanSha256,
             records.MoveToImmutable(),
-            continuation!);
+            continuation);
         return true;
     }
 
     private static bool TryConvertRecord(
         JsonElement element,
+        bool deferContinuationSlots,
         out AgentSessionRecord? record,
         out string failureCode)
     {
@@ -552,10 +692,14 @@ internal static class AgentSessionCodec
                 var contents =
                     ImmutableArray.CreateBuilder<AgentSessionAssistantContent>(
                         message.Contents.Length);
-                foreach (var contentElement in message.Contents)
+                for (var contentIndex = 0;
+                    contentIndex < message.Contents.Length;
+                    contentIndex++)
                 {
                     if (!TryConvertContent(
-                            contentElement,
+                            message.Contents[contentIndex],
+                            deferContinuationSlots,
+                            contentIndex,
                             out var content,
                             out failureCode))
                     {
@@ -643,6 +787,8 @@ internal static class AgentSessionCodec
 
     private static bool TryConvertContent(
         JsonElement element,
+        bool deferContinuationSlot,
+        int contentIndex,
         out AgentSessionAssistantContent? content,
         out string failureCode)
     {
@@ -671,6 +817,24 @@ internal static class AgentSessionCodec
                     text.Text);
                 return true;
             case "continuation_slot":
+                failureCode = AgentSessionCodes.ContinuationInvalid;
+                if (deferContinuationSlot)
+                {
+                    content = new AgentSessionContinuationSlotContent(
+                        contentIndex,
+                        "deferred_continuation_item");
+                    return true;
+                }
+
+                if (!HasInt32(element, "content_position") ||
+                    !HasKind(
+                        element,
+                        "continuation_item_id",
+                        JsonValueKind.String))
+                {
+                    return false;
+                }
+
                 var slot = JsonSerializer.Deserialize(
                     element,
                     AgentSessionJsonContext.Default

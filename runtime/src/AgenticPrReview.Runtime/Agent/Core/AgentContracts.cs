@@ -185,7 +185,10 @@ internal sealed record AgentContinuationCandidate(
     string ModelId,
     string AdapterId,
     string SessionId,
-    ImmutableArray<AgentContinuationCandidateItem> Items);
+    ImmutableArray<AgentContinuationCandidateItem> Items)
+{
+    public override string ToString() => "agent_continuation_candidate";
+}
 
 internal sealed record AgentContinuationCandidateItem(
     string Readable,
@@ -193,7 +196,10 @@ internal sealed record AgentContinuationCandidateItem(
     string Framing,
     string? AssociatedCallId,
     int MessagePosition,
-    int ContentPosition);
+    int ContentPosition)
+{
+    public override string ToString() => "agent_continuation_candidate_item";
+}
 
 internal abstract record AgentLogicalEvent(string Kind);
 
@@ -204,12 +210,18 @@ internal sealed record AgentMessageEvent(
     int MessageIndex,
     string Role,
     ImmutableArray<AgentMessagePart> Contents)
-    : AgentLogicalEvent("message");
+    : AgentLogicalEvent("message")
+{
+    public override string ToString() => "agent_message_event";
+}
 
 internal abstract record AgentMessagePart(string Kind);
 
 internal sealed record AgentTextPart(string Text)
-    : AgentMessagePart("text");
+    : AgentMessagePart("text")
+{
+    public override string ToString() => "agent_text_part";
+}
 
 internal sealed record AgentReasoningReferencePart(
     string ReadableSha256,

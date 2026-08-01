@@ -1119,6 +1119,235 @@ public sealed class AgentSessionRoundTripTests
     }
 
     [Fact]
+    public async Task MalformedDeclaredContinuationSlotUsesContinuationCode()
+    {
+        var trusted = Trusted();
+        var built = await BuildGenerationAsync(
+            trusted,
+            previous: null,
+            "g0",
+            "finish0",
+            reasoning: true);
+        var assistant = Assert.IsType<AgentSessionAssistantMessageRecord>(
+            built.Artifact.Document.CompletedRuns[0].Records[1]);
+        var slot = Assert.IsType<AgentSessionContinuationSlotContent>(
+            assistant.Contents[0]);
+        var malformed = RawMutation(
+            built.Artifact,
+            string.Concat(
+                ",\"continuation_item_id\":",
+                JsonSerializer.Serialize(slot.ContinuationItemId)),
+            string.Empty);
+
+        Assert.False(AgentSessionCodec.TryParse(
+            malformed.Plaintext,
+            out var parsed,
+            out var failure));
+        Assert.Null(parsed);
+        Assert.Equal(AgentSessionCodes.ContinuationInvalid, failure);
+    }
+
+    [Fact]
+    public async Task DeclaredContinuationWrongTokenKindsUseContinuationCode()
+    {
+        var trusted = Trusted();
+        var built = await BuildGenerationAsync(
+            trusted,
+            previous: null,
+            "g0",
+            "finish0",
+            reasoning: true);
+        var run = Assert.Single(built.Artifact.Document.CompletedRuns);
+        var continuation = run.Continuation;
+        var item = Assert.Single(continuation.Items);
+        var assistant = Assert.IsType<AgentSessionAssistantMessageRecord>(
+            run.Records[1]);
+        var slot = Assert.IsType<AgentSessionContinuationSlotContent>(
+            assistant.Contents[0]);
+        (string Old, string Replacement)[] mutations =
+        [
+            (
+                string.Concat(
+                    "\"kind\":\"continuation_slot\",\"content_position\":",
+                    slot.ContentPosition),
+                "\"kind\":\"continuation_slot\",\"content_position\":\"0\""),
+            (
+                string.Concat(
+                    "\"continuation_item_id\":",
+                    CanonicalJsonString(slot.ContinuationItemId)),
+                "\"continuation_item_id\":0"),
+            (
+                string.Concat(
+                    "\"codec_id\":",
+                    CanonicalJsonString(continuation.CodecId)),
+                "\"codec_id\":0"),
+            (
+                string.Concat(
+                    "\"codec_discriminator\":",
+                    CanonicalJsonString(
+                        continuation.CodecDiscriminator)),
+                "\"codec_discriminator\":0"),
+            (
+                string.Concat(
+                    "\"item_id\":",
+                    CanonicalJsonString(item.ItemId)),
+                "\"item_id\":0"),
+            (
+                string.Concat(
+                    "\"encoding\":",
+                    CanonicalJsonString(item.Encoding)),
+                "\"encoding\":0"),
+            (
+                string.Concat(
+                    "\"payload\":",
+                    CanonicalJsonString(item.Payload)),
+                "\"payload\":0"),
+            (
+                string.Concat(
+                    "\"payload_sha256\":",
+                    CanonicalJsonString(item.PayloadSha256)),
+                "\"payload_sha256\":0"),
+            (
+                string.Concat(
+                    "\"message_id\":",
+                    CanonicalJsonString(item.MessageId)),
+                "\"message_id\":0"),
+            (
+                string.Concat(
+                    "\"message_id\":",
+                    CanonicalJsonString(item.MessageId),
+                    ",\"content_position\":",
+                    item.ContentPosition),
+                string.Concat(
+                    "\"message_id\":",
+                    CanonicalJsonString(item.MessageId),
+                    ",\"content_position\":\"0\"")),
+            (
+                string.Concat(
+                    "\"associated_call_id\":",
+                    item.AssociatedCallId is null
+                        ? "null"
+                        : CanonicalJsonString(item.AssociatedCallId)),
+                "\"associated_call_id\":{}"),
+        ];
+
+        foreach (var mutation in mutations)
+        {
+            var malformed = RawMutation(
+                built.Artifact,
+                mutation.Old,
+                mutation.Replacement);
+
+            Assert.False(AgentSessionCodec.TryParse(
+                malformed.Plaintext,
+                out var parsed,
+                out var failure));
+            Assert.Null(parsed);
+            Assert.Equal(AgentSessionCodes.ContinuationInvalid, failure);
+        }
+    }
+
+    [Fact]
+    public async Task EarlierSessionFailuresPrecedeWrongContinuationTokens()
+    {
+        var trusted = Trusted();
+        var built = await BuildGenerationAsync(
+            trusted,
+            previous: null,
+            "g0",
+            "finish0",
+            reasoning: true);
+        var run = Assert.Single(built.Artifact.Document.CompletedRuns);
+        var item = Assert.Single(run.Continuation.Items);
+        var context = Assert.IsType<AgentSessionReviewContextRecord>(
+            run.Records[0]);
+        var outcome = Assert.IsType<AgentSessionReviewOutcomeRecord>(
+            run.Records[^1]);
+        var assistant = Assert.IsType<AgentSessionAssistantMessageRecord>(
+            run.Records[1]);
+        var slot = Assert.IsType<AgentSessionContinuationSlotContent>(
+            assistant.Contents[0]);
+        var wrongContinuationToken = RawMutation(
+            built.Artifact,
+            string.Concat(
+                "\"associated_call_id\":",
+                item.AssociatedCallId is null
+                    ? "null"
+                    : CanonicalJsonString(item.AssociatedCallId)),
+            "\"associated_call_id\":{}");
+        var wrongClassification = RawMutation(
+            wrongContinuationToken,
+            string.Concat(
+                "\"classification\":",
+                CanonicalJsonString(context.Classification)),
+            "\"classification\":\"wrong\"");
+        var wrongSlotToken = RawMutation(
+            built.Artifact,
+            string.Concat(
+                "\"kind\":\"continuation_slot\",\"content_position\":",
+                slot.ContentPosition),
+            "\"kind\":\"continuation_slot\",\"content_position\":\"0\"");
+        var wrongClassificationAndSlot = RawMutation(
+            wrongSlotToken,
+            string.Concat(
+                "\"classification\":",
+                CanonicalJsonString(context.Classification)),
+            "\"classification\":\"wrong\"");
+        var wrongAssociation = RawMutation(
+            wrongContinuationToken,
+            string.Concat(
+                "\"terminal_message_id\":",
+                CanonicalJsonString(outcome.TerminalMessageId)),
+            "\"terminal_message_id\":\"missing\"");
+
+        (AgentSessionRestoreResult Result, string Expected)[] cases =
+        [
+            (
+                Restore(
+                    wrongClassification,
+                    trusted,
+                    AgentSessionHeadTransition.SameHead),
+                AgentSessionCodes.ClassificationInvalid),
+            (
+                Restore(
+                    wrongAssociation,
+                    trusted,
+                    AgentSessionHeadTransition.SameHead),
+                AgentSessionCodes.AssociationInvalid),
+            (
+                Restore(
+                    wrongClassificationAndSlot,
+                    trusted,
+                    AgentSessionHeadTransition.SameHead),
+                AgentSessionCodes.ClassificationInvalid),
+            (
+                Restore(
+                    wrongContinuationToken,
+                    trusted,
+                    AgentSessionHeadTransition.SameHead),
+                AgentSessionCodes.ContinuationInvalid),
+            (
+                Restore(
+                    wrongContinuationToken,
+                    trusted with { BuildId = "other-build" },
+                    AgentSessionHeadTransition.SameHead),
+                AgentSessionCodes.ScopeMismatch),
+            (
+                Restore(
+                    wrongContinuationToken,
+                    trusted,
+                    AgentSessionHeadTransition.Unknown),
+                AgentSessionCodes.TransitionRejected),
+        ];
+
+        foreach (var entry in cases)
+        {
+            Assert.Equal(entry.Expected, entry.Result.Code);
+            Assert.Null(entry.Result.RunRequest);
+        }
+    }
+
+    [Fact]
     public async Task ClosedKindsOrderingOrdinalsAndAssociationsRejectMutation()
     {
         var trusted = Trusted();
@@ -1205,7 +1434,7 @@ public sealed class AgentSessionRoundTripTests
                     }),
             });
         Assert.Equal(
-            AgentSessionCodes.RecordInvalid,
+            AgentSessionCodes.ContinuationInvalid,
             Restore(
                 movedSlot,
                 trusted,
@@ -3493,7 +3722,9 @@ public sealed class AgentSessionRoundTripTests
             oldProperty,
             newProperty,
             StringComparison.Ordinal);
-        Assert.NotEqual(json, mutated);
+        Assert.True(
+            !StringComparer.Ordinal.Equals(json, mutated),
+            $"Mutation source was not found: {oldValue}");
         return mutated;
     }
 
@@ -3582,7 +3813,9 @@ public sealed class AgentSessionRoundTripTests
             oldValue,
             newValue,
             StringComparison.Ordinal);
-        Assert.NotEqual(json, mutated);
+        Assert.True(
+            !StringComparer.Ordinal.Equals(json, mutated),
+            $"Mutation source was not found: {oldValue}");
         var plaintext = Frame(Encoding.UTF8.GetBytes(mutated));
         return new AgentSessionArtifact(
             plaintext,
@@ -3590,6 +3823,14 @@ public sealed class AgentSessionRoundTripTests
                 AgentCanonical.SessionDomain,
                 plaintext),
             artifact.Document);
+    }
+
+    private static string CanonicalJsonString(string value)
+    {
+        var writer = new Rfc8785Writer(256);
+        writer.WriteString(value);
+        return Encoding.UTF8.GetString(
+            writer.ToImmutableArray().AsSpan());
     }
 
     private static AgentSessionRestoreResult Restore(

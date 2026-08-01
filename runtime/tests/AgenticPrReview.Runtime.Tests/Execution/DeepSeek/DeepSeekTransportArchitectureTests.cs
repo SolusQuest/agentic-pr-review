@@ -5,6 +5,10 @@ using System.Reflection.PortableExecutable;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using AgenticPrReview.Runtime;
+using AgenticPrReview.Runtime.Agent;
+using AgenticPrReview.Runtime.Agent.Chat;
+using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 
@@ -231,6 +235,121 @@ public sealed partial class DeepSeekTransportArchitectureTests
     }
 
     [Fact]
+    public void FinalBackendHasOnlyTheReviewedCompositionCapabilities()
+    {
+        var roots = new[]
+        {
+            typeof(DeepSeekAdapterContext),
+            typeof(DeepSeekReasoningContinuationCodec),
+            typeof(DeepSeekChatBackend),
+            typeof(DeepSeekChatBackendException),
+        };
+        var types = roots
+            .SelectMany(IncludeTypeAndNestedTypesRecursively)
+            .ToArray();
+        Type[] approvedRoots =
+        [
+            .. roots,
+            typeof(DeepSeekRequestWriter),
+                typeof(DeepSeekRequestWriteResult),
+                typeof(DeepSeekRequestWriteOutcome),
+                typeof(IDeepSeekTransport),
+                typeof(DeepSeekTransportResult),
+                typeof(DeepSeekTransportOutcome),
+                typeof(DeepSeekTransportPolicy),
+                typeof(DeepSeekResponseParser),
+                typeof(DeepSeekResponseParseResult),
+                typeof(DeepSeekResponseParseOutcome),
+                typeof(DeepSeekParsedToolResponse),
+                typeof(DeepSeekParsedToolCall),
+                typeof(DeepSeekParsedUsage),
+                typeof(IProjectChatClient),
+                typeof(ProjectChatNormalizationException),
+                typeof(MinimalChatClient),
+                typeof(IMinimalChatBackend),
+                typeof(MinimalChatRequest),
+                typeof(MinimalChatMessage),
+                typeof(MinimalChatContent),
+                typeof(MinimalChatTool),
+                typeof(MinimalChatContinuation),
+                typeof(MinimalChatContinuationItem),
+                typeof(MinimalChatUsage),
+                typeof(MinimalChatResponse),
+                typeof(IAgentContinuationCodec),
+                typeof(IAgentContinuationStructurePolicy),
+                typeof(AgentContinuationStructure),
+                typeof(AgentContinuationStructureMessage),
+                typeof(AgentContinuationStructureItem),
+                typeof(AgentContinuationCodecValue),
+                typeof(AgentContinuationEncodedPayload),
+                typeof(AgentLimits),
+            typeof(AgentValueDomains),
+        ];
+        var approvedProductionTypes = approvedRoots
+            .SelectMany(IncludeTypeAndNestedTypesRecursively)
+            .ToHashSet();
+        var forbidden = new[]
+        {
+            typeof(DeepSeekCredential),
+            typeof(DeepSeekTransport),
+            typeof(DeepSeekProviderContract),
+            typeof(DeepSeekLiveProviderExecutor),
+            typeof(HttpClient),
+            typeof(HttpMessageHandler),
+            typeof(Environment),
+            typeof(NativeLibrary),
+            typeof(Marshal),
+        };
+
+        Assert.Empty(FindForbiddenCapabilities(types, forbidden));
+        Assert.Empty(FindGloballyForbiddenCapabilities(types));
+        var unapproved = FindUnapprovedProductionDependencies(
+            types,
+            approvedProductionTypes);
+        Assert.True(
+            unapproved.Length == 0,
+            string.Join(Environment.NewLine, unapproved));
+        var constructor = Assert.Single(
+            typeof(DeepSeekChatBackend).GetConstructors(
+                BindingFlags.Instance |
+                BindingFlags.Public |
+                BindingFlags.NonPublic));
+        Assert.Equal(
+            [typeof(DeepSeekAdapterContext), typeof(IDeepSeekTransport)],
+            constructor.GetParameters()
+                .Select(parameter => parameter.ParameterType)
+                .ToArray());
+        Assert.All(
+            typeof(DeepSeekAdapterContext).GetProperties(
+                BindingFlags.Instance |
+                BindingFlags.NonPublic |
+                BindingFlags.Public),
+            property => Assert.False(property.CanWrite));
+        Assert.All(
+            types,
+            type => Assert.False(typeof(IDisposable).IsAssignableFrom(type)));
+    }
+
+    [Fact]
+    public void FinalBackendScannerChecksAsyncStateMachineBodies()
+    {
+        var types = IncludeTypeAndNestedTypesRecursively(
+                typeof(AsyncCapabilityFixture))
+            .ToArray();
+        var approved = types.ToHashSet();
+
+        var violations = FindUnapprovedProductionDependencies(
+            types,
+            approved);
+
+        Assert.Contains(
+            violations,
+            violation => violation.Contains(
+                TypeName(typeof(AgentToolRegistry)),
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void RequestWriterCapabilityScannerChecksMethodBodies()
     {
         var violations = FindForbiddenCapabilities(
@@ -371,6 +490,16 @@ public sealed partial class DeepSeekTransportArchitectureTests
                 DeepSeekCredential.Create("architecture-scanner-fixture"));
     }
 
+    private static class AsyncCapabilityFixture
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        internal static async Task BodyOnlyForbiddenCapability()
+        {
+            await Task.Yield();
+            _ = AgentToolRegistry.Definitions;
+        }
+    }
+
     private static string[] FindForbiddenCapabilities(
         IEnumerable<Type> types,
         IReadOnlyCollection<Type> forbidden)
@@ -403,6 +532,183 @@ public sealed partial class DeepSeekTransportArchitectureTests
         }
 
         return violations.Order(StringComparer.Ordinal).ToArray();
+    }
+
+    private static string[] FindGloballyForbiddenCapabilities(
+        IEnumerable<Type> types)
+    {
+        var violations = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var type in types)
+        {
+            foreach (var referenced in ReferencedTypes(type)
+                         .SelectMany(ExpandTypeGraph))
+            {
+                if (ForbiddenType(type, referenced))
+                {
+                    violations.Add(
+                        $"{type.FullName}:signature->{TypeName(referenced)}");
+                }
+            }
+
+            foreach (var method in DeclaredExecutableMembers(type))
+            {
+                foreach (var member in ResolveMethodBodyMembers(method))
+                {
+                    if (ForbiddenMember(type, member))
+                    {
+                        violations.Add(
+                            $"{type.FullName}.{method.Name}->" +
+                            FormatMember(member));
+                    }
+                }
+            }
+        }
+
+        return violations.Order(StringComparer.Ordinal).ToArray();
+    }
+
+    private static string[] FindUnapprovedProductionDependencies(
+        IEnumerable<Type> types,
+        IReadOnlySet<Type> approved)
+    {
+        var productionAssembly = typeof(RuntimeApplication).Assembly;
+        var violations = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var type in types)
+        {
+            foreach (var referenced in ReferencedTypes(type)
+                         .SelectMany(ExpandTypeGraph))
+            {
+                AddUnapprovedProductionType(
+                    violations,
+                    productionAssembly,
+                    approved,
+                    referenced,
+                    $"{type.FullName}:signature");
+            }
+
+            foreach (var method in DeclaredExecutableMembers(type))
+            {
+                var body = method.GetMethodBody();
+                if (body is not null)
+                {
+                    foreach (var local in body.LocalVariables)
+                    {
+                        foreach (var localType in
+                                 ExpandTypeGraph(local.LocalType))
+                        {
+                            AddUnapprovedProductionType(
+                                violations,
+                                productionAssembly,
+                                approved,
+                                localType,
+                                $"{type.FullName}.{method.Name}:local");
+                        }
+                    }
+
+                    foreach (var clause in body.ExceptionHandlingClauses)
+                    {
+                        if (clause.CatchType is { } catchType)
+                        {
+                            AddUnapprovedProductionType(
+                                violations,
+                                productionAssembly,
+                                approved,
+                                catchType,
+                                $"{type.FullName}.{method.Name}:catch");
+                        }
+                    }
+                }
+
+                foreach (var member in ResolveMethodBodyMembers(method))
+                {
+                    foreach (var referenced in
+                             ReferencedTypes(member).SelectMany(ExpandTypeGraph))
+                    {
+                        AddUnapprovedProductionType(
+                            violations,
+                            productionAssembly,
+                            approved,
+                            referenced,
+                            $"{type.FullName}.{method.Name}:body");
+                    }
+                }
+            }
+        }
+
+        return violations.Order(StringComparer.Ordinal).ToArray();
+    }
+
+    private static void AddUnapprovedProductionType(
+        ISet<string> violations,
+        Assembly productionAssembly,
+        IReadOnlySet<Type> approved,
+        Type referenced,
+        string source)
+    {
+        while (referenced.HasElementType &&
+               referenced.GetElementType() is { } elementType)
+        {
+            referenced = elementType;
+        }
+
+        if (referenced.Assembly == productionAssembly &&
+            !approved.Contains(referenced))
+        {
+            violations.Add($"{source}->{TypeName(referenced)}");
+        }
+    }
+
+    private static IEnumerable<Type> ReferencedTypes(MemberInfo member)
+    {
+        if (member.DeclaringType is { } declaringType)
+        {
+            yield return declaringType;
+        }
+
+        switch (member)
+        {
+            case Type type:
+                yield return type;
+                break;
+            case MethodInfo method:
+                yield return method.ReturnType;
+                foreach (var argument in method.GetGenericArguments())
+                {
+                    yield return argument;
+                }
+
+                foreach (var parameter in method.GetParameters())
+                {
+                    yield return parameter.ParameterType;
+                }
+
+                break;
+            case ConstructorInfo constructor:
+                foreach (var parameter in constructor.GetParameters())
+                {
+                    yield return parameter.ParameterType;
+                }
+
+                break;
+            case FieldInfo field:
+                yield return field.FieldType;
+                break;
+        }
+    }
+
+    private static IEnumerable<Type> IncludeTypeAndNestedTypesRecursively(
+        Type type)
+    {
+        yield return type;
+        foreach (var nested in type.GetNestedTypes(
+                     BindingFlags.Public | BindingFlags.NonPublic))
+        {
+            foreach (var descendant in
+                     IncludeTypeAndNestedTypesRecursively(nested))
+            {
+                yield return descendant;
+            }
+        }
     }
 
     private sealed class ForbiddenConstructorParameterFixture(

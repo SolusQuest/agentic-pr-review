@@ -1,6 +1,6 @@
 # Current Agent Session Format
 
-Status: normative current-format contract implemented by issue [#89](https://github.com/SolusQuest/agentic-pr-review/issues/89) and extended to the complete R3 read-only observation surface by issue [#102](https://github.com/SolusQuest/agentic-pr-review/issues/102).
+Status: normative current-format contract implemented by issue [#89](https://github.com/SolusQuest/agentic-pr-review/issues/89), extended to the complete R3 read-only observation surface by issue [#102](https://github.com/SolusQuest/agentic-pr-review/issues/102), and bound to the final DeepSeek reasoning-continuation adapter by issue [#106](https://github.com/SolusQuest/agentic-pr-review/issues/106).
 
 This document is the durable copy of the current Agent session contract refined under [#78](https://github.com/SolusQuest/agentic-pr-review/issues/78). It defines the bounded plaintext SESSION artifact and deterministic restore boundary. It does not define encryption, storage, transport, authorization, retention, or accepted-lineage persistence; [#87](https://github.com/SolusQuest/agentic-pr-review/issues/87) owns those responsibilities.
 
@@ -122,7 +122,11 @@ Each item property order is exactly `item_id`, `encoding`, `payload`, `payload_s
 
 The continuation digest is domain `apr.continuation.r2` over the exact ordered canonical object `codec_id`, `codec_discriminator`, `item_id`, `encoding`, `payload_bytes`, where `payload_bytes` is canonical padded base64 of the decoded exact codec bytes.
 
-Generic SESSION code validates bytes, encoding, hash, array order, slot, same-message association, and size. It does not parse, concatenate, trim, normalize, summarize, reinterpret, or synthesize provider continuation. The selected adapter codec owns its approved field set and converts between exact bounded payload bytes and the project-minimal continuation value. Missing-property and other closed codec-domain exceptions are contained at the adapter boundary and become `session_continuation_invalid`; the selected codec must also return false for malformed required-property shapes rather than exposing partial values.
+Generic SESSION code validates bytes, encoding, hash, array order, slot, same-message association, and size. It does not parse, concatenate, trim, normalize, summarize, reinterpret, or synthesize provider continuation. The selected adapter codec owns its approved field set and converts between exact bounded payload bytes and the project-minimal continuation value. A codec may additionally implement the provider-neutral whole-structure policy seam; SESSION supplies only ordered assistant-message ordinals, continuation-slot positions, call counts, ordered item ordinals, message ordinals, content positions, associations, and decoded values. Both construction and restore invoke this seam after the generic checks, while SESSION never references a concrete provider. Missing-property and other closed codec-domain exceptions are contained at the adapter boundary and become `session_continuation_invalid`; the selected codec must also return false for malformed required-property shapes rather than exposing partial values.
+
+The DeepSeek thinking adapter uses exactly `codec_id: "deepseek-reasoning-content"`, `codec_discriminator: "deepseek-v4-flash-thinking-v1"`, `encoding: "utf8"`, and framing `deepseek.reasoning_content.utf8.v1`. Its payload bytes are the exact non-empty UTF-8 bytes of the readable `reasoning_content`, without BOM, normalization, wrapper, compression, or trailing newline; opaque is exactly empty. Every assistant message containing admitted calls has exactly one continuation item at content position 0, before optional non-empty text and ordered calls. Items are chronological by assistant-message ordinal, `associated_call_id` is JSON `null`, and multi-call order does not create additional items. Every later request reinserts each complete reasoning value at its original assistant message before provider projection.
+
+The final DeepSeek adapter scope is provider `deepseek`, model `deepseek-v4-flash`, and adapter ID `0c585a37957e31b864e137bde2fbfd7c14005d03c42fd1a6983171d54e8977e0`. That adapter ID is the lowercase SHA-256 of the frozen 531-byte no-BOM/no-newline descriptor owned by the backend; build identity remains the existing independent root field. These provider rules add no SESSION property, namespace, discriminator, public schema, compatibility reader, or provider framework.
 
 Durable item-array order is significant and never changed. Adapter materialization independently groups by absolute assistant-message position and inserts by content position. Consequently a durable array may intentionally differ from physical insertion order; tests assert both orders separately through the exact `MinimalChatClient.Materialize` path.
 
@@ -163,7 +167,7 @@ The Host classifies locator family before SESSION sees candidate bytes.
 
 There is no scope-mismatch reset or best-effort replay. A selected-current artifact cannot become non-current because its inner magic, namespace, or discriminator was altered.
 
-When defects conflict, evaluation order is Host locator/reset, current framing/size/canonical bytes, stable scope, accepted producer/predecessor facts, Host transition, record grammar/classification/association and semantic terminal grounding, continuation codec admission, then request reconstruction. Closed continuation-codec domain failures, including RFC 8785 canonicalization failures, become `session_continuation_invalid`; malformed terminal findings shapes remain bounded record failures. No failure returns an `AgentRunRequest` or invokes provider code.
+When defects conflict, evaluation order is Host locator/reset, current framing/size/canonical bytes, stable scope, accepted producer/predecessor facts, Host transition, record grammar/classification/association and semantic terminal grounding, continuation codec admission, then request reconstruction. Once an assistant content object declares `kind: "continuation_slot"`, a missing/invalid slot identifier or slot-specific position/shape defect becomes `session_continuation_invalid`; framing or otherwise noncanonical JSON retains the earlier current-format code. Closed continuation-codec domain failures, including RFC 8785 canonicalization failures, become `session_continuation_invalid`; malformed terminal findings shapes remain bounded record failures. No failure returns an `AgentRunRequest` or invokes provider code.
 
 Stable SESSION outcomes are:
 
@@ -182,7 +186,7 @@ Stable SESSION outcomes are:
 - `session_continuation_invalid`
 - `session_construction_limit`
 
-Diagnostics expose only one of these bounded codes and public-safe identity classes or hashes. They never include logical text, tool results, findings JSON, continuation payload, provider reasoning, raw session bytes, credentials, authorization, or ambient paths.
+Diagnostics expose only one of these bounded codes and public-safe identity classes or hashes. They never include logical text, tool results, findings JSON, continuation payload, provider reasoning, raw session bytes, credentials, authorization, or ambient paths. Continuation-bearing project, minimal-chat, Agent, SESSION, and DeepSeek carrier `ToString()` surfaces return fixed non-sensitive type labels rather than compiler-generated field dumps.
 
 ## Golden vectors
 
@@ -236,7 +240,7 @@ Focused tests pin these vectors, complete framing/root property order, canonical
 
 ## Security exclusions and downstream handoff
 
-SESSION is a pure bounded in-memory plaintext transformation. It has no filesystem, environment, process, network, GitHub, Actions, publisher, endpoint, HTTP, header, credential, key, encryption, storage, retention, enumeration, deletion, CAS, or authorization capability. Review and tool text stays in immutable untrusted-data record classes. Provider payload bytes exist only inside the restricted continuation layer and transient reconstructed request.
+SESSION is a pure bounded in-memory plaintext transformation. It has no filesystem, environment, process, network, GitHub, Actions, publisher, endpoint, HTTP, header, credential, key, encryption, storage, retention, enumeration, deletion, CAS, or authorization capability. Review and tool text stays in immutable untrusted-data record classes. Provider payload bytes exist only inside the bounded in-memory continuation layer and transient reconstructed request. The plaintext SESSION artifact is persisted only as the authenticated encrypted STATE payload; an authenticated current envelope whose decrypted SESSION fails semantic admission collapses to STATE's existing `state_envelope_invalid`, while raw AEAD/tag corruption remains the existing authentication failure.
 
 SESSION does not reference, deserialize, reinterpret, or convert `ProviderSessionLedgerV1`, `StateManifestV2`, `ReviewInputV1`, or any other M4 state payload. Host-classified non-current artifacts bypass the current parser.
 
