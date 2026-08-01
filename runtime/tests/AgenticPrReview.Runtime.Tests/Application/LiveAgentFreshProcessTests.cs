@@ -200,6 +200,62 @@ public sealed class LiveAgentFreshProcessTests
         }
     }
 
+    [Theory]
+    [InlineData("unknown")]
+    [InlineData("diverged")]
+    [InlineData("unrelated")]
+    public async Task NonVerifiedTransitionFailsBeforeProviderConstruction(
+        string transition)
+    {
+        using var fixture = new FreshProcessFixture();
+        var firstIdentity = new ReviewedIdentity(
+            "owner/repository",
+            109,
+            new string('a', 40),
+            new string('b', 40));
+        fixture.WritePhase(
+            firstIdentity,
+            "Review the first immutable snapshot.",
+            "APR_PRIOR_ONLY_" + new string('c', 64) + "\n",
+            "transition_bootstrap",
+            "absent",
+            "automatic",
+            "same_head",
+            expectedLineageSha256: null,
+            fromHeadSha: firstIdentity.HeadSha);
+        Assert.Equal(0, (await fixture.RunAsync("bootstrap")).ExitCode);
+        var first = fixture.ReadResult();
+        var lineageBefore = File.ReadAllBytes(fixture.LineagePath);
+        File.Delete(fixture.ResultPath);
+        var secondIdentity = new ReviewedIdentity(
+            firstIdentity.RepositoryId,
+            firstIdentity.ReviewTarget,
+            firstIdentity.HeadSha,
+            new string('d', 40));
+        fixture.WritePhase(
+            secondIdentity,
+            "Review the next immutable snapshot.",
+            "APR_CURRENT_ONLY\n",
+            "transition_rejected",
+            "current",
+            "explicit",
+            transition,
+            first.LineageSha256,
+            firstIdentity.HeadSha);
+
+        var rejected = await fixture.RunAsync("continue");
+
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.Equal(
+            LiveAgentFreshProcessCodes.TransitionRejected,
+            rejected.StandardError.Trim());
+        var result = fixture.ReadResult();
+        Assert.Equal(LiveAgentFreshProcessCodes.TransitionRejected, result.Code);
+        Assert.Equal(0, result.ModelCalls);
+        Assert.Equal(0, result.ToolCalls);
+        Assert.Equal(lineageBefore, File.ReadAllBytes(fixture.LineagePath));
+    }
+
     [Fact]
     public async Task AuthorizationDenialDoesNotRequestAuthorizedLayout()
     {
@@ -234,6 +290,118 @@ public sealed class LiveAgentFreshProcessTests
         Assert.Equal(RestrictedStateCodes.AccessDenied, result.DiagnosticCode);
         Assert.Equal(1, files.AuthorizationReads);
         Assert.Equal(0, files.AuthorizedLayoutCalls);
+    }
+
+    [Theory]
+    [InlineData("provider")]
+    [InlineData("model")]
+    [InlineData("adapter")]
+    [InlineData("policy")]
+    [InlineData("limits")]
+    [InlineData("toolset")]
+    [InlineData("build")]
+    [InlineData("session")]
+    [InlineData("scope")]
+    public async Task StableOrScopeMismatchFailsBeforeAuthorizedLayout(
+        string mismatch)
+    {
+        var trusted = Trusted();
+        Assert.True(AgentStableRequestMaterializer.TryMaterialize(
+            trusted,
+            priorSessionSha256: null,
+            out var materialized));
+        var scope = Scope(trusted, materialized!, "session-109");
+        var document = Authorization(
+            trusted,
+            scope,
+            "session-109",
+            "mismatch_invocation",
+            "absent",
+            "automatic",
+            "same_head",
+            new string('b', 40),
+            new string('a', 40),
+            new string('b', 40),
+            expectedLineageSha256: null);
+        document = mismatch switch
+        {
+            "provider" => document with
+            {
+                Stable = document.Stable with { ProviderId = "other" },
+            },
+            "model" => document with
+            {
+                Stable = document.Stable with { ModelId = "other" },
+            },
+            "adapter" => document with
+            {
+                Stable = document.Stable with { AdapterId = "other" },
+            },
+            "policy" => document with
+            {
+                Stable = document.Stable with
+                {
+                    TrustedPolicy = document.Stable.TrustedPolicy + " changed",
+                },
+            },
+            "limits" => document with
+            {
+                AuthorizedScope = document.AuthorizedScope with
+                {
+                    LimitsSha256 = new string('0', 64),
+                },
+            },
+            "toolset" => document with
+            {
+                AuthorizedScope = document.AuthorizedScope with
+                {
+                    ToolsetSha256 = new string('0', 64),
+                },
+            },
+            "build" => document with
+            {
+                AuthorizedScope = document.AuthorizedScope with
+                {
+                    BuildId = "other-build",
+                },
+            },
+            "session" => document with
+            {
+                Stable = document.Stable with { SessionId = "other-session" },
+            },
+            "scope" => document with
+            {
+                AuthorizedScope = document.AuthorizedScope with
+                {
+                    RepositoryId = "other/repository",
+                },
+            },
+            _ => throw new InvalidOperationException("Unknown mismatch."),
+        };
+        var files = new DenialProbeFileSystem(
+            LiveAgentFreshProcessCodec.Write(document));
+
+        var result = await LiveAgentFreshProcessCommand.RunAsync(
+            "bootstrap",
+            files,
+            CancellationToken.None);
+
+        Assert.Equal(1, files.AuthorizationReads);
+        Assert.Equal(0, files.AuthorizedLayoutCalls);
+        if (mismatch is "provider" or "model" or "adapter")
+        {
+            Assert.Equal(10, result.ExitCode);
+            Assert.Equal(
+                LiveAgentFreshProcessCodes.AuthorizationInvalid,
+                result.DiagnosticCode);
+        }
+        else
+        {
+            Assert.Equal(13, result.ExitCode);
+            Assert.Equal(
+                RestrictedStateCodes.AccessDenied,
+                result.DiagnosticCode);
+        }
     }
 
     [Fact]
@@ -517,6 +685,73 @@ public sealed class LiveAgentFreshProcessTests
         }
     }
 
+    [Fact]
+    public void AuthorizedDirectorySwapInvalidatesCapability()
+    {
+        using var fixture = new FreshProcessFixture();
+        var trusted = Trusted();
+        Assert.True(AgentStableRequestMaterializer.TryMaterialize(
+            trusted,
+            priorSessionSha256: null,
+            out var materialized));
+        var scope = Scope(trusted, materialized!, "session-109");
+        var authorization = AuthorizedStateAccess.Authorize(
+            new RestrictedStateAccessRequest(
+                scope,
+                scope,
+                IsTrustedWorkflow: true,
+                IsSameRepository: true,
+                IsForkOrigin: false),
+            out var access);
+        Assert.Equal(StateAction.Authorized, authorization.Action);
+        Assert.NotNull(access);
+        var identity = new ReviewedIdentity(
+            "owner/repository",
+            109,
+            new string('a', 40),
+            new string('b', 40));
+        fixture.WritePhase(
+            identity,
+            "Review the immutable snapshot.",
+            "APR_PRIOR_ONLY_" + new string('b', 64) + "\n",
+            "directory_swap",
+            "absent",
+            "automatic",
+            "same_head",
+            expectedLineageSha256: null,
+            fromHeadSha: identity.HeadSha);
+        Assert.True(LiveAgentFreshProcessFileSystem.TryCreate(
+            fixture.Root,
+            out var files));
+        Assert.True(files!.TryAuthorizeLayout(
+            access!,
+            lineageExpected: false,
+            out var authorizedRoot));
+
+        var input = Path.Join(fixture.Root, "input");
+        var displaced = fixture.Root + "-input-displaced";
+        Directory.Move(input, displaced);
+        Directory.CreateDirectory(input);
+        try
+        {
+            foreach (var name in new[]
+            {
+                "reviewed-input.json",
+                "snapshot-manifest.json",
+            })
+            {
+                File.Copy(Path.Join(displaced, name), Path.Join(input, name));
+            }
+
+            Assert.Null(files.ReadReviewedInput(authorizedRoot!));
+        }
+        finally
+        {
+            Directory.Delete(input, recursive: true);
+            Directory.Move(displaced, input);
+        }
+    }
+
     private static AgentSessionTrustedRequest Trusted() => new(
         "owner/repository",
         109,
@@ -698,7 +933,7 @@ public sealed class LiveAgentFreshProcessTests
             };
             start.ArgumentList.Add("exec");
             start.ArgumentList.Add("--runtimeconfig");
-            start.ArgumentList.Add(Path.Combine(
+            start.ArgumentList.Add(Path.Join(
                 AppContext.BaseDirectory,
                 "AgenticPrReview.Runtime.Tests.runtimeconfig.json"));
             start.ArgumentList.Add(typeof(RuntimeApplication).Assembly.Location);

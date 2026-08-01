@@ -2,11 +2,30 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
+using Microsoft.Win32.SafeHandles;
 
 namespace AgenticPrReview.Runtime.Tests.Agent.Core;
 
 public sealed partial class AgentCapabilityArchitectureTests
 {
+    private static readonly HashSet<Type> FreshProcessFileSystemCapabilities =
+    [
+        typeof(Directory),
+        typeof(DirectoryInfo),
+        typeof(File),
+        typeof(FileAccess),
+        typeof(FileAttributes),
+        typeof(FileMode),
+        typeof(FileOptions),
+        typeof(FileShare),
+        typeof(FileStream),
+        typeof(FileSystemInfo),
+        typeof(Path),
+        typeof(RandomAccess),
+        typeof(SafeFileHandle),
+        typeof(Stream),
+    ];
+
     [Fact]
     public void FreshProcessProductionRootInventoryIsExact()
     {
@@ -69,6 +88,31 @@ public sealed partial class AgentCapabilityArchitectureTests
         Assert.True(
             violations.Count == 0,
             string.Join(Environment.NewLine, violations));
+    }
+
+    [Fact]
+    public void FreshProcessCommandHasOneExternalRuntimeDispatch()
+    {
+        var family = FreshProcessTypes().ToHashSet();
+        var calls = typeof(RuntimeApplication).Assembly.GetTypes()
+            .Where(type => !family.Contains(type))
+            .SelectMany(type => DeclaredExecutableMembers(type)
+                .SelectMany(method => ResolveMethodBodyMembers(method)
+                    .OfType<MethodInfo>()
+                    .Where(member => member.DeclaringType ==
+                        typeof(LiveAgentFreshProcessCommand))
+                    .Select(member => (Caller: type, Member: member))))
+            .ToArray();
+
+        var call = Assert.Single(calls);
+        var callerRoot = call.Caller;
+        while (callerRoot.DeclaringType is not null)
+        {
+            callerRoot = callerRoot.DeclaringType;
+        }
+
+        Assert.Equal(typeof(RuntimeApplication), callerRoot);
+        Assert.Equal("RunAsync", call.Member.Name);
     }
 
     [Fact]
@@ -249,17 +293,13 @@ public sealed partial class AgentCapabilityArchitectureTests
 
         var name = TypeName(referenced);
         if (root == typeof(LiveAgentFreshProcessFileSystem) &&
-            (name.StartsWith("System.IO.", StringComparison.Ordinal) ||
-                name.StartsWith(
-                    "Microsoft.Win32.SafeHandles.",
-                    StringComparison.Ordinal)))
+            FreshProcessFileSystemCapabilities.Contains(referenced))
         {
             return false;
         }
 
         if (root == typeof(LiveAgentFreshProcessDeterministicTransport) &&
-            (referenced == typeof(MemoryStream) ||
-                name.StartsWith("System.Net.Http.", StringComparison.Ordinal)))
+            referenced == typeof(MemoryStream))
         {
             return false;
         }

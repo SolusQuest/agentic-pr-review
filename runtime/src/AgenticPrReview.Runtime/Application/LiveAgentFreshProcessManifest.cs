@@ -177,7 +177,7 @@ internal sealed class LiveAgentFreshProcessManifestFile(
     string path,
     byte[] bytes)
 {
-    private byte[] contents = bytes;
+    private readonly byte[] contents = bytes;
 
     internal string Path { get; } = path;
 

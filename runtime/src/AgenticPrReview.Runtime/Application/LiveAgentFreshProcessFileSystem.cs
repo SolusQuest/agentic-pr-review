@@ -177,12 +177,18 @@ internal sealed class LiveAgentFreshProcessFileSystem :
             return false;
         }
 
+        if (!TryCaptureAuthorizedProof(root, out var authorizedProof) ||
+            !RootProofIsCurrent(root, proof))
+        {
+            return false;
+        }
+
         authorizedRoot = LiveAgentFreshProcessAuthorizedRoot.Create(
             this,
             root,
             Path.Join(root, "state"),
             access,
-            proof);
+            authorizedProof);
         return true;
     }
 
@@ -325,7 +331,7 @@ internal sealed class LiveAgentFreshProcessFileSystem :
         capability.BelongsTo(this) &&
         PathComparer.Equals(capability.RootPath, root) &&
         RestrictedStateValidation.IsValidScope(capability.Access.Scope) &&
-        RootProofIsCurrent(root, capability.Proof);
+        AuthorizedProofIsCurrent(root, capability.Proof);
 
     private static LiveAgentFreshProcessRead? ReadFixed(
         string path,
@@ -433,8 +439,14 @@ internal sealed class LiveAgentFreshProcessFileSystem :
         }
     }
 
-    private static bool TryInspectDirectory(string path)
+    private static bool TryInspectDirectory(string path) =>
+        TryInspectDirectory(path, out _);
+
+    private static bool TryInspectDirectory(
+        string path,
+        out RestrictedStateFileIdentity identity)
     {
+        identity = default;
         var open = NativeRestrictedStateFiles.OpenDirectoryNoFollow(
             path,
             out var handle);
@@ -453,7 +465,7 @@ internal sealed class LiveAgentFreshProcessFileSystem :
                     NativeRestrictedStateFiles.TryGetIdentity(
                         handle,
                         expectDirectory: true,
-                        out _);
+                        out identity);
             }
             catch (Exception exception) when (exception is IOException or
                 UnauthorizedAccessException)
@@ -562,6 +574,39 @@ internal sealed class LiveAgentFreshProcessFileSystem :
         string rootPath,
         ImmutableArray<RestrictedStateRootEntry> expected) =>
         TryCaptureRootProof(rootPath, out var actual) &&
+        actual.SequenceEqual(expected);
+
+    private static bool TryCaptureAuthorizedProof(
+        string rootPath,
+        out ImmutableArray<RestrictedStateRootEntry> proof)
+    {
+        if (!TryCaptureRootProof(rootPath, out var rootProof))
+        {
+            proof = [];
+            return false;
+        }
+
+        var entries = rootProof.ToBuilder();
+        foreach (var name in RootEntries)
+        {
+            var path = Path.Join(rootPath, name);
+            if (!TryInspectDirectory(path, out var identity))
+            {
+                proof = [];
+                return false;
+            }
+
+            entries.Add(new RestrictedStateRootEntry(path, identity));
+        }
+
+        proof = entries.ToImmutable();
+        return true;
+    }
+
+    private static bool AuthorizedProofIsCurrent(
+        string rootPath,
+        ImmutableArray<RestrictedStateRootEntry> expected) =>
+        TryCaptureAuthorizedProof(rootPath, out var actual) &&
         actual.SequenceEqual(expected);
 
     private static void TryDelete(string path)
