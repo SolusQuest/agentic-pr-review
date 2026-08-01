@@ -690,6 +690,59 @@ public sealed class LiveAgentFreshProcessTests
     }
 
     [Theory]
+    [InlineData("reviewed-input.json", "repository_id")]
+    [InlineData("snapshot-manifest.json", "head_sha")]
+    public async Task ReviewedIdentityExplicitNullIsClosedInputFailure(
+        string fileName,
+        string member)
+    {
+        using var fixture = new FreshProcessFixture();
+        var identity = new ReviewedIdentity(
+            "owner/repository",
+            109,
+            new string('a', 40),
+            new string('b', 40));
+        fixture.WritePhase(
+            identity,
+            "Review the immutable snapshot.",
+            "APR_PRIOR_ONLY_" + new string('e', 64) + "\n",
+            "null_reviewed_identity",
+            "absent",
+            "automatic",
+            "same_head",
+            expectedLineageSha256: null,
+            fromHeadSha: identity.HeadSha);
+        var path = Path.Join(fixture.Root, "input", fileName);
+        var valid = File.ReadAllText(path);
+        var expected = member == "repository_id"
+            ? $"\"repository_id\":\"{identity.RepositoryId}\""
+            : $"\"head_sha\":\"{identity.HeadSha}\"";
+        var invalid = valid.Replace(
+            expected,
+            $"\"{member}\":null",
+            StringComparison.Ordinal);
+        Assert.NotEqual(valid, invalid);
+        File.WriteAllText(path, invalid);
+
+        var run = await fixture.RunAsync("bootstrap");
+
+        Assert.Equal(1, run.ExitCode);
+        Assert.Equal(
+            LiveAgentFreshProcessCodes.InputInvalid,
+            run.StandardError.Trim());
+        var result = fixture.ReadResult();
+        Assert.Equal(LiveAgentFreshProcessCodes.InputInvalid, result.Code);
+        Assert.Equal(0, result.ModelCalls);
+        Assert.Equal(0, result.ToolCalls);
+        Assert.False(result.HandoffReady);
+        Assert.False(File.Exists(fixture.LineagePath));
+        Assert.Empty(Directory.EnumerateFiles(
+            fixture.StateRoot,
+            "*",
+            SearchOption.AllDirectories));
+    }
+
+    [Theory]
     [InlineData("input", "unexpected.json")]
     [InlineData("private", "second-request.capture")]
     [InlineData("output", "result.json")]
@@ -796,6 +849,88 @@ public sealed class LiveAgentFreshProcessTests
             fixture.StateRoot,
             "*",
             SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task AuthenticatedLineageProducerExplicitNullFailsClosed()
+    {
+        using var fixture = new FreshProcessFixture();
+        var firstIdentity = new ReviewedIdentity(
+            "owner/repository",
+            109,
+            new string('a', 40),
+            new string('b', 40));
+        fixture.WritePhase(
+            firstIdentity,
+            "Review the first immutable snapshot.",
+            "APR_PRIOR_ONLY_" + new string('f', 64) + "\n",
+            "null_lineage_bootstrap",
+            "absent",
+            "automatic",
+            "same_head",
+            expectedLineageSha256: null,
+            fromHeadSha: firstIdentity.HeadSha);
+        var first = await fixture.RunAsync("bootstrap");
+        Assert.Equal(0, first.ExitCode);
+        var stateBefore = Directory.EnumerateFiles(
+                fixture.StateRoot,
+                "*",
+                SearchOption.AllDirectories)
+            .ToDictionary(
+                path => Path.GetRelativePath(fixture.StateRoot, path),
+                File.ReadAllBytes,
+                StringComparer.Ordinal);
+        File.Delete(fixture.ResultPath);
+        var valid = File.ReadAllText(fixture.LineagePath);
+        var invalid = valid.Replace(
+            $"\"producer_base_sha\":\"{firstIdentity.BaseSha}\"",
+            "\"producer_base_sha\":null",
+            StringComparison.Ordinal);
+        Assert.NotEqual(valid, invalid);
+        var invalidBytes = Encoding.UTF8.GetBytes(invalid);
+        File.WriteAllBytes(fixture.LineagePath, invalidBytes);
+        var secondIdentity = new ReviewedIdentity(
+            firstIdentity.RepositoryId,
+            firstIdentity.ReviewTarget,
+            firstIdentity.HeadSha,
+            new string('c', 40));
+        fixture.WritePhase(
+            secondIdentity,
+            "Review the next immutable snapshot.",
+            "APR_CURRENT_ONLY\n",
+            "null_lineage_continue",
+            "current",
+            "explicit",
+            "verified_ahead",
+            LiveAgentFreshProcessDomain.RawSha256(invalidBytes),
+            fromHeadSha: firstIdentity.HeadSha);
+
+        var second = await fixture.RunAsync("continue");
+
+        Assert.Equal(1, second.ExitCode);
+        Assert.Equal(
+            LiveAgentFreshProcessCodes.LineageInvalid,
+            second.StandardError.Trim());
+        var result = fixture.ReadResult();
+        Assert.Equal(LiveAgentFreshProcessCodes.LineageInvalid, result.Code);
+        Assert.Equal(0, result.ModelCalls);
+        Assert.Equal(0, result.ToolCalls);
+        Assert.False(result.HandoffReady);
+        Assert.Equal(invalidBytes, File.ReadAllBytes(fixture.LineagePath));
+        var stateAfter = Directory.EnumerateFiles(
+                fixture.StateRoot,
+                "*",
+                SearchOption.AllDirectories)
+            .ToDictionary(
+                path => Path.GetRelativePath(fixture.StateRoot, path),
+                File.ReadAllBytes,
+                StringComparer.Ordinal);
+        Assert.Equal(stateBefore.Count, stateAfter.Count);
+        foreach (var (name, bytes) in stateBefore)
+        {
+            Assert.True(stateAfter.TryGetValue(name, out var after));
+            Assert.Equal(bytes, after);
+        }
     }
 
     [Fact]

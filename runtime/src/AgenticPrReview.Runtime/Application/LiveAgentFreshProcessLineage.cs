@@ -70,7 +70,11 @@ internal static class LiveAgentFreshProcessLineageAdmission
                 !LiveAgentFreshProcessDomain.IsSha256(
                     document.ExpectedPredecessorEnvelopeSha256) ||
             !LiveAgentFreshProcessDomain.IsSha256(
-                document.InvocationIdentitySha256))
+                document.InvocationIdentitySha256) ||
+            !LiveAgentFreshProcessDomain.IsCommitSha(
+                document.ProducerBaseSha) ||
+            !LiveAgentFreshProcessDomain.IsCommitSha(
+                document.ProducerHeadSha))
         {
             return false;
         }

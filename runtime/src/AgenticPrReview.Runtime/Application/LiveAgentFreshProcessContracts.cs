@@ -370,7 +370,10 @@ internal static class LiveAgentFreshProcessDomain
         out ReviewedIdentity? identity)
     {
         identity = null;
-        if (value is null)
+        if (value is null ||
+            value.RepositoryId is null ||
+            !IsCommitSha(value.BaseSha) ||
+            !IsCommitSha(value.HeadSha))
         {
             return false;
         }
