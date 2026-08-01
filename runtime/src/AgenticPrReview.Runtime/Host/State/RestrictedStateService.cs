@@ -1364,6 +1364,11 @@ internal sealed class RestrictedStateService
         {
             CryptographicOperations.ZeroMemory(session.Plaintext);
         }
+
+        if (session.Value?.Artifact?.Plaintext is { } artifactPlaintext)
+        {
+            CryptographicOperations.ZeroMemory(artifactPlaintext);
+        }
     }
 
     private static StateResult Success(

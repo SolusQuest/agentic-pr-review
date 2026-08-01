@@ -98,7 +98,11 @@ internal sealed class R3LiveAgentResult(
     int modelCalls,
     int toolCalls,
     string? stablePlanSha256,
-    string? terminalSha256)
+    string? terminalSha256,
+    long? acceptedGeneration,
+    string? acceptedSessionSha256,
+    string? acceptedEnvelopeSha256,
+    bool handoffReady)
 {
     internal string Code { get; } = code;
 
@@ -110,20 +114,20 @@ internal sealed class R3LiveAgentResult(
 
     internal string? TerminalSha256 { get; } = terminalSha256;
 
+    internal long? AcceptedGeneration { get; } = acceptedGeneration;
+
+    internal string? AcceptedSessionSha256 { get; } = acceptedSessionSha256;
+
+    internal string? AcceptedEnvelopeSha256 { get; } = acceptedEnvelopeSha256;
+
+    internal bool HandoffReady { get; } = handoffReady;
+
     public override string ToString() => "r3_live_agent_result";
 }
 
-internal sealed class R3LiveAgentExecution(
-    R3LiveAgentResult result,
-    LiveAgentCandidate? candidate,
-    AuthorizedStateAccess? authorizedStateAccess)
+internal sealed class R3LiveAgentExecution(R3LiveAgentResult result)
 {
     internal R3LiveAgentResult Result { get; } = result;
-
-    internal LiveAgentCandidate? Candidate { get; } = candidate;
-
-    internal AuthorizedStateAccess? AuthorizedStateAccess { get; } =
-        authorizedStateAccess;
 
     public override string ToString() => "r3_live_agent_execution";
 }
@@ -132,10 +136,9 @@ internal sealed class R3LiveAgentApplication
 {
     private readonly R3LiveAgentDependencies dependencies;
 
-    internal R3LiveAgentApplication(R3LiveAgentDependencies? dependencies = null)
+    internal R3LiveAgentApplication(R3LiveAgentDependencies dependencies)
     {
-        this.dependencies = dependencies ??
-            R3LiveAgentDependencies.CreateDefault();
+        this.dependencies = dependencies;
     }
 
     internal async Task<R3LiveAgentExecution> RunAsync(
@@ -145,7 +148,6 @@ internal sealed class R3LiveAgentApplication
         AgentSessionMaterializedStableRequest? materialized = null;
         AgentSessionTrustedRequest? trusted = null;
         RestrictedStateAdmittedSession? admittedSession = null;
-        LiveAgentCandidate? candidate = null;
 
         try
         {
@@ -316,7 +318,9 @@ internal sealed class R3LiveAgentApplication
                     return FromOutcome(run, outcome);
                 }
 
-                candidate = new LiveAgentCandidate(
+                var authorizedTransition =
+                    stateContext.SessionContext.Transition;
+                var candidate = new LiveAgentCandidate(
                     run,
                     outcome,
                     trusted,
@@ -325,13 +329,20 @@ internal sealed class R3LiveAgentApplication
                     stateContext.SessionContext.Transition,
                     predecessor,
                     stateContext);
+                var commit = dependencies.StateCommitCoordinator.Commit(
+                    candidate,
+                    access,
+                    request.AcceptedLineage,
+                    authorizedTransition,
+                    request.StateRoot,
+                    keyResolver!,
+                    cancellationToken);
                 return new R3LiveAgentExecution(
                     ResultFromOutcome(
-                        R3LiveAgentCodes.Completed,
+                        commit.Code,
                         run,
-                        outcome),
-                    candidate,
-                    access);
+                        outcome,
+                        commit));
             }
         }
         catch (Exception exception) when (!IsFatal(exception))
@@ -343,10 +354,7 @@ internal sealed class R3LiveAgentApplication
             if (admittedSession is not null)
             {
                 Zero(admittedSession.Plaintext);
-                if (candidate is null)
-                {
-                    Zero(admittedSession.Value.Artifact.Plaintext);
-                }
+                Zero(admittedSession.Value?.Artifact?.Plaintext);
             }
         }
     }
@@ -547,14 +555,13 @@ internal sealed class R3LiveAgentApplication
             ResultFromOutcome(
                 outcome.Diagnostic?.Code ?? R3LiveAgentCodes.CompositionFailed,
                 run,
-                outcome),
-            null,
-            null);
+                outcome));
 
     private static R3LiveAgentResult ResultFromOutcome(
         string code,
         AgentRunRequest run,
-        AgentRunOutcome outcome)
+        AgentRunOutcome outcome,
+        LiveAgentStateCommitResult? commit = null)
     {
         var modelCalls = outcome.Diagnostic?.ModelCalls ??
             outcome.Events.OfType<AgentMessageEvent>().Count(
@@ -568,14 +575,25 @@ internal sealed class R3LiveAgentApplication
             modelCalls,
             toolCalls,
             AgentCanonical.StablePlanSha256(run.StablePlan),
-            outcome.Review?.TerminalSha256);
+            outcome.Review?.TerminalSha256,
+            commit?.AcceptedGeneration,
+            commit?.AcceptedSessionSha256,
+            commit?.AcceptedEnvelopeSha256,
+            commit?.HandoffReady ?? false);
     }
 
     private static R3LiveAgentExecution Failure(string code) =>
         new(
-            new R3LiveAgentResult(code, 0, 0, null, null),
-            null,
-            null);
+            new R3LiveAgentResult(
+                code,
+                0,
+                0,
+                null,
+                null,
+                null,
+                null,
+                null,
+                handoffReady: false));
 
     private static void Zero(byte[]? bytes)
     {

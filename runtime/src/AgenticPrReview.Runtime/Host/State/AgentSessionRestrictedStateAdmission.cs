@@ -47,6 +47,12 @@ internal sealed class AgentSessionRestrictedStateAdmission
                 admitted.PredecessorEnvelopeSha256,
                 context.PredecessorEnvelopeSha256))
         {
+            if (admitted.Value?.Artifact?.Plaintext is { } artifactPlaintext)
+            {
+                System.Security.Cryptography.CryptographicOperations
+                    .ZeroMemory(artifactPlaintext);
+            }
+
             return RestrictedStateSessionAdmissionResult.Failure();
         }
 
