@@ -44,6 +44,35 @@ public sealed class R3QualityEvaluatorTests
     }
 
     [Fact]
+    public async Task MustFindRejectsSubstitutedCurrentContextAndPriorSession()
+    {
+        var testCase = R3QualityCorpusTests.ParseCorpus().Cases[0];
+        var substituted = await BootstrapAsync(
+            testCase,
+            [],
+            "No finding.",
+            [],
+            "Different marker-free synthetic review context.");
+
+        var substitutedOutcome = Evaluate(testCase, substituted.Input, Fresh());
+
+        Assert.Equal("not_evaluated", substitutedOutcome.Status);
+        Assert.Equal(R3QualityCodes.SubjectInvalid, substitutedOutcome.Code);
+
+        using var generationOne = await ContinuationAsync(
+            testCase,
+            "No finding.",
+            "Unrelated synthetic predecessor context.");
+        var generationOneOutcome = Evaluate(
+            testCase,
+            generationOne.Input,
+            Fresh());
+
+        Assert.Equal("not_evaluated", generationOneOutcome.Status);
+        Assert.Equal(R3QualityCodes.SubjectInvalid, generationOneOutcome.Code);
+    }
+
+    [Fact]
     public async Task MustFindSourcePredicatesAreMutuallyExclusive()
     {
         var testCase = R3QualityCorpusTests.ParseCorpus().Cases[0];
@@ -298,10 +327,7 @@ public sealed class R3QualityEvaluatorTests
                 5));
         var completed = await BootstrapAsync(
             testCase,
-            [
-                RequiredDiff(expectation),
-                new ToolCall("read0", AgentToolRegistry.ReadFileName, readArguments),
-            ],
+            [new ToolCall("read0", AgentToolRegistry.ReadFileName, readArguments)],
             "Complete.",
             [finding]);
 
@@ -318,7 +344,7 @@ public sealed class R3QualityEvaluatorTests
             testCase.Expectation);
         var clean = await BootstrapAsync(
             testCase,
-            [RequiredDiff(expectation)],
+            [],
             "No actionable defects.",
             []);
         Assert.Equal(
@@ -333,6 +359,15 @@ public sealed class R3QualityEvaluatorTests
             testCase,
             AgentToolRegistry.ReadFileName,
             readArguments);
+        var readOnly = await BootstrapAsync(
+            testCase,
+            [new ToolCall("read0", AgentToolRegistry.ReadFileName, readArguments)],
+            "No actionable defects after reading the safe line.",
+            []);
+        Assert.Equal(
+            R3QualityCodes.Passed,
+            Evaluate(testCase, readOnly.Input, Fresh()).Code);
+
         var unrelated = Finding(
             "low",
             "Synthetic unrelated scope",
@@ -344,10 +379,7 @@ public sealed class R3QualityEvaluatorTests
                 5));
         var completed = await BootstrapAsync(
             testCase,
-            [
-                RequiredDiff(expectation),
-                new ToolCall("read0", AgentToolRegistry.ReadFileName, readArguments),
-            ],
+            [new ToolCall("read0", AgentToolRegistry.ReadFileName, readArguments)],
             "Complete.",
             [unrelated]);
 
@@ -415,6 +447,25 @@ public sealed class R3QualityEvaluatorTests
 
         Assert.Equal("failed", outcome.Status);
         Assert.Equal(R3QualityCodes.PriorFactMissing, outcome.Code);
+    }
+
+    [Fact]
+    public async Task ContinuationRejectsUnrelatedPredecessorContext()
+    {
+        var testCase = R3QualityCorpusTests.ParseCorpus().Cases[2];
+        var expectation = Assert.IsType<R3QualityContinuationExpectation>(
+            testCase.Expectation);
+        using var completed = await ContinuationAsync(
+            testCase,
+            string.Concat("Restored fact: ", expectation.PriorOnlyMarker),
+            "Unrelated predecessor without the prior-only marker.");
+        var fresh = Fresh(expectation.FreshInputNames.Select(name =>
+            (name, "synthetic current input")).ToArray());
+
+        var outcome = Evaluate(testCase, completed.Input, fresh);
+
+        Assert.Equal("not_evaluated", outcome.Status);
+        Assert.Equal(R3QualityCodes.SubjectInvalid, outcome.Code);
     }
 
     [Fact]
@@ -553,14 +604,19 @@ public sealed class R3QualityEvaluatorTests
 
     private static async Task<ContinuationInput> ContinuationAsync(
         R3QualityCase testCase,
-        string terminalSummary)
+        string terminalSummary,
+        string? predecessorContextOverride = null)
     {
+        var predecessorContext = predecessorContextOverride ??
+            testCase.ProcessOneContext ??
+            throw new InvalidOperationException(
+                "A predecessor review context is required.");
         var generationZero = await BootstrapAsync(
             testCase,
             [],
-            testCase.ProcessOneContext!,
+            predecessorContext,
             [],
-            testCase.ProcessOneContext);
+            predecessorContext);
         var built = AgentSessionBuilder.Build(generationZero.Input);
         Assert.True(built.Succeeded, built.FailureCode);
         var artifact = built.Artifact!;

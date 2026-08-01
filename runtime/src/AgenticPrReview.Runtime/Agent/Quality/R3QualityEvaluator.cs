@@ -37,6 +37,8 @@ internal sealed class R3QualitySubject
         ReviewedIdentity? reviewedIdentity,
         bool hasPriorSession,
         ImmutableArray<byte> initialRequest,
+        string? currentReviewContext,
+        string? priorReviewContext,
         AgentTerminalReview? review,
         ImmutableArray<R3QualityToolObservation> toolObservations,
         R3QualityFreshProcessTwoInputSet? freshInputs,
@@ -48,6 +50,8 @@ internal sealed class R3QualitySubject
         ReviewedIdentity = reviewedIdentity;
         HasPriorSession = hasPriorSession;
         InitialRequest = initialRequest;
+        CurrentReviewContext = currentReviewContext;
+        PriorReviewContext = priorReviewContext;
         Review = review;
         ToolObservations = toolObservations;
         FreshInputs = freshInputs;
@@ -63,6 +67,10 @@ internal sealed class R3QualitySubject
     internal bool HasPriorSession { get; }
 
     internal ImmutableArray<byte> InitialRequest { get; }
+
+    internal string? CurrentReviewContext { get; }
+
+    internal string? PriorReviewContext { get; }
 
     internal AgentTerminalReview? Review { get; }
 
@@ -100,7 +108,12 @@ internal sealed class R3QualitySubject
             }
 
             artifact = built.Artifact;
-            if (!TryReconstructObservations(
+            if (artifact is null ||
+                !TryReviewContexts(
+                    artifact.Document,
+                    out var currentReviewContext,
+                    out var priorReviewContext) ||
+                !TryReconstructObservations(
                     input.Run.ReviewedIdentity,
                     input.Outcome.Events,
                     out var observations) ||
@@ -122,8 +135,10 @@ internal sealed class R3QualitySubject
             return R3QualitySubjectCreation.Success(new R3QualitySubject(
                 R3QualitySubjectKind.Completed,
                 input.Run.ReviewedIdentity,
-                input.Run.StablePlan.PriorSessionSha256 is not null,
+                artifact.Document.PriorSessionSha256 is not null,
                 ImmutableArray.CreateRange(initialRequest),
+                currentReviewContext,
+                priorReviewContext,
                 reconstructedReview,
                 observations,
                 freshInputs,
@@ -232,6 +247,8 @@ internal sealed class R3QualitySubject
             reviewedIdentity: null,
             hasPriorSession: false,
             initialRequest: [],
+            currentReviewContext: null,
+            priorReviewContext: null,
             review: null,
             toolObservations: [],
             freshInputs: null,
@@ -239,6 +256,38 @@ internal sealed class R3QualitySubject
             findingCount,
             toolCallCount);
         return true;
+    }
+
+    private static bool TryReviewContexts(
+        AgentSessionDocument document,
+        out string? currentReviewContext,
+        out string? priorReviewContext)
+    {
+        currentReviewContext = null;
+        priorReviewContext = null;
+        if (document.CompletedRuns.IsDefaultOrEmpty ||
+            !TryReviewContext(document.CompletedRuns[^1], out currentReviewContext))
+        {
+            return false;
+        }
+
+        return document.CompletedRuns.Length == 1 ||
+            TryReviewContext(document.CompletedRuns[^2], out priorReviewContext);
+    }
+
+    private static bool TryReviewContext(
+        AgentSessionCompletedRun run,
+        out string? reviewContext)
+    {
+        reviewContext = null;
+        if (run.Records.IsDefaultOrEmpty ||
+            run.Records[0] is not AgentSessionReviewContextRecord context)
+        {
+            return false;
+        }
+
+        reviewContext = context.Text;
+        return reviewContext is not null;
     }
 
     private static bool TryReconstructObservations(
@@ -628,6 +677,11 @@ internal static class R3QualityEvaluator
                 R3QualityCodes.InitialContextLeak);
         }
 
+        if (subject.HasPriorSession || !MatchesCaseContext(testCase, subject))
+        {
+            return SubjectMismatch(testCase);
+        }
+
         if (!subject.FreshInputs!.MatchesManifest([]) ||
             subject.FreshInputs.Contains(marker))
         {
@@ -721,6 +775,11 @@ internal static class R3QualityEvaluator
         R3QualitySubject subject,
         R3QualityMustNotFindExpectation expectation)
     {
+        if (!MatchesCaseContext(testCase, subject))
+        {
+            return SubjectMismatch(testCase);
+        }
+
         if (!subject.FreshInputs!.MatchesManifest([]))
         {
             return CompletedFailure(
@@ -729,45 +788,6 @@ internal static class R3QualityEvaluator
                 "not_evaluated",
                 "evaluator",
                 R3QualityCodes.FreshInputInvalid);
-        }
-
-        var exact = subject.ToolObservations.Any(item =>
-            StringComparer.Ordinal.Equals(
-                item.Name,
-                AgentToolRegistry.ReadDiffName) &&
-            item.CanonicalArguments.AsSpan().SequenceEqual(
-                expectation.RequiredArguments.AsSpan()) &&
-            item.CanonicalResult.AsSpan().SequenceEqual(
-                expectation.RequiredResult.AsSpan()) &&
-            StringComparer.Ordinal.Equals(
-                item.Observation.ObservationId,
-                expectation.RequiredObservationId));
-        if (!exact)
-        {
-            var alternateGrounding = subject.ToolObservations.Any(item =>
-                expectation.ProhibitedLines.Any(line =>
-                    item.Observation.Grounds(new AgentEvidence(
-                        item.Observation.ObservationId,
-                        expectation.Path,
-                        line,
-                        line))));
-            if (alternateGrounding)
-            {
-                return QualityFailure(
-                    testCase,
-                    subject,
-                    R3QualityCodes.RequiredToolWrong);
-            }
-
-            return QualityFailure(
-                testCase,
-                subject,
-                subject.ToolObservations.Any(item =>
-                    StringComparer.Ordinal.Equals(
-                        item.Name,
-                        AgentToolRegistry.ReadDiffName))
-                    ? R3QualityCodes.RequiredObservationMissing
-                    : R3QualityCodes.RequiredToolMissing);
         }
 
         var prohibited = subject.Review!.Findings
@@ -803,6 +823,11 @@ internal static class R3QualityEvaluator
                 terminalSha256: null);
         }
 
+        if (!MatchesCaseContext(testCase, subject))
+        {
+            return SubjectMismatch(testCase);
+        }
+
         if (!subject.FreshInputs!.MatchesManifest(expectation.FreshInputNames) ||
             subject.FreshInputs.Contains(marker) ||
             subject.ToolObservations.Any(item =>
@@ -834,6 +859,27 @@ internal static class R3QualityEvaluator
                 subject,
                 R3QualityCodes.PriorFactMissing);
     }
+
+    private static bool MatchesCaseContext(
+        R3QualityCase testCase,
+        R3QualitySubject subject) =>
+        StringComparer.Ordinal.Equals(
+            subject.CurrentReviewContext,
+            testCase.InitialContext) &&
+        StringComparer.Ordinal.Equals(
+            subject.PriorReviewContext,
+            testCase.ProcessOneContext);
+
+    private static R3QualityOutcome SubjectMismatch(R3QualityCase testCase) =>
+        Create(
+            testCase,
+            "not_evaluated",
+            "evaluator",
+            R3QualityCodes.SubjectInvalid,
+            "quality_scope_mismatch",
+            findingCount: 0,
+            toolCallCount: 0,
+            terminalSha256: null);
 
     private static R3QualityOutcome FailureOutcome(
         R3QualityCase testCase,
