@@ -13,51 +13,111 @@ internal sealed record LiveAgentFreshProcessRead(
     byte[] Bytes,
     LiveAgentFreshProcessFileVersion Version);
 
+internal sealed class LiveAgentFreshProcessAuthorizationRead
+{
+    private readonly object owner;
+
+    private LiveAgentFreshProcessAuthorizationRead(
+        object owner,
+        byte[] bytes,
+        LiveAgentFreshProcessFileVersion version,
+        ImmutableArray<RestrictedStateRootEntry> rootProof)
+    {
+        this.owner = owner;
+        Bytes = bytes;
+        Version = version;
+        RootProof = rootProof;
+    }
+
+    internal byte[] Bytes { get; }
+
+    internal LiveAgentFreshProcessFileVersion Version { get; }
+
+    internal ImmutableArray<RestrictedStateRootEntry> RootProof { get; }
+
+    internal bool BelongsTo(object candidate) => ReferenceEquals(owner, candidate);
+
+    internal static LiveAgentFreshProcessAuthorizationRead Create(
+        object owner,
+        LiveAgentFreshProcessRead read,
+        ImmutableArray<RestrictedStateRootEntry> rootProof) => new(
+            owner,
+            read.Bytes,
+            read.Version,
+            rootProof);
+}
+
 internal sealed record LiveAgentFreshProcessAtomicWriteReceipt(
     LiveAgentFreshProcessFileVersion Version);
 
-internal sealed class LiveAgentFreshProcessAuthorizedRoot
+internal sealed class LiveAgentFreshProcessAuthorizedRoot : IDisposable
 {
     private readonly object owner;
+    private IDisposable? guard;
 
     private LiveAgentFreshProcessAuthorizedRoot(
         object owner,
         string rootPath,
+        string inputRootPath,
+        string hostRootPath,
+        string outputRootPath,
         string stateRootPath,
         AuthorizedStateAccess access,
-        ImmutableArray<RestrictedStateRootEntry> proof)
+        IDisposable guard)
     {
         this.owner = owner;
+        this.guard = guard;
         RootPath = rootPath;
+        InputRootPath = inputRootPath;
+        HostRootPath = hostRootPath;
+        OutputRootPath = outputRootPath;
         StateRootPath = stateRootPath;
         Access = access;
-        Proof = proof;
     }
 
     internal string RootPath { get; }
+
+    internal string InputRootPath { get; }
+
+    internal string HostRootPath { get; }
+
+    internal string OutputRootPath { get; }
 
     internal string StateRootPath { get; }
 
     internal AuthorizedStateAccess Access { get; }
 
-    internal ImmutableArray<RestrictedStateRootEntry> Proof { get; }
-
     internal bool BelongsTo(object candidate) => ReferenceEquals(owner, candidate);
+
+    internal object? Guard => guard;
+
+    public void Dispose() => Interlocked.Exchange(ref guard, null)?.Dispose();
 
     internal static LiveAgentFreshProcessAuthorizedRoot Create(
         object owner,
         string rootPath,
+        string inputRootPath,
+        string hostRootPath,
+        string outputRootPath,
         string stateRootPath,
         AuthorizedStateAccess access,
-        ImmutableArray<RestrictedStateRootEntry> proof) =>
-        new(owner, rootPath, stateRootPath, access, proof);
+        IDisposable guard) => new(
+            owner,
+            rootPath,
+            inputRootPath,
+            hostRootPath,
+            outputRootPath,
+            stateRootPath,
+            access,
+            guard);
 }
 
 internal interface ILiveAgentFreshProcessFileSystem
 {
-    LiveAgentFreshProcessRead? ReadAuthorization();
+    LiveAgentFreshProcessAuthorizationRead? ReadAuthorization();
 
     bool TryAuthorizeLayout(
+        LiveAgentFreshProcessAuthorizationRead authorization,
         AuthorizedStateAccess access,
         bool lineageExpected,
         out LiveAgentFreshProcessAuthorizedRoot? authorizedRoot);
@@ -132,7 +192,7 @@ internal sealed class LiveAgentFreshProcessFileSystem :
         }
     }
 
-    public LiveAgentFreshProcessRead? ReadAuthorization()
+    public LiveAgentFreshProcessAuthorizationRead? ReadAuthorization()
     {
         if (!TryCaptureRootProof(root, out var proof) ||
             !TryInspectDirectory(Path.Join(root, "host")) ||
@@ -145,69 +205,69 @@ internal sealed class LiveAgentFreshProcessFileSystem :
             Path.Join(root, "host", "authorization.json"),
             LiveAgentFreshProcessCodec.AuthorizationBytes);
         return read is not null && RootProofIsCurrent(root, proof)
-            ? read
+            ? LiveAgentFreshProcessAuthorizationRead.Create(this, read, proof)
             : null;
     }
 
     public bool TryAuthorizeLayout(
+        LiveAgentFreshProcessAuthorizationRead authorization,
         AuthorizedStateAccess access,
         bool lineageExpected,
         out LiveAgentFreshProcessAuthorizedRoot? authorizedRoot)
     {
         authorizedRoot = null;
-        if (access is null ||
+        if (authorization is null ||
+            !authorization.BelongsTo(this) ||
+            access is null ||
             !RestrictedStateValidation.IsValidScope(access.Scope) ||
-            !TryCaptureRootProof(root, out var proof) ||
-            !MatchesEntries(root, RootEntries) ||
-            !TryInspectDirectory(Path.Join(root, "input")) ||
-            !TryInspectDirectory(Path.Join(root, "host")) ||
-            !TryInspectDirectory(Path.Join(root, "state")) ||
-            !TryInspectDirectory(Path.Join(root, "private")) ||
-            !TryInspectDirectory(Path.Join(root, "output")) ||
-            !MatchesEntries(Path.Join(root, "input"), InputEntries) ||
-            !MatchesEntries(
-                Path.Join(root, "host"),
-                lineageExpected
-                    ? ["accepted-lineage.json", "authorization.json"]
-                    : ["authorization.json"]) ||
-            !MatchesEntries(Path.Join(root, "private"), []) ||
-            !MatchesEntries(Path.Join(root, "output"), []) ||
-            !RootProofIsCurrent(root, proof))
-        {
-            return false;
-        }
-
-        if (!TryCaptureAuthorizedProof(root, out var authorizedProof) ||
-            !RootProofIsCurrent(root, proof))
+            authorization.RootProof.IsDefaultOrEmpty ||
+            !TryOpenAuthorizedLayout(
+                authorization,
+                lineageExpected,
+                out var guard,
+                out var rootPath,
+                out var inputPath,
+                out var hostPath,
+                out var outputPath,
+                out var statePath))
         {
             return false;
         }
 
         authorizedRoot = LiveAgentFreshProcessAuthorizedRoot.Create(
             this,
-            root,
-            Path.Join(root, "state"),
+            rootPath!,
+            inputPath!,
+            hostPath!,
+            outputPath!,
+            statePath!,
             access,
-            authorizedProof);
+            guard!);
         return true;
     }
 
     public LiveAgentFreshProcessRead? ReadReviewedInput(
         LiveAgentFreshProcessAuthorizedRoot rootCapability) => ReadAuthorized(
             rootCapability,
-            Path.Join(root, "input", "reviewed-input.json"),
+            Path.Join(
+                rootCapability.InputRootPath,
+                "reviewed-input.json"),
             LiveAgentFreshProcessCodec.ReviewedInputBytes);
 
     public LiveAgentFreshProcessRead? ReadSnapshotManifest(
         LiveAgentFreshProcessAuthorizedRoot rootCapability) => ReadAuthorized(
             rootCapability,
-            Path.Join(root, "input", "snapshot-manifest.json"),
+            Path.Join(
+                rootCapability.InputRootPath,
+                "snapshot-manifest.json"),
             LiveAgentFreshProcessCodec.SnapshotManifestBytes);
 
     public LiveAgentFreshProcessRead? ReadLineage(
         LiveAgentFreshProcessAuthorizedRoot rootCapability) => ReadAuthorized(
             rootCapability,
-            Path.Join(root, "host", "accepted-lineage.json"),
+            Path.Join(
+                rootCapability.HostRootPath,
+                "accepted-lineage.json"),
             LiveAgentFreshProcessCodec.LineageBytes);
 
     public LiveAgentFreshProcessAtomicWriteReceipt? PublishLineage(
@@ -215,7 +275,9 @@ internal sealed class LiveAgentFreshProcessFileSystem :
         byte[] bytes,
         LiveAgentFreshProcessFileVersion? expectedPrior) => WriteAuthorized(
             rootCapability,
-            Path.Join(root, "host", "accepted-lineage.json"),
+            Path.Join(
+                rootCapability.HostRootPath,
+                "accepted-lineage.json"),
             bytes,
             LiveAgentFreshProcessCodec.LineageBytes,
             expectedPrior,
@@ -225,7 +287,7 @@ internal sealed class LiveAgentFreshProcessFileSystem :
         LiveAgentFreshProcessAuthorizedRoot rootCapability,
         byte[] bytes) => WriteAuthorized(
             rootCapability,
-            Path.Join(root, "output", "result.json"),
+            Path.Join(rootCapability.OutputRootPath, "result.json"),
             bytes,
             LiveAgentFreshProcessCodec.ResultBytes,
             expectedPrior: null,
@@ -300,7 +362,8 @@ internal sealed class LiveAgentFreshProcessFileSystem :
 
             File.Move(temporary, path, overwrite: allowReplace);
             moved = true;
-            if (!TrySyncParent(path))
+            if (capability.Guard is not AuthorizedLayoutGuard guard ||
+                !guard.TrySyncParent(path))
             {
                 return null;
             }
@@ -329,9 +392,9 @@ internal sealed class LiveAgentFreshProcessFileSystem :
     private bool IsAuthorized(LiveAgentFreshProcessAuthorizedRoot capability) =>
         capability is not null &&
         capability.BelongsTo(this) &&
-        PathComparer.Equals(capability.RootPath, root) &&
         RestrictedStateValidation.IsValidScope(capability.Access.Scope) &&
-        AuthorizedProofIsCurrent(root, capability.Proof);
+        capability.Guard is AuthorizedLayoutGuard guard &&
+        guard.IsCurrent;
 
     private static LiveAgentFreshProcessRead? ReadFixed(
         string path,
@@ -475,28 +538,6 @@ internal sealed class LiveAgentFreshProcessFileSystem :
         }
     }
 
-    private static bool TrySyncParent(string path)
-    {
-        var parent = Path.GetDirectoryName(path);
-        if (parent is null)
-        {
-            return false;
-        }
-
-        var open = NativeRestrictedStateFiles.OpenDirectoryNoFollow(
-            parent,
-            out var handle);
-        if (open != RestrictedStateOpenResult.Success || handle is null)
-        {
-            return false;
-        }
-
-        using (handle)
-        {
-            return NativeRestrictedStateFiles.TrySyncDirectory(handle);
-        }
-    }
-
     private static bool MatchesEntries(string directory, string[] expected)
     {
         try
@@ -576,38 +617,284 @@ internal sealed class LiveAgentFreshProcessFileSystem :
         TryCaptureRootProof(rootPath, out var actual) &&
         actual.SequenceEqual(expected);
 
-    private static bool TryCaptureAuthorizedProof(
-        string rootPath,
-        out ImmutableArray<RestrictedStateRootEntry> proof)
+    private bool TryOpenAuthorizedLayout(
+        LiveAgentFreshProcessAuthorizationRead authorization,
+        bool lineageExpected,
+        out AuthorizedLayoutGuard? guard,
+        out string? rootPath,
+        out string? inputPath,
+        out string? hostPath,
+        out string? outputPath,
+        out string? statePath)
     {
-        if (!TryCaptureRootProof(rootPath, out var rootProof))
+        guard = null;
+        rootPath = null;
+        inputPath = null;
+        hostPath = null;
+        outputPath = null;
+        statePath = null;
+        string? privatePath = null;
+        var handles = ImmutableArray.CreateBuilder<SafeFileHandle>();
+        var identities = ImmutableArray.CreateBuilder<
+            RestrictedStateFileIdentity>();
+        var paths = ImmutableArray.CreateBuilder<string>();
+        var pathChecks = ImmutableArray.CreateBuilder<bool>();
+        try
         {
-            proof = [];
-            return false;
-        }
-
-        var entries = rootProof.ToBuilder();
-        foreach (var name in RootEntries)
-        {
-            var path = Path.Join(rootPath, name);
-            if (!TryInspectDirectory(path, out var identity))
+            if (!PathComparer.Equals(
+                    authorization.RootProof[0].Path,
+                    root))
             {
-                proof = [];
                 return false;
             }
 
-            entries.Add(new RestrictedStateRootEntry(path, identity));
+            foreach (var expected in authorization.RootProof)
+            {
+                if (!TryOpenDirectoryGuard(
+                        expected.Path,
+                        expected.Identity,
+                        out var handle,
+                        out var identity))
+                {
+                    return false;
+                }
+
+                handles.Add(handle!);
+                identities.Add(identity);
+                paths.Add(expected.Path);
+                pathChecks.Add(true);
+            }
+
+            rootPath = NativeRestrictedStateFiles.AnchoredRoot(
+                root,
+                handles[0]);
+            if (!MatchesEntries(rootPath, RootEntries))
+            {
+                return false;
+            }
+
+            foreach (var name in RootEntries)
+            {
+                var configured = Path.Join(rootPath, name);
+                if (!TryOpenDirectoryGuard(
+                        configured,
+                        expected: null,
+                        out var handle,
+                        out var identity))
+                {
+                    return false;
+                }
+
+                var anchored = NativeRestrictedStateFiles.AnchoredRoot(
+                    configured,
+                    handle!);
+                handles.Add(handle!);
+                identities.Add(identity);
+                paths.Add(anchored);
+                pathChecks.Add(OperatingSystem.IsWindows());
+                switch (name)
+                {
+                    case "input":
+                        inputPath = anchored;
+                        break;
+                    case "host":
+                        hostPath = anchored;
+                        break;
+                    case "output":
+                        outputPath = anchored;
+                        break;
+                    case "private":
+                        privatePath = anchored;
+                        break;
+                    case "state":
+                        statePath = anchored;
+                        break;
+                }
+            }
+
+            if (inputPath is null ||
+                hostPath is null ||
+                outputPath is null ||
+                privatePath is null ||
+                statePath is null ||
+                !MatchesEntries(inputPath, InputEntries) ||
+                !MatchesEntries(
+                    hostPath,
+                    lineageExpected
+                        ? ["accepted-lineage.json", "authorization.json"]
+                        : ["authorization.json"]) ||
+                !MatchesEntries(privatePath, []) ||
+                !MatchesEntries(outputPath, []))
+            {
+                return false;
+            }
+
+            var currentAuthorization = ReadFixed(
+                Path.Join(hostPath, "authorization.json"),
+                LiveAgentFreshProcessCodec.AuthorizationBytes);
+            if (currentAuthorization is null ||
+                currentAuthorization.Version != authorization.Version ||
+                !currentAuthorization.Bytes.SequenceEqual(
+                    authorization.Bytes))
+            {
+                return false;
+            }
+
+            var candidate = new AuthorizedLayoutGuard(
+                handles.ToImmutable(),
+                identities.ToImmutable(),
+                paths.ToImmutable(),
+                pathChecks.ToImmutable());
+            if (!candidate.IsCurrent)
+            {
+                candidate.Dispose();
+                return false;
+            }
+
+            guard = candidate;
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or
+            UnauthorizedAccessException or
+            ArgumentException or
+            NotSupportedException)
+        {
+            return false;
+        }
+        finally
+        {
+            if (guard is null)
+            {
+                foreach (var handle in handles)
+                {
+                    handle.Dispose();
+                }
+            }
+        }
+    }
+
+    private static bool TryOpenDirectoryGuard(
+        string path,
+        RestrictedStateFileIdentity? expected,
+        out SafeFileHandle? handle,
+        out RestrictedStateFileIdentity identity)
+    {
+        identity = default;
+        var open = NativeRestrictedStateFiles.OpenRootGuardNoFollow(
+            path,
+            out handle);
+        if (open != RestrictedStateOpenResult.Success ||
+            handle is null ||
+            !TryGetDirectoryIdentity(handle, out identity) ||
+            expected is { } required && identity != required)
+        {
+            handle?.Dispose();
+            handle = null;
+            return false;
         }
 
-        proof = entries.ToImmutable();
         return true;
     }
 
-    private static bool AuthorizedProofIsCurrent(
-        string rootPath,
-        ImmutableArray<RestrictedStateRootEntry> expected) =>
-        TryCaptureAuthorizedProof(rootPath, out var actual) &&
-        actual.SequenceEqual(expected);
+    private static bool TryGetDirectoryIdentity(
+        SafeFileHandle handle,
+        out RestrictedStateFileIdentity identity)
+    {
+        identity = default;
+        try
+        {
+            var attributes = File.GetAttributes(handle);
+            return (attributes & FileAttributes.Directory) != 0 &&
+                (attributes & FileAttributes.ReparsePoint) == 0 &&
+                NativeRestrictedStateFiles.TryGetIdentity(
+                    handle,
+                    expectDirectory: true,
+                    out identity);
+        }
+        catch (Exception exception) when (exception is IOException or
+            UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private sealed class AuthorizedLayoutGuard(
+        ImmutableArray<SafeFileHandle> handles,
+        ImmutableArray<RestrictedStateFileIdentity> identities,
+        ImmutableArray<string> paths,
+        ImmutableArray<bool> pathChecks) : IDisposable
+    {
+        private int disposed;
+
+        internal bool IsCurrent
+        {
+            get
+            {
+                if (Volatile.Read(ref disposed) != 0 ||
+                    handles.Length != identities.Length ||
+                    handles.Length != paths.Length ||
+                    handles.Length != pathChecks.Length)
+                {
+                    return false;
+                }
+
+                for (var index = 0; index < handles.Length; index++)
+                {
+                    if (!TryGetDirectoryIdentity(
+                            handles[index],
+                            out var identity) ||
+                        identity != identities[index] ||
+                        pathChecks[index] &&
+                            (!TryInspectDirectory(
+                                paths[index],
+                                out var pathIdentity) ||
+                             pathIdentity != identities[index]))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+        }
+
+        internal bool TrySyncParent(string path)
+        {
+            var parent = Path.GetDirectoryName(path);
+            if (parent is null || Volatile.Read(ref disposed) != 0)
+            {
+                return false;
+            }
+
+            for (var index = 0; index < paths.Length; index++)
+            {
+                if (PathComparer.Equals(paths[index], parent) &&
+                    TryGetDirectoryIdentity(
+                        handles[index],
+                        out var identity) &&
+                    identity == identities[index])
+                {
+                    return NativeRestrictedStateFiles.TrySyncDirectory(
+                        handles[index]);
+                }
+            }
+
+            return false;
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref disposed, 1) != 0)
+            {
+                return;
+            }
+
+            foreach (var handle in handles)
+            {
+                handle.Dispose();
+            }
+        }
+    }
 
     private static void TryDelete(string path)
     {

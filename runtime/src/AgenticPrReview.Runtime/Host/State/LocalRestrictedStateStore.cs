@@ -1622,6 +1622,8 @@ internal static partial class NativeRestrictedStateFiles
     private const int OpenNoFollow = 0x20000;
     private const int OpenCloseOnExec = 0x80000;
     private const int OpenDirectory = 0x10000;
+    private const int DuplicateCloseOnExec = 1030;
+    private const string LinuxDescriptorPrefix = "/proc/self/fd/";
     private const uint FileTypeMask = 0xF000;
     private const uint RegularFile = 0x8000;
     private const uint DirectoryFile = 0x4000;
@@ -1706,6 +1708,33 @@ internal static partial class NativeRestrictedStateFiles
 
         if (OperatingSystem.IsLinux())
         {
+            if (TryParseLinuxDescriptor(path, out var existingDescriptor))
+            {
+                var duplicate = Fcntl(
+                    existingDescriptor,
+                    DuplicateCloseOnExec,
+                    0);
+                if (duplicate < 0 ||
+                    FStat(duplicate, out var duplicateInfo) != 0 ||
+                    (duplicateInfo.Mode & FileTypeMask) != DirectoryFile)
+                {
+                    if (duplicate >= 0)
+                    {
+                        new SafeFileHandle(
+                            (nint)duplicate,
+                            ownsHandle: true).Dispose();
+                    }
+
+                    handle = null;
+                    return RestrictedStateOpenResult.Unsafe;
+                }
+
+                handle = new SafeFileHandle(
+                    (nint)duplicate,
+                    ownsHandle: true);
+                return RestrictedStateOpenResult.Success;
+            }
+
             var descriptor = Open(
                 path,
                 OpenReadOnly |
@@ -1726,6 +1755,35 @@ internal static partial class NativeRestrictedStateFiles
 
         handle = null;
         return RestrictedStateOpenResult.Unsafe;
+    }
+
+    private static bool TryParseLinuxDescriptor(
+        string path,
+        out int descriptor)
+    {
+        descriptor = -1;
+        if (!path.StartsWith(
+                LinuxDescriptorPrefix,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var value = path.AsSpan(LinuxDescriptorPrefix.Length);
+        if (value.IsEmpty)
+        {
+            return false;
+        }
+
+        foreach (var character in value)
+        {
+            if (character is < '0' or > '9')
+            {
+                return false;
+            }
+        }
+
+        return int.TryParse(value, out descriptor) && descriptor >= 0;
     }
 
     internal static RestrictedStateOpenResult OpenRootGuardNoFollow(
@@ -1857,6 +1915,12 @@ internal static partial class NativeRestrictedStateFiles
 
     [LibraryImport("libc", EntryPoint = "fsync", SetLastError = true)]
     private static partial int FSync(int fileDescriptor);
+
+    [LibraryImport("libc", EntryPoint = "fcntl", SetLastError = true)]
+    private static partial int Fcntl(
+        int fileDescriptor,
+        int command,
+        int argument);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct ByHandleFileInformation

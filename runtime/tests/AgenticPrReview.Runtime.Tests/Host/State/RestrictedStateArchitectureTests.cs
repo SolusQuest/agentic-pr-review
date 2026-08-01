@@ -189,6 +189,7 @@ public sealed class RestrictedStateArchitectureTests
                 ("CreateFile", "kernel32.dll", "CreateFileW"),
                 ("FStat", "libc", "fstat"),
                 ("FSync", "libc", "fsync"),
+                ("Fcntl", "libc", "fcntl"),
                 (
                     "GetFileInformationByHandle",
                     "kernel32.dll",

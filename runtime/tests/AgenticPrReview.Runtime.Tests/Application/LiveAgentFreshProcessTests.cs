@@ -1,8 +1,11 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Session;
+using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.State;
 
@@ -40,7 +43,9 @@ public sealed class LiveAgentFreshProcessTests
 
         var first = await fixture.RunAsync("bootstrap");
 
-        Assert.Equal(0, first.ExitCode);
+        Assert.True(
+            first.ExitCode == 0,
+            $"{first.StandardError}{first.StandardOutput}");
         Assert.Empty(first.StandardOutput);
         Assert.Empty(first.StandardError);
         var firstResult = fixture.ReadResult();
@@ -79,7 +84,9 @@ public sealed class LiveAgentFreshProcessTests
 
         var second = await fixture.RunAsync("continue");
 
-        Assert.Equal(0, second.ExitCode);
+        Assert.True(
+            second.ExitCode == 0,
+            $"{second.StandardError}{second.StandardOutput}");
         Assert.Empty(second.StandardOutput);
         Assert.Empty(second.StandardError);
         var secondResult = fixture.ReadResult();
@@ -124,6 +131,73 @@ public sealed class LiveAgentFreshProcessTests
             priorFact,
             Encoding.UTF8.GetString(stateBytes),
             StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("absent")]
+    [InlineData("non_current")]
+    public async Task AutomaticAbsentOrNonCurrentContinueBootstraps(
+        string locator)
+    {
+        using var fixture = new FreshProcessFixture();
+        var identity = new ReviewedIdentity(
+            "owner/repository",
+            109,
+            new string('a', 40),
+            new string('b', 40));
+        fixture.WritePhase(
+            identity,
+            "Review the immutable snapshot.",
+            "APR_PRIOR_ONLY_" + new string('a', 64) + "\n",
+            "automatic_bootstrap",
+            locator,
+            "automatic",
+            "same_head",
+            expectedLineageSha256: null,
+            fromHeadSha: identity.HeadSha);
+
+        var run = await fixture.RunAsync("continue");
+
+        Assert.Equal(0, run.ExitCode);
+        var result = fixture.ReadResult();
+        Assert.Equal(R3LiveAgentCodes.Completed, result.Code);
+        Assert.Equal(0, result.Generation);
+        Assert.True(result.HandoffReady);
+    }
+
+    [Theory]
+    [InlineData("absent")]
+    [InlineData("non_current")]
+    public async Task ExplicitAbsentOrNonCurrentRetainsExactFailure(
+        string locator)
+    {
+        using var fixture = new FreshProcessFixture();
+        var identity = new ReviewedIdentity(
+            "owner/repository",
+            109,
+            new string('a', 40),
+            new string('b', 40));
+        fixture.WritePhase(
+            identity,
+            "Review the immutable snapshot.",
+            "APR_PRIOR_ONLY_" + new string('a', 64) + "\n",
+            "explicit_missing",
+            locator,
+            "explicit",
+            "same_head",
+            expectedLineageSha256: null,
+            fromHeadSha: identity.HeadSha);
+
+        var run = await fixture.RunAsync("continue");
+
+        Assert.Equal(1, run.ExitCode);
+        Assert.Equal(
+            RestrictedStateCodes.ExplicitMissing,
+            run.StandardError.Trim());
+        var result = fixture.ReadResult();
+        Assert.Equal(RestrictedStateCodes.ExplicitMissing, result.Code);
+        Assert.Equal(0, result.ModelCalls);
+        Assert.Equal(0, result.ToolCalls);
     }
 
     [Fact]
@@ -251,6 +325,114 @@ public sealed class LiveAgentFreshProcessTests
             rejected.StandardError.Trim());
         var result = fixture.ReadResult();
         Assert.Equal(LiveAgentFreshProcessCodes.TransitionRejected, result.Code);
+        Assert.Equal(0, result.ModelCalls);
+        Assert.Equal(0, result.ToolCalls);
+        Assert.Equal(lineageBefore, File.ReadAllBytes(fixture.LineagePath));
+    }
+
+    [Fact]
+    public async Task CurrentAutomaticIsRejectedBeforeProviderConstruction()
+    {
+        using var fixture = new FreshProcessFixture();
+        var firstIdentity = new ReviewedIdentity(
+            "owner/repository",
+            109,
+            new string('a', 40),
+            new string('b', 40));
+        fixture.WritePhase(
+            firstIdentity,
+            "Review the first immutable snapshot.",
+            "APR_PRIOR_ONLY_" + new string('c', 64) + "\n",
+            "current_automatic_bootstrap",
+            "absent",
+            "automatic",
+            "same_head",
+            expectedLineageSha256: null,
+            fromHeadSha: firstIdentity.HeadSha);
+        Assert.Equal(0, (await fixture.RunAsync("bootstrap")).ExitCode);
+        var first = fixture.ReadResult();
+        var lineageBefore = File.ReadAllBytes(fixture.LineagePath);
+        File.Delete(fixture.ResultPath);
+        var secondIdentity = new ReviewedIdentity(
+            firstIdentity.RepositoryId,
+            firstIdentity.ReviewTarget,
+            firstIdentity.HeadSha,
+            new string('d', 40));
+        fixture.WritePhase(
+            secondIdentity,
+            "Review the next immutable snapshot.",
+            "APR_CURRENT_ONLY\n",
+            "current_automatic_continue",
+            "current",
+            "automatic",
+            "verified_ahead",
+            first.LineageSha256,
+            firstIdentity.HeadSha);
+
+        var rejected = await fixture.RunAsync("continue");
+
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.Equal(
+            LiveAgentFreshProcessCodes.TransitionRejected,
+            rejected.StandardError.Trim());
+        var result = fixture.ReadResult();
+        Assert.Equal(
+            LiveAgentFreshProcessCodes.TransitionRejected,
+            result.Code);
+        Assert.Equal(0, result.ModelCalls);
+        Assert.Equal(0, result.ToolCalls);
+        Assert.Equal(lineageBefore, File.ReadAllBytes(fixture.LineagePath));
+    }
+
+    [Fact]
+    public async Task SelectedCurrentMissingRetainsExactFailure()
+    {
+        using var fixture = new FreshProcessFixture();
+        var firstIdentity = new ReviewedIdentity(
+            "owner/repository",
+            109,
+            new string('a', 40),
+            new string('b', 40));
+        fixture.WritePhase(
+            firstIdentity,
+            "Review the first immutable snapshot.",
+            "APR_PRIOR_ONLY_" + new string('c', 64) + "\n",
+            "missing_current_bootstrap",
+            "absent",
+            "automatic",
+            "same_head",
+            expectedLineageSha256: null,
+            fromHeadSha: firstIdentity.HeadSha);
+        Assert.Equal(0, (await fixture.RunAsync("bootstrap")).ExitCode);
+        var first = fixture.ReadResult();
+        var lineageBefore = File.ReadAllBytes(fixture.LineagePath);
+        File.Delete(fixture.ResultPath);
+        Directory.Delete(fixture.StateRoot, recursive: true);
+        Directory.CreateDirectory(fixture.StateRoot);
+        var secondIdentity = new ReviewedIdentity(
+            firstIdentity.RepositoryId,
+            firstIdentity.ReviewTarget,
+            firstIdentity.HeadSha,
+            new string('d', 40));
+        fixture.WritePhase(
+            secondIdentity,
+            "Review the next immutable snapshot.",
+            "APR_CURRENT_ONLY\n",
+            "missing_current_continue",
+            "current",
+            "explicit",
+            "verified_ahead",
+            first.LineageSha256,
+            firstIdentity.HeadSha);
+
+        var rejected = await fixture.RunAsync("continue");
+
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.Equal(
+            RestrictedStateCodes.CurrentMissing,
+            rejected.StandardError.Trim());
+        var result = fixture.ReadResult();
+        Assert.Equal(RestrictedStateCodes.CurrentMissing, result.Code);
         Assert.Equal(0, result.ModelCalls);
         Assert.Equal(0, result.ToolCalls);
         Assert.Equal(lineageBefore, File.ReadAllBytes(fixture.LineagePath));
@@ -443,6 +625,71 @@ public sealed class LiveAgentFreshProcessTests
     }
 
     [Theory]
+    [InlineData("kind")]
+    [InlineData("stable")]
+    [InlineData("scope")]
+    [InlineData("transition")]
+    public async Task AuthorizationExplicitNullIsClosedInputFailure(
+        string member)
+    {
+        var trusted = Trusted();
+        Assert.True(AgentStableRequestMaterializer.TryMaterialize(
+            trusted,
+            priorSessionSha256: null,
+            out var materialized));
+        var scope = Scope(trusted, materialized!, "session-109");
+        var valid = Encoding.UTF8.GetString(
+            LiveAgentFreshProcessCodec.Write(Authorization(
+                trusted,
+                scope,
+                "session-109",
+                "null_invocation",
+                "absent",
+                "automatic",
+                "same_head",
+                new string('b', 40),
+                new string('a', 40),
+                new string('b', 40),
+                expectedLineageSha256: null)));
+        var invalid = member switch
+        {
+            "kind" => valid.Replace(
+                $"\"kind\":\"{LiveAgentFreshProcessDomain.AuthorizationKind}\"",
+                "\"kind\":null",
+                StringComparison.Ordinal),
+            "stable" => valid.Replace(
+                "\"trusted_policy\":\"Use the immutable reviewed " +
+                    "snapshot for all evidence.\"",
+                "\"trusted_policy\":null",
+                StringComparison.Ordinal),
+            "scope" => valid.Replace(
+                "\"policy_sha256\":\"" + scope.PolicySha256 + "\"",
+                "\"policy_sha256\":null",
+                StringComparison.Ordinal),
+            "transition" => valid.Replace(
+                "\"classification\":\"same_head\"",
+                "\"classification\":null",
+                StringComparison.Ordinal),
+            _ => throw new InvalidOperationException("Unknown member."),
+        };
+        Assert.NotEqual(valid, invalid);
+        var files = new DenialProbeFileSystem(
+            Encoding.UTF8.GetBytes(invalid));
+
+        var result = await LiveAgentFreshProcessCommand.RunAsync(
+            "bootstrap",
+            files,
+            CancellationToken.None);
+
+        Assert.Equal(10, result.ExitCode);
+        Assert.Equal(
+            LiveAgentFreshProcessCodes.AuthorizationInvalid,
+            result.DiagnosticCode);
+        Assert.Equal(1, files.AuthorizationReads);
+        Assert.Equal(0, files.AuthorizedLayoutCalls);
+    }
+
+    [Theory]
     [InlineData("input", "unexpected.json")]
     [InlineData("private", "second-request.capture")]
     [InlineData("output", "result.json")]
@@ -549,6 +796,36 @@ public sealed class LiveAgentFreshProcessTests
             fixture.StateRoot,
             "*",
             SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public void WrongLineageDigestIsRejectedBeforeDecode()
+    {
+        var trusted = Trusted();
+        Assert.True(AgentStableRequestMaterializer.TryMaterialize(
+            trusted,
+            priorSessionSha256: null,
+            out var materialized));
+        var scope = Scope(trusted, materialized!, "session-109");
+        var bytes = Encoding.UTF8.GetBytes("{}");
+        var read = new LiveAgentFreshProcessRead(
+            bytes,
+            new LiveAgentFreshProcessFileVersion(1, 1, bytes.Length));
+        var decodeCalls = 0;
+
+        var admitted = LiveAgentFreshProcessLineageAdmission.TryAdmit(
+            read,
+            new string('0', 64),
+            scope,
+            value =>
+            {
+                decodeCalls++;
+                return LiveAgentFreshProcessCodec.ReadLineage(value);
+            },
+            out _);
+
+        Assert.False(admitted);
+        Assert.Equal(0, decodeCalls);
     }
 
     [Theory]
@@ -686,7 +963,7 @@ public sealed class LiveAgentFreshProcessTests
     }
 
     [Fact]
-    public void AuthorizedDirectorySwapInvalidatesCapability()
+    public void AuthorizedDirectorySwapCannotRedirectCapability()
     {
         using var fixture = new FreshProcessFixture();
         var trusted = Trusted();
@@ -723,17 +1000,34 @@ public sealed class LiveAgentFreshProcessTests
         Assert.True(LiveAgentFreshProcessFileSystem.TryCreate(
             fixture.Root,
             out var files));
+        var authorizationRead = files!.ReadAuthorization();
+        Assert.NotNull(authorizationRead);
         Assert.True(files!.TryAuthorizeLayout(
+            authorizationRead!,
             access!,
             lineageExpected: false,
             out var authorizedRoot));
 
         var input = Path.Join(fixture.Root, "input");
         var displaced = fixture.Root + "-input-displaced";
-        Directory.Move(input, displaced);
-        Directory.CreateDirectory(input);
+        var expected = File.ReadAllBytes(
+            Path.Join(input, "reviewed-input.json"));
+        var moved = false;
         try
         {
+            try
+            {
+                Directory.Move(input, displaced);
+                moved = true;
+            }
+            catch (IOException)
+            {
+                Assert.True(OperatingSystem.IsWindows());
+                Assert.NotNull(files.ReadReviewedInput(authorizedRoot!));
+                return;
+            }
+
+            Directory.CreateDirectory(input);
             foreach (var name in new[]
             {
                 "reviewed-input.json",
@@ -742,14 +1036,404 @@ public sealed class LiveAgentFreshProcessTests
             {
                 File.Copy(Path.Join(displaced, name), Path.Join(input, name));
             }
+            File.WriteAllText(
+                Path.Join(input, "reviewed-input.json"),
+                "{}");
 
-            Assert.Null(files.ReadReviewedInput(authorizedRoot!));
+            var read = files.ReadReviewedInput(authorizedRoot!);
+            if (OperatingSystem.IsWindows())
+            {
+                Assert.Null(read);
+            }
+            else
+            {
+                Assert.Equal(expected, Assert.IsType<
+                    LiveAgentFreshProcessRead>(read).Bytes);
+            }
         }
         finally
         {
-            Directory.Delete(input, recursive: true);
-            Directory.Move(displaced, input);
+            authorizedRoot?.Dispose();
+            if (moved)
+            {
+                Directory.Delete(input, recursive: true);
+                Directory.Move(displaced, input);
+            }
         }
+    }
+
+    [Fact]
+    public void RootReplacementAfterAuthorizationReadIsRejected()
+    {
+        using var fixture = new FreshProcessFixture();
+        var identity = new ReviewedIdentity(
+            "owner/repository",
+            109,
+            new string('a', 40),
+            new string('b', 40));
+        fixture.WritePhase(
+            identity,
+            "Review the immutable snapshot.",
+            "APR_PRIOR_ONLY_" + new string('b', 64) + "\n",
+            "root_swap",
+            "absent",
+            "automatic",
+            "same_head",
+            expectedLineageSha256: null,
+            fromHeadSha: identity.HeadSha);
+        Assert.True(LiveAgentFreshProcessFileSystem.TryCreate(
+            fixture.Root,
+            out var files));
+        var authorizationRead = files!.ReadAuthorization();
+        Assert.NotNull(authorizationRead);
+        var displaced = fixture.Root + "-root-displaced";
+        Directory.Move(fixture.Root, displaced);
+        try
+        {
+            foreach (var name in new[]
+            {
+                "host",
+                "input",
+                "output",
+                "private",
+                "state",
+            })
+            {
+                Directory.CreateDirectory(Path.Join(fixture.Root, name));
+            }
+
+            File.Copy(
+                Path.Join(displaced, "host", "authorization.json"),
+                Path.Join(fixture.Root, "host", "authorization.json"));
+            foreach (var name in new[]
+            {
+                "reviewed-input.json",
+                "snapshot-manifest.json",
+            })
+            {
+                File.Copy(
+                    Path.Join(displaced, "input", name),
+                    Path.Join(fixture.Root, "input", name));
+            }
+
+            Assert.False(files.TryAuthorizeLayout(
+                authorizationRead!,
+                AuthorizedAccess(),
+                lineageExpected: false,
+                out _));
+        }
+        finally
+        {
+            Directory.Delete(fixture.Root, recursive: true);
+            Directory.Move(displaced, fixture.Root);
+        }
+    }
+
+    [Theory]
+    [InlineData("host")]
+    [InlineData("output")]
+    public void AuthorizedPublicationCannotBeRedirected(string directory)
+    {
+        using var fixture = new FreshProcessFixture();
+        var identity = new ReviewedIdentity(
+            "owner/repository",
+            109,
+            new string('a', 40),
+            new string('b', 40));
+        fixture.WritePhase(
+            identity,
+            "Review the immutable snapshot.",
+            "APR_PRIOR_ONLY_" + new string('b', 64) + "\n",
+            "publication_swap",
+            "absent",
+            "automatic",
+            "same_head",
+            expectedLineageSha256: null,
+            fromHeadSha: identity.HeadSha);
+        Assert.True(LiveAgentFreshProcessFileSystem.TryCreate(
+            fixture.Root,
+            out var files));
+        var authorizationRead = files!.ReadAuthorization();
+        Assert.NotNull(authorizationRead);
+        Assert.True(files.TryAuthorizeLayout(
+            authorizationRead!,
+            AuthorizedAccess(),
+            lineageExpected: false,
+            out var authorizedRoot));
+        var original = Path.Join(fixture.Root, directory);
+        var displaced = fixture.Root + "-" + directory + "-displaced";
+        var moved = false;
+        try
+        {
+            try
+            {
+                Directory.Move(original, displaced);
+                moved = true;
+            }
+            catch (IOException)
+            {
+                Assert.True(OperatingSystem.IsWindows());
+            }
+
+            if (moved)
+            {
+                Directory.CreateDirectory(original);
+            }
+
+            var receipt = directory == "host"
+                ? files.PublishLineage(
+                    authorizedRoot!,
+                    [1],
+                    expectedPrior: null)
+                : files.PublishResult(authorizedRoot!, [1]);
+            if (!moved || !OperatingSystem.IsWindows())
+            {
+                Assert.NotNull(receipt);
+                var target = directory == "host"
+                    ? "accepted-lineage.json"
+                    : "result.json";
+                Assert.True(File.Exists(Path.Join(
+                    moved ? displaced : original,
+                    target)));
+                if (moved)
+                {
+                    Assert.False(File.Exists(Path.Join(original, target)));
+                }
+            }
+            else
+            {
+                Assert.Null(receipt);
+            }
+        }
+        finally
+        {
+            authorizedRoot?.Dispose();
+            if (moved)
+            {
+                Directory.Delete(original, recursive: true);
+                Directory.Move(displaced, original);
+            }
+        }
+    }
+
+    [Fact]
+    public void ExactRestoredReplayShapeIsAccepted()
+    {
+        var fact = "APR_PRIOR_ONLY_" + new string('a', 64);
+        var messages = RestoredMessages(fact);
+        using var document = JsonDocument.Parse(messages.ToJsonString());
+
+        var accepted = LiveAgentFreshProcessDeterministicTransport
+            .TryValidateRestoredMessages(
+                document.RootElement,
+                [Encoding.UTF8.GetBytes("fresh public input")],
+                out var restored);
+
+        Assert.True(accepted);
+        Assert.Equal(fact, restored);
+    }
+
+    [Theory]
+    [InlineData("first_reasoning")]
+    [InlineData("first_call_id")]
+    [InlineData("first_arguments")]
+    [InlineData("first_result_id")]
+    [InlineData("finish_reasoning")]
+    [InlineData("finish_call_id")]
+    [InlineData("finish_arguments")]
+    [InlineData("finish_result_id")]
+    [InlineData("historical_user_fact")]
+    [InlineData("fresh_user_fact")]
+    [InlineData("fresh_public_fact")]
+    [InlineData("unapproved_reasoning")]
+    public void RestoredReplayMutationIsRejected(string mutation)
+    {
+        var fact = "APR_PRIOR_ONLY_" + new string('a', 64);
+        var messages = RestoredMessages(fact);
+        var currentInputs = new List<byte[]>
+        {
+            Encoding.UTF8.GetBytes("fresh public input"),
+        };
+        switch (mutation)
+        {
+            case "first_reasoning":
+                Message(messages, 2)["reasoning_content"] = "changed";
+                break;
+            case "first_call_id":
+                ToolCall(Message(messages, 2))["id"] = "changed";
+                break;
+            case "first_arguments":
+                ToolFunction(Message(messages, 2))["arguments"] =
+                    "{\"path\":\"fact.txt\"}";
+                break;
+            case "first_result_id":
+                Message(messages, 3)["tool_call_id"] = "changed";
+                break;
+            case "finish_reasoning":
+                Message(messages, 4)["reasoning_content"] = "changed";
+                break;
+            case "finish_call_id":
+                ToolCall(Message(messages, 4))["id"] = "changed";
+                break;
+            case "finish_arguments":
+                ToolFunction(Message(messages, 4))["arguments"] = "{}";
+                break;
+            case "finish_result_id":
+                Message(messages, 5)["tool_call_id"] = "changed";
+                break;
+            case "historical_user_fact":
+                Message(messages, 1)["content"] = fact;
+                break;
+            case "fresh_user_fact":
+                Message(messages, 6)["content"] = fact;
+                break;
+            case "fresh_public_fact":
+                currentInputs.Add(Encoding.UTF8.GetBytes(fact));
+                break;
+            case "unapproved_reasoning":
+                Message(messages, 3)["reasoning_content"] = "hidden";
+                break;
+            default:
+                throw new InvalidOperationException("Unknown mutation.");
+        }
+
+        using var document = JsonDocument.Parse(messages.ToJsonString());
+        Assert.False(LiveAgentFreshProcessDeterministicTransport
+            .TryValidateRestoredMessages(
+                document.RootElement,
+                currentInputs,
+                out _));
+    }
+
+    [Fact]
+    public void TransportProofRequiresExactValidatedTerminalDigest()
+    {
+        var expected = new string('a', 64);
+        var proof = new LiveAgentFreshProcessTransportProof(
+            true,
+            2,
+            new string('b', 64),
+            new string('c', 64),
+            expected);
+
+        Assert.True(proof.IsSatisfiedBy(expected));
+        Assert.False(proof.IsSatisfiedBy(new string('0', 64)));
+        Assert.False((proof with { Succeeded = false })
+            .IsSatisfiedBy(expected));
+    }
+
+    private static JsonArray RestoredMessages(string fact)
+    {
+        var observation = new string('e', 64);
+        return
+        [
+            new JsonObject
+            {
+                ["role"] = "system",
+                ["content"] = "stable control",
+            },
+            new JsonObject
+            {
+                ["role"] = "user",
+                ["content"] = "historical review context",
+            },
+            AssistantMessage(
+                "Inspect the manifest-backed reviewed file.",
+                "bootstrap_read",
+                AgentToolRegistry.ReadFileName,
+                "{\"path\":\"fact.txt\",\"start_line\":1," +
+                    "\"line_count\":400}"),
+            new JsonObject
+            {
+                ["role"] = "tool",
+                ["tool_call_id"] = "bootstrap_read",
+                ["content"] = "{\"observation_id\":\"" + observation +
+                    "\",\"content\":\"" + fact + "\"}",
+            },
+            AssistantMessage(
+                "Remember " + fact,
+                "bootstrap_finish",
+                AgentToolRegistry.FinishReviewName,
+                RestoredFinishArguments(fact, observation)),
+            new JsonObject
+            {
+                ["role"] = "tool",
+                ["tool_call_id"] = "bootstrap_finish",
+                ["content"] = "{}",
+            },
+            new JsonObject
+            {
+                ["role"] = "user",
+                ["content"] = "fresh review context",
+            },
+        ];
+    }
+
+    private static JsonObject AssistantMessage(
+        string reasoning,
+        string callId,
+        string name,
+        string arguments) => new()
+        {
+            ["role"] = "assistant",
+            ["content"] = string.Empty,
+            ["reasoning_content"] = reasoning,
+            ["tool_calls"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["id"] = callId,
+                    ["type"] = "function",
+                    ["function"] = new JsonObject
+                    {
+                        ["name"] = name,
+                        ["arguments"] = arguments,
+                    },
+                },
+            },
+        };
+
+    private static JsonObject Message(JsonArray messages, int index) =>
+        Assert.IsType<JsonObject>(messages[index]);
+
+    private static JsonObject ToolCall(JsonObject message) =>
+        Assert.IsType<JsonObject>(
+            Assert.IsType<JsonArray>(message["tool_calls"])[0]);
+
+    private static JsonObject ToolFunction(JsonObject message) =>
+        Assert.IsType<JsonObject>(ToolCall(message)["function"]);
+
+    private static string RestoredFinishArguments(
+        string fact,
+        string observation) => string.Concat(
+            "{\"summary\":\"grounded ",
+            fact,
+            "\",\"findings\":[{\"severity\":\"high\"," +
+                "\"title\":\"grounded continuation\"," +
+                "\"message\":\"The reviewed fact was grounded.\"," +
+                "\"evidence\":[{\"observation_id\":\"",
+            observation,
+            "\",\"path\":\"fact.txt\",\"start_line\":1," +
+                "\"end_line\":1}]}]}");
+
+    private static AuthorizedStateAccess AuthorizedAccess()
+    {
+        var trusted = Trusted();
+        Assert.True(AgentStableRequestMaterializer.TryMaterialize(
+            trusted,
+            priorSessionSha256: null,
+            out var materialized));
+        var scope = Scope(trusted, materialized!, "session-109");
+        var authorization = AuthorizedStateAccess.Authorize(
+            new RestrictedStateAccessRequest(
+                scope,
+                scope,
+                IsTrustedWorkflow: true,
+                IsSameRepository: true,
+                IsForkOrigin: false),
+            out var access);
+        Assert.Equal(StateAction.Authorized, authorization.Action);
+        return Assert.IsType<AuthorizedStateAccess>(access);
     }
 
     private static AgentSessionTrustedRequest Trusted() => new(
@@ -992,15 +1676,22 @@ public sealed class LiveAgentFreshProcessTests
 
         internal int AuthorizedLayoutCalls { get; private set; }
 
-        public LiveAgentFreshProcessRead? ReadAuthorization()
+        public LiveAgentFreshProcessAuthorizationRead? ReadAuthorization()
         {
             AuthorizationReads++;
-            return new LiveAgentFreshProcessRead(
-                authorization,
-                new LiveAgentFreshProcessFileVersion(1, 1, authorization.Length));
+            return LiveAgentFreshProcessAuthorizationRead.Create(
+                this,
+                new LiveAgentFreshProcessRead(
+                    authorization,
+                    new LiveAgentFreshProcessFileVersion(
+                        1,
+                        1,
+                        authorization.Length)),
+                []);
         }
 
         public bool TryAuthorizeLayout(
+            LiveAgentFreshProcessAuthorizationRead authorizationRead,
             AuthorizedStateAccess access,
             bool lineageExpected,
             out LiveAgentFreshProcessAuthorizedRoot? authorizedRoot)

@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 
@@ -10,7 +11,16 @@ internal sealed record LiveAgentFreshProcessTransportProof(
     bool Succeeded,
     int RequestCount,
     string? SecondProcessFirstRequestSha256,
-    string? PriorFactSha256);
+    string? PriorFactSha256,
+    string? ExpectedTerminalSha256)
+{
+    internal bool IsSatisfiedBy(string? terminalSha256) =>
+        Succeeded &&
+        LiveAgentFreshProcessDomain.IsSha256(ExpectedTerminalSha256) &&
+        StringComparer.Ordinal.Equals(
+            ExpectedTerminalSha256,
+            terminalSha256);
+}
 
 internal sealed class LiveAgentFreshProcessDeterministicTransportFactory(
     string phase,
@@ -27,6 +37,7 @@ internal sealed class LiveAgentFreshProcessDeterministicTransportFactory(
         transport?.Proof ?? new LiveAgentFreshProcessTransportProof(
             false,
             0,
+            null,
             null,
             null);
 
@@ -64,6 +75,7 @@ internal sealed class LiveAgentFreshProcessDeterministicTransport :
     private string? priorFact;
     private string? priorFactSha256;
     private string? firstRequestSha256;
+    private string? expectedTerminalSha256;
     private int requestCount;
     private bool replayValidated;
     private bool terminalUsedFact;
@@ -100,7 +112,8 @@ internal sealed class LiveAgentFreshProcessDeterministicTransport :
                 priorFactSha256 ?? (priorFact is null
                     ? null
                     : LiveAgentFreshProcessDomain.RawSha256(
-                        Encoding.UTF8.GetBytes(priorFact))));
+                        Encoding.UTF8.GetBytes(priorFact))),
+                expectedTerminalSha256);
         }
     }
 
@@ -236,7 +249,18 @@ internal sealed class LiveAgentFreshProcessDeterministicTransport :
         if (!Roles(messages).SequenceEqual(
                 ["system", "user", "assistant", "tool"],
                 StringComparer.Ordinal) ||
-            !TryReadLastTool(messages, out var observation, out var content) ||
+            !HasExactToolCall(
+                messages[2],
+                "Inspect the manifest-backed reviewed file.",
+                "bootstrap_read",
+                AgentToolRegistry.ReadFileName,
+                "{\"path\":\"fact.txt\",\"start_line\":1," +
+                    "\"line_count\":400}") ||
+            !TryReadLastTool(
+                messages,
+                "bootstrap_read",
+                out var observation,
+                out var content) ||
             !TryFindFact(content!, out priorFact))
         {
             return false;
@@ -256,43 +280,11 @@ internal sealed class LiveAgentFreshProcessDeterministicTransport :
         out byte[]? response)
     {
         response = null;
-        var roles = Roles(messages);
-        if (!roles.SequenceEqual(
-                [
-                    "system",
-                    "user",
-                    "assistant",
-                    "tool",
-                    "assistant",
-                    "tool",
-                    "user",
-                ],
-                StringComparer.Ordinal))
-        {
-            return false;
-        }
-
-        var values = messages.EnumerateArray().ToArray();
-        var historicalTool = values[3]
-            .GetProperty("content")
-            .GetString();
-        if (!TryFindFact(historicalTool, out var restoredFact) ||
+        if (!TryValidateRestoredMessages(
+                messages,
+                currentPublicInputs,
+                out var restoredFact) ||
             restoredFact is null)
-        {
-            return false;
-        }
-
-        if (ContainsFact(values[0].GetRawText(), restoredFact) ||
-            ContainsFact(values[^1].GetRawText(), restoredFact) ||
-            currentPublicInputs.Any(value => ContainsFact(value, restoredFact)) ||
-            !ContainsFact(
-                values[4].GetProperty("reasoning_content").GetString(),
-                restoredFact) ||
-            !HasToolCall(values[2], AgentToolRegistry.ReadFileName) ||
-            !HasToolCall(values[4], AgentToolRegistry.FinishReviewName) ||
-            !StringComparer.Ordinal.Equals(
-                values[5].GetProperty("content").GetString(),
-                "{}"))
         {
             return false;
         }
@@ -307,6 +299,71 @@ internal sealed class LiveAgentFreshProcessDeterministicTransport :
         return true;
     }
 
+    internal static bool TryValidateRestoredMessages(
+        JsonElement messages,
+        IReadOnlyList<byte[]> currentPublicInputs,
+        out string? restoredFact)
+    {
+        restoredFact = null;
+        if (!Roles(messages).SequenceEqual(
+                [
+                    "system",
+                    "user",
+                    "assistant",
+                    "tool",
+                    "assistant",
+                    "tool",
+                    "user",
+                ],
+                StringComparer.Ordinal) ||
+            currentPublicInputs is null)
+        {
+            return false;
+        }
+
+        var values = messages.EnumerateArray().ToArray();
+        if (!HasExactToolCall(
+                values[2],
+                "Inspect the manifest-backed reviewed file.",
+                "bootstrap_read",
+                AgentToolRegistry.ReadFileName,
+                "{\"path\":\"fact.txt\",\"start_line\":1," +
+                    "\"line_count\":400}") ||
+            !TryReadTool(
+                values[3],
+                "bootstrap_read",
+                out var observation,
+                out var historicalTool) ||
+            !TryFindFact(historicalTool, out restoredFact) ||
+            restoredFact is null)
+        {
+            return false;
+        }
+
+        var fact = restoredFact;
+        if (ContainsFact(values[0].GetRawText(), fact) ||
+            ContainsFact(values[1].GetRawText(), fact) ||
+            ContainsFact(values[^1].GetRawText(), fact) ||
+            currentPublicInputs.Any(value => ContainsFact(value, fact)) ||
+            !HasNoReasoning(values[0]) ||
+            !HasNoReasoning(values[1]) ||
+            !HasNoReasoning(values[3]) ||
+            !HasNoReasoning(values[5]) ||
+            !HasNoReasoning(values[6]) ||
+            !HasExactToolCall(
+                values[4],
+                "Remember " + fact,
+                "bootstrap_finish",
+                AgentToolRegistry.FinishReviewName,
+                FinishArguments("grounded " + fact, observation!)) ||
+            !IsExactToolResult(values[5], "bootstrap_finish", "{}"))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
     private bool TryContinueFinish(
         JsonElement messages,
         out byte[]? response)
@@ -314,7 +371,19 @@ internal sealed class LiveAgentFreshProcessDeterministicTransport :
         response = null;
         if (!replayValidated ||
             priorFact is null ||
-            !TryReadLastTool(messages, out var observation, out _))
+            !HasExactToolCall(
+                messages.EnumerateArray().ElementAt(
+                    messages.GetArrayLength() - 2),
+                "Ground the continued review in the current snapshot.",
+                "continue_read",
+                AgentToolRegistry.ReadFileName,
+                "{\"path\":\"fact.txt\",\"start_line\":1," +
+                    "\"line_count\":400}") ||
+            !TryReadLastTool(
+                messages,
+                "continue_read",
+                out var observation,
+                out _))
         {
             return false;
         }
@@ -333,15 +402,66 @@ internal sealed class LiveAgentFreshProcessDeterministicTransport :
             .Select(message => message.GetProperty("role").GetString()!)
             .ToArray();
 
-    private static bool HasToolCall(JsonElement message, string name) =>
-        message.TryGetProperty("tool_calls", out var calls) &&
-        calls.ValueKind == JsonValueKind.Array &&
-        calls.EnumerateArray().Any(call => StringComparer.Ordinal.Equals(
-            call.GetProperty("function").GetProperty("name").GetString(),
-            name));
+    private static bool HasExactToolCall(
+        JsonElement message,
+        string reasoning,
+        string callId,
+        string name,
+        string arguments)
+    {
+        if (!StringComparer.Ordinal.Equals(
+                message.GetProperty("role").GetString(),
+                "assistant") ||
+            !StringComparer.Ordinal.Equals(
+                message.GetProperty("content").GetString(),
+                string.Empty) ||
+            !StringComparer.Ordinal.Equals(
+                message.GetProperty("reasoning_content").GetString(),
+                reasoning) ||
+            !message.TryGetProperty("tool_calls", out var calls) ||
+            calls.ValueKind != JsonValueKind.Array ||
+            calls.GetArrayLength() != 1)
+        {
+            return false;
+        }
+
+        var call = calls[0];
+        var function = call.GetProperty("function");
+        return StringComparer.Ordinal.Equals(
+                call.GetProperty("id").GetString(),
+                callId) &&
+            StringComparer.Ordinal.Equals(
+                call.GetProperty("type").GetString(),
+                "function") &&
+            StringComparer.Ordinal.Equals(
+                function.GetProperty("name").GetString(),
+                name) &&
+            StringComparer.Ordinal.Equals(
+                function.GetProperty("arguments").GetString(),
+                arguments);
+    }
+
+    private static bool HasNoReasoning(JsonElement message) =>
+        !message.TryGetProperty("reasoning_content", out _);
+
+    private static bool IsExactToolResult(
+        JsonElement message,
+        string callId,
+        string content) =>
+        StringComparer.Ordinal.Equals(
+            message.GetProperty("role").GetString(),
+            "tool") &&
+        StringComparer.Ordinal.Equals(
+            message.GetProperty("tool_call_id").GetString(),
+            callId) &&
+        StringComparer.Ordinal.Equals(
+            message.GetProperty("content").GetString(),
+            content) &&
+        HasNoReasoning(message);
 
     private static bool TryReadLastTool(
         JsonElement messages,
+        string expectedCallId,
         out string? observation,
         out string? content)
     {
@@ -352,6 +472,32 @@ internal sealed class LiveAgentFreshProcessDeterministicTransport :
                 message.GetProperty("role").GetString(),
                 "tool"));
         if (tool.ValueKind == JsonValueKind.Undefined)
+        {
+            return false;
+        }
+
+        return TryReadTool(
+            tool,
+            expectedCallId,
+            out observation,
+            out content);
+    }
+
+    private static bool TryReadTool(
+        JsonElement tool,
+        string expectedCallId,
+        out string? observation,
+        out string? content)
+    {
+        observation = null;
+        content = null;
+        if (!StringComparer.Ordinal.Equals(
+                tool.GetProperty("role").GetString(),
+                "tool") ||
+            !StringComparer.Ordinal.Equals(
+                tool.GetProperty("tool_call_id").GetString(),
+                expectedCallId) ||
+            !HasNoReasoning(tool))
         {
             return false;
         }
@@ -400,13 +546,25 @@ internal sealed class LiveAgentFreshProcessDeterministicTransport :
     private static bool ContainsFact(byte[] value, string fact) =>
         Encoding.UTF8.GetString(value).Contains(fact, StringComparison.Ordinal);
 
-    private static byte[] FinishResponse(
+    private byte[] FinishResponse(
         string reasoning,
         string summary,
         string observation,
         string callId)
     {
         var arguments = FinishArguments(summary, observation);
+        var bytes = Encoding.UTF8.GetBytes(arguments);
+        try
+        {
+            expectedTerminalSha256 = AgentCanonical.HashDomain(
+                AgentCanonical.TerminalDomain,
+                bytes);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+        }
+
         return Response(
             reasoning,
             AgentToolRegistry.FinishReviewName,

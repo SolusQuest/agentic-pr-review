@@ -27,6 +27,47 @@ public sealed class LocalRestrictedStateStoreTests
     }
 
     [Fact]
+    public void LinuxAnchoredDirectoryCanBeReopenedNoFollow()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        WithRoot(root =>
+        {
+            var firstOpen = NativeRestrictedStateFiles
+                .OpenRootGuardNoFollow(root, out var first);
+            Assert.Equal(RestrictedStateOpenResult.Success, firstOpen);
+            Assert.NotNull(first);
+            using (first)
+            {
+                var anchored = NativeRestrictedStateFiles.AnchoredRoot(
+                    root,
+                    first!);
+                var secondOpen = NativeRestrictedStateFiles
+                    .OpenDirectoryNoFollow(anchored, out var second);
+                Assert.Equal(
+                    RestrictedStateOpenResult.Success,
+                    secondOpen);
+                Assert.NotNull(second);
+                using (second)
+                {
+                    Assert.True(NativeRestrictedStateFiles.TryGetIdentity(
+                        first!,
+                        expectDirectory: true,
+                        out var firstIdentity));
+                    Assert.True(NativeRestrictedStateFiles.TryGetIdentity(
+                        second!,
+                        expectDirectory: true,
+                        out var secondIdentity));
+                    Assert.Equal(firstIdentity, secondIdentity);
+                }
+            }
+        });
+    }
+
+    [Fact]
     public void SnapshotRoundTripsAcrossFreshStoreInstance()
     {
         WithRoot(root =>

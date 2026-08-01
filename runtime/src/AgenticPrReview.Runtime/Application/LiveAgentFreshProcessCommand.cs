@@ -75,6 +75,7 @@ internal static class LiveAgentFreshProcessCommand
         var lineageExpected = input!.LocatorFamily ==
             RestrictedStateLocatorFamily.Current;
         if (!fileSystem.TryAuthorizeLayout(
+                authorizationRead!,
                 access,
                 lineageExpected,
                 out var authorizedRoot) ||
@@ -84,6 +85,7 @@ internal static class LiveAgentFreshProcessCommand
                 exitCode: 10,
                 LiveAgentFreshProcessCodes.RootInvalid);
         }
+        using var authorizedRootScope = authorizedRoot;
 
         var reviewedRead = fileSystem.ReadReviewedInput(authorizedRoot);
         var manifestRead = fileSystem.ReadSnapshotManifest(authorizedRoot);
@@ -119,14 +121,9 @@ internal static class LiveAgentFreshProcessCommand
         if (lineageExpected)
         {
             var lineageRead = fileSystem.ReadLineage(authorizedRoot);
-            var lineageDocument = lineageRead is null
-                ? null
-                : LiveAgentFreshProcessCodec.ReadLineage(lineageRead.Bytes);
             if (lineageRead is null ||
-                lineageDocument is null ||
                 !LiveAgentFreshProcessLineageAdmission.TryAdmit(
                     lineageRead,
-                    lineageDocument,
                     input.Document.ExpectedLineageSha256!,
                     input.Scope,
                     out prior))
@@ -146,7 +143,8 @@ internal static class LiveAgentFreshProcessCommand
                 identity!,
                 prior,
                 out var generation,
-                out var predecessor))
+                out var predecessor,
+                out var transportPhase))
         {
             DisposeSnapshot(snapshot!);
             return PublishFailure(
@@ -195,7 +193,7 @@ internal static class LiveAgentFreshProcessCommand
             (IDisposable)snapshot.FileAccessFactory;
         using var transportFactory =
             new LiveAgentFreshProcessDeterministicTransportFactory(
-                phase,
+                transportPhase!,
                 [
                     authorizationRead!.Bytes,
                     reviewedRead!.Bytes,
@@ -223,15 +221,17 @@ internal static class LiveAgentFreshProcessCommand
         var proof = transportFactory.Proof;
         var receipt = lineageSink.PublicationReceipt;
         var applicationResult = execution.Result;
+        var proofSucceeded = proof.IsSatisfiedBy(
+            applicationResult.TerminalSha256);
         var handoffReady = StringComparer.Ordinal.Equals(
                 applicationResult.Code,
                 R3LiveAgentCodes.Completed) &&
             applicationResult.HandoffReady &&
-            proof.Succeeded &&
+            proofSucceeded &&
             receipt is not null;
         var code = applicationResult.Code;
         if (StringComparer.Ordinal.Equals(code, R3LiveAgentCodes.Completed) &&
-            !proof.Succeeded)
+            !proofSucceeded)
         {
             code = LiveAgentFreshProcessCodes.TransportProofFailed;
             handoffReady = false;
@@ -305,7 +305,9 @@ internal static class LiveAgentFreshProcessCommand
                 document.Kind,
                 LiveAgentFreshProcessDomain.AuthorizationKind) ||
             document.Stable is null ||
+            document.AuthorizedScope is null ||
             document.Transition is null ||
+            !HasRequiredAuthorizationValues(document) ||
             !StringComparer.Ordinal.Equals(
                 document.ExecutionProfile,
                 LiveAgentFreshProcessDomain.DeterministicProfile) ||
@@ -421,6 +423,37 @@ internal static class LiveAgentFreshProcessCommand
         return true;
     }
 
+    private static bool HasRequiredAuthorizationValues(
+        LiveAgentFreshProcessAuthorizationDocument document) =>
+        document.Kind is not null &&
+        document.ExecutionProfile is not null &&
+        document.StateLocatorFamily is not null &&
+        document.RestoreIntent is not null &&
+        document.InvocationIdentity is not null &&
+        document.Stable.RepositoryId is not null &&
+        document.Stable.WorkflowIdentity is not null &&
+        document.Stable.TrustedPolicy is not null &&
+        document.Stable.BuildId is not null &&
+        document.Stable.ProviderId is not null &&
+        document.Stable.ModelId is not null &&
+        document.Stable.AdapterId is not null &&
+        document.Stable.SessionId is not null &&
+        document.AuthorizedScope.RepositoryId is not null &&
+        document.AuthorizedScope.WorkflowIdentity is not null &&
+        document.AuthorizedScope.SessionId is not null &&
+        document.AuthorizedScope.ProviderId is not null &&
+        document.AuthorizedScope.ModelId is not null &&
+        document.AuthorizedScope.AdapterId is not null &&
+        document.AuthorizedScope.PolicySha256 is not null &&
+        document.AuthorizedScope.LimitsSha256 is not null &&
+        document.AuthorizedScope.ToolsetSha256 is not null &&
+        document.AuthorizedScope.BuildId is not null &&
+        document.Transition.Classification is not null &&
+        document.Transition.FromHeadSha is not null &&
+        document.Transition.ToBaseSha is not null &&
+        document.Transition.ToHeadSha is not null &&
+        document.Transition.ReceiptSha256 is not null;
+
     private static bool TryAdmitReviewedInput(
         LiveAgentFreshProcessAuthorizedInput input,
         LiveAgentFreshProcessReviewedInputDocument document,
@@ -460,10 +493,12 @@ internal static class LiveAgentFreshProcessCommand
         ReviewedIdentity identity,
         LiveAgentFreshProcessAdmittedLineage? prior,
         out long generation,
-        out string? predecessor)
+        out string? predecessor,
+        out string? transportPhase)
     {
         generation = 0;
         predecessor = null;
+        transportPhase = null;
         var transition = input.Document.Transition;
         if (!StringComparer.Ordinal.Equals(
                 transition.ToBaseSha,
@@ -478,6 +513,7 @@ internal static class LiveAgentFreshProcessCommand
         if (input.LocatorFamily == RestrictedStateLocatorFamily.Current)
         {
             if (!StringComparer.Ordinal.Equals(phase, "continue") ||
+                input.RestoreIntent != RestrictedStateRestoreIntent.Explicit ||
                 input.Transition != AgentSessionHeadTransition.VerifiedAhead ||
                 prior is null ||
                 !prior.Lineage.TransitionAuthorized ||
@@ -497,12 +533,14 @@ internal static class LiveAgentFreshProcessCommand
 
             generation = prior.Lineage.Generation + 1;
             predecessor = prior.Lineage.EnvelopeSha256;
+            transportPhase = "continue";
             return true;
         }
 
-        if (!StringComparer.Ordinal.Equals(phase, "bootstrap") ||
-            input.LocatorFamily != RestrictedStateLocatorFamily.Absent ||
-            input.RestoreIntent != RestrictedStateRestoreIntent.Automatic ||
+        if (phase is not ("bootstrap" or "continue") ||
+            input.LocatorFamily is not (
+                RestrictedStateLocatorFamily.Absent or
+                RestrictedStateLocatorFamily.NonCurrent) ||
             input.Transition != AgentSessionHeadTransition.SameHead ||
             prior is not null ||
             !StringComparer.Ordinal.Equals(
@@ -512,6 +550,7 @@ internal static class LiveAgentFreshProcessCommand
             return false;
         }
 
+        transportPhase = "bootstrap";
         return true;
     }
 

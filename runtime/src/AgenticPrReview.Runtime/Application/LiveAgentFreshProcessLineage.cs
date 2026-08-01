@@ -22,18 +22,39 @@ internal static class LiveAgentFreshProcessLineageAdmission
 {
     internal static bool TryAdmit(
         LiveAgentFreshProcessRead read,
-        LiveAgentFreshProcessLineageDocument document,
         string expectedRawSha256,
         RestrictedStateScope authorizedScope,
+        out LiveAgentFreshProcessAdmittedLineage? admitted) => TryAdmit(
+            read,
+            expectedRawSha256,
+            authorizedScope,
+            LiveAgentFreshProcessCodec.ReadLineage,
+            out admitted);
+
+    internal static bool TryAdmit(
+        LiveAgentFreshProcessRead read,
+        string expectedRawSha256,
+        RestrictedStateScope authorizedScope,
+        Func<byte[], LiveAgentFreshProcessLineageDocument?> decode,
         out LiveAgentFreshProcessAdmittedLineage? admitted)
     {
         admitted = null;
         if (read is null ||
-            document is null ||
             !LiveAgentFreshProcessDomain.IsSha256(expectedRawSha256) ||
             !StringComparer.Ordinal.Equals(
                 LiveAgentFreshProcessDomain.RawSha256(read.Bytes),
-                expectedRawSha256) ||
+                expectedRawSha256))
+        {
+            return false;
+        }
+
+        if (decode is null)
+        {
+            return false;
+        }
+
+        var document = decode(read.Bytes);
+        if (document is null ||
             !StringComparer.Ordinal.Equals(
                 document.Kind,
                 LiveAgentFreshProcessDomain.LineageKind) ||
@@ -94,8 +115,8 @@ internal sealed class LiveAgentFreshProcessLineageSink(
 {
     private int calls;
 
-    internal LiveAgentFreshProcessLineagePublicationReceipt?
-        PublicationReceipt { get; private set; }
+    internal LiveAgentFreshProcessLineagePublicationReceipt? PublicationReceipt
+    { get; private set; }
 
     public LiveAgentLineagePublicationOutcome PublishAtomically(
         AcceptedLineage? priorLineage,
