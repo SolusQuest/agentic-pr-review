@@ -739,14 +739,14 @@ public sealed class R3QualityEvaluatorTests
     {
         internal SyntheticRepository(R3QualityCase testCase)
         {
-            Root = Path.Combine(
+            Root = Path.Join(
                 Path.GetTempPath(),
                 "apr-r3-quality-evaluator",
                 Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(Root);
             foreach (var file in testCase.Files)
             {
-                var fullPath = Path.Combine(
+                var fullPath = Path.Join(
                     Root,
                     file.Path.Replace('/', Path.DirectorySeparatorChar));
                 Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);

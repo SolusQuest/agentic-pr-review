@@ -302,7 +302,7 @@ public sealed class R3QualityCorpusTests
     }
 
     internal static byte[] ReadCorpus() =>
-        File.ReadAllBytes(Path.Combine(
+        File.ReadAllBytes(Path.Join(
             AppContext.BaseDirectory,
             "fixtures",
             "agent",
@@ -377,14 +377,14 @@ public sealed class R3QualityCorpusTests
     {
         internal SyntheticRepository(R3QualityCase testCase)
         {
-            Root = Path.Combine(
+            Root = Path.Join(
                 Path.GetTempPath(),
                 "apr-r3-quality",
                 Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(Root);
             foreach (var file in testCase.Files)
             {
-                var fullPath = Path.Combine(
+                var fullPath = Path.Join(
                     Root,
                     file.Path.Replace('/', Path.DirectorySeparatorChar));
                 Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
