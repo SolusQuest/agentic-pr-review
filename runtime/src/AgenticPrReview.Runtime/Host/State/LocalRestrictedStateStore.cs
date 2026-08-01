@@ -854,6 +854,8 @@ internal sealed class LocalRestrictedStateStore : IRestrictedStateStore
             var entries = ImmutableArray.CreateBuilder<
                 RestrictedStateRootEntry>();
             var current = new DirectoryInfo(root);
+            var anchoredRoot =
+                NativeRestrictedStateFiles.IsLinuxAnchoredRoot(root);
             while (current is not null)
             {
                 var open =
@@ -888,6 +890,11 @@ internal sealed class LocalRestrictedStateStore : IRestrictedStateStore
                     entries.Add(new RestrictedStateRootEntry(
                         current.FullName,
                         identity));
+                }
+
+                if (anchoredRoot)
+                {
+                    break;
                 }
 
                 current = current.Parent;
@@ -1785,6 +1792,10 @@ internal static partial class NativeRestrictedStateFiles
 
         return int.TryParse(value, out descriptor) && descriptor >= 0;
     }
+
+    internal static bool IsLinuxAnchoredRoot(string path) =>
+        OperatingSystem.IsLinux() &&
+        TryParseLinuxDescriptor(path, out _);
 
     internal static RestrictedStateOpenResult OpenRootGuardNoFollow(
         string path,

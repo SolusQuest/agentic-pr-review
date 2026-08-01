@@ -27,7 +27,7 @@ public sealed class LocalRestrictedStateStoreTests
     }
 
     [Fact]
-    public void LinuxAnchoredDirectoryCanBeReopenedNoFollow()
+    public void LinuxAnchoredDirectorySupportsStoreRoundTrip()
     {
         if (!OperatingSystem.IsLinux())
         {
@@ -63,6 +63,32 @@ public sealed class LocalRestrictedStateStoreTests
                         out var secondIdentity));
                     Assert.Equal(firstIdentity, secondIdentity);
                 }
+
+                var access = RestrictedStateTestData.Access();
+                var keys = new TestKeyResolver();
+                var candidate = RestrictedStateTestData.Candidate(
+                    access,
+                    keys);
+                var store = new LocalRestrictedStateStore(anchored);
+                var initial = store.Read(access, CancellationToken.None);
+                Assert.True(initial.Succeeded);
+                Assert.False(initial.Version!.Exists);
+
+                var write = store.CompareExchange(
+                    access,
+                    initial.Version,
+                    new RestrictedStateSnapshot([candidate], null),
+                    CancellationToken.None);
+                Assert.True(write.Succeeded);
+
+                var restored = new LocalRestrictedStateStore(anchored).Read(
+                    access,
+                    CancellationToken.None);
+                Assert.True(restored.Succeeded);
+                Assert.Equal(
+                    candidate.EnvelopeSha256,
+                    Assert.Single(restored.Snapshot!.Accepted)
+                        .EnvelopeSha256);
             }
         });
     }
