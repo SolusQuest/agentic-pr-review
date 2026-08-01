@@ -1015,6 +1015,7 @@ public sealed class LiveAgentFreshProcessTests
         var moved = false;
         try
         {
+            using var authorizedRootLease = authorizedRoot;
             try
             {
                 Directory.Move(input, displaced);
@@ -1023,7 +1024,8 @@ public sealed class LiveAgentFreshProcessTests
             catch (IOException)
             {
                 Assert.True(OperatingSystem.IsWindows());
-                Assert.NotNull(files.ReadReviewedInput(authorizedRoot!));
+                Assert.NotNull(files.ReadReviewedInput(
+                    authorizedRootLease!));
                 return;
             }
 
@@ -1040,7 +1042,7 @@ public sealed class LiveAgentFreshProcessTests
                 Path.Join(input, "reviewed-input.json"),
                 "{}");
 
-            var read = files.ReadReviewedInput(authorizedRoot!);
+            var read = files.ReadReviewedInput(authorizedRootLease!);
             if (OperatingSystem.IsWindows())
             {
                 Assert.Null(read);
@@ -1053,7 +1055,6 @@ public sealed class LiveAgentFreshProcessTests
         }
         finally
         {
-            authorizedRoot?.Dispose();
             if (moved)
             {
                 Directory.Delete(input, recursive: true);
@@ -1165,6 +1166,7 @@ public sealed class LiveAgentFreshProcessTests
         var moved = false;
         try
         {
+            using var authorizedRootLease = authorizedRoot;
             try
             {
                 Directory.Move(original, displaced);
@@ -1182,10 +1184,10 @@ public sealed class LiveAgentFreshProcessTests
 
             var receipt = directory == "host"
                 ? files.PublishLineage(
-                    authorizedRoot!,
+                    authorizedRootLease!,
                     [1],
                     expectedPrior: null)
-                : files.PublishResult(authorizedRoot!, [1]);
+                : files.PublishResult(authorizedRootLease!, [1]);
             if (!moved || !OperatingSystem.IsWindows())
             {
                 Assert.NotNull(receipt);
@@ -1207,7 +1209,6 @@ public sealed class LiveAgentFreshProcessTests
         }
         finally
         {
-            authorizedRoot?.Dispose();
             if (moved)
             {
                 Directory.Delete(original, recursive: true);
