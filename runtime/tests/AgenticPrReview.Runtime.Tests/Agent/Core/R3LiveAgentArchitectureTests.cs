@@ -38,7 +38,7 @@ public sealed partial class AgentCapabilityArchitectureTests
     }
 
     [Fact]
-    public void R3LiveApplicationDoesNotReferenceLegacyOrBroadCapabilities()
+    public void R3LiveApplicationDoesNotReferenceRetiredOrBroadCapabilities()
     {
         var forbidden = new[]
         {
@@ -86,7 +86,7 @@ public sealed partial class AgentCapabilityArchitectureTests
     }
 
     [Fact]
-    public void RuntimeEntrypointsRetainOnlyTheLegacyDispatch()
+    public void RuntimeEntrypointsRetainOnlyTheExistingDispatch()
     {
         var entrypointTypes = new[]
         {
