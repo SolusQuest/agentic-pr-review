@@ -667,6 +667,11 @@ internal static class R3QualityEvaluator
         R3QualityMustFindExpectation expectation)
     {
         var marker = StrictUtf8.GetBytes(expectation.TargetMarker);
+        if (subject.HasPriorSession || !MatchesCaseContext(testCase, subject))
+        {
+            return SubjectMismatch(testCase);
+        }
+
         if (subject.InitialRequest.AsSpan().IndexOf(marker) >= 0)
         {
             return CompletedFailure(
@@ -675,11 +680,6 @@ internal static class R3QualityEvaluator
                 "not_evaluated",
                 "evaluator",
                 R3QualityCodes.InitialContextLeak);
-        }
-
-        if (subject.HasPriorSession || !MatchesCaseContext(testCase, subject))
-        {
-            return SubjectMismatch(testCase);
         }
 
         if (!subject.FreshInputs!.MatchesManifest([]) ||

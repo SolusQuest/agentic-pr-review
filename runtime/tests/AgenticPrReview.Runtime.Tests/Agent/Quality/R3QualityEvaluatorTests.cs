@@ -47,22 +47,39 @@ public sealed class R3QualityEvaluatorTests
     public async Task MustFindRejectsSubstitutedCurrentContextAndPriorSession()
     {
         var testCase = R3QualityCorpusTests.ParseCorpus().Cases[0];
-        var substituted = await BootstrapAsync(
-            testCase,
-            [],
-            "No finding.",
-            [],
-            "Different marker-free synthetic review context.");
+        var expectation = Assert.IsType<R3QualityMustFindExpectation>(
+            testCase.Expectation);
+        var substitutedContexts = new[]
+        {
+            "Different marker-free synthetic review context.",
+            string.Concat(
+                "Different synthetic review context containing ",
+                expectation.TargetMarker),
+        };
+        foreach (var currentContext in substitutedContexts)
+        {
+            var substituted = await BootstrapAsync(
+                testCase,
+                [],
+                "No finding.",
+                [],
+                currentContext);
 
-        var substitutedOutcome = Evaluate(testCase, substituted.Input, Fresh());
+            var substitutedOutcome = Evaluate(
+                testCase,
+                substituted.Input,
+                Fresh());
 
-        Assert.Equal("not_evaluated", substitutedOutcome.Status);
-        Assert.Equal(R3QualityCodes.SubjectInvalid, substitutedOutcome.Code);
+            Assert.Equal("not_evaluated", substitutedOutcome.Status);
+            Assert.Equal(R3QualityCodes.SubjectInvalid, substitutedOutcome.Code);
+        }
 
         using var generationOne = await ContinuationAsync(
             testCase,
             "No finding.",
-            "Unrelated synthetic predecessor context.");
+            string.Concat(
+                "Unrelated predecessor history containing ",
+                expectation.TargetMarker));
         var generationOneOutcome = Evaluate(
             testCase,
             generationOne.Input,
@@ -146,7 +163,10 @@ public sealed class R3QualityEvaluatorTests
             [RequiredDiff(expectation)],
             "Complete.",
             [validFinding],
-            string.Concat(testCase.InitialContext, " ", expectation.TargetMarker));
+            initialContext: null,
+            trustedPolicy: string.Concat(
+                "Public synthetic quality policy with ",
+                expectation.TargetMarker));
         var leakOutcome = Evaluate(testCase, leaked.Input, Fresh());
         Assert.Equal("not_evaluated", leakOutcome.Status);
         Assert.Equal(R3QualityCodes.InitialContextLeak, leakOutcome.Code);
@@ -515,9 +535,10 @@ public sealed class R3QualityEvaluatorTests
         IReadOnlyList<ToolCall> calls,
         string summary,
         ImmutableArray<AgentFinding> findings,
-        string? initialContext = null)
+        string? initialContext = null,
+        string? trustedPolicy = null)
     {
-        var trusted = Trusted(testCase);
+        var trusted = Trusted(testCase, trustedPolicy);
         Assert.True(AgentStableRequestMaterializer.TryMaterialize(
             trusted,
             priorSessionSha256: null,
@@ -718,12 +739,15 @@ public sealed class R3QualityEvaluatorTests
     private static ProjectChatMessage User(string text) =>
         new("user", [new ProjectTextContent(text)]);
 
-    private static AgentSessionTrustedRequest Trusted(R3QualityCase testCase) =>
+    private static AgentSessionTrustedRequest Trusted(
+        R3QualityCase testCase,
+        string? trustedPolicy = null) =>
         new(
             testCase.ReviewedIdentity.RepositoryId,
             testCase.ReviewedIdentity.ReviewTarget,
             "r3-quality@synthetic",
-            "public synthetic quality policy"u8.ToArray(),
+            Encoding.UTF8.GetBytes(
+                trustedPolicy ?? "public synthetic quality policy"),
             "quality-build",
             "quality-provider",
             "quality-model",
