@@ -42,6 +42,21 @@ public sealed class RuntimeApplication
         _ = stdout;
         try
         {
+            if (args.Length > 0 && StringComparer.Ordinal.Equals(
+                    args[0],
+                    "review-live-agent-r3"))
+            {
+                var result = await LiveAgentFreshProcessCommand.RunAsync(
+                    args,
+                    CancellationToken.None);
+                if (result.DiagnosticCode is not null)
+                {
+                    await stderr.WriteLineAsync(result.DiagnosticCode);
+                }
+
+                return result.ExitCode;
+            }
+
             if (args.Length > 0 && StringComparer.Ordinal.Equals(args[0], "review-live"))
             {
                 return await LiveRuntimeApplication.RunAsync(args, fileSystem, schemas, stderr, liveExecutorFactory);

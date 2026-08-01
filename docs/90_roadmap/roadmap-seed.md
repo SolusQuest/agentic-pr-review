@@ -301,6 +301,8 @@ Exit criteria:
 
 Goal: prove a real provider can use bounded repository tools and continue a completed review session in a fresh executable invocation.
 
+Implementation status: issue [#109](https://github.com/SolusQuest/agentic-pr-review/issues/109) now supplies a deterministic concrete Host boundary over the real R3 application, DeepSeek request writer/parser, encrypted local STATE, independent lineage receipt, and two fresh runtime processes. It proves that a prior-only tool-derived fact survives only through accepted encrypted SESSION restore and is consumed by the second process. The full CI workflow and six-tool loop, Native AOT continuation path, and trusted live-provider evidence remain owned by their later focused R3 issues; this local proof does not claim those gates.
+
 Initial live tools, consisting of the R2 subset plus the three R3 additions:
 
 - `list_changed_files`;
