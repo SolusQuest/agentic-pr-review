@@ -1,5 +1,6 @@
 using AgenticPrReview.Runtime.Agent.Quality;
 using AgenticPrReview.Runtime.Agent.Session;
+using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.State;
 
@@ -7,11 +8,15 @@ namespace AgenticPrReview.Runtime.LiveAgentVerifierFixture;
 
 internal sealed class LiveAgentVerifierProfile(
     VerifierScenario scenario,
-    R3QualityCase testCase) : ILiveAgentFreshProcessProfile
+    R3QualityCase testCase,
+    ReviewedIdentity reviewedIdentity,
+    string? expectedHistorySha256) : ILiveAgentFreshProcessProfile
 {
     private LiveAgentVerifierExecution? execution;
 
     internal LiveAgentVerifierExecution? Execution => execution;
+
+    internal int ActivationCount => execution is null ? 0 : 1;
 
     public ILiveAgentFreshProcessProfileExecution Activate(
         LiveAgentFreshProcessProfileActivation activation)
@@ -26,6 +31,8 @@ internal sealed class LiveAgentVerifierProfile(
         execution = new LiveAgentVerifierExecution(
             scenario,
             testCase,
+            reviewedIdentity,
+            expectedHistorySha256,
             activation.CurrentPublicInputs);
         return execution;
     }
@@ -37,24 +44,30 @@ internal sealed class LiveAgentVerifierExecution :
     private readonly VerifierTransportFactory factory;
     private readonly VerifierCommitObserver observer;
     private readonly VerifierCombinedProof proof;
+    private readonly VerifierScenario scenario;
 
     internal LiveAgentVerifierExecution(
         VerifierScenario scenario,
         R3QualityCase testCase,
+        ReviewedIdentity reviewedIdentity,
+        string? expectedHistorySha256,
         IReadOnlyList<byte[]> currentPublicInputs)
     {
+        this.scenario = scenario;
         var copiedInputs = currentPublicInputs
             .Select(value => value.ToArray())
             .ToArray();
         factory = new VerifierTransportFactory(
             scenario,
             testCase,
+            reviewedIdentity,
+            expectedHistorySha256,
             copiedInputs);
         observer = new VerifierCommitObserver(
             scenario,
             testCase,
             CaptureFreshInputs(scenario, copiedInputs));
-        proof = new VerifierCombinedProof(factory, observer);
+        proof = new VerifierCombinedProof(scenario, factory, observer);
     }
 
     public IR3LiveAgentTransportFactory TransportFactory => factory;
@@ -64,6 +77,30 @@ internal sealed class LiveAgentVerifierExecution :
     internal VerifierCommitObserver Observer => observer;
 
     internal VerifierWireProof WireProof => factory.Proof;
+
+    internal bool PublicResultCanaryInjected =>
+        proof.PublicResultCanaryInjected;
+
+    public R3LiveAgentRequest Prepare(R3LiveAgentRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return scenario == VerifierScenario.InnerAuthorizationDenied
+            ? new R3LiveAgentRequest(
+                request.AuthorizedScope with { BuildId = "other-build" },
+                request.IsTrustedWorkflow,
+                request.IsSameRepository,
+                request.IsForkOrigin,
+                request.StateLocatorFamily,
+                request.StateRestoreIntent,
+                request.AcceptedLineage,
+                request.StateAdmissionContext,
+                request.StateRoot,
+                request.SnapshotRoot,
+                request.TrackedFiles,
+                request.ChangedFiles,
+                request.DiffSources)
+            : request;
+    }
 
     public ILiveAgentStateCommitCoordinator Observe(
         ILiveAgentStateCommitCoordinator coordinator)
@@ -94,15 +131,23 @@ internal sealed class LiveAgentVerifierExecution :
 }
 
 internal sealed class VerifierCombinedProof(
+    VerifierScenario scenario,
     VerifierTransportFactory factory,
     VerifierCommitObserver observer) : ILiveAgentFreshProcessProof
 {
+    internal bool PublicResultCanaryInjected =>
+        scenario != VerifierScenario.PublicResultCanary ||
+        StringComparer.Ordinal.Equals(
+            Environment.GetEnvironmentVariable("APR111_PUBLIC_RESULT"),
+            VerifierCanaries.PublicResult);
+
     public int RequestCount => factory.Proof.RequestCount;
 
     public string? SecondProcessFirstRequestSha256 =>
         factory.Proof.FirstRequestSha256;
 
     public bool IsSatisfiedBy(string? terminalSha256) =>
+        scenario != VerifierScenario.PublicResultCanary &&
         factory.Proof.IsSatisfiedBy(terminalSha256) &&
         observer.DelegationCount == 1 &&
         observer.ProofPassed;
@@ -124,7 +169,9 @@ internal sealed class VerifierCommitObserver(
 
     internal bool SeedReceiptValid { get; private set; }
 
-    internal bool ProofPassed => scenario == VerifierScenario.ContinuationSeed
+    internal bool ProofPassed => scenario is
+            VerifierScenario.ContinuationSeed or
+            VerifierScenario.CanaryRouting
         ? SeedReceiptValid && CommitResult?.HandoffReady == true
         : Outcome is
         {
@@ -162,11 +209,21 @@ internal sealed class VerifierCommitObserver(
 
         try
         {
-            if (scenario == VerifierScenario.ContinuationSeed)
+            if (scenario is VerifierScenario.ContinuationSeed or
+                VerifierScenario.CanaryRouting)
             {
                 SeedReceiptValid = candidate.Outcome.CompletedSessionEligible &&
                     candidate.Predecessor is null &&
                     candidate.Transition == AgentSessionHeadTransition.SameHead;
+            }
+            else if (scenario == VerifierScenario.QualityFailedAfterCommit)
+            {
+                R3QualitySubject.TryCreateEvaluatorFailure(
+                    "quality_after_commit_injected",
+                    findingCount: 0,
+                    toolCallCount: 0,
+                    out var subject);
+                Outcome = R3QualityEvaluator.Evaluate(testCase, subject!);
             }
             else
             {
@@ -210,6 +267,8 @@ internal sealed class VerifierCommitObserver(
 internal sealed class VerifierTransportFactory(
     VerifierScenario scenario,
     R3QualityCase testCase,
+    ReviewedIdentity reviewedIdentity,
+    string? expectedHistorySha256,
     IReadOnlyList<byte[]> currentPublicInputs)
     : IR3LiveAgentTransportFactory,
     IDisposable
@@ -252,8 +311,14 @@ internal sealed class VerifierTransportFactory(
         server = new DeepSeekTlsLoopbackServer(
             scenario,
             testCase,
+            reviewedIdentity,
+            expectedHistorySha256,
             currentPublicInputs,
-            authorizationHash);
+            authorizationHash,
+            scenario != VerifierScenario.CanaryRouting ||
+                StringComparer.Ordinal.Equals(
+                    credential.Value,
+                    VerifierCanaries.Provider));
         var handler = DeepSeekTransport.CreateHandler(
             TimeSpan.FromSeconds(5),
             server.ConnectAsync);
@@ -274,7 +339,11 @@ internal sealed record VerifierWireProof(
     string? FirstRequestSha256,
     string? ExpectedTerminalSha256,
     string? PriorFactSha256,
-    string? FailureCode)
+    string? HistoricalMessagesSha256,
+    bool ExactReplayValidated,
+    bool ReplayMutationMatrixValidated,
+    string? FailureCode,
+    bool CanaryRoutesValidated = false)
 {
     internal static VerifierWireProof Empty { get; } = new(
         false,
@@ -283,6 +352,9 @@ internal sealed record VerifierWireProof(
         null,
         null,
         null,
+        null,
+        false,
+        false,
         "wire_not_started");
 
     internal bool IsSatisfiedBy(string? terminalSha256) =>

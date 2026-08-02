@@ -175,6 +175,7 @@ public sealed class LiveAgentVerifierContractTests
                 "tool-arguments-invalid\tpre_commit\tno_advance\tagent_tool_arguments_invalid",
                 "terminal-ungrounded\tpre_commit\tno_advance\tagent_terminal_invalid",
                 "transition-from-head-invalid\tpre_activation\tprior_unchanged\tsession_transition_rejected",
+                "lineage-authority-tampered\tpre_activation\tprior_unchanged\tstate_lineage_mismatch",
                 "quality-failed-after-commit\tpost_commit\taccepted_preserved\tr3_fresh_process_transport_proof_failed",
                 "public-result-canary\tpost_commit\taccepted_preserved\tr3_fresh_process_transport_proof_failed",
                 "replacement-write-failed\tpost_commit\taccepted_preserved\tr3_fresh_process_output_failed",
@@ -183,48 +184,40 @@ public sealed class LiveAgentVerifierContractTests
     }
 
     [Fact]
-    public void LiveAgentVerifierNegativeMatrixRowsHaveExecutableRegressions()
+    public void LiveAgentVerifierNegativeMatrixRowsHaveIntegratedScenarios()
     {
-        var executable = typeof(LiveAgentVerifierContractTests).Assembly
-            .GetTypes()
-            .SelectMany(type => type.GetMethods(
-                BindingFlags.Instance |
-                BindingFlags.Static |
-                BindingFlags.Public |
-                BindingFlags.NonPublic))
-            .Select(method => method.Name)
-            .ToHashSet(StringComparer.Ordinal);
-        var rows = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["outer-authorization-denied"] =
-                "LiveAgentVerifierAuthorizationDenialHasZeroActivation",
-            ["inner-authorization-denied"] =
-                "LiveAgentVerifierInnerAuthorizationDenialPrecedesNetworkActivation",
-            ["provider-http-failure"] =
-                "LiveAgentVerifierProviderHttpFailuresHaveNoPublishableResult",
-            ["provider-malformed-response"] =
-                "LiveAgentVerifierMalformedProviderResponsesAreResponseInvalid",
-            ["tool-arguments-invalid"] =
-                "LiveAgentVerifierInvalidToolArgumentsStopBeforeDispatch",
-            ["terminal-ungrounded"] =
-                "LiveAgentVerifierUngroundedTerminalIsRejected",
-            ["transition-from-head-invalid"] =
-                "LiveAgentVerifierInvalidTransitionStopsBeforeProviderConstruction",
-            ["quality-failed-after-commit"] =
-                "LiveAgentVerifierQualityFailureAfterCommitPreservesAcceptedTruth",
-            ["public-result-canary"] =
-                "LiveAgentVerifierWireOracleBindsTheCompleteToolContracts",
-            ["replacement-write-failed"] =
-                "LiveAgentVerifierReplacementWriteFailurePreservesPriorEvidence",
-        };
-        var manifestCases = File.ReadAllLines(Fixture("negative-cases.tsv"))
+        var manifestRows = File.ReadAllLines(Fixture("negative-cases.tsv"))
             .Skip(1)
-            .Select(line => line.Split('\t')[0])
+            .Select(line => line.Split('\t'))
+            .ToArray();
+        var integrated = Enum.GetValues<VerifierScenario>()
+            .Where(VerifierScenarioDomain.IsNegative)
+            .Select(VerifierScenarioDomain.Negative)
+            .Select(item => new[]
+            {
+                item.Id,
+                item.Phase,
+                item.StateExpectation,
+                item.StableCode,
+            })
             .ToArray();
 
-        Assert.Equal(rows.Keys.Order(StringComparer.Ordinal),
-            manifestCases.Order(StringComparer.Ordinal));
-        Assert.All(rows.Values, name => Assert.Contains(name, executable));
+        Assert.Equal(
+            integrated.Select(row => row[0]).Order(StringComparer.Ordinal),
+            manifestRows.Take(integrated.Length)
+                .Select(row => row[0])
+                .Order(StringComparer.Ordinal));
+        Assert.All(integrated, expected => Assert.Contains(
+            manifestRows,
+            actual => actual.SequenceEqual(expected, StringComparer.Ordinal)));
+        Assert.Equal(
+            [
+                "replacement-write-failed",
+                "post_commit",
+                "accepted_preserved",
+                LiveAgentFreshProcessCodes.OutputFailed,
+            ],
+            manifestRows[^1]);
     }
 
     [Fact]
@@ -290,44 +283,46 @@ public sealed class LiveAgentVerifierContractTests
         Assert.Equal("wire_canary_invalid", randomFreshInput.Code);
     }
 
-    [Fact]
-    public async Task LiveAgentVerifierReplacementWriteFailurePreservesPriorEvidence()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LiveAgentVerifierAggregateRejectsMissingOrFabricatedReceipts(
+        bool fabricateReceipts)
     {
         var root = Path.Join(
             Path.GetTempPath(),
-            string.Concat("apr111-write-", Guid.NewGuid().ToString("N")));
-        Directory.CreateDirectory(Path.Join(root, "receipts"));
+            string.Concat("apr111-evidence-", Guid.NewGuid().ToString("N")));
+        var receiptRoot = Path.Join(root, "receipts");
+        Directory.CreateDirectory(Path.Join(receiptRoot, "negative"));
         var output = Path.Join(root, "replacement.json");
         var prior = "prior-evidence"u8.ToArray();
         File.WriteAllBytes(output, prior);
-        var fact = new string('f', 64);
-        var seedIdentity = new string('e', 64);
-        var qualities = new[]
+        if (fabricateReceipts)
         {
-            Quality("must-find-read-diff", new string('1', 64), 1, 2),
-            Quality("must-not-find-safe-line", new string('2', 64), 0, 3),
-            Quality("continuation-prior-only", new string('3', 64), 0, 1),
-        };
-        WriteReceipt(root, "must-find.json", Receipt(
-            "MustFind", 0, 3, new string('a', 64), null, qualities[0]));
-        WriteReceipt(root, "must-not-find.json", Receipt(
-            "MustNotFind", 0, 4, new string('b', 64), null, qualities[1]));
-        WriteReceipt(root, "seed.json", Receipt(
-            "ContinuationSeed",
-            0,
-            2,
-            new string('c', 64),
-            fact,
-            null,
-            seedIdentity));
-        WriteReceipt(root, "restore.json", Receipt(
-            "ContinuationRestore",
-            1,
-            2,
-            new string('d', 64),
-            fact,
-            qualities[2],
-            firstRequestSha256: new string('9', 64)));
+            foreach (var name in new[]
+            {
+                "must-find.json",
+                "must-not-find.json",
+                "seed.json",
+                "restore.json",
+                "canary.json",
+                "architecture.json",
+            })
+            {
+                File.WriteAllText(Path.Join(receiptRoot, name), "{}");
+            }
+
+            foreach (var line in File.ReadAllLines(Fixture("negative-cases.tsv"))
+                .Skip(1))
+            {
+                File.WriteAllText(
+                    Path.Join(
+                        receiptRoot,
+                        "negative",
+                        string.Concat(line.Split('\t')[0], ".json")),
+                    "{}");
+            }
+        }
 
         try
         {
@@ -341,16 +336,18 @@ public sealed class LiveAgentVerifierContractTests
                 Corpus(),
                 "--output",
                 output,
+                "--negative-manifest",
+                Fixture("negative-cases.tsv"),
+                "--canary-manifest",
+                Fixture("canary-routes.tsv"),
             ]);
 
-            Assert.Equal(1, exitCode);
+            Assert.Equal(3, exitCode);
             Assert.Equal(prior, File.ReadAllBytes(output));
-            Assert.Equal(
-                nameof(IOException),
-                File.ReadAllText(Path.Join(root, "private", "failure.code")));
-            Assert.Equal(4, Directory.GetFiles(
-                Path.Join(root, "receipts"),
-                "*.json").Length);
+            Assert.DoesNotContain(
+                "\"status\":\"passed\"",
+                Encoding.UTF8.GetString(File.ReadAllBytes(output)),
+                StringComparison.Ordinal);
         }
         finally
         {
@@ -422,6 +419,9 @@ public sealed class LiveAgentVerifierContractTests
             null,
             terminal,
             null,
+            null,
+            false,
+            false,
             null);
         Assert.True(passed.IsSatisfiedBy(terminal));
         Assert.False(passed.IsSatisfiedBy(new string('b', 64)));
@@ -446,53 +446,4 @@ public sealed class LiveAgentVerifierContractTests
         "r3-quality",
         "corpus.json");
 
-    private static VerifierQualityProjection Quality(
-        string id,
-        string caseSha256,
-        int findingCount,
-        int toolCallCount) => new(
-        id,
-        caseSha256,
-        "passed",
-        "quality",
-        R3QualityCodes.Passed,
-        findingCount,
-        toolCallCount,
-        TerminalPresent: true,
-        ExpectedCaseBound: true);
-
-    private static VerifierPhaseReceipt Receipt(
-        string scenario,
-        long generation,
-        int providerRequests,
-        string invocationIdentitySha256,
-        string? priorFactSha256,
-        VerifierQualityProjection? quality,
-        string? seedIdentitySha256 = null,
-        string? firstRequestSha256 = null) => new(
-        scenario,
-        "passed",
-        R3LiveAgentCodes.Completed,
-        generation,
-        generation == 0 ? "same_head" : "verified_ahead",
-        ModelCalls: providerRequests,
-        ToolCalls: quality?.ToolCallCount ?? 1,
-        ProviderRequests: providerRequests,
-        WireValid: true,
-        WireFailureCode: null,
-        CommitDelegatedOnce: true,
-        HandoffReady: true,
-        FirstRequestSha256: firstRequestSha256,
-        TerminalSha256: new string('8', 64),
-        PriorFactSha256: priorFactSha256,
-        InvocationIdentitySha256: invocationIdentitySha256,
-        SeedIdentitySha256: seedIdentitySha256,
-        Quality: quality);
-
-    private static void WriteReceipt(
-        string root,
-        string name,
-        VerifierPhaseReceipt receipt) => File.WriteAllBytes(
-        Path.Join(root, "receipts", name),
-        VerifierReceiptCodec.Write(receipt));
 }

@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Security.Cryptography;
 using AgenticPrReview.Runtime.Agent.Tools;
 
 namespace AgenticPrReview.Runtime.LiveAgentVerifierFixture;
@@ -22,10 +23,25 @@ internal static class Program
                 return Aggregate(parsedCommand);
             }
 
+            if (parsedCommand.Verb == "architecture")
+            {
+                return WriteArchitectureReceipt(parsedCommand);
+            }
+
+            if (parsedCommand.Verb == "negative-replacement-write-failed")
+            {
+                return WriteReplacementFailureReceipt(parsedCommand);
+            }
+
             if (parsedCommand.Scenario is not { } scenario)
             {
                 Console.Error.WriteLine(VerifierCodes.FixtureInvalid);
                 return 3;
+            }
+
+            if (VerifierScenarioDomain.IsNegative(scenario))
+            {
+                return await RunNegativePhaseAsync(parsedCommand, scenario);
             }
 
             return await RunPhaseAsync(parsedCommand, scenario);
@@ -56,16 +72,167 @@ internal static class Program
         }
     }
 
+    private static int WriteArchitectureReceipt(VerifierCommand command)
+    {
+        var receipt = VerifierArchitectureProof.Create(
+            NewProcessInstanceSha256());
+        WriteNew(command.Output, VerifierReceiptCodec.Write(receipt));
+        if (!receipt.Passed)
+        {
+            Console.Error.WriteLine(VerifierCodes.PhaseFailed);
+            return 1;
+        }
+
+        Console.WriteLine("APR_R3_LIVE_ARCHITECTURE_OK");
+        return 0;
+    }
+
+    private static async Task<int> RunNegativePhaseAsync(
+        VerifierCommand command,
+        VerifierScenario scenario)
+    {
+        var corpusBytes = File.ReadAllBytes(command.Corpus);
+        var processInstanceSha256 = NewProcessInstanceSha256();
+        if (!FreshProcessMaterializer.TryMaterialize(
+                scenario,
+                command.Root,
+                corpusBytes,
+                out var materialized,
+                command.ExpectedLineageSha256) ||
+            materialized is null ||
+            !LiveAgentFreshProcessFileSystem.TryCreate(
+                command.Root,
+                out var fileSystem) ||
+            fileSystem is null)
+        {
+            Console.Error.WriteLine(VerifierCodes.FixtureInvalid);
+            return 3;
+        }
+
+        var descriptor = VerifierScenarioDomain.Negative(scenario);
+        var stateBefore = TreeSha256(Path.Join(command.Root, "state"));
+        var lineagePath = Path.Join(
+            command.Root,
+            "host",
+            "accepted-lineage.json");
+        var lineageBefore = FileSha256(lineagePath);
+        var profile = new LiveAgentVerifierProfile(
+            scenario,
+            materialized.TestCase,
+            materialized.ReviewedIdentity,
+            command.ExpectedHistorySha256);
+        var result = await LiveAgentFreshProcessCommand.RunAsync(
+            materialized.Phase,
+            fileSystem,
+            CancellationToken.None,
+            profile);
+        var resultPath = Path.Join(
+            command.Root,
+            "output",
+            "result.json");
+        var product = File.Exists(resultPath)
+            ? LiveAgentFreshProcessCodec.ReadResult(
+                File.ReadAllBytes(resultPath))
+            : null;
+        var execution = profile.Execution;
+        var wire = execution?.WireProof;
+        var stateAfter = TreeSha256(Path.Join(command.Root, "state"));
+        var lineageAfter = FileSha256(lineagePath);
+        var actualCode = product?.Code ?? result.DiagnosticCode;
+        var unchanged = StringComparer.Ordinal.Equals(
+                stateBefore,
+                stateAfter) &&
+            StringComparer.Ordinal.Equals(lineageBefore, lineageAfter);
+        var acceptedTruthPreserved = descriptor.StateExpectation ==
+            "accepted_preserved" &&
+            product is
+            {
+                Generation: 0,
+                HandoffReady: false,
+            } &&
+            execution?.Observer.DelegationCount == 1 &&
+            lineageAfter is not null &&
+            !StringComparer.Ordinal.Equals(stateBefore, stateAfter);
+        var invariant = descriptor.StateExpectation switch
+        {
+            "no_advance" or "prior_unchanged" => unchanged &&
+                product?.Generation is null,
+            "accepted_preserved" => acceptedTruthPreserved,
+            _ => false,
+        };
+        var expectedActivation = scenario is
+            VerifierScenario.OuterAuthorizationDenied or
+            VerifierScenario.TransitionFromHeadInvalid or
+            VerifierScenario.LineageTampered
+            ? 0
+            : 1;
+        var expectedRequests = scenario switch
+        {
+            VerifierScenario.OuterAuthorizationDenied or
+                VerifierScenario.InnerAuthorizationDenied or
+                VerifierScenario.TransitionFromHeadInvalid or
+                VerifierScenario.LineageTampered => 0,
+            VerifierScenario.QualityFailedAfterCommit => 3,
+            VerifierScenario.PublicResultCanary => 4,
+            _ => 1,
+        };
+        var publicResultSafe = scenario != VerifierScenario.PublicResultCanary ||
+            File.Exists(resultPath) &&
+                !File.ReadAllText(resultPath).Contains(
+                    VerifierCanaries.PublicResult,
+                    StringComparison.Ordinal);
+        var passed = result.ExitCode != 0 &&
+            StringComparer.Ordinal.Equals(actualCode, descriptor.StableCode) &&
+            invariant &&
+            profile.ActivationCount == expectedActivation &&
+            (wire?.RequestCount ?? 0) == expectedRequests &&
+            product?.HandoffReady != true &&
+            publicResultSafe &&
+            (execution?.PublicResultCanaryInjected ??
+                scenario != VerifierScenario.PublicResultCanary);
+        var receipt = new VerifierNegativeReceipt(
+            "apr-r3-live-agent-negative-receipt-v1",
+            descriptor.Id,
+            descriptor.Phase,
+            descriptor.StateExpectation,
+            descriptor.StableCode,
+            actualCode,
+            stateBefore,
+            stateAfter,
+            lineageBefore,
+            lineageAfter,
+            product?.Generation,
+            profile.ActivationCount,
+            wire?.RequestCount ?? 0,
+            execution?.Observer.DelegationCount ?? 0,
+            product?.HandoffReady == true,
+            acceptedTruthPreserved,
+            passed,
+            processInstanceSha256);
+        WriteNew(command.Output, VerifierReceiptCodec.Write(receipt));
+        if (!passed)
+        {
+            Console.Error.WriteLine(VerifierCodes.PhaseFailed);
+            return 1;
+        }
+
+        Console.WriteLine(
+            string.Concat("APR_R3_LIVE_NEGATIVE_OK ", descriptor.Id));
+        return 0;
+    }
+
     private static async Task<int> RunPhaseAsync(
         VerifierCommand command,
         VerifierScenario scenario)
     {
         var corpusBytes = File.ReadAllBytes(command.Corpus);
+        var processInstanceSha256 = NewProcessInstanceSha256();
         if (!FreshProcessMaterializer.TryMaterialize(
                 scenario,
                 command.Root,
                 corpusBytes,
-                out var materialized) ||
+                out var materialized,
+                command.ExpectedLineageSha256) ||
             materialized is null ||
             !LiveAgentFreshProcessFileSystem.TryCreate(
                 command.Root,
@@ -78,7 +245,9 @@ internal static class Program
 
         var profile = new LiveAgentVerifierProfile(
             scenario,
-            materialized.TestCase);
+            materialized.TestCase,
+            materialized.ReviewedIdentity,
+            command.ExpectedHistorySha256);
         var result = await LiveAgentFreshProcessCommand.RunAsync(
             materialized.Phase,
             fileSystem,
@@ -116,6 +285,9 @@ internal static class Program
                 materialized.TestCase,
                 execution.Observer.Outcome);
         var wire = execution.WireProof;
+        var canaryRoutes = scenario == VerifierScenario.CanaryRouting
+            ? CreateCanaryRoutes(command, wire)
+            : null;
         var receipt = new VerifierPhaseReceipt(
             scenario.ToString(),
             result.ExitCode == 0 ? "passed" : "failed",
@@ -134,7 +306,17 @@ internal static class Program
             wire.PriorFactSha256,
             product.InvocationIdentitySha256,
             materialized.SeedIdentitySha256,
-            quality);
+            product.LineageSha256,
+            wire.HistoricalMessagesSha256,
+            wire.ExactReplayValidated,
+            wire.ReplayMutationMatrixValidated,
+            quality,
+            ProcessInstanceSha256: processInstanceSha256,
+            CanaryRoutesValidated:
+                scenario == VerifierScenario.CanaryRouting &&
+                canaryRoutes is { Count: 8 } &&
+                canaryRoutes.All(route => route.Observed),
+            CanaryRoutes: canaryRoutes);
         WriteNew(command.Output, VerifierReceiptCodec.Write(receipt));
         if (result.ExitCode != 0 || !receipt.HandoffReady)
         {
@@ -152,85 +334,114 @@ internal static class Program
 
     private static int Aggregate(VerifierCommand command)
     {
-        var receiptPaths = new[]
+        if (!VerifierEvidence.TryLoad(
+                command,
+                requireReplacement: true,
+                out var evidence,
+                out var failure) ||
+            evidence is null)
         {
-            Path.Join(command.Root, "receipts", "must-find.json"),
-            Path.Join(command.Root, "receipts", "must-not-find.json"),
-            Path.Join(command.Root, "receipts", "seed.json"),
-            Path.Join(command.Root, "receipts", "restore.json"),
-        };
-        var receipts = receiptPaths.Select(ReadReceipt).ToArray();
-        if (receipts.Any(receipt => receipt is null))
-        {
-            Directory.CreateDirectory(Path.Join(command.Root, "private"));
-            File.WriteAllText(
-                Path.Join(command.Root, "private", "failure.code"),
-                string.Join(
-                    ",",
-                    receiptPaths
-                        .Where(path => !File.Exists(path))
-                        .Select(Path.GetFileName)));
+            WriteFailureCode(command.Root, failure);
             Console.Error.WriteLine(VerifierCodes.FixtureInvalid);
             return 3;
         }
 
-        var mustFind = receipts[0]!;
-        var mustNot = receipts[1]!;
-        var seed = receipts[2]!;
-        var restore = receipts[3]!;
-        var qualities = new[]
-        {
-            mustFind.Quality,
-            mustNot.Quality,
-            restore.Quality,
-        };
-        if (receipts.Any(receipt =>
-                receipt!.Status != "passed" ||
-                !receipt.HandoffReady ||
-                !receipt.WireValid ||
-                !receipt.CommitDelegatedOnce) ||
-            mustFind.ProviderRequests != 3 ||
-            mustNot.ProviderRequests != 4 ||
-            seed.ProviderRequests != 2 ||
-            restore.ProviderRequests != 2 ||
-            mustFind.Generation != 0 ||
-            mustNot.Generation != 0 ||
-            seed.Generation != 0 ||
-            restore.Generation != 1 ||
-            seed.Quality is not null ||
-            qualities.Any(quality => quality is not
-            {
-                Status: "passed",
-                Classification: "quality",
-                Code: "r3_quality_passed",
-                ExpectedCaseBound: true,
-            }) ||
-            seed.PriorFactSha256 is null ||
-            !StringComparer.Ordinal.Equals(
-                seed.PriorFactSha256,
-                restore.PriorFactSha256) ||
-            restore.FirstRequestSha256 is null ||
-            seed.SeedIdentitySha256 is null ||
-            StringComparer.Ordinal.Equals(
-                seed.InvocationIdentitySha256,
-                restore.InvocationIdentitySha256))
-        {
-            Console.Error.WriteLine(VerifierCodes.PhaseFailed);
-            return 1;
-        }
-
-        var output = WriteReplacementRecord(
-            qualities.Select(quality => quality!).ToArray(),
-            seed.SeedIdentitySha256);
+        var output = WriteReplacementRecord(evidence);
         WriteNew(command.Output, output);
         Console.WriteLine(VerifierCodes.AggregateOk);
         return 0;
     }
 
-    private static byte[] WriteReplacementRecord(
-        IReadOnlyList<VerifierQualityProjection> qualities,
-        string seedIdentitySha256)
+    private static int WriteReplacementFailureReceipt(
+        VerifierCommand command)
     {
+        if (command.ReplacementTarget is not { } target ||
+            !File.Exists(target))
+        {
+            WriteFailureCode(command.Root, "replacement_target_invalid");
+            Console.Error.WriteLine(VerifierCodes.FixtureInvalid);
+            return 3;
+        }
+
+        if (!VerifierEvidence.TryLoad(
+                command,
+                requireReplacement: false,
+                out var evidence,
+                out var failure) ||
+            evidence is null)
+        {
+            WriteFailureCode(command.Root, failure);
+            Console.Error.WriteLine(VerifierCodes.FixtureInvalid);
+            return 3;
+        }
+
+        var prior = File.ReadAllBytes(target);
+        var stateRoot = Path.Join(command.Root, "continuation", "state");
+        var lineagePath = Path.Join(
+            command.Root,
+            "continuation",
+            "host",
+            "accepted-lineage.json");
+        var stateBefore = TreeSha256(stateRoot);
+        var lineageBefore = FileSha256(lineagePath);
+        var failedClosed = false;
+        try
+        {
+            WriteNew(target, WriteReplacementRecord(evidence));
+        }
+        catch (IOException)
+        {
+            failedClosed = true;
+        }
+
+        var stateAfter = TreeSha256(stateRoot);
+        var lineageAfter = FileSha256(lineagePath);
+        var passed = failedClosed &&
+            prior.AsSpan().SequenceEqual(File.ReadAllBytes(target)) &&
+            StringComparer.Ordinal.Equals(stateBefore, stateAfter) &&
+            StringComparer.Ordinal.Equals(lineageBefore, lineageAfter) &&
+            evidence.Restore.Generation == 1 &&
+            evidence.Restore.HandoffReady;
+        var receipt = new VerifierNegativeReceipt(
+            "apr-r3-live-agent-negative-receipt-v1",
+            "replacement-write-failed",
+            "post_commit",
+            "accepted_preserved",
+            LiveAgentFreshProcessCodes.OutputFailed,
+            failedClosed ? LiveAgentFreshProcessCodes.OutputFailed : null,
+            stateBefore,
+            stateAfter,
+            lineageBefore,
+            lineageAfter,
+            evidence.Restore.Generation,
+            ActivationCount: 0,
+            ProviderRequests: 0,
+            CommitDelegationCount: 0,
+            HandoffReady: false,
+            AcceptedTruthPreserved: passed,
+            Passed: passed,
+            ProcessInstanceSha256: NewProcessInstanceSha256());
+        WriteNew(command.Output, VerifierReceiptCodec.Write(receipt));
+        if (!passed)
+        {
+            Console.Error.WriteLine(VerifierCodes.PhaseFailed);
+            return 1;
+        }
+
+        Console.WriteLine(
+            "APR_R3_LIVE_NEGATIVE_OK replacement-write-failed");
+        return 0;
+    }
+
+    private static byte[] WriteReplacementRecord(
+        VerifierAggregateEvidence evidence)
+    {
+        var qualities = new[]
+        {
+            evidence.MustFind.Quality!,
+            evidence.MustNotFind.Quality!,
+            evidence.Restore.Quality!,
+        };
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
         {
@@ -262,23 +473,29 @@ internal static class Program
             }
             writer.WriteEndArray();
             writer.WriteStartObject("continuation");
-            writer.WriteString("seed_identity_sha256", seedIdentitySha256);
+            writer.WriteString(
+                "seed_identity_sha256",
+                evidence.Seed.SeedIdentitySha256);
             writer.WriteString("transition", "generation_0_to_1_verified_ahead");
-            writer.WriteBoolean("two_fresh_processes", true);
-            writer.WriteBoolean("restored_first_request_exact", true);
-            writer.WriteBoolean("random_prior_fact_private", true);
+            writer.WriteBoolean(
+                "two_fresh_processes",
+                evidence.TwoFreshProcesses);
+            writer.WriteBoolean(
+                "restored_first_request_exact",
+                evidence.RestoredFirstRequestExact);
+            writer.WriteBoolean(
+                "random_prior_fact_private",
+                evidence.RandomPriorFactPrivate);
             writer.WriteEndObject();
             writer.WriteString(
                 "negative_matrix_sha256",
-                LiveAgentFreshProcessDomain.RawSha256(
-                    Encoding.UTF8.GetBytes(
-                        "authorization|provider|tool|terminal|state|lineage|quality|capture|cleanup")));
+                evidence.NegativeMatrixSha256);
             writer.WriteString(
                 "canary_matrix_sha256",
-                LiveAgentFreshProcessDomain.RawSha256(
-                    Encoding.UTF8.GetBytes(
-                        "provider|state|repository|path|prompt|github|actions|workflow|prior")));
-            writer.WriteBoolean("single_shot_independent", true);
+                evidence.CanaryMatrixSha256);
+            writer.WriteBoolean(
+                "single_shot_independent",
+                evidence.SingleShotIndependent);
             writer.WriteEndObject();
         }
 
@@ -286,58 +503,130 @@ internal static class Program
         return stream.ToArray();
     }
 
-    private static VerifierPhaseReceipt? ReadReceipt(string path)
+    private static string TreeSha256(string root)
     {
-        if (!File.Exists(path))
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        if (Directory.Exists(root))
+        {
+            foreach (var path in Directory.EnumerateFiles(
+                    root,
+                    "*",
+                    SearchOption.AllDirectories)
+                .Order(StringComparer.Ordinal))
+            {
+                var relative = Path.GetRelativePath(root, path)
+                    .Replace(Path.DirectorySeparatorChar, '/');
+                hash.AppendData(Encoding.UTF8.GetBytes(relative));
+                hash.AppendData([0]);
+                hash.AppendData(File.ReadAllBytes(path));
+                hash.AppendData([0]);
+            }
+        }
+
+        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+    }
+
+    private static string? FileSha256(string path) => File.Exists(path)
+        ? LiveAgentFreshProcessDomain.RawSha256(File.ReadAllBytes(path))
+        : null;
+
+    private static string NewProcessInstanceSha256() =>
+        LiveAgentFreshProcessDomain.RawSha256(
+            RandomNumberGenerator.GetBytes(32));
+
+    private static IReadOnlyList<VerifierCanaryRouteOutcome>?
+        CreateCanaryRoutes(
+            VerifierCommand command,
+            VerifierWireProof wire)
+    {
+        if (!VerifierEvidence.TryReadCanaryManifest(
+                command.CanaryManifest,
+                out var rows,
+                out _) ||
+            !wire.CanaryRoutesValidated ||
+            !CanarySinksValid(command.Root))
         {
             return null;
         }
 
-        using var document = JsonDocument.Parse(File.ReadAllBytes(path));
-        var root = document.RootElement;
-        VerifierQualityProjection? quality = null;
-        if (root.GetProperty("quality").ValueKind == JsonValueKind.Object)
-        {
-            var value = root.GetProperty("quality");
-            quality = new VerifierQualityProjection(
-                value.GetProperty("case_id").GetString()!,
-                value.GetProperty("case_sha256").GetString()!,
-                value.GetProperty("status").GetString()!,
-                value.GetProperty("classification").GetString()!,
-                value.GetProperty("code").GetString()!,
-                value.GetProperty("finding_count").GetInt32(),
-                value.GetProperty("tool_call_count").GetInt32(),
-                value.GetProperty("terminal_present").GetBoolean(),
-                value.GetProperty("expected_case_bound").GetBoolean());
-        }
-
-        return new VerifierPhaseReceipt(
-            root.GetProperty("scenario").GetString()!,
-            root.GetProperty("status").GetString()!,
-            root.GetProperty("product_code").GetString()!,
-            root.GetProperty("generation").ValueKind == JsonValueKind.Null
-                ? null
-                : root.GetProperty("generation").GetInt64(),
-            root.GetProperty("transition").GetString()!,
-            root.GetProperty("model_calls").GetInt32(),
-            root.GetProperty("tool_calls").GetInt32(),
-            root.GetProperty("provider_requests").GetInt32(),
-            root.GetProperty("wire_valid").GetBoolean(),
-            NullableString(root, "wire_failure_code"),
-            root.GetProperty("commit_delegated_once").GetBoolean(),
-            root.GetProperty("handoff_ready").GetBoolean(),
-            NullableString(root, "first_request_sha256"),
-            NullableString(root, "terminal_sha256"),
-            NullableString(root, "prior_fact_sha256"),
-            root.GetProperty("invocation_identity_sha256").GetString()!,
-            NullableString(root, "seed_identity_sha256"),
-            quality);
+        return rows
+            .Where(row => row.Id != "prior")
+            .Select(row => new VerifierCanaryRouteOutcome(
+                row.Id,
+                row.PhaseOrRoute,
+                Observed: true))
+            .ToArray();
     }
 
-    private static string? NullableString(JsonElement root, string name) =>
-        root.GetProperty(name).ValueKind == JsonValueKind.Null
-            ? null
-            : root.GetProperty(name).GetString();
+    private static bool CanarySinksValid(string root)
+    {
+        var reviewed = Path.GetFullPath(Path.Join(
+            root,
+            "input",
+            "reviewed-input.json"));
+        var manifest = Path.GetFullPath(Path.Join(
+            root,
+            "input",
+            "snapshot-manifest.json"));
+        if (!File.Exists(reviewed) ||
+            !File.Exists(manifest) ||
+            !File.ReadAllText(reviewed).Contains(
+                VerifierCanaries.Prompt,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var manifestText = File.ReadAllText(manifest);
+        if (!manifestText.Contains(
+                VerifierCanaries.Repository,
+                StringComparison.Ordinal) ||
+            !manifestText.Contains(
+                VerifierCanaries.Path,
+                StringComparison.Ordinal) ||
+            !manifestText.Contains(
+                VerifierCanaries.Prompt,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var forbiddenEverywhere = new[]
+        {
+            VerifierCanaries.Provider,
+            VerifierCanaries.State,
+            VerifierCanaries.StateBase64,
+            VerifierCanaries.GitHub,
+            VerifierCanaries.Actions,
+            VerifierCanaries.Workflow,
+            VerifierCanaries.PublicResult,
+        };
+        var routed = new[]
+        {
+            VerifierCanaries.Repository,
+            VerifierCanaries.Path,
+            VerifierCanaries.Prompt,
+        };
+        foreach (var path in Directory.EnumerateFiles(
+            root,
+            "*",
+            SearchOption.AllDirectories))
+        {
+            var bytes = File.ReadAllBytes(path);
+            if (forbiddenEverywhere.Any(value => Contains(bytes, value)) ||
+                path != reviewed &&
+                path != manifest &&
+                routed.Any(value => Contains(bytes, value)))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool Contains(ReadOnlySpan<byte> bytes, string value) =>
+        bytes.IndexOf(Encoding.UTF8.GetBytes(value)) >= 0;
 
     private static void WriteNew(string path, ReadOnlySpan<byte> bytes)
     {
@@ -351,5 +640,11 @@ internal static class Program
             FileOptions.WriteThrough);
         stream.Write(bytes);
         stream.Flush(flushToDisk: true);
+    }
+
+    private static void WriteFailureCode(string root, string code)
+    {
+        Directory.CreateDirectory(Path.Join(root, "private"));
+        File.WriteAllText(Path.Join(root, "private", "failure.code"), code);
     }
 }

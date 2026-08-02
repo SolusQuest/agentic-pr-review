@@ -29,7 +29,8 @@ internal static class FreshProcessMaterializer
         VerifierScenario scenario,
         string root,
         ReadOnlySpan<byte> corpusBytes,
-        out MaterializedVerifierPhase? materialized)
+        out MaterializedVerifierPhase? materialized,
+        string? expectedLineageSha256 = null)
     {
         materialized = null;
         if (!R3QualityCorpusParser.TryParse(
@@ -51,6 +52,11 @@ internal static class FreshProcessMaterializer
             : testCase!.ReviewedIdentity with { };
         var reviewContext = scenario == VerifierScenario.ContinuationSeed
             ? testCase.ProcessOneContext
+            : scenario == VerifierScenario.CanaryRouting
+                ? string.Concat(
+                    "Review untrusted repository content containing ",
+                    VerifierCanaries.Prompt,
+                    ".")
             : testCase.InitialContext;
         if (reviewContext is null)
         {
@@ -96,18 +102,13 @@ internal static class FreshProcessMaterializer
             stable.StablePlan.ToolsetSha256,
             trusted.BuildId);
 
-        var continuing = scenario == VerifierScenario.ContinuationRestore;
-        string? expectedLineage = null;
-        if (continuing)
+        var continuing = VerifierScenarioDomain.IsContinuing(scenario);
+        if (continuing != (expectedLineageSha256 is not null) ||
+            expectedLineageSha256 is not null &&
+                !LiveAgentFreshProcessDomain.IsSha256(
+                    expectedLineageSha256))
         {
-            var lineagePath = Path.Join(root, "host", "accepted-lineage.json");
-            if (!File.Exists(lineagePath))
-            {
-                return false;
-            }
-
-            expectedLineage = LiveAgentFreshProcessDomain.RawSha256(
-                File.ReadAllBytes(lineagePath));
+            return false;
         }
 
         var invocation = scenario switch
@@ -116,19 +117,50 @@ internal static class FreshProcessMaterializer
             VerifierScenario.MustNotFind => "issue111_must_not_find",
             VerifierScenario.ContinuationSeed => "issue111_seed_process",
             VerifierScenario.ContinuationRestore => "issue111_restore_process",
+            VerifierScenario.CanaryRouting => "issue111_canary_routing",
+            VerifierScenario.OuterAuthorizationDenied =>
+                "issue111_negative_outer_authorization",
+            VerifierScenario.InnerAuthorizationDenied =>
+                "issue111_negative_inner_authorization",
+            VerifierScenario.ProviderHttpFailure =>
+                "issue111_negative_provider_http",
+            VerifierScenario.ProviderMalformedResponse =>
+                "issue111_negative_provider_malformed",
+            VerifierScenario.ToolArgumentsInvalid =>
+                "issue111_negative_tool_arguments",
+            VerifierScenario.TerminalUngrounded =>
+                "issue111_negative_terminal_ungrounded",
+            VerifierScenario.TransitionFromHeadInvalid =>
+                "issue111_negative_transition",
+            VerifierScenario.LineageTampered =>
+                "issue111_negative_lineage_tampered",
+            VerifierScenario.QualityFailedAfterCommit =>
+                "issue111_negative_quality_after_commit",
+            VerifierScenario.PublicResultCanary =>
+                "issue111_negative_public_result_canary",
             _ => throw new InvalidOperationException(),
         };
-        var transition = continuing ? "verified_ahead" : "same_head";
+        var transition = scenario == VerifierScenario.TransitionFromHeadInvalid
+            ? "diverged"
+            : continuing
+                ? "verified_ahead"
+                : "same_head";
         var fromHead = continuing
             ? testCase.ReviewedIdentity.BaseSha
             : identity.HeadSha;
         var receipt = LiveAgentFreshProcessDomain.TransitionReceiptSha256(
-            expectedLineage,
+            expectedLineageSha256,
             transition,
             fromHead,
             identity.BaseSha,
             identity.HeadSha,
             invocation);
+        var authorizedScope = LiveAgentFreshProcessDomain.ScopeDocument(scope);
+        if (scenario == VerifierScenario.OuterAuthorizationDenied)
+        {
+            authorizedScope = authorizedScope with { BuildId = "other-build" };
+        }
+
         var authorization = new LiveAgentFreshProcessAuthorizationDocument(
             LiveAgentFreshProcessDomain.AuthorizationKind,
             new LiveAgentFreshProcessStableAuthority(
@@ -141,7 +173,7 @@ internal static class FreshProcessMaterializer
                 trusted.ModelId,
                 trusted.AdapterId,
                 sessionId),
-            LiveAgentFreshProcessDomain.ScopeDocument(scope),
+            authorizedScope,
             IsTrustedWorkflow: true,
             IsSameRepository: true,
             IsForkOrigin: false,
@@ -155,12 +187,14 @@ internal static class FreshProcessMaterializer
                 identity.HeadSha,
                 receipt),
             invocation,
-            expectedLineage);
+            expectedLineageSha256);
         var reviewed = new LiveAgentFreshProcessReviewedInputDocument(
             LiveAgentFreshProcessDomain.ReviewedInputKind,
             LiveAgentFreshProcessDomain.IdentityDocument(identity),
             reviewContext);
-        var manifest = Manifest(identity, testCase);
+        var manifest = scenario == VerifierScenario.CanaryRouting
+            ? CanaryManifest(identity, testCase)
+            : Manifest(identity, testCase);
 
         Write(
             Path.Join(root, "host", "authorization.json"),
@@ -208,8 +242,21 @@ internal static class FreshProcessMaterializer
             VerifierScenario.MustFind => R3QualityCaseKind.MustFind,
             VerifierScenario.MustNotFind => R3QualityCaseKind.MustNotFind,
             VerifierScenario.ContinuationSeed or
-                VerifierScenario.ContinuationRestore =>
+                VerifierScenario.ContinuationRestore or
+                VerifierScenario.TransitionFromHeadInvalid or
+                VerifierScenario.LineageTampered =>
                     R3QualityCaseKind.Continuation,
+            VerifierScenario.CanaryRouting or
+                VerifierScenario.PublicResultCanary =>
+                    R3QualityCaseKind.MustNotFind,
+            VerifierScenario.OuterAuthorizationDenied or
+                VerifierScenario.InnerAuthorizationDenied or
+                VerifierScenario.ProviderHttpFailure or
+                VerifierScenario.ProviderMalformedResponse or
+                VerifierScenario.ToolArgumentsInvalid or
+                VerifierScenario.TerminalUngrounded or
+                VerifierScenario.QualityFailedAfterCommit =>
+                    R3QualityCaseKind.MustFind,
             _ => throw new InvalidOperationException(),
         };
         testCase = corpus.Cases.SingleOrDefault(item => item.Kind == kind);
@@ -276,6 +323,89 @@ internal static class FreshProcessMaterializer
             files.Select(file => file.Path).Order(StringComparer.Ordinal).ToArray(),
             files,
             [changedDocument],
+            [sourceDocument]);
+    }
+
+    private static LiveAgentFreshProcessSnapshotManifestDocument CanaryManifest(
+        ReviewedIdentity identity,
+        R3QualityCase testCase)
+    {
+        var path = string.Concat("src/", VerifierCanaries.Path, ".cs");
+        var content = string.Concat(
+            "// ",
+            VerifierCanaries.Repository,
+            "\n// ",
+            VerifierCanaries.Prompt,
+            "\ninternal static class CanaryRoute {}\n");
+        var bytes = Encoding.UTF8.GetBytes(content);
+        var source = new ReviewedDiffSource(
+            identity,
+            path,
+            null,
+            "modified",
+            false,
+            [
+                new ReviewedDiffHunk(
+                    0,
+                    0,
+                    1,
+                    3,
+                    [
+                        new ReviewedDiffLine(
+                            "addition",
+                            null,
+                            1,
+                            "// " + VerifierCanaries.Repository),
+                        new ReviewedDiffLine(
+                            "addition",
+                            null,
+                            2,
+                            "// " + VerifierCanaries.Prompt),
+                        new ReviewedDiffLine(
+                            "addition",
+                            null,
+                            3,
+                            "internal static class CanaryRoute {}"),
+                    ]),
+            ]);
+        var file = new LiveAgentFreshProcessFileDocument(
+            path,
+            bytes.Length,
+            LiveAgentFreshProcessDomain.RawSha256(bytes),
+            Convert.ToBase64String(bytes));
+        var changed = new LiveAgentFreshProcessChangedFileDocument(
+            path,
+            null,
+            "modified",
+            Additions: 3,
+            Deletions: 0,
+            Changes: 3,
+            "available",
+            source.PatchSha256,
+            SourceTruncated: false);
+        var sourceDocument = new LiveAgentFreshProcessDiffSourceDocument(
+            path,
+            null,
+            "modified",
+            SourceTruncated: false,
+            source.Hunks.Select(hunk =>
+                new LiveAgentFreshProcessDiffHunkDocument(
+                    hunk.OldStart,
+                    hunk.OldCount,
+                    hunk.NewStart,
+                    hunk.NewCount,
+                    hunk.Lines.Select(line =>
+                        new LiveAgentFreshProcessDiffLineDocument(
+                            line.Kind,
+                            line.OldLine,
+                            line.NewLine,
+                            line.Text)).ToArray())).ToArray());
+        return new LiveAgentFreshProcessSnapshotManifestDocument(
+            LiveAgentFreshProcessDomain.SnapshotManifestKind,
+            LiveAgentFreshProcessDomain.IdentityDocument(identity),
+            [path],
+            [file],
+            [changed],
             [sourceDocument]);
     }
 

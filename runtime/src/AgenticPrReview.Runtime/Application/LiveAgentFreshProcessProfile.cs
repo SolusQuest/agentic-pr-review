@@ -27,6 +27,8 @@ internal interface ILiveAgentFreshProcessProfileExecution : IDisposable
 {
     IR3LiveAgentTransportFactory TransportFactory { get; }
 
+    R3LiveAgentRequest Prepare(R3LiveAgentRequest request);
+
     ILiveAgentStateCommitCoordinator Observe(
         ILiveAgentStateCommitCoordinator coordinator);
 
@@ -77,6 +79,12 @@ internal sealed class LiveAgentFreshProcessDeterministicProfileExecution :
     {
         ArgumentNullException.ThrowIfNull(coordinator);
         return coordinator;
+    }
+
+    public R3LiveAgentRequest Prepare(R3LiveAgentRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return request;
     }
 
     public void Dispose() => factory.Dispose();

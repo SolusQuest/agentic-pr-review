@@ -232,7 +232,7 @@ internal static class LiveAgentFreshProcessCommand
             stateCommitCoordinator,
             timeProvider);
         var execution = await new R3LiveAgentApplication(dependencies)
-            .RunAsync(request, cancellationToken);
+            .RunAsync(profileExecution.Prepare(request), cancellationToken);
         var proof = profileExecution.Proof;
         var receipt = lineageSink.PublicationReceipt;
         var applicationResult = execution.Result;

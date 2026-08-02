@@ -14,6 +14,7 @@ CORPUS="${RUNTIME_TESTS}/fixtures/agent/r3-quality/corpus.json"
 FIXTURES="${RUNTIME_TESTS}/fixtures/agent/r3-live-agent"
 GOLDEN="${FIXTURES}/replacement-record.json.golden"
 NEGATIVE_CASES="${FIXTURES}/negative-cases.tsv"
+CANARY_ROUTES="${FIXTURES}/canary-routes.tsv"
 ASSEMBLY="AgenticPrReview.Runtime.LiveAgentVerifierFixture"
 DOTNET_CMD="${DOTNET_CMD:-dotnet}"
 PROVIDER_CANARY="APR111_PROVIDER_SECRET_CANARY"
@@ -24,6 +25,7 @@ WORKFLOW_CANARY="APR111_UNRELATED_WORKFLOW_CANARY"
 REPOSITORY_CANARY="APR111_REPOSITORY_CANARY"
 PATH_CANARY="APR111_PATH_CANARY"
 PROMPT_CANARY="APR111_PROMPT_INJECTION_CANARY"
+PUBLIC_RESULT_CANARY="APR111_PUBLIC_RESULT_CANARY"
 
 _tempdirs=()
 
@@ -101,6 +103,7 @@ _closed_environment() {
     wsl_environment+="AGENTIC_REVIEW_R3_STATE_KEY_B64:GITHUB_TOKEN:"
     wsl_environment+="ACTIONS_RUNTIME_TOKEN:APR111_UNRELATED_WORKFLOW:"
     wsl_environment+="APR111_REPOSITORY:APR111_PATH:APR111_PROMPT"
+    wsl_environment+=":APR111_PUBLIC_RESULT"
     printf '%s\0' \
       "AGENTIC_REVIEW_DEEPSEEK_API_KEY=${PROVIDER_CANARY}" \
       "AGENTIC_REVIEW_R3_STATE_KEY_B64=${STATE_KEY_B64}" \
@@ -110,6 +113,7 @@ _closed_environment() {
       "APR111_REPOSITORY=${REPOSITORY_CANARY}" \
       "APR111_PATH=${PATH_CANARY}" \
       "APR111_PROMPT=${PROMPT_CANARY}" \
+      "APR111_PUBLIC_RESULT=${PUBLIC_RESULT_CANARY}" \
       "WSLENV=${wsl_environment}" \
       "DOTNET_CLI_HOME=${windows_root}" \
       "DOTNET_ROOT=${windows_dotnet_root}" \
@@ -141,6 +145,7 @@ _closed_environment() {
       "APR111_REPOSITORY=${REPOSITORY_CANARY}" \
       "APR111_PATH=${PATH_CANARY}" \
       "APR111_PROMPT=${PROMPT_CANARY}" \
+      "APR111_PUBLIC_RESULT=${PUBLIC_RESULT_CANARY}" \
       "DOTNET_CLI_HOME=${root}/dotnet-home" \
       "DOTNET_ROOT=$(dirname "${dotnet_path}")" \
       "HOME=${root}/home" \
@@ -199,6 +204,8 @@ _run_fixture() {
   local phase_root="$3"
   local output="$4"
   local log="$5"
+  shift 5
+  local -a extra_arguments=("$@")
   local -a environment
   mapfile -d '' -t environment < <(_closed_environment "${controlled_root}")
   local corpus="${CORPUS}"
@@ -210,13 +217,24 @@ _run_fixture() {
     root_argument="$(_windows_path "${phase_root}")"
     output_argument="$(_windows_path "${output}")"
     runner="$(_windows_path "${RUNNER_DLL}")"
+    local index
+    for ((index = 0; index < ${#extra_arguments[@]}; index++)); do
+      case "${extra_arguments[index]}" in
+        --negative-manifest|--canary-manifest|--replacement-target)
+          ((index += 1))
+          extra_arguments[index]="$(_windows_path \
+            "${extra_arguments[index]}")"
+          ;;
+      esac
+    done
   fi
   _run_closed_process 45 "${controlled_root}" \
     "${environment[@]}" APR_R3_LIVE_COMMAND \
     "${DOTNET_EXE}" "${runner}" "${verb}" \
     --root "${root_argument}" \
     --corpus "${corpus}" \
-    --output "${output_argument}" >"${log}" 2>&1
+    --output "${output_argument}" \
+    "${extra_arguments[@]}" >"${log}" 2>&1
 }
 
 _extract_hash() {
@@ -225,6 +243,70 @@ _extract_hash() {
   grep -o "\"${field}\":\"[0-9a-f]\{64\}\"" "${path}" |
     head -n 1 |
     cut -d '"' -f 4
+}
+
+_assert_phase_marker() {
+  local log="$1"
+  local marker="$2"
+  tr -d '\r' <"${log}" | grep -Fxq "${marker}"
+}
+
+_run_negative_case() {
+  local root="$1"
+  local case_id="$2"
+  local verb="$3"
+  local requires_prior="$4"
+  local tamper_lineage="$5"
+  local phase_root="${root}/negative-runs/${case_id}"
+  local receipt="${root}/receipts/negative/${case_id}.json"
+  local private_receipt="${phase_root}/private/negative-receipt.json"
+  local log="${root}/negative-${case_id}.log"
+  mkdir -p -- "${phase_root}" "${root}/receipts/negative"
+  local -a extra_arguments=()
+  if [[ "${requires_prior}" == yes ]]; then
+    local seed_output="${phase_root}/private/seed-receipt.json"
+    local seed_log="${root}/negative-${case_id}-seed.log"
+    _run_fixture "${root}" continuation-seed "${phase_root}" \
+      "${seed_output}" "${seed_log}" ||
+      _fail "APR_R3_LIVE_NEGATIVE_SEED_FAILED ${case_id}"
+    _assert_phase_marker \
+      "${seed_log}" "APR_R3_LIVE_PHASE_OK ContinuationSeed" ||
+      _fail "APR_R3_LIVE_NEGATIVE_SEED_MARKER_INVALID ${case_id}"
+    local expected_lineage expected_history
+    expected_lineage="$(_extract_hash lineage_sha256 "${seed_output}")"
+    expected_history="$(_extract_hash \
+      historical_messages_sha256 "${seed_output}")"
+    [[ -n "${expected_lineage}" && -n "${expected_history}" ]] ||
+      _fail "APR_R3_LIVE_NEGATIVE_SEED_RECEIPT_INVALID ${case_id}"
+    mkdir -p -- "${root}/receipts/negative-seeds"
+    mv -- "${seed_output}" \
+      "${root}/receipts/negative-seeds/${case_id}.json"
+    extra_arguments=(
+      --expected-lineage-sha256 "${expected_lineage}"
+      --expected-history-sha256 "${expected_history}"
+    )
+    if [[ "${tamper_lineage}" == yes ]]; then
+      node -e '
+        const fs = require("fs");
+        const path = process.argv[1];
+        const value = JSON.parse(fs.readFileSync(path, "utf8"));
+        value.invocation_identity_sha256 = "f".repeat(64);
+        fs.writeFileSync(path, JSON.stringify(value));
+      ' "${phase_root}/host/accepted-lineage.json"
+    fi
+  fi
+
+  if ! _run_fixture "${root}" "${verb}" "${phase_root}" \
+      "${private_receipt}" "${log}" "${extra_arguments[@]}"; then
+    tail -n 20 "${log}" >&2
+    [[ ! -f "${private_receipt}" ]] ||
+      sed -n '1p' "${private_receipt}" >&2
+    _fail "APR_R3_LIVE_NEGATIVE_EXECUTION_FAILED ${case_id}"
+  fi
+  _assert_phase_marker \
+    "${log}" "APR_R3_LIVE_NEGATIVE_OK ${case_id}" ||
+    _fail "APR_R3_LIVE_NEGATIVE_MARKER_INVALID ${case_id}"
+  mv -- "${private_receipt}" "${receipt}"
 }
 
 _run_once() {
@@ -243,8 +325,24 @@ _run_once() {
     mkdir -p -- "${root}/${directory}"
     local private_output="${root}/${directory}/private/receipt.json"
     local log="${root}/${receipt}.log"
+    local -a extra_arguments=()
+    if [[ "${verb}" == continuation-restore ]]; then
+      local expected_lineage expected_history
+      expected_lineage="$(_extract_hash \
+        lineage_sha256 "${root}/receipts/seed.json")"
+      expected_history="$(_extract_hash \
+        historical_messages_sha256 "${root}/receipts/seed.json")"
+      [[ -n "${expected_lineage}" ]] ||
+        _fail APR_R3_LIVE_SEED_LINEAGE_MISSING
+      [[ -n "${expected_history}" ]] ||
+        _fail APR_R3_LIVE_SEED_HISTORY_MISSING
+      extra_arguments=(
+        --expected-lineage-sha256 "${expected_lineage}"
+        --expected-history-sha256 "${expected_history}"
+      )
+    fi
     if ! _run_fixture "${root}" "${verb}" "${root}/${directory}" \
-        "${private_output}" "${log}"; then
+        "${private_output}" "${log}" "${extra_arguments[@]}"; then
       tail -n 20 "${log}" >&2
       if [[ -f "${root}/${directory}/private/failure.code" ]]; then
         sed -n '1p' "${root}/${directory}/private/failure.code" >&2
@@ -260,8 +358,79 @@ _run_once() {
     mv -- "${private_output}" "${root}/receipts/${receipt}.json"
   done
 
+  mkdir -p -- "${root}/canary"
+  local canary_output="${root}/canary/private/receipt.json"
+  local canary_log="${root}/canary.log"
+  _run_fixture "${root}" canary-routing "${root}/canary" \
+    "${canary_output}" "${canary_log}" \
+    --canary-manifest "${CANARY_ROUTES}" ||
+    _fail APR_R3_LIVE_CANARY_EXECUTION_FAILED
+  _assert_phase_marker \
+    "${canary_log}" "APR_R3_LIVE_PHASE_OK CanaryRouting" ||
+    _fail APR_R3_LIVE_CANARY_MARKER_INVALID
+  mv -- "${canary_output}" "${root}/receipts/canary.json"
+
+  mkdir -p -- "${root}/architecture/private"
+  local architecture_output="${root}/architecture/private/receipt.json"
+  local architecture_log="${root}/architecture.log"
+  _run_fixture "${root}" architecture "${root}/architecture" \
+    "${architecture_output}" "${architecture_log}" ||
+    _fail APR_R3_LIVE_ARCHITECTURE_EXECUTION_FAILED
+  _assert_phase_marker \
+    "${architecture_log}" APR_R3_LIVE_ARCHITECTURE_OK ||
+    _fail APR_R3_LIVE_ARCHITECTURE_MARKER_INVALID
+  mv -- "${architecture_output}" "${root}/receipts/architecture.json"
+
+  local negative
+  local -a negatives=(
+    'outer-authorization-denied|negative-outer-authorization-denied|no|no'
+    'inner-authorization-denied|negative-inner-authorization-denied|no|no'
+    'provider-http-failure|negative-provider-http-failure|no|no'
+    'provider-malformed-response|negative-provider-malformed-response|no|no'
+    'tool-arguments-invalid|negative-tool-arguments-invalid|no|no'
+    'terminal-ungrounded|negative-terminal-ungrounded|no|no'
+    'transition-from-head-invalid|negative-transition-from-head-invalid|yes|no'
+    'lineage-authority-tampered|negative-lineage-authority-tampered|yes|yes'
+    'quality-failed-after-commit|negative-quality-failed-after-commit|no|no'
+    'public-result-canary|negative-public-result-canary|no|no'
+  )
+  for negative in "${negatives[@]}"; do
+    local case_id negative_verb requires_prior tamper_lineage
+    IFS='|' read -r case_id negative_verb requires_prior tamper_lineage \
+      <<<"${negative}"
+    _run_negative_case "${root}" "${case_id}" "${negative_verb}" \
+      "${requires_prior}" "${tamper_lineage}"
+  done
+
+  local prior_replacement="${root}/prior-replacement.json"
+  local replacement_receipt=
+  replacement_receipt="${root}/private/replacement-write-receipt.json"
+  local replacement_log="${root}/negative-replacement-write-failed.log"
+  printf '%s\n' prior-accepted-evidence >"${prior_replacement}"
+  if ! _run_fixture "${root}" negative-replacement-write-failed "${root}" \
+      "${replacement_receipt}" "${replacement_log}" \
+      --negative-manifest "${NEGATIVE_CASES}" \
+      --canary-manifest "${CANARY_ROUTES}" \
+      --replacement-target "${prior_replacement}"; then
+    tail -n 20 "${replacement_log}" >&2
+    [[ ! -f "${root}/private/failure.code" ]] ||
+      sed -n '1p' "${root}/private/failure.code" >&2
+    [[ ! -f "${replacement_receipt}" ]] ||
+      sed -n '1p' "${replacement_receipt}" >&2
+    _fail APR_R3_LIVE_REPLACEMENT_NEGATIVE_EXECUTION_FAILED
+  fi
+  _assert_phase_marker "${replacement_log}" \
+    "APR_R3_LIVE_NEGATIVE_OK replacement-write-failed" ||
+    _fail APR_R3_LIVE_REPLACEMENT_NEGATIVE_MARKER_INVALID
+  grep -Fxq prior-accepted-evidence "${prior_replacement}" ||
+    _fail APR_R3_LIVE_REPLACEMENT_PRIOR_CHANGED
+  mv -- "${replacement_receipt}" \
+    "${root}/receipts/negative/replacement-write-failed.json"
+
   if ! _run_fixture "${root}" aggregate "${root}" \
-      "${root}/replacement.json" "${root}/aggregate.log"; then
+      "${root}/replacement.json" "${root}/aggregate.log" \
+      --negative-manifest "${NEGATIVE_CASES}" \
+      --canary-manifest "${CANARY_ROUTES}"; then
     tail -n 20 "${root}/aggregate.log" >&2
     if [[ -f "${root}/private/failure.code" ]]; then
       sed -n '1p' "${root}/private/failure.code" >&2
@@ -271,8 +440,10 @@ _run_once() {
   tr -d '\r' <"${root}/aggregate.log" |
     grep -Fxq APR_R3_LIVE_DETERMINISTIC_OK ||
     _fail APR_R3_LIVE_AGGREGATE_MARKER_INVALID
-  cmp -s -- "${root}/replacement.json" "${GOLDEN}" ||
+  if ! cmp -s -- "${root}/replacement.json" "${GOLDEN}"; then
+    sed -n '1p' "${root}/replacement.json" >&2
     _fail APR_R3_LIVE_GOLDEN_MISMATCH
+  fi
 
   if grep -Raq \
       -e "${PROVIDER_CANARY}" \
@@ -281,12 +452,21 @@ _run_once() {
       -e "${GITHUB_CANARY}" \
       -e "${ACTIONS_CANARY}" \
       -e "${WORKFLOW_CANARY}" \
-      -e "${REPOSITORY_CANARY}" \
-      -e "${PATH_CANARY}" \
-      -e "${PROMPT_CANARY}" \
+      -e "${PUBLIC_RESULT_CANARY}" \
       "${root}"; then
     _fail APR_R3_LIVE_CANARY_PUBLISHED
   fi
+  local routed_path
+  while IFS= read -r routed_path; do
+    case "${routed_path}" in
+      "${root}/canary/input/reviewed-input.json"|"${root}/canary/input/snapshot-manifest.json") ;;
+      *) _fail "APR_R3_LIVE_CANARY_ROUTE_PUBLISHED ${routed_path}" ;;
+    esac
+  done < <(grep -RIl \
+    -e "${REPOSITORY_CANARY}" \
+    -e "${PATH_CANARY}" \
+    -e "${PROMPT_CANARY}" \
+    "${root}" || true)
 }
 
 _validate_manifest() {
@@ -296,6 +476,11 @@ _validate_manifest() {
     _fail APR_R3_LIVE_NEGATIVE_MANIFEST_INVALID
   [[ -z "$(cut -f1 "${NEGATIVE_CASES}" | tail -n +2 | sort | uniq -d)" ]] ||
     _fail APR_R3_LIVE_NEGATIVE_MANIFEST_DUPLICATE
+  IFS= read -r header <"${CANARY_ROUTES}"
+  [[ "${header}" == $'class\tapproved_route' ]] ||
+    _fail APR_R3_LIVE_CANARY_MANIFEST_INVALID
+  [[ -z "$(cut -f1 "${CANARY_ROUTES}" | tail -n +2 | sort | uniq -d)" ]] ||
+    _fail APR_R3_LIVE_CANARY_MANIFEST_DUPLICATE
 }
 
 run_deterministic() {
@@ -304,6 +489,7 @@ run_deterministic() {
   _require_file corpus "${CORPUS}"
   _require_file golden "${GOLDEN}"
   _require_file negative-cases "${NEGATIVE_CASES}"
+  _require_file canary-routes "${CANARY_ROUTES}"
   _validate_manifest
 
   local build_root

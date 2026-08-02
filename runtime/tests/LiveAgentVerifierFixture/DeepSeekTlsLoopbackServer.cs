@@ -4,8 +4,10 @@ using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Quality;
@@ -21,6 +23,7 @@ internal sealed class DeepSeekTlsLoopbackServer : IDisposable
     private readonly R3QualityCase testCase;
     private readonly byte[][] currentPublicInputs;
     private readonly string authorizationHash;
+    private readonly bool providerCanaryValid;
     private readonly TcpListener listener;
     private readonly X509Certificate2 certificate;
     private readonly CancellationTokenSource timeout =
@@ -35,8 +38,11 @@ internal sealed class DeepSeekTlsLoopbackServer : IDisposable
     internal DeepSeekTlsLoopbackServer(
         VerifierScenario scenario,
         R3QualityCase testCase,
+        ReviewedIdentity reviewedIdentity,
+        string? expectedHistorySha256,
         IReadOnlyList<byte[]> currentPublicInputs,
-        string authorizationHash)
+        string authorizationHash,
+        bool providerCanaryValid)
     {
         this.scenario = scenario;
         this.testCase = testCase;
@@ -44,7 +50,12 @@ internal sealed class DeepSeekTlsLoopbackServer : IDisposable
             .Select(value => value.ToArray())
             .ToArray();
         this.authorizationHash = authorizationHash;
-        script = new VerifierProviderScript(scenario, testCase);
+        this.providerCanaryValid = providerCanaryValid;
+        script = new VerifierProviderScript(
+            scenario,
+            testCase,
+            reviewedIdentity,
+            expectedHistorySha256);
         certificate = CreateCertificate();
         listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start(backlog: 1);
@@ -68,7 +79,13 @@ internal sealed class DeepSeekTlsLoopbackServer : IDisposable
                     : null,
                 script.ExpectedTerminalSha256,
                 script.PriorFactSha256,
-                failureCode);
+                script.HistoricalMessagesSha256,
+                script.ExactReplayValidated,
+                script.ReplayMutationMatrixValidated,
+                failureCode,
+                scenario == VerifierScenario.CanaryRouting &&
+                    providerCanaryValid &&
+                    script.CanaryRoutesValidated);
         }
     }
 
@@ -174,7 +191,8 @@ internal sealed class DeepSeekTlsLoopbackServer : IDisposable
                         authorizationHash);
                     VerifierWireOracle.ValidateBody(
                         request.Body,
-                        currentPublicInputs);
+                        currentPublicInputs,
+                        scenario);
                     response = script.Respond(index, request.Body);
                 }
                 catch (VerifierWireException exception)
@@ -432,7 +450,8 @@ internal static class VerifierWireOracle
 
     internal static void ValidateBody(
         byte[] body,
-        IReadOnlyList<byte[]> currentPublicInputs)
+        IReadOnlyList<byte[]> currentPublicInputs,
+        VerifierScenario? scenario = null)
     {
         using var document = JsonDocument.Parse(body);
         var root = document.RootElement;
@@ -497,11 +516,18 @@ internal static class VerifierWireOracle
             "APR111_GITHUB_CANARY",
             "APR111_ACTIONS_CANARY",
             "APR111_UNRELATED_WORKFLOW_CANARY",
-            "APR111_REPOSITORY_CANARY",
-            "APR111_PATH_CANARY",
-            "APR111_PROMPT_INJECTION_CANARY",
+            VerifierCanaries.PublicResult,
+        };
+        var untrustedRouteCanaries = new[]
+        {
+            VerifierCanaries.Repository,
+            VerifierCanaries.Path,
+            VerifierCanaries.Prompt,
         };
         if (forbidden.Any(value => text.Contains(value, StringComparison.Ordinal)) ||
+            scenario != VerifierScenario.CanaryRouting &&
+                untrustedRouteCanaries.Any(value =>
+                    text.Contains(value, StringComparison.Ordinal)) ||
             currentPublicInputs.Any(input =>
                 Encoding.UTF8.GetString(input).Contains(
                     "APR111_RANDOM_",
@@ -515,21 +541,42 @@ internal static class VerifierWireOracle
 internal sealed class VerifierProviderScript
 {
     private const string RandomPrefix = "APR111_RANDOM_";
+    private const string SeedReadArguments =
+        "{\"path\":\"src/RetryBudget.cs\",\"start_line\":1,\"line_count\":400}";
+    private const string RestoreDiffArguments =
+        "{\"path\":\"src/RetryBudget.cs\",\"start_hunk\":1,\"hunk_count\":20}";
     private readonly VerifierScenario scenario;
     private readonly R3QualityCase testCase;
+    private readonly ReviewedIdentity reviewedIdentity;
+    private readonly string? expectedHistorySha256;
     private string? randomFact;
 
     internal VerifierProviderScript(
         VerifierScenario scenario,
-        R3QualityCase testCase)
+        R3QualityCase testCase,
+        ReviewedIdentity reviewedIdentity,
+        string? expectedHistorySha256)
     {
         this.scenario = scenario;
         this.testCase = testCase;
+        this.reviewedIdentity = reviewedIdentity;
+        this.expectedHistorySha256 = expectedHistorySha256;
         if (scenario == VerifierScenario.ContinuationSeed)
         {
             randomFact = RandomPrefix + Convert.ToHexString(
                 RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
         }
+    }
+
+    internal VerifierProviderScript(
+        VerifierScenario scenario,
+        R3QualityCase testCase)
+        : this(
+            scenario,
+            testCase,
+            testCase.ReviewedIdentity,
+            expectedHistorySha256: null)
+    {
     }
 
     internal int ExpectedRequests => scenario switch
@@ -538,6 +585,17 @@ internal sealed class VerifierProviderScript
         VerifierScenario.MustNotFind => 4,
         VerifierScenario.ContinuationSeed => 2,
         VerifierScenario.ContinuationRestore => 2,
+        VerifierScenario.CanaryRouting => 2,
+        VerifierScenario.ProviderHttpFailure or
+            VerifierScenario.ProviderMalformedResponse or
+            VerifierScenario.ToolArgumentsInvalid or
+            VerifierScenario.TerminalUngrounded => 1,
+        VerifierScenario.QualityFailedAfterCommit => 3,
+        VerifierScenario.PublicResultCanary => 4,
+        VerifierScenario.OuterAuthorizationDenied or
+            VerifierScenario.InnerAuthorizationDenied or
+            VerifierScenario.TransitionFromHeadInvalid or
+            VerifierScenario.LineageTampered => 0,
         _ => throw new InvalidOperationException(),
     };
 
@@ -550,12 +608,41 @@ internal sealed class VerifierProviderScript
         : LiveAgentFreshProcessDomain.RawSha256(
             Encoding.UTF8.GetBytes(randomFact));
 
+    internal string? HistoricalMessagesSha256 { get; private set; }
+
+    internal bool ExactReplayValidated { get; private set; }
+
+    internal bool ReplayMutationMatrixValidated { get; private set; }
+
+    internal bool CanaryRoutesValidated { get; private set; }
+
     internal byte[] Respond(int index, byte[] body) => scenario switch
     {
         VerifierScenario.MustFind => MustFind(index, body),
         VerifierScenario.MustNotFind => MustNotFind(index, body),
         VerifierScenario.ContinuationSeed => Seed(index, body),
         VerifierScenario.ContinuationRestore => Restore(index, body),
+        VerifierScenario.CanaryRouting => Canary(index, body),
+        VerifierScenario.ProviderHttpFailure => throw new VerifierWireException(
+            "provider_http_injected"),
+        VerifierScenario.ProviderMalformedResponse => "{}"u8.ToArray(),
+        VerifierScenario.ToolArgumentsInvalid => Tool(
+            "Attempt an invalid tool call.",
+            "negative_invalid_arguments",
+            AgentToolRegistry.ReadFileName,
+            "{\"path\":\"src/CacheGate.cs\",\"unknown\":true}"),
+        VerifierScenario.TerminalUngrounded => Finish(
+            "Return an ungrounded terminal finding.",
+            string.Concat(
+                "{\"summary\":\"invalid\",\"findings\":[{",
+                "\"severity\":\"high\",\"title\":\"ungrounded\",",
+                "\"message\":\"invalid\",\"evidence\":[{",
+                "\"observation_id\":\"",
+                new string('0', 64),
+                "\",\"path\":\"src/CacheGate.cs\",",
+                "\"start_line\":1,\"end_line\":1}]}]}")),
+        VerifierScenario.QualityFailedAfterCommit => MustFind(index, body),
+        VerifierScenario.PublicResultCanary => MustNotFind(index, body),
         _ => throw new InvalidOperationException(),
     };
 
@@ -628,26 +715,8 @@ internal sealed class VerifierProviderScript
         var messages = document.RootElement.GetProperty("messages");
         return index switch
         {
-            0 => Tool(
-                "Remember restored-only fact " + randomFact,
-                "seed_read",
-                AgentToolRegistry.ReadFileName,
-                "{\"path\":\"src/RetryBudget.cs\",\"start_line\":1,\"line_count\":400}"),
-            1 => Finish(
-                "Commit the bounded seed with " + randomFact,
-                string.Concat(
-                    "{\"summary\":\"Seeded ",
-                    ((R3QualityContinuationExpectation)testCase.Expectation)
-                        .PriorOnlyMarker,
-                    " and ",
-                    randomFact,
-                    ".\",\"findings\":[{\"severity\":\"low\",",
-                    "\"title\":\"seed evidence\",",
-                    "\"message\":\"The current snapshot was grounded.\",",
-                    "\"evidence\":[{\"observation_id\":\"",
-                    LastObservation(messages, "seed_read"),
-                    "\",\"path\":\"src/RetryBudget.cs\",",
-                    "\"start_line\":1,\"end_line\":1}]}]}")),
+            0 => SeedRead(messages),
+            1 => SeedFinish(messages),
             _ => throw new VerifierWireException("script_index_invalid"),
         };
     }
@@ -658,16 +727,21 @@ internal sealed class VerifierProviderScript
         var messages = document.RootElement.GetProperty("messages");
         if (index == 0)
         {
-            randomFact = ExtractRestoredFact(messages);
+            randomFact = ValidateRestoredFirstRequest(messages);
+            ValidateRestoredPrefixMutationMatrix(messages);
             return Tool(
                 "Ground the restored review in the current diff.",
                 "restore_diff",
                 AgentToolRegistry.ReadDiffName,
-                "{\"path\":\"src/RetryBudget.cs\",\"start_hunk\":1,\"hunk_count\":20}");
+                RestoreDiffArguments);
         }
 
         if (index == 1 && randomFact is not null)
         {
+            ValidateRestoredSecondRequest(messages, randomFact);
+            ValidateRestoredCurrentMutationMatrix(messages, randomFact);
+            ExactReplayValidated = true;
+            ReplayMutationMatrixValidated = true;
             return Finish(
                 "Use only the restored prior fact.",
                 string.Concat(
@@ -682,6 +756,123 @@ internal sealed class VerifierProviderScript
         throw new VerifierWireException("script_index_invalid");
     }
 
+    private byte[] Canary(int index, byte[] body)
+    {
+        using var document = JsonDocument.Parse(body);
+        var messages = document.RootElement.GetProperty("messages");
+        var path = string.Concat("src/", VerifierCanaries.Path, ".cs");
+        if (index == 0)
+        {
+            var values = messages.EnumerateArray().ToArray();
+            if (values.Length != 2 ||
+                !HasNoReasoning(values[0]) ||
+                values[0].GetRawText().Contains(
+                    VerifierCanaries.Repository,
+                    StringComparison.Ordinal) ||
+                values[0].GetRawText().Contains(
+                    VerifierCanaries.Path,
+                    StringComparison.Ordinal) ||
+                values[0].GetRawText().Contains(
+                    VerifierCanaries.Prompt,
+                    StringComparison.Ordinal) ||
+                !values[1].GetRawText().Contains(
+                    VerifierCanaries.Prompt,
+                    StringComparison.Ordinal))
+            {
+                throw new VerifierWireException("canary_initial_route_invalid");
+            }
+
+            return Tool(
+                "Read only the untrusted canary path.",
+                "canary_read",
+                AgentToolRegistry.ReadFileName,
+                string.Concat(
+                    "{\"path\":\"",
+                    path,
+                    "\",\"start_line\":1,\"line_count\":400}"));
+        }
+
+        if (index == 1)
+        {
+            var values = messages.EnumerateArray().ToArray();
+            var system = values[0].GetRawText();
+            var assistant = values[^2].GetRawText();
+            var tool = values[^1].GetRawText();
+            if (values.Length != 4 ||
+                system.Contains(VerifierCanaries.Repository, StringComparison.Ordinal) ||
+                system.Contains(VerifierCanaries.Path, StringComparison.Ordinal) ||
+                system.Contains(VerifierCanaries.Prompt, StringComparison.Ordinal) ||
+                !assistant.Contains(VerifierCanaries.Path, StringComparison.Ordinal) ||
+                assistant.Contains(VerifierCanaries.Repository, StringComparison.Ordinal) ||
+                assistant.Contains(VerifierCanaries.Prompt, StringComparison.Ordinal) ||
+                !tool.Contains(VerifierCanaries.Repository, StringComparison.Ordinal) ||
+                !tool.Contains(VerifierCanaries.Path, StringComparison.Ordinal) ||
+                !tool.Contains(VerifierCanaries.Prompt, StringComparison.Ordinal))
+            {
+                throw new VerifierWireException("canary_tool_route_invalid");
+            }
+
+            CanaryRoutesValidated = true;
+            return Finish(
+                "Complete without promoting untrusted canaries.",
+                "{\"summary\":\"Canary routing remained untrusted.\",\"findings\":[]}");
+        }
+
+        throw new VerifierWireException("script_index_invalid");
+    }
+
+    private byte[] SeedRead(JsonElement messages)
+    {
+        if (!HasExactInitialMessages(
+                messages,
+                testCase.ProcessOneContext ?? string.Empty))
+        {
+            throw new VerifierWireException("seed_initial_request_invalid");
+        }
+
+        return Tool(
+            "Remember restored-only fact " + randomFact,
+            "seed_read",
+            AgentToolRegistry.ReadFileName,
+            SeedReadArguments);
+    }
+
+    private byte[] SeedFinish(JsonElement messages)
+    {
+        var values = messages.EnumerateArray().ToArray();
+        if (randomFact is null ||
+            values.Length != 4 ||
+            !Roles(values).SequenceEqual(
+                ["system", "user", "assistant", "tool"],
+                StringComparer.Ordinal) ||
+            !HasNoReasoning(values[0]) ||
+            !HasExactUser(values[1], testCase.ProcessOneContext) ||
+            !HasExactToolCall(
+                values[2],
+                "Remember restored-only fact " + randomFact,
+                "seed_read",
+                AgentToolRegistry.ReadFileName,
+                SeedReadArguments) ||
+            !TryValidateReadFileResult(
+                values[3],
+                "seed_read",
+                "src/RetryBudget.cs",
+                reviewedIdentity,
+                out var observation) ||
+            values[0].GetRawText().Contains(randomFact, StringComparison.Ordinal) ||
+            values[1].GetRawText().Contains(randomFact, StringComparison.Ordinal) ||
+            values[3].GetRawText().Contains(randomFact, StringComparison.Ordinal))
+        {
+            throw new VerifierWireException("seed_history_invalid");
+        }
+
+        var response = Finish(
+            "Commit the bounded seed with " + randomFact,
+            SeedFinishArguments(randomFact, observation!));
+        HistoricalMessagesSha256 = HashSeedHistory(values, response);
+        return response;
+    }
+
     private byte[] Finish(string reasoning, string arguments)
     {
         var bytes = Encoding.UTF8.GetBytes(arguments);
@@ -689,12 +880,13 @@ internal sealed class VerifierProviderScript
             AgentCanonical.TerminalDomain,
             bytes);
         Completed = true;
-        var callId = scenario switch
+        var callId = VerifierScenarioDomain.ProviderBehavior(scenario) switch
         {
             VerifierScenario.MustFind => "must_find_finish",
             VerifierScenario.MustNotFind => "must_not_finish",
             VerifierScenario.ContinuationSeed => "seed_finish",
             VerifierScenario.ContinuationRestore => "restore_finish",
+            VerifierScenario.CanaryRouting => "canary_finish",
             _ => throw new InvalidOperationException(),
         };
         return Tool(
@@ -767,47 +959,481 @@ internal sealed class VerifierProviderScript
             throw new VerifierWireException("observation_missing");
     }
 
-    private static string ExtractRestoredFact(JsonElement messages)
+    private string ValidateRestoredFirstRequest(JsonElement messages)
     {
         var values = messages.EnumerateArray().ToArray();
-        if (values.Length != 7 ||
-            !values.Select(message => message.GetProperty("role").GetString())
-                .SequenceEqual(
-                    [
-                        "system",
-                        "user",
-                        "assistant",
-                        "tool",
-                        "assistant",
-                        "tool",
-                        "user",
-                    ],
-                    StringComparer.Ordinal))
+        if (!TryValidateRestoredPrefix(values, out var fact) ||
+            fact is null)
         {
             throw new VerifierWireException("restore_history_shape_invalid");
         }
 
-        var previous = string.Concat(
-            values[2].GetRawText(),
-            values[4].GetRawText());
-        var index = previous.IndexOf(RandomPrefix, StringComparison.Ordinal);
-        if (index < 0 || previous.Length < index + RandomPrefix.Length + 64)
+        var actualHistorySha256 = HashMessagePrefix(values, 6);
+        if (!StringComparer.Ordinal.Equals(
+                actualHistorySha256,
+                expectedHistorySha256))
         {
-            throw new VerifierWireException("restore_fact_missing");
+            throw new VerifierWireException("restore_history_digest_invalid");
         }
 
-        var fact = previous.Substring(index, RandomPrefix.Length + 64);
-        if (fact.AsSpan(RandomPrefix.Length).ToArray().Any(character =>
-                character is not (>= '0' and <= '9') and
-                not (>= 'a' and <= 'f')) ||
-            values[0].GetRawText().Contains(fact, StringComparison.Ordinal) ||
-            values[^1].GetRawText().Contains(fact, StringComparison.Ordinal) ||
-            values[3].GetRawText().Contains(fact, StringComparison.Ordinal) ||
-            values[5].GetRawText().Contains(fact, StringComparison.Ordinal))
-        {
-            throw new VerifierWireException("restore_fact_route_invalid");
-        }
-
+        HistoricalMessagesSha256 = actualHistorySha256;
         return fact;
+    }
+
+    private void ValidateRestoredSecondRequest(
+        JsonElement messages,
+        string fact)
+    {
+        var values = messages.EnumerateArray().ToArray();
+        if (values.Length != 9 ||
+            !TryValidateRestoredPrefix(values[..7], out var restoredFact) ||
+            !StringComparer.Ordinal.Equals(restoredFact, fact) ||
+            !StringComparer.Ordinal.Equals(
+                HashMessagePrefix(values, 6),
+                expectedHistorySha256) ||
+            !HasExactToolCall(
+                values[7],
+                "Ground the restored review in the current diff.",
+                "restore_diff",
+                AgentToolRegistry.ReadDiffName,
+                RestoreDiffArguments) ||
+            !TryValidateReadDiffResult(
+                values[8],
+                "restore_diff",
+                "src/RetryBudget.cs",
+                reviewedIdentity,
+                out _) ||
+            values[6].GetRawText().Contains(fact, StringComparison.Ordinal) ||
+            values[7].GetRawText().Contains(fact, StringComparison.Ordinal) ||
+            values[8].GetRawText().Contains(fact, StringComparison.Ordinal))
+        {
+            throw new VerifierWireException("restore_current_request_invalid");
+        }
+    }
+
+    private void ValidateRestoredPrefixMutationMatrix(JsonElement messages)
+    {
+        Action<JsonArray>[] mutations =
+        [
+            values => values[2]!["role"] = "user",
+            values => values[1]!["content"] = "changed initial request",
+            values => values[2]!["reasoning_content"] = "changed reasoning",
+            values => values[2]!["tool_calls"]![0]!["id"] = "changed",
+            values => values[2]!["tool_calls"]![0]!["function"]!["name"] =
+                AgentToolRegistry.ReadDiffName,
+            values => values[2]!["tool_calls"]![0]!["function"]!["arguments"] =
+                "{}",
+            values => values[3]!["content"] = "{}",
+            values => values[4]!["reasoning_content"] = "changed reasoning",
+            values => values[4]!["tool_calls"]![0]!["id"] = "changed",
+            values => values[4]!["tool_calls"]![0]!["function"]!["arguments"] =
+                "{}",
+            values => values[5]!["content"] = "{\"changed\":true}",
+            values => values[6]!["content"] = "changed current request",
+        ];
+        foreach (var mutate in mutations)
+        {
+            var values = JsonNode.Parse(messages.GetRawText())!.AsArray();
+            mutate(values);
+            using var document = JsonDocument.Parse(values.ToJsonString());
+            var rejected = false;
+            try
+            {
+                ValidateRestoredFirstRequest(document.RootElement);
+            }
+            catch (VerifierWireException)
+            {
+                rejected = true;
+            }
+
+            if (!rejected)
+            {
+                throw new VerifierWireException(
+                    "restore_prefix_mutation_accepted");
+            }
+        }
+    }
+
+    private void ValidateRestoredCurrentMutationMatrix(
+        JsonElement messages,
+        string fact)
+    {
+        Action<JsonArray>[] mutations =
+        [
+            values => values[7]!["role"] = "user",
+            values => values[7]!["reasoning_content"] = "changed reasoning",
+            values => values[7]!["tool_calls"]![0]!["id"] = "changed",
+            values => values[7]!["tool_calls"]![0]!["function"]!["name"] =
+                AgentToolRegistry.ReadFileName,
+            values => values[7]!["tool_calls"]![0]!["function"]!["arguments"] =
+                "{}",
+            values => values[8]!["tool_call_id"] = "changed",
+            values => values[8]!["content"] = "{}",
+        ];
+        foreach (var mutate in mutations)
+        {
+            var values = JsonNode.Parse(messages.GetRawText())!.AsArray();
+            mutate(values);
+            using var document = JsonDocument.Parse(values.ToJsonString());
+            var rejected = false;
+            try
+            {
+                ValidateRestoredSecondRequest(document.RootElement, fact);
+            }
+            catch (VerifierWireException)
+            {
+                rejected = true;
+            }
+
+            if (!rejected)
+            {
+                throw new VerifierWireException(
+                    "restore_current_mutation_accepted");
+            }
+        }
+    }
+
+    private bool TryValidateRestoredPrefix(
+        JsonElement[] values,
+        out string? fact)
+    {
+        fact = null;
+        if (values.Length != 7 ||
+            !Roles(values).SequenceEqual(
+                [
+                    "system",
+                    "user",
+                    "assistant",
+                    "tool",
+                    "assistant",
+                    "tool",
+                    "user",
+                ],
+                StringComparer.Ordinal) ||
+            !HasNoReasoning(values[0]) ||
+            !HasExactUser(values[1], testCase.ProcessOneContext) ||
+            !HasNoReasoning(values[3]) ||
+            !HasNoReasoning(values[5]) ||
+            !HasExactUser(values[6], testCase.InitialContext) ||
+            !TryExtractRandomFact(values[2], out fact) ||
+            fact is null ||
+            !HasExactToolCall(
+                values[2],
+                "Remember restored-only fact " + fact,
+                "seed_read",
+                AgentToolRegistry.ReadFileName,
+                SeedReadArguments) ||
+            !TryValidateReadFileResult(
+                values[3],
+                "seed_read",
+                "src/RetryBudget.cs",
+                new ReviewedIdentity(
+                    reviewedIdentity.RepositoryId,
+                    reviewedIdentity.ReviewTarget,
+                    new string('4', 40),
+                    reviewedIdentity.BaseSha),
+                out var observation) ||
+            !HasExactToolCall(
+                values[4],
+                "Commit the bounded seed with " + fact,
+                "seed_finish",
+                AgentToolRegistry.FinishReviewName,
+                SeedFinishArguments(fact, observation!)) ||
+            !IsExactToolResult(values[5], "seed_finish", "{}") ||
+            values[0].GetRawText().Contains(fact, StringComparison.Ordinal) ||
+            values[1].GetRawText().Contains(fact, StringComparison.Ordinal) ||
+            values[3].GetRawText().Contains(fact, StringComparison.Ordinal) ||
+            values[5].GetRawText().Contains(fact, StringComparison.Ordinal) ||
+            values[6].GetRawText().Contains(fact, StringComparison.Ordinal))
+        {
+            fact = null;
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool TryValidateReadFileResult(
+        JsonElement message,
+        string callId,
+        string path,
+        ReviewedIdentity identity,
+        out string? observation)
+    {
+        observation = null;
+        var file = testCase.Files.SingleOrDefault(item =>
+            StringComparer.Ordinal.Equals(item.Path, path));
+        if (file is null)
+        {
+            return false;
+        }
+
+        var bytes = Encoding.UTF8.GetBytes(file.Content);
+        var text = file.Content.Replace("\r\n", "\n", StringComparison.Ordinal);
+        var values = text.Length == 0
+            ? []
+            : text.Split('\n');
+        var length = values.Length;
+        if (text.EndsWith('\n'))
+        {
+            length--;
+        }
+
+        var lines = values[..length]
+            .Select((value, index) => new ReadFileLine(index + 1, value))
+            .ToImmutableArray();
+        var withoutObservation = new ReadFileResult(
+            "ok",
+            identity,
+            path,
+            AgentCanonical.HashRaw(bytes),
+            RequestedStartLine: 1,
+            RequestedLineCount: 400,
+            ReturnedStartLine: lines.Length == 0 ? null : 1,
+            ReturnedEndLine: lines.Length == 0 ? null : lines.Length,
+            lines,
+            Truncated: false,
+            TruncationReason: null,
+            ObservationId: null);
+        observation = AgentCanonical.HashDomain(
+            AgentCanonical.ReadObservationDomain,
+            ReadFileResultWriter.Write(
+                withoutObservation,
+                includeObservationId: false));
+        var expected = Encoding.UTF8.GetString(
+            ReadFileResultWriter.Write(
+                withoutObservation with { ObservationId = observation }));
+        return IsExactToolResult(message, callId, expected);
+    }
+
+    private bool TryValidateReadDiffResult(
+        JsonElement message,
+        string callId,
+        string path,
+        ReviewedIdentity identity,
+        out string? observation)
+    {
+        observation = null;
+        var source = testCase.DiffSource;
+        if (!StringComparer.Ordinal.Equals(source.Path, path) ||
+            source.Hunks.Count() == 0 ||
+            source.Hunks.Count() > 20)
+        {
+            return false;
+        }
+
+        var rebound = new ReviewedDiffSource(
+            identity,
+            source.Path,
+            source.PreviousPath,
+            source.Status,
+            source.SourceTruncated,
+            source.Hunks);
+        var hunks = rebound.Hunks.ToImmutableArray();
+        var withoutObservation = new ReadDiffResult(
+            "ok",
+            identity,
+            path,
+            rebound.PatchSha256,
+            rebound.SourceTruncated,
+            RequestedStartHunk: 1,
+            RequestedHunkCount: 20,
+            ReturnedStartHunk: 1,
+            ReturnedEndHunk: hunks.Length,
+            hunks,
+            Truncated: false,
+            NextStartHunk: null,
+            ObservationId: null);
+        observation = AgentCanonical.HashDomain(
+            AgentCanonical.ReadDiffObservationDomain,
+            ReadDiffResultWriter.Write(
+                withoutObservation,
+                includeObservationId: false));
+        var expected = Encoding.UTF8.GetString(
+            ReadDiffResultWriter.Write(
+                withoutObservation with { ObservationId = observation }));
+        return IsExactToolResult(message, callId, expected);
+    }
+
+    private static bool HasExactInitialMessages(
+        JsonElement messages,
+        string currentContext)
+    {
+        var values = messages.EnumerateArray().ToArray();
+        return values.Length == 2 &&
+            Roles(values).SequenceEqual(
+                ["system", "user"],
+                StringComparer.Ordinal) &&
+            HasNoReasoning(values[0]) &&
+            HasExactUser(values[1], currentContext);
+    }
+
+    private static string[] Roles(IEnumerable<JsonElement> messages) =>
+        messages.Select(message =>
+            message.GetProperty("role").GetString()!).ToArray();
+
+    private static bool HasExactUser(JsonElement message, string? content) =>
+        content is not null &&
+        message.EnumerateObject().Select(property => property.Name)
+            .SequenceEqual(["role", "content"], StringComparer.Ordinal) &&
+        StringComparer.Ordinal.Equals(
+            message.GetProperty("role").GetString(),
+            "user") &&
+        StringComparer.Ordinal.Equals(
+            message.GetProperty("content").GetString(),
+            content) &&
+        HasNoReasoning(message);
+
+    private static bool HasExactToolCall(
+        JsonElement message,
+        string reasoning,
+        string callId,
+        string name,
+        string arguments)
+    {
+        if (!message.EnumerateObject().Select(property => property.Name)
+                .SequenceEqual(
+                    ["role", "content", "reasoning_content", "tool_calls"],
+                    StringComparer.Ordinal) ||
+            !StringComparer.Ordinal.Equals(
+                message.GetProperty("role").GetString(),
+                "assistant") ||
+            !StringComparer.Ordinal.Equals(
+                message.GetProperty("content").GetString(),
+                string.Empty) ||
+            !StringComparer.Ordinal.Equals(
+                message.GetProperty("reasoning_content").GetString(),
+                reasoning))
+        {
+            return false;
+        }
+
+        var calls = message.GetProperty("tool_calls");
+        if (calls.GetArrayLength() != 1)
+        {
+            return false;
+        }
+
+        var call = calls[0];
+        var function = call.GetProperty("function");
+        return call.EnumerateObject().Select(property => property.Name)
+                .SequenceEqual(["id", "type", "function"], StringComparer.Ordinal) &&
+            function.EnumerateObject().Select(property => property.Name)
+                .SequenceEqual(["name", "arguments"], StringComparer.Ordinal) &&
+            StringComparer.Ordinal.Equals(call.GetProperty("id").GetString(), callId) &&
+            StringComparer.Ordinal.Equals(call.GetProperty("type").GetString(), "function") &&
+            StringComparer.Ordinal.Equals(function.GetProperty("name").GetString(), name) &&
+            StringComparer.Ordinal.Equals(
+                function.GetProperty("arguments").GetString(),
+                arguments);
+    }
+
+    private static bool IsExactToolResult(
+        JsonElement message,
+        string callId,
+        string content) =>
+        message.EnumerateObject().Select(property => property.Name)
+            .SequenceEqual(
+                ["role", "tool_call_id", "content"],
+                StringComparer.Ordinal) &&
+        StringComparer.Ordinal.Equals(message.GetProperty("role").GetString(), "tool") &&
+        StringComparer.Ordinal.Equals(
+            message.GetProperty("tool_call_id").GetString(),
+            callId) &&
+        StringComparer.Ordinal.Equals(
+            message.GetProperty("content").GetString(),
+            content) &&
+        HasNoReasoning(message);
+
+    private static bool HasNoReasoning(JsonElement message) =>
+        !message.TryGetProperty("reasoning_content", out _);
+
+    private static bool TryExtractRandomFact(
+        JsonElement message,
+        out string? fact)
+    {
+        fact = null;
+        var reasoning = message.GetProperty("reasoning_content").GetString();
+        const string prefix = "Remember restored-only fact ";
+        if (reasoning is null ||
+            !reasoning.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var candidate = reasoning[prefix.Length..];
+        if (candidate.Length != RandomPrefix.Length + 64 ||
+            !candidate.StartsWith(RandomPrefix, StringComparison.Ordinal) ||
+            candidate.AsSpan(RandomPrefix.Length).ToArray().Any(character =>
+                character is not (>= '0' and <= '9') and
+                not (>= 'a' and <= 'f')))
+        {
+            return false;
+        }
+
+        fact = candidate;
+        return true;
+    }
+
+    private string SeedFinishArguments(
+        string fact,
+        string observation) => string.Concat(
+        "{\"summary\":\"Seeded ",
+        ((R3QualityContinuationExpectation)testCase.Expectation)
+            .PriorOnlyMarker,
+        " and ",
+        fact,
+        ".\",\"findings\":[{\"severity\":\"low\",",
+        "\"title\":\"seed evidence\",",
+        "\"message\":\"The current snapshot was grounded.\",",
+        "\"evidence\":[{\"observation_id\":\"",
+        observation,
+        "\",\"path\":\"src/RetryBudget.cs\",",
+        "\"start_line\":1,\"end_line\":1}]}]}");
+
+    private static string HashSeedHistory(
+        IReadOnlyList<JsonElement> messages,
+        byte[] finishResponse)
+    {
+        using var response = JsonDocument.Parse(finishResponse);
+        var finish = response.RootElement
+            .GetProperty("choices")[0]
+            .GetProperty("message");
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartArray();
+            foreach (var message in messages)
+            {
+                message.WriteTo(writer);
+            }
+            finish.WriteTo(writer);
+            writer.WriteStartObject();
+            writer.WriteString("role", "tool");
+            writer.WriteString("tool_call_id", "seed_finish");
+            writer.WriteString("content", "{}");
+            writer.WriteEndObject();
+            writer.WriteEndArray();
+        }
+
+        return LiveAgentFreshProcessDomain.RawSha256(stream.ToArray());
+    }
+
+    private static string HashMessagePrefix(
+        IReadOnlyList<JsonElement> messages,
+        int count)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartArray();
+            for (var index = 0; index < count; index++)
+            {
+                messages[index].WriteTo(writer);
+            }
+            writer.WriteEndArray();
+        }
+
+        return LiveAgentFreshProcessDomain.RawSha256(stream.ToArray());
     }
 }
