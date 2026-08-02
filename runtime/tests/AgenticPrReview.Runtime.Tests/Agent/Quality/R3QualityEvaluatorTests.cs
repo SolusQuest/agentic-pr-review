@@ -489,6 +489,28 @@ public sealed class R3QualityEvaluatorTests
     }
 
     [Fact]
+    public async Task ContinuationRejectsPriorMarkerInTrustedPolicy()
+    {
+        var testCase = R3QualityCorpusTests.ParseCorpus().Cases[2];
+        var expectation = Assert.IsType<R3QualityContinuationExpectation>(
+            testCase.Expectation);
+        using var completed = await ContinuationAsync(
+            testCase,
+            string.Concat("Restored fact: ", expectation.PriorOnlyMarker),
+            predecessorContextOverride: null,
+            trustedPolicyOverride: string.Concat(
+                "Public synthetic policy containing ",
+                expectation.PriorOnlyMarker));
+        var fresh = Fresh(expectation.FreshInputNames.Select(name =>
+            (name, "synthetic current input")).ToArray());
+
+        var outcome = Evaluate(testCase, completed.Input, fresh);
+
+        Assert.Equal("not_evaluated", outcome.Status);
+        Assert.Equal(R3QualityCodes.FreshInputInvalid, outcome.Code);
+    }
+
+    [Fact]
     public void TypedFailuresNeverMasqueradeAsQuality()
     {
         var testCase = R3QualityCorpusTests.ParseCorpus().Cases[0];
@@ -626,7 +648,8 @@ public sealed class R3QualityEvaluatorTests
     private static async Task<ContinuationInput> ContinuationAsync(
         R3QualityCase testCase,
         string terminalSummary,
-        string? predecessorContextOverride = null)
+        string? predecessorContextOverride = null,
+        string? trustedPolicyOverride = null)
     {
         var predecessorContext = predecessorContextOverride ??
             testCase.ProcessOneContext ??
@@ -637,7 +660,8 @@ public sealed class R3QualityEvaluatorTests
             [],
             predecessorContext,
             [],
-            predecessorContext);
+            predecessorContext,
+            trustedPolicyOverride);
         var built = AgentSessionBuilder.Build(generationZero.Input);
         Assert.True(built.Succeeded, built.FailureCode);
         var artifact = built.Artifact!;

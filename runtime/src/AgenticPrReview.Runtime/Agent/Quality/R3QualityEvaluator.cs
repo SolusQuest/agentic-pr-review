@@ -37,6 +37,7 @@ internal sealed class R3QualitySubject
         ReviewedIdentity? reviewedIdentity,
         bool hasPriorSession,
         ImmutableArray<byte> initialRequest,
+        ImmutableArray<byte> trustedPolicy,
         string? currentReviewContext,
         string? priorReviewContext,
         AgentTerminalReview? review,
@@ -50,6 +51,7 @@ internal sealed class R3QualitySubject
         ReviewedIdentity = reviewedIdentity;
         HasPriorSession = hasPriorSession;
         InitialRequest = initialRequest;
+        TrustedPolicy = trustedPolicy;
         CurrentReviewContext = currentReviewContext;
         PriorReviewContext = priorReviewContext;
         Review = review;
@@ -67,6 +69,8 @@ internal sealed class R3QualitySubject
     internal bool HasPriorSession { get; }
 
     internal ImmutableArray<byte> InitialRequest { get; }
+
+    internal ImmutableArray<byte> TrustedPolicy { get; }
 
     internal string? CurrentReviewContext { get; }
 
@@ -137,6 +141,7 @@ internal sealed class R3QualitySubject
                 input.Run.ReviewedIdentity,
                 artifact.Document.PriorSessionSha256 is not null,
                 ImmutableArray.CreateRange(initialRequest),
+                ImmutableArray.CreateRange(input.TrustedRequest.TrustedPolicyBytes),
                 currentReviewContext,
                 priorReviewContext,
                 reconstructedReview,
@@ -247,6 +252,7 @@ internal sealed class R3QualitySubject
             reviewedIdentity: null,
             hasPriorSession: false,
             initialRequest: [],
+            trustedPolicy: [],
             currentReviewContext: null,
             priorReviewContext: null,
             review: null,
@@ -828,7 +834,8 @@ internal static class R3QualityEvaluator
             return SubjectMismatch(testCase);
         }
 
-        if (!subject.FreshInputs!.MatchesManifest(expectation.FreshInputNames) ||
+        if (subject.TrustedPolicy.AsSpan().IndexOf(marker) >= 0 ||
+            !subject.FreshInputs!.MatchesManifest(expectation.FreshInputNames) ||
             subject.FreshInputs.Contains(marker) ||
             subject.ToolObservations.Any(item =>
                 item.CanonicalResult.AsSpan().IndexOf(marker) >= 0))
