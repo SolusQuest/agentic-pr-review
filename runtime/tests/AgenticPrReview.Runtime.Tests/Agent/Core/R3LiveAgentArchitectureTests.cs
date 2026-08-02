@@ -82,7 +82,7 @@ public sealed partial class AgentCapabilityArchitectureTests
     }
 
     [Fact]
-    public void RuntimeEntrypointsRetainOnlyTheExistingDispatch()
+    public void RuntimeEntrypointsDoNotReachDirectlyIntoR3LiveApplication()
     {
         var entrypointTypes = new[]
         {

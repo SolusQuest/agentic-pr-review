@@ -27,6 +27,73 @@ public sealed class LocalRestrictedStateStoreTests
     }
 
     [Fact]
+    public void LinuxAnchoredDirectorySupportsStoreRoundTrip()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        WithRoot(root =>
+        {
+            var firstOpen = NativeRestrictedStateFiles
+                .OpenRootGuardNoFollow(root, out var first);
+            Assert.Equal(RestrictedStateOpenResult.Success, firstOpen);
+            Assert.NotNull(first);
+            using (first)
+            {
+                var anchored = NativeRestrictedStateFiles.AnchoredRoot(
+                    root,
+                    first!);
+                var secondOpen = NativeRestrictedStateFiles
+                    .OpenDirectoryNoFollow(anchored, out var second);
+                Assert.Equal(
+                    RestrictedStateOpenResult.Success,
+                    secondOpen);
+                Assert.NotNull(second);
+                using (second)
+                {
+                    Assert.True(NativeRestrictedStateFiles.TryGetIdentity(
+                        first!,
+                        expectDirectory: true,
+                        out var firstIdentity));
+                    Assert.True(NativeRestrictedStateFiles.TryGetIdentity(
+                        second!,
+                        expectDirectory: true,
+                        out var secondIdentity));
+                    Assert.Equal(firstIdentity, secondIdentity);
+                }
+
+                var access = RestrictedStateTestData.Access();
+                var keys = new TestKeyResolver();
+                var candidate = RestrictedStateTestData.Candidate(
+                    access,
+                    keys);
+                var store = new LocalRestrictedStateStore(anchored);
+                var initial = store.Read(access, CancellationToken.None);
+                Assert.True(initial.Succeeded);
+                Assert.False(initial.Version!.Exists);
+
+                var write = store.CompareExchange(
+                    access,
+                    initial.Version,
+                    new RestrictedStateSnapshot([candidate], null),
+                    CancellationToken.None);
+                Assert.True(write.Succeeded);
+
+                var restored = new LocalRestrictedStateStore(anchored).Read(
+                    access,
+                    CancellationToken.None);
+                Assert.True(restored.Succeeded);
+                Assert.Equal(
+                    candidate.EnvelopeSha256,
+                    Assert.Single(restored.Snapshot!.Accepted)
+                        .EnvelopeSha256);
+            }
+        });
+    }
+
+    [Fact]
     public void SnapshotRoundTripsAcrossFreshStoreInstance()
     {
         WithRoot(root =>
