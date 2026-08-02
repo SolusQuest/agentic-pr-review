@@ -466,6 +466,7 @@ internal static class Program
             : null;
         var execution = restoreProfile.Execution;
         var wire = execution?.WireProof;
+        var observer = execution?.Observer;
         var resultAfter = FileSha256(target);
         var acceptedTruthPreserved = attemptedProduct is
             {
@@ -496,13 +497,15 @@ internal static class Program
                 Succeeded: true,
                 RequestCount: 2,
             } &&
-            execution is not null &&
-            execution.Observer.DelegationCount == 1 &&
-            execution.Observer.CommitResult is
+            observer is
             {
-                AcceptedGeneration: 1,
-                HandoffReady: true,
-            } commit &&
+                DelegationCount: 1,
+                CommitResult:
+                {
+                    AcceptedGeneration: 1,
+                    HandoffReady: true,
+                } commit,
+            } &&
             StringComparer.Ordinal.Equals(
                 commit.AcceptedSessionSha256,
                 attemptedProduct?.SessionSha256) &&
@@ -531,7 +534,7 @@ internal static class Program
             acceptedAfter?.LineageSha256,
             restoreProfile.ActivationCount,
             wire?.RequestCount ?? 0,
-            execution?.Observer.DelegationCount ?? 0,
+            observer?.DelegationCount ?? 0,
             HandoffReady: false,
             AcceptedTruthPreserved: acceptedTruthPreserved,
             Passed: passed,
@@ -550,7 +553,7 @@ internal static class Program
                     "replacement_command_failed",
                     attemptedProduct?.Code ?? "product_missing",
                     wire?.FailureCode ?? "wire_missing",
-                    (execution?.Observer.DelegationCount ?? 0).ToString(
+                    (observer?.DelegationCount ?? 0).ToString(
                         System.Globalization.CultureInfo.InvariantCulture)));
             Console.Error.WriteLine(VerifierCodes.PhaseFailed);
             return 1;
