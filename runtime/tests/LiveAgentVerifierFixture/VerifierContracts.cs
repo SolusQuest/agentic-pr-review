@@ -115,7 +115,10 @@ internal sealed record VerifierNegativeReceipt(
     bool HandoffReady,
     bool AcceptedTruthPreserved,
     bool Passed,
-    string ProcessInstanceSha256);
+    string ProcessInstanceSha256,
+    string? ResultBeforeSha256 = null,
+    string? ResultAfterSha256 = null,
+    int ResultPublicationAttempts = 0);
 
 internal static class VerifierArguments
 {
@@ -481,6 +484,17 @@ internal static class VerifierReceiptCodec
             writer.WriteString(
                 "process_instance_sha256",
                 receipt.ProcessInstanceSha256);
+            WriteNullable(
+                writer,
+                "result_before_sha256",
+                receipt.ResultBeforeSha256);
+            WriteNullable(
+                writer,
+                "result_after_sha256",
+                receipt.ResultAfterSha256);
+            writer.WriteNumber(
+                "result_publication_attempts",
+                receipt.ResultPublicationAttempts);
             writer.WriteEndObject();
         }
 

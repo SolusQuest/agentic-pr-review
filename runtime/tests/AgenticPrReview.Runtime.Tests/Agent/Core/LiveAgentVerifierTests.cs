@@ -487,6 +487,62 @@ public sealed class LiveAgentVerifierContractTests
             VerifierEvidence.NegativeValidForTesting(receipt)));
     }
 
+    [Fact]
+    public void LiveAgentVerifierReplacementPublicationProofFailsClosed()
+    {
+        var session = new string('1', 64);
+        var envelope = new string('2', 64);
+        var lineage = new string('3', 64);
+        var stateBefore = new string('4', 64);
+        var stateAfter = new string('5', 64);
+        var lineageBefore = new string('6', 64);
+        var result = new string('7', 64);
+        var valid = new VerifierNegativeReceipt(
+            "apr-r3-live-agent-negative-receipt-v1",
+            "replacement-write-failed",
+            "post_commit",
+            "accepted_preserved",
+            LiveAgentFreshProcessCodes.OutputFailed,
+            LiveAgentFreshProcessCodes.OutputFailed,
+            stateBefore,
+            stateAfter,
+            lineageBefore,
+            lineage,
+            1,
+            session,
+            envelope,
+            lineage,
+            1,
+            session,
+            envelope,
+            lineage,
+            ActivationCount: 1,
+            ProviderRequests: 2,
+            CommitDelegationCount: 1,
+            HandoffReady: false,
+            AcceptedTruthPreserved: true,
+            Passed: true,
+            ProcessInstanceSha256: new string('8', 64),
+            ResultBeforeSha256: result,
+            ResultAfterSha256: result,
+            ResultPublicationAttempts: 1);
+        Assert.True(VerifierEvidence.ReplacementNegativeValidForTesting(valid));
+
+        var mutations = new[]
+        {
+            valid with { StateAfterSha256 = stateBefore },
+            valid with { LineageAfterSha256 = lineageBefore },
+            valid with { ActivationCount = 0 },
+            valid with { ProviderRequests = 0 },
+            valid with { CommitDelegationCount = 0 },
+            valid with { ResultBeforeSha256 = null },
+            valid with { ResultAfterSha256 = new string('9', 64) },
+            valid with { ResultPublicationAttempts = 0 },
+        };
+        Assert.All(mutations, receipt => Assert.False(
+            VerifierEvidence.ReplacementNegativeValidForTesting(receipt)));
+    }
+
     private static string Fixture(string name) => Path.Join(
         AppContext.BaseDirectory,
         "fixtures",

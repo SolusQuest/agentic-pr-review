@@ -402,6 +402,30 @@ _run_once() {
       "${requires_prior}" "${tamper_lineage}"
   done
 
+  local replacement_root="${root}/replacement-run"
+  local replacement_seed_receipt=
+  replacement_seed_receipt="${replacement_root}/private/seed-receipt.json"
+  local replacement_seed_log="${root}/negative-replacement-seed.log"
+  mkdir -p -- "${replacement_root}"
+  if ! _run_fixture "${root}" continuation-seed "${replacement_root}" \
+      "${replacement_seed_receipt}" "${replacement_seed_log}"; then
+    tail -n 20 "${replacement_seed_log}" >&2
+    _fail APR_R3_LIVE_REPLACEMENT_SEED_EXECUTION_FAILED
+  fi
+  _assert_phase_marker "${replacement_seed_log}" \
+    "APR_R3_LIVE_PHASE_OK ContinuationSeed" ||
+    _fail APR_R3_LIVE_REPLACEMENT_SEED_MARKER_INVALID
+  local replacement_lineage replacement_history
+  replacement_lineage="$(_extract_hash \
+    lineage_sha256 "${replacement_seed_receipt}")"
+  replacement_history="$(_extract_hash \
+    historical_messages_sha256 "${replacement_seed_receipt}")"
+  [[ -n "${replacement_lineage}" ]] ||
+    _fail APR_R3_LIVE_REPLACEMENT_SEED_LINEAGE_MISSING
+  [[ -n "${replacement_history}" ]] ||
+    _fail APR_R3_LIVE_REPLACEMENT_SEED_HISTORY_MISSING
+  rm -f -- "${replacement_seed_receipt}"
+
   local prior_replacement="${root}/prior-replacement.json"
   local replacement_receipt=
   replacement_receipt="${root}/private/replacement-write-receipt.json"
@@ -411,6 +435,8 @@ _run_once() {
       "${replacement_receipt}" "${replacement_log}" \
       --negative-manifest "${NEGATIVE_CASES}" \
       --canary-manifest "${CANARY_ROUTES}" \
+      --expected-lineage-sha256 "${replacement_lineage}" \
+      --expected-history-sha256 "${replacement_history}" \
       --replacement-target "${prior_replacement}"; then
     tail -n 20 "${replacement_log}" >&2
     [[ ! -f "${root}/private/failure.code" ]] ||

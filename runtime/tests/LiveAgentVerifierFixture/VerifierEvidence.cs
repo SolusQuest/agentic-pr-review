@@ -501,10 +501,19 @@ internal static class VerifierEvidence
             return receipt.AcceptedTruthPreserved &&
                 receipt.AcceptedGeneration == 1 &&
                 AcceptedIdentityMatches(receipt) &&
-                receipt.ActivationCount == 0 &&
-                receipt.ProviderRequests == 0 &&
-                receipt.CommitDelegationCount == 0 &&
-                receipt.StateBeforeSha256 == receipt.StateAfterSha256;
+                receipt.ActivationCount == 1 &&
+                receipt.ProviderRequests == 2 &&
+                receipt.CommitDelegationCount == 1 &&
+                receipt.StateBeforeSha256 != receipt.StateAfterSha256 &&
+                LiveAgentFreshProcessDomain.IsSha256(
+                    receipt.LineageBeforeSha256) &&
+                LiveAgentFreshProcessDomain.IsSha256(
+                    receipt.LineageAfterSha256) &&
+                receipt.LineageBeforeSha256 != receipt.LineageAfterSha256 &&
+                LiveAgentFreshProcessDomain.IsSha256(
+                    receipt.ResultBeforeSha256) &&
+                receipt.ResultBeforeSha256 == receipt.ResultAfterSha256 &&
+                receipt.ResultPublicationAttempts == 1;
         }
 
         var scenario = Enum.GetValues<VerifierScenario>()
@@ -548,7 +557,10 @@ internal static class VerifierEvidence
         };
         return stateValid &&
             receipt.ActivationCount == expectedActivation &&
-            receipt.ProviderRequests == expectedRequests;
+            receipt.ProviderRequests == expectedRequests &&
+            receipt.ResultBeforeSha256 is null &&
+            receipt.ResultAfterSha256 is null &&
+            receipt.ResultPublicationAttempts == 0;
     }
 
     internal static bool AcceptedIdentityMatches(
@@ -579,6 +591,15 @@ internal static class VerifierEvidence
             "post_commit",
             "accepted_preserved",
             LiveAgentFreshProcessCodes.TransportProofFailed),
+        receipt);
+
+    internal static bool ReplacementNegativeValidForTesting(
+        VerifierNegativeReceipt receipt) => NegativeValid(
+        new VerifierManifestRow(
+            "replacement-write-failed",
+            "post_commit",
+            "accepted_preserved",
+            LiveAgentFreshProcessCodes.OutputFailed),
         receipt);
 
     private static bool ArchitectureValid(
@@ -726,6 +747,8 @@ internal static class VerifierEvidence
             "canonical_lineage_sha256", "activation_count", "provider_requests",
             "commit_delegation_count", "handoff_ready",
             "accepted_truth_preserved", "passed", "process_instance_sha256",
+            "result_before_sha256", "result_after_sha256",
+            "result_publication_attempts",
         ]);
         if (document is null)
         {
@@ -758,7 +781,10 @@ internal static class VerifierEvidence
             root.GetProperty("handoff_ready").GetBoolean(),
             root.GetProperty("accepted_truth_preserved").GetBoolean(),
             root.GetProperty("passed").GetBoolean(),
-            RequiredString(root, "process_instance_sha256"));
+            RequiredString(root, "process_instance_sha256"),
+            NullableString(root, "result_before_sha256"),
+            NullableString(root, "result_after_sha256"),
+            root.GetProperty("result_publication_attempts").GetInt32());
     }
 
     private static VerifierArchitectureReceipt? ReadArchitecture(string path)

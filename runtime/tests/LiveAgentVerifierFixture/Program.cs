@@ -30,7 +30,7 @@ internal static class Program
 
             if (parsedCommand.Verb == "negative-replacement-write-failed")
             {
-                return WriteReplacementFailureReceipt(parsedCommand);
+                return await RunReplacementWriteFailureAsync(parsedCommand);
             }
 
             if (parsedCommand.Scenario is not { } scenario)
@@ -382,7 +382,7 @@ internal static class Program
         return 0;
     }
 
-    private static int WriteReplacementFailureReceipt(
+    private static async Task<int> RunReplacementWriteFailureAsync(
         VerifierCommand command)
     {
         if (command.ReplacementTarget is not { } target ||
@@ -396,79 +396,162 @@ internal static class Program
         if (!VerifierEvidence.TryLoad(
                 command,
                 requireReplacement: false,
-                out var evidence,
-                out var failure) ||
-            evidence is null)
+                out _,
+                out var failure))
         {
             WriteFailureCode(command.Root, failure);
             Console.Error.WriteLine(VerifierCodes.FixtureInvalid);
             return 3;
         }
 
+        var corpusBytes = File.ReadAllBytes(command.Corpus);
+        var replacementRoot = Path.Join(command.Root, "replacement-run");
+        if (!Directory.Exists(replacementRoot) ||
+            !LiveAgentFreshProcessDomain.IsSha256(
+                command.ExpectedLineageSha256) ||
+            !LiveAgentFreshProcessDomain.IsSha256(
+                command.ExpectedHistorySha256))
+        {
+            WriteFailureCode(command.Root, "replacement_seed_setup_invalid");
+            Console.Error.WriteLine(VerifierCodes.FixtureInvalid);
+            return 3;
+        }
+
         var prior = File.ReadAllBytes(target);
-        var stateRoot = Path.Join(command.Root, "continuation", "state");
+        var resultBefore = LiveAgentFreshProcessDomain.RawSha256(prior);
+        if (!FreshProcessMaterializer.TryMaterialize(
+                VerifierScenario.ContinuationRestore,
+                replacementRoot,
+                corpusBytes,
+                out var restoreMaterialized,
+                command.ExpectedLineageSha256) ||
+            restoreMaterialized is null ||
+            !LiveAgentFreshProcessFileSystem.TryCreate(
+                replacementRoot,
+                out var restoreFileSystem) ||
+            restoreFileSystem is null)
+        {
+            WriteFailureCode(command.Root, "replacement_restore_setup_invalid");
+            Console.Error.WriteLine(VerifierCodes.FixtureInvalid);
+            return 3;
+        }
+
+        var stateRoot = Path.Join(replacementRoot, "state");
         var lineagePath = Path.Join(
-            command.Root,
-            "continuation",
+            replacementRoot,
             "host",
             "accepted-lineage.json");
         var stateBefore = TreeSha256(stateRoot);
         var lineageBefore = FileSha256(lineagePath);
         var acceptedBefore = ReadAcceptedTuple(lineagePath);
-        var failedClosed = false;
-        try
-        {
-            WriteNew(target, WriteReplacementRecord(evidence));
-        }
-        catch (IOException)
-        {
-            failedClosed = true;
-        }
+        var failingFileSystem = new VerifierFailingResultFileSystem(
+            restoreFileSystem,
+            target);
+        var restoreProfile = new LiveAgentVerifierProfile(
+            VerifierScenario.ContinuationRestore,
+            restoreMaterialized.TestCase,
+            restoreMaterialized.ReviewedIdentity,
+            command.ExpectedHistorySha256);
+        var result = await LiveAgentFreshProcessCommand.RunAsync(
+            restoreMaterialized.Phase,
+            failingFileSystem,
+            CancellationToken.None,
+            restoreProfile);
 
         var stateAfter = TreeSha256(stateRoot);
         var lineageAfter = FileSha256(lineagePath);
         var acceptedAfter = ReadAcceptedTuple(lineagePath);
-        var passed = failedClosed &&
+        var attemptedProduct = failingFileSystem.AttemptedResult is { } attempted
+            ? LiveAgentFreshProcessCodec.ReadResult(attempted)
+            : null;
+        var execution = restoreProfile.Execution;
+        var wire = execution?.WireProof;
+        var resultAfter = FileSha256(target);
+        var acceptedTruthPreserved = attemptedProduct is
+            {
+                Code: R3LiveAgentCodes.Completed,
+                Generation: 1,
+                HandoffReady: true,
+            } &&
+            acceptedBefore is { Generation: 0 } &&
+            acceptedAfter is { Generation: 1 } &&
+            ProductMatches(attemptedProduct, acceptedAfter) &&
+            StringComparer.Ordinal.Equals(
+                command.ExpectedLineageSha256,
+                acceptedBefore.LineageSha256) &&
+            !StringComparer.Ordinal.Equals(stateBefore, stateAfter) &&
+            !StringComparer.Ordinal.Equals(lineageBefore, lineageAfter) &&
             prior.AsSpan().SequenceEqual(File.ReadAllBytes(target)) &&
-            StringComparer.Ordinal.Equals(stateBefore, stateAfter) &&
-            StringComparer.Ordinal.Equals(lineageBefore, lineageAfter) &&
-            evidence.Restore.Generation == 1 &&
-            PhaseMatches(
-                evidence.Restore,
-                acceptedBefore) &&
-            PhaseMatches(
-                evidence.Restore,
-                acceptedAfter) &&
-            evidence.Restore.HandoffReady;
+            StringComparer.Ordinal.Equals(resultBefore, resultAfter);
+        var passed = result is
+            {
+                ExitCode: 40,
+                DiagnosticCode: LiveAgentFreshProcessCodes.OutputFailed,
+            } &&
+            failingFileSystem.PublishResultAttempts == 1 &&
+            failingFileSystem.ReplacementConflictObserved &&
+            restoreProfile.ActivationCount == 1 &&
+            wire is
+            {
+                Succeeded: true,
+                RequestCount: 2,
+            } &&
+            execution is not null &&
+            execution.Observer.DelegationCount == 1 &&
+            execution.Observer.CommitResult is
+            {
+                AcceptedGeneration: 1,
+                HandoffReady: true,
+            } commit &&
+            StringComparer.Ordinal.Equals(
+                commit.AcceptedSessionSha256,
+                attemptedProduct?.SessionSha256) &&
+            StringComparer.Ordinal.Equals(
+                commit.AcceptedEnvelopeSha256,
+                attemptedProduct?.EnvelopeSha256) &&
+            acceptedTruthPreserved;
         var receipt = new VerifierNegativeReceipt(
             "apr-r3-live-agent-negative-receipt-v1",
             "replacement-write-failed",
             "post_commit",
             "accepted_preserved",
             LiveAgentFreshProcessCodes.OutputFailed,
-            failedClosed ? LiveAgentFreshProcessCodes.OutputFailed : null,
+            result.DiagnosticCode,
             stateBefore,
             stateAfter,
             lineageBefore,
             lineageAfter,
-            evidence.Restore.Generation,
-            evidence.Restore.AcceptedSessionSha256,
-            evidence.Restore.AcceptedEnvelopeSha256,
-            evidence.Restore.LineageSha256,
+            attemptedProduct?.Generation,
+            attemptedProduct?.SessionSha256,
+            attemptedProduct?.EnvelopeSha256,
+            attemptedProduct?.LineageSha256,
             acceptedAfter?.Generation,
             acceptedAfter?.SessionSha256,
             acceptedAfter?.EnvelopeSha256,
             acceptedAfter?.LineageSha256,
-            ActivationCount: 0,
-            ProviderRequests: 0,
-            CommitDelegationCount: 0,
+            restoreProfile.ActivationCount,
+            wire?.RequestCount ?? 0,
+            execution?.Observer.DelegationCount ?? 0,
             HandoffReady: false,
-            AcceptedTruthPreserved: passed,
+            AcceptedTruthPreserved: acceptedTruthPreserved,
             Passed: passed,
-            ProcessInstanceSha256: NewProcessInstanceSha256());
+            ProcessInstanceSha256: NewProcessInstanceSha256(),
+            ResultBeforeSha256: resultBefore,
+            ResultAfterSha256: resultAfter,
+            ResultPublicationAttempts:
+                failingFileSystem.PublishResultAttempts);
         WriteNew(command.Output, VerifierReceiptCodec.Write(receipt));
         if (!passed)
         {
+            WriteFailureCode(
+                command.Root,
+                string.Join(
+                    ':',
+                    "replacement_command_failed",
+                    attemptedProduct?.Code ?? "product_missing",
+                    wire?.FailureCode ?? "wire_missing",
+                    (execution?.Observer.DelegationCount ?? 0).ToString(
+                        System.Globalization.CultureInfo.InvariantCulture)));
             Console.Error.WriteLine(VerifierCodes.PhaseFailed);
             return 1;
         }
@@ -620,20 +703,6 @@ internal static class Program
             accepted.EnvelopeSha256) &&
         StringComparer.Ordinal.Equals(
             product.LineageSha256,
-            accepted.LineageSha256);
-
-    private static bool PhaseMatches(
-        VerifierPhaseReceipt phase,
-        AcceptedTuple? accepted) => accepted is not null &&
-        phase.Generation == accepted.Generation &&
-        StringComparer.Ordinal.Equals(
-            phase.AcceptedSessionSha256,
-            accepted.SessionSha256) &&
-        StringComparer.Ordinal.Equals(
-            phase.AcceptedEnvelopeSha256,
-            accepted.EnvelopeSha256) &&
-        StringComparer.Ordinal.Equals(
-            phase.LineageSha256,
             accepted.LineageSha256);
 
     private static string NewProcessInstanceSha256() =>
