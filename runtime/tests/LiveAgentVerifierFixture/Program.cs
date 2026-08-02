@@ -14,35 +14,55 @@ internal static class Program
             return 2;
         }
 
+        var parsedCommand = command!;
         try
         {
-            return command!.Verb == "aggregate"
-                ? Aggregate(command)
-                : await RunPhaseAsync(command);
+            if (parsedCommand.Verb == "aggregate")
+            {
+                return Aggregate(parsedCommand);
+            }
+
+            if (parsedCommand.Scenario is not { } scenario)
+            {
+                Console.Error.WriteLine(VerifierCodes.FixtureInvalid);
+                return 3;
+            }
+
+            return await RunPhaseAsync(parsedCommand, scenario);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException and
             not StackOverflowException and not AccessViolationException)
         {
             try
             {
-                Directory.CreateDirectory(Path.Join(command!.Root, "private"));
+                Directory.CreateDirectory(Path.Join(parsedCommand.Root, "private"));
                 File.WriteAllText(
-                    Path.Join(command.Root, "private", "failure.code"),
+                    Path.Join(parsedCommand.Root, "private", "failure.code"),
                     exception.GetType().Name);
             }
-            catch
+            catch (Exception diagnosticException) when (
+                diagnosticException is ArgumentException or
+                    IOException or
+                    NotSupportedException or
+                    UnauthorizedAccessException or
+                    System.Security.SecurityException)
             {
+                Console.Error.WriteLine(VerifierCodes.PhaseFailed);
+                return 1;
             }
+
             Console.Error.WriteLine(VerifierCodes.PhaseFailed);
             return 1;
         }
     }
 
-    private static async Task<int> RunPhaseAsync(VerifierCommand command)
+    private static async Task<int> RunPhaseAsync(
+        VerifierCommand command,
+        VerifierScenario scenario)
     {
         var corpusBytes = File.ReadAllBytes(command.Corpus);
         if (!FreshProcessMaterializer.TryMaterialize(
-                command.Scenario!.Value,
+                scenario,
                 command.Root,
                 corpusBytes,
                 out var materialized) ||
@@ -57,7 +77,7 @@ internal static class Program
         }
 
         var profile = new LiveAgentVerifierProfile(
-            command.Scenario.Value,
+            scenario,
             materialized.TestCase);
         var result = await LiveAgentFreshProcessCommand.RunAsync(
             materialized.Phase,
@@ -97,7 +117,7 @@ internal static class Program
                 execution.Observer.Outcome);
         var wire = execution.WireProof;
         var receipt = new VerifierPhaseReceipt(
-            command.Scenario.Value.ToString(),
+            scenario.ToString(),
             result.ExitCode == 0 ? "passed" : "failed",
             product.Code,
             product.Generation,
@@ -126,7 +146,7 @@ internal static class Program
             string.Concat(
                 VerifierCodes.PhaseOk,
                 " ",
-                command.Scenario.Value));
+                scenario));
         return 0;
     }
 
