@@ -90,7 +90,7 @@ public sealed class R3QualityEvaluatorTests
     }
 
     [Fact]
-    public async Task MustFindSourcePredicatesAreMutuallyExclusive()
+    public async Task LiveAgentVerifierMustFindNegativesRemainExecutable()
     {
         var testCase = R3QualityCorpusTests.ParseCorpus().Cases[0];
         var expectation = Assert.IsType<R3QualityMustFindExpectation>(
@@ -189,7 +189,7 @@ public sealed class R3QualityEvaluatorTests
     }
 
     [Fact]
-    public async Task CompletedSubjectRejectsDetachedReviewAndAlteredResult()
+    public async Task LiveAgentVerifierAlteredProductSubjectsRemainInvalid()
     {
         var testCase = R3QualityCorpusTests.ParseCorpus().Cases[0];
         var expectation = Assert.IsType<R3QualityMustFindExpectation>(
@@ -323,7 +323,7 @@ public sealed class R3QualityEvaluatorTests
     }
 
     [Fact]
-    public async Task MustNotRejectsAlternateObservationAndCoveringRange()
+    public async Task LiveAgentVerifierMustNotNegativesRemainExecutable()
     {
         var testCase = R3QualityCorpusTests.ParseCorpus().Cases[1];
         var expectation = Assert.IsType<R3QualityMustNotFindExpectation>(
@@ -452,7 +452,7 @@ public sealed class R3QualityEvaluatorTests
     }
 
     [Fact]
-    public async Task ContinuationMissingPriorOnlyResponseFactFailsQuality()
+    public async Task LiveAgentVerifierMissingPriorFactFailsQuality()
     {
         var testCase = R3QualityCorpusTests.ParseCorpus().Cases[2];
         var expectation = Assert.IsType<R3QualityContinuationExpectation>(

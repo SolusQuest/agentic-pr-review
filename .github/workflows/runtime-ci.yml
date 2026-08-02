@@ -43,6 +43,9 @@ jobs:
       - name: R2 Agent loop framework and Native AOT proof
         run: bash runtime/scripts/verify-agent-loop.sh all
 
+      - name: R3 deterministic live-agent replacement proof
+        run: bash runtime/scripts/verify-live-agent.sh deterministic
+
   integration:
     runs-on: ubuntu-latest
     permissions:

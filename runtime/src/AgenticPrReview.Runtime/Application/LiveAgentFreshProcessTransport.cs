@@ -12,9 +12,9 @@ internal sealed record LiveAgentFreshProcessTransportProof(
     int RequestCount,
     string? SecondProcessFirstRequestSha256,
     string? PriorFactSha256,
-    string? ExpectedTerminalSha256)
+    string? ExpectedTerminalSha256) : ILiveAgentFreshProcessProof
 {
-    internal bool IsSatisfiedBy(string? terminalSha256) =>
+    public bool IsSatisfiedBy(string? terminalSha256) =>
         Succeeded &&
         LiveAgentFreshProcessDomain.IsSha256(ExpectedTerminalSha256) &&
         StringComparer.Ordinal.Equals(

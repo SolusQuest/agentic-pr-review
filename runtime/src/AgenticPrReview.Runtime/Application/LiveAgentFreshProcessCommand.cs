@@ -36,14 +36,27 @@ internal static class LiveAgentFreshProcessCommand
         return await RunAsync(
             phase!,
             fileSystem!,
-            cancellationToken);
+            cancellationToken,
+            LiveAgentFreshProcessDeterministicProfile.Instance);
     }
 
     internal static async Task<LiveAgentFreshProcessCommandResult> RunAsync(
         string phase,
         ILiveAgentFreshProcessFileSystem fileSystem,
         CancellationToken cancellationToken)
+        => await RunAsync(
+            phase,
+            fileSystem,
+            cancellationToken,
+            LiveAgentFreshProcessDeterministicProfile.Instance);
+
+    internal static async Task<LiveAgentFreshProcessCommandResult> RunAsync(
+        string phase,
+        ILiveAgentFreshProcessFileSystem fileSystem,
+        CancellationToken cancellationToken,
+        ILiveAgentFreshProcessProfile profile)
     {
+        ArgumentNullException.ThrowIfNull(profile);
         var authorizationRead = fileSystem.ReadAuthorization();
         var authorization = authorizationRead is null
             ? null
@@ -191,14 +204,14 @@ internal static class LiveAgentFreshProcessCommand
 
         using var manifestFactory =
             (IDisposable)snapshot.FileAccessFactory;
-        using var transportFactory =
-            new LiveAgentFreshProcessDeterministicTransportFactory(
+        using var profileExecution = profile.Activate(
+            new LiveAgentFreshProcessProfileActivation(
                 transportPhase!,
                 [
                     authorizationRead!.Bytes,
                     reviewedRead!.Bytes,
                     manifestRead!.Bytes,
-                ]);
+                ]));
         var lineageSink = new LiveAgentFreshProcessLineageSink(
             fileSystem,
             authorizedRoot,
@@ -206,19 +219,21 @@ internal static class LiveAgentFreshProcessCommand
             input.InvocationIdentitySha256,
             prior);
         var timeProvider = TimeProvider.System;
-        var dependencies = new R3LiveAgentDependencies(
-            new R3LiveAgentEnvironmentSecretSource(),
-            new R3LiveAgentStateRestorer(),
-            transportFactory,
-            snapshot.FileAccessFactory,
+        var stateCommitCoordinator = profileExecution.Observe(
             new LiveAgentStateCommitCoordinator(
                 new LiveAgentStateTransactionFactory(timeProvider),
                 new AgentSessionRestrictedStateAdmission(),
-                lineageSink),
+                lineageSink));
+        var dependencies = new R3LiveAgentDependencies(
+            new R3LiveAgentEnvironmentSecretSource(),
+            new R3LiveAgentStateRestorer(),
+            profileExecution.TransportFactory,
+            snapshot.FileAccessFactory,
+            stateCommitCoordinator,
             timeProvider);
         var execution = await new R3LiveAgentApplication(dependencies)
             .RunAsync(request, cancellationToken);
-        var proof = transportFactory.Proof;
+        var proof = profileExecution.Proof;
         var receipt = lineageSink.PublicationReceipt;
         var applicationResult = execution.Result;
         var proofSucceeded = proof.IsSatisfiedBy(

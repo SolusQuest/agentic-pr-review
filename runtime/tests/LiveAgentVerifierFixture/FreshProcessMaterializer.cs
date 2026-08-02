@@ -1,0 +1,294 @@
+using System.Text;
+using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent.Quality;
+using AgenticPrReview.Runtime.Agent.Session;
+using AgenticPrReview.Runtime.Agent.Tools;
+using AgenticPrReview.Runtime.Execution.DeepSeek;
+using AgenticPrReview.Runtime.Host.State;
+
+namespace AgenticPrReview.Runtime.LiveAgentVerifierFixture;
+
+internal sealed record MaterializedVerifierPhase(
+    R3QualityCase TestCase,
+    ReviewedIdentity ReviewedIdentity,
+    string Phase,
+    string Transition,
+    string Invocation,
+    string? SeedIdentitySha256);
+
+internal static class FreshProcessMaterializer
+{
+    private const string WorkflowIdentity = "trusted-r3-live-verifier";
+    private const string TrustedPolicy =
+        "Use only the immutable reviewed snapshot and grounded tool evidence.";
+    private const string BuildId = "build-111";
+    private const string SeedBaseSha =
+        "4444444444444444444444444444444444444444";
+
+    internal static bool TryMaterialize(
+        VerifierScenario scenario,
+        string root,
+        ReadOnlySpan<byte> corpusBytes,
+        out MaterializedVerifierPhase? materialized)
+    {
+        materialized = null;
+        if (!R3QualityCorpusParser.TryParse(
+                corpusBytes,
+                out var corpus,
+                out _) ||
+            corpus is null ||
+            !TrySelectCase(corpus, scenario, out var testCase))
+        {
+            return false;
+        }
+
+        var identity = scenario == VerifierScenario.ContinuationSeed
+            ? new ReviewedIdentity(
+                testCase!.ReviewedIdentity.RepositoryId,
+                testCase.ReviewedIdentity.ReviewTarget,
+                SeedBaseSha,
+                testCase.ReviewedIdentity.BaseSha)
+            : testCase!.ReviewedIdentity with { };
+        var reviewContext = scenario == VerifierScenario.ContinuationSeed
+            ? testCase.ProcessOneContext
+            : testCase.InitialContext;
+        if (reviewContext is null)
+        {
+            return false;
+        }
+
+        Directory.CreateDirectory(Path.Join(root, "input"));
+        Directory.CreateDirectory(Path.Join(root, "host"));
+        Directory.CreateDirectory(Path.Join(root, "state"));
+        Directory.CreateDirectory(Path.Join(root, "private"));
+        Directory.CreateDirectory(Path.Join(root, "output"));
+
+        var trusted = new AgentSessionTrustedRequest(
+            identity.RepositoryId,
+            identity.ReviewTarget,
+            WorkflowIdentity,
+            Encoding.UTF8.GetBytes(TrustedPolicy),
+            BuildId,
+            DeepSeekAdapterContext.Provider,
+            DeepSeekAdapterContext.Model,
+            DeepSeekAdapterContext.Adapter);
+        if (!AgentStableRequestMaterializer.TryMaterialize(
+                trusted,
+                priorSessionSha256: null,
+                out var stable))
+        {
+            return false;
+        }
+
+        var sessionId = testCase.Kind == R3QualityCaseKind.Continuation
+            ? "session-111-continuation"
+            : string.Concat("session-111-", testCase.Id);
+        var scope = new RestrictedStateScope(
+            trusted.RepositoryId,
+            trusted.WorkflowIdentity,
+            trusted.ReviewTarget,
+            sessionId,
+            trusted.ProviderId,
+            trusted.ModelId,
+            trusted.AdapterId,
+            stable!.StablePlan.PolicySha256,
+            stable.StablePlan.LimitsSha256,
+            stable.StablePlan.ToolsetSha256,
+            trusted.BuildId);
+
+        var continuing = scenario == VerifierScenario.ContinuationRestore;
+        string? expectedLineage = null;
+        if (continuing)
+        {
+            var lineagePath = Path.Join(root, "host", "accepted-lineage.json");
+            if (!File.Exists(lineagePath))
+            {
+                return false;
+            }
+
+            expectedLineage = LiveAgentFreshProcessDomain.RawSha256(
+                File.ReadAllBytes(lineagePath));
+        }
+
+        var invocation = scenario switch
+        {
+            VerifierScenario.MustFind => "issue111_must_find",
+            VerifierScenario.MustNotFind => "issue111_must_not_find",
+            VerifierScenario.ContinuationSeed => "issue111_seed_process",
+            VerifierScenario.ContinuationRestore => "issue111_restore_process",
+            _ => throw new InvalidOperationException(),
+        };
+        var transition = continuing ? "verified_ahead" : "same_head";
+        var fromHead = continuing
+            ? testCase.ReviewedIdentity.BaseSha
+            : identity.HeadSha;
+        var receipt = LiveAgentFreshProcessDomain.TransitionReceiptSha256(
+            expectedLineage,
+            transition,
+            fromHead,
+            identity.BaseSha,
+            identity.HeadSha,
+            invocation);
+        var authorization = new LiveAgentFreshProcessAuthorizationDocument(
+            LiveAgentFreshProcessDomain.AuthorizationKind,
+            new LiveAgentFreshProcessStableAuthority(
+                trusted.RepositoryId,
+                trusted.ReviewTarget,
+                trusted.WorkflowIdentity,
+                TrustedPolicy,
+                trusted.BuildId,
+                trusted.ProviderId,
+                trusted.ModelId,
+                trusted.AdapterId,
+                sessionId),
+            LiveAgentFreshProcessDomain.ScopeDocument(scope),
+            IsTrustedWorkflow: true,
+            IsSameRepository: true,
+            IsForkOrigin: false,
+            LiveAgentFreshProcessDomain.DeterministicProfile,
+            continuing ? "current" : "absent",
+            continuing ? "explicit" : "automatic",
+            new LiveAgentFreshProcessTransitionDocument(
+                transition,
+                fromHead,
+                identity.BaseSha,
+                identity.HeadSha,
+                receipt),
+            invocation,
+            expectedLineage);
+        var reviewed = new LiveAgentFreshProcessReviewedInputDocument(
+            LiveAgentFreshProcessDomain.ReviewedInputKind,
+            LiveAgentFreshProcessDomain.IdentityDocument(identity),
+            reviewContext);
+        var manifest = Manifest(identity, testCase);
+
+        Write(
+            Path.Join(root, "host", "authorization.json"),
+            LiveAgentFreshProcessCodec.Write(authorization));
+        Write(
+            Path.Join(root, "input", "reviewed-input.json"),
+            LiveAgentFreshProcessCodec.Write(reviewed));
+        Write(
+            Path.Join(root, "input", "snapshot-manifest.json"),
+            LiveAgentFreshProcessCodec.Write(manifest));
+        var resultPath = Path.Join(root, "output", "result.json");
+        if (File.Exists(resultPath))
+        {
+            File.Delete(resultPath);
+        }
+
+        materialized = new MaterializedVerifierPhase(
+            testCase,
+            identity,
+            continuing ? "continue" : "bootstrap",
+            transition,
+            invocation,
+            scenario == VerifierScenario.ContinuationSeed
+                ? LiveAgentFreshProcessDomain.RawSha256(
+                    Encoding.UTF8.GetBytes(
+                        string.Concat(
+                            identity.RepositoryId,
+                            "\n",
+                            identity.ReviewTarget,
+                            "\n",
+                            identity.BaseSha,
+                            "\n",
+                            identity.HeadSha)))
+                : null);
+        return true;
+    }
+
+    private static bool TrySelectCase(
+        R3QualityCorpus corpus,
+        VerifierScenario scenario,
+        out R3QualityCase? testCase)
+    {
+        var kind = scenario switch
+        {
+            VerifierScenario.MustFind => R3QualityCaseKind.MustFind,
+            VerifierScenario.MustNotFind => R3QualityCaseKind.MustNotFind,
+            VerifierScenario.ContinuationSeed or
+                VerifierScenario.ContinuationRestore =>
+                    R3QualityCaseKind.Continuation,
+            _ => throw new InvalidOperationException(),
+        };
+        testCase = corpus.Cases.SingleOrDefault(item => item.Kind == kind);
+        return testCase is not null;
+    }
+
+    private static LiveAgentFreshProcessSnapshotManifestDocument Manifest(
+        ReviewedIdentity identity,
+        R3QualityCase testCase)
+    {
+        var files = testCase.Files.Select(file =>
+        {
+            var bytes = Encoding.UTF8.GetBytes(file.Content);
+            return new LiveAgentFreshProcessFileDocument(
+                file.Path,
+                bytes.Length,
+                LiveAgentFreshProcessDomain.RawSha256(bytes),
+                Convert.ToBase64String(bytes));
+        }).ToArray();
+        var changed = testCase.ChangedFile;
+        var source = testCase.DiffSource;
+        var reboundSource = new ReviewedDiffSource(
+            identity,
+            source.Path,
+            source.PreviousPath,
+            source.Status,
+            source.SourceTruncated,
+            source.Hunks.Select(hunk => new ReviewedDiffHunk(
+                hunk.OldStart,
+                hunk.OldCount,
+                hunk.NewStart,
+                hunk.NewCount,
+                hunk.Lines)));
+        var changedDocument = new LiveAgentFreshProcessChangedFileDocument(
+            changed.Path,
+            changed.PreviousPath,
+            changed.Status,
+            changed.Additions,
+            changed.Deletions,
+            changed.Changes,
+            changed.PatchStatus,
+            reboundSource.PatchSha256,
+            changed.SourceTruncated);
+        var sourceDocument = new LiveAgentFreshProcessDiffSourceDocument(
+            source.Path,
+            source.PreviousPath,
+            source.Status,
+            source.SourceTruncated,
+            source.Hunks.Select(hunk =>
+                new LiveAgentFreshProcessDiffHunkDocument(
+                    hunk.OldStart,
+                    hunk.OldCount,
+                    hunk.NewStart,
+                    hunk.NewCount,
+                    hunk.Lines.Select(line =>
+                        new LiveAgentFreshProcessDiffLineDocument(
+                            line.Kind,
+                            line.OldLine,
+                            line.NewLine,
+                            line.Text)).ToArray())).ToArray());
+        return new LiveAgentFreshProcessSnapshotManifestDocument(
+            LiveAgentFreshProcessDomain.SnapshotManifestKind,
+            LiveAgentFreshProcessDomain.IdentityDocument(identity),
+            files.Select(file => file.Path).Order(StringComparer.Ordinal).ToArray(),
+            files,
+            [changedDocument],
+            [sourceDocument]);
+    }
+
+    private static void Write(string path, ReadOnlySpan<byte> bytes)
+    {
+        using var stream = new FileStream(
+            path,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            4_096,
+            FileOptions.WriteThrough);
+        stream.Write(bytes);
+        stream.Flush(flushToDisk: true);
+    }
+}

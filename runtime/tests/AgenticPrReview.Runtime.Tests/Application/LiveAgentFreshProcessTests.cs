@@ -278,7 +278,7 @@ public sealed class LiveAgentFreshProcessTests
     [InlineData("unknown")]
     [InlineData("diverged")]
     [InlineData("unrelated")]
-    public async Task NonVerifiedTransitionFailsBeforeProviderConstruction(
+    public async Task LiveAgentVerifierInvalidTransitionStopsBeforeProviderConstruction(
         string transition)
     {
         using var fixture = new FreshProcessFixture();
@@ -439,7 +439,7 @@ public sealed class LiveAgentFreshProcessTests
     }
 
     [Fact]
-    public async Task AuthorizationDenialDoesNotRequestAuthorizedLayout()
+    public async Task LiveAgentVerifierAuthorizationDenialHasZeroActivation()
     {
         var trusted = Trusted();
         Assert.True(AgentStableRequestMaterializer.TryMaterialize(
@@ -462,16 +462,19 @@ public sealed class LiveAgentFreshProcessTests
             expectedLineageSha256: null);
         var files = new DenialProbeFileSystem(
             LiveAgentFreshProcessCodec.Write(authorization));
+        var profile = new ActivationProbeProfile();
 
         var result = await LiveAgentFreshProcessCommand.RunAsync(
             "bootstrap",
             files,
-            CancellationToken.None);
+            CancellationToken.None,
+            profile);
 
         Assert.Equal(13, result.ExitCode);
         Assert.Equal(RestrictedStateCodes.AccessDenied, result.DiagnosticCode);
         Assert.Equal(1, files.AuthorizationReads);
         Assert.Equal(0, files.AuthorizedLayoutCalls);
+        Assert.Equal(0, profile.ActivationCount);
     }
 
     [Theory]
@@ -1575,7 +1578,7 @@ public sealed class LiveAgentFreshProcessTests
     }
 
     [Fact]
-    public void TransportProofRequiresExactValidatedTerminalDigest()
+    public void LiveAgentVerifierTransportProofRequiresExactTerminalDigest()
     {
         var expected = new string('a', 64);
         var proof = new LiveAgentFreshProcessTransportProof(
@@ -1993,6 +1996,19 @@ public sealed class LiveAgentFreshProcessTests
         private static Exception Unreachable() =>
             new InvalidOperationException(
                 "Authorization denial reached a protected capability.");
+    }
+
+    private sealed class ActivationProbeProfile : ILiveAgentFreshProcessProfile
+    {
+        internal int ActivationCount { get; private set; }
+
+        public ILiveAgentFreshProcessProfileExecution Activate(
+            LiveAgentFreshProcessProfileActivation activation)
+        {
+            ActivationCount++;
+            throw new InvalidOperationException(
+                "A denied invocation must not activate the live profile.");
+        }
     }
 
     private sealed record RunResult(
