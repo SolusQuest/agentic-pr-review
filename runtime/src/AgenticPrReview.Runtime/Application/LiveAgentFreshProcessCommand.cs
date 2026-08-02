@@ -578,7 +578,7 @@ internal static class LiveAgentFreshProcessCommand
         return fileSystem.PublishResult(
                 root,
                 LiveAgentFreshProcessCodec.Write(result)) is not
-                    { Durable: true }
+                { Durable: true }
             ? Failure(
                 exitCode: 40,
                 LiveAgentFreshProcessCodes.OutputFailed)
