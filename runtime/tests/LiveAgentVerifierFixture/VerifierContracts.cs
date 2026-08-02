@@ -78,6 +78,9 @@ internal sealed record VerifierPhaseReceipt(
     string InvocationIdentitySha256,
     string? SeedIdentitySha256,
     string? LineageSha256,
+    string? AcceptedSessionSha256,
+    string? AcceptedEnvelopeSha256,
+    bool AcceptedTupleValidated,
     string? HistoricalMessagesSha256,
     bool ExactReplayValidated,
     bool ReplayMutationMatrixValidated,
@@ -99,6 +102,13 @@ internal sealed record VerifierNegativeReceipt(
     string? LineageBeforeSha256,
     string? LineageAfterSha256,
     long? AcceptedGeneration,
+    string? AcceptedSessionSha256,
+    string? AcceptedEnvelopeSha256,
+    string? AcceptedLineageSha256,
+    long? CanonicalLineageGeneration,
+    string? CanonicalLineageSessionSha256,
+    string? CanonicalLineageEnvelopeSha256,
+    string? CanonicalLineageSha256,
     int ActivationCount,
     int ProviderRequests,
     int CommitDelegationCount,
@@ -303,6 +313,17 @@ internal static class VerifierReceiptCodec
             WriteNullable(writer, "lineage_sha256", receipt.LineageSha256);
             WriteNullable(
                 writer,
+                "accepted_session_sha256",
+                receipt.AcceptedSessionSha256);
+            WriteNullable(
+                writer,
+                "accepted_envelope_sha256",
+                receipt.AcceptedEnvelopeSha256);
+            writer.WriteBoolean(
+                "accepted_tuple_validated",
+                receipt.AcceptedTupleValidated);
+            WriteNullable(
+                writer,
                 "historical_messages_sha256",
                 receipt.HistoricalMessagesSha256);
             writer.WriteBoolean(
@@ -413,6 +434,40 @@ internal static class VerifierReceiptCodec
             {
                 writer.WriteNull("accepted_generation");
             }
+            WriteNullable(
+                writer,
+                "accepted_session_sha256",
+                receipt.AcceptedSessionSha256);
+            WriteNullable(
+                writer,
+                "accepted_envelope_sha256",
+                receipt.AcceptedEnvelopeSha256);
+            WriteNullable(
+                writer,
+                "accepted_lineage_sha256",
+                receipt.AcceptedLineageSha256);
+            if (receipt.CanonicalLineageGeneration is { } lineageGeneration)
+            {
+                writer.WriteNumber(
+                    "canonical_lineage_generation",
+                    lineageGeneration);
+            }
+            else
+            {
+                writer.WriteNull("canonical_lineage_generation");
+            }
+            WriteNullable(
+                writer,
+                "canonical_lineage_session_sha256",
+                receipt.CanonicalLineageSessionSha256);
+            WriteNullable(
+                writer,
+                "canonical_lineage_envelope_sha256",
+                receipt.CanonicalLineageEnvelopeSha256);
+            WriteNullable(
+                writer,
+                "canonical_lineage_sha256",
+                receipt.CanonicalLineageSha256);
             writer.WriteNumber("activation_count", receipt.ActivationCount);
             writer.WriteNumber("provider_requests", receipt.ProviderRequests);
             writer.WriteNumber(

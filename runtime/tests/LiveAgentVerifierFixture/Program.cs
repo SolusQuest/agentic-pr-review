@@ -138,6 +138,10 @@ internal static class Program
         var wire = execution?.WireProof;
         var stateAfter = TreeSha256(Path.Join(command.Root, "state"));
         var lineageAfter = FileSha256(lineagePath);
+        var canonicalLineage = ReadAcceptedTuple(lineagePath);
+        var acceptedTupleMatches = ProductMatches(
+            product,
+            canonicalLineage);
         var actualCode = product?.Code ?? result.DiagnosticCode;
         var unchanged = StringComparer.Ordinal.Equals(
                 stateBefore,
@@ -150,13 +154,20 @@ internal static class Program
                 Generation: 0,
                 HandoffReady: false,
             } &&
+            acceptedTupleMatches &&
             execution?.Observer.DelegationCount == 1 &&
             lineageAfter is not null &&
             !StringComparer.Ordinal.Equals(stateBefore, stateAfter);
         var invariant = descriptor.StateExpectation switch
         {
             "no_advance" or "prior_unchanged" => unchanged &&
-                product?.Generation is null,
+                product is null || product is
+                {
+                    Generation: null,
+                    SessionSha256: null,
+                    EnvelopeSha256: null,
+                    LineageSha256: null,
+                },
             "accepted_preserved" => acceptedTruthPreserved,
             _ => false,
         };
@@ -202,6 +213,13 @@ internal static class Program
             lineageBefore,
             lineageAfter,
             product?.Generation,
+            product?.SessionSha256,
+            product?.EnvelopeSha256,
+            product?.LineageSha256,
+            canonicalLineage?.Generation,
+            canonicalLineage?.SessionSha256,
+            canonicalLineage?.EnvelopeSha256,
+            canonicalLineage?.LineageSha256,
             profile.ActivationCount,
             wire?.RequestCount ?? 0,
             execution?.Observer.DelegationCount ?? 0,
@@ -285,6 +303,13 @@ internal static class Program
                 materialized.TestCase,
                 execution.Observer.Outcome);
         var wire = execution.WireProof;
+        var canonicalLineage = ReadAcceptedTuple(Path.Join(
+            command.Root,
+            "host",
+            "accepted-lineage.json"));
+        var acceptedTupleValidated = ProductMatches(
+            product,
+            canonicalLineage);
         var canaryRoutes = scenario == VerifierScenario.CanaryRouting
             ? CreateCanaryRoutes(command, wire)
             : null;
@@ -307,6 +332,9 @@ internal static class Program
             product.InvocationIdentitySha256,
             materialized.SeedIdentitySha256,
             product.LineageSha256,
+            product.SessionSha256,
+            product.EnvelopeSha256,
+            acceptedTupleValidated,
             wire.HistoricalMessagesSha256,
             wire.ExactReplayValidated,
             wire.ReplayMutationMatrixValidated,
@@ -318,7 +346,9 @@ internal static class Program
                 canaryRoutes.All(route => route.Observed),
             CanaryRoutes: canaryRoutes);
         WriteNew(command.Output, VerifierReceiptCodec.Write(receipt));
-        if (result.ExitCode != 0 || !receipt.HandoffReady)
+        if (result.ExitCode != 0 ||
+            !receipt.HandoffReady ||
+            !receipt.AcceptedTupleValidated)
         {
             Console.Error.WriteLine(VerifierCodes.PhaseFailed);
             return 1;
@@ -384,6 +414,7 @@ internal static class Program
             "accepted-lineage.json");
         var stateBefore = TreeSha256(stateRoot);
         var lineageBefore = FileSha256(lineagePath);
+        var acceptedBefore = ReadAcceptedTuple(lineagePath);
         var failedClosed = false;
         try
         {
@@ -396,11 +427,18 @@ internal static class Program
 
         var stateAfter = TreeSha256(stateRoot);
         var lineageAfter = FileSha256(lineagePath);
+        var acceptedAfter = ReadAcceptedTuple(lineagePath);
         var passed = failedClosed &&
             prior.AsSpan().SequenceEqual(File.ReadAllBytes(target)) &&
             StringComparer.Ordinal.Equals(stateBefore, stateAfter) &&
             StringComparer.Ordinal.Equals(lineageBefore, lineageAfter) &&
             evidence.Restore.Generation == 1 &&
+            PhaseMatches(
+                evidence.Restore,
+                acceptedBefore) &&
+            PhaseMatches(
+                evidence.Restore,
+                acceptedAfter) &&
             evidence.Restore.HandoffReady;
         var receipt = new VerifierNegativeReceipt(
             "apr-r3-live-agent-negative-receipt-v1",
@@ -414,6 +452,13 @@ internal static class Program
             lineageBefore,
             lineageAfter,
             evidence.Restore.Generation,
+            evidence.Restore.AcceptedSessionSha256,
+            evidence.Restore.AcceptedEnvelopeSha256,
+            evidence.Restore.LineageSha256,
+            acceptedAfter?.Generation,
+            acceptedAfter?.SessionSha256,
+            acceptedAfter?.EnvelopeSha256,
+            acceptedAfter?.LineageSha256,
             ActivationCount: 0,
             ProviderRequests: 0,
             CommitDelegationCount: 0,
@@ -529,6 +574,67 @@ internal static class Program
     private static string? FileSha256(string path) => File.Exists(path)
         ? LiveAgentFreshProcessDomain.RawSha256(File.ReadAllBytes(path))
         : null;
+
+    private static AcceptedTuple? ReadAcceptedTuple(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        var bytes = File.ReadAllBytes(path);
+        var lineage = LiveAgentFreshProcessCodec.ReadLineage(bytes);
+        if (lineage is null ||
+            lineage.Kind != LiveAgentFreshProcessDomain.LineageKind ||
+            lineage.Generation < 0 ||
+            !lineage.TransitionAuthorized ||
+            !LiveAgentFreshProcessDomain.IsSha256(lineage.SessionSha256) ||
+            !LiveAgentFreshProcessDomain.IsSha256(lineage.EnvelopeSha256) ||
+            !LiveAgentFreshProcessDomain.IsSha256(
+                lineage.InvocationIdentitySha256) ||
+            !LiveAgentFreshProcessDomain.IsCommitSha(
+                lineage.ProducerBaseSha) ||
+            !LiveAgentFreshProcessDomain.IsCommitSha(
+                lineage.ProducerHeadSha))
+        {
+            return null;
+        }
+
+        return new AcceptedTuple(
+            lineage.Generation,
+            lineage.SessionSha256,
+            lineage.EnvelopeSha256,
+            LiveAgentFreshProcessDomain.RawSha256(bytes));
+    }
+
+    private static bool ProductMatches(
+        LiveAgentFreshProcessResultDocument? product,
+        AcceptedTuple? accepted) => product is not null &&
+        accepted is not null &&
+        product.Generation == accepted.Generation &&
+        StringComparer.Ordinal.Equals(
+            product.SessionSha256,
+            accepted.SessionSha256) &&
+        StringComparer.Ordinal.Equals(
+            product.EnvelopeSha256,
+            accepted.EnvelopeSha256) &&
+        StringComparer.Ordinal.Equals(
+            product.LineageSha256,
+            accepted.LineageSha256);
+
+    private static bool PhaseMatches(
+        VerifierPhaseReceipt phase,
+        AcceptedTuple? accepted) => accepted is not null &&
+        phase.Generation == accepted.Generation &&
+        StringComparer.Ordinal.Equals(
+            phase.AcceptedSessionSha256,
+            accepted.SessionSha256) &&
+        StringComparer.Ordinal.Equals(
+            phase.AcceptedEnvelopeSha256,
+            accepted.EnvelopeSha256) &&
+        StringComparer.Ordinal.Equals(
+            phase.LineageSha256,
+            accepted.LineageSha256);
 
     private static string NewProcessInstanceSha256() =>
         LiveAgentFreshProcessDomain.RawSha256(
@@ -647,4 +753,10 @@ internal static class Program
         Directory.CreateDirectory(Path.Join(root, "private"));
         File.WriteAllText(Path.Join(root, "private", "failure.code"), code);
     }
+
+    private sealed record AcceptedTuple(
+        long Generation,
+        string SessionSha256,
+        string EnvelopeSha256,
+        string LineageSha256);
 }

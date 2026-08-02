@@ -432,6 +432,61 @@ public sealed class LiveAgentVerifierContractTests
         Assert.False(VerifierWireProof.Empty.IsSatisfiedBy(null));
     }
 
+    [Fact]
+    public void LiveAgentVerifierAcceptedIdentityMutationsFailClosed()
+    {
+        var session = new string('1', 64);
+        var envelope = new string('2', 64);
+        var lineage = new string('3', 64);
+        var valid = new VerifierNegativeReceipt(
+            "apr-r3-live-agent-negative-receipt-v1",
+            "quality-failed-after-commit",
+            "post_commit",
+            "accepted_preserved",
+            LiveAgentFreshProcessCodes.TransportProofFailed,
+            LiveAgentFreshProcessCodes.TransportProofFailed,
+            new string('4', 64),
+            new string('5', 64),
+            null,
+            lineage,
+            0,
+            session,
+            envelope,
+            lineage,
+            0,
+            session,
+            envelope,
+            lineage,
+            ActivationCount: 1,
+            ProviderRequests: 3,
+            CommitDelegationCount: 1,
+            HandoffReady: false,
+            AcceptedTruthPreserved: true,
+            Passed: true,
+            ProcessInstanceSha256: new string('6', 64));
+        Assert.True(VerifierEvidence.NegativeValidForTesting(valid));
+
+        var mutations = new[]
+        {
+            valid with { AcceptedSessionSha256 = null },
+            valid with { AcceptedSessionSha256 = new string('7', 64) },
+            valid with { AcceptedEnvelopeSha256 = null },
+            valid with { AcceptedEnvelopeSha256 = new string('7', 64) },
+            valid with { AcceptedLineageSha256 = new string('7', 64) },
+            valid with
+            {
+                CanonicalLineageSessionSha256 = new string('7', 64),
+            },
+            valid with
+            {
+                CanonicalLineageEnvelopeSha256 = new string('7', 64),
+            },
+            valid with { CanonicalLineageSha256 = new string('7', 64) },
+        };
+        Assert.All(mutations, receipt => Assert.False(
+            VerifierEvidence.NegativeValidForTesting(receipt)));
+    }
+
     private static string Fixture(string name) => Path.Join(
         AppContext.BaseDirectory,
         "fixtures",

@@ -191,12 +191,18 @@ internal static class VerifierEvidence
                         "pending");
                 }
 
+                if (receipt is null)
+                {
+                    throw new InvalidOperationException(
+                        "A required negative receipt was not loaded.");
+                }
+
                 return string.Join(
                     '\t',
                     row.Id,
                     row.PhaseOrRoute,
                     row.StateExpectation,
-                    receipt!.ExpectedCode,
+                    receipt.ExpectedCode,
                     receipt.ActualCode,
                     receipt.Passed);
             }).ToArray();
@@ -364,10 +370,15 @@ internal static class VerifierEvidence
                 receipt.WireFailureCode is not null ||
                 !receipt.CommitDelegatedOnce ||
                 !receipt.HandoffReady ||
+                !receipt.AcceptedTupleValidated ||
                 !LiveAgentFreshProcessDomain.IsSha256(
                     receipt.InvocationIdentitySha256) ||
                 !LiveAgentFreshProcessDomain.IsSha256(
                     receipt.LineageSha256) ||
+                !LiveAgentFreshProcessDomain.IsSha256(
+                    receipt.AcceptedSessionSha256) ||
+                !LiveAgentFreshProcessDomain.IsSha256(
+                    receipt.AcceptedEnvelopeSha256) ||
                 !LiveAgentFreshProcessDomain.IsSha256(
                     receipt.TerminalSha256)))
         {
@@ -489,6 +500,7 @@ internal static class VerifierEvidence
         {
             return receipt.AcceptedTruthPreserved &&
                 receipt.AcceptedGeneration == 1 &&
+                AcceptedIdentityMatches(receipt) &&
                 receipt.ActivationCount == 0 &&
                 receipt.ProviderRequests == 0 &&
                 receipt.CommitDelegationCount == 0 &&
@@ -521,9 +533,13 @@ internal static class VerifierEvidence
         {
             "no_advance" or "prior_unchanged" => unchanged &&
                 receipt.AcceptedGeneration is null &&
+                receipt.AcceptedSessionSha256 is null &&
+                receipt.AcceptedEnvelopeSha256 is null &&
+                receipt.AcceptedLineageSha256 is null &&
                 !receipt.AcceptedTruthPreserved,
             "accepted_preserved" => receipt.AcceptedTruthPreserved &&
                 receipt.AcceptedGeneration == 0 &&
+                AcceptedIdentityMatches(receipt) &&
                 receipt.CommitDelegationCount == 1 &&
                 receipt.StateBeforeSha256 != receipt.StateAfterSha256 &&
                 LiveAgentFreshProcessDomain.IsSha256(
@@ -534,6 +550,36 @@ internal static class VerifierEvidence
             receipt.ActivationCount == expectedActivation &&
             receipt.ProviderRequests == expectedRequests;
     }
+
+    internal static bool AcceptedIdentityMatches(
+        VerifierNegativeReceipt receipt) =>
+        receipt.AcceptedGeneration is >= 0 &&
+        receipt.AcceptedGeneration ==
+            receipt.CanonicalLineageGeneration &&
+        LiveAgentFreshProcessDomain.IsSha256(
+            receipt.AcceptedSessionSha256) &&
+        StringComparer.Ordinal.Equals(
+            receipt.AcceptedSessionSha256,
+            receipt.CanonicalLineageSessionSha256) &&
+        LiveAgentFreshProcessDomain.IsSha256(
+            receipt.AcceptedEnvelopeSha256) &&
+        StringComparer.Ordinal.Equals(
+            receipt.AcceptedEnvelopeSha256,
+            receipt.CanonicalLineageEnvelopeSha256) &&
+        LiveAgentFreshProcessDomain.IsSha256(
+            receipt.AcceptedLineageSha256) &&
+        StringComparer.Ordinal.Equals(
+            receipt.AcceptedLineageSha256,
+            receipt.CanonicalLineageSha256);
+
+    internal static bool NegativeValidForTesting(
+        VerifierNegativeReceipt receipt) => NegativeValid(
+        new VerifierManifestRow(
+            "quality-failed-after-commit",
+            "post_commit",
+            "accepted_preserved",
+            LiveAgentFreshProcessCodes.TransportProofFailed),
+        receipt);
 
     private static bool ArchitectureValid(
         VerifierArchitectureReceipt receipt) =>
@@ -556,6 +602,8 @@ internal static class VerifierEvidence
             "handoff_ready", "first_request_sha256", "terminal_sha256",
             "prior_fact_sha256", "invocation_identity_sha256",
             "seed_identity_sha256", "lineage_sha256",
+            "accepted_session_sha256", "accepted_envelope_sha256",
+            "accepted_tuple_validated",
             "historical_messages_sha256", "exact_replay_validated",
             "replay_mutation_matrix_validated",
             "process_instance_sha256", "canary_routes_validated",
@@ -620,6 +668,9 @@ internal static class VerifierEvidence
             RequiredString(root, "invocation_identity_sha256"),
             NullableString(root, "seed_identity_sha256"),
             NullableString(root, "lineage_sha256"),
+            NullableString(root, "accepted_session_sha256"),
+            NullableString(root, "accepted_envelope_sha256"),
+            root.GetProperty("accepted_tuple_validated").GetBoolean(),
             NullableString(root, "historical_messages_sha256"),
             root.GetProperty("exact_replay_validated").GetBoolean(),
             root.GetProperty("replay_mutation_matrix_validated").GetBoolean(),
@@ -667,7 +718,12 @@ internal static class VerifierEvidence
             "kind", "case", "phase", "state_expectation", "expected_code",
             "actual_code", "state_before_sha256", "state_after_sha256",
             "lineage_before_sha256", "lineage_after_sha256",
-            "accepted_generation", "activation_count", "provider_requests",
+            "accepted_generation", "accepted_session_sha256",
+            "accepted_envelope_sha256", "accepted_lineage_sha256",
+            "canonical_lineage_generation",
+            "canonical_lineage_session_sha256",
+            "canonical_lineage_envelope_sha256",
+            "canonical_lineage_sha256", "activation_count", "provider_requests",
             "commit_delegation_count", "handoff_ready",
             "accepted_truth_preserved", "passed", "process_instance_sha256",
         ]);
@@ -689,6 +745,13 @@ internal static class VerifierEvidence
             NullableString(root, "lineage_before_sha256"),
             NullableString(root, "lineage_after_sha256"),
             NullableInt64(root, "accepted_generation"),
+            NullableString(root, "accepted_session_sha256"),
+            NullableString(root, "accepted_envelope_sha256"),
+            NullableString(root, "accepted_lineage_sha256"),
+            NullableInt64(root, "canonical_lineage_generation"),
+            NullableString(root, "canonical_lineage_session_sha256"),
+            NullableString(root, "canonical_lineage_envelope_sha256"),
+            NullableString(root, "canonical_lineage_sha256"),
             root.GetProperty("activation_count").GetInt32(),
             root.GetProperty("provider_requests").GetInt32(),
             root.GetProperty("commit_delegation_count").GetInt32(),
