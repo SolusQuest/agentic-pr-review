@@ -16,7 +16,7 @@ internal sealed record LiveAgentFreshProcessLineagePublicationReceipt(
     long Generation,
     string SessionSha256,
     string EnvelopeSha256,
-    LiveAgentFreshProcessFileVersion FileVersion);
+    LiveAgentFreshProcessFileVersion? FileVersion);
 
 internal static class LiveAgentFreshProcessLineageAdmission
 {
@@ -178,14 +178,18 @@ internal sealed class LiveAgentFreshProcessLineageSink(
             return LiveAgentLineagePublicationOutcome.Unavailable;
         }
 
+        var outcome = write.Durable && write.Version is not null
+            ? LiveAgentLineagePublicationOutcome.Ready
+            : LiveAgentLineagePublicationOutcome
+                .CleanupFailedAfterAtomicPublication;
         PublicationReceipt =
             new LiveAgentFreshProcessLineagePublicationReceipt(
-                LiveAgentLineagePublicationOutcome.Ready,
+                outcome,
                 sha256,
                 acceptedLineage.Generation,
                 acceptedLineage.SessionSha256,
                 acceptedLineage.EnvelopeSha256,
                 write.Version);
-        return LiveAgentLineagePublicationOutcome.Ready;
+        return outcome;
     }
 }

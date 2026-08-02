@@ -248,14 +248,14 @@ internal static class LiveAgentFreshProcessCommand
             applicationResult.TerminalSha256,
             applicationResult.AcceptedSessionSha256,
             applicationResult.AcceptedEnvelopeSha256,
-            handoffReady ? receipt!.LineageSha256 : null,
+            receipt?.LineageSha256,
             handoffReady ? proof.SecondProcessFirstRequestSha256 : null,
             input.InvocationIdentitySha256,
             handoffReady);
         var written = fileSystem.PublishResult(
             authorizedRoot,
             LiveAgentFreshProcessCodec.Write(result));
-        if (written is null)
+        if (written is not { Durable: true })
         {
             return Failure(
                 exitCode: 40,
@@ -577,7 +577,8 @@ internal static class LiveAgentFreshProcessCommand
             false);
         return fileSystem.PublishResult(
                 root,
-                LiveAgentFreshProcessCodec.Write(result)) is null
+                LiveAgentFreshProcessCodec.Write(result)) is not
+                    { Durable: true }
             ? Failure(
                 exitCode: 40,
                 LiveAgentFreshProcessCodes.OutputFailed)

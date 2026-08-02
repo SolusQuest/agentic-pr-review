@@ -48,7 +48,8 @@ internal sealed class LiveAgentFreshProcessAuthorizationRead
 }
 
 internal sealed record LiveAgentFreshProcessAtomicWriteReceipt(
-    LiveAgentFreshProcessFileVersion Version);
+    LiveAgentFreshProcessFileVersion? Version,
+    bool Durable);
 
 internal sealed class LiveAgentFreshProcessAuthorizedRoot : IDisposable
 {
@@ -153,14 +154,33 @@ internal sealed class LiveAgentFreshProcessFileSystem :
     private static readonly string[] InputEntries =
         ["reviewed-input.json", "snapshot-manifest.json"];
     private readonly string root;
+    private readonly bool failParentSyncForTests;
 
-    private LiveAgentFreshProcessFileSystem(string root)
+    private LiveAgentFreshProcessFileSystem(
+        string root,
+        bool failParentSyncForTests)
     {
         this.root = root;
+        this.failParentSyncForTests = failParentSyncForTests;
     }
 
     internal static bool TryCreate(
         string? value,
+        out LiveAgentFreshProcessFileSystem? fileSystem) => TryCreate(
+            value,
+            failParentSyncForTests: false,
+            out fileSystem);
+
+    internal static bool TryCreateForParentSyncFailureTest(
+        string? value,
+        out LiveAgentFreshProcessFileSystem? fileSystem) => TryCreate(
+            value,
+            failParentSyncForTests: true,
+            out fileSystem);
+
+    private static bool TryCreate(
+        string? value,
+        bool failParentSyncForTests,
         out LiveAgentFreshProcessFileSystem? fileSystem)
     {
         fileSystem = null;
@@ -180,7 +200,9 @@ internal sealed class LiveAgentFreshProcessFileSystem :
                 return false;
             }
 
-            fileSystem = new LiveAgentFreshProcessFileSystem(trimmed);
+            fileSystem = new LiveAgentFreshProcessFileSystem(
+                trimmed,
+                failParentSyncForTests);
             return true;
         }
         catch (Exception exception) when (exception is ArgumentException or
@@ -362,23 +384,28 @@ internal sealed class LiveAgentFreshProcessFileSystem :
 
             File.Move(temporary, path, overwrite: allowReplace);
             moved = true;
-            if (capability.Guard is not AuthorizedLayoutGuard guard ||
-                !guard.TrySyncParent(path))
-            {
-                return null;
-            }
-
-            var version = InspectRegularPath(path);
-            return version is not null && IsAuthorized(capability)
-                ? new LiveAgentFreshProcessAtomicWriteReceipt(version)
-                : null;
+            var synchronized =
+                capability.Guard is AuthorizedLayoutGuard guard &&
+                !failParentSyncForTests &&
+                guard.TrySyncParent(path);
+            var read = ReadFixed(path, maximumBytes);
+            var reconciled = read is not null &&
+                read.Bytes.SequenceEqual(bytes) &&
+                IsAuthorized(capability);
+            return new LiveAgentFreshProcessAtomicWriteReceipt(
+                reconciled ? read!.Version : null,
+                synchronized && reconciled);
         }
         catch (Exception exception) when (exception is IOException or
             UnauthorizedAccessException or
             ArgumentException or
             NotSupportedException)
         {
-            return null;
+            return moved
+                ? new LiveAgentFreshProcessAtomicWriteReceipt(
+                    Version: null,
+                    Durable: false)
+                : null;
         }
         finally
         {

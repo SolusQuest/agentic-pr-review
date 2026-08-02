@@ -1353,6 +1353,139 @@ public sealed class LiveAgentFreshProcessTests
     }
 
     [Fact]
+    public void ParentSyncFailurePreservesCommittedLineageReceipt()
+    {
+        using var fixture = new FreshProcessFixture();
+        var identity = new ReviewedIdentity(
+            "owner/repository",
+            109,
+            new string('a', 40),
+            new string('b', 40));
+        fixture.WritePhase(
+            identity,
+            "Review the immutable snapshot.",
+            "APR_PRIOR_ONLY_" + new string('c', 64) + "\n",
+            "parent_sync_failure",
+            "absent",
+            "automatic",
+            "same_head",
+            expectedLineageSha256: null,
+            fromHeadSha: identity.HeadSha);
+        Assert.True(LiveAgentFreshProcessFileSystem
+            .TryCreateForParentSyncFailureTest(
+                fixture.Root,
+                out var files));
+        var authorizationRead = files!.ReadAuthorization();
+        Assert.NotNull(authorizationRead);
+        var access = AuthorizedAccess();
+        Assert.True(files.TryAuthorizeLayout(
+            authorizationRead!,
+            access,
+            lineageExpected: false,
+            out var authorizedRoot));
+        using var authorizedRootLease = authorizedRoot;
+        var accepted = new AcceptedLineage(
+            access.Scope,
+            0,
+            new string('d', 64),
+            new string('e', 64),
+            ExpectedPredecessorEnvelopeSha256: null,
+            1_700_000_000,
+            1_700_000_000 +
+                RestrictedStateFormat.MaximumRetentionSeconds,
+            TransitionAuthorized: true);
+        var sink = new LiveAgentFreshProcessLineageSink(
+            files,
+            authorizedRootLease!,
+            identity,
+            new string('f', 64),
+            prior: null);
+
+        var outcome = sink.PublishAtomically(
+            priorLineage: null,
+            accepted,
+            CancellationToken.None);
+
+        Assert.Equal(
+            LiveAgentLineagePublicationOutcome
+                .CleanupFailedAfterAtomicPublication,
+            outcome);
+        var receipt = Assert.IsType<
+            LiveAgentFreshProcessLineagePublicationReceipt>(
+                sink.PublicationReceipt);
+        Assert.Equal(outcome, receipt.Outcome);
+        Assert.NotNull(receipt.FileVersion);
+        Assert.Equal(
+            LiveAgentFreshProcessDomain.RawSha256(
+                File.ReadAllBytes(fixture.LineagePath)),
+            receipt.LineageSha256);
+    }
+
+    [Fact]
+    public async Task ParentSyncFailureResultCarriesCommittedLineageDigest()
+    {
+        using var fixture = new FreshProcessFixture();
+        var identity = new ReviewedIdentity(
+            "owner/repository",
+            109,
+            new string('a', 40),
+            new string('b', 40));
+        fixture.WritePhase(
+            identity,
+            "Review the immutable snapshot.",
+            "APR_PRIOR_ONLY_" + new string('c', 64) + "\n",
+            "parent_sync_result",
+            "absent",
+            "automatic",
+            "same_head",
+            expectedLineageSha256: null,
+            fromHeadSha: identity.HeadSha);
+        Assert.True(LiveAgentFreshProcessFileSystem
+            .TryCreateForParentSyncFailureTest(
+                fixture.Root,
+                out var files));
+        var providerVariable =
+            R3LiveAgentEnvironmentSecretSource.ProviderVariable;
+        var stateVariable =
+            R3LiveAgentEnvironmentSecretSource.StateKeyVariable;
+        var priorProvider = Environment.GetEnvironmentVariable(
+            providerVariable);
+        var priorState = Environment.GetEnvironmentVariable(stateVariable);
+        try
+        {
+            Environment.SetEnvironmentVariable(
+                providerVariable,
+                ProviderSecret);
+            Environment.SetEnvironmentVariable(stateVariable, StateKey);
+
+            var command = await LiveAgentFreshProcessCommand.RunAsync(
+                "bootstrap",
+                files!,
+                CancellationToken.None);
+
+            Assert.Equal(40, command.ExitCode);
+            Assert.Equal(
+                LiveAgentFreshProcessCodes.OutputFailed,
+                command.DiagnosticCode);
+            var result = fixture.ReadResult();
+            Assert.Equal(R3LiveAgentCodes.HandoffCleanupFailed, result.Code);
+            Assert.False(result.HandoffReady);
+            Assert.NotNull(result.LineageSha256);
+            Assert.Equal(
+                LiveAgentFreshProcessDomain.RawSha256(
+                    File.ReadAllBytes(fixture.LineagePath)),
+                result.LineageSha256);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(
+                providerVariable,
+                priorProvider);
+            Environment.SetEnvironmentVariable(stateVariable, priorState);
+        }
+    }
+
+    [Fact]
     public void ExactRestoredReplayShapeIsAccepted()
     {
         var fact = "APR_PRIOR_ONLY_" + new string('a', 64);
