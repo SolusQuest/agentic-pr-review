@@ -596,7 +596,7 @@ public sealed class AgentLoopTests
     }
 
     [Fact]
-    public async Task CompleteResponseArgumentsAreValidatedBeforeFirstTool()
+    public async Task LiveAgentVerifierInvalidToolArgumentsStopBeforeDispatch()
     {
         var response = new ProjectChatResponse(
             new ProjectChatMessage(
@@ -1618,7 +1618,7 @@ public sealed class AgentLoopTests
     }
 
     [Fact]
-    public async Task BackendFailuresAndInternalCancellationAreChatFailures()
+    public async Task LiveAgentVerifierProviderHttpFailuresHaveNoPublishableResult()
     {
         var synchronous = new ThrowingChatClient(
             _ => throw new InvalidOperationException(
@@ -1657,7 +1657,7 @@ public sealed class AgentLoopTests
     }
 
     [Fact]
-    public async Task BackendMappingFailuresAreResponseInvalidButBackendFailuresAreChatFailed()
+    public async Task LiveAgentVerifierMalformedProviderResponsesAreResponseInvalid()
     {
         var malformedBackend = new CapturingMinimalBackend(
             new MinimalChatResponse(

@@ -78,6 +78,9 @@ public sealed partial class AgentCapabilityArchitectureTests
         Assert.Equal(
             [
                 "ILiveAgentFreshProcessFileSystem",
+                "ILiveAgentFreshProcessProfile",
+                "ILiveAgentFreshProcessProfileExecution",
+                "ILiveAgentFreshProcessProof",
                 "LiveAgentFreshProcessAdmittedLineage",
                 "LiveAgentFreshProcessAtomicWriteReceipt",
                 "LiveAgentFreshProcessAuthorizationDocument",
@@ -89,6 +92,8 @@ public sealed partial class AgentCapabilityArchitectureTests
                 "LiveAgentFreshProcessCodes",
                 "LiveAgentFreshProcessCommand",
                 "LiveAgentFreshProcessCommandResult",
+                "LiveAgentFreshProcessDeterministicProfile",
+                "LiveAgentFreshProcessDeterministicProfileExecution",
                 "LiveAgentFreshProcessDeterministicTransport",
                 "LiveAgentFreshProcessDeterministicTransportFactory",
                 "LiveAgentFreshProcessDiffHunkDocument",
@@ -107,6 +112,7 @@ public sealed partial class AgentCapabilityArchitectureTests
                 "LiveAgentFreshProcessManifestFile",
                 "LiveAgentFreshProcessManifestFileAccess",
                 "LiveAgentFreshProcessManifestFileAccessFactory",
+                "LiveAgentFreshProcessProfileActivation",
                 "LiveAgentFreshProcessRead",
                 "LiveAgentFreshProcessResultDocument",
                 "LiveAgentFreshProcessReviewedIdentityDocument",

@@ -16,11 +16,13 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\AgenticPrReview.Runtime\AgenticPrReview.Runtime.csproj" />
     <ProjectReference Include="..\DeepSeekCompatibilityProbe\AgenticPrReview.Runtime.DeepSeekCompatibilityProbe.csproj" />
+    <ProjectReference Include="..\LiveAgentVerifierFixture\AgenticPrReview.Runtime.LiveAgentVerifierFixture.csproj" />
     <None Include="..\..\..\protocol\fixtures\v1\**\*" Link="protocol\fixtures\v1\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\..\protocol\fixtures\prefix-contract\**\*" Link="protocol\fixtures\prefix-contract\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\fixtures\deterministic\**\*" Link="fixtures\deterministic\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\fixtures\agent\agent-loop\**\*" Link="fixtures\agent\agent-loop\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\fixtures\agent\r3-quality\**\*" Link="fixtures\agent\r3-quality\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\fixtures\agent\r3-live-agent\**\*" Link="fixtures\agent\r3-live-agent\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\fixtures\prefix-contract\**\*" Link="fixtures\prefix-contract\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

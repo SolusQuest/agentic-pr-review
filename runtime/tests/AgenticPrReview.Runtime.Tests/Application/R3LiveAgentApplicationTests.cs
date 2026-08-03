@@ -6,10 +6,12 @@ using System.Text.Json;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
+using AgenticPrReview.Runtime.Agent.Quality;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.State;
+using AgenticPrReview.Runtime.LiveAgentVerifierFixture;
 
 namespace AgenticPrReview.Runtime.Tests.Application;
 
@@ -100,7 +102,7 @@ public sealed partial class R3LiveAgentApplicationTests
     }
 
     [Fact]
-    public async Task AuthorizationDenialPrecedesSecretsStateSnapshotAndProvider()
+    public async Task LiveAgentVerifierInnerAuthorizationDenialPrecedesNetworkActivation()
     {
         var secrets = new CountingSecretSource(
             new R3LiveAgentSecrets(ProviderSecret, StateSecret));
@@ -140,6 +142,78 @@ public sealed partial class R3LiveAgentApplicationTests
         Assert.Equal(0, restorer.CallCount);
         Assert.Equal(0, transport.CallCount);
         Assert.Equal(0, files.CallCount);
+    }
+
+    [Fact]
+    public async Task LiveAgentVerifierQualityFailureAfterCommitPreservesAcceptedTruth()
+    {
+        using var snapshot = SnapshotDirectory();
+        File.WriteAllText(
+            Path.Join(snapshot.Path, "a.txt"),
+            RepositoryFact + "\n",
+            new UTF8Encoding(false));
+        var corpusPath = Path.Join(
+            AppContext.BaseDirectory,
+            "fixtures",
+            "agent",
+            "r3-quality",
+            "corpus.json");
+        Assert.True(R3QualityCorpusParser.TryParse(
+            File.ReadAllBytes(corpusPath),
+            out var corpus,
+            out var parseFailure),
+            parseFailure?.ToString());
+        var sourceCase = Assert.Single(
+            corpus!.Cases,
+            item => item.Kind == R3QualityCaseKind.MustFind);
+        var failingCase = sourceCase with
+        {
+            ReviewedIdentity = Identity,
+            InitialContext = "Review the selected snapshot.",
+            ProcessOneContext = null,
+        };
+        var inner = new CapturingStateCommitCoordinator();
+        var observer = new VerifierCommitObserver(
+            VerifierScenario.MustFind,
+            failingCase,
+            R3QualityFreshProcessTwoInputSet.Capture([]));
+        observer.SetInner(inner);
+        var dependencies = new R3LiveAgentDependencies(
+            new CountingSecretSource(
+                new R3LiveAgentSecrets(ProviderSecret, StateSecret)),
+            new R3LiveAgentStateRestorer(),
+            new TestingTransportFactory(
+                new GroundedReviewHandler(ProviderSecret)),
+            new CountingFileAccessFactory(),
+            observer,
+            TimeProvider.System);
+
+        var execution = await new R3LiveAgentApplication(dependencies)
+            .RunAsync(
+                Request(
+                    snapshot.Path,
+                    Path.Join(snapshot.Path, "state-does-not-exist")),
+                CancellationToken.None);
+
+        Assert.Equal(R3LiveAgentCodes.Completed, execution.Result.Code);
+        Assert.True(execution.Result.HandoffReady);
+        Assert.Equal(1, observer.DelegationCount);
+        Assert.Equal(1, inner.CallCount);
+        Assert.True(observer.CommitResult!.HandoffReady);
+        Assert.True(
+            observer.Outcome is
+            {
+                Status: "failed",
+                Classification: "quality",
+                Code: R3QualityCodes.RequiredToolMissing,
+            },
+            string.Join(
+                "|",
+                observer.Outcome?.Status,
+                observer.Outcome?.Classification,
+                observer.Outcome?.Code,
+                observer.Outcome?.SourceCode));
+        Assert.False(observer.ProofPassed);
     }
 
     [Fact]

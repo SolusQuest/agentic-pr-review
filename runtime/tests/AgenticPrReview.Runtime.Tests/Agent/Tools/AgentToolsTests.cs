@@ -687,7 +687,7 @@ public sealed partial class AgentToolsTests
     }
 
     [Fact]
-    public void TerminalRequiresCurrentGroundedUniqueEvidence()
+    public void LiveAgentVerifierUngroundedTerminalIsRejected()
     {
         var returned = ImmutableDictionary<string, ImmutableHashSet<int>>.Empty
             .WithComparers(StringComparer.Ordinal)

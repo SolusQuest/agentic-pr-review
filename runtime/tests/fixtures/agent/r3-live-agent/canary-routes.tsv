@@ -1,0 +1,10 @@
+class	approved_route
+provider	authorization_header_only
+state	host_crypto_only
+repository	untrusted_reviewed_content
+path	tracked_path_and_tool_evidence
+prompt	untrusted_user_and_tool_content
+github	absent
+actions	absent
+workflow	absent
+prior	restored_history_and_terminal_only
