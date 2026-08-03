@@ -58,12 +58,12 @@ internal static class VerifierArchitectureProof
     private const string VerifierTransportFactoryType =
         "AgenticPrReview.Runtime.LiveAgentVerifierFixture.VerifierTransportFactory";
     private const string VerifierTransportFactoryCreateSignature =
-        "instance[AgenticPrReview.Runtime]" +
+        "instance arity=0 [AgenticPrReview.Runtime]" +
         "AgenticPrReview.Runtime.Execution.DeepSeek.IDeepSeekTransport(" +
         "[AgenticPrReview.Runtime]" +
         "AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekCredential)";
     private const string CreateHandlerSignature =
-        "static[System.Net.Http]System.Net.Http.SocketsHttpHandler(" +
+        "static arity=0 [System.Net.Http]System.Net.Http.SocketsHttpHandler(" +
         "[System.Runtime]System.TimeSpan," +
         "[System.Runtime]System.Func`3<" +
         "[System.Net.Http]System.Net.Http.SocketsHttpConnectionContext," +
@@ -71,7 +71,7 @@ internal static class VerifierArchitectureProof
         "[System.Runtime]System.Threading.Tasks.ValueTask`1<" +
         "[System.Runtime]System.IO.Stream>>)";
     private const string CreateForTestingSignature =
-        "static[AgenticPrReview.Runtime]" +
+        "static arity=0 [AgenticPrReview.Runtime]" +
         "AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekTransport(" +
         "[AgenticPrReview.Runtime]" +
         "AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekCredential," +
@@ -405,6 +405,7 @@ internal static class VerifierArchitectureProof
             call.Caller.DeclaringType.FullName == VerifierTransportFactoryType &&
             call.Caller.Name == "Create" &&
             call.Caller.Signature == VerifierTransportFactoryCreateSignature &&
+            call.Caller.GenericParameterCount == 0 &&
             !call.Caller.IsMethodSpecification) &&
         calls.Count(call => TargetMatches(
             call.Target,
@@ -424,6 +425,7 @@ internal static class VerifierArchitectureProof
         target.DeclaringType.FullName == DeepSeekTransportType &&
         target.Name == name &&
         target.Signature == signature &&
+        target.GenericParameterCount == 0 &&
         !target.IsMethodSpecification;
 
     private static IEnumerable<VerifierArchitectureMethodReference>
@@ -587,6 +589,9 @@ internal static class VerifierArchitectureProof
         MethodSignature<VerifierArchitectureTypeIdentity> signature) =>
         string.Concat(
             signature.Header.IsInstance ? "instance" : "static",
+            " arity=",
+            signature.GenericParameterCount,
+            " ",
             signature.ReturnType.DisplayName,
             "(",
             string.Join(',', signature.ParameterTypes.Select(

@@ -455,6 +455,15 @@ public sealed class LiveAgentVerifierContractTests
         var calls = VerifierArchitectureProof
             .ReadTransportCallsForTesting(assemblyPath);
         Assert.Equal(2, calls.Count);
+        Assert.All(calls, call =>
+        {
+            Assert.Equal(0, call.Caller.GenericParameterCount);
+            Assert.Equal(0, call.Target.GenericParameterCount);
+            Assert.Contains(" arity=0 ", call.Caller.Signature,
+                StringComparison.Ordinal);
+            Assert.Contains(" arity=0 ", call.Target.Signature,
+                StringComparison.Ordinal);
+        });
         Assert.True(
             VerifierArchitectureProof.TransportCallsValidForTesting(calls));
 
@@ -501,6 +510,36 @@ public sealed class LiveAgentVerifierContractTests
         };
         Assert.False(VerifierArchitectureProof.TransportCallsValidForTesting(
             wrongCaller));
+
+        var genericCaller = calls.ToArray();
+        genericCaller[0] = genericCaller[0] with
+        {
+            Caller = genericCaller[0].Caller with
+            {
+                GenericParameterCount = 1,
+                Signature = genericCaller[0].Caller.Signature.Replace(
+                    " arity=0 ",
+                    " arity=1 ",
+                    StringComparison.Ordinal),
+            },
+        };
+        Assert.False(VerifierArchitectureProof.TransportCallsValidForTesting(
+            genericCaller));
+
+        var genericTarget = calls.ToArray();
+        genericTarget[0] = genericTarget[0] with
+        {
+            Target = genericTarget[0].Target with
+            {
+                GenericParameterCount = 1,
+                Signature = genericTarget[0].Target.Signature.Replace(
+                    " arity=0 ",
+                    " arity=1 ",
+                    StringComparison.Ordinal),
+            },
+        };
+        Assert.False(VerifierArchitectureProof.TransportCallsValidForTesting(
+            genericTarget));
 
         var invalidSpecification = calls.ToArray();
         invalidSpecification[0] = invalidSpecification[0] with
