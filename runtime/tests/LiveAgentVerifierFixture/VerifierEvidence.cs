@@ -49,6 +49,7 @@ internal static class VerifierEvidence
 
     internal static bool TryLoad(
         VerifierCommand command,
+        VerifierBuildPair buildPair,
         bool requireReplacement,
         out VerifierAggregateEvidence? evidence,
         out string failure)
@@ -91,6 +92,17 @@ internal static class VerifierEvidence
                 return false;
             }
 
+            if (!BuildPairValid(buildPair, mustFind) ||
+                !BuildPairValid(buildPair, mustNot) ||
+                !BuildPairValid(buildPair, seed) ||
+                !BuildPairValid(buildPair, restore) ||
+                !BuildPairValid(buildPair, canary) ||
+                !BuildPairValid(buildPair, architecture))
+            {
+                failure = "evidence_build_pair_invalid";
+                return false;
+            }
+
             var positiveFailure = PositiveFailure(
                     mustFind,
                     mustNot,
@@ -103,7 +115,7 @@ internal static class VerifierEvidence
                 return false;
             }
 
-            if (!ArchitectureValid(architecture))
+            if (!ArchitectureValid(buildPair, architecture))
             {
                 failure = "evidence_architecture_invalid";
                 return false;
@@ -120,7 +132,9 @@ internal static class VerifierEvidence
                     receiptRoot,
                     "negative",
                     string.Concat(row.Id, ".json")));
-                if (receipt is null || !NegativeValid(row, receipt))
+                if (receipt is null ||
+                    !BuildPairValid(buildPair, receipt) ||
+                    !NegativeValid(row, receipt))
                 {
                     failure = string.Concat(
                         "evidence_negative_invalid_",
@@ -486,6 +500,11 @@ internal static class VerifierEvidence
             receipt.StateExpectation != row.StateExpectation ||
             receipt.ExpectedCode != row.StableCode ||
             receipt.ActualCode != row.StableCode ||
+            !ReceiptBuildPairShapeValid(
+                receipt.ExecutionKind,
+                receipt.ExecutionArtifactSha256,
+                receipt.ArchitectureAssemblySha256,
+                receipt.BuildPairSha256) ||
             !receipt.Passed ||
             receipt.HandoffReady ||
             !LiveAgentFreshProcessDomain.IsSha256(
@@ -603,21 +622,88 @@ internal static class VerifierEvidence
         receipt);
 
     private static bool ArchitectureValid(
+        VerifierBuildPair buildPair,
         VerifierArchitectureReceipt receipt) =>
         receipt.Kind == ArchitectureKind &&
         receipt.Status == "passed" &&
         LiveAgentFreshProcessDomain.IsSha256(receipt.AssemblySha256) &&
+        receipt.AssemblySha256 == buildPair.ArchitectureAssemblySha256 &&
         receipt.ForbiddenReferencesAbsent &&
         receipt.RealTransportCreationCalls == 2 &&
         receipt.TransportFactoryTypes == 1 &&
         receipt.ProfileTypes == 1 &&
         receipt.Passed;
 
+    private static bool BuildPairValid(
+        VerifierBuildPair expected,
+        VerifierPhaseReceipt receipt) => BuildPairValid(
+        expected,
+        receipt.ExecutionKind,
+        receipt.ExecutionArtifactSha256,
+        receipt.ArchitectureAssemblySha256,
+        receipt.BuildPairSha256);
+
+    private static bool BuildPairValid(
+        VerifierBuildPair expected,
+        VerifierNegativeReceipt receipt) => BuildPairValid(
+        expected,
+        receipt.ExecutionKind,
+        receipt.ExecutionArtifactSha256,
+        receipt.ArchitectureAssemblySha256,
+        receipt.BuildPairSha256);
+
+    private static bool BuildPairValid(
+        VerifierBuildPair expected,
+        VerifierArchitectureReceipt receipt) => BuildPairValid(
+        expected,
+        receipt.ExecutionKind,
+        receipt.ExecutionArtifactSha256,
+        receipt.ArchitectureAssemblySha256,
+        receipt.BuildPairSha256);
+
+    private static bool BuildPairValid(
+        VerifierBuildPair expected,
+        string executionKind,
+        string executionArtifactSha256,
+        string architectureAssemblySha256,
+        string buildPairSha256) =>
+        ReceiptBuildPairShapeValid(
+            executionKind,
+            executionArtifactSha256,
+            architectureAssemblySha256,
+            buildPairSha256) &&
+        executionKind == expected.ExecutionKind &&
+        executionArtifactSha256 == expected.ExecutionArtifactSha256 &&
+        architectureAssemblySha256 == expected.ArchitectureAssemblySha256 &&
+        buildPairSha256 == expected.BuildPairSha256;
+
+    private static bool ReceiptBuildPairShapeValid(
+        string executionKind,
+        string executionArtifactSha256,
+        string architectureAssemblySha256,
+        string buildPairSha256) =>
+        executionKind is (
+            VerifierExecutionKinds.Framework or
+            VerifierExecutionKinds.NativeAot) &&
+        LiveAgentFreshProcessDomain.IsSha256(executionArtifactSha256) &&
+        LiveAgentFreshProcessDomain.IsSha256(architectureAssemblySha256) &&
+        LiveAgentFreshProcessDomain.IsSha256(buildPairSha256) &&
+        buildPairSha256 == VerifierBuildPairDomain.ComputeSha256(
+            executionKind,
+            executionArtifactSha256,
+            architectureAssemblySha256);
+
+    internal static bool BuildPairValidForTesting(
+        VerifierBuildPair expected,
+        VerifierNegativeReceipt receipt) => BuildPairValid(expected, receipt);
+
     private static VerifierPhaseReceipt? ReadPhase(string path)
     {
         using var document = OpenExact(path,
         [
-            "kind", "scenario", "status", "product_code", "generation",
+            "kind", "execution_kind", "execution_artifact_sha256",
+            "architecture_assembly_sha256", "build_pair_sha256",
+            "scenario", "status", "product_code", "generation",
             "transition", "model_calls", "tool_calls", "provider_requests",
             "wire_valid", "wire_failure_code", "commit_delegated_once",
             "handoff_ready", "first_request_sha256", "terminal_sha256",
@@ -699,7 +785,11 @@ internal static class VerifierEvidence
             RequiredString(root, "kind"),
             RequiredString(root, "process_instance_sha256"),
             root.GetProperty("canary_routes_validated").GetBoolean(),
-            routes);
+            routes,
+            RequiredString(root, "execution_kind"),
+            RequiredString(root, "execution_artifact_sha256"),
+            RequiredString(root, "architecture_assembly_sha256"),
+            RequiredString(root, "build_pair_sha256"));
     }
 
     private static VerifierQualityProjection? ReadQuality(JsonElement value)
@@ -736,7 +826,9 @@ internal static class VerifierEvidence
     {
         using var document = OpenExact(path,
         [
-            "kind", "case", "phase", "state_expectation", "expected_code",
+            "kind", "execution_kind", "execution_artifact_sha256",
+            "architecture_assembly_sha256", "build_pair_sha256",
+            "case", "phase", "state_expectation", "expected_code",
             "actual_code", "state_before_sha256", "state_after_sha256",
             "lineage_before_sha256", "lineage_after_sha256",
             "accepted_generation", "accepted_session_sha256",
@@ -784,14 +876,20 @@ internal static class VerifierEvidence
             RequiredString(root, "process_instance_sha256"),
             NullableString(root, "result_before_sha256"),
             NullableString(root, "result_after_sha256"),
-            root.GetProperty("result_publication_attempts").GetInt32());
+            root.GetProperty("result_publication_attempts").GetInt32(),
+            RequiredString(root, "execution_kind"),
+            RequiredString(root, "execution_artifact_sha256"),
+            RequiredString(root, "architecture_assembly_sha256"),
+            RequiredString(root, "build_pair_sha256"));
     }
 
     private static VerifierArchitectureReceipt? ReadArchitecture(string path)
     {
         using var document = OpenExact(path,
         [
-            "kind", "status", "assembly_sha256",
+            "kind", "execution_kind", "execution_artifact_sha256",
+            "architecture_assembly_sha256", "build_pair_sha256",
+            "status", "assembly_sha256",
             "forbidden_references_absent", "real_transport_creation_calls",
             "transport_factory_types", "profile_types", "passed",
             "process_instance_sha256",
@@ -804,6 +902,10 @@ internal static class VerifierEvidence
         var root = document.RootElement;
         return new VerifierArchitectureReceipt(
             RequiredString(root, "kind"),
+            RequiredString(root, "execution_kind"),
+            RequiredString(root, "execution_artifact_sha256"),
+            RequiredString(root, "architecture_assembly_sha256"),
+            RequiredString(root, "build_pair_sha256"),
             RequiredString(root, "status"),
             RequiredString(root, "assembly_sha256"),
             root.GetProperty("forbidden_references_absent").GetBoolean(),

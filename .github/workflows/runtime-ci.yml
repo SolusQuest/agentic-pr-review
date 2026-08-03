@@ -46,6 +46,9 @@ jobs:
       - name: R3 deterministic live-agent replacement proof
         run: bash runtime/scripts/verify-live-agent.sh deterministic
 
+      - name: R3 Linux x64 Native AOT live-agent replacement proof
+        run: bash runtime/scripts/verify-live-agent.sh aot
+
   integration:
     runs-on: ubuntu-latest
     permissions:

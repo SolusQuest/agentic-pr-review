@@ -50,7 +50,13 @@ bash runtime/scripts/verify-agent-loop.sh all
 # individual R2 Agent proof modes
 bash runtime/scripts/verify-agent-loop.sh framework
 bash runtime/scripts/verify-agent-loop.sh aot
+
+# R3 live-Agent replacement proof modes
+bash runtime/scripts/verify-live-agent.sh deterministic
+bash runtime/scripts/verify-live-agent.sh aot
 ```
+
+The R3 `aot` mode is a secret-free Linux x64 pre-deletion proof. It publishes the verifier once, binds the exact managed compiler input to the resulting native executable, and executes the same two-run corpus, continuation, negative, canary, grounding, and freshness expectations as `deterministic`. It is not a released payload, production Host, trusted live-provider run, or public Action.
 
 Result and trace outputs are compared to committed goldens by exact-byte `cmp`. Each smoke
 subcommand allocates a fresh temporary work directory; the CLI's no-overwrite contract prevents
@@ -58,4 +64,4 @@ stale output from participating in comparisons.
 
 ## Continuous integration
 
-The direct runtime framework and `linux-x64` Native AOT paths and the real R2 Agent product proof run on every `pull_request` and on `push` to `main` via `.github/workflows/runtime-ci.yml`. The workflow installs the SDK from `global.json` and calls the same scripts used locally, so CI and contributor validation cannot drift.
+The direct runtime framework and `linux-x64` Native AOT paths, the real R2 Agent product proof, and both R3 live-Agent replacement modes run on every `pull_request` and on `push` to `main` via `.github/workflows/runtime-ci.yml`. The workflow installs the SDK from `global.json` and calls the same scripts used locally, so CI and contributor validation cannot drift.

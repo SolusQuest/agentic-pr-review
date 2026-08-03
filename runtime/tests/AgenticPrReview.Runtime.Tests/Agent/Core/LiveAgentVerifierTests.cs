@@ -295,8 +295,15 @@ public sealed class LiveAgentVerifierContractTests
         var receiptRoot = Path.Join(root, "receipts");
         Directory.CreateDirectory(Path.Join(receiptRoot, "negative"));
         var output = Path.Join(root, "replacement.json");
+        var executionArtifact = typeof(AgenticPrReview.Runtime
+            .LiveAgentVerifierFixture.Program).Assembly.Location;
+        var buildPair = BuildPair(executionArtifact, executionArtifact);
+        var buildPairManifest = Path.Join(root, "build-pair.json");
         var prior = "prior-evidence"u8.ToArray();
         File.WriteAllBytes(output, prior);
+        File.WriteAllBytes(
+            buildPairManifest,
+            VerifierBuildPairDomain.Write(buildPair));
         if (fabricateReceipts)
         {
             foreach (var name in new[]
@@ -340,6 +347,12 @@ public sealed class LiveAgentVerifierContractTests
                 Fixture("negative-cases.tsv"),
                 "--canary-manifest",
                 Fixture("canary-routes.tsv"),
+                "--execution-kind",
+                VerifierExecutionKinds.Framework,
+                "--execution-artifact",
+                executionArtifact,
+                "--build-pair-manifest",
+                buildPairManifest,
             ]);
 
             Assert.Equal(3, exitCode);
@@ -348,6 +361,78 @@ public sealed class LiveAgentVerifierContractTests
                 "\"status\":\"passed\"",
                 Encoding.UTF8.GetString(File.ReadAllBytes(output)),
                 StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void LiveAgentVerifierBuildPairRejectsSubstitutedMembers()
+    {
+        var root = Path.Join(
+            Path.GetTempPath(),
+            string.Concat("apr112-build-pair-", Guid.NewGuid().ToString("N")));
+        Directory.CreateDirectory(root);
+        var executionArtifact = typeof(AgenticPrReview.Runtime
+            .LiveAgentVerifierFixture.Program).Assembly.Location;
+        var buildPair = BuildPair(executionArtifact, executionArtifact);
+        var manifest = Path.Join(root, "build-pair.json");
+        File.WriteAllBytes(manifest, VerifierBuildPairDomain.Write(buildPair));
+        var output = Path.Join(root, "output.json");
+        var command = new VerifierCommand(
+            "aggregate",
+            null,
+            root,
+            Corpus(),
+            output,
+            null,
+            null,
+            Fixture("negative-cases.tsv"),
+            Fixture("canary-routes.tsv"),
+            null,
+            VerifierExecutionKinds.Framework,
+            executionArtifact,
+            manifest,
+            null);
+
+        try
+        {
+            Assert.True(VerifierBuildPairDomain.TryAdmit(
+                command,
+                out var admitted));
+            Assert.Equal(buildPair, admitted);
+
+            var substitutedExecutable = Path.Join(root, "substituted-runner.dll");
+            File.WriteAllText(substitutedExecutable, "not-the-published-runner");
+            Assert.False(VerifierBuildPairDomain.TryAdmit(
+                command with { ExecutionArtifact = substitutedExecutable },
+                out _));
+
+            var receipt = VerifierArchitectureProof.Create(
+                executionArtifact,
+                buildPair,
+                new string('8', 64));
+            Assert.True(
+                receipt.Passed,
+                string.Join(
+                    ':',
+                    receipt.ForbiddenReferencesAbsent,
+                    receipt.RealTransportCreationCalls,
+                    receipt.TransportFactoryTypes,
+                    receipt.ProfileTypes));
+            Assert.Equal(buildPair.BuildPairSha256, receipt.BuildPairSha256);
+
+            var substitutedAssembly = Path.Join(root, "substituted-input.dll");
+            var bytes = File.ReadAllBytes(executionArtifact);
+            bytes[^1] ^= 0xff;
+            File.WriteAllBytes(substitutedAssembly, bytes);
+            Assert.Throws<InvalidDataException>(() =>
+                VerifierArchitectureProof.Create(
+                    substitutedAssembly,
+                    buildPair,
+                    new string('9', 64)));
         }
         finally
         {
@@ -438,6 +523,7 @@ public sealed class LiveAgentVerifierContractTests
         var session = new string('1', 64);
         var envelope = new string('2', 64);
         var lineage = new string('3', 64);
+        var buildPair = TestBuildPair();
         var valid = new VerifierNegativeReceipt(
             "apr-r3-live-agent-negative-receipt-v1",
             "quality-failed-after-commit",
@@ -463,8 +549,16 @@ public sealed class LiveAgentVerifierContractTests
             HandoffReady: false,
             AcceptedTruthPreserved: true,
             Passed: true,
-            ProcessInstanceSha256: new string('6', 64));
+            ProcessInstanceSha256: new string('6', 64),
+            ExecutionKind: buildPair.ExecutionKind,
+            ExecutionArtifactSha256: buildPair.ExecutionArtifactSha256,
+            ArchitectureAssemblySha256:
+                buildPair.ArchitectureAssemblySha256,
+            BuildPairSha256: buildPair.BuildPairSha256);
         Assert.True(VerifierEvidence.NegativeValidForTesting(valid));
+        Assert.True(VerifierEvidence.BuildPairValidForTesting(
+            buildPair,
+            valid));
 
         var mutations = new[]
         {
@@ -482,6 +576,7 @@ public sealed class LiveAgentVerifierContractTests
                 CanonicalLineageEnvelopeSha256 = new string('7', 64),
             },
             valid with { CanonicalLineageSha256 = new string('7', 64) },
+            valid with { BuildPairSha256 = new string('7', 64) },
         };
         Assert.All(mutations, receipt => Assert.False(
             VerifierEvidence.NegativeValidForTesting(receipt)));
@@ -497,6 +592,7 @@ public sealed class LiveAgentVerifierContractTests
         var stateAfter = new string('5', 64);
         var lineageBefore = new string('6', 64);
         var result = new string('7', 64);
+        var buildPair = TestBuildPair();
         var valid = new VerifierNegativeReceipt(
             "apr-r3-live-agent-negative-receipt-v1",
             "replacement-write-failed",
@@ -525,7 +621,12 @@ public sealed class LiveAgentVerifierContractTests
             ProcessInstanceSha256: new string('8', 64),
             ResultBeforeSha256: result,
             ResultAfterSha256: result,
-            ResultPublicationAttempts: 1);
+            ResultPublicationAttempts: 1,
+            ExecutionKind: buildPair.ExecutionKind,
+            ExecutionArtifactSha256: buildPair.ExecutionArtifactSha256,
+            ArchitectureAssemblySha256:
+                buildPair.ArchitectureAssemblySha256,
+            BuildPairSha256: buildPair.BuildPairSha256);
         Assert.True(VerifierEvidence.ReplacementNegativeValidForTesting(valid));
 
         var mutations = new[]
@@ -556,5 +657,37 @@ public sealed class LiveAgentVerifierContractTests
         "agent",
         "r3-quality",
         "corpus.json");
+
+    private static VerifierBuildPair BuildPair(
+        string executionArtifact,
+        string architectureAssembly)
+    {
+        var executionSha256 = LiveAgentFreshProcessDomain.RawSha256(
+            File.ReadAllBytes(executionArtifact));
+        var architectureSha256 = LiveAgentFreshProcessDomain.RawSha256(
+            File.ReadAllBytes(architectureAssembly));
+        return new VerifierBuildPair(
+            VerifierExecutionKinds.Framework,
+            executionSha256,
+            architectureSha256,
+            VerifierBuildPairDomain.ComputeSha256(
+                VerifierExecutionKinds.Framework,
+                executionSha256,
+                architectureSha256));
+    }
+
+    private static VerifierBuildPair TestBuildPair()
+    {
+        var execution = new string('a', 64);
+        var architecture = new string('b', 64);
+        return new VerifierBuildPair(
+            VerifierExecutionKinds.Framework,
+            execution,
+            architecture,
+            VerifierBuildPairDomain.ComputeSha256(
+                VerifierExecutionKinds.Framework,
+                execution,
+                architecture));
+    }
 
 }
