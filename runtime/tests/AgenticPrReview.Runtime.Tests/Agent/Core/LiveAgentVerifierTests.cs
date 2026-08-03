@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Reflection.Metadata;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -417,11 +418,17 @@ public sealed class LiveAgentVerifierContractTests
             Assert.True(
                 receipt.Passed,
                 string.Join(
-                    ':',
-                    receipt.ForbiddenReferencesAbsent,
-                    receipt.RealTransportCreationCalls,
-                    receipt.TransportFactoryTypes,
-                    receipt.ProfileTypes));
+                    Environment.NewLine,
+                    [
+                        string.Join(
+                            ':',
+                            receipt.ForbiddenReferencesAbsent,
+                            receipt.RealTransportCreationCalls,
+                            receipt.TransportFactoryTypes,
+                            receipt.ProfileTypes),
+                        .. VerifierArchitectureProof
+                            .DescribeTransportCallsForTesting(executionArtifact),
+                    ]));
             Assert.Equal(buildPair.BuildPairSha256, receipt.BuildPairSha256);
 
             var substitutedAssembly = Path.Join(root, "substituted-input.dll");
@@ -438,6 +445,92 @@ public sealed class LiveAgentVerifierContractTests
         {
             Directory.Delete(root, recursive: true);
         }
+    }
+
+    [Fact]
+    public void LiveAgentVerifierArchitectureRejectsMethodReferenceMutations()
+    {
+        var assemblyPath = typeof(AgenticPrReview.Runtime
+            .LiveAgentVerifierFixture.Program).Assembly.Location;
+        var calls = VerifierArchitectureProof
+            .ReadTransportCallsForTesting(assemblyPath);
+        Assert.Equal(2, calls.Count);
+        Assert.True(
+            VerifierArchitectureProof.TransportCallsValidForTesting(calls));
+
+        var ldftn = VerifierArchitectureProof
+            .ReadSyntheticTransportReferenceForTesting(
+                assemblyPath,
+                "CreateForTesting",
+                ILOpCode.Ldftn);
+        Assert.Equal(ILOpCode.Ldftn, ldftn.OpCode);
+        Assert.False(VerifierArchitectureProof.TransportCallsValidForTesting(
+            [.. calls, new(calls[0].Caller, ldftn)]));
+
+        var wrongAssembly = calls.ToArray();
+        wrongAssembly[0] = wrongAssembly[0] with
+        {
+            Target = wrongAssembly[0].Target with
+            {
+                DeclaringType = wrongAssembly[0].Target.DeclaringType with
+                {
+                    AssemblyName = "Substituted.Runtime",
+                },
+            },
+        };
+        Assert.False(VerifierArchitectureProof.TransportCallsValidForTesting(
+            wrongAssembly));
+
+        var wrongSignature = calls.ToArray();
+        wrongSignature[0] = wrongSignature[0] with
+        {
+            Target = wrongSignature[0].Target with
+            {
+                Signature = string.Concat(
+                    wrongSignature[0].Target.Signature,
+                    "<wrong-overload>"),
+            },
+        };
+        Assert.False(VerifierArchitectureProof.TransportCallsValidForTesting(
+            wrongSignature));
+
+        var wrongCaller = calls.ToArray();
+        wrongCaller[0] = wrongCaller[0] with
+        {
+            Caller = wrongCaller[0].Caller with { Name = "CreateElsewhere" },
+        };
+        Assert.False(VerifierArchitectureProof.TransportCallsValidForTesting(
+            wrongCaller));
+
+        var invalidSpecification = calls.ToArray();
+        invalidSpecification[0] = invalidSpecification[0] with
+        {
+            Target = invalidSpecification[0].Target with
+            {
+                IsMethodSpecification = true,
+            },
+        };
+        Assert.False(VerifierArchitectureProof.TransportCallsValidForTesting(
+            invalidSpecification));
+    }
+
+    [Fact]
+    public void LiveAgentVerifierArchitectureCountsInheritedImplementations()
+    {
+        var assembly = typeof(LiveAgentVerifierContractTests).Assembly;
+        var target = typeof(ArchitectureProfileProbe).FullName!;
+        Assert.Equal(
+            2,
+            VerifierArchitectureProof.CountImplementationsForTesting(
+                assembly.Location,
+                assembly.GetName().Name!,
+                target));
+        Assert.Equal(
+            0,
+            VerifierArchitectureProof.CountImplementationsForTesting(
+                assembly.Location,
+                "Substituted.Runtime",
+                target));
     }
 
     [Fact]
@@ -690,4 +783,27 @@ public sealed class LiveAgentVerifierContractTests
                 architecture));
     }
 
+    private interface ArchitectureProfileProbe
+    {
+    }
+
+    private abstract class ArchitectureProfileProbeBase :
+        ArchitectureProfileProbe
+    {
+    }
+
+    private abstract class ArchitectureProfileProbeMiddle :
+        ArchitectureProfileProbeBase
+    {
+    }
+
+    private sealed class ArchitectureProfileProbeDerived :
+        ArchitectureProfileProbeMiddle
+    {
+    }
+
+    private sealed class ArchitectureProfileProbeDirect :
+        ArchitectureProfileProbe
+    {
+    }
 }

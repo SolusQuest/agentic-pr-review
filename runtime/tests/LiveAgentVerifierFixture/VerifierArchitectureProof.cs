@@ -21,9 +21,34 @@ internal sealed record VerifierArchitectureReceipt(
     bool Passed,
     string ProcessInstanceSha256);
 
+internal sealed record VerifierArchitectureTypeIdentity(
+    string AssemblyName,
+    string FullName,
+    string DisplayName)
+{
+    internal bool HasSameDefinition(VerifierArchitectureTypeIdentity other) =>
+        StringComparer.Ordinal.Equals(AssemblyName, other.AssemblyName) &&
+        StringComparer.Ordinal.Equals(FullName, other.FullName);
+}
+
+internal sealed record VerifierArchitectureMethodReference(
+    VerifierArchitectureTypeIdentity DeclaringType,
+    string Name,
+    string Signature,
+    int GenericParameterCount,
+    bool IsMethodSpecification,
+    ILOpCode OpCode);
+
+internal sealed record VerifierArchitectureTransportCall(
+    VerifierArchitectureMethodReference Caller,
+    VerifierArchitectureMethodReference Target);
+
 internal static class VerifierArchitectureProof
 {
     private const int MaximumAssemblyBytes = 64 * 1024 * 1024;
+    private const string FixtureAssembly =
+        "AgenticPrReview.Runtime.LiveAgentVerifierFixture";
+    private const string RuntimeAssembly = "AgenticPrReview.Runtime";
     private const string TransportFactoryInterface =
         "AgenticPrReview.Runtime.IR3LiveAgentTransportFactory";
     private const string FreshProcessProfileInterface =
@@ -32,6 +57,26 @@ internal static class VerifierArchitectureProof
         "AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekTransport";
     private const string VerifierTransportFactoryType =
         "AgenticPrReview.Runtime.LiveAgentVerifierFixture.VerifierTransportFactory";
+    private const string VerifierTransportFactoryCreateSignature =
+        "instance[AgenticPrReview.Runtime]" +
+        "AgenticPrReview.Runtime.Execution.DeepSeek.IDeepSeekTransport(" +
+        "[AgenticPrReview.Runtime]" +
+        "AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekCredential)";
+    private const string CreateHandlerSignature =
+        "static[System.Net.Http]System.Net.Http.SocketsHttpHandler(" +
+        "[System.Runtime]System.TimeSpan," +
+        "[System.Runtime]System.Func`3<" +
+        "[System.Net.Http]System.Net.Http.SocketsHttpConnectionContext," +
+        "[System.Runtime]System.Threading.CancellationToken," +
+        "[System.Runtime]System.Threading.Tasks.ValueTask`1<" +
+        "[System.Runtime]System.IO.Stream>>)";
+    private const string CreateForTestingSignature =
+        "static[AgenticPrReview.Runtime]" +
+        "AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekTransport(" +
+        "[AgenticPrReview.Runtime]" +
+        "AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekCredential," +
+        "[System.Net.Http]System.Net.Http.HttpMessageHandler," +
+        "[System.Runtime]System.TimeSpan)";
 
     private static readonly HashSet<string> ForbiddenTypes = new(
         [
@@ -76,22 +121,40 @@ internal static class VerifierArchitectureProof
         }
 
         var reader = pe.GetMetadataReader();
+        var assemblyName = AssemblyName(reader);
+        if (!StringComparer.Ordinal.Equals(assemblyName, FixtureAssembly))
+        {
+            throw new InvalidDataException(
+                "The verifier architecture assembly identity is invalid.");
+        }
+
         var typeReferences = reader.TypeReferences
             .Select(handle => FullName(reader, handle))
             .ToHashSet(StringComparer.Ordinal);
         var transportCalls = ReadTransportCalls(pe, reader).ToArray();
         var factoryTypes = CountImplementations(
             reader,
-            TransportFactoryInterface);
+            new VerifierArchitectureTypeIdentity(
+                RuntimeAssembly,
+                TransportFactoryInterface,
+                string.Concat(
+                    "[",
+                    RuntimeAssembly,
+                    "]",
+                    TransportFactoryInterface)));
         var profileTypes = CountImplementations(
             reader,
-            FreshProcessProfileInterface);
+            new VerifierArchitectureTypeIdentity(
+                RuntimeAssembly,
+                FreshProcessProfileInterface,
+                string.Concat(
+                    "[",
+                    RuntimeAssembly,
+                    "]",
+                    FreshProcessProfileInterface)));
         var forbiddenAbsent = !ForbiddenTypes.Overlaps(typeReferences);
         var passed = forbiddenAbsent &&
-            transportCalls.Length == 2 &&
-            transportCalls.All(call =>
-                call.CallerType == VerifierTransportFactoryType &&
-                call.CallerMethod == "Create") &&
+            TransportCallsValid(transportCalls) &&
             factoryTypes == 1 &&
             profileTypes == 1;
         return new VerifierArchitectureReceipt(
@@ -110,34 +173,202 @@ internal static class VerifierArchitectureProof
             processInstanceSha256);
     }
 
+    internal static IReadOnlyList<string> DescribeTransportCallsForTesting(
+        string assemblyPath)
+    {
+        using var stream = File.OpenRead(assemblyPath);
+        using var pe = new PEReader(stream);
+        var reader = pe.GetMetadataReader();
+        return ReadTransportCalls(pe, reader)
+            .Select(call => string.Concat(
+                call.Caller.DeclaringType.DisplayName,
+                ".",
+                call.Caller.Name,
+                " ",
+                call.Caller.Signature,
+                " -> ",
+                call.Target.OpCode,
+                " ",
+                call.Target.DeclaringType.DisplayName,
+                ".",
+                call.Target.Name,
+                " ",
+                call.Target.Signature,
+                call.Target.IsMethodSpecification ? " <method-spec>" : ""))
+            .ToArray();
+    }
+
+    internal static IReadOnlyList<VerifierArchitectureTransportCall>
+        ReadTransportCallsForTesting(string assemblyPath)
+    {
+        using var stream = File.OpenRead(assemblyPath);
+        using var pe = new PEReader(stream);
+        return ReadTransportCalls(pe, pe.GetMetadataReader()).ToArray();
+    }
+
+    internal static bool TransportCallsValidForTesting(
+        IReadOnlyCollection<VerifierArchitectureTransportCall> calls) =>
+        TransportCallsValid(calls);
+
+    internal static VerifierArchitectureMethodReference
+        ReadSyntheticTransportReferenceForTesting(
+            string assemblyPath,
+            string methodName,
+            ILOpCode opCode)
+    {
+        using var stream = File.OpenRead(assemblyPath);
+        using var pe = new PEReader(stream);
+        var reader = pe.GetMetadataReader();
+        var handle = reader.MemberReferences.Single(candidate =>
+        {
+            var reference = reader.GetMemberReference(candidate);
+            return reference.GetKind() == MemberReferenceKind.Method &&
+                reader.GetString(reference.Name) == methodName &&
+                TypeIdentity(reader, reference.Parent).FullName ==
+                    DeepSeekTransportType;
+        });
+        var value = (ushort)opCode;
+        var opCodeBytes = value > byte.MaxValue
+            ? new[] { (byte)(value >> 8), (byte)value }
+            : [(byte)value];
+        var il = opCodeBytes.Concat(BitConverter.GetBytes(
+            MetadataTokens.GetToken(handle))).ToArray();
+        return ReadMethodReferences(reader, il).Single();
+    }
+
+    internal static int CountImplementationsForTesting(
+        string assemblyPath,
+        string targetAssembly,
+        string targetFullName)
+    {
+        using var stream = File.OpenRead(assemblyPath);
+        using var pe = new PEReader(stream);
+        return CountImplementations(
+            pe.GetMetadataReader(),
+            new VerifierArchitectureTypeIdentity(
+                targetAssembly,
+                targetFullName,
+                string.Concat("[", targetAssembly, "]", targetFullName)));
+    }
+
     private static int CountImplementations(
         MetadataReader reader,
-        string interfaceName) => reader.TypeDefinitions.Count(handle =>
+        VerifierArchitectureTypeIdentity target)
     {
-        var definition = reader.GetTypeDefinition(handle);
-        if ((definition.Attributes & TypeAttributes.Interface) != 0 ||
-            (definition.Attributes & TypeAttributes.Abstract) != 0)
+        var assemblyName = AssemblyName(reader);
+        var definitions = reader.TypeDefinitions.ToDictionary(
+            handle => FullName(reader, handle),
+            handle => handle,
+            StringComparer.Ordinal);
+        return reader.TypeDefinitions.Count(handle =>
+        {
+            var definition = reader.GetTypeDefinition(handle);
+            if ((definition.Attributes & TypeAttributes.Interface) != 0 ||
+                (definition.Attributes & TypeAttributes.Abstract) != 0)
+            {
+                return false;
+            }
+
+            return Implements(
+                reader,
+                assemblyName,
+                definitions,
+                handle,
+                target,
+                []);
+        });
+    }
+
+    private static bool Implements(
+        MetadataReader reader,
+        string assemblyName,
+        IReadOnlyDictionary<string, TypeDefinitionHandle> definitions,
+        TypeDefinitionHandle handle,
+        VerifierArchitectureTypeIdentity target,
+        HashSet<TypeDefinitionHandle> visiting)
+    {
+        if (!visiting.Add(handle))
+        {
+            throw new InvalidDataException(
+                "The verifier contains a cyclic type hierarchy.");
+        }
+
+        try
+        {
+            var definition = reader.GetTypeDefinition(handle);
+            foreach (var item in definition.GetInterfaceImplementations())
+            {
+                var implementation = reader.GetInterfaceImplementation(item);
+                if (HierarchyTypeMatches(
+                        reader,
+                        assemblyName,
+                        definitions,
+                        implementation.Interface,
+                        target,
+                        visiting))
+                {
+                    return true;
+                }
+            }
+
+            return !definition.BaseType.IsNil && HierarchyTypeMatches(
+                reader,
+                assemblyName,
+                definitions,
+                definition.BaseType,
+                target,
+                visiting);
+        }
+        finally
+        {
+            visiting.Remove(handle);
+        }
+    }
+
+    private static bool HierarchyTypeMatches(
+        MetadataReader reader,
+        string assemblyName,
+        IReadOnlyDictionary<string, TypeDefinitionHandle> definitions,
+        EntityHandle handle,
+        VerifierArchitectureTypeIdentity target,
+        HashSet<TypeDefinitionHandle> visiting)
+    {
+        var identity = TypeIdentity(reader, handle);
+        if (identity.HasSameDefinition(target))
+        {
+            return true;
+        }
+
+        if (!StringComparer.Ordinal.Equals(
+                identity.AssemblyName,
+                assemblyName))
         {
             return false;
         }
 
-        return definition.GetInterfaceImplementations().Any(item =>
+        if (!definitions.TryGetValue(identity.FullName, out var definition))
         {
-            var implementation = reader.GetInterfaceImplementation(item);
-            return StringComparer.Ordinal.Equals(
-                FullName(reader, implementation.Interface),
-                interfaceName);
-        });
-    });
+            throw new InvalidDataException(
+                "The verifier contains an unresolved local hierarchy type.");
+        }
 
-    private static IEnumerable<TransportCall> ReadTransportCalls(
+        return Implements(
+            reader,
+            assemblyName,
+            definitions,
+            definition,
+            target,
+            visiting);
+    }
+
+    private static IEnumerable<VerifierArchitectureTransportCall> ReadTransportCalls(
         PEReader pe,
         MetadataReader reader)
     {
+        var assemblyName = AssemblyName(reader);
         foreach (var typeHandle in reader.TypeDefinitions)
         {
             var type = reader.GetTypeDefinition(typeHandle);
-            var callerType = FullName(reader, typeHandle);
             foreach (var methodHandle in type.GetMethods())
             {
                 var method = reader.GetMethodDefinition(methodHandle);
@@ -146,26 +377,57 @@ internal static class VerifierArchitectureProof
                     continue;
                 }
 
-                var callerMethod = reader.GetString(method.Name);
+                var caller = ResolveMethodDefinition(
+                    reader,
+                    methodHandle,
+                    assemblyName);
                 var il = pe.GetMethodBody(method.RelativeVirtualAddress)
                     .GetILBytes() ?? throw new InvalidDataException(
                         "The verifier contains a method without IL bytes.");
-                foreach (var target in ReadCalledMethods(reader, il))
+                foreach (var target in ReadMethodReferences(reader, il))
                 {
-                    if (target.DeclaringType == DeepSeekTransportType &&
-                        target.Name is "CreateHandler" or "CreateForTesting")
+                    if (target.DeclaringType.FullName == DeepSeekTransportType)
                     {
-                        yield return new TransportCall(
-                            callerType,
-                            callerMethod,
-                            target.Name);
+                        yield return new VerifierArchitectureTransportCall(
+                            caller,
+                            target);
                     }
                 }
             }
         }
     }
 
-    private static IEnumerable<CalledMethod> ReadCalledMethods(
+    private static bool TransportCallsValid(
+        IReadOnlyCollection<VerifierArchitectureTransportCall> calls) =>
+        calls.Count == 2 &&
+        calls.All(call =>
+            call.Caller.DeclaringType.AssemblyName == FixtureAssembly &&
+            call.Caller.DeclaringType.FullName == VerifierTransportFactoryType &&
+            call.Caller.Name == "Create" &&
+            call.Caller.Signature == VerifierTransportFactoryCreateSignature &&
+            !call.Caller.IsMethodSpecification) &&
+        calls.Count(call => TargetMatches(
+            call.Target,
+            "CreateHandler",
+            CreateHandlerSignature)) == 1 &&
+        calls.Count(call => TargetMatches(
+            call.Target,
+            "CreateForTesting",
+            CreateForTestingSignature)) == 1;
+
+    private static bool TargetMatches(
+        VerifierArchitectureMethodReference target,
+        string name,
+        string signature) =>
+        target.OpCode == ILOpCode.Call &&
+        target.DeclaringType.AssemblyName == RuntimeAssembly &&
+        target.DeclaringType.FullName == DeepSeekTransportType &&
+        target.Name == name &&
+        target.Signature == signature &&
+        !target.IsMethodSpecification;
+
+    private static IEnumerable<VerifierArchitectureMethodReference>
+        ReadMethodReferences(
         MetadataReader reader,
         byte[] il)
     {
@@ -187,62 +449,149 @@ internal static class VerifierArchitectureProof
                     "The verifier contains a truncated IL operand.");
             }
 
-            if (opCode is ILOpCode.Call or ILOpCode.Callvirt)
+            if (IsMethodTokenOpCode(opCode))
             {
                 var token = BitConverter.ToInt32(il, operandOffset);
-                yield return ResolveCalledMethod(
-                    reader,
-                    MetadataTokens.EntityHandle(token));
+                var handle = MetadataTokens.EntityHandle(token);
+                if (opCode != ILOpCode.Ldtoken || IsMethodHandle(reader, handle))
+                {
+                    yield return ResolveCalledMethod(reader, handle, opCode);
+                }
             }
 
             offset += operandSize;
         }
     }
 
-    private static CalledMethod ResolveCalledMethod(
+    private static bool IsMethodTokenOpCode(ILOpCode opCode) => opCode is
+        ILOpCode.Call or
+        ILOpCode.Callvirt or
+        ILOpCode.Jmp or
+        ILOpCode.Newobj or
+        ILOpCode.Ldftn or
+        ILOpCode.Ldvirtftn or
+        ILOpCode.Ldtoken;
+
+    private static bool IsMethodHandle(
         MetadataReader reader,
         EntityHandle handle) => handle.Kind switch
     {
-        HandleKind.MemberReference => ResolveMemberReference(
-            reader,
-            (MemberReferenceHandle)handle),
-        HandleKind.MethodDefinition => ResolveMethodDefinition(
-            reader,
-            (MethodDefinitionHandle)handle),
-        HandleKind.MethodSpecification => ResolveCalledMethod(
-            reader,
-            reader.GetMethodSpecification((MethodSpecificationHandle)handle)
-                .Method),
-        _ => throw new InvalidDataException(
-            "The verifier contains an unsupported call target."),
+        HandleKind.MethodDefinition or HandleKind.MethodSpecification => true,
+        HandleKind.MemberReference => reader.GetMemberReference(
+            (MemberReferenceHandle)handle).GetKind() ==
+                MemberReferenceKind.Method,
+        _ => false,
     };
 
-    private static CalledMethod ResolveMemberReference(
+    private static VerifierArchitectureMethodReference ResolveCalledMethod(
         MetadataReader reader,
-        MemberReferenceHandle handle)
+        EntityHandle handle,
+        ILOpCode opCode) => handle.Kind switch
+    {
+        HandleKind.MemberReference => ResolveMemberReference(
+            reader,
+            (MemberReferenceHandle)handle,
+            opCode),
+        HandleKind.MethodDefinition => ResolveMethodDefinition(
+            reader,
+            (MethodDefinitionHandle)handle,
+            AssemblyName(reader)) with
+            {
+                OpCode = opCode,
+            },
+        HandleKind.MethodSpecification => ResolveMethodSpecification(
+            reader,
+            (MethodSpecificationHandle)handle,
+            opCode),
+        _ => throw new InvalidDataException(
+            "The verifier contains an unsupported method target."),
+    };
+
+    private static VerifierArchitectureMethodReference ResolveMemberReference(
+        MetadataReader reader,
+        MemberReferenceHandle handle,
+        ILOpCode opCode)
     {
         var reference = reader.GetMemberReference(handle);
-        var declaringType = FullName(reader, reference.Parent);
-        if (declaringType is null)
+        if (reference.GetKind() != MemberReferenceKind.Method)
         {
             throw new InvalidDataException(
-                "The verifier contains an unresolved member parent.");
+                "The verifier contains a field token in a method position.");
         }
 
-        return new CalledMethod(
+        var declaringType = TypeIdentity(reader, reference.Parent);
+        var signature = reference.DecodeMethodSignature(
+            new MetadataTypeIdentityProvider(),
+            null);
+        return new VerifierArchitectureMethodReference(
             declaringType,
-            reader.GetString(reference.Name));
+            reader.GetString(reference.Name),
+            FormatSignature(signature),
+            signature.GenericParameterCount,
+            IsMethodSpecification: false,
+            opCode);
     }
 
-    private static CalledMethod ResolveMethodDefinition(
+    private static VerifierArchitectureMethodReference ResolveMethodDefinition(
         MetadataReader reader,
-        MethodDefinitionHandle handle)
+        MethodDefinitionHandle handle,
+        string assemblyName)
     {
         var definition = reader.GetMethodDefinition(handle);
-        return new CalledMethod(
-            FullName(reader, definition.GetDeclaringType()),
-            reader.GetString(definition.Name));
+        var signature = definition.DecodeSignature(
+            new MetadataTypeIdentityProvider(),
+            null);
+        var isStatic = (definition.Attributes & MethodAttributes.Static) != 0;
+        if (isStatic == signature.Header.IsInstance)
+        {
+            throw new InvalidDataException(
+                "The verifier contains an inconsistent method signature.");
+        }
+
+        return new VerifierArchitectureMethodReference(
+            new VerifierArchitectureTypeIdentity(
+                assemblyName,
+                FullName(reader, definition.GetDeclaringType()),
+                string.Concat(
+                    "[",
+                    assemblyName,
+                    "]",
+                    FullName(reader, definition.GetDeclaringType()))),
+            reader.GetString(definition.Name),
+            FormatSignature(signature),
+            signature.GenericParameterCount,
+            IsMethodSpecification: false,
+            ILOpCode.Nop);
     }
+
+    private static VerifierArchitectureMethodReference ResolveMethodSpecification(
+        MetadataReader reader,
+        MethodSpecificationHandle handle,
+        ILOpCode opCode)
+    {
+        var specification = reader.GetMethodSpecification(handle);
+        var method = ResolveCalledMethod(reader, specification.Method, opCode);
+        var arguments = specification.DecodeSignature(
+            new MetadataTypeIdentityProvider(),
+            null);
+        if (method.GenericParameterCount != arguments.Length)
+        {
+            throw new InvalidDataException(
+                "The verifier contains an invalid method specification.");
+        }
+
+        return method with { IsMethodSpecification = true };
+    }
+
+    private static string FormatSignature(
+        MethodSignature<VerifierArchitectureTypeIdentity> signature) =>
+        string.Concat(
+            signature.Header.IsInstance ? "instance" : "static",
+            signature.ReturnType.DisplayName,
+            "(",
+            string.Join(',', signature.ParameterTypes.Select(
+                parameter => parameter.DisplayName)),
+            ")");
 
     private static ILOpCode ReadOpCode(byte[] il, ref int offset)
     {
@@ -347,29 +696,77 @@ internal static class VerifierArchitectureProof
                 name);
     }
 
-    private static string? FullName(
+    private static string AssemblyName(MetadataReader reader) =>
+        reader.IsAssembly
+            ? reader.GetString(reader.GetAssemblyDefinition().Name)
+            : throw new InvalidDataException(
+                "The verifier metadata does not define an assembly.");
+
+    private static VerifierArchitectureTypeIdentity TypeIdentity(
         MetadataReader reader,
         EntityHandle handle) => handle.Kind switch
     {
-        HandleKind.TypeReference => FullName(
+        HandleKind.TypeReference => TypeIdentity(
             reader,
             (TypeReferenceHandle)handle),
-        HandleKind.TypeDefinition => FullName(
+        HandleKind.TypeDefinition => DefinitionIdentity(
             reader,
             (TypeDefinitionHandle)handle),
         HandleKind.TypeSpecification => reader
             .GetTypeSpecification((TypeSpecificationHandle)handle)
-            .DecodeSignature(MetadataTypeNameProvider.Instance, null),
-        HandleKind.MethodDefinition => FullName(
+            .DecodeSignature(new MetadataTypeIdentityProvider(), null),
+        HandleKind.MethodDefinition => DefinitionIdentity(
             reader,
             reader.GetMethodDefinition((MethodDefinitionHandle)handle)
                 .GetDeclaringType()),
+        _ => throw new InvalidDataException(
+            "The verifier contains an unresolved metadata type."),
+    };
+
+    private static VerifierArchitectureTypeIdentity DefinitionIdentity(
+        MetadataReader reader,
+        TypeDefinitionHandle handle)
+    {
+        var assemblyName = AssemblyName(reader);
+        var fullName = FullName(reader, handle);
+        return new VerifierArchitectureTypeIdentity(
+            assemblyName,
+            fullName,
+            string.Concat("[", assemblyName, "]", fullName));
+    }
+
+    private static VerifierArchitectureTypeIdentity TypeIdentity(
+        MetadataReader reader,
+        TypeReferenceHandle handle)
+    {
+        var fullName = FullName(reader, handle);
+        var assemblyName = ResolutionAssembly(
+            reader,
+            reader.GetTypeReference(handle).ResolutionScope);
+        return new VerifierArchitectureTypeIdentity(
+            assemblyName,
+            fullName,
+            string.Concat("[", assemblyName, "]", fullName));
+    }
+
+    private static string ResolutionAssembly(
+        MetadataReader reader,
+        EntityHandle scope) => scope.Kind switch
+    {
+        HandleKind.AssemblyReference => reader.GetString(
+            reader.GetAssemblyReference((AssemblyReferenceHandle)scope).Name),
+        HandleKind.ModuleDefinition => AssemblyName(reader),
+        HandleKind.TypeReference => ResolutionAssembly(
+            reader,
+            reader.GetTypeReference((TypeReferenceHandle)scope)
+                .ResolutionScope),
         HandleKind.ModuleReference => string.Concat(
-            "<Module:",
+            "<module:",
             reader.GetString(
-                reader.GetModuleReference((ModuleReferenceHandle)handle).Name),
+                reader.GetModuleReference((ModuleReferenceHandle)scope).Name),
             ">"),
-        _ => null,
+        _ => throw new InvalidDataException(
+            "The verifier contains an unresolved type scope."),
     };
 
     private static string JoinName(string @namespace, string name) =>
@@ -377,72 +774,111 @@ internal static class VerifierArchitectureProof
             ? name
             : string.Concat(@namespace, ".", name);
 
-    private sealed record CalledMethod(string DeclaringType, string Name);
-
-    private sealed record TransportCall(
-        string CallerType,
-        string CallerMethod,
-        string CalledMethod);
-
-    private sealed class MetadataTypeNameProvider :
-        ISignatureTypeProvider<string, object?>
+    private sealed class MetadataTypeIdentityProvider :
+        ISignatureTypeProvider<VerifierArchitectureTypeIdentity, object?>
     {
-        internal static MetadataTypeNameProvider Instance { get; } = new();
+        private const string IntrinsicAssembly = "<intrinsic>";
 
-        public string GetArrayType(string elementType, ArrayShape shape) =>
-            string.Concat(elementType, "[", new string(',', shape.Rank - 1), "]");
+        public VerifierArchitectureTypeIdentity GetArrayType(
+            VerifierArchitectureTypeIdentity elementType,
+            ArrayShape shape) => Decorate(
+                elementType,
+                string.Concat(
+                    elementType.DisplayName,
+                    "[",
+                    new string(',', shape.Rank - 1),
+                    "]"));
 
-        public string GetByReferenceType(string elementType) =>
-            string.Concat(elementType, "&");
+        public VerifierArchitectureTypeIdentity GetByReferenceType(
+            VerifierArchitectureTypeIdentity elementType) => Decorate(
+                elementType,
+                string.Concat(elementType.DisplayName, "&"));
 
-        public string GetFunctionPointerType(
-            MethodSignature<string> signature) => "<function-pointer>";
+        public VerifierArchitectureTypeIdentity GetFunctionPointerType(
+            MethodSignature<VerifierArchitectureTypeIdentity> signature) => new(
+                IntrinsicAssembly,
+                "<function-pointer>",
+                string.Concat("<function-pointer:", FormatSignature(signature), ">"));
 
-        public string GetGenericInstantiation(
-            string genericType,
-            ImmutableArray<string> typeArguments) => string.Concat(
-                genericType,
-                "<",
-                string.Join(',', typeArguments),
-                ">");
+        public VerifierArchitectureTypeIdentity GetGenericInstantiation(
+            VerifierArchitectureTypeIdentity genericType,
+            ImmutableArray<VerifierArchitectureTypeIdentity> typeArguments) =>
+            new(
+                genericType.AssemblyName,
+                genericType.FullName,
+                string.Concat(
+                    genericType.DisplayName,
+                    "<",
+                    string.Join(',', typeArguments.Select(
+                        argument => argument.DisplayName)),
+                    ">"));
 
-        public string GetGenericMethodParameter(object? context, int index) =>
-            string.Concat("!!", index);
+        public VerifierArchitectureTypeIdentity GetGenericMethodParameter(
+            object? context,
+            int index) => Intrinsic(string.Concat("!!", index));
 
-        public string GetGenericTypeParameter(object? context, int index) =>
-            string.Concat("!", index);
+        public VerifierArchitectureTypeIdentity GetGenericTypeParameter(
+            object? context,
+            int index) => Intrinsic(string.Concat("!", index));
 
-        public string GetModifiedType(
-            string modifier,
-            string unmodifiedType,
-            bool isRequired) => unmodifiedType;
+        public VerifierArchitectureTypeIdentity GetModifiedType(
+            VerifierArchitectureTypeIdentity modifier,
+            VerifierArchitectureTypeIdentity unmodifiedType,
+            bool isRequired) => Decorate(
+                unmodifiedType,
+                string.Concat(
+                    isRequired ? "modreq(" : "modopt(",
+                    modifier.DisplayName,
+                    ")",
+                    unmodifiedType.DisplayName));
 
-        public string GetPinnedType(string elementType) => elementType;
+        public VerifierArchitectureTypeIdentity GetPinnedType(
+            VerifierArchitectureTypeIdentity elementType) => Decorate(
+                elementType,
+                string.Concat(elementType.DisplayName, " pinned"));
 
-        public string GetPointerType(string elementType) =>
-            string.Concat(elementType, "*");
+        public VerifierArchitectureTypeIdentity GetPointerType(
+            VerifierArchitectureTypeIdentity elementType) => Decorate(
+                elementType,
+                string.Concat(elementType.DisplayName, "*"));
 
-        public string GetPrimitiveType(PrimitiveTypeCode typeCode) =>
-            string.Concat("System.", typeCode);
+        public VerifierArchitectureTypeIdentity GetPrimitiveType(
+            PrimitiveTypeCode typeCode) => Intrinsic(
+                string.Concat("System.", typeCode));
 
-        public string GetSZArrayType(string elementType) =>
-            string.Concat(elementType, "[]");
+        public VerifierArchitectureTypeIdentity GetSZArrayType(
+            VerifierArchitectureTypeIdentity elementType) => Decorate(
+                elementType,
+                string.Concat(elementType.DisplayName, "[]"));
 
-        public string GetTypeFromDefinition(
+        public VerifierArchitectureTypeIdentity GetTypeFromDefinition(
             MetadataReader reader,
             TypeDefinitionHandle handle,
-            byte rawTypeKind) => FullName(reader, handle);
+            byte rawTypeKind) => DefinitionIdentity(reader, handle);
 
-        public string GetTypeFromReference(
+        public VerifierArchitectureTypeIdentity GetTypeFromReference(
             MetadataReader reader,
             TypeReferenceHandle handle,
-            byte rawTypeKind) => FullName(reader, handle);
+            byte rawTypeKind) => TypeIdentity(reader, handle);
 
-        public string GetTypeFromSpecification(
+        public VerifierArchitectureTypeIdentity GetTypeFromSpecification(
             MetadataReader reader,
             object? context,
             TypeSpecificationHandle handle,
             byte rawTypeKind) => reader.GetTypeSpecification(handle)
                 .DecodeSignature(this, context);
+
+        private static VerifierArchitectureTypeIdentity Intrinsic(
+            string name) => new(
+            IntrinsicAssembly,
+            name,
+            name);
+
+        private static VerifierArchitectureTypeIdentity Decorate(
+            VerifierArchitectureTypeIdentity type,
+            string displayName) => new(
+                type.AssemblyName,
+                type.FullName,
+                displayName);
     }
 }

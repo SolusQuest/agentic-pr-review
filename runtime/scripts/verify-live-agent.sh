@@ -11,6 +11,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 RUNTIME_TESTS="${REPO_ROOT}/runtime/tests"
 PROJECT="${RUNTIME_TESTS}/LiveAgentVerifierFixture/AgenticPrReview.Runtime.LiveAgentVerifierFixture.csproj"
 TEST_PROJECT="${RUNTIME_TESTS}/AgenticPrReview.Runtime.Tests/AgenticPrReview.Runtime.Tests.csproj"
+RUNTIME_PROJECT="${REPO_ROOT}/runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj"
 CORPUS="${RUNTIME_TESTS}/fixtures/agent/r3-quality/corpus.json"
 FIXTURES="${RUNTIME_TESTS}/fixtures/agent/r3-live-agent"
 GOLDEN="${FIXTURES}/replacement-record.json.golden"
@@ -643,30 +644,97 @@ run_deterministic() {
 
 _audit_aot_warnings() {
   local log="$1"
-  local expected
-  expected="CSC : warning IL3058: Referenced assembly 'JsonSchema.Net' is not built with "'`true`'" and may not be compatible with AOT."
+  local announce="${2:-yes}"
+  local expected_prefix expected_runtime expected_fixture
+  expected_prefix="CSC : warning IL3058: Referenced assembly 'JsonSchema.Net' is not built with "'`true`'" and may not be compatible with AOT."
+  expected_runtime="${expected_prefix} [${RUNTIME_PROJECT}]"
+  expected_fixture="${expected_prefix} [${PROJECT}]"
   local -a warnings=()
-  mapfile -t warnings < <(tr -d '\r' <"${log}" |
-    grep -E '(^|: )warning [A-Z]+[0-9]+:' || true)
-  [[ "${#warnings[@]}" -eq 2 ]] ||
-    _fail APR_R3_LIVE_AOT_WARNING_ALLOWLIST_MISSING
+  local line lower
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    line="${line%$'\r'}"
+    lower="${line,,}"
+    if [[ "${lower}" =~ (^|[[:space:]:])warning([[:space:]]+[a-z]+[0-9]+[[:space:]]*:|[[:space:]]*:) ]]; then
+      warnings+=("${line}")
+    fi
+  done <"${log}"
+
   local warning runtime_count=0 fixture_count=0
   for warning in "${warnings[@]}"; do
-    [[ "${warning}" == *"${expected}"* ]] ||
-      _fail "APR_R3_LIVE_AOT_WARNING_UNEXPECTED ${warning}"
     case "${warning}" in
-      *AgenticPrReview.Runtime.LiveAgentVerifierFixture.csproj*)
+      "${expected_fixture}")
         ((fixture_count += 1))
         ;;
-      *AgenticPrReview.Runtime.csproj*)
+      "${expected_runtime}")
         ((runtime_count += 1))
         ;;
-      *) _fail "APR_R3_LIVE_AOT_WARNING_ORIGIN_INVALID ${warning}" ;;
+      *)
+        _fail "APR_R3_LIVE_AOT_WARNING_UNEXPECTED ${warning}"
+        return 1
+        ;;
     esac
   done
-  [[ "${runtime_count}" -eq 1 && "${fixture_count}" -eq 1 ]] ||
-    _fail APR_R3_LIVE_AOT_WARNING_ORIGIN_INVALID
-  printf 'APR_R3_LIVE_AOT_WARNING_ALLOWLIST count=%s\n' "${#warnings[@]}"
+  if [[ "${#warnings[@]}" -ne 2 ||
+        "${runtime_count}" -ne 1 ||
+        "${fixture_count}" -ne 1 ]]; then
+    _fail APR_R3_LIVE_AOT_WARNING_ALLOWLIST_INVALID
+    return 1
+  fi
+  if [[ "${announce}" == yes ]]; then
+    printf 'APR_R3_LIVE_AOT_WARNING_ALLOWLIST count=%s\n' "${#warnings[@]}"
+  fi
+}
+
+_verify_aot_warning_audit() {
+  local root="$1"
+  local expected_prefix
+  expected_prefix="CSC : warning IL3058: Referenced assembly 'JsonSchema.Net' is not built with "'`true`'" and may not be compatible with AOT."
+  local good="${root}/warning-good.log"
+  printf '%s [%s]\n%s [%s]\n' \
+    "${expected_prefix}" "${RUNTIME_PROJECT}" \
+    "${expected_prefix}" "${PROJECT}" >"${good}"
+  _audit_aot_warnings "${good}" no >/dev/null ||
+    _fail APR_R3_LIVE_AOT_WARNING_SELF_TEST_BASELINE_FAILED
+
+  local case_id injected mutated
+  local -a injections=(
+    'clang: warning: synthetic native linker condition'
+    'VerifierTask : warning : synthetic MSBuild task condition'
+    'CSC : warning IL9999: synthetic coded warning [synthetic.csproj]'
+  )
+  for case_id in "${!injections[@]}"; do
+    injected="${root}/warning-injected-${case_id}.log"
+    cp "${good}" "${injected}"
+    printf '%s\n' "${injections[case_id]}" >>"${injected}"
+    if _audit_aot_warnings "${injected}" no >/dev/null 2>&1; then
+      _fail "APR_R3_LIVE_AOT_WARNING_SELF_TEST_ACCEPTED_${case_id}"
+      return 1
+    fi
+  done
+
+  mutated="${root}/warning-mutated.log"
+  printf '%s [%s] appended-diagnostic\n%s [%s]\n' \
+    "${expected_prefix}" "${RUNTIME_PROJECT}" \
+    "${expected_prefix}" "${PROJECT}" >"${mutated}"
+  if _audit_aot_warnings "${mutated}" no >/dev/null 2>&1; then
+    _fail APR_R3_LIVE_AOT_WARNING_SELF_TEST_ACCEPTED_MUTATION
+    return 1
+  fi
+
+  mutated="${root}/warning-duplicate.log"
+  cp "${good}" "${mutated}"
+  printf '%s [%s]\n' "${expected_prefix}" "${PROJECT}" >>"${mutated}"
+  if _audit_aot_warnings "${mutated}" no >/dev/null 2>&1; then
+    _fail APR_R3_LIVE_AOT_WARNING_SELF_TEST_ACCEPTED_DUPLICATE
+    return 1
+  fi
+
+  mutated="${root}/warning-missing.log"
+  printf '%s [%s]\n' "${expected_prefix}" "${RUNTIME_PROJECT}" >"${mutated}"
+  if _audit_aot_warnings "${mutated}" no >/dev/null 2>&1; then
+    _fail APR_R3_LIVE_AOT_WARNING_SELF_TEST_ACCEPTED_MISSING
+    return 1
+  fi
 }
 
 run_aot() {
@@ -677,6 +745,7 @@ run_aot() {
 
   local build_root
   _new_tempdir build_root
+  _verify_aot_warning_audit "${build_root}"
   local publish_output="${build_root}/publish"
   local intermediate_output="${build_root}/aot-intermediate"
   if ! "${DOTNET_CMD}" publish "${PROJECT}" \
@@ -686,8 +755,8 @@ run_aot() {
       -o "${publish_output}" \
       -p:PublishAot=true \
       -p:JsonSerializerIsReflectionEnabledByDefault=false \
-      -p:TreatWarningsAsErrors=true \
-      -p:WarningsNotAsErrors=IL3058 \
+      -warnaserror \
+      -warnnotaserror:IL3058 \
       -p:LiveAgentVerifierAotIntermediateDirectory="${intermediate_output}" \
       >"${build_root}/publish.log" 2>&1; then
     tail -n 80 "${build_root}/publish.log" >&2
