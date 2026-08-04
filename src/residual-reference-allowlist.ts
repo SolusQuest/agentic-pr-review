@@ -88,9 +88,10 @@ export const residualReferenceRules = [
     term: retiredSelector,
     path: /^src\/live-runtime-invocation\/invoke-live-runtime\.integration\.test\.ts$/u,
     lifecycleClass: 'protocol-migration',
-    currentConsumer: 'exact retired-selector rejection regression',
+    currentConsumer: 'retained R4 migration fixture excluded from active runtime integration',
     owner: 'R2 runtime input replacement',
-    interpretation: 'must be rejected with APR_INPUT_RUNTIME_PROVIDER_INVALID',
+    interpretation:
+      'historical exact rejection vector, not executable product integration evidence',
     deletionGate: 'replace the R1 runtime input contract and its exact rejection vector',
     milestone: 'R2',
   },
@@ -187,9 +188,10 @@ export const residualReferenceRules = [
     term: stateOrMarkerLegacy,
     path: /^src\/(?:live-provider\/deepseek-contract\.ts|live-runtime-invocation\/invoke-live-runtime\.integration\.test\.ts)$/u,
     lifecycleClass: 'state-migration',
-    currentConsumer: 'temporary M4 live-provider contract and integration rejection evidence',
+    currentConsumer: 'temporary M4 live-provider contract and retained non-executing fixture',
     owner: 'R4 Host',
-    interpretation: 'internal provider-mode vocabulary, not a public Action input',
+    interpretation:
+      'internal migration vocabulary; the retained fixture is not active product evidence',
     deletionGate: 'replace the temporary TypeScript live-provider host boundary',
     milestone: 'R4',
   },
@@ -399,17 +401,6 @@ export const residualReferenceRules = [
     interpretation:
       'credential name and presence bit only; the value must remain absent from the generic child',
     deletionGate: 'replace the R1 integration fixture with R4 Host integration',
-    milestone: 'R4',
-  },
-  {
-    id: 'RR-036',
-    term: stateOrMarkerLegacy,
-    path: /^runtime\/src\/AgenticPrReview\.Runtime\/Application\/LiveRuntimeApplication\.cs$/u,
-    lifecycleClass: 'protocol-migration',
-    currentConsumer: 'C# live-runtime input and unavailable-provider failure taxonomy',
-    owner: 'R4 Host runtime boundary',
-    interpretation: 'internal diagnostic-code vocabulary, not a public runtime selector',
-    deletionGate: 'replace the temporary live-runtime provider seam in the R4 Host',
     milestone: 'R4',
   },
 ] as const satisfies readonly ResidualReferenceRule[];

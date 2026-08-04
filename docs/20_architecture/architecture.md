@@ -11,7 +11,7 @@ The detailed decision, rationale, migration sequence, tools, `Microsoft.Extensio
 
 ## Status
 
-This is the selected target direction. R1 removed the TypeScript business host and Claude Code CLI path, leaving no public Action. R2 now has a real project-minimal Agent product path: the selected chat seam, explicit loop and tools, current SESSION format, restricted encrypted STATE, and two-fresh-process framework and Linux x64 Native AOT proof. The earlier two-candidate comparison infrastructure is deleted; see [`ai-abstraction-decision.md`](./ai-abstraction-decision.md). The current tree retains deterministic and single-shot live C# paths plus narrow M1-M4 TypeScript invocation, state, publisher, and migration families only for their named R3/R4 consumers.
+This is the selected target direction. R1 removed the TypeScript business host and Claude Code CLI path, leaving no public Action. R2 established the project-minimal Agent product path: the selected chat seam, explicit loop and tools, current SESSION format, restricted encrypted STATE, and two-fresh-process framework and Linux x64 Native AOT proof. R3 then proved the real Agent transport path and removed the superseded single-request C# application and executor family; see the checked [`r3-single-shot-removal-handoff.md`](./r3-single-shot-removal-handoff.md). The earlier two-candidate comparison infrastructure is also deleted; see [`ai-abstraction-decision.md`](./ai-abstraction-decision.md). The current tree retains the deterministic CLI plus narrow M1-M4 TypeScript invocation, state, publisher, protocol, and migration families only for the named R4 consumers in the handoff.
 
 New work must distinguish:
 

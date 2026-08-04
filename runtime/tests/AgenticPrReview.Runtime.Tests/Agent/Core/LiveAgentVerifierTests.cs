@@ -74,11 +74,11 @@ public sealed partial class AgentCapabilityArchitectureTests
             .ToArray();
         Assert.Empty(constructed);
 
-        var oldPath = new HashSet<Type>
+        var oldPath = new HashSet<string>(StringComparer.Ordinal)
         {
-            typeof(LiveRuntimeApplication),
-            typeof(ILiveProviderExecutor),
-            typeof(DeepSeekLiveProviderExecutor),
+            "AgenticPrReview.Runtime.LiveRuntimeApplication",
+            "AgenticPrReview.Runtime.ILiveProviderExecutor",
+            "AgenticPrReview.Runtime.DeepSeekLiveProviderExecutor",
         };
         var referencedOldPath = fixtureTypes
             .SelectMany(type => ReferencedTypes(type)
@@ -87,7 +87,8 @@ public sealed partial class AgentCapabilityArchitectureTests
                     .Select(member => member as Type ?? member.DeclaringType)
                     .OfType<Type>()))
             .SelectMany(ExpandTypeGraph)
-            .Where(oldPath.Contains)
+            .Select(type => type.FullName)
+            .Where(name => name is not null && oldPath.Contains(name))
             .Distinct()
             .ToArray();
         Assert.Empty(referencedOldPath);

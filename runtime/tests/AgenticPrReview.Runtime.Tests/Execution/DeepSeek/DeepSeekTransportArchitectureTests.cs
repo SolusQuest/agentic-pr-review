@@ -228,8 +228,6 @@ public sealed partial class DeepSeekTransportArchitectureTests
             typeof(HttpClient),
             typeof(HttpMessageHandler),
             typeof(AgentToolRegistry),
-            typeof(DeepSeekProviderContract),
-            typeof(DeepSeekLiveProviderExecutor),
         };
         Assert.Empty(FindForbiddenCapabilities(types, forbidden));
     }
@@ -292,8 +290,6 @@ public sealed partial class DeepSeekTransportArchitectureTests
         {
             typeof(DeepSeekCredential),
             typeof(DeepSeekTransport),
-            typeof(DeepSeekProviderContract),
-            typeof(DeepSeekLiveProviderExecutor),
             typeof(HttpClient),
             typeof(HttpMessageHandler),
             typeof(Environment),

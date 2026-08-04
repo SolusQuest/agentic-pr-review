@@ -1,6 +1,6 @@
 # Deterministic Runtime CLI
 
-This directory contains the M2 C# runtime implemented by issue #19. Its only command is:
+This directory contains the C# runtime. Its supported deterministic CLI command is:
 
 ```text
 review --input <path> --output <path> --trace <path>
@@ -19,7 +19,7 @@ emits IL3058. This is individually justified by the published Native AOT binary 
 embedded schemas and completing the deterministic fixture path under recurring CI. Do not replace
 this with a hand-written partial validator.
 
-The runtime now contains the selected project-minimal Agent product path under `Agent/Chat`, `Agent/Core`, `Agent/Loop`, `Agent/Session`, `Agent/Tools`, and `Host/State`. Issue #88 verifies that path through two fresh executable invocations in framework-dependent Release and Linux x64 Native AOT modes. The first invocation requires a thinking-enabled tool round and grounded terminal result before accepting encrypted generation 0 state; the second authorizes, restores exact logical and provider continuation state, uses a prior-only fact, and accepts generation 1 with verified-ahead lineage.
+The runtime contains the selected project-minimal Agent product path under `Agent/Chat`, `Agent/Core`, `Agent/Loop`, `Agent/Session`, `Agent/Tools`, and `Host/State`. Issue #88 verifies the base path through two fresh executable invocations, and the R3 verifier extends it through the real DeepSeek request writer, response parser, and transport seam in framework-dependent Release and Linux x64 Native AOT modes. The first invocation requires a thinking-enabled tool round and grounded terminal result before accepting encrypted generation 0 state; the second authorizes, restores exact logical and provider continuation state, uses a prior-only fact, and accepts generation 1 with verified-ahead lineage. The superseded `review-live` single-request application and executor family are deleted; `review-live-agent-r3` remains a verification command, not a public Action surface.
 
 The replacement proof is `runtime/tests/AgentLoopAotFixture` plus `runtime/scripts/verify-agent-loop.sh`. It uses the real runtime modules, a synthetic loopback provider oracle, closed child environments, exact public-safe goldens, and fail-closed transport, authorization, session, state, cancellation, and limit cases. It is not live-provider quality evidence or production GitHub Actions transport evidence. The earlier two-candidate comparison fixture and its test-only `Microsoft.Extensions.AI.Abstractions` dependency were deleted only after this replacement passed in both modes; the historical selection evidence remains recorded in [`docs/20_architecture/ai-abstraction-decision.md`](../docs/20_architecture/ai-abstraction-decision.md).
 
@@ -56,7 +56,7 @@ bash runtime/scripts/verify-live-agent.sh deterministic
 bash runtime/scripts/verify-live-agent.sh aot
 ```
 
-The R3 `aot` mode is a secret-free Linux x64 pre-deletion proof. It publishes the verifier once, binds the exact managed compiler input to the resulting native executable, and executes the same two-run corpus, continuation, negative, canary, grounding, and freshness expectations as `deterministic`. It is not a released payload, production Host, trusted live-provider run, or public Action.
+The R3 `aot` mode is a secret-free Linux x64 replacement and retirement proof. It publishes the verifier once, binds the exact managed compiler input to the resulting native executable, and executes the same two-run corpus, continuation, negative, canary, grounding, freshness, retired-definition absence, and exact route/composition expectations as `deterministic`. It is not a released payload, production Host, trusted live-provider run, or public Action.
 
 Result and trace outputs are compared to committed goldens by exact-byte `cmp`. Each smoke
 subcommand allocates a fresh temporary work directory; the CLI's no-overwrite contract prevents

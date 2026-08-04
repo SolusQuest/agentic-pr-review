@@ -1,4 +1,6 @@
 using System;
+using System.Buffers.Binary;
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Linq;
 using System.Text.Json;
@@ -59,10 +61,40 @@ public sealed class PrefixMaterializerTests
         Assert.NotEqual(baseline.Value.PrefixSha256, withInstruction.Value.PrefixSha256);
         Assert.NotEqual(baseline.Value.StableProviderStream, withInstruction.Value.StableProviderStream);
 
-        var messages = ProviderRequestPlanDecoder.Decode(withInstruction.Value.StableProviderStream);
+        var messages = ReadProviderMessages(withInstruction.Value.StableProviderStream);
         Assert.Equal("fixed provider instruction", messages[3].Text);
         Assert.Equal("system", messages[3].Role);
     }
+
+    private static ImmutableArray<TestProviderMessage> ReadProviderMessages(
+        ImmutableArray<byte> stream)
+    {
+        var messages = ImmutableArray.CreateBuilder<TestProviderMessage>();
+        var offset = 0;
+        while (offset < stream.Length)
+        {
+            Assert.True(stream.Length - offset >= sizeof(uint));
+            var length = checked((int)BinaryPrimitives.ReadUInt32BigEndian(
+                stream.AsSpan(offset, sizeof(uint))));
+            offset += sizeof(uint);
+            Assert.InRange(length, 0, stream.Length - offset);
+
+            using var document = JsonDocument.Parse(
+                stream.AsSpan(offset, length).ToArray());
+            var root = document.RootElement;
+            var content = root.GetProperty("content");
+            var block = Assert.Single(content.EnumerateArray());
+            Assert.Equal("text", block.GetProperty("type").GetString());
+            messages.Add(new TestProviderMessage(
+                root.GetProperty("role").GetString()!,
+                block.GetProperty("text").GetString()!));
+            offset += length;
+        }
+
+        return messages.ToImmutable();
+    }
+
+    private sealed record TestProviderMessage(string Role, string Text);
 
     [Fact]
     public void InvalidProviderBoundInstructionReturnsTypedFailure()

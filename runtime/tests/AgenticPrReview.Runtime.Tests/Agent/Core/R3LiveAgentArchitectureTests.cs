@@ -87,7 +87,6 @@ public sealed partial class AgentCapabilityArchitectureTests
         var entrypointTypes = new[]
         {
             typeof(RuntimeApplication),
-            typeof(LiveRuntimeApplication),
         }.SelectMany(IncludeTypeAndNestedTypesRecursively).ToArray();
         var r3Types = R3LiveTypes().ToHashSet();
         var references = entrypointTypes
@@ -103,8 +102,10 @@ public sealed partial class AgentCapabilityArchitectureTests
             .ToArray();
 
         Assert.Empty(references);
-        Assert.NotNull(typeof(LiveRuntimeApplication));
-        Assert.NotNull(typeof(RuntimeApplication).GetField(
+        Assert.Null(typeof(RuntimeApplication).Assembly.GetType(
+            "AgenticPrReview.Runtime.LiveRuntimeApplication",
+            throwOnError: false));
+        Assert.Null(typeof(RuntimeApplication).GetField(
             "liveExecutorFactory",
             BindingFlags.Instance | BindingFlags.NonPublic));
     }
@@ -119,8 +120,6 @@ public sealed partial class AgentCapabilityArchitectureTests
             [
                 "AgenticPrReview.Runtime.Canonical.LenientJsonObjectEnumerator+<Enumerate>d__5|.ctor|get_CurrentManagedThreadId",
                 "AgenticPrReview.Runtime.Canonical.LenientJsonObjectEnumerator+<Enumerate>d__5|System.Collections.Generic.IEnumerable<AgenticPrReview.Runtime.Canonical.LenientJsonObjectEnumerator.Entry>.GetEnumerator|get_CurrentManagedThreadId",
-                "AgenticPrReview.Runtime.DeepSeekLiveProviderExecutor|FromEnvironment|GetEnvironmentVariable",
-                "AgenticPrReview.Runtime.DeepSeekLiveProviderExecutor|ValidatePreflight|GetEnvironmentVariable",
                 "AgenticPrReview.Runtime.R3LiveAgentEnvironmentSecretSource|TakeAndClear|GetEnvironmentVariable",
                 "AgenticPrReview.Runtime.R3LiveAgentEnvironmentSecretSource|TakeAndClear|GetEnvironmentVariable",
                 "AgenticPrReview.Runtime.R3LiveAgentEnvironmentSecretSource|TakeAndClear|SetEnvironmentVariable",
@@ -332,13 +331,6 @@ public sealed partial class AgentCapabilityArchitectureTests
         if (typeof(IOException).IsAssignableFrom(type))
         {
             return false;
-        }
-
-        if (type == typeof(DeepSeekLiveProviderExecutor) ||
-            type == typeof(ILiveProviderExecutor) ||
-            type == typeof(LiveRuntimeApplication))
-        {
-            return true;
         }
 
         var name = TypeName(type);
