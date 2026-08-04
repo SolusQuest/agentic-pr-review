@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Secret-free deterministic R3 live-agent replacement proof. Every product
-# phase runs in a fresh process. Raw requests, SESSION/STATE, credentials,
-# random prior facts, and logs remain in temporary roots and are deleted.
+# Secret-free deterministic and Native AOT R3 live-agent replacement proof.
+# Every product phase runs in a fresh process. Raw requests, SESSION/STATE,
+# credentials, random prior facts, and logs remain in temporary roots and are
+# deleted.
 
 set -euo pipefail
 
@@ -10,6 +11,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 RUNTIME_TESTS="${REPO_ROOT}/runtime/tests"
 PROJECT="${RUNTIME_TESTS}/LiveAgentVerifierFixture/AgenticPrReview.Runtime.LiveAgentVerifierFixture.csproj"
 TEST_PROJECT="${RUNTIME_TESTS}/AgenticPrReview.Runtime.Tests/AgenticPrReview.Runtime.Tests.csproj"
+RUNTIME_PROJECT="${REPO_ROOT}/runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj"
 CORPUS="${RUNTIME_TESTS}/fixtures/agent/r3-quality/corpus.json"
 FIXTURES="${RUNTIME_TESTS}/fixtures/agent/r3-live-agent"
 GOLDEN="${FIXTURES}/replacement-record.json.golden"
@@ -211,16 +213,22 @@ _run_fixture() {
   local corpus="${CORPUS}"
   local root_argument="${phase_root}"
   local output_argument="${output}"
-  local runner="${RUNNER_DLL}"
+  local execution_artifact="${EXECUTION_ARTIFACT}"
+  local build_pair_manifest="${BUILD_PAIR_MANIFEST}"
+  local -a runner=("${RUNNER[@]}")
   if _windows_interop; then
     corpus="$(_windows_path "${corpus}")"
     root_argument="$(_windows_path "${phase_root}")"
     output_argument="$(_windows_path "${output}")"
-    runner="$(_windows_path "${RUNNER_DLL}")"
+    execution_artifact="$(_windows_path "${EXECUTION_ARTIFACT}")"
+    build_pair_manifest="$(_windows_path "${BUILD_PAIR_MANIFEST}")"
+    if [[ "${#runner[@]}" -gt 1 ]]; then
+      runner[1]="$(_windows_path "${runner[1]}")"
+    fi
     local index
     for ((index = 0; index < ${#extra_arguments[@]}; index++)); do
       case "${extra_arguments[index]}" in
-        --negative-manifest|--canary-manifest|--replacement-target)
+        --negative-manifest|--canary-manifest|--replacement-target|--architecture-assembly)
           ((index += 1))
           extra_arguments[index]="$(_windows_path \
             "${extra_arguments[index]}")"
@@ -230,10 +238,13 @@ _run_fixture() {
   fi
   _run_closed_process 45 "${controlled_root}" \
     "${environment[@]}" APR_R3_LIVE_COMMAND \
-    "${DOTNET_EXE}" "${runner}" "${verb}" \
+    "${runner[@]}" "${verb}" \
     --root "${root_argument}" \
     --corpus "${corpus}" \
     --output "${output_argument}" \
+    --execution-kind "${EXECUTION_KIND}" \
+    --execution-artifact "${execution_artifact}" \
+    --build-pair-manifest "${build_pair_manifest}" \
     "${extra_arguments[@]}" >"${log}" 2>&1
 }
 
@@ -249,6 +260,31 @@ _assert_phase_marker() {
   local log="$1"
   local marker="$2"
   tr -d '\r' <"${log}" | grep -Fxq "${marker}"
+}
+
+_tamper_lineage() {
+  local path="$1"
+  if command -v node >/dev/null 2>&1; then
+    node -e '
+      const fs = require("fs");
+      const path = process.argv[1];
+      const value = JSON.parse(fs.readFileSync(path, "utf8"));
+      value.invocation_identity_sha256 = "f".repeat(64);
+      fs.writeFileSync(path, JSON.stringify(value));
+    ' "${path}"
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c '
+import json, sys
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as stream:
+    value = json.load(stream)
+value["invocation_identity_sha256"] = "f" * 64
+with open(path, "w", encoding="utf-8", newline="") as stream:
+    json.dump(value, stream, separators=(",", ":"))
+' "${path}"
+  else
+    _fail APR_R3_LIVE_JSON_TAMPER_TOOL_MISSING
+  fi
 }
 
 _run_negative_case() {
@@ -286,13 +322,7 @@ _run_negative_case() {
       --expected-history-sha256 "${expected_history}"
     )
     if [[ "${tamper_lineage}" == yes ]]; then
-      node -e '
-        const fs = require("fs");
-        const path = process.argv[1];
-        const value = JSON.parse(fs.readFileSync(path, "utf8"));
-        value.invocation_identity_sha256 = "f".repeat(64);
-        fs.writeFileSync(path, JSON.stringify(value));
-      ' "${phase_root}/host/accepted-lineage.json"
+      _tamper_lineage "${phase_root}/host/accepted-lineage.json"
     fi
   fi
 
@@ -374,7 +404,8 @@ _run_once() {
   local architecture_output="${root}/architecture/private/receipt.json"
   local architecture_log="${root}/architecture.log"
   _run_fixture "${root}" architecture "${root}/architecture" \
-    "${architecture_output}" "${architecture_log}" ||
+    "${architecture_output}" "${architecture_log}" \
+    --architecture-assembly "${ARCHITECTURE_ASSEMBLY}" ||
     _fail APR_R3_LIVE_ARCHITECTURE_EXECUTION_FAILED
   _assert_phase_marker \
     "${architecture_log}" APR_R3_LIVE_ARCHITECTURE_OK ||
@@ -509,7 +540,7 @@ _validate_manifest() {
     _fail APR_R3_LIVE_CANARY_MANIFEST_DUPLICATE
 }
 
-run_deterministic() {
+_prepare_common() {
   _require_file project "${PROJECT}"
   _require_file test-project "${TEST_PROJECT}"
   _require_file corpus "${CORPUS}"
@@ -518,24 +549,39 @@ run_deterministic() {
   _require_file canary-routes "${CANARY_ROUTES}"
   _validate_manifest
 
-  local build_root
-  _new_tempdir build_root
-  local build_project="${PROJECT}"
-  local build_output="${build_root}/build"
+}
+
+_hash_file() {
+  sha256sum "$1" | cut -d ' ' -f 1
+}
+
+_write_build_pair() {
+  local build_root="$1"
+  local execution_sha architecture_sha pair_sha
+  execution_sha="$(_hash_file "${EXECUTION_ARTIFACT}")"
+  architecture_sha="$(_hash_file "${ARCHITECTURE_ASSEMBLY}")"
+  pair_sha="$({
+    printf '%s\n' \
+      apr-r3-live-agent-build-pair-v1 \
+      "${EXECUTION_KIND}" \
+      "${execution_sha}" \
+      "${architecture_sha}"
+  } | sha256sum | cut -d ' ' -f 1)"
+  BUILD_PAIR_MANIFEST="${build_root}/build-pair.json"
+  printf '{"kind":"apr-r3-live-agent-build-pair-v1","execution_kind":"%s","execution_artifact_sha256":"%s","architecture_assembly_sha256":"%s","build_pair_sha256":"%s"}\n' \
+    "${EXECUTION_KIND}" \
+    "${execution_sha}" \
+    "${architecture_sha}" \
+    "${pair_sha}" >"${BUILD_PAIR_MANIFEST}"
+}
+
+_run_repeated_proof() {
+  local success_marker="$1"
+  local build_root="$2"
   local test_project="${TEST_PROJECT}"
   if _windows_interop; then
-    build_project="$(_windows_path "${PROJECT}")"
-    build_output="$(_windows_path "${build_root}/build")"
     test_project="$(_windows_path "${TEST_PROJECT}")"
   fi
-  if ! "${DOTNET_CMD}" build "${build_project}" \
-      --configuration Release --nologo -o "${build_output}" \
-      >"${build_root}/build.log" 2>&1; then
-    tail -n 40 "${build_root}/build.log" >&2
-    _fail APR_R3_LIVE_BUILD_FAILED
-  fi
-  RUNNER_DLL="${build_root}/build/${ASSEMBLY}.dll"
-  DOTNET_EXE="$(readlink -f "$(command -v "${DOTNET_CMD}")")"
 
   local first second
   _new_tempdir first
@@ -566,14 +612,176 @@ run_deterministic() {
     >"${build_root}/focused-tests.log" 2>&1 ||
     _fail APR_R3_LIVE_FOCUSED_TESTS_FAILED
   _cleanup || _fail APR_R3_LIVE_CLEANUP_FAILED
-  printf '%s\n' APR_R3_LIVE_DETERMINISTIC_OK
+  printf '%s\n' "${success_marker}"
+}
+
+run_deterministic() {
+  _prepare_common
+  local build_root
+  _new_tempdir build_root
+  local build_project="${PROJECT}"
+  local build_output="${build_root}/build"
+  if _windows_interop; then
+    build_project="$(_windows_path "${PROJECT}")"
+    build_output="$(_windows_path "${build_root}/build")"
+  fi
+  if ! "${DOTNET_CMD}" build "${build_project}" \
+      --configuration Release --nologo -o "${build_output}" \
+      -p:PublishAot=false \
+      >"${build_root}/build.log" 2>&1; then
+    tail -n 40 "${build_root}/build.log" >&2
+    _fail APR_R3_LIVE_BUILD_FAILED
+  fi
+  RUNNER_DLL="${build_root}/build/${ASSEMBLY}.dll"
+  DOTNET_EXE="$(readlink -f "$(command -v "${DOTNET_CMD}")")"
+  RUNNER=("${DOTNET_EXE}" "${RUNNER_DLL}")
+  EXECUTION_KIND=framework
+  EXECUTION_ARTIFACT="${RUNNER_DLL}"
+  ARCHITECTURE_ASSEMBLY="${RUNNER_DLL}"
+  _write_build_pair "${build_root}"
+  _run_repeated_proof APR_R3_LIVE_DETERMINISTIC_OK "${build_root}"
+}
+
+_audit_aot_warnings() {
+  local log="$1"
+  local announce="${2:-yes}"
+  local expected_prefix expected_runtime expected_fixture
+  expected_prefix="CSC : warning IL3058: Referenced assembly 'JsonSchema.Net' is not built with "'`true`'" and may not be compatible with AOT."
+  expected_runtime="${expected_prefix} [${RUNTIME_PROJECT}]"
+  expected_fixture="${expected_prefix} [${PROJECT}]"
+  local -a warnings=()
+  local line lower
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    line="${line%$'\r'}"
+    lower="${line,,}"
+    if [[ "${lower}" =~ (^|[[:space:]:])warning([[:space:]]+[a-z]+[0-9]+[[:space:]]*:|[[:space:]]*:) ]]; then
+      warnings+=("${line}")
+    fi
+  done <"${log}"
+
+  local warning runtime_count=0 fixture_count=0
+  for warning in "${warnings[@]}"; do
+    case "${warning}" in
+      "${expected_fixture}")
+        ((fixture_count += 1))
+        ;;
+      "${expected_runtime}")
+        ((runtime_count += 1))
+        ;;
+      *)
+        _fail "APR_R3_LIVE_AOT_WARNING_UNEXPECTED ${warning}"
+        return 1
+        ;;
+    esac
+  done
+  if [[ "${#warnings[@]}" -ne 2 ||
+        "${runtime_count}" -ne 1 ||
+        "${fixture_count}" -ne 1 ]]; then
+    _fail APR_R3_LIVE_AOT_WARNING_ALLOWLIST_INVALID
+    return 1
+  fi
+  if [[ "${announce}" == yes ]]; then
+    printf 'APR_R3_LIVE_AOT_WARNING_ALLOWLIST count=%s\n' "${#warnings[@]}"
+  fi
+}
+
+_verify_aot_warning_audit() {
+  local root="$1"
+  local expected_prefix
+  expected_prefix="CSC : warning IL3058: Referenced assembly 'JsonSchema.Net' is not built with "'`true`'" and may not be compatible with AOT."
+  local good="${root}/warning-good.log"
+  printf '%s [%s]\n%s [%s]\n' \
+    "${expected_prefix}" "${RUNTIME_PROJECT}" \
+    "${expected_prefix}" "${PROJECT}" >"${good}"
+  _audit_aot_warnings "${good}" no >/dev/null ||
+    _fail APR_R3_LIVE_AOT_WARNING_SELF_TEST_BASELINE_FAILED
+
+  local case_id injected mutated
+  local -a injections=(
+    'clang: warning: synthetic native linker condition'
+    'VerifierTask : warning : synthetic MSBuild task condition'
+    'CSC : warning IL9999: synthetic coded warning [synthetic.csproj]'
+  )
+  for case_id in "${!injections[@]}"; do
+    injected="${root}/warning-injected-${case_id}.log"
+    cp "${good}" "${injected}"
+    printf '%s\n' "${injections[case_id]}" >>"${injected}"
+    if _audit_aot_warnings "${injected}" no >/dev/null 2>&1; then
+      _fail "APR_R3_LIVE_AOT_WARNING_SELF_TEST_ACCEPTED_${case_id}"
+      return 1
+    fi
+  done
+
+  mutated="${root}/warning-mutated.log"
+  printf '%s [%s] appended-diagnostic\n%s [%s]\n' \
+    "${expected_prefix}" "${RUNTIME_PROJECT}" \
+    "${expected_prefix}" "${PROJECT}" >"${mutated}"
+  if _audit_aot_warnings "${mutated}" no >/dev/null 2>&1; then
+    _fail APR_R3_LIVE_AOT_WARNING_SELF_TEST_ACCEPTED_MUTATION
+    return 1
+  fi
+
+  mutated="${root}/warning-duplicate.log"
+  cp "${good}" "${mutated}"
+  printf '%s [%s]\n' "${expected_prefix}" "${PROJECT}" >>"${mutated}"
+  if _audit_aot_warnings "${mutated}" no >/dev/null 2>&1; then
+    _fail APR_R3_LIVE_AOT_WARNING_SELF_TEST_ACCEPTED_DUPLICATE
+    return 1
+  fi
+
+  mutated="${root}/warning-missing.log"
+  printf '%s [%s]\n' "${expected_prefix}" "${RUNTIME_PROJECT}" >"${mutated}"
+  if _audit_aot_warnings "${mutated}" no >/dev/null 2>&1; then
+    _fail APR_R3_LIVE_AOT_WARNING_SELF_TEST_ACCEPTED_MISSING
+    return 1
+  fi
+}
+
+run_aot() {
+  _prepare_common
+  [[ "$(uname -s)" == Linux ]] ||
+    _fail APR_R3_LIVE_AOT_REQUIRES_LINUX
+  _windows_interop && _fail APR_R3_LIVE_AOT_REQUIRES_NATIVE_DOTNET
+
+  local build_root
+  _new_tempdir build_root
+  _verify_aot_warning_audit "${build_root}"
+  local publish_output="${build_root}/publish"
+  local intermediate_output="${build_root}/aot-intermediate"
+  if ! "${DOTNET_CMD}" publish "${PROJECT}" \
+      --configuration Release --nologo \
+      --runtime linux-x64 --self-contained true \
+      --artifacts-path "${build_root}/artifacts" \
+      -o "${publish_output}" \
+      -p:PublishAot=true \
+      -p:JsonSerializerIsReflectionEnabledByDefault=false \
+      -warnaserror \
+      -warnnotaserror:IL3058 \
+      -p:LiveAgentVerifierAotIntermediateDirectory="${intermediate_output}" \
+      >"${build_root}/publish.log" 2>&1; then
+    tail -n 80 "${build_root}/publish.log" >&2
+    _fail APR_R3_LIVE_AOT_PUBLISH_FAILED
+  fi
+  _audit_aot_warnings "${build_root}/publish.log"
+
+  EXECUTION_KIND=native-aot
+  EXECUTION_ARTIFACT="${publish_output}/${ASSEMBLY}"
+  ARCHITECTURE_ASSEMBLY="${intermediate_output}/${ASSEMBLY}.dll"
+  _require_file aot-executable "${EXECUTION_ARTIFACT}"
+  [[ -x "${EXECUTION_ARTIFACT}" ]] ||
+    _fail APR_R3_LIVE_AOT_EXECUTABLE_INVALID
+  _require_file aot-intermediate "${ARCHITECTURE_ASSEMBLY}"
+  RUNNER=("${EXECUTION_ARTIFACT}")
+  _write_build_pair "${build_root}"
+  _run_repeated_proof APR_R3_LIVE_AOT_OK "${build_root}"
 }
 
 subcommand="${1:-}"
 case "${subcommand}" in
   deterministic) run_deterministic ;;
+  aot) run_aot ;;
   -h|--help|help)
-    printf '%s\n' 'Usage: verify-live-agent.sh deterministic'
+    printf '%s\n' 'Usage: verify-live-agent.sh [deterministic|aot]'
     ;;
   *)
     printf 'APR_R3_LIVE_COMMAND_INVALID %s\n' "${subcommand:-missing}" >&2

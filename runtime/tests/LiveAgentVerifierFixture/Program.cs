@@ -16,21 +16,35 @@ internal static class Program
         }
 
         var parsedCommand = command!;
+        if (!VerifierBuildPairDomain.TryAdmit(
+                parsedCommand,
+                out var buildPair) ||
+            buildPair is null)
+        {
+            Console.Error.WriteLine(VerifierCodes.FixtureInvalid);
+            return 3;
+        }
+
+        var admittedBuildPair = buildPair;
         try
         {
             if (parsedCommand.Verb == "aggregate")
             {
-                return Aggregate(parsedCommand);
+                return Aggregate(parsedCommand, admittedBuildPair);
             }
 
             if (parsedCommand.Verb == "architecture")
             {
-                return WriteArchitectureReceipt(parsedCommand);
+                return WriteArchitectureReceipt(
+                    parsedCommand,
+                    admittedBuildPair);
             }
 
             if (parsedCommand.Verb == "negative-replacement-write-failed")
             {
-                return await RunReplacementWriteFailureAsync(parsedCommand);
+                return await RunReplacementWriteFailureAsync(
+                    parsedCommand,
+                    admittedBuildPair);
             }
 
             if (parsedCommand.Scenario is not { } scenario)
@@ -41,10 +55,16 @@ internal static class Program
 
             if (VerifierScenarioDomain.IsNegative(scenario))
             {
-                return await RunNegativePhaseAsync(parsedCommand, scenario);
+                return await RunNegativePhaseAsync(
+                    parsedCommand,
+                    scenario,
+                    admittedBuildPair);
             }
 
-            return await RunPhaseAsync(parsedCommand, scenario);
+            return await RunPhaseAsync(
+                parsedCommand,
+                scenario,
+                admittedBuildPair);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException and
             not StackOverflowException and not AccessViolationException)
@@ -72,9 +92,13 @@ internal static class Program
         }
     }
 
-    private static int WriteArchitectureReceipt(VerifierCommand command)
+    private static int WriteArchitectureReceipt(
+        VerifierCommand command,
+        VerifierBuildPair buildPair)
     {
         var receipt = VerifierArchitectureProof.Create(
+            command.ArchitectureAssembly!,
+            buildPair,
             NewProcessInstanceSha256());
         WriteNew(command.Output, VerifierReceiptCodec.Write(receipt));
         if (!receipt.Passed)
@@ -89,7 +113,8 @@ internal static class Program
 
     private static async Task<int> RunNegativePhaseAsync(
         VerifierCommand command,
-        VerifierScenario scenario)
+        VerifierScenario scenario,
+        VerifierBuildPair buildPair)
     {
         var corpusBytes = File.ReadAllBytes(command.Corpus);
         var processInstanceSha256 = NewProcessInstanceSha256();
@@ -226,7 +251,12 @@ internal static class Program
             product?.HandoffReady == true,
             acceptedTruthPreserved,
             passed,
-            processInstanceSha256);
+            processInstanceSha256,
+            ExecutionKind: buildPair.ExecutionKind,
+            ExecutionArtifactSha256: buildPair.ExecutionArtifactSha256,
+            ArchitectureAssemblySha256:
+                buildPair.ArchitectureAssemblySha256,
+            BuildPairSha256: buildPair.BuildPairSha256);
         WriteNew(command.Output, VerifierReceiptCodec.Write(receipt));
         if (!passed)
         {
@@ -241,7 +271,8 @@ internal static class Program
 
     private static async Task<int> RunPhaseAsync(
         VerifierCommand command,
-        VerifierScenario scenario)
+        VerifierScenario scenario,
+        VerifierBuildPair buildPair)
     {
         var corpusBytes = File.ReadAllBytes(command.Corpus);
         var processInstanceSha256 = NewProcessInstanceSha256();
@@ -344,7 +375,12 @@ internal static class Program
                 scenario == VerifierScenario.CanaryRouting &&
                 canaryRoutes is { Count: 8 } &&
                 canaryRoutes.All(route => route.Observed),
-            CanaryRoutes: canaryRoutes);
+            CanaryRoutes: canaryRoutes,
+            ExecutionKind: buildPair.ExecutionKind,
+            ExecutionArtifactSha256: buildPair.ExecutionArtifactSha256,
+            ArchitectureAssemblySha256:
+                buildPair.ArchitectureAssemblySha256,
+            BuildPairSha256: buildPair.BuildPairSha256);
         WriteNew(command.Output, VerifierReceiptCodec.Write(receipt));
         if (result.ExitCode != 0 ||
             !receipt.HandoffReady ||
@@ -362,10 +398,13 @@ internal static class Program
         return 0;
     }
 
-    private static int Aggregate(VerifierCommand command)
+    private static int Aggregate(
+        VerifierCommand command,
+        VerifierBuildPair buildPair)
     {
         if (!VerifierEvidence.TryLoad(
                 command,
+                buildPair,
                 requireReplacement: true,
                 out var evidence,
                 out var failure) ||
@@ -383,7 +422,8 @@ internal static class Program
     }
 
     private static async Task<int> RunReplacementWriteFailureAsync(
-        VerifierCommand command)
+        VerifierCommand command,
+        VerifierBuildPair buildPair)
     {
         if (command.ReplacementTarget is not { } target ||
             !File.Exists(target))
@@ -395,6 +435,7 @@ internal static class Program
 
         if (!VerifierEvidence.TryLoad(
                 command,
+                buildPair,
                 requireReplacement: false,
                 out _,
                 out var failure))
@@ -542,7 +583,12 @@ internal static class Program
             ResultBeforeSha256: resultBefore,
             ResultAfterSha256: resultAfter,
             ResultPublicationAttempts:
-                failingFileSystem.PublishResultAttempts);
+                failingFileSystem.PublishResultAttempts,
+            ExecutionKind: buildPair.ExecutionKind,
+            ExecutionArtifactSha256: buildPair.ExecutionArtifactSha256,
+            ArchitectureAssemblySha256:
+                buildPair.ArchitectureAssemblySha256,
+            BuildPairSha256: buildPair.BuildPairSha256);
         WriteNew(command.Output, VerifierReceiptCodec.Write(receipt));
         if (!passed)
         {

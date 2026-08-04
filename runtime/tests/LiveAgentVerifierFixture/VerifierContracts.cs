@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using AgenticPrReview.Runtime.Agent.Quality;
 
@@ -31,6 +32,18 @@ internal static class VerifierCodes
     internal const string AggregateOk = "APR_R3_LIVE_DETERMINISTIC_OK";
 }
 
+internal static class VerifierExecutionKinds
+{
+    internal const string Framework = "framework";
+    internal const string NativeAot = "native-aot";
+}
+
+internal sealed record VerifierBuildPair(
+    string ExecutionKind,
+    string ExecutionArtifactSha256,
+    string ArchitectureAssemblySha256,
+    string BuildPairSha256);
+
 internal sealed record VerifierCommand(
     string Verb,
     VerifierScenario? Scenario,
@@ -41,7 +54,11 @@ internal sealed record VerifierCommand(
     string? ExpectedHistorySha256,
     string? NegativeManifest,
     string? CanaryManifest,
-    string? ReplacementTarget);
+    string? ReplacementTarget,
+    string ExecutionKind,
+    string ExecutionArtifact,
+    string BuildPairManifest,
+    string? ArchitectureAssembly);
 
 internal sealed record VerifierCanaryRouteOutcome(
     string Class,
@@ -88,7 +105,11 @@ internal sealed record VerifierPhaseReceipt(
     string Kind = "apr-r3-live-agent-phase-receipt-v1",
     string ProcessInstanceSha256 = "",
     bool CanaryRoutesValidated = false,
-    IReadOnlyList<VerifierCanaryRouteOutcome>? CanaryRoutes = null);
+    IReadOnlyList<VerifierCanaryRouteOutcome>? CanaryRoutes = null,
+    string ExecutionKind = "",
+    string ExecutionArtifactSha256 = "",
+    string ArchitectureAssemblySha256 = "",
+    string BuildPairSha256 = "");
 
 internal sealed record VerifierNegativeReceipt(
     string Kind,
@@ -118,7 +139,11 @@ internal sealed record VerifierNegativeReceipt(
     string ProcessInstanceSha256,
     string? ResultBeforeSha256 = null,
     string? ResultAfterSha256 = null,
-    int ResultPublicationAttempts = 0);
+    int ResultPublicationAttempts = 0,
+    string ExecutionKind = "",
+    string ExecutionArtifactSha256 = "",
+    string ArchitectureAssemblySha256 = "",
+    string BuildPairSha256 = "");
 
 internal static class VerifierArguments
 {
@@ -146,10 +171,24 @@ internal static class VerifierArguments
         if (!values.TryGetValue("--root", out var root) ||
             !values.TryGetValue("--corpus", out var corpus) ||
             !values.TryGetValue("--output", out var output) ||
+            !values.TryGetValue("--execution-kind", out var executionKind) ||
+            !values.TryGetValue(
+                "--execution-artifact",
+                out var executionArtifact) ||
+            !values.TryGetValue(
+                "--build-pair-manifest",
+                out var buildPairManifest) ||
             !Path.IsPathFullyQualified(root) ||
             !Path.IsPathFullyQualified(corpus) ||
             !Path.IsPathFullyQualified(output) ||
-            !File.Exists(corpus))
+            !Path.IsPathFullyQualified(executionArtifact) ||
+            !Path.IsPathFullyQualified(buildPairManifest) ||
+            executionKind is not (
+                VerifierExecutionKinds.Framework or
+                VerifierExecutionKinds.NativeAot) ||
+            !File.Exists(corpus) ||
+            !File.Exists(executionArtifact) ||
+            !File.Exists(buildPairManifest))
         {
             return false;
         }
@@ -196,7 +235,11 @@ internal static class VerifierArguments
                 "--expected-history-sha256" or
                 "--negative-manifest" or
                 "--canary-manifest" or
-                "--replacement-target")))
+                "--replacement-target" or
+                "--execution-kind" or
+                "--execution-artifact" or
+                "--build-pair-manifest" or
+                "--architecture-assembly")))
         {
             return false;
         }
@@ -222,6 +265,9 @@ internal static class VerifierArguments
         values.TryGetValue("--negative-manifest", out var negativeManifest);
         values.TryGetValue("--canary-manifest", out var canaryManifest);
         values.TryGetValue("--replacement-target", out var replacementTarget);
+        values.TryGetValue(
+            "--architecture-assembly",
+            out var architectureAssembly);
         if (negativeManifest is not null)
         {
             negativeManifest = Path.GetFullPath(negativeManifest);
@@ -234,8 +280,16 @@ internal static class VerifierArguments
         {
             replacementTarget = Path.GetFullPath(replacementTarget);
         }
+        if (architectureAssembly is not null)
+        {
+            architectureAssembly = Path.GetFullPath(architectureAssembly);
+        }
         if (negativeManifest is not null && !File.Exists(negativeManifest) ||
-            canaryManifest is not null && !File.Exists(canaryManifest))
+            canaryManifest is not null && !File.Exists(canaryManifest) ||
+            args[0] == "architecture" &&
+                (architectureAssembly is null ||
+                    !File.Exists(architectureAssembly)) ||
+            args[0] != "architecture" && architectureAssembly is not null)
         {
             return false;
         }
@@ -243,6 +297,8 @@ internal static class VerifierArguments
         root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
         corpus = Path.GetFullPath(corpus);
         output = Path.GetFullPath(output);
+        executionArtifact = Path.GetFullPath(executionArtifact);
+        buildPairManifest = Path.GetFullPath(buildPairManifest);
         if (!IsDescendant(root, output) ||
             replacementTarget is not null &&
                 !IsDescendant(root, replacementTarget))
@@ -260,7 +316,11 @@ internal static class VerifierArguments
             expectedHistorySha256,
             negativeManifest,
             canaryManifest,
-            replacementTarget);
+            replacementTarget,
+            executionKind,
+            executionArtifact,
+            buildPairManifest,
+            architectureAssembly);
         return true;
     }
 
@@ -276,6 +336,153 @@ internal static class VerifierArguments
     }
 }
 
+internal static class VerifierBuildPairDomain
+{
+    internal const string Kind = "apr-r3-live-agent-build-pair-v1";
+    private const int MaximumManifestBytes = 4 * 1024;
+    private const int MaximumExecutionArtifactBytes = 256 * 1024 * 1024;
+
+    internal static bool TryAdmit(
+        VerifierCommand command,
+        out VerifierBuildPair? buildPair)
+    {
+        buildPair = null;
+        try
+        {
+            var manifestInfo = new FileInfo(command.BuildPairManifest);
+            if (!manifestInfo.Exists ||
+                manifestInfo.Length is <= 0 or > MaximumManifestBytes)
+            {
+                return false;
+            }
+
+            using var document = JsonDocument.Parse(
+                File.ReadAllBytes(command.BuildPairManifest));
+            var root = document.RootElement;
+            var properties = root.ValueKind == JsonValueKind.Object
+                ? root.EnumerateObject().Select(property => property.Name)
+                : [];
+            if (!properties.SequenceEqual(
+                [
+                    "kind",
+                    "execution_kind",
+                    "execution_artifact_sha256",
+                    "architecture_assembly_sha256",
+                    "build_pair_sha256",
+                ],
+                StringComparer.Ordinal))
+            {
+                return false;
+            }
+
+            var kind = RequiredString(root, "kind");
+            var executionKind = RequiredString(root, "execution_kind");
+            var executionSha256 = RequiredString(
+                root,
+                "execution_artifact_sha256");
+            var architectureSha256 = RequiredString(
+                root,
+                "architecture_assembly_sha256");
+            var pairSha256 = RequiredString(root, "build_pair_sha256");
+            if (kind != Kind ||
+                executionKind != command.ExecutionKind ||
+                !LiveAgentFreshProcessDomain.IsSha256(executionSha256) ||
+                !LiveAgentFreshProcessDomain.IsSha256(architectureSha256) ||
+                !LiveAgentFreshProcessDomain.IsSha256(pairSha256) ||
+                pairSha256 != ComputeSha256(
+                    executionKind,
+                    executionSha256,
+                    architectureSha256))
+            {
+                return false;
+            }
+
+            var artifactInfo = new FileInfo(command.ExecutionArtifact);
+            if (!artifactInfo.Exists ||
+                artifactInfo.Length is <= 0 or > MaximumExecutionArtifactBytes)
+            {
+                return false;
+            }
+
+            var executionBytes = File.ReadAllBytes(command.ExecutionArtifact);
+            if (executionSha256 !=
+                LiveAgentFreshProcessDomain.RawSha256(executionBytes))
+            {
+                return false;
+            }
+
+            if (executionKind == VerifierExecutionKinds.NativeAot)
+            {
+                if (JsonSerializer.IsReflectionEnabledByDefault ||
+                    Environment.ProcessPath is not { } processPath ||
+                    !StringComparer.Ordinal.Equals(
+                        Path.GetFullPath(processPath),
+                        command.ExecutionArtifact))
+                {
+                    return false;
+                }
+            }
+
+            buildPair = new VerifierBuildPair(
+                executionKind,
+                executionSha256,
+                architectureSha256,
+                pairSha256);
+            return true;
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or
+            IOException or
+            NotSupportedException or
+            UnauthorizedAccessException or
+            JsonException or
+            System.Security.SecurityException)
+        {
+            return false;
+        }
+    }
+
+    internal static string ComputeSha256(
+        string executionKind,
+        string executionArtifactSha256,
+        string architectureAssemblySha256) =>
+        LiveAgentFreshProcessDomain.RawSha256(Encoding.UTF8.GetBytes(
+            string.Join(
+                '\n',
+                Kind,
+                executionKind,
+                executionArtifactSha256,
+                architectureAssemblySha256,
+                string.Empty)));
+
+    internal static byte[] Write(VerifierBuildPair buildPair)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("kind", Kind);
+            writer.WriteString("execution_kind", buildPair.ExecutionKind);
+            writer.WriteString(
+                "execution_artifact_sha256",
+                buildPair.ExecutionArtifactSha256);
+            writer.WriteString(
+                "architecture_assembly_sha256",
+                buildPair.ArchitectureAssemblySha256);
+            writer.WriteString("build_pair_sha256", buildPair.BuildPairSha256);
+            writer.WriteEndObject();
+        }
+
+        stream.WriteByte((byte)'\n');
+        return stream.ToArray();
+    }
+
+    private static string RequiredString(JsonElement root, string name) =>
+        root.GetProperty(name).ValueKind == JsonValueKind.String
+            ? root.GetProperty(name).GetString()!
+            : throw new JsonException(string.Concat(name, " must be a string."));
+}
+
 internal static class VerifierReceiptCodec
 {
     internal static byte[] Write(VerifierPhaseReceipt receipt)
@@ -285,6 +492,7 @@ internal static class VerifierReceiptCodec
         {
             writer.WriteStartObject();
             writer.WriteString("kind", receipt.Kind);
+            WriteBuildPair(writer, receipt);
             writer.WriteString("scenario", receipt.Scenario);
             writer.WriteString("status", receipt.Status);
             writer.WriteString("product_code", receipt.ProductCode);
@@ -408,6 +616,7 @@ internal static class VerifierReceiptCodec
         {
             writer.WriteStartObject();
             writer.WriteString("kind", receipt.Kind);
+            WriteBuildPair(writer, receipt);
             writer.WriteString("case", receipt.Case);
             writer.WriteString("phase", receipt.Phase);
             writer.WriteString(
@@ -508,6 +717,14 @@ internal static class VerifierReceiptCodec
         {
             writer.WriteStartObject();
             writer.WriteString("kind", receipt.Kind);
+            writer.WriteString("execution_kind", receipt.ExecutionKind);
+            writer.WriteString(
+                "execution_artifact_sha256",
+                receipt.ExecutionArtifactSha256);
+            writer.WriteString(
+                "architecture_assembly_sha256",
+                receipt.ArchitectureAssemblySha256);
+            writer.WriteString("build_pair_sha256", receipt.BuildPairSha256);
             writer.WriteString("status", receipt.Status);
             writer.WriteString("assembly_sha256", receipt.AssemblySha256);
             writer.WriteBoolean(
@@ -528,6 +745,34 @@ internal static class VerifierReceiptCodec
         }
 
         return stream.ToArray();
+    }
+
+    private static void WriteBuildPair(
+        Utf8JsonWriter writer,
+        VerifierPhaseReceipt receipt)
+    {
+        writer.WriteString("execution_kind", receipt.ExecutionKind);
+        writer.WriteString(
+            "execution_artifact_sha256",
+            receipt.ExecutionArtifactSha256);
+        writer.WriteString(
+            "architecture_assembly_sha256",
+            receipt.ArchitectureAssemblySha256);
+        writer.WriteString("build_pair_sha256", receipt.BuildPairSha256);
+    }
+
+    private static void WriteBuildPair(
+        Utf8JsonWriter writer,
+        VerifierNegativeReceipt receipt)
+    {
+        writer.WriteString("execution_kind", receipt.ExecutionKind);
+        writer.WriteString(
+            "execution_artifact_sha256",
+            receipt.ExecutionArtifactSha256);
+        writer.WriteString(
+            "architecture_assembly_sha256",
+            receipt.ArchitectureAssemblySha256);
+        writer.WriteString("build_pair_sha256", receipt.BuildPairSha256);
     }
 
     private static void WriteNullable(

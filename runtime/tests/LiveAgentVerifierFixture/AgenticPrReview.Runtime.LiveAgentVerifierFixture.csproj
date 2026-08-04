@@ -4,9 +4,26 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <PublishAot>true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <VerifyReferenceAotCompatibility>true</VerifyReferenceAotCompatibility>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
     <AssemblyName>AgenticPrReview.Runtime.LiveAgentVerifierFixture</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\AgenticPrReview.Runtime\AgenticPrReview.Runtime.csproj" />
   </ItemGroup>
+  <Target Name="ExportLiveAgentVerifierAotIntermediate"
+          AfterTargets="ComputeIlcCompileInputs"
+          BeforeTargets="IlcCompile"
+          Condition="'$(PublishAot)' == 'true' and '$(LiveAgentVerifierAotIntermediateDirectory)' != ''">
+    <Error Condition="'@(ManagedBinary)' == ''"
+           Text="APR_R3_LIVE_AOT_INTERMEDIATE_MISSING" />
+    <Error Condition="'@(ManagedBinary->Count())' != '1'"
+           Text="APR_R3_LIVE_AOT_INTERMEDIATE_AMBIGUOUS" />
+    <MakeDir Directories="$(LiveAgentVerifierAotIntermediateDirectory)" />
+    <Copy SourceFiles="@(ManagedBinary)"
+          DestinationFiles="@(ManagedBinary->'$(LiveAgentVerifierAotIntermediateDirectory)/%(Filename)%(Extension)')"
+          SkipUnchangedFiles="false" />
+  </Target>
 </Project>
