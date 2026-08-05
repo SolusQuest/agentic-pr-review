@@ -382,21 +382,12 @@ public sealed partial class AgentCapabilityArchitectureTests
             if (opCode.OperandType == OperandType.InlineMethod)
             {
                 var token = BitConverter.ToInt32(il, operandOffset);
-                MethodBase target;
-                try
-                {
-                    target = method.Module.ResolveMethod(
-                        token,
-                        method.DeclaringType?.GetGenericArguments(),
-                        method is MethodInfo info
-                            ? info.GetGenericArguments()
-                            : null)!;
-                }
-                catch (Exception exception)
-                {
-                    throw new Xunit.Sdk.XunitException(
-                        $"IL method resolution failed for {method.DeclaringType?.FullName}.{method.Name}: {exception.GetType().Name}");
-                }
+                var target = method.Module.ResolveMethod(
+                    token,
+                    method.DeclaringType?.GetGenericArguments(),
+                    method is MethodInfo info
+                        ? info.GetGenericArguments()
+                        : null)!;
 
                 yield return new MethodBodyCall(target, opCode);
             }
