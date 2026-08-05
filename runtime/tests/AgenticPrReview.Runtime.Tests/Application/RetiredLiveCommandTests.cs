@@ -7,7 +7,7 @@ public sealed class RetiredLiveCommandTests
     [Fact]
     public async Task LiveAgentVerifierRetiredReviewLiveCommandIsRejectedWithoutOutputs()
     {
-        var root = Path.Combine(
+        var root = Path.Join(
             Path.GetTempPath(),
             $"apr-retired-live-tests-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
@@ -15,20 +15,19 @@ public sealed class RetiredLiveCommandTests
         {
             var outputPaths = new[]
             {
-                Path.Combine(root, "result.json"),
-                Path.Combine(root, "trace.json"),
-                Path.Combine(root, "candidate-ledger.json"),
-                Path.Combine(root, "provider-run-metadata.json"),
+                Path.Join(root, "result.json"),
+                Path.Join(root, "trace.json"),
+                Path.Join(root, "candidate-ledger.json"),
+                Path.Join(root, "provider-run-metadata.json"),
             };
-            var application = new RuntimeApplication();
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
 
-            var exitCode = await application.RunAsync(
+            var exitCode = await RuntimeEntrypoint.RunAsync(
                 [
                     "review-live",
-                    "--input", Path.Combine(root, "input.json"),
-                    "--context", Path.Combine(root, "live-context.json"),
+                    "--input", Path.Join(root, "input.json"),
+                    "--context", Path.Join(root, "live-context.json"),
                     "--output", outputPaths[0],
                     "--trace", outputPaths[1],
                     "--candidate-ledger", outputPaths[2],

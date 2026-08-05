@@ -403,4 +403,13 @@ export const residualReferenceRules = [
     deletionGate: 'replace the R1 integration fixture with R4 Host integration',
     milestone: 'R4',
   },
+  permanent(
+    'RR-037',
+    /^docs\/20_architecture\/r3-single-shot-removal-handoff\.md$/u,
+    'historical',
+    'R3 live-Agent replacement owner',
+    'checked single-shot deletion and later-consumer handoff',
+    'legacy vocabulary occurs only in the readable R1 handoff link; retired runtime names and selectors are inventory or negative evidence',
+    'an accepted later-milestone handoff may supersede retained-consumer ownership but not the R3 deletion record',
+  ),
 ] as const satisfies readonly ResidualReferenceRule[];
