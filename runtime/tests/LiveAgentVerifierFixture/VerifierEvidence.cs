@@ -631,7 +631,7 @@ internal static class VerifierEvidence
         receipt.ForbiddenReferencesAbsent &&
         receipt.RealTransportCreationCalls == 2 &&
         receipt.TransportFactoryTypes == 1 &&
-        receipt.ProfileTypes == 1 &&
+        receipt.ProfileTypes == 2 &&
         receipt.Passed;
 
     private static bool BuildPairValid(

@@ -1,0 +1,662 @@
+using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
+
+namespace AgenticPrReview.Runtime.LiveAgentVerifierFixture;
+
+internal static class TrustedLiveSupervisor
+{
+    private const string Repository = "SolusQuest/agentic-pr-review";
+    private const string MainRef = "refs/heads/main";
+    private const string WorkflowRef =
+        "SolusQuest/agentic-pr-review/.github/workflows/" +
+        "r3-live-proof.yml@refs/heads/main";
+    private static readonly TimeSpan ChildTimeout = TimeSpan.FromSeconds(360);
+
+    internal static async Task<int> RunAsync(IReadOnlyList<string> args)
+    {
+        var testedSha = PublicEnvironment("GITHUB_SHA");
+        var workflowRef = PublicEnvironment("GITHUB_WORKFLOW_REF");
+        var workflowSha = PublicEnvironment("GITHUB_WORKFLOW_SHA");
+        var provider = Environment.GetEnvironmentVariable(
+            "AGENTIC_REVIEW_DEEPSEEK_API_KEY");
+        var ambientStateKey = Environment.GetEnvironmentVariable(
+            "AGENTIC_REVIEW_R3_STATE_KEY_B64");
+        Environment.SetEnvironmentVariable(
+            "AGENTIC_REVIEW_DEEPSEEK_API_KEY",
+            null);
+        Environment.SetEnvironmentVariable(
+            "AGENTIC_REVIEW_R3_STATE_KEY_B64",
+            null);
+        var providerBytes = provider is null
+            ? []
+            : Encoding.UTF8.GetBytes(provider);
+        var stateKey = new byte[32];
+        string? stateKeyBase64 = null;
+        string? sensitiveRoot = null;
+        VerifierBuildPair? buildPair = null;
+        string? fixtureSha256 = null;
+        var phases = new List<TrustedLivePhaseReceipt>(4);
+        var status = "failed";
+        var code = TrustedLiveCodes.Arguments;
+
+        try
+        {
+            if (!string.IsNullOrEmpty(ambientStateKey))
+            {
+                code = TrustedLiveCodes.Canary;
+            }
+            else if (!VerifierArguments.TryParse(args, out var command) ||
+                command is null ||
+                command.Verb != "live-supervise" ||
+                !VerifierBuildPairDomain.TryAdmit(command, out buildPair) ||
+                buildPair is null ||
+                !ProvenanceIsExact(testedSha, workflowRef, workflowSha) ||
+                !RootIsExact(command.Root))
+            {
+                code = TrustedLiveCodes.Provenance;
+            }
+            else if (providerBytes.Length is < 1 or > 16 * 1024)
+            {
+                code = TrustedLiveCodes.Provider;
+            }
+            else
+            {
+                sensitiveRoot = command.Root;
+                fixtureSha256 = LiveAgentFreshProcessDomain.RawSha256(
+                    File.ReadAllBytes(command.Corpus));
+                if (Directory.Exists(sensitiveRoot))
+                {
+                    code = TrustedLiveCodes.Infrastructure;
+                }
+                else
+                {
+                    Directory.CreateDirectory(sensitiveRoot);
+                    RandomNumberGenerator.Fill(stateKey);
+                    stateKeyBase64 = Convert.ToBase64String(stateKey);
+                    code = await RunPhasesAsync(
+                        command,
+                        buildPair,
+                        provider!,
+                        stateKeyBase64,
+                        phases);
+                    if (code == TrustedLiveCodes.Passed &&
+                        ContainsSensitiveBytes(
+                            sensitiveRoot,
+                            providerBytes,
+                            stateKey,
+                            Encoding.ASCII.GetBytes(stateKeyBase64)))
+                    {
+                        code = TrustedLiveCodes.Canary;
+                    }
+                    if (code == TrustedLiveCodes.Passed)
+                    {
+                        status = "passed";
+                    }
+                }
+            }
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException and
+            not StackOverflowException and not AccessViolationException)
+        {
+            code = TrustedLiveCodes.Infrastructure;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(providerBytes);
+            CryptographicOperations.ZeroMemory(stateKey);
+            provider = null;
+            ambientStateKey = null;
+            stateKeyBase64 = null;
+            if (sensitiveRoot is not null &&
+                !TryDeleteSensitiveRoot(sensitiveRoot))
+            {
+                status = "failed";
+                code = TrustedLiveCodes.Cleanup;
+            }
+
+            Console.Out.WriteLine(TrustedLiveReceiptCodec.WriteCompletion(
+                status,
+                code,
+                testedSha,
+                workflowRef,
+                workflowSha,
+                fixtureSha256,
+                buildPair,
+                phases));
+        }
+
+        return status == "passed" ? 0 : 1;
+    }
+
+    private static async Task<string> RunPhasesAsync(
+        VerifierCommand command,
+        VerifierBuildPair buildPair,
+        string provider,
+        string stateKeyBase64,
+        List<TrustedLivePhaseReceipt> phases)
+    {
+        var mustFind = await RunPhaseAsync(
+            command,
+            buildPair,
+            "trusted-must-find",
+            Path.Join(command.Root, "must-find"),
+            provider,
+            stateKeyBase64,
+            expectedLineageSha256: null);
+        if (!TryAdmitPhase(
+                mustFind,
+                VerifierScenario.MustFind,
+                buildPair,
+                phases,
+                out var code))
+        {
+            return code;
+        }
+
+        var mustNotFind = await RunPhaseAsync(
+            command,
+            buildPair,
+            "trusted-must-not-find",
+            Path.Join(command.Root, "must-not-find"),
+            provider,
+            stateKeyBase64,
+            expectedLineageSha256: null);
+        if (!TryAdmitPhase(
+                mustNotFind,
+                VerifierScenario.MustNotFind,
+                buildPair,
+                phases,
+                out code))
+        {
+            return code;
+        }
+
+        var continuationRoot = Path.Join(command.Root, "continuation");
+        var seed = await RunPhaseAsync(
+            command,
+            buildPair,
+            "trusted-continuation-seed",
+            continuationRoot,
+            provider,
+            stateKeyBase64,
+            expectedLineageSha256: null);
+        if (!TryAdmitPhase(
+                seed,
+                VerifierScenario.ContinuationSeed,
+                buildPair,
+                phases,
+                out code) ||
+            seed.Receipt?.LineageSha256 is not { } lineage)
+        {
+            return code == TrustedLiveCodes.Passed
+                ? TrustedLiveCodes.Continuation
+                : code;
+        }
+
+        var restore = await RunPhaseAsync(
+            command,
+            buildPair,
+            "trusted-continuation-restore",
+            continuationRoot,
+            provider,
+            stateKeyBase64,
+            lineage);
+        if (!TryAdmitPhase(
+                restore,
+                VerifierScenario.ContinuationRestore,
+                buildPair,
+                phases,
+                out code))
+        {
+            return code;
+        }
+
+        return TrustedLiveCodes.Passed;
+    }
+
+    private static async Task<TrustedLivePhaseExecution> RunPhaseAsync(
+        VerifierCommand command,
+        VerifierBuildPair buildPair,
+        string verb,
+        string phaseRoot,
+        string provider,
+        string stateKeyBase64,
+        string? expectedLineageSha256)
+    {
+        Directory.CreateDirectory(Path.Join(phaseRoot, "private"));
+        var receiptPath = Path.Join(
+            phaseRoot,
+            "private",
+            string.Concat(verb, ".json"));
+        var arguments = new List<string>
+        {
+            verb,
+            "--root",
+            phaseRoot,
+            "--corpus",
+            command.Corpus,
+            "--output",
+            receiptPath,
+            "--execution-kind",
+            command.ExecutionKind,
+            "--execution-artifact",
+            command.ExecutionArtifact,
+            "--build-pair-manifest",
+            command.BuildPairManifest,
+        };
+        if (expectedLineageSha256 is not null)
+        {
+            arguments.Add("--expected-lineage-sha256");
+            arguments.Add(expectedLineageSha256);
+        }
+
+        var result = await TrustedLiveProcessLauncher.RunAsync(
+            command.ExecutionArtifact,
+            arguments,
+            command.Root,
+            provider,
+            stateKeyBase64,
+            ChildTimeout,
+            CancellationToken.None);
+        var receipt = TrustedLiveReceiptCodec.Read(receiptPath);
+        var canaryDetected = result.StandardOutput.Contains(
+                provider,
+                StringComparison.Ordinal) ||
+            result.StandardError.Contains(provider, StringComparison.Ordinal) ||
+            result.StandardOutput.Contains(
+                stateKeyBase64,
+                StringComparison.Ordinal) ||
+            result.StandardError.Contains(
+                stateKeyBase64,
+                StringComparison.Ordinal);
+        return new TrustedLivePhaseExecution(
+            result,
+            receipt,
+            canaryDetected);
+    }
+
+    private static bool TryAdmitPhase(
+        TrustedLivePhaseExecution execution,
+        VerifierScenario scenario,
+        VerifierBuildPair buildPair,
+        List<TrustedLivePhaseReceipt> phases,
+        out string code)
+    {
+        code = ClassifyFailure(execution, scenario);
+        var receipt = execution.Receipt;
+        if (execution.CanaryDetected ||
+            execution.Process is not { ExitCode: 0, TimedOut: false } ||
+            receipt is not
+            {
+                Status: "passed",
+                HandoffReady: true,
+                AcceptedTupleValidated: true,
+            } ||
+            receipt.Scenario != scenario.ToString() ||
+            receipt.ExecutionArtifactSha256 !=
+                buildPair.ExecutionArtifactSha256 ||
+            receipt.BuildPairSha256 != buildPair.BuildPairSha256 ||
+            !PhaseMatchesScenario(receipt, scenario))
+        {
+            return false;
+        }
+
+        phases.Add(receipt);
+        code = TrustedLiveCodes.Passed;
+        return true;
+    }
+
+    private static bool PhaseMatchesScenario(
+        TrustedLivePhaseReceipt receipt,
+        VerifierScenario scenario)
+    {
+        if (!LiveAgentFreshProcessDomain.IsSha256(
+                receipt.InvocationIdentitySha256) ||
+            !LiveAgentFreshProcessDomain.IsSha256(receipt.LineageSha256) ||
+            !LiveAgentFreshProcessDomain.IsSha256(
+                receipt.AcceptedSessionSha256) ||
+            !LiveAgentFreshProcessDomain.IsSha256(
+                receipt.AcceptedEnvelopeSha256) ||
+            !LiveAgentFreshProcessDomain.IsSha256(receipt.TerminalSha256) ||
+            receipt.ModelCalls is < 1 or > 8 ||
+            receipt.ToolCalls is < 1 or > 16)
+        {
+            return false;
+        }
+        var qualityPassed = receipt.QualityStatus == "passed" &&
+            receipt.QualityClassification == "quality" &&
+            receipt.QualityCode == "r3_quality_passed";
+        return scenario switch
+        {
+            VerifierScenario.MustFind =>
+                receipt.Generation == 0 &&
+                receipt.Transition == "same_head" &&
+                receipt.OutcomeCode == "APR_R3_TRUSTED_LIVE_MUST_FIND_OK" &&
+                qualityPassed,
+            VerifierScenario.MustNotFind =>
+                receipt.Generation == 0 &&
+                receipt.Transition == "same_head" &&
+                receipt.OutcomeCode ==
+                    "APR_R3_TRUSTED_LIVE_MUST_NOT_FIND_OK" &&
+                qualityPassed,
+            VerifierScenario.ContinuationSeed =>
+                receipt.Generation == 0 &&
+                receipt.Transition == "same_head" &&
+                receipt.OutcomeCode ==
+                    "APR_R3_TRUSTED_LIVE_CONTINUATION_SEED_OK" &&
+                receipt.QualityStatus is null &&
+                receipt.QualityClassification is null &&
+                receipt.QualityCode is null,
+            VerifierScenario.ContinuationRestore =>
+                receipt.Generation == 1 &&
+                receipt.Transition == "verified_ahead" &&
+                receipt.OutcomeCode ==
+                    "APR_R3_TRUSTED_LIVE_CONTINUATION_RESTORE_OK" &&
+                qualityPassed,
+            _ => false,
+        };
+    }
+
+    private static string ClassifyFailure(
+        TrustedLivePhaseExecution execution,
+        VerifierScenario scenario)
+    {
+        if (execution.CanaryDetected)
+        {
+            return TrustedLiveCodes.Canary;
+        }
+        if (execution.Process.TimedOut)
+        {
+            return TrustedLiveCodes.Timeout;
+        }
+        var qualityCode = execution.Receipt?.QualityCode;
+        if (qualityCode is
+            "r3_quality_required_tool_missing" or
+            "r3_quality_required_tool_wrong" or
+            "r3_quality_required_observation_missing")
+        {
+            return TrustedLiveCodes.MissingTool;
+        }
+        if (qualityCode is
+            "r3_quality_expected_finding_missing" or
+            "r3_quality_prohibited_finding" or
+            "r3_quality_prior_fact_missing")
+        {
+            return TrustedLiveCodes.Grounding;
+        }
+        if (execution.Receipt?.QualityClassification == "provider" ||
+            execution.Receipt?.ProductCode is
+                "r3_live_composition_failed" or
+                "r3_live_secret_invalid")
+        {
+            return TrustedLiveCodes.Provider;
+        }
+        return scenario switch
+        {
+            VerifierScenario.MustFind => TrustedLiveCodes.MustFind,
+            VerifierScenario.MustNotFind => TrustedLiveCodes.MustNotFind,
+            VerifierScenario.ContinuationSeed or
+                VerifierScenario.ContinuationRestore =>
+                TrustedLiveCodes.Continuation,
+            _ => TrustedLiveCodes.Infrastructure,
+        };
+    }
+
+    private static bool ProvenanceIsExact(
+        string sha,
+        string workflowRef,
+        string workflowSha) =>
+        IsGitSha(sha) &&
+        PublicEnvironment("GITHUB_REPOSITORY") == Repository &&
+        PublicEnvironment("GITHUB_REF") == MainRef &&
+        workflowRef == WorkflowRef &&
+        workflowSha == sha;
+
+    private static bool RootIsExact(string root)
+    {
+        var runnerTemp = PublicEnvironment("RUNNER_TEMP");
+        if (!Path.IsPathFullyQualified(runnerTemp))
+        {
+            return false;
+        }
+        return StringComparer.Ordinal.Equals(
+            root,
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Join(
+                runnerTemp,
+                "r3-live-proof-sensitive"))));
+    }
+
+    private static bool IsGitSha(string value) =>
+        value.Length == 40 && value.All(character =>
+            character is >= '0' and <= '9' or >= 'a' and <= 'f');
+
+    private static bool ContainsSensitiveBytes(
+        string root,
+        params byte[][] canaries)
+    {
+        foreach (var file in Directory.EnumerateFiles(
+                     root,
+                     "*",
+                     SearchOption.AllDirectories))
+        {
+            var info = new FileInfo(file);
+            if (info.Length > 16 * 1024 * 1024)
+            {
+                return true;
+            }
+            var bytes = File.ReadAllBytes(file);
+            if (canaries.Any(canary =>
+                    canary.Length != 0 && bytes.AsSpan().IndexOf(canary) >= 0))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool TryDeleteSensitiveRoot(string root)
+    {
+        try
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+            return !Directory.Exists(root);
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or
+            IOException or
+            NotSupportedException or
+            UnauthorizedAccessException or
+            System.Security.SecurityException)
+        {
+            return false;
+        }
+    }
+
+    private static string PublicEnvironment(string name) =>
+        Environment.GetEnvironmentVariable(name) ?? string.Empty;
+}
+
+internal static class TrustedLiveProcessLauncher
+{
+    internal static async Task<TrustedLiveProcessResult> RunAsync(
+        string executable,
+        IReadOnlyList<string> arguments,
+        string workingDirectory,
+        string provider,
+        string stateKeyBase64,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var start = new ProcessStartInfo
+        {
+            FileName = executable,
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+        foreach (var argument in arguments)
+        {
+            start.ArgumentList.Add(argument);
+        }
+        start.Environment.Clear();
+        start.Environment["AGENTIC_REVIEW_DEEPSEEK_API_KEY"] = provider;
+        start.Environment["AGENTIC_REVIEW_R3_STATE_KEY_B64"] = stateKeyBase64;
+        var home = Path.Join(workingDirectory, "home");
+        var temporary = Path.Join(workingDirectory, "tmp");
+        start.Environment["HOME"] = home;
+        start.Environment["TMPDIR"] = temporary;
+        start.Environment["LANG"] = "C.UTF-8";
+        start.Environment["LC_ALL"] = "C.UTF-8";
+        start.Environment["TZ"] = "UTC";
+        if (OperatingSystem.IsWindows())
+        {
+            AddPublicRuntimeVariable(start, "SystemRoot");
+            AddPublicRuntimeVariable(start, "WINDIR");
+        }
+        Directory.CreateDirectory(home);
+        Directory.CreateDirectory(temporary);
+
+        using var process = new Process { StartInfo = start };
+        if (!process.Start())
+        {
+            start.Environment.Clear();
+            return new TrustedLiveProcessResult(
+                1,
+                TimedOut: false,
+                string.Empty,
+                string.Empty);
+        }
+        start.Environment.Clear();
+        var output = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var error = process.StandardError.ReadToEndAsync(cancellationToken);
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken);
+        timeoutSource.CancelAfter(timeout);
+        var timedOut = false;
+        try
+        {
+            await process.WaitForExitAsync(timeoutSource.Token);
+        }
+        catch (OperationCanceledException)
+            when (!cancellationToken.IsCancellationRequested)
+        {
+            timedOut = true;
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            await process.WaitForExitAsync(CancellationToken.None);
+        }
+        var standardOutput = await output;
+        var standardError = await error;
+        if (standardOutput.Length > 64 * 1024 ||
+            standardError.Length > 64 * 1024)
+        {
+            return new TrustedLiveProcessResult(
+                1,
+                timedOut,
+                string.Empty,
+                string.Empty);
+        }
+        return new TrustedLiveProcessResult(
+            process.ExitCode,
+            timedOut,
+            standardOutput,
+            standardError);
+    }
+
+    private static void AddPublicRuntimeVariable(
+        ProcessStartInfo start,
+        string name)
+    {
+        var value = Environment.GetEnvironmentVariable(name);
+        if (!string.IsNullOrEmpty(value))
+        {
+            start.Environment[name] = value;
+        }
+    }
+}
+
+internal sealed record TrustedLivePhaseExecution(
+    TrustedLiveProcessResult Process,
+    TrustedLivePhaseReceipt? Receipt,
+    bool CanaryDetected);
+
+internal static class TrustedLiveLauncherProbe
+{
+    internal static async Task<int> RunAsync(IReadOnlyList<string> args)
+    {
+        if (args is ["launcher-grandchild"])
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan);
+            return 0;
+        }
+        if (args is ["launcher-tree-probe", var pidPath])
+        {
+            var start = new ProcessStartInfo
+            {
+                FileName = Environment.ProcessPath ?? string.Empty,
+                UseShellExecute = false,
+            };
+            start.ArgumentList.Add("launcher-grandchild");
+            using var child = Process.Start(start);
+            if (child is null)
+            {
+                return 2;
+            }
+            File.WriteAllText(
+                pidPath,
+                child.Id.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture));
+            await Task.Delay(Timeout.InfiniteTimeSpan);
+            return 0;
+        }
+        if (args is not ["launcher-probe", var delayText, ..] ||
+            !int.TryParse(
+                delayText,
+                System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var delay) ||
+            delay is < 0 or > 60_000)
+        {
+            return 2;
+        }
+        if (delay != 0)
+        {
+            await Task.Delay(delay);
+        }
+        var provider = Environment.GetEnvironmentVariable(
+            "AGENTIC_REVIEW_DEEPSEEK_API_KEY");
+        var state = Environment.GetEnvironmentVariable(
+            "AGENTIC_REVIEW_R3_STATE_KEY_B64");
+        using var stream = new MemoryStream();
+        using (var writer = new System.Text.Json.Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteBoolean(
+                "provider_in_arguments",
+                provider is not null && args.Contains(provider));
+            writer.WriteBoolean(
+                "state_in_arguments",
+                state is not null && args.Contains(state));
+            writer.WriteStartArray("environment_names");
+            foreach (var name in Environment.GetEnvironmentVariables().Keys
+                         .OfType<string>()
+                         .Order(StringComparer.Ordinal))
+            {
+                writer.WriteStringValue(name);
+            }
+            writer.WriteEndArray();
+            writer.WriteNumber("process_id", Environment.ProcessId);
+            writer.WriteEndObject();
+        }
+        Console.Out.WriteLine(Encoding.UTF8.GetString(stream.ToArray()));
+        return 0;
+    }
+}
