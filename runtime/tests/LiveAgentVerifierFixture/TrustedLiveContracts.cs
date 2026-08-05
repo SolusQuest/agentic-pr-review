@@ -327,5 +327,8 @@ internal static class TrustedLiveReceiptCodec
 internal sealed record TrustedLiveProcessResult(
     int ExitCode,
     bool TimedOut,
+    bool Cancelled,
+    bool SensitiveBytesObserved,
+    bool OutputLimitExceeded,
     string StandardOutput,
     string StandardError);

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { createHash } from 'node:crypto';
 import { parseDocument } from 'yaml';
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -8,10 +9,60 @@ const workflowPath = process.env.APR_R3_LIVE_POLICY_WORKFLOW
   ? path.resolve(process.env.APR_R3_LIVE_POLICY_WORKFLOW)
   : path.join(root, '.github', 'workflows', 'r3-live-proof.yml');
 const workflowsRoot = path.dirname(workflowPath);
+const verifierScriptPath = process.env.APR_R3_LIVE_POLICY_SCRIPT
+  ? path.resolve(process.env.APR_R3_LIVE_POLICY_SCRIPT)
+  : path.join(root, 'runtime', 'scripts', 'verify-live-agent.sh');
 const dedicatedSecret = 'secrets.R3_LIVE_PROOF_DEEPSEEK_API_KEY';
 const retiredSecret = 'secrets.AGENTIC_REVIEW_DEEPSEEK_API_KEY';
 const checkoutSha = 'd23441a48e516b6c34aea4fa41551a30e30af803';
 const setupDotnetSha = '26b0ec14cb23fa6904739307f278c14f94c95bf1';
+const trustedScriptSha256 = '8cbc0967d34c52babeccc247e71ac64dfc83da779c5afc73023a24d844c50512';
+const exactLineageRun = [
+  'set -euo pipefail',
+  '[[ "${ACTUAL_SHA}" =~ ^[0-9a-f]{40}$ ]]',
+  '[[ "${WORKFLOW_REF}" == "SolusQuest/agentic-pr-review/.github/workflows/r3-live-proof.yml@refs/heads/main" ]]',
+  '[[ "${WORKFLOW_SHA}" == "${ACTUAL_SHA}" ]]',
+  '',
+].join('\n');
+const exactProvenanceRun = [
+  'set -euo pipefail',
+  '[[ "$(git remote get-url origin)" == "https://github.com/SolusQuest/agentic-pr-review" ]]',
+  'git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main',
+  '[[ "$(git rev-parse HEAD)" == "${ACTUAL_SHA}" ]]',
+  'git merge-base --is-ancestor "${ACTUAL_SHA}" refs/remotes/origin/main',
+  '[[ -z "$(git status --porcelain=v1 --untracked-files=all)" ]]',
+  '',
+].join('\n');
+const exactReadmissionRun = [
+  'set -euo pipefail',
+  '[[ "$(git rev-parse HEAD)" == "${ACTUAL_SHA}" ]]',
+  'git merge-base --is-ancestor "${ACTUAL_SHA}" refs/remotes/origin/main',
+  '[[ -z "$(git status --porcelain=v1 --untracked-files=all)" ]]',
+  'bash runtime/scripts/verify-live-agent.sh live --verify-prepared',
+  '',
+].join('\n');
+const exactDispatchBlock = [
+  'if [[ "${1:-}" == live && "$#" -eq 1 ]]; then',
+  '  prepared_root="${RUNNER_TEMP:?}/r3-live-proof-build"',
+  '  sensitive_root="${RUNNER_TEMP}/r3-live-proof-sensitive"',
+  '  supervisor="${prepared_root}/publish/AgenticPrReview.Runtime.LiveAgentVerifierFixture"',
+  '  live_arguments=(',
+  '    live-supervise',
+  '    --root "${sensitive_root}"',
+  '    --corpus "${GITHUB_WORKSPACE:?}/runtime/tests/fixtures/agent/r3-quality/corpus.json"',
+  '    --output "${sensitive_root}/private/completion.json"',
+  '    --execution-kind native-aot',
+  '    --execution-artifact "${supervisor}"',
+  '    --build-pair-manifest "${prepared_root}/build-pair.json"',
+  '  )',
+  '  if [[ "${APR_R3_TRUSTED_LIVE_DISPATCH_PROBE:-}" == 1 ]]; then',
+  '    [[ -z "${AGENTIC_REVIEW_DEEPSEEK_API_KEY:-}" ]]',
+  '    [[ -z "${AGENTIC_REVIEW_R3_STATE_KEY_B64:-}" ]]',
+  '    exec "${supervisor}" launcher-dispatch-probe "${live_arguments[@]}"',
+  '  fi',
+  '  exec "${supervisor}" "${live_arguments[@]}"',
+  'fi',
+].join('\n');
 
 function fail(code) {
   throw new Error(code);
@@ -51,6 +102,26 @@ function requireExactStep(steps, name, run) {
     fail('APR_R3_LIVE_POLICY_STEP_INVALID');
   }
   return matches[0];
+}
+
+function collectSecretExpressions(value, expressions) {
+  if (typeof value === 'string') {
+    if (/\$\{\{[\s\S]*\bsecrets\b[\s\S]*\}\}/u.test(value)) {
+      expressions.push(value);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectSecretExpressions(item, expressions);
+    }
+    return;
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const item of Object.values(value)) {
+      collectSecretExpressions(item, expressions);
+    }
+  }
 }
 
 export function checkTrustedLivePolicy() {
@@ -127,10 +198,7 @@ export function checkTrustedLivePolicy() {
     lineage.env.ACTUAL_SHA !== '${{ github.sha }}' ||
     lineage.env.WORKFLOW_REF !== '${{ github.workflow_ref }}' ||
     lineage.env.WORKFLOW_SHA !== '${{ github.workflow_sha }}' ||
-    !lineage.run.includes(
-      'SolusQuest/agentic-pr-review/.github/workflows/r3-live-proof.yml@refs/heads/main',
-    ) ||
-    !lineage.run.includes('[[ "${WORKFLOW_SHA}" == "${ACTUAL_SHA}" ]]')
+    lineage.run !== exactLineageRun
   ) {
     fail('APR_R3_LIVE_POLICY_LINEAGE_INVALID');
   }
@@ -169,10 +237,14 @@ export function checkTrustedLivePolicy() {
     fail('APR_R3_LIVE_POLICY_SETUP_INVALID');
   }
 
+  if (job.steps[3].run !== exactProvenanceRun) {
+    fail('APR_R3_LIVE_POLICY_PROVENANCE_INVALID');
+  }
+
   if (
     job.steps[4].run !== 'bash runtime/scripts/verify-live-agent.sh live --prepare' ||
     job.steps[5].run !== 'bash runtime/scripts/verify-live-agent.sh deterministic' ||
-    !job.steps[6].run.endsWith('bash runtime/scripts/verify-live-agent.sh live --verify-prepared\n')
+    job.steps[6].run !== exactReadmissionRun
   ) {
     fail('APR_R3_LIVE_POLICY_PREFLIGHT_INVALID');
   }
@@ -201,13 +273,19 @@ export function checkTrustedLivePolicy() {
     .readdirSync(workflowsRoot)
     .filter((name) => /\.ya?ml$/u.test(name))
     .map((name) => path.join(workflowsRoot, name));
-  const allWorkflowSource = allWorkflowFiles
-    .map((file) => fs.readFileSync(file, 'utf8'))
+  const allWorkflowDocuments = allWorkflowFiles.map((file) => readYaml(file));
+  const allWorkflowSource = allWorkflowDocuments
+    .map(({ source: workflowSource }) => workflowSource)
     .join('\n');
+  const secretExpressions = [];
+  for (const { value: workflowValue } of allWorkflowDocuments) {
+    collectSecretExpressions(workflowValue, secretExpressions);
+  }
   if (
-    (allWorkflowSource.match(new RegExp(dedicatedSecret, 'g')) ?? []).length !== 1 ||
+    secretExpressions.length !== 1 ||
+    secretExpressions[0] !== '${{ secrets.R3_LIVE_PROOF_DEEPSEEK_API_KEY }}' ||
     allWorkflowSource.includes(retiredSecret) ||
-    /secrets\s*:\s*inherit/u.test(source) ||
+    /secrets\s*:\s*inherit/u.test(allWorkflowSource) ||
     /probe-deepseek-request|DeepSeekCompatibilityProbe/u.test(allWorkflowSource)
   ) {
     fail('APR_R3_LIVE_POLICY_PROVIDER_ROUTE_INVALID');
@@ -232,13 +310,30 @@ export function checkTrustedLivePolicy() {
   if (forbidden.some((token) => source.includes(token))) {
     fail('APR_R3_LIVE_POLICY_PUBLICATION_INVALID');
   }
-  if (
-    !source.includes('github.workflow_ref') ||
-    !source.includes('github.workflow_sha') ||
-    !source.includes('git merge-base --is-ancestor') ||
-    !source.includes('git status --porcelain=v1 --untracked-files=all')
-  ) {
+  if (!source.includes('github.workflow_ref') || !source.includes('github.workflow_sha')) {
     fail('APR_R3_LIVE_POLICY_PROVENANCE_INVALID');
+  }
+  const verifierScriptSource = fs.readFileSync(verifierScriptPath, 'utf8');
+  const verifierScriptDigest = createHash('sha256')
+    .update(verifierScriptSource, 'utf8')
+    .digest('hex');
+  const dispatchOffset = verifierScriptSource.indexOf(
+    'if [[ "${1:-}" == live && "$#" -eq 1 ]]; then',
+  );
+  if (
+    verifierScriptDigest !== trustedScriptSha256 ||
+    !verifierScriptSource.startsWith('#!/usr/bin/env bash\n') ||
+    dispatchOffset < 0 ||
+    verifierScriptSource.slice(dispatchOffset, dispatchOffset + exactDispatchBlock.length) !==
+      exactDispatchBlock ||
+    !verifierScriptSource.includes('exec "${supervisor}" "${live_arguments[@]}"') ||
+    !verifierScriptSource.includes(
+      'exec "${supervisor}" launcher-dispatch-probe "${live_arguments[@]}"',
+    ) ||
+    !verifierScriptSource.includes('--execution-kind native-aot') ||
+    !verifierScriptSource.includes('APR_R3_TRUSTED_LIVE_DISPATCH_PROBE=1')
+  ) {
+    fail('APR_R3_LIVE_POLICY_DISPATCH_INVALID');
   }
   const runtimeReadme = fs.readFileSync(path.join(root, 'runtime', 'README.md'), 'utf8');
   const prerequisite = [

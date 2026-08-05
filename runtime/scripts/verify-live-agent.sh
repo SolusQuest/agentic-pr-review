@@ -12,14 +12,22 @@ set -euo pipefail
 if [[ "${1:-}" == live && "$#" -eq 1 ]]; then
   prepared_root="${RUNNER_TEMP:?}/r3-live-proof-build"
   sensitive_root="${RUNNER_TEMP}/r3-live-proof-sensitive"
-  supervisor="${prepared_root}/build/AgenticPrReview.Runtime.LiveAgentVerifierFixture"
-  exec "${supervisor}" live-supervise \
-    --root "${sensitive_root}" \
-    --corpus "${GITHUB_WORKSPACE:?}/runtime/tests/fixtures/agent/r3-quality/corpus.json" \
-    --output "${sensitive_root}/private/completion.json" \
-    --execution-kind framework \
-    --execution-artifact "${supervisor}" \
+  supervisor="${prepared_root}/publish/AgenticPrReview.Runtime.LiveAgentVerifierFixture"
+  live_arguments=(
+    live-supervise
+    --root "${sensitive_root}"
+    --corpus "${GITHUB_WORKSPACE:?}/runtime/tests/fixtures/agent/r3-quality/corpus.json"
+    --output "${sensitive_root}/private/completion.json"
+    --execution-kind native-aot
+    --execution-artifact "${supervisor}"
     --build-pair-manifest "${prepared_root}/build-pair.json"
+  )
+  if [[ "${APR_R3_TRUSTED_LIVE_DISPATCH_PROBE:-}" == 1 ]]; then
+    [[ -z "${AGENTIC_REVIEW_DEEPSEEK_API_KEY:-}" ]]
+    [[ -z "${AGENTIC_REVIEW_R3_STATE_KEY_B64:-}" ]]
+    exec "${supervisor}" launcher-dispatch-probe "${live_arguments[@]}"
+  fi
+  exec "${supervisor}" "${live_arguments[@]}"
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -675,9 +683,9 @@ _require_live_linux() {
 _load_live_prepared() {
   local build_root
   build_root="$(_live_prepared_root)"
-  EXECUTION_KIND=framework
-  EXECUTION_ARTIFACT="${build_root}/build/${ASSEMBLY}"
-  ARCHITECTURE_ASSEMBLY="${build_root}/build/${ASSEMBLY}.dll"
+  EXECUTION_KIND=native-aot
+  EXECUTION_ARTIFACT="${build_root}/publish/${ASSEMBLY}"
+  ARCHITECTURE_ASSEMBLY="${build_root}/aot-intermediate/${ASSEMBLY}.dll"
   BUILD_PAIR_MANIFEST="${build_root}/build-pair.json"
   RUNNER=("${EXECUTION_ARTIFACT}")
   _require_file live-supervisor "${EXECUTION_ARTIFACT}"
@@ -690,22 +698,32 @@ _load_live_prepared() {
 run_live_prepare() {
   _require_live_linux
   _prepare_common
-  local build_root build_output
+  local build_root publish_output intermediate_output
   build_root="$(_live_prepared_root)"
-  build_output="${build_root}/build"
+  publish_output="${build_root}/publish"
+  intermediate_output="${build_root}/aot-intermediate"
   [[ ! -e "${build_root}" ]] ||
     _fail APR_R3_TRUSTED_LIVE_PREPARED_ROOT_EXISTS
-  mkdir -p -- "${build_output}"
-  if ! "${DOTNET_CMD}" build "${PROJECT}" \
-      --configuration Release --nologo -o "${build_output}" \
-      -p:PublishAot=false \
-      >"${build_root}/build.log" 2>&1; then
-    tail -n 40 "${build_root}/build.log" >&2
+  mkdir -p -- "${build_root}"
+  _verify_aot_warning_audit "${build_root}"
+  if ! "${DOTNET_CMD}" publish "${PROJECT}" \
+      --configuration Release --nologo \
+      --runtime linux-x64 --self-contained true \
+      --artifacts-path "${build_root}/artifacts" \
+      -o "${publish_output}" \
+      -p:PublishAot=true \
+      -p:JsonSerializerIsReflectionEnabledByDefault=false \
+      -warnaserror \
+      -warnnotaserror:IL3058 \
+      -p:LiveAgentVerifierAotIntermediateDirectory="${intermediate_output}" \
+      >"${build_root}/publish.log" 2>&1; then
+    tail -n 80 "${build_root}/publish.log" >&2
     _fail APR_R3_TRUSTED_LIVE_BUILD_FAILED
   fi
-  EXECUTION_KIND=framework
-  EXECUTION_ARTIFACT="${build_output}/${ASSEMBLY}"
-  ARCHITECTURE_ASSEMBLY="${build_output}/${ASSEMBLY}.dll"
+  _audit_aot_warnings "${build_root}/publish.log"
+  EXECUTION_KIND=native-aot
+  EXECUTION_ARTIFACT="${publish_output}/${ASSEMBLY}"
+  ARCHITECTURE_ASSEMBLY="${intermediate_output}/${ASSEMBLY}.dll"
   RUNNER=("${EXECUTION_ARTIFACT}")
   _require_file live-supervisor "${EXECUTION_ARTIFACT}"
   [[ -x "${EXECUTION_ARTIFACT}" ]] ||
@@ -745,6 +763,11 @@ run_live_dry_run() {
   RUNNER_TEMP="${dry_runner_temp}"
   export RUNNER_TEMP
   run_live_prepare
+  APR_R3_TRUSTED_LIVE_DISPATCH_PROBE=1 \
+    GITHUB_WORKSPACE="${REPO_ROOT}" \
+    bash "${REPO_ROOT}/runtime/scripts/verify-live-agent.sh" live |
+    grep -Fxq APR_R3_TRUSTED_LIVE_DISPATCH_OK ||
+    _fail APR_R3_TRUSTED_LIVE_DISPATCH_INVALID
   node "${REPO_ROOT}/scripts/check-r3-live-proof.mjs" ||
     _fail APR_R3_TRUSTED_LIVE_POLICY_FAILED
   test_project="${TEST_PROJECT}"

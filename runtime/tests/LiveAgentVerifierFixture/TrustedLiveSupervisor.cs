@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -39,6 +40,19 @@ internal static class TrustedLiveSupervisor
         var phases = new List<TrustedLivePhaseReceipt>(4);
         var status = "failed";
         var code = TrustedLiveCodes.Arguments;
+        using var cancellationSource = new CancellationTokenSource();
+        ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
+        {
+            eventArgs.Cancel = true;
+            cancellationSource.Cancel();
+        };
+        Console.CancelKeyPress += cancelHandler;
+        using var terminateSignal = RegisterSignal(
+            PosixSignal.SIGTERM,
+            cancellationSource);
+        using var interruptSignal = RegisterSignal(
+            PosixSignal.SIGINT,
+            cancellationSource);
 
         try
         {
@@ -79,16 +93,8 @@ internal static class TrustedLiveSupervisor
                         buildPair,
                         provider!,
                         stateKeyBase64,
-                        phases);
-                    if (code == TrustedLiveCodes.Passed &&
-                        ContainsSensitiveBytes(
-                            sensitiveRoot,
-                            providerBytes,
-                            stateKey,
-                            Encoding.ASCII.GetBytes(stateKeyBase64)))
-                    {
-                        code = TrustedLiveCodes.Canary;
-                    }
+                        phases,
+                        cancellationSource.Token);
                     if (code == TrustedLiveCodes.Passed)
                     {
                         status = "passed";
@@ -103,17 +109,31 @@ internal static class TrustedLiveSupervisor
         }
         finally
         {
+            Console.CancelKeyPress -= cancelHandler;
+            var sensitiveBytesObserved = sensitiveRoot is not null &&
+                ContainsSensitiveBytes(
+                    sensitiveRoot,
+                    providerBytes,
+                    stateKey,
+                    stateKeyBase64 is null
+                        ? []
+                        : Encoding.ASCII.GetBytes(stateKeyBase64));
+            var cleanupFailed = sensitiveRoot is not null &&
+                !TryDeleteSensitiveRoot(sensitiveRoot);
             CryptographicOperations.ZeroMemory(providerBytes);
             CryptographicOperations.ZeroMemory(stateKey);
             provider = null;
             ambientStateKey = null;
             stateKeyBase64 = null;
-            if (sensitiveRoot is not null &&
-                !TryDeleteSensitiveRoot(sensitiveRoot))
+            var safetyCode = ApplySafetyClassification(
+                code,
+                sensitiveBytesObserved,
+                cleanupFailed);
+            if (safetyCode != code)
             {
                 status = "failed";
-                code = TrustedLiveCodes.Cleanup;
             }
+            code = safetyCode;
 
             Console.Out.WriteLine(TrustedLiveReceiptCodec.WriteCompletion(
                 status,
@@ -134,8 +154,10 @@ internal static class TrustedLiveSupervisor
         VerifierBuildPair buildPair,
         string provider,
         string stateKeyBase64,
-        List<TrustedLivePhaseReceipt> phases)
+        List<TrustedLivePhaseReceipt> phases,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var mustFind = await RunPhaseAsync(
             command,
             buildPair,
@@ -143,7 +165,8 @@ internal static class TrustedLiveSupervisor
             Path.Join(command.Root, "must-find"),
             provider,
             stateKeyBase64,
-            expectedLineageSha256: null);
+            expectedLineageSha256: null,
+            cancellationToken);
         if (!TryAdmitPhase(
                 mustFind,
                 VerifierScenario.MustFind,
@@ -161,7 +184,8 @@ internal static class TrustedLiveSupervisor
             Path.Join(command.Root, "must-not-find"),
             provider,
             stateKeyBase64,
-            expectedLineageSha256: null);
+            expectedLineageSha256: null,
+            cancellationToken);
         if (!TryAdmitPhase(
                 mustNotFind,
                 VerifierScenario.MustNotFind,
@@ -180,7 +204,8 @@ internal static class TrustedLiveSupervisor
             continuationRoot,
             provider,
             stateKeyBase64,
-            expectedLineageSha256: null);
+            expectedLineageSha256: null,
+            cancellationToken);
         if (!TryAdmitPhase(
                 seed,
                 VerifierScenario.ContinuationSeed,
@@ -201,7 +226,8 @@ internal static class TrustedLiveSupervisor
             continuationRoot,
             provider,
             stateKeyBase64,
-            lineage);
+            lineage,
+            cancellationToken);
         if (!TryAdmitPhase(
                 restore,
                 VerifierScenario.ContinuationRestore,
@@ -222,8 +248,10 @@ internal static class TrustedLiveSupervisor
         string phaseRoot,
         string provider,
         string stateKeyBase64,
-        string? expectedLineageSha256)
+        string? expectedLineageSha256,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         Directory.CreateDirectory(Path.Join(phaseRoot, "private"));
         var receiptPath = Path.Join(
             phaseRoot,
@@ -258,9 +286,10 @@ internal static class TrustedLiveSupervisor
             provider,
             stateKeyBase64,
             ChildTimeout,
-            CancellationToken.None);
+            cancellationToken);
         var receipt = TrustedLiveReceiptCodec.Read(receiptPath);
-        var canaryDetected = result.StandardOutput.Contains(
+        var canaryDetected = result.SensitiveBytesObserved ||
+            result.StandardOutput.Contains(
                 provider,
                 StringComparison.Ordinal) ||
             result.StandardError.Contains(provider, StringComparison.Ordinal) ||
@@ -283,10 +312,17 @@ internal static class TrustedLiveSupervisor
         List<TrustedLivePhaseReceipt> phases,
         out string code)
     {
-        code = ClassifyFailure(execution, scenario);
+        code = ClassifyFailure(execution);
         var receipt = execution.Receipt;
         if (execution.CanaryDetected ||
-            execution.Process is not { ExitCode: 0, TimedOut: false } ||
+            execution.Process is not
+            {
+                ExitCode: 0,
+                TimedOut: false,
+                Cancelled: false,
+                SensitiveBytesObserved: false,
+                OutputLimitExceeded: false,
+            } ||
             receipt is not
             {
                 Status: "passed",
@@ -358,11 +394,11 @@ internal static class TrustedLiveSupervisor
         };
     }
 
-    private static string ClassifyFailure(
-        TrustedLivePhaseExecution execution,
-        VerifierScenario scenario)
+    internal static string ClassifyFailure(
+        TrustedLivePhaseExecution execution)
     {
-        if (execution.CanaryDetected)
+        if (execution.CanaryDetected ||
+            execution.Process.SensitiveBytesObserved)
         {
             return TrustedLiveCodes.Canary;
         }
@@ -370,37 +406,60 @@ internal static class TrustedLiveSupervisor
         {
             return TrustedLiveCodes.Timeout;
         }
-        var qualityCode = execution.Receipt?.QualityCode;
+        var receipt = execution.Receipt;
+        if (execution.Process.Cancelled ||
+            execution.Process.OutputLimitExceeded ||
+            receipt is null)
+        {
+            return TrustedLiveCodes.Infrastructure;
+        }
+        var qualityCode = receipt.QualityCode;
         if (qualityCode is
             "r3_quality_required_tool_missing" or
-            "r3_quality_required_tool_wrong" or
-            "r3_quality_required_observation_missing")
+            "r3_quality_required_tool_wrong")
         {
             return TrustedLiveCodes.MissingTool;
         }
-        if (qualityCode is
-            "r3_quality_expected_finding_missing" or
-            "r3_quality_prohibited_finding" or
-            "r3_quality_prior_fact_missing")
+        if (qualityCode == "r3_quality_required_observation_missing")
         {
             return TrustedLiveCodes.Grounding;
         }
-        if (execution.Receipt?.QualityClassification == "provider" ||
-            execution.Receipt?.ProductCode is
-                "r3_live_composition_failed" or
+        if (qualityCode == "r3_quality_expected_finding_missing")
+        {
+            return TrustedLiveCodes.MustFind;
+        }
+        if (qualityCode == "r3_quality_prohibited_finding")
+        {
+            return TrustedLiveCodes.MustNotFind;
+        }
+        if (qualityCode is
+            "r3_quality_prior_fact_missing" or
+            "r3_quality_state_failed")
+        {
+            return TrustedLiveCodes.Continuation;
+        }
+        var productCode = receipt.ProductCode;
+        if (receipt.QualityClassification == "provider" ||
+            qualityCode == "r3_quality_provider_failed" ||
+            productCode is
+                "agent_chat_failed" or
                 "r3_live_secret_invalid")
         {
             return TrustedLiveCodes.Provider;
         }
-        return scenario switch
+        if (productCode is
+            "agent_unknown_tool" or
+            "agent_tool_arguments_invalid")
         {
-            VerifierScenario.MustFind => TrustedLiveCodes.MustFind,
-            VerifierScenario.MustNotFind => TrustedLiveCodes.MustNotFind,
-            VerifierScenario.ContinuationSeed or
-                VerifierScenario.ContinuationRestore =>
-                TrustedLiveCodes.Continuation,
-            _ => TrustedLiveCodes.Infrastructure,
-        };
+            return TrustedLiveCodes.MissingTool;
+        }
+        if (productCode is
+            "agent_terminal_sequence_invalid" or
+            "agent_terminal_invalid")
+        {
+            return TrustedLiveCodes.Grounding;
+        }
+        return TrustedLiveCodes.Infrastructure;
     }
 
     private static bool ProvenanceIsExact(
@@ -431,28 +490,69 @@ internal static class TrustedLiveSupervisor
         value.Length == 40 && value.All(character =>
             character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
-    private static bool ContainsSensitiveBytes(
+    internal static bool ContainsSensitiveBytes(
         string root,
         params byte[][] canaries)
     {
-        foreach (var file in Directory.EnumerateFiles(
-                     root,
-                     "*",
-                     SearchOption.AllDirectories))
+        try
         {
-            var info = new FileInfo(file);
-            if (info.Length > 16 * 1024 * 1024)
+            if (!Directory.Exists(root))
             {
-                return true;
+                return false;
             }
-            var bytes = File.ReadAllBytes(file);
-            if (canaries.Any(canary =>
-                    canary.Length != 0 && bytes.AsSpan().IndexOf(canary) >= 0))
+            foreach (var file in Directory.EnumerateFiles(
+                         root,
+                         "*",
+                         SearchOption.AllDirectories))
             {
-                return true;
+                var info = new FileInfo(file);
+                if (info.Length > 16 * 1024 * 1024)
+                {
+                    return true;
+                }
+                var bytes = File.ReadAllBytes(file);
+                if (canaries.Any(canary =>
+                        canary.Length != 0 &&
+                        bytes.AsSpan().IndexOf(canary) >= 0))
+                {
+                    return true;
+                }
             }
+            return false;
         }
-        return false;
+        catch (Exception exception) when (exception is
+            ArgumentException or
+            IOException or
+            NotSupportedException or
+            UnauthorizedAccessException or
+            System.Security.SecurityException)
+        {
+            return true;
+        }
+    }
+
+    internal static string ApplySafetyClassification(
+        string code,
+        bool sensitiveBytesObserved,
+        bool cleanupFailed) => sensitiveBytesObserved
+            ? TrustedLiveCodes.Canary
+            : cleanupFailed
+                ? TrustedLiveCodes.Cleanup
+                : code;
+
+    private static PosixSignalRegistration? RegisterSignal(
+        PosixSignal signal,
+        CancellationTokenSource cancellationSource)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return null;
+        }
+        return PosixSignalRegistration.Create(signal, context =>
+        {
+            context.Cancel = true;
+            cancellationSource.Cancel();
+        });
     }
 
     private static bool TryDeleteSensitiveRoot(string root)
@@ -482,6 +582,8 @@ internal static class TrustedLiveSupervisor
 
 internal static class TrustedLiveProcessLauncher
 {
+    private const int MaximumCapturedCharacters = 64 * 1024;
+
     internal static async Task<TrustedLiveProcessResult> RunAsync(
         string executable,
         IReadOnlyList<string> arguments,
@@ -491,6 +593,21 @@ internal static class TrustedLiveProcessLauncher
         TimeSpan timeout,
         CancellationToken cancellationToken)
     {
+        var canaries = new[] { provider, stateKeyBase64 }
+            .Where(value => !string.IsNullOrEmpty(value))
+            .ToArray();
+        if (arguments.Any(argument => canaries.Any(canary =>
+                argument.Contains(canary, StringComparison.Ordinal))))
+        {
+            return new TrustedLiveProcessResult(
+                1,
+                TimedOut: false,
+                Cancelled: false,
+                SensitiveBytesObserved: true,
+                OutputLimitExceeded: false,
+                string.Empty,
+                string.Empty);
+        }
         var start = new ProcessStartInfo
         {
             FileName = executable,
@@ -523,30 +640,43 @@ internal static class TrustedLiveProcessLauncher
         Directory.CreateDirectory(temporary);
 
         using var process = new Process { StartInfo = start };
-        if (!process.Start())
+        try
+        {
+            if (!process.Start())
+            {
+                return new TrustedLiveProcessResult(
+                    1,
+                    TimedOut: false,
+                    Cancelled: false,
+                    SensitiveBytesObserved: false,
+                    OutputLimitExceeded: false,
+                    string.Empty,
+                    string.Empty);
+            }
+        }
+        finally
         {
             start.Environment.Clear();
-            return new TrustedLiveProcessResult(
-                1,
-                TimedOut: false,
-                string.Empty,
-                string.Empty);
         }
-        start.Environment.Clear();
-        var output = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var error = process.StandardError.ReadToEndAsync(cancellationToken);
+        var output = ReadBoundedAndScanAsync(
+            process.StandardOutput,
+            canaries);
+        var error = ReadBoundedAndScanAsync(
+            process.StandardError,
+            canaries);
         using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken);
         timeoutSource.CancelAfter(timeout);
         var timedOut = false;
+        var cancelled = false;
         try
         {
             await process.WaitForExitAsync(timeoutSource.Token);
         }
         catch (OperationCanceledException)
-            when (!cancellationToken.IsCancellationRequested)
         {
-            timedOut = true;
+            cancelled = cancellationToken.IsCancellationRequested;
+            timedOut = !cancelled;
             if (!process.HasExited)
             {
                 process.Kill(entireProcessTree: true);
@@ -555,20 +685,71 @@ internal static class TrustedLiveProcessLauncher
         }
         var standardOutput = await output;
         var standardError = await error;
-        if (standardOutput.Length > 64 * 1024 ||
-            standardError.Length > 64 * 1024)
-        {
-            return new TrustedLiveProcessResult(
-                1,
-                timedOut,
-                string.Empty,
-                string.Empty);
-        }
+        var sensitiveBytesObserved =
+            standardOutput.SensitiveBytesObserved ||
+            standardError.SensitiveBytesObserved;
+        var outputLimitExceeded = standardOutput.LimitExceeded ||
+            standardError.LimitExceeded;
         return new TrustedLiveProcessResult(
             process.ExitCode,
             timedOut,
-            standardOutput,
-            standardError);
+            cancelled,
+            sensitiveBytesObserved,
+            outputLimitExceeded,
+            sensitiveBytesObserved || outputLimitExceeded
+                ? string.Empty
+                : standardOutput.Text,
+            sensitiveBytesObserved || outputLimitExceeded
+                ? string.Empty
+                : standardError.Text);
+    }
+
+    private static async Task<TrustedLiveBoundedCapture>
+        ReadBoundedAndScanAsync(
+            StreamReader reader,
+            IReadOnlyList<string> canaries)
+    {
+        var capture = new StringBuilder(MaximumCapturedCharacters);
+        var buffer = new char[4096];
+        var longestCanary = canaries.Count == 0
+            ? 0
+            : canaries.Max(value => value.Length);
+        var carry = string.Empty;
+        var sensitiveBytesObserved = false;
+        var limitExceeded = false;
+        long totalCharacters = 0;
+        while (true)
+        {
+            var read = await reader.ReadAsync(buffer.AsMemory());
+            if (read == 0)
+            {
+                break;
+            }
+            totalCharacters += read;
+            var chunk = new string(buffer, 0, read);
+            var scan = string.Concat(carry, chunk);
+            if (canaries.Any(canary =>
+                    scan.Contains(canary, StringComparison.Ordinal)))
+            {
+                sensitiveBytesObserved = true;
+            }
+            var carryLength = Math.Min(
+                Math.Max(longestCanary - 1, 0),
+                scan.Length);
+            carry = carryLength == 0
+                ? string.Empty
+                : scan[^carryLength..];
+            if (capture.Length < MaximumCapturedCharacters)
+            {
+                var remaining = MaximumCapturedCharacters - capture.Length;
+                capture.Append(chunk.AsSpan(0, Math.Min(remaining, chunk.Length)));
+            }
+            limitExceeded = totalCharacters > MaximumCapturedCharacters;
+        }
+        return new TrustedLiveBoundedCapture(
+            capture.ToString(),
+            sensitiveBytesObserved,
+            limitExceeded);
     }
 
     private static void AddPublicRuntimeVariable(
@@ -583,6 +764,11 @@ internal static class TrustedLiveProcessLauncher
     }
 }
 
+internal sealed record TrustedLiveBoundedCapture(
+    string Text,
+    bool SensitiveBytesObserved,
+    bool LimitExceeded);
+
 internal sealed record TrustedLivePhaseExecution(
     TrustedLiveProcessResult Process,
     TrustedLivePhaseReceipt? Receipt,
@@ -592,6 +778,53 @@ internal static class TrustedLiveLauncherProbe
 {
     internal static async Task<int> RunAsync(IReadOnlyList<string> args)
     {
+        if (args is ["launcher-dispatch-probe", ..])
+        {
+            var runnerTemp = Environment.GetEnvironmentVariable("RUNNER_TEMP");
+            var workspace = Environment.GetEnvironmentVariable(
+                "GITHUB_WORKSPACE");
+            if (Environment.GetEnvironmentVariable(
+                    "APR_R3_TRUSTED_LIVE_DISPATCH_PROBE") != "1" ||
+                !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(
+                    "AGENTIC_REVIEW_DEEPSEEK_API_KEY")) ||
+                !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(
+                    "AGENTIC_REVIEW_R3_STATE_KEY_B64")) ||
+                runnerTemp is null ||
+                workspace is null ||
+                !Path.IsPathFullyQualified(runnerTemp) ||
+                !Path.IsPathFullyQualified(workspace) ||
+                !VerifierArguments.TryParse(args.Skip(1).ToArray(), out var command) ||
+                command is null ||
+                command.Verb != "live-supervise" ||
+                command.ExecutionKind != VerifierExecutionKinds.NativeAot ||
+                !VerifierBuildPairDomain.TryAdmit(command, out var buildPair) ||
+                buildPair is null ||
+                !StringComparer.Ordinal.Equals(
+                    command.Root,
+                    Path.Join(runnerTemp, "r3-live-proof-sensitive")) ||
+                !StringComparer.Ordinal.Equals(
+                    command.Corpus,
+                    Path.Join(
+                        workspace,
+                        "runtime",
+                        "tests",
+                        "fixtures",
+                        "agent",
+                        "r3-quality",
+                        "corpus.json")) ||
+                !StringComparer.Ordinal.Equals(
+                    command.Output,
+                    Path.Join(
+                        runnerTemp,
+                        "r3-live-proof-sensitive",
+                        "private",
+                        "completion.json")))
+            {
+                return 2;
+            }
+            Console.Out.WriteLine("APR_R3_TRUSTED_LIVE_DISPATCH_OK");
+            return 0;
+        }
         if (args is ["launcher-grandchild"])
         {
             await Task.Delay(Timeout.InfiniteTimeSpan);
@@ -635,16 +868,36 @@ internal static class TrustedLiveLauncherProbe
             "AGENTIC_REVIEW_DEEPSEEK_API_KEY");
         var state = Environment.GetEnvironmentVariable(
             "AGENTIC_REVIEW_R3_STATE_KEY_B64");
+        if (args.Contains("emit-provider-large") && provider is not null)
+        {
+            Console.Out.Write(new string('x', 70 * 1024));
+            Console.Out.Write(provider);
+            return 1;
+        }
+        if (args.Contains("emit-provider") && provider is not null)
+        {
+            Console.Error.Write(provider);
+            return 1;
+        }
+        if (args.Contains("write-provider-file") && provider is not null)
+        {
+            File.WriteAllText(
+                Path.Join(Environment.CurrentDirectory, "provider.leak"),
+                provider);
+            return 1;
+        }
         using var stream = new MemoryStream();
         using (var writer = new System.Text.Json.Utf8JsonWriter(stream))
         {
             writer.WriteStartObject();
             writer.WriteBoolean(
                 "provider_in_arguments",
-                provider is not null && args.Contains(provider));
+                provider is not null && args.Any(argument =>
+                    argument.Contains(provider, StringComparison.Ordinal)));
             writer.WriteBoolean(
                 "state_in_arguments",
-                state is not null && args.Contains(state));
+                state is not null && args.Any(argument =>
+                    argument.Contains(state, StringComparison.Ordinal)));
             writer.WriteStartArray("environment_names");
             foreach (var name in Environment.GetEnvironmentVariables().Keys
                          .OfType<string>()
