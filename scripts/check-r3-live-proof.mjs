@@ -24,6 +24,11 @@ const exactLineageRun = [
   '[[ "${WORKFLOW_SHA}" == "${ACTUAL_SHA}" ]]',
   '',
 ].join('\n');
+const exactAotDependenciesRun = [
+  'sudo apt-get update',
+  'sudo apt-get install -y clang zlib1g-dev',
+  '',
+].join('\n');
 const exactProvenanceRun = [
   'set -euo pipefail',
   '[[ "$(git remote get-url origin)" == "https://github.com/SolusQuest/agentic-pr-review" ]]',
@@ -177,6 +182,7 @@ export function checkTrustedLivePolicy() {
     'Admit the workflow lineage',
     'Checkout the exact authorized commit',
     'Set up the reviewed .NET SDK',
+    'Install AOT build dependencies',
     'Prove exact source provenance',
     'Prepare the exact trusted-live artifact without secrets',
     'Run the deterministic preflight without secrets',
@@ -237,14 +243,20 @@ export function checkTrustedLivePolicy() {
     fail('APR_R3_LIVE_POLICY_SETUP_INVALID');
   }
 
-  if (job.steps[3].run !== exactProvenanceRun) {
+  const installAotDependencies = job.steps[3];
+  exactKeys(installAotDependencies, ['name', 'run'], 'APR_R3_LIVE_POLICY_AOT_DEPENDENCIES_INVALID');
+  if (installAotDependencies.run !== exactAotDependenciesRun) {
+    fail('APR_R3_LIVE_POLICY_AOT_DEPENDENCIES_INVALID');
+  }
+
+  if (job.steps[4].run !== exactProvenanceRun) {
     fail('APR_R3_LIVE_POLICY_PROVENANCE_INVALID');
   }
 
   if (
-    job.steps[4].run !== 'bash runtime/scripts/verify-live-agent.sh live --prepare' ||
-    job.steps[5].run !== 'bash runtime/scripts/verify-live-agent.sh deterministic' ||
-    job.steps[6].run !== exactReadmissionRun
+    job.steps[5].run !== 'bash runtime/scripts/verify-live-agent.sh live --prepare' ||
+    job.steps[6].run !== 'bash runtime/scripts/verify-live-agent.sh deterministic' ||
+    job.steps[7].run !== exactReadmissionRun
   ) {
     fail('APR_R3_LIVE_POLICY_PREFLIGHT_INVALID');
   }

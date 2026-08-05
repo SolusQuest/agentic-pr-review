@@ -44,6 +44,11 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Install AOT build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang zlib1g-dev
+
       - name: Prove exact source provenance
         env:
           ACTUAL_SHA: ${{ github.sha }}

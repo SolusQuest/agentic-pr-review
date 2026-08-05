@@ -73,6 +73,7 @@ describe('trusted live workflow policy', () => {
     ['actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803', 'actions/checkout@v6'],
     ['          ref: ${{ github.sha }}', '          ref: refs/heads/main'],
     ['          persist-credentials: false', '          persist-credentials: true'],
+    ['sudo apt-get install -y clang zlib1g-dev', 'sudo apt-get install -y clang'],
     ['  contents: read', '  contents: write'],
     ['  workflow_dispatch:', '  pull_request_target:'],
     [
