@@ -81,7 +81,16 @@ internal static class VerifierArchitectureProof
     private static readonly HashSet<string> ForbiddenTypes = new(
         [
             "AgenticPrReview.Runtime.LiveRuntimeApplication",
+            "AgenticPrReview.Runtime.LiveInvocation",
             "AgenticPrReview.Runtime.ILiveProviderExecutor",
+            "AgenticPrReview.Runtime.ILiveProviderExecutorFactory",
+            "AgenticPrReview.Runtime.DefaultLiveProviderExecutorFactory",
+            "AgenticPrReview.Runtime.ProviderRequestMessage",
+            "AgenticPrReview.Runtime.ProviderRequestPlan",
+            "AgenticPrReview.Runtime.ProviderRequestPlanDecoder",
+            "AgenticPrReview.Runtime.ProviderExecutionObservation",
+            "AgenticPrReview.Runtime.SyntheticLiveProviderExecutor",
+            "AgenticPrReview.Runtime.DeepSeekProviderContract",
             "AgenticPrReview.Runtime.DeepSeekLiveProviderExecutor",
             "AgenticPrReview.Runtime.R3LiveAgentApplication",
             "AgenticPrReview.Runtime.Agent.Loop.AgentLoop",

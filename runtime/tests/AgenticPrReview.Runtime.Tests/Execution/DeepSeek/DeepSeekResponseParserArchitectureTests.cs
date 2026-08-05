@@ -237,8 +237,6 @@ public sealed partial class DeepSeekTransportArchitectureTests
             candidate == typeof(DeepSeekCredential) ||
             candidate == typeof(DeepSeekTransport) ||
             candidate == typeof(IDeepSeekTransport) ||
-            candidate == typeof(DeepSeekProviderContract) ||
-            candidate == typeof(DeepSeekLiveProviderExecutor) ||
             name.StartsWith(
                 "AgenticPrReview.Runtime.Agent",
                 StringComparison.Ordinal) &&

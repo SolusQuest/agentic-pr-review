@@ -139,7 +139,7 @@ public sealed partial class AgentCapabilityArchitectureTests
     }
 
     [Fact]
-    public void FreshProcessCommandHasOneExternalRuntimeDispatch()
+    public void LiveAgentVerifierFreshProcessCommandHasOneExternalRuntimeDispatch()
     {
         var family = FreshProcessTypes().ToHashSet();
         var calls = typeof(RuntimeApplication).Assembly.GetTypes()
@@ -180,7 +180,7 @@ public sealed partial class AgentCapabilityArchitectureTests
     }
 
     [Fact]
-    public void FreshProcessFamilyHasNoOtherRuntimeReverseDependencies()
+    public void LiveAgentVerifierFreshProcessFamilyHasNoOtherRuntimeReverseDependencies()
     {
         var family = FreshProcessTypes().ToHashSet();
         var violations = new List<string>();
