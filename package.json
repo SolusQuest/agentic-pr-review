@@ -8,6 +8,7 @@
     "dist:check": "node scripts/check-no-public-action.mjs",
     "format:check": "prettier --check .",
     "format": "prettier --write .",
+    "r3:live:policy": "node scripts/check-r3-live-proof.mjs",
     "runtime:verify": "bash runtime/scripts/verify-runtime.sh all",
     "runtime:integration": "node scripts/run-runtime-integration.mjs",
     "typecheck": "tsc --noEmit",
@@ -20,6 +21,7 @@
     "esbuild": "^0.28.1",
     "prettier": "^3.0.0",
     "typescript": "^5.0.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "yaml": "^2.9.0"
   }
 }

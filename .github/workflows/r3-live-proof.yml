@@ -1,0 +1,82 @@
+name: R3 Trusted Live Proof
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: r3-trusted-live-proof
+  cancel-in-progress: false
+
+jobs:
+  live-proof:
+    if: >-
+      github.repository == 'SolusQuest/agentic-pr-review' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment:
+      name: r3-live-proof
+      deployment: false
+    steps:
+      - name: Admit the workflow lineage
+        env:
+          ACTUAL_SHA: ${{ github.sha }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          set -euo pipefail
+          [[ "${ACTUAL_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${WORKFLOW_REF}" == "SolusQuest/agentic-pr-review/.github/workflows/r3-live-proof.yml@refs/heads/main" ]]
+          [[ "${WORKFLOW_SHA}" == "${ACTUAL_SHA}" ]]
+
+      - name: Checkout the exact authorized commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Set up the reviewed .NET SDK
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          global-json-file: global.json
+
+      - name: Install AOT build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang zlib1g-dev
+
+      - name: Prove exact source provenance
+        env:
+          ACTUAL_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$(git remote get-url origin)" == "https://github.com/SolusQuest/agentic-pr-review" ]]
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+          [[ "$(git rev-parse HEAD)" == "${ACTUAL_SHA}" ]]
+          git merge-base --is-ancestor "${ACTUAL_SHA}" refs/remotes/origin/main
+          [[ -z "$(git status --porcelain=v1 --untracked-files=all)" ]]
+
+      - name: Prepare the exact trusted-live artifact without secrets
+        run: bash runtime/scripts/verify-live-agent.sh live --prepare
+
+      - name: Run the deterministic preflight without secrets
+        run: bash runtime/scripts/verify-live-agent.sh deterministic
+
+      - name: Re-admit source and the prepared artifact without secrets
+        env:
+          ACTUAL_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "${ACTUAL_SHA}" ]]
+          git merge-base --is-ancestor "${ACTUAL_SHA}" refs/remotes/origin/main
+          [[ -z "$(git status --porcelain=v1 --untracked-files=all)" ]]
+          bash runtime/scripts/verify-live-agent.sh live --verify-prepared
+
+      - name: Run the bounded trusted live proof
+        env:
+          AGENTIC_REVIEW_DEEPSEEK_API_KEY: ${{ secrets.R3_LIVE_PROOF_DEEPSEEK_API_KEY }}
+        run: exec runtime/scripts/verify-live-agent.sh live

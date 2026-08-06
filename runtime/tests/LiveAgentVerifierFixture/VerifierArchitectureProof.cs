@@ -165,7 +165,7 @@ internal static class VerifierArchitectureProof
         var passed = forbiddenAbsent &&
             TransportCallsValid(transportCalls) &&
             factoryTypes == 1 &&
-            profileTypes == 1;
+            profileTypes == 2;
         return new VerifierArchitectureReceipt(
             "apr-r3-live-agent-architecture-receipt-v1",
             buildPair.ExecutionKind,

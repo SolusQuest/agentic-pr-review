@@ -199,6 +199,12 @@ internal static class VerifierArguments
             "must-not-find" => VerifierScenario.MustNotFind,
             "continuation-seed" => VerifierScenario.ContinuationSeed,
             "continuation-restore" => VerifierScenario.ContinuationRestore,
+            "trusted-must-find" => VerifierScenario.MustFind,
+            "trusted-must-not-find" => VerifierScenario.MustNotFind,
+            "trusted-continuation-seed" =>
+                VerifierScenario.ContinuationSeed,
+            "trusted-continuation-restore" =>
+                VerifierScenario.ContinuationRestore,
             "canary-routing" => VerifierScenario.CanaryRouting,
             "negative-outer-authorization-denied" =>
                 VerifierScenario.OuterAuthorizationDenied,
@@ -226,7 +232,8 @@ internal static class VerifierArguments
         if (scenario is null && args[0] is not (
                 "aggregate" or
                 "architecture" or
-                "negative-replacement-write-failed") ||
+                "negative-replacement-write-failed" or
+                "live-supervise") ||
             values.Keys.Any(key => key is not (
                 "--root" or
                 "--corpus" or

@@ -6,6 +6,30 @@
 
 set -euo pipefail
 
+# The secret-bearing workflow invokes this exact branch. Bash performs only
+# parameter expansion before replacing itself with the already prepared and
+# admitted C# supervisor; no helper process inherits the provider credential.
+if [[ "${1:-}" == live && "$#" -eq 1 ]]; then
+  prepared_root="${RUNNER_TEMP:?}/r3-live-proof-build"
+  sensitive_root="${RUNNER_TEMP}/r3-live-proof-sensitive"
+  supervisor="${prepared_root}/publish/AgenticPrReview.Runtime.LiveAgentVerifierFixture"
+  live_arguments=(
+    live-supervise
+    --root "${sensitive_root}"
+    --corpus "${GITHUB_WORKSPACE:?}/runtime/tests/fixtures/agent/r3-quality/corpus.json"
+    --output "${sensitive_root}/private/completion.json"
+    --execution-kind native-aot
+    --execution-artifact "${supervisor}"
+    --build-pair-manifest "${prepared_root}/build-pair.json"
+  )
+  if [[ "${APR_R3_TRUSTED_LIVE_DISPATCH_PROBE:-}" == 1 ]]; then
+    [[ -z "${AGENTIC_REVIEW_DEEPSEEK_API_KEY:-}" ]]
+    [[ -z "${AGENTIC_REVIEW_R3_STATE_KEY_B64:-}" ]]
+    exec "${supervisor}" launcher-dispatch-probe "${live_arguments[@]}"
+  fi
+  exec "${supervisor}" "${live_arguments[@]}"
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 RUNTIME_TESTS="${REPO_ROOT}/runtime/tests"
@@ -642,6 +666,119 @@ run_deterministic() {
   _run_repeated_proof APR_R3_LIVE_DETERMINISTIC_OK "${build_root}"
 }
 
+_live_prepared_root() {
+  [[ -n "${RUNNER_TEMP:-}" && "${RUNNER_TEMP}" != / ]] ||
+    _fail APR_R3_TRUSTED_LIVE_RUNNER_TEMP_INVALID
+  printf '%s/r3-live-proof-build\n' "${RUNNER_TEMP%/}"
+}
+
+_require_live_linux() {
+  [[ "$(uname -s)" == Linux ]] ||
+    _fail APR_R3_TRUSTED_LIVE_PLATFORM_INVALID
+  [[ ! -r /proc/sys/kernel/osrelease ]] ||
+    [[ "$(tr '[:upper:]' '[:lower:]' </proc/sys/kernel/osrelease)" != *microsoft* ]] ||
+    _fail APR_R3_TRUSTED_LIVE_PLATFORM_INVALID
+}
+
+_load_live_prepared() {
+  local build_root
+  build_root="$(_live_prepared_root)"
+  EXECUTION_KIND=native-aot
+  EXECUTION_ARTIFACT="${build_root}/publish/${ASSEMBLY}"
+  ARCHITECTURE_ASSEMBLY="${build_root}/aot-intermediate/${ASSEMBLY}.dll"
+  BUILD_PAIR_MANIFEST="${build_root}/build-pair.json"
+  RUNNER=("${EXECUTION_ARTIFACT}")
+  _require_file live-supervisor "${EXECUTION_ARTIFACT}"
+  [[ -x "${EXECUTION_ARTIFACT}" ]] ||
+    _fail APR_R3_TRUSTED_LIVE_SUPERVISOR_INVALID
+  _require_file live-architecture "${ARCHITECTURE_ASSEMBLY}"
+  _require_file live-build-pair "${BUILD_PAIR_MANIFEST}"
+}
+
+run_live_prepare() {
+  _require_live_linux
+  _prepare_common
+  local build_root publish_output intermediate_output
+  build_root="$(_live_prepared_root)"
+  publish_output="${build_root}/publish"
+  intermediate_output="${build_root}/aot-intermediate"
+  [[ ! -e "${build_root}" ]] ||
+    _fail APR_R3_TRUSTED_LIVE_PREPARED_ROOT_EXISTS
+  mkdir -p -- "${build_root}"
+  _verify_aot_warning_audit "${build_root}"
+  if ! "${DOTNET_CMD}" publish "${PROJECT}" \
+      --configuration Release --nologo \
+      --runtime linux-x64 --self-contained true \
+      --artifacts-path "${build_root}/artifacts" \
+      -o "${publish_output}" \
+      -p:PublishAot=true \
+      -p:JsonSerializerIsReflectionEnabledByDefault=false \
+      -warnaserror \
+      -warnnotaserror:IL3058 \
+      -p:LiveAgentVerifierAotIntermediateDirectory="${intermediate_output}" \
+      >"${build_root}/publish.log" 2>&1; then
+    tail -n 80 "${build_root}/publish.log" >&2
+    _fail APR_R3_TRUSTED_LIVE_BUILD_FAILED
+  fi
+  _audit_aot_warnings "${build_root}/publish.log"
+  EXECUTION_KIND=native-aot
+  EXECUTION_ARTIFACT="${publish_output}/${ASSEMBLY}"
+  ARCHITECTURE_ASSEMBLY="${intermediate_output}/${ASSEMBLY}.dll"
+  RUNNER=("${EXECUTION_ARTIFACT}")
+  _require_file live-supervisor "${EXECUTION_ARTIFACT}"
+  [[ -x "${EXECUTION_ARTIFACT}" ]] ||
+    _fail APR_R3_TRUSTED_LIVE_SUPERVISOR_INVALID
+  _require_file live-architecture "${ARCHITECTURE_ASSEMBLY}"
+  _write_build_pair "${build_root}"
+  run_live_verify_prepared
+  printf '%s\n' APR_R3_TRUSTED_LIVE_PREPARED_OK
+}
+
+run_live_verify_prepared() {
+  _require_live_linux
+  _prepare_common
+  _load_live_prepared
+  local verification_root output log
+  _new_tempdir verification_root
+  mkdir -p -- "${verification_root}/private"
+  output="${verification_root}/private/architecture.json"
+  log="${verification_root}/architecture.log"
+  _run_fixture "${verification_root}" architecture "${verification_root}" \
+    "${output}" "${log}" \
+    --architecture-assembly "${ARCHITECTURE_ASSEMBLY}" ||
+    _fail APR_R3_TRUSTED_LIVE_PREPARED_INVALID
+  _assert_phase_marker "${log}" APR_R3_LIVE_ARCHITECTURE_OK ||
+    _fail APR_R3_TRUSTED_LIVE_ARCHITECTURE_INVALID
+  printf '%s\n' APR_R3_TRUSTED_LIVE_PREPARED_VERIFIED
+}
+
+run_live_dry_run() {
+  [[ -z "${AGENTIC_REVIEW_DEEPSEEK_API_KEY:-}" ]] ||
+    _fail APR_R3_TRUSTED_LIVE_DRY_RUN_SECRET_PRESENT
+  [[ -z "${AGENTIC_REVIEW_R3_STATE_KEY_B64:-}" ]] ||
+    _fail APR_R3_TRUSTED_LIVE_DRY_RUN_SECRET_PRESENT
+  _require_live_linux
+  local dry_runner_temp test_project
+  _new_tempdir dry_runner_temp
+  RUNNER_TEMP="${dry_runner_temp}"
+  export RUNNER_TEMP
+  run_live_prepare
+  APR_R3_TRUSTED_LIVE_DISPATCH_PROBE=1 \
+    GITHUB_WORKSPACE="${REPO_ROOT}" \
+    bash "${REPO_ROOT}/runtime/scripts/verify-live-agent.sh" live |
+    grep -Fxq APR_R3_TRUSTED_LIVE_DISPATCH_OK ||
+    _fail APR_R3_TRUSTED_LIVE_DISPATCH_INVALID
+  node "${REPO_ROOT}/scripts/check-r3-live-proof.mjs" ||
+    _fail APR_R3_TRUSTED_LIVE_POLICY_FAILED
+  test_project="${TEST_PROJECT}"
+  "${DOTNET_CMD}" test "${test_project}" --configuration Release --nologo \
+    --filter 'FullyQualifiedName~TrustedLive' \
+    >"${dry_runner_temp}/trusted-live-tests.log" 2>&1 ||
+    _fail APR_R3_TRUSTED_LIVE_TESTS_FAILED
+  _cleanup || _fail APR_R3_TRUSTED_LIVE_CLEANUP_FAILED
+  printf '%s\n' APR_R3_TRUSTED_LIVE_DRY_RUN_OK
+}
+
 _audit_aot_warnings() {
   local log="$1"
   local announce="${2:-yes}"
@@ -780,8 +917,16 @@ subcommand="${1:-}"
 case "${subcommand}" in
   deterministic) run_deterministic ;;
   aot) run_aot ;;
+  live)
+    case "${2:-}" in
+      --prepare) [[ "$#" -eq 2 ]] && run_live_prepare ;;
+      --verify-prepared) [[ "$#" -eq 2 ]] && run_live_verify_prepared ;;
+      --dry-run) [[ "$#" -eq 2 ]] && run_live_dry_run ;;
+      *) _fail APR_R3_TRUSTED_LIVE_COMMAND_INVALID ;;
+    esac
+    ;;
   -h|--help|help)
-    printf '%s\n' 'Usage: verify-live-agent.sh [deterministic|aot]'
+    printf '%s\n' 'Usage: verify-live-agent.sh [deterministic|aot|live [--prepare|--verify-prepared|--dry-run]]'
     ;;
   *)
     printf 'APR_R3_LIVE_COMMAND_INVALID %s\n' "${subcommand:-missing}" >&2
