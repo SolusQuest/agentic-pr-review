@@ -216,6 +216,56 @@ public sealed partial class R3LiveAgentApplicationTests
         Assert.False(observer.ProofPassed);
     }
 
+    [Theory]
+    [InlineData("commit_result", AgentSessionCodes.RecordInvalid)]
+    [InlineData("commit_exception", R3LiveAgentDiagnosticCodes.StateCommitFailed)]
+    [InlineData("result_projection_exception", R3LiveAgentDiagnosticCodes.ResultFailed)]
+    public async Task FailureAfterCompletedQualityKeepsTheActualPrimaryCause(
+        string failureMode,
+        string expected)
+    {
+        using var snapshot = SnapshotDirectory();
+        File.WriteAllText(
+            Path.Join(snapshot.Path, "a.txt"),
+            RepositoryFact + "\n",
+            new UTF8Encoding(false));
+        var observer = new VerifierCommitObserver(
+            VerifierScenario.MustNotFind,
+            PassingVerifierQualityCase(),
+            R3QualityFreshProcessTwoInputSet.Capture([]));
+        observer.SetInner(new ControlledStateCommitCoordinator(failureMode));
+        var stageObserver = failureMode == "result_projection_exception"
+            ? new ThrowingDiagnosticStageObserver(
+                R3LiveAgentDiagnosticCodes.ResultFailed)
+            : null;
+        var execution = await new R3LiveAgentApplication(
+            new R3LiveAgentDependencies(
+                new CountingSecretSource(new R3LiveAgentSecrets(
+                    ProviderSecret,
+                    StateSecret)),
+                new R3LiveAgentStateRestorer(),
+                new TestingTransportFactory(
+                    new GroundedReviewHandler(ProviderSecret)),
+                new CountingFileAccessFactory(),
+                observer,
+                TimeProvider.System,
+                stageObserver))
+            .RunAsync(
+                Request(
+                    snapshot.Path,
+                    Path.Join(snapshot.Path, "state-does-not-exist")),
+                CancellationToken.None);
+
+        Assert.Equal("passed", observer.Outcome?.Status);
+        Assert.Equal(R3QualityCodes.Passed, observer.Outcome?.Code);
+        Assert.Equal(
+            expected,
+            TrustedLiveDomain.FailureOutcomeCode(
+                execution.DiagnosticCode,
+                execution.Result.Code,
+                observer.Outcome));
+    }
+
     [Fact]
     public async Task EveryStableScopeFieldAndTrustFactIsIndependentlyDenied()
     {
@@ -799,6 +849,30 @@ public sealed partial class R3LiveAgentApplicationTests
             stateCommitCoordinator ?? new CapturingStateCommitCoordinator(),
             TimeProvider.System);
 
+    private static R3QualityCase PassingVerifierQualityCase()
+    {
+        var corpusPath = Path.Join(
+            AppContext.BaseDirectory,
+            "fixtures",
+            "agent",
+            "r3-quality",
+            "corpus.json");
+        Assert.True(R3QualityCorpusParser.TryParse(
+            File.ReadAllBytes(corpusPath),
+            out var corpus,
+            out var failure),
+            failure?.ToString());
+        var source = Assert.Single(
+            corpus!.Cases,
+            item => item.Kind == R3QualityCaseKind.MustNotFind);
+        return source with
+        {
+            ReviewedIdentity = Identity,
+            InitialContext = "Review the selected snapshot.",
+            ProcessOneContext = null,
+        };
+    }
+
     private static R3LiveAgentRequest Request(
         string snapshotRoot,
         string stateRoot)
@@ -1007,6 +1081,34 @@ public sealed partial class R3LiveAgentApplicationTests
                 new string('d', 64),
                 handoffReady: true);
         }
+    }
+
+    private sealed class ControlledStateCommitCoordinator(string failureMode)
+        : ILiveAgentStateCommitCoordinator
+    {
+        public LiveAgentStateCommitResult Commit(
+            LiveAgentCandidate candidate,
+            AuthorizedStateAccess access,
+            AcceptedLineage? priorLineage,
+            AgentSessionHeadTransition authorizedTransition,
+            string stateRoot,
+            IRestrictedStateKeyResolver keyResolver,
+            CancellationToken cancellationToken) => failureMode switch
+            {
+                "commit_result" => LiveAgentStateCommitResult.Failure(
+                    AgentSessionCodes.RecordInvalid),
+                "commit_exception" => throw new InvalidOperationException(
+                    "synthetic commit failure"),
+                "result_projection_exception" =>
+                    new LiveAgentStateCommitResult(
+                        R3LiveAgentCodes.Completed,
+                        0,
+                        new string('c', 64),
+                        new string('d', 64),
+                        handoffReady: true),
+                _ => throw new InvalidOperationException(
+                    "Unknown controlled commit mode."),
+            };
     }
 
     private sealed class TestingTransportFactory(HttpMessageHandler handler)

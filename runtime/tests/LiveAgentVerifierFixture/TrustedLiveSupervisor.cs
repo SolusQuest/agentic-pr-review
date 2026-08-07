@@ -550,64 +550,44 @@ internal static class TrustedLiveSupervisor
             return TrustedLiveCodes.Infrastructure;
         }
         var qualityCode = receipt.QualityCode;
-        if (qualityCode is
-            "r3_quality_required_tool_missing" or
-            "r3_quality_required_tool_wrong")
+        if (receipt.OutcomeCode == qualityCode)
         {
-            return TrustedLiveCodes.MissingTool;
-        }
-        if (qualityCode == "r3_quality_required_observation_missing")
-        {
-            return TrustedLiveCodes.Grounding;
-        }
-        if (qualityCode == "r3_quality_expected_finding_missing")
-        {
-            return TrustedLiveCodes.MustFind;
-        }
-        if (qualityCode == "r3_quality_prohibited_finding")
-        {
-            return TrustedLiveCodes.MustNotFind;
-        }
-        if (qualityCode is
-            "r3_quality_prior_fact_missing" or
-            "r3_quality_state_failed")
-        {
-            return TrustedLiveCodes.Continuation;
+            if (qualityCode is
+                "r3_quality_required_tool_missing" or
+                "r3_quality_required_tool_wrong")
+            {
+                return TrustedLiveCodes.MissingTool;
+            }
+            if (qualityCode == "r3_quality_required_observation_missing")
+            {
+                return TrustedLiveCodes.Grounding;
+            }
+            if (qualityCode == "r3_quality_expected_finding_missing")
+            {
+                return TrustedLiveCodes.MustFind;
+            }
+            if (qualityCode == "r3_quality_prohibited_finding")
+            {
+                return TrustedLiveCodes.MustNotFind;
+            }
+            if (qualityCode is
+                "r3_quality_prior_fact_missing" or
+                "r3_quality_state_failed")
+            {
+                return TrustedLiveCodes.Continuation;
+            }
+            if (receipt.QualityClassification == "provider" ||
+                qualityCode == "r3_quality_provider_failed")
+            {
+                return TrustedLiveCodes.Provider;
+            }
         }
         var productCode = receipt.ProductCode;
-        if (productCode is
-            AgentSessionCodes.TransitionRejected or
-            AgentSessionCodes.ContinuationInvalid)
+        if (TrustedLiveDomain.TryClassifyProductFailure(
+                productCode,
+                out var classification))
         {
-            return TrustedLiveCodes.Continuation;
-        }
-        if (productCode is
-            AgentSessionCodes.ScopeMismatch or
-            AgentSessionCodes.RecordInvalid or
-            AgentSessionCodes.ClassificationInvalid or
-            AgentSessionCodes.AssociationInvalid)
-        {
-            return TrustedLiveCodes.Grounding;
-        }
-        if (receipt.QualityClassification == "provider" ||
-            qualityCode == "r3_quality_provider_failed" ||
-            productCode is
-                "agent_chat_failed" or
-                "r3_live_secret_invalid")
-        {
-            return TrustedLiveCodes.Provider;
-        }
-        if (productCode is
-            "agent_unknown_tool" or
-            "agent_tool_arguments_invalid")
-        {
-            return TrustedLiveCodes.MissingTool;
-        }
-        if (productCode is
-            "agent_terminal_sequence_invalid" or
-            "agent_terminal_invalid")
-        {
-            return TrustedLiveCodes.Grounding;
+            return classification;
         }
         return TrustedLiveCodes.Infrastructure;
     }

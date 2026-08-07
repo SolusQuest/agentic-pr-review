@@ -546,8 +546,10 @@ internal static class Program
                         TrustedLiveSuccessCodes.ContinuationRestore,
                     _ => TrustedLiveCodes.Infrastructure,
                 }
-                : quality?.Code ?? result.DiagnosticCode ??
-                    product?.Code ?? TrustedLiveCodes.Infrastructure;
+                : TrustedLiveDomain.FailureOutcomeCode(
+                    result.DiagnosticCode,
+                    product?.Code ?? result.DiagnosticCode,
+                    quality);
             var receipt = new TrustedLivePhaseReceipt(
                 scenario.ToString(),
                 passed ? "passed" : "failed",

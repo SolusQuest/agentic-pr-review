@@ -320,15 +320,121 @@ internal static class TrustedLiveDomain
             R3LiveAgentDiagnosticCodes.ResultFailed,
         };
 
+    private static readonly HashSet<string> nonFailureProductCodes =
+        new(StringComparer.Ordinal)
+        {
+            R3LiveAgentCodes.Completed,
+            RestrictedStateCodes.Authorized,
+            RestrictedStateCodes.Enumerated,
+            RestrictedStateCodes.Prepared,
+            RestrictedStateCodes.Absent,
+            RestrictedStateCodes.Restored,
+            RestrictedStateCodes.Accepted,
+            RestrictedStateCodes.Idempotent,
+            RestrictedStateCodes.Reset,
+            RestrictedStateCodes.HandoffReady,
+            AgentSessionCodes.BootstrapAbsent,
+            AgentSessionCodes.ResetExplicit,
+        };
+
+    private static readonly Dictionary<string, string>
+        productFailureClassifications = new(StringComparer.Ordinal);
+
     static TrustedLiveDomain()
     {
         productCodes.UnionWith(RestrictedStateCodes.All);
+        AddFailureClassification(
+            TrustedLiveCodes.Cleanup,
+            R3LiveAgentCodes.HandoffCleanupFailed,
+            RestrictedStateCodes.CleanupFailed);
+        AddFailureClassification(
+            TrustedLiveCodes.Continuation,
+            LiveAgentFreshProcessCodes.LineageInvalid,
+            LiveAgentFreshProcessCodes.TransitionRejected,
+            LiveAgentFreshProcessCodes.ProcessIdentityReused,
+            RestrictedStateCodes.ExplicitMissing,
+            RestrictedStateCodes.CurrentMissing,
+            RestrictedStateCodes.Expired,
+            RestrictedStateCodes.ReplayRejected,
+            AgentSessionCodes.ContinuationInvalid);
+        AddFailureClassification(
+            TrustedLiveCodes.Grounding,
+            AgentFailureCodes.TerminalSequenceInvalid,
+            AgentFailureCodes.TerminalInvalid,
+            AgentSessionCodes.ScopeMismatch,
+            AgentSessionCodes.RecordInvalid,
+            AgentSessionCodes.ClassificationInvalid,
+            AgentSessionCodes.AssociationInvalid);
+        AddFailureClassification(
+            TrustedLiveCodes.Provider,
+            R3LiveAgentCodes.SecretInvalid,
+            AgentFailureCodes.ChatFailed);
+        AddFailureClassification(
+            TrustedLiveCodes.MissingTool,
+            AgentFailureCodes.UnknownTool,
+            AgentFailureCodes.ToolArgumentsInvalid);
+        AddFailureClassification(
+            TrustedLiveCodes.Infrastructure,
+            R3LiveAgentCodes.InputInvalid,
+            R3LiveAgentCodes.CompositionFailed,
+            R3LiveAgentCodes.HandoffUnavailable,
+            LiveAgentFreshProcessCodes.UsageInvalid,
+            LiveAgentFreshProcessCodes.AuthorizationInvalid,
+            LiveAgentFreshProcessCodes.RootInvalid,
+            LiveAgentFreshProcessCodes.InputInvalid,
+            LiveAgentFreshProcessCodes.TransportProofFailed,
+            LiveAgentFreshProcessCodes.OutputFailed,
+            AgentFailureCodes.Cancelled,
+            AgentFailureCodes.DeadlineExceeded,
+            AgentFailureCodes.ModelLimit,
+            AgentFailureCodes.ToolLimit,
+            AgentFailureCodes.TokenLimit,
+            AgentFailureCodes.RequestTooLarge,
+            AgentFailureCodes.ResponseTooLarge,
+            AgentFailureCodes.UsageInvalid,
+            AgentFailureCodes.ResponseInvalid,
+            AgentFailureCodes.ToolPathInvalid,
+            AgentFailureCodes.ToolPathNotTracked,
+            AgentFailureCodes.ToolCursorInvalid,
+            AgentFailureCodes.ToolPathUnsafe,
+            AgentFailureCodes.ToolFileTooLarge,
+            AgentFailureCodes.ToolFileBinary,
+            AgentFailureCodes.ToolFileInvalidUtf8,
+            AgentFailureCodes.ToolFileLoneCr,
+            AgentFailureCodes.ToolIoFailed,
+            AgentFailureCodes.ToolResultLimit,
+            AgentSessionCodes.BootstrapIncompatible,
+            AgentSessionCodes.ExplicitMissing,
+            AgentSessionCodes.ExplicitIncompatible,
+            AgentSessionCodes.CurrentMalformed,
+            AgentSessionCodes.CurrentOversized,
+            AgentSessionCodes.ConstructionLimit,
+            RestrictedStateCodes.AccessDenied,
+            RestrictedStateCodes.EnumerationInvalid,
+            RestrictedStateCodes.Cancelled,
+            RestrictedStateCodes.EnvelopeInvalid,
+            RestrictedStateCodes.KeyUnavailable,
+            RestrictedStateCodes.AuthenticationFailed,
+            RestrictedStateCodes.Conflict,
+            RestrictedStateCodes.IoFailed);
+
+        var expectedFailures = productCodes
+            .Where(code => !nonFailureProductCodes.Contains(code))
+            .ToHashSet(StringComparer.Ordinal);
+        if (!expectedFailures.SetEquals(productFailureClassifications.Keys))
+        {
+            throw new InvalidOperationException(
+                "The trusted-live product failure classification is incomplete.");
+        }
     }
 
     internal static IReadOnlySet<string> ProductCodes => productCodes;
 
     internal static IReadOnlySet<string> ApplicationDiagnostics =>
         applicationDiagnostics;
+
+    internal static IReadOnlyDictionary<string, string>
+        ProductFailureClassifications => productFailureClassifications;
 
     internal static bool ReceiptIsAdmitted(TrustedLivePhaseReceipt receipt)
     {
@@ -363,24 +469,58 @@ internal static class TrustedLiveDomain
                         receipt.QualityCode == R3QualityCodes.Passed);
         }
 
-        if (receipt.QualityCode is not null)
-        {
-            return receipt.OutcomeCode == receipt.QualityCode;
-        }
-
         if (applicationDiagnostics.Contains(receipt.OutcomeCode))
         {
             return receipt.ProductCode == R3LiveAgentCodes.CompositionFailed;
         }
 
-        return receipt.OutcomeCode == receipt.ProductCode &&
-            ProductFailureCodeIsAdmitted(receipt.ProductCode);
+        if (ProductFailureCodeIsAdmitted(receipt.ProductCode))
+        {
+            return receipt.OutcomeCode == receipt.ProductCode;
+        }
+
+        return receipt.ProductCode == R3LiveAgentCodes.Completed &&
+            receipt.QualityStatus is "failed" or "not_evaluated" &&
+            receipt.QualityCode is not null and not R3QualityCodes.Passed &&
+            receipt.OutcomeCode == receipt.QualityCode;
     }
 
     internal static string? ApplicationStage(string diagnosticCode) =>
         applicationDiagnostics.Contains(diagnosticCode)
             ? diagnosticCode
             : null;
+
+    internal static string FailureOutcomeCode(
+        string? applicationDiagnostic,
+        string? productCode,
+        R3QualityOutcome? quality)
+    {
+        if (applicationDiagnostic is not null &&
+            applicationDiagnostics.Contains(applicationDiagnostic))
+        {
+            return applicationDiagnostic;
+        }
+        if (productCode is not null &&
+            ProductFailureCodeIsAdmitted(productCode))
+        {
+            return productCode;
+        }
+        if (quality is
+            {
+                Status: "failed" or "not_evaluated",
+                Code: not R3QualityCodes.Passed,
+            })
+        {
+            return quality.Code;
+        }
+
+        return TrustedLiveCodes.Infrastructure;
+    }
+
+    internal static bool TryClassifyProductFailure(
+        string code,
+        out string classification) =>
+        productFailureClassifications.TryGetValue(code, out classification!);
 
     private static bool QualityIsAdmitted(TrustedLivePhaseReceipt receipt)
     {
@@ -431,19 +571,22 @@ internal static class TrustedLiveDomain
             _ => string.Empty,
         };
 
-    private static bool ProductFailureCodeIsAdmitted(string code) =>
-        code != R3LiveAgentCodes.Completed &&
-        code is not RestrictedStateCodes.Authorized and
-        not RestrictedStateCodes.Enumerated and
-        not RestrictedStateCodes.Prepared and
-        not RestrictedStateCodes.Absent and
-        not RestrictedStateCodes.Restored and
-        not RestrictedStateCodes.Accepted and
-        not RestrictedStateCodes.Idempotent and
-        not RestrictedStateCodes.Reset and
-        not RestrictedStateCodes.HandoffReady and
-        not AgentSessionCodes.BootstrapAbsent and
-        not AgentSessionCodes.ResetExplicit;
+    internal static bool ProductFailureCodeIsAdmitted(string code) =>
+        productFailureClassifications.ContainsKey(code);
+
+    private static void AddFailureClassification(
+        string classification,
+        params string[] codes)
+    {
+        foreach (var code in codes)
+        {
+            if (!productFailureClassifications.TryAdd(code, classification))
+            {
+                throw new InvalidOperationException(
+                    "The trusted-live product failure classification overlaps.");
+            }
+        }
+    }
 }
 
 internal static class TrustedLiveReceiptCodec

@@ -337,6 +337,11 @@ public sealed class TrustedLiveAgentTests : IDisposable
     [InlineData(AgentSessionCodes.TransitionRejected, null, null, TrustedLiveCodes.Continuation)]
     [InlineData(AgentSessionCodes.RecordInvalid, null, null, TrustedLiveCodes.Grounding)]
     [InlineData(AgentSessionCodes.CurrentMalformed, null, null, TrustedLiveCodes.Infrastructure)]
+    [InlineData(R3LiveAgentCodes.HandoffCleanupFailed, null, null, TrustedLiveCodes.Cleanup)]
+    [InlineData(RestrictedStateCodes.CleanupFailed, null, null, TrustedLiveCodes.Cleanup)]
+    [InlineData(RestrictedStateCodes.LineageMismatch, null, null, TrustedLiveCodes.Continuation)]
+    [InlineData(LiveAgentFreshProcessCodes.ProcessIdentityReused, null, null, TrustedLiveCodes.Continuation)]
+    [InlineData(RestrictedStateCodes.ReplayRejected, null, null, TrustedLiveCodes.Continuation)]
     public void FailureClassificationIsExhaustiveAndStable(
         string productCode,
         string? qualityClassification,
@@ -669,6 +674,47 @@ public sealed class TrustedLiveAgentTests : IDisposable
         Assert.Null(WriteAndReadReceipt(wrongApplicationProduct));
     }
 
+    [Fact]
+    public void FailedReceiptNeverPromotesACompletedQualityOutcome()
+    {
+        var qualityPassed = FailureReceipt(
+            AgentSessionCodes.RecordInvalid,
+            "quality",
+            R3QualityCodes.Passed) with
+        {
+            OutcomeCode = AgentSessionCodes.RecordInvalid,
+            QualityStatus = "passed",
+            FindingCount = 1,
+            QualityToolCallCount = 1,
+            TerminalSha256 = new string('f', 64),
+        };
+        var applicationFailed = qualityPassed with
+        {
+            OutcomeCode = R3LiveAgentDiagnosticCodes.StateCommitFailed,
+            ProductCode = R3LiveAgentCodes.CompositionFailed,
+        };
+        var staleQualityPrimary = qualityPassed with
+        {
+            OutcomeCode = R3QualityCodes.Passed,
+        };
+
+        Assert.NotNull(WriteAndReadReceipt(qualityPassed));
+        Assert.NotNull(WriteAndReadReceipt(applicationFailed));
+        Assert.Null(WriteAndReadReceipt(staleQualityPrimary));
+        Assert.Equal(
+            LiveAgentFreshProcessCodes.AuthorizationInvalid,
+            TrustedLiveDomain.FailureOutcomeCode(
+                LiveAgentFreshProcessCodes.AuthorizationInvalid,
+                LiveAgentFreshProcessCodes.AuthorizationInvalid,
+                quality: null));
+        Assert.Equal(
+            R3LiveAgentDiagnosticCodes.StateCommitFailed,
+            TrustedLiveDomain.FailureOutcomeCode(
+                R3LiveAgentDiagnosticCodes.StateCommitFailed,
+                AgentSessionCodes.RecordInvalid,
+                quality: null));
+    }
+
     [Theory]
     [InlineData(AgentSessionCodes.ContinuationInvalid, TrustedLiveCodes.Continuation)]
     [InlineData(AgentSessionCodes.TransitionRejected, TrustedLiveCodes.Continuation)]
@@ -692,6 +738,49 @@ public sealed class TrustedLiveAgentTests : IDisposable
                     FailedProcess(),
                     admitted,
                     CanaryDetected: false)));
+    }
+
+    [Theory]
+    [InlineData(R3LiveAgentCodes.HandoffCleanupFailed, TrustedLiveCodes.Cleanup)]
+    [InlineData(RestrictedStateCodes.CleanupFailed, TrustedLiveCodes.Cleanup)]
+    [InlineData(LiveAgentFreshProcessCodes.LineageInvalid, TrustedLiveCodes.Continuation)]
+    [InlineData(LiveAgentFreshProcessCodes.ProcessIdentityReused, TrustedLiveCodes.Continuation)]
+    [InlineData(RestrictedStateCodes.CurrentMissing, TrustedLiveCodes.Continuation)]
+    [InlineData(RestrictedStateCodes.Expired, TrustedLiveCodes.Continuation)]
+    [InlineData(RestrictedStateCodes.ExplicitMissing, TrustedLiveCodes.Continuation)]
+    [InlineData(RestrictedStateCodes.ReplayRejected, TrustedLiveCodes.Continuation)]
+    public void CleanupAndContinuationFailuresRemainClassifiedThroughAdmission(
+        string productCode,
+        string expected)
+    {
+        var receipt = FailureReceipt(
+            productCode,
+            qualityClassification: null,
+            qualityCode: null);
+        var buildPair = new VerifierBuildPair(
+            VerifierExecutionKinds.Framework,
+            receipt.ExecutionArtifactSha256,
+            new string('3', 64),
+            receipt.BuildPairSha256);
+        var phases = new List<TrustedLivePhaseReceipt>();
+
+        Assert.False(TrustedLiveSupervisor.TryAdmitPhase(
+            new TrustedLivePhaseExecution(
+                FailedProcess(),
+                receipt,
+                CanaryDetected: false,
+                ReceiptFilePresent: true),
+            VerifierScenario.MustFind,
+            buildPair,
+            phases,
+            out var code,
+            out var failure));
+
+        Assert.Equal(expected, code);
+        Assert.Empty(phases);
+        Assert.NotNull(failure);
+        Assert.Equal(productCode, failure.ProductCode);
+        Assert.Equal(productCode, failure.OutcomeCode);
     }
 
     [Fact]
@@ -782,6 +871,16 @@ public sealed class TrustedLiveAgentTests : IDisposable
             .ToHashSet(StringComparer.Ordinal);
         Assert.True(applicationCodes.SetEquals(
             TrustedLiveDomain.ApplicationDiagnostics));
+
+        var classifiedFailures = TrustedLiveDomain.ProductCodes
+            .Where(TrustedLiveDomain.ProductFailureCodeIsAdmitted)
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.True(classifiedFailures.SetEquals(
+            TrustedLiveDomain.ProductFailureClassifications.Keys));
+        Assert.All(classifiedFailures, code =>
+            Assert.True(TrustedLiveDomain.TryClassifyProductFailure(
+                code,
+                out _)));
     }
 
     [Fact]
