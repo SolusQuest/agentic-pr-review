@@ -361,6 +361,115 @@ public sealed class TrustedLiveAgentTests : IDisposable
                 new TrustedLivePhaseExecution(process, null, true)));
     }
 
+    [Fact]
+    public void FailedPhaseIsRetainedWithSanitizedEvidence()
+    {
+        var receipt = FailureReceipt(
+            R3LiveAgentCodes.CompositionFailed,
+            qualityClassification: null,
+            qualityCode: null) with
+        {
+            OutcomeCode = R3LiveAgentDiagnosticCodes.TransportFailed,
+        };
+        var buildPair = new VerifierBuildPair(
+            VerifierExecutionKinds.Framework,
+            receipt.ExecutionArtifactSha256,
+            new string('3', 64),
+            receipt.BuildPairSha256);
+        var execution = new TrustedLivePhaseExecution(
+            new TrustedLiveProcessResult(
+                1,
+                TimedOut: false,
+                Cancelled: false,
+                SensitiveBytesObserved: false,
+                OutputLimitExceeded: false,
+                string.Empty,
+                string.Empty),
+            receipt,
+            CanaryDetected: false,
+            DiagnosticCode: receipt.OutcomeCode);
+        var phases = new List<TrustedLivePhaseReceipt>();
+
+        Assert.False(TrustedLiveSupervisor.TryAdmitPhase(
+            execution,
+            VerifierScenario.MustFind,
+            buildPair,
+            phases,
+            out var code,
+            out var failure));
+
+        Assert.Equal(TrustedLiveCodes.Infrastructure, code);
+        Assert.Equal(receipt, Assert.Single(phases));
+        Assert.NotNull(failure);
+        Assert.Equal(TrustedLiveDiagnosticCodes.PhaseReceipt, failure.Kind);
+        Assert.Equal(
+            R3LiveAgentDiagnosticCodes.TransportFailed,
+            failure.DiagnosticCode);
+        Assert.Equal(R3LiveAgentCodes.CompositionFailed, failure.ProductCode);
+    }
+
+    [Fact]
+    public void CanaryFailureSuppressesAllReceiptFields()
+    {
+        var receipt = FailureReceipt(
+            "provider-canary",
+            qualityClassification: null,
+            qualityCode: null);
+        var buildPair = new VerifierBuildPair(
+            VerifierExecutionKinds.Framework,
+            receipt.ExecutionArtifactSha256,
+            new string('3', 64),
+            receipt.BuildPairSha256);
+        var execution = new TrustedLivePhaseExecution(
+            new TrustedLiveProcessResult(
+                1,
+                TimedOut: false,
+                Cancelled: false,
+                SensitiveBytesObserved: true,
+                OutputLimitExceeded: false,
+                string.Empty,
+                string.Empty),
+            receipt,
+            CanaryDetected: true,
+            DiagnosticCode: receipt.OutcomeCode);
+        var phases = new List<TrustedLivePhaseReceipt>();
+
+        Assert.False(TrustedLiveSupervisor.TryAdmitPhase(
+            execution,
+            VerifierScenario.MustFind,
+            buildPair,
+            phases,
+            out var code,
+            out var failure));
+
+        Assert.Equal(TrustedLiveCodes.Canary, code);
+        Assert.Empty(phases);
+        Assert.NotNull(failure);
+        Assert.Equal(TrustedLiveDiagnosticCodes.PhaseCanary, failure.Kind);
+        Assert.Null(failure.ProductCode);
+        Assert.Null(failure.OutcomeCode);
+        Assert.Null(failure.QualityClassification);
+        Assert.Null(failure.QualityCode);
+    }
+
+    [Theory]
+    [InlineData("ArgumentNullException", "phase_exception_argument")]
+    [InlineData("IOException", "phase_exception_io")]
+    [InlineData("UnauthorizedAccessException", "phase_exception_access")]
+    [InlineData("PlatformNotSupportedException", "phase_exception_unsupported")]
+    [InlineData("CryptographicException", "phase_exception_cryptography")]
+    [InlineData("JsonException", "phase_exception_json")]
+    [InlineData("Win32Exception", "phase_exception_process")]
+    [InlineData("InvalidOperationException", "phase_exception_other")]
+    public void RawExceptionTypesMapToStablePublicDiagnostics(
+        string exceptionType,
+        string expected)
+    {
+        Assert.Equal(
+            expected,
+            TrustedLiveSupervisor.ClassifyException(exceptionType));
+    }
+
     [Theory]
     [InlineData(false, TrustedLiveCodes.Provenance)]
     [InlineData(true, TrustedLiveCodes.Canary)]
@@ -451,14 +560,45 @@ public sealed class TrustedLiveAgentTests : IDisposable
             new string('a', 40),
             new string('9', 64),
             buildPair,
-            [phase]);
+            [phase],
+            new TrustedLiveFailureEvidence(
+                phase.Scenario,
+                TrustedLiveDiagnosticCodes.PhaseReceipt,
+                R3LiveAgentDiagnosticCodes.TransportFailed,
+                1,
+                R3LiveAgentCodes.CompositionFailed,
+                R3LiveAgentDiagnosticCodes.TransportFailed,
+                QualityClassification: null,
+                QualityCode: null));
 
         Assert.DoesNotContain("provider-launcher-canary", value);
         Assert.DoesNotContain("reasoning_content", value);
         Assert.DoesNotContain("Authorization", value);
         using var document = JsonDocument.Parse(value);
         Assert.Equal(1, document.RootElement.GetProperty("phase_count").GetInt32());
+        var failure = document.RootElement.GetProperty("failure");
+        Assert.Equal(
+            R3LiveAgentDiagnosticCodes.TransportFailed,
+            failure.GetProperty("diagnostic_code").GetString());
+        Assert.DoesNotContain("InvalidOperationException", value);
         Assert.True(value.Length < 8 * 1024);
+    }
+
+    [Fact]
+    public void ReceiptRejectsAnOversizedPublicDiagnostic()
+    {
+        Directory.CreateDirectory(root);
+        var path = Path.Join(root, "oversized-receipt.json");
+        var receipt = FailureReceipt(
+            R3LiveAgentCodes.CompositionFailed,
+            qualityClassification: null,
+            qualityCode: null) with
+        {
+            OutcomeCode = new string('x', 129),
+        };
+        File.WriteAllBytes(path, TrustedLiveReceiptCodec.Write(receipt));
+
+        Assert.Null(TrustedLiveReceiptCodec.Read(path));
     }
 
     public void Dispose()

@@ -38,6 +38,7 @@ internal static class TrustedLiveSupervisor
         VerifierBuildPair? buildPair = null;
         string? fixtureSha256 = null;
         var phases = new List<TrustedLivePhaseReceipt>(4);
+        TrustedLiveFailureEvidence? failure = null;
         var status = "failed";
         var code = TrustedLiveCodes.Arguments;
         using var cancellationSource = new CancellationTokenSource();
@@ -88,13 +89,15 @@ internal static class TrustedLiveSupervisor
                     Directory.CreateDirectory(sensitiveRoot);
                     RandomNumberGenerator.Fill(stateKey);
                     stateKeyBase64 = Convert.ToBase64String(stateKey);
-                    code = await RunPhasesAsync(
+                    var run = await RunPhasesAsync(
                         command,
                         buildPair,
                         provider!,
                         stateKeyBase64,
                         phases,
                         cancellationSource.Token);
+                    code = run.Code;
+                    failure = run.Failure;
                     if (code == TrustedLiveCodes.Passed)
                     {
                         status = "passed";
@@ -134,6 +137,11 @@ internal static class TrustedLiveSupervisor
                 status = "failed";
             }
             code = safetyCode;
+            if (code == TrustedLiveCodes.Canary)
+            {
+                phases.Clear();
+                failure = null;
+            }
 
             Console.Out.WriteLine(TrustedLiveReceiptCodec.WriteCompletion(
                 status,
@@ -143,13 +151,14 @@ internal static class TrustedLiveSupervisor
                 workflowSha,
                 fixtureSha256,
                 buildPair,
-                phases));
+                phases,
+                failure));
         }
 
         return status == "passed" ? 0 : 1;
     }
 
-    private static async Task<string> RunPhasesAsync(
+    private static async Task<TrustedLiveRunResult> RunPhasesAsync(
         VerifierCommand command,
         VerifierBuildPair buildPair,
         string provider,
@@ -172,9 +181,10 @@ internal static class TrustedLiveSupervisor
                 VerifierScenario.MustFind,
                 buildPair,
                 phases,
-                out var code))
+                out var code,
+                out var failure))
         {
-            return code;
+            return new TrustedLiveRunResult(code, failure);
         }
 
         var mustNotFind = await RunPhaseAsync(
@@ -191,9 +201,10 @@ internal static class TrustedLiveSupervisor
                 VerifierScenario.MustNotFind,
                 buildPair,
                 phases,
-                out code))
+                out code,
+                out failure))
         {
-            return code;
+            return new TrustedLiveRunResult(code, failure);
         }
 
         var continuationRoot = Path.Join(command.Root, "continuation");
@@ -211,12 +222,15 @@ internal static class TrustedLiveSupervisor
                 VerifierScenario.ContinuationSeed,
                 buildPair,
                 phases,
-                out code) ||
+                out code,
+                out failure) ||
             seed.Receipt?.LineageSha256 is not { } lineage)
         {
-            return code == TrustedLiveCodes.Passed
-                ? TrustedLiveCodes.Continuation
-                : code;
+            return new TrustedLiveRunResult(
+                code == TrustedLiveCodes.Passed
+                    ? TrustedLiveCodes.Continuation
+                    : code,
+                failure);
         }
 
         var restore = await RunPhaseAsync(
@@ -233,12 +247,13 @@ internal static class TrustedLiveSupervisor
                 VerifierScenario.ContinuationRestore,
                 buildPair,
                 phases,
-                out code))
+                out code,
+                out failure))
         {
-            return code;
+            return new TrustedLiveRunResult(code, failure);
         }
 
-        return TrustedLiveCodes.Passed;
+        return new TrustedLiveRunResult(TrustedLiveCodes.Passed, null);
     }
 
     private static async Task<TrustedLivePhaseExecution> RunPhaseAsync(
@@ -251,69 +266,168 @@ internal static class TrustedLiveSupervisor
         string? expectedLineageSha256,
         CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        Directory.CreateDirectory(Path.Join(phaseRoot, "private"));
-        var receiptPath = Path.Join(
-            phaseRoot,
-            "private",
-            string.Concat(verb, ".json"));
-        var arguments = new List<string>
+        try
         {
-            verb,
-            "--root",
-            phaseRoot,
-            "--corpus",
-            command.Corpus,
-            "--output",
-            receiptPath,
-            "--execution-kind",
-            command.ExecutionKind,
-            "--execution-artifact",
-            command.ExecutionArtifact,
-            "--build-pair-manifest",
-            command.BuildPairManifest,
-        };
-        if (expectedLineageSha256 is not null)
-        {
-            arguments.Add("--expected-lineage-sha256");
-            arguments.Add(expectedLineageSha256);
-        }
+            cancellationToken.ThrowIfCancellationRequested();
+            Directory.CreateDirectory(Path.Join(phaseRoot, "private"));
+            var receiptPath = Path.Join(
+                phaseRoot,
+                "private",
+                string.Concat(verb, ".json"));
+            var arguments = new List<string>
+            {
+                verb,
+                "--root",
+                phaseRoot,
+                "--corpus",
+                command.Corpus,
+                "--output",
+                receiptPath,
+                "--execution-kind",
+                command.ExecutionKind,
+                "--execution-artifact",
+                command.ExecutionArtifact,
+                "--build-pair-manifest",
+                command.BuildPairManifest,
+            };
+            if (expectedLineageSha256 is not null)
+            {
+                arguments.Add("--expected-lineage-sha256");
+                arguments.Add(expectedLineageSha256);
+            }
 
-        var result = await TrustedLiveProcessLauncher.RunAsync(
-            command.ExecutionArtifact,
-            arguments,
-            command.Root,
-            provider,
-            stateKeyBase64,
-            ChildTimeout,
-            cancellationToken);
-        var receipt = TrustedLiveReceiptCodec.Read(receiptPath);
-        var canaryDetected = result.SensitiveBytesObserved ||
-            result.StandardOutput.Contains(
+            var result = await TrustedLiveProcessLauncher.RunAsync(
+                command.ExecutionArtifact,
+                arguments,
+                command.Root,
                 provider,
-                StringComparison.Ordinal) ||
-            result.StandardError.Contains(provider, StringComparison.Ordinal) ||
-            result.StandardOutput.Contains(
                 stateKeyBase64,
-                StringComparison.Ordinal) ||
-            result.StandardError.Contains(
-                stateKeyBase64,
-                StringComparison.Ordinal);
-        return new TrustedLivePhaseExecution(
-            result,
-            receipt,
-            canaryDetected);
+                ChildTimeout,
+                cancellationToken);
+            var receipt = TrustedLiveReceiptCodec.Read(receiptPath);
+            var diagnosticCode = receipt is not null
+                ? receipt.OutcomeCode
+                : ReadPhaseDiagnostic(phaseRoot, receiptPath);
+            var canaryDetected = result.SensitiveBytesObserved ||
+                result.StandardOutput.Contains(
+                    provider,
+                    StringComparison.Ordinal) ||
+                result.StandardError.Contains(
+                    provider,
+                    StringComparison.Ordinal) ||
+                result.StandardOutput.Contains(
+                    stateKeyBase64,
+                    StringComparison.Ordinal) ||
+                result.StandardError.Contains(
+                    stateKeyBase64,
+                    StringComparison.Ordinal);
+            return new TrustedLivePhaseExecution(
+                result,
+                receipt,
+                canaryDetected,
+                diagnosticCode);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException and
+            not StackOverflowException and not AccessViolationException)
+        {
+            return new TrustedLivePhaseExecution(
+                new TrustedLiveProcessResult(
+                    1,
+                    TimedOut: false,
+                    Cancelled: exception is OperationCanceledException,
+                    SensitiveBytesObserved: false,
+                    OutputLimitExceeded: false,
+                    string.Empty,
+                    string.Empty),
+                Receipt: null,
+                CanaryDetected: false,
+                DiagnosticCode: ClassifyException(exception.GetType().Name));
+        }
     }
 
-    private static bool TryAdmitPhase(
+    private static string ReadPhaseDiagnostic(
+        string phaseRoot,
+        string receiptPath)
+    {
+        if (File.Exists(receiptPath))
+        {
+            return TrustedLiveDiagnosticCodes.PhaseReceiptInvalid;
+        }
+        var failurePath = Path.Join(phaseRoot, "private", "failure.code");
+        try
+        {
+            var info = new FileInfo(failurePath);
+            if (!info.Exists || info.Length is <= 0 or > 128)
+            {
+                return TrustedLiveDiagnosticCodes.PhaseReceiptMissing;
+            }
+            return ClassifyException(File.ReadAllText(failurePath));
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or
+            IOException or
+            NotSupportedException or
+            UnauthorizedAccessException or
+            System.Security.SecurityException)
+        {
+            return TrustedLiveDiagnosticCodes.PhaseReceiptMissing;
+        }
+    }
+
+    internal static string ClassifyException(string exceptionType) =>
+        exceptionType switch
+        {
+            "ArgumentException" or
+            "ArgumentNullException" or
+            "ArgumentOutOfRangeException" or
+            "FormatException" or
+            "OverflowException" =>
+                TrustedLiveDiagnosticCodes.PhaseExceptionArgument,
+            "DirectoryNotFoundException" or
+            "EndOfStreamException" or
+            "FileNotFoundException" or
+            "IOException" or
+            "PathTooLongException" =>
+                TrustedLiveDiagnosticCodes.PhaseExceptionIo,
+            "SecurityException" or
+            "UnauthorizedAccessException" =>
+                TrustedLiveDiagnosticCodes.PhaseExceptionAccess,
+            "NotSupportedException" or
+            "PlatformNotSupportedException" =>
+                TrustedLiveDiagnosticCodes.PhaseExceptionUnsupported,
+            "CryptographicException" =>
+                TrustedLiveDiagnosticCodes.PhaseExceptionCryptography,
+            "JsonException" => TrustedLiveDiagnosticCodes.PhaseExceptionJson,
+            "Win32Exception" =>
+                TrustedLiveDiagnosticCodes.PhaseExceptionProcess,
+            "OperationCanceledException" or
+            "TaskCanceledException" =>
+                TrustedLiveDiagnosticCodes.PhaseExceptionCancelled,
+            _ => TrustedLiveDiagnosticCodes.PhaseExceptionOther,
+        };
+
+    internal static bool TryAdmitPhase(
         TrustedLivePhaseExecution execution,
         VerifierScenario scenario,
         VerifierBuildPair buildPair,
         List<TrustedLivePhaseReceipt> phases,
-        out string code)
+        out string code,
+        out TrustedLiveFailureEvidence? failure)
     {
         code = ClassifyFailure(execution);
+        failure = null;
         var receipt = execution.Receipt;
+        var receiptMatchesInvocation = receipt is not null &&
+            receipt.Scenario == scenario.ToString() &&
+            receipt.ExecutionArtifactSha256 ==
+                buildPair.ExecutionArtifactSha256 &&
+            receipt.BuildPairSha256 == buildPair.BuildPairSha256;
+        if (!execution.CanaryDetected &&
+            !execution.Process.SensitiveBytesObserved &&
+            receiptMatchesInvocation)
+        {
+            phases.Add(receipt!);
+        }
         if (execution.CanaryDetected ||
             execution.Process is not
             {
@@ -328,19 +442,68 @@ internal static class TrustedLiveSupervisor
                 Status: "passed",
                 HandoffReady: true,
                 AcceptedTupleValidated: true,
-            } ||
-            receipt.Scenario != scenario.ToString() ||
-            receipt.ExecutionArtifactSha256 !=
-                buildPair.ExecutionArtifactSha256 ||
-            receipt.BuildPairSha256 != buildPair.BuildPairSha256 ||
+             } ||
+            !receiptMatchesInvocation ||
             !PhaseMatchesScenario(receipt, scenario))
         {
+            failure = CreateFailureEvidence(
+                execution,
+                scenario,
+                receiptMatchesInvocation);
             return false;
         }
 
-        phases.Add(receipt);
         code = TrustedLiveCodes.Passed;
         return true;
+    }
+
+    internal static TrustedLiveFailureEvidence CreateFailureEvidence(
+        TrustedLivePhaseExecution execution,
+        VerifierScenario scenario,
+        bool receiptMatchesInvocation)
+    {
+        var receipt = execution.Receipt;
+        if (execution.CanaryDetected ||
+            execution.Process.SensitiveBytesObserved)
+        {
+            return new TrustedLiveFailureEvidence(
+                scenario.ToString(),
+                TrustedLiveDiagnosticCodes.PhaseCanary,
+                TrustedLiveCodes.Canary,
+                execution.Process.ExitCode,
+                ProductCode: null,
+                OutcomeCode: null,
+                QualityClassification: null,
+                QualityCode: null);
+        }
+        if (receipt is not null && !receiptMatchesInvocation)
+        {
+            return new TrustedLiveFailureEvidence(
+                scenario.ToString(),
+                TrustedLiveDiagnosticCodes.PhaseReceiptInvalid,
+                TrustedLiveDiagnosticCodes.PhaseReceiptInvalid,
+                execution.Process.ExitCode,
+                ProductCode: null,
+                OutcomeCode: null,
+                QualityClassification: null,
+                QualityCode: null);
+        }
+        var kind = receipt is not null
+            ? TrustedLiveDiagnosticCodes.PhaseReceipt
+            : execution.DiagnosticCode.StartsWith(
+                "phase_exception_",
+                StringComparison.Ordinal)
+                ? TrustedLiveDiagnosticCodes.PhaseException
+                : execution.DiagnosticCode;
+        return new TrustedLiveFailureEvidence(
+            scenario.ToString(),
+            kind,
+            execution.DiagnosticCode,
+            execution.Process.ExitCode,
+            receipt?.ProductCode,
+            receipt?.OutcomeCode,
+            receipt?.QualityClassification,
+            receipt?.QualityCode);
     }
 
     private static bool PhaseMatchesScenario(
@@ -772,7 +935,12 @@ internal sealed record TrustedLiveBoundedCapture(
 internal sealed record TrustedLivePhaseExecution(
     TrustedLiveProcessResult Process,
     TrustedLivePhaseReceipt? Receipt,
-    bool CanaryDetected);
+    bool CanaryDetected,
+    string DiagnosticCode = TrustedLiveDiagnosticCodes.PhaseReceiptMissing);
+
+internal sealed record TrustedLiveRunResult(
+    string Code,
+    TrustedLiveFailureEvidence? Failure);
 
 internal static class TrustedLiveLauncherProbe
 {

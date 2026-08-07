@@ -47,6 +47,37 @@ internal sealed record TrustedLivePhaseReceipt(
     string BuildPairSha256,
     string Kind = "apr-r3-trusted-live-phase-v1");
 
+internal static class TrustedLiveDiagnosticCodes
+{
+    internal const string PhaseReceipt = "phase_receipt";
+    internal const string PhaseException = "phase_exception";
+    internal const string PhaseCanary = "phase_canary";
+    internal const string PhaseReceiptInvalid = "phase_receipt_invalid";
+    internal const string PhaseReceiptMissing = "phase_receipt_missing";
+    internal const string PhaseExceptionArgument = "phase_exception_argument";
+    internal const string PhaseExceptionIo = "phase_exception_io";
+    internal const string PhaseExceptionAccess = "phase_exception_access";
+    internal const string PhaseExceptionUnsupported =
+        "phase_exception_unsupported";
+    internal const string PhaseExceptionCryptography =
+        "phase_exception_cryptography";
+    internal const string PhaseExceptionJson = "phase_exception_json";
+    internal const string PhaseExceptionProcess = "phase_exception_process";
+    internal const string PhaseExceptionCancelled =
+        "phase_exception_cancelled";
+    internal const string PhaseExceptionOther = "phase_exception_other";
+}
+
+internal sealed record TrustedLiveFailureEvidence(
+    string Scenario,
+    string Kind,
+    string DiagnosticCode,
+    int ProcessExitCode,
+    string? ProductCode,
+    string? OutcomeCode,
+    string? QualityClassification,
+    string? QualityCode);
+
 internal static class TrustedLiveReceiptCodec
 {
     internal static byte[] Write(TrustedLivePhaseReceipt receipt)
@@ -194,7 +225,8 @@ internal static class TrustedLiveReceiptCodec
         string workflowSha,
         string? fixtureSha256,
         VerifierBuildPair? buildPair,
-        IReadOnlyList<TrustedLivePhaseReceipt> phases)
+        IReadOnlyList<TrustedLivePhaseReceipt> phases,
+        TrustedLiveFailureEvidence? failure = null)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
@@ -238,11 +270,25 @@ internal static class TrustedLiveReceiptCodec
             {
                 writer.WriteStartObject();
                 writer.WriteString("scenario", phase.Scenario);
+                writer.WriteString("status", phase.Status);
                 writer.WriteString("outcome_code", phase.OutcomeCode);
+                writer.WriteString("product_code", phase.ProductCode);
                 WriteNullableNumber(writer, "generation", phase.Generation);
                 writer.WriteString("transition", phase.Transition);
                 writer.WriteNumber("model_calls", phase.ModelCalls);
                 writer.WriteNumber("tool_calls", phase.ToolCalls);
+                writer.WriteBoolean("handoff_ready", phase.HandoffReady);
+                writer.WriteBoolean(
+                    "accepted_tuple_validated",
+                    phase.AcceptedTupleValidated);
+                WriteNullableString(
+                    writer,
+                    "quality_classification",
+                    phase.QualityClassification);
+                WriteNullableString(
+                    writer,
+                    "quality_code",
+                    phase.QualityCode);
                 WriteNullableString(
                     writer,
                     "terminal_sha256",
@@ -254,6 +300,39 @@ internal static class TrustedLiveReceiptCodec
                 writer.WriteEndObject();
             }
             writer.WriteEndArray();
+            if (failure is null)
+            {
+                writer.WriteNull("failure");
+            }
+            else
+            {
+                writer.WriteStartObject("failure");
+                writer.WriteString("scenario", failure.Scenario);
+                writer.WriteString("kind", failure.Kind);
+                writer.WriteString(
+                    "diagnostic_code",
+                    failure.DiagnosticCode);
+                writer.WriteNumber(
+                    "process_exit_code",
+                    failure.ProcessExitCode);
+                WriteNullableString(
+                    writer,
+                    "product_code",
+                    failure.ProductCode);
+                WriteNullableString(
+                    writer,
+                    "outcome_code",
+                    failure.OutcomeCode);
+                WriteNullableString(
+                    writer,
+                    "quality_classification",
+                    failure.QualityClassification);
+                WriteNullableString(
+                    writer,
+                    "quality_code",
+                    failure.QualityCode);
+                writer.WriteEndObject();
+            }
             writer.WriteEndObject();
         }
         return Encoding.UTF8.GetString(stream.ToArray());
@@ -262,13 +341,43 @@ internal static class TrustedLiveReceiptCodec
     private static bool PhaseIsBounded(TrustedLivePhaseReceipt receipt) =>
         receipt.Kind == "apr-r3-trusted-live-phase-v1" &&
         receipt.Status is "passed" or "failed" &&
+        IsPublicToken(receipt.Scenario, 64) &&
+        IsPublicToken(receipt.OutcomeCode, 128) &&
+        IsPublicToken(receipt.ProductCode, 128) &&
+        IsPublicToken(receipt.Transition, 64) &&
+        IsOptionalPublicToken(receipt.QualityStatus, 64) &&
+        IsOptionalPublicToken(receipt.QualityClassification, 64) &&
+        IsOptionalPublicToken(receipt.QualityCode, 128) &&
         receipt.ModelCalls is >= 0 and <= 8 &&
         receipt.ToolCalls is >= 0 and <= 16 &&
         receipt.FindingCount is >= 0 and <= 32 &&
         receipt.QualityToolCallCount is >= 0 and <= 16 &&
+        (receipt.InvocationIdentitySha256.Length == 0 ||
+            LiveAgentFreshProcessDomain.IsSha256(
+                receipt.InvocationIdentitySha256)) &&
+        IsOptionalSha256(receipt.LineageSha256) &&
+        IsOptionalSha256(receipt.AcceptedSessionSha256) &&
+        IsOptionalSha256(receipt.AcceptedEnvelopeSha256) &&
+        IsOptionalSha256(receipt.TerminalSha256) &&
         LiveAgentFreshProcessDomain.IsSha256(
             receipt.ExecutionArtifactSha256) &&
         LiveAgentFreshProcessDomain.IsSha256(receipt.BuildPairSha256);
+
+    private static bool IsPublicToken(string value, int maximumLength) =>
+        value.Length is > 0 &&
+        value.Length <= maximumLength &&
+        value.All(character => character is >= 'a' and <= 'z' or
+            >= 'A' and <= 'Z' or
+            >= '0' and <= '9' or
+            '_' or '-');
+
+    private static bool IsOptionalPublicToken(
+        string? value,
+        int maximumLength) =>
+        value is null || IsPublicToken(value, maximumLength);
+
+    private static bool IsOptionalSha256(string? value) =>
+        value is null || LiveAgentFreshProcessDomain.IsSha256(value);
 
     private static string RequiredString(JsonElement root, string name) =>
         root.GetProperty(name).GetString() ?? throw new JsonException();

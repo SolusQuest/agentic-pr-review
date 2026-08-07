@@ -215,6 +215,7 @@ public sealed partial class AgentCapabilityArchitectureTests
         AssertExactInternalAutoPropertyStorage(
             typeof(R3LiveAgentExecution),
             [
+                ("DiagnosticCode", typeof(string)),
                 ("Result", typeof(R3LiveAgentResult)),
             ]);
         AssertExactInternalAutoPropertyStorage(

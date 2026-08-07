@@ -500,8 +500,8 @@ internal static class Program
                     "APR_R3_TRUSTED_LIVE_CONTINUATION_RESTORE_OK",
                 _ => TrustedLiveCodes.Infrastructure,
             }
-            : quality?.Code ?? product?.Code ??
-                result.DiagnosticCode ?? TrustedLiveCodes.Infrastructure;
+            : quality?.Code ?? result.DiagnosticCode ??
+                product?.Code ?? TrustedLiveCodes.Infrastructure;
         var receipt = new TrustedLivePhaseReceipt(
             scenario.ToString(),
             passed ? "passed" : "failed",

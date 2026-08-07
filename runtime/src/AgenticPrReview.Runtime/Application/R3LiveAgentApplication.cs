@@ -125,9 +125,31 @@ internal sealed class R3LiveAgentResult(
     public override string ToString() => "r3_live_agent_result";
 }
 
-internal sealed class R3LiveAgentExecution(R3LiveAgentResult result)
+internal static class R3LiveAgentDiagnosticCodes
+{
+    internal const string PreparationFailed =
+        "r3_live_composition_preparation_failed";
+    internal const string StateRestoreFailed =
+        "r3_live_composition_state_restore_failed";
+    internal const string SnapshotFailed =
+        "r3_live_composition_snapshot_failed";
+    internal const string TransportFailed =
+        "r3_live_composition_transport_failed";
+    internal const string AgentRunFailed =
+        "r3_live_composition_agent_run_failed";
+    internal const string StateCommitFailed =
+        "r3_live_composition_state_commit_failed";
+    internal const string ResultFailed =
+        "r3_live_composition_result_failed";
+}
+
+internal sealed class R3LiveAgentExecution(
+    R3LiveAgentResult result,
+    string? diagnosticCode = null)
 {
     internal R3LiveAgentResult Result { get; } = result;
+
+    internal string? DiagnosticCode { get; } = diagnosticCode;
 
     public override string ToString() => "r3_live_agent_execution";
 }
@@ -148,6 +170,7 @@ internal sealed class R3LiveAgentApplication
         AgentSessionMaterializedStableRequest? materialized = null;
         AgentSessionTrustedRequest? trusted = null;
         RestrictedStateAdmittedSession? admittedSession = null;
+        var diagnosticCode = R3LiveAgentDiagnosticCodes.PreparationFailed;
 
         try
         {
@@ -220,6 +243,7 @@ internal sealed class R3LiveAgentApplication
                     return Failure(R3LiveAgentCodes.InputInvalid);
                 }
 
+                diagnosticCode = R3LiveAgentDiagnosticCodes.StateRestoreFailed;
                 var restore = dependencies.StateRestorer.Restore(
                     request.StateRoot,
                     keyResolver!,
@@ -285,6 +309,7 @@ internal sealed class R3LiveAgentApplication
                     return Failure(restore.Result.Code);
                 }
 
+                diagnosticCode = R3LiveAgentDiagnosticCodes.SnapshotFailed;
                 ReviewedSnapshot snapshot;
                 try
                 {
@@ -300,8 +325,10 @@ internal sealed class R3LiveAgentApplication
                     return Failure(R3LiveAgentCodes.InputInvalid);
                 }
 
+                diagnosticCode = R3LiveAgentDiagnosticCodes.TransportFailed;
                 using var transport =
                     dependencies.TransportFactory.Create(credential!);
+                diagnosticCode = R3LiveAgentDiagnosticCodes.AgentRunFailed;
                 var client = DeepSeekChatBackend.CreateClient(
                     adapter,
                     transport);
@@ -318,6 +345,7 @@ internal sealed class R3LiveAgentApplication
                     return FromOutcome(run, outcome);
                 }
 
+                diagnosticCode = R3LiveAgentDiagnosticCodes.StateCommitFailed;
                 var authorizedTransition =
                     stateContext.SessionContext.Transition;
                 var candidate = new LiveAgentCandidate(
@@ -337,6 +365,7 @@ internal sealed class R3LiveAgentApplication
                     request.StateRoot,
                     keyResolver!,
                     cancellationToken);
+                diagnosticCode = R3LiveAgentDiagnosticCodes.ResultFailed;
                 return new R3LiveAgentExecution(
                     ResultFromOutcome(
                         commit.Code,
@@ -347,7 +376,7 @@ internal sealed class R3LiveAgentApplication
         }
         catch (Exception exception) when (!IsFatal(exception))
         {
-            return Failure(R3LiveAgentCodes.CompositionFailed);
+            return Failure(R3LiveAgentCodes.CompositionFailed, diagnosticCode);
         }
         finally
         {
@@ -582,7 +611,9 @@ internal sealed class R3LiveAgentApplication
             commit?.HandoffReady ?? false);
     }
 
-    private static R3LiveAgentExecution Failure(string code) =>
+    private static R3LiveAgentExecution Failure(
+        string code,
+        string? diagnosticCode = null) =>
         new(
             new R3LiveAgentResult(
                 code,
@@ -593,7 +624,8 @@ internal sealed class R3LiveAgentApplication
                 null,
                 null,
                 null,
-                handoffReady: false));
+                handoffReady: false),
+            diagnosticCode);
 
     private static void Zero(byte[]? bytes)
     {

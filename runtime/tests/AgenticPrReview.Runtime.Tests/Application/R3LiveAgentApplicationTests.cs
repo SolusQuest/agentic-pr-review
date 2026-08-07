@@ -306,6 +306,58 @@ public sealed partial class R3LiveAgentApplicationTests
     }
 
     [Fact]
+    public async Task CompositionFailuresExposeOnlyStableStageDiagnostics()
+    {
+        using var snapshot = SnapshotDirectory();
+        File.WriteAllText(
+            Path.Join(snapshot.Path, "a.txt"),
+            RepositoryFact + "\n",
+            new UTF8Encoding(false));
+        var request = Request(
+            snapshot.Path,
+            Path.Join(snapshot.Path, "state"));
+        var stateFailure = await new R3LiveAgentApplication(
+            new R3LiveAgentDependencies(
+                new CountingSecretSource(new R3LiveAgentSecrets(
+                    ProviderSecret,
+                    StateSecret)),
+                new ThrowingStateRestorer(),
+                new ThrowingTransportFactory(),
+                new ThrowingFileAccessFactory(),
+                new CapturingStateCommitCoordinator(),
+                TimeProvider.System))
+            .RunAsync(request, CancellationToken.None);
+        Assert.Equal(R3LiveAgentCodes.CompositionFailed,
+            stateFailure.Result.Code);
+        Assert.Equal(
+            R3LiveAgentDiagnosticCodes.StateRestoreFailed,
+            stateFailure.DiagnosticCode);
+
+        var bootstrap = new FixedStateRestorer(
+            new RestrictedStateRestoreResult(
+                StateResult.Create(
+                    StateAction.Bootstrap,
+                    RestrictedStateCodes.Absent),
+                null));
+        var transportFailure = await new R3LiveAgentApplication(
+            new R3LiveAgentDependencies(
+                new CountingSecretSource(new R3LiveAgentSecrets(
+                    ProviderSecret,
+                    StateSecret)),
+                bootstrap,
+                new ThrowingTransportFactory(),
+                new ThrowingFileAccessFactory(),
+                new CapturingStateCommitCoordinator(),
+                TimeProvider.System))
+            .RunAsync(request, CancellationToken.None);
+        Assert.Equal(R3LiveAgentCodes.CompositionFailed,
+            transportFailure.Result.Code);
+        Assert.Equal(
+            R3LiveAgentDiagnosticCodes.TransportFailed,
+            transportFailure.DiagnosticCode);
+    }
+
+    [Fact]
     public async Task InvalidSnapshotAndCancellationProduceNoCandidateOrProviderCall()
     {
         using var snapshot = SnapshotDirectory();
