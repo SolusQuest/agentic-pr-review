@@ -174,6 +174,7 @@ internal sealed class R3LiveAgentApplication
 
         try
         {
+            dependencies.DiagnosticStageObserver?.Enter(diagnosticCode);
             if (!TryFreezeTrustedInput(
                     request,
                     out trusted,
@@ -244,6 +245,7 @@ internal sealed class R3LiveAgentApplication
                 }
 
                 diagnosticCode = R3LiveAgentDiagnosticCodes.StateRestoreFailed;
+                dependencies.DiagnosticStageObserver?.Enter(diagnosticCode);
                 var restore = dependencies.StateRestorer.Restore(
                     request.StateRoot,
                     keyResolver!,
@@ -310,6 +312,7 @@ internal sealed class R3LiveAgentApplication
                 }
 
                 diagnosticCode = R3LiveAgentDiagnosticCodes.SnapshotFailed;
+                dependencies.DiagnosticStageObserver?.Enter(diagnosticCode);
                 ReviewedSnapshot snapshot;
                 try
                 {
@@ -326,9 +329,11 @@ internal sealed class R3LiveAgentApplication
                 }
 
                 diagnosticCode = R3LiveAgentDiagnosticCodes.TransportFailed;
+                dependencies.DiagnosticStageObserver?.Enter(diagnosticCode);
                 using var transport =
                     dependencies.TransportFactory.Create(credential!);
                 diagnosticCode = R3LiveAgentDiagnosticCodes.AgentRunFailed;
+                dependencies.DiagnosticStageObserver?.Enter(diagnosticCode);
                 var client = DeepSeekChatBackend.CreateClient(
                     adapter,
                     transport);
@@ -346,6 +351,7 @@ internal sealed class R3LiveAgentApplication
                 }
 
                 diagnosticCode = R3LiveAgentDiagnosticCodes.StateCommitFailed;
+                dependencies.DiagnosticStageObserver?.Enter(diagnosticCode);
                 var authorizedTransition =
                     stateContext.SessionContext.Transition;
                 var candidate = new LiveAgentCandidate(
@@ -366,6 +372,7 @@ internal sealed class R3LiveAgentApplication
                     keyResolver!,
                     cancellationToken);
                 diagnosticCode = R3LiveAgentDiagnosticCodes.ResultFailed;
+                dependencies.DiagnosticStageObserver?.Enter(diagnosticCode);
                 return new R3LiveAgentExecution(
                     ResultFromOutcome(
                         commit.Code,

@@ -116,6 +116,11 @@ internal interface IR3LiveAgentReviewedFileAccessFactory
     IReviewedFileAccess Create();
 }
 
+internal interface IR3LiveAgentDiagnosticStageObserver
+{
+    void Enter(string diagnosticCode);
+}
+
 internal sealed class R3LiveAgentReviewedFileAccessFactory
     : IR3LiveAgentReviewedFileAccessFactory
 {
@@ -222,7 +227,8 @@ internal sealed class R3LiveAgentDependencies(
     IR3LiveAgentTransportFactory transportFactory,
     IR3LiveAgentReviewedFileAccessFactory reviewedFileAccessFactory,
     ILiveAgentStateCommitCoordinator stateCommitCoordinator,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IR3LiveAgentDiagnosticStageObserver? diagnosticStageObserver = null)
 {
     internal IR3LiveAgentSecretSource SecretSource { get; } = secretSource;
 
@@ -239,6 +245,10 @@ internal sealed class R3LiveAgentDependencies(
         stateCommitCoordinator;
 
     internal TimeProvider TimeProvider { get; } = timeProvider;
+
+    internal IR3LiveAgentDiagnosticStageObserver? DiagnosticStageObserver {
+        get;
+    } = diagnosticStageObserver;
 
     internal static R3LiveAgentDependencies CreateDefault(
         ILiveAgentAcceptedLineageSink lineageSink)

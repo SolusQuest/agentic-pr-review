@@ -305,8 +305,16 @@ public sealed partial class R3LiveAgentApplicationTests
         Assert.Equal(0, files.CallCount);
     }
 
-    [Fact]
-    public async Task CompositionFailuresExposeOnlyStableStageDiagnostics()
+    [Theory]
+    [InlineData(R3LiveAgentDiagnosticCodes.PreparationFailed)]
+    [InlineData(R3LiveAgentDiagnosticCodes.StateRestoreFailed)]
+    [InlineData(R3LiveAgentDiagnosticCodes.SnapshotFailed)]
+    [InlineData(R3LiveAgentDiagnosticCodes.TransportFailed)]
+    [InlineData(R3LiveAgentDiagnosticCodes.AgentRunFailed)]
+    [InlineData(R3LiveAgentDiagnosticCodes.StateCommitFailed)]
+    [InlineData(R3LiveAgentDiagnosticCodes.ResultFailed)]
+    public async Task CompositionFailuresExposeEveryStableStageDiagnostic(
+        string diagnosticCode)
     {
         using var snapshot = SnapshotDirectory();
         File.WriteAllText(
@@ -316,45 +324,28 @@ public sealed partial class R3LiveAgentApplicationTests
         var request = Request(
             snapshot.Path,
             Path.Join(snapshot.Path, "state"));
-        var stateFailure = await new R3LiveAgentApplication(
-            new R3LiveAgentDependencies(
-                new CountingSecretSource(new R3LiveAgentSecrets(
-                    ProviderSecret,
-                    StateSecret)),
-                new ThrowingStateRestorer(),
-                new ThrowingTransportFactory(),
-                new ThrowingFileAccessFactory(),
-                new CapturingStateCommitCoordinator(),
-                TimeProvider.System))
-            .RunAsync(request, CancellationToken.None);
-        Assert.Equal(R3LiveAgentCodes.CompositionFailed,
-            stateFailure.Result.Code);
-        Assert.Equal(
-            R3LiveAgentDiagnosticCodes.StateRestoreFailed,
-            stateFailure.DiagnosticCode);
-
         var bootstrap = new FixedStateRestorer(
             new RestrictedStateRestoreResult(
                 StateResult.Create(
                     StateAction.Bootstrap,
                     RestrictedStateCodes.Absent),
                 null));
-        var transportFailure = await new R3LiveAgentApplication(
+        var execution = await new R3LiveAgentApplication(
             new R3LiveAgentDependencies(
                 new CountingSecretSource(new R3LiveAgentSecrets(
                     ProviderSecret,
                     StateSecret)),
                 bootstrap,
-                new ThrowingTransportFactory(),
-                new ThrowingFileAccessFactory(),
+                new TestingTransportFactory(
+                    new GroundedReviewHandler(ProviderSecret)),
+                new CountingFileAccessFactory(),
                 new CapturingStateCommitCoordinator(),
-                TimeProvider.System))
+                TimeProvider.System,
+                new ThrowingDiagnosticStageObserver(diagnosticCode)))
             .RunAsync(request, CancellationToken.None);
-        Assert.Equal(R3LiveAgentCodes.CompositionFailed,
-            transportFailure.Result.Code);
-        Assert.Equal(
-            R3LiveAgentDiagnosticCodes.TransportFailed,
-            transportFailure.DiagnosticCode);
+
+        Assert.Equal(R3LiveAgentCodes.CompositionFailed, execution.Result.Code);
+        Assert.Equal(diagnosticCode, execution.DiagnosticCode);
     }
 
     [Fact]
@@ -1203,6 +1194,19 @@ public sealed partial class R3LiveAgentApplicationTests
         {
             CallCount++;
             throw new InvalidOperationException();
+        }
+    }
+
+    private sealed class ThrowingDiagnosticStageObserver(string target) :
+        IR3LiveAgentDiagnosticStageObserver
+    {
+        public void Enter(string diagnosticCode)
+        {
+            if (diagnosticCode == target)
+            {
+                throw new InvalidOperationException(
+                    "synthetic diagnostic stage failure");
+            }
         }
     }
 

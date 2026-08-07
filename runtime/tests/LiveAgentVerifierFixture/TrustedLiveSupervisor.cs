@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using AgenticPrReview.Runtime.Agent.Session;
 
 namespace AgenticPrReview.Runtime.LiveAgentVerifierFixture;
 
@@ -304,10 +305,14 @@ internal static class TrustedLiveSupervisor
                 stateKeyBase64,
                 ChildTimeout,
                 cancellationToken);
+            var receiptFilePresent = File.Exists(receiptPath);
             var receipt = TrustedLiveReceiptCodec.Read(receiptPath);
-            var diagnosticCode = receipt is not null
-                ? receipt.OutcomeCode
-                : ReadPhaseDiagnostic(phaseRoot, receiptPath);
+            var privateFailure = receipt is null && !receiptFilePresent
+                ? TrustedLivePrivateFailureCodec.Read(Path.Join(
+                    phaseRoot,
+                    "private",
+                    "failure.json"))
+                : null;
             var canaryDetected = result.SensitiveBytesObserved ||
                 result.StandardOutput.Contains(
                     provider,
@@ -325,7 +330,8 @@ internal static class TrustedLiveSupervisor
                 result,
                 receipt,
                 canaryDetected,
-                diagnosticCode);
+                receiptFilePresent,
+                privateFailure);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException and
             not StackOverflowException and not AccessViolationException)
@@ -341,70 +347,13 @@ internal static class TrustedLiveSupervisor
                     string.Empty),
                 Receipt: null,
                 CanaryDetected: false,
-                DiagnosticCode: ClassifyException(exception.GetType().Name));
+                ReceiptFilePresent: false,
+                PrivateFailure: new TrustedLivePrivateFailure(
+                    TrustedLiveFailureKinds.Child,
+                    TrustedLiveChildStages.CommandExecution,
+                    TrustedLiveFailureCategories.FromException(exception)));
         }
     }
-
-    private static string ReadPhaseDiagnostic(
-        string phaseRoot,
-        string receiptPath)
-    {
-        if (File.Exists(receiptPath))
-        {
-            return TrustedLiveDiagnosticCodes.PhaseReceiptInvalid;
-        }
-        var failurePath = Path.Join(phaseRoot, "private", "failure.code");
-        try
-        {
-            var info = new FileInfo(failurePath);
-            if (!info.Exists || info.Length is <= 0 or > 128)
-            {
-                return TrustedLiveDiagnosticCodes.PhaseReceiptMissing;
-            }
-            return ClassifyException(File.ReadAllText(failurePath));
-        }
-        catch (Exception exception) when (exception is
-            ArgumentException or
-            IOException or
-            NotSupportedException or
-            UnauthorizedAccessException or
-            System.Security.SecurityException)
-        {
-            return TrustedLiveDiagnosticCodes.PhaseReceiptMissing;
-        }
-    }
-
-    internal static string ClassifyException(string exceptionType) =>
-        exceptionType switch
-        {
-            "ArgumentException" or
-            "ArgumentNullException" or
-            "ArgumentOutOfRangeException" or
-            "FormatException" or
-            "OverflowException" =>
-                TrustedLiveDiagnosticCodes.PhaseExceptionArgument,
-            "DirectoryNotFoundException" or
-            "EndOfStreamException" or
-            "FileNotFoundException" or
-            "IOException" or
-            "PathTooLongException" =>
-                TrustedLiveDiagnosticCodes.PhaseExceptionIo,
-            "SecurityException" or
-            "UnauthorizedAccessException" =>
-                TrustedLiveDiagnosticCodes.PhaseExceptionAccess,
-            "NotSupportedException" or
-            "PlatformNotSupportedException" =>
-                TrustedLiveDiagnosticCodes.PhaseExceptionUnsupported,
-            "CryptographicException" =>
-                TrustedLiveDiagnosticCodes.PhaseExceptionCryptography,
-            "JsonException" => TrustedLiveDiagnosticCodes.PhaseExceptionJson,
-            "Win32Exception" =>
-                TrustedLiveDiagnosticCodes.PhaseExceptionProcess,
-            "OperationCanceledException" or
-            "TaskCanceledException" =>
-                TrustedLiveDiagnosticCodes.PhaseExceptionCancelled,
-            _ => TrustedLiveDiagnosticCodes.PhaseExceptionOther,
-        };
 
     internal static bool TryAdmitPhase(
         TrustedLivePhaseExecution execution,
@@ -418,16 +367,11 @@ internal static class TrustedLiveSupervisor
         failure = null;
         var receipt = execution.Receipt;
         var receiptMatchesInvocation = receipt is not null &&
+            TrustedLiveDomain.ReceiptIsAdmitted(receipt) &&
             receipt.Scenario == scenario.ToString() &&
             receipt.ExecutionArtifactSha256 ==
                 buildPair.ExecutionArtifactSha256 &&
             receipt.BuildPairSha256 == buildPair.BuildPairSha256;
-        if (!execution.CanaryDetected &&
-            !execution.Process.SensitiveBytesObserved &&
-            receiptMatchesInvocation)
-        {
-            phases.Add(receipt!);
-        }
         if (execution.CanaryDetected ||
             execution.Process is not
             {
@@ -453,6 +397,7 @@ internal static class TrustedLiveSupervisor
             return false;
         }
 
+        phases.Add(receipt);
         code = TrustedLiveCodes.Passed;
         return true;
     }
@@ -468,42 +413,70 @@ internal static class TrustedLiveSupervisor
         {
             return new TrustedLiveFailureEvidence(
                 scenario.ToString(),
-                TrustedLiveDiagnosticCodes.PhaseCanary,
+                TrustedLiveFailureKinds.Canary,
+                Stage: null,
+                Category: null,
                 TrustedLiveCodes.Canary,
                 execution.Process.ExitCode,
+                ModelCalls: 0,
+                ToolCalls: 0,
                 ProductCode: null,
                 OutcomeCode: null,
                 QualityClassification: null,
                 QualityCode: null);
         }
-        if (receipt is not null && !receiptMatchesInvocation)
+        if (receipt is null && execution.ReceiptFilePresent ||
+            receipt is not null && !receiptMatchesInvocation)
         {
             return new TrustedLiveFailureEvidence(
                 scenario.ToString(),
-                TrustedLiveDiagnosticCodes.PhaseReceiptInvalid,
+                TrustedLiveFailureKinds.ReceiptInvalid,
+                Stage: null,
+                Category: null,
                 TrustedLiveDiagnosticCodes.PhaseReceiptInvalid,
                 execution.Process.ExitCode,
+                ModelCalls: 0,
+                ToolCalls: 0,
                 ProductCode: null,
                 OutcomeCode: null,
                 QualityClassification: null,
                 QualityCode: null);
         }
-        var kind = receipt is not null
-            ? TrustedLiveDiagnosticCodes.PhaseReceipt
-            : execution.DiagnosticCode.StartsWith(
-                "phase_exception_",
-                StringComparison.Ordinal)
-                ? TrustedLiveDiagnosticCodes.PhaseException
-                : execution.DiagnosticCode;
+        if (receipt is null)
+        {
+            var privateFailure = execution.PrivateFailure;
+            return new TrustedLiveFailureEvidence(
+                scenario.ToString(),
+                privateFailure is null
+                    ? TrustedLiveFailureKinds.ReceiptMissing
+                    : TrustedLiveFailureKinds.Child,
+                privateFailure?.Stage,
+                privateFailure?.Category,
+                privateFailure is null
+                    ? TrustedLiveDiagnosticCodes.PhaseReceiptMissing
+                    : TrustedLiveDiagnosticCodes.PhaseChildFailed,
+                execution.Process.ExitCode,
+                ModelCalls: 0,
+                ToolCalls: 0,
+                ProductCode: null,
+                OutcomeCode: null,
+                QualityClassification: null,
+                QualityCode: null);
+        }
+
         return new TrustedLiveFailureEvidence(
             scenario.ToString(),
-            kind,
-            execution.DiagnosticCode,
+            TrustedLiveFailureKinds.Application,
+            TrustedLiveDomain.ApplicationStage(receipt.OutcomeCode),
+            Category: null,
+            receipt.OutcomeCode,
             execution.Process.ExitCode,
-            receipt?.ProductCode,
-            receipt?.OutcomeCode,
-            receipt?.QualityClassification,
-            receipt?.QualityCode);
+            receipt.ModelCalls,
+            receipt.ToolCalls,
+            receipt.ProductCode,
+            receipt.OutcomeCode,
+            receipt.QualityClassification,
+            receipt.QualityCode);
     }
 
     private static bool PhaseMatchesScenario(
@@ -531,19 +504,19 @@ internal static class TrustedLiveSupervisor
             VerifierScenario.MustFind =>
                 receipt.Generation == 0 &&
                 receipt.Transition == "same_head" &&
-                receipt.OutcomeCode == "APR_R3_TRUSTED_LIVE_MUST_FIND_OK" &&
+                receipt.OutcomeCode == TrustedLiveSuccessCodes.MustFind &&
                 qualityPassed,
             VerifierScenario.MustNotFind =>
                 receipt.Generation == 0 &&
                 receipt.Transition == "same_head" &&
                 receipt.OutcomeCode ==
-                    "APR_R3_TRUSTED_LIVE_MUST_NOT_FIND_OK" &&
+                    TrustedLiveSuccessCodes.MustNotFind &&
                 qualityPassed,
             VerifierScenario.ContinuationSeed =>
                 receipt.Generation == 0 &&
                 receipt.Transition == "same_head" &&
                 receipt.OutcomeCode ==
-                    "APR_R3_TRUSTED_LIVE_CONTINUATION_SEED_OK" &&
+                    TrustedLiveSuccessCodes.ContinuationSeed &&
                 receipt.QualityStatus is null &&
                 receipt.QualityClassification is null &&
                 receipt.QualityCode is null,
@@ -551,7 +524,7 @@ internal static class TrustedLiveSupervisor
                 receipt.Generation == 1 &&
                 receipt.Transition == "verified_ahead" &&
                 receipt.OutcomeCode ==
-                    "APR_R3_TRUSTED_LIVE_CONTINUATION_RESTORE_OK" &&
+                    TrustedLiveSuccessCodes.ContinuationRestore &&
                 qualityPassed,
             _ => false,
         };
@@ -602,6 +575,20 @@ internal static class TrustedLiveSupervisor
             return TrustedLiveCodes.Continuation;
         }
         var productCode = receipt.ProductCode;
+        if (productCode is
+            AgentSessionCodes.TransitionRejected or
+            AgentSessionCodes.ContinuationInvalid)
+        {
+            return TrustedLiveCodes.Continuation;
+        }
+        if (productCode is
+            AgentSessionCodes.ScopeMismatch or
+            AgentSessionCodes.RecordInvalid or
+            AgentSessionCodes.ClassificationInvalid or
+            AgentSessionCodes.AssociationInvalid)
+        {
+            return TrustedLiveCodes.Grounding;
+        }
         if (receipt.QualityClassification == "provider" ||
             qualityCode == "r3_quality_provider_failed" ||
             productCode is
@@ -936,7 +923,8 @@ internal sealed record TrustedLivePhaseExecution(
     TrustedLiveProcessResult Process,
     TrustedLivePhaseReceipt? Receipt,
     bool CanaryDetected,
-    string DiagnosticCode = TrustedLiveDiagnosticCodes.PhaseReceiptMissing);
+    bool ReceiptFilePresent = false,
+    TrustedLivePrivateFailure? PrivateFailure = null);
 
 internal sealed record TrustedLiveRunResult(
     string Code,

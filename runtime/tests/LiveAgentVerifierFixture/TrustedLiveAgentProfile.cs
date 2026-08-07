@@ -13,10 +13,15 @@ internal sealed class TrustedLiveAgentProfile(
 
     internal TrustedLiveAgentExecution? Execution => execution;
 
+    internal bool ActivationStarted { get; private set; }
+
+    internal bool ActivationCompleted { get; private set; }
+
     public ILiveAgentFreshProcessProfileExecution Activate(
         LiveAgentFreshProcessProfileActivation activation)
     {
         ArgumentNullException.ThrowIfNull(activation);
+        ActivationStarted = true;
         if (execution is not null)
         {
             throw new InvalidOperationException(
@@ -28,6 +33,7 @@ internal sealed class TrustedLiveAgentProfile(
             testCase,
             reviewedIdentity,
             activation.CurrentPublicInputs);
+        ActivationCompleted = true;
         return execution;
     }
 }

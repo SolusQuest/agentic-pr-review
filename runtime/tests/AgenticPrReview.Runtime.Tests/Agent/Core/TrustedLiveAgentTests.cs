@@ -1,7 +1,13 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent.Quality;
+using AgenticPrReview.Runtime.Agent.Session;
+using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.LiveAgentVerifierFixture;
 
 namespace AgenticPrReview.Runtime.Tests.Agent.Core;
@@ -11,6 +17,19 @@ public sealed class TrustedLiveAgentTests : IDisposable
     private readonly string root = Path.Join(
         Path.GetTempPath(),
         string.Concat("apr-r3-trusted-live-", Guid.NewGuid().ToString("N")));
+
+    public static TheoryData<Exception, string> ExceptionCategories => new()
+    {
+        { new ArgumentNullException("value"), TrustedLiveFailureCategories.Argument },
+        { new IOException(), TrustedLiveFailureCategories.Io },
+        { new UnauthorizedAccessException(), TrustedLiveFailureCategories.Access },
+        { new PlatformNotSupportedException(), TrustedLiveFailureCategories.Unsupported },
+        { new CryptographicException(), TrustedLiveFailureCategories.Cryptography },
+        { new JsonException(), TrustedLiveFailureCategories.Json },
+        { new Win32Exception(), TrustedLiveFailureCategories.Process },
+        { new OperationCanceledException(), TrustedLiveFailureCategories.Cancelled },
+        { new InvalidOperationException(), TrustedLiveFailureCategories.Other },
+    };
 
     [Fact]
     public void VerifierOwnsExactlyTheDeterministicAndTrustedProfiles()
@@ -306,15 +325,18 @@ public sealed class TrustedLiveAgentTests : IDisposable
     }
 
     [Theory]
-    [InlineData("agent_chat_failed", null, null, TrustedLiveCodes.Provider)]
-    [InlineData("other", "provider", "r3_quality_provider_failed", TrustedLiveCodes.Provider)]
-    [InlineData("other", null, "r3_quality_required_tool_missing", TrustedLiveCodes.MissingTool)]
-    [InlineData("other", null, "r3_quality_required_observation_missing", TrustedLiveCodes.Grounding)]
-    [InlineData("other", null, "r3_quality_expected_finding_missing", TrustedLiveCodes.MustFind)]
-    [InlineData("other", null, "r3_quality_prohibited_finding", TrustedLiveCodes.MustNotFind)]
-    [InlineData("other", null, "r3_quality_prior_fact_missing", TrustedLiveCodes.Continuation)]
-    [InlineData("agent_terminal_invalid", null, null, TrustedLiveCodes.Grounding)]
-    [InlineData("unknown", null, "unknown", TrustedLiveCodes.Infrastructure)]
+    [InlineData(AgentFailureCodes.ChatFailed, null, null, TrustedLiveCodes.Provider)]
+    [InlineData(R3LiveAgentCodes.Completed, "provider", R3QualityCodes.ProviderFailed, TrustedLiveCodes.Provider)]
+    [InlineData(R3LiveAgentCodes.Completed, "quality", R3QualityCodes.RequiredToolMissing, TrustedLiveCodes.MissingTool)]
+    [InlineData(R3LiveAgentCodes.Completed, "quality", R3QualityCodes.RequiredObservationMissing, TrustedLiveCodes.Grounding)]
+    [InlineData(R3LiveAgentCodes.Completed, "quality", R3QualityCodes.ExpectedFindingMissing, TrustedLiveCodes.MustFind)]
+    [InlineData(R3LiveAgentCodes.Completed, "quality", R3QualityCodes.ProhibitedFinding, TrustedLiveCodes.MustNotFind)]
+    [InlineData(R3LiveAgentCodes.Completed, "quality", R3QualityCodes.PriorFactMissing, TrustedLiveCodes.Continuation)]
+    [InlineData(AgentFailureCodes.TerminalInvalid, null, null, TrustedLiveCodes.Grounding)]
+    [InlineData(AgentSessionCodes.ContinuationInvalid, null, null, TrustedLiveCodes.Continuation)]
+    [InlineData(AgentSessionCodes.TransitionRejected, null, null, TrustedLiveCodes.Continuation)]
+    [InlineData(AgentSessionCodes.RecordInvalid, null, null, TrustedLiveCodes.Grounding)]
+    [InlineData(AgentSessionCodes.CurrentMalformed, null, null, TrustedLiveCodes.Infrastructure)]
     public void FailureClassificationIsExhaustiveAndStable(
         string productCode,
         string? qualityClassification,
@@ -335,7 +357,8 @@ public sealed class TrustedLiveAgentTests : IDisposable
                 string.Empty,
                 string.Empty),
             receipt,
-            CanaryDetected: false);
+            CanaryDetected: false,
+            ReceiptFilePresent: true);
 
         Assert.Equal(expected, TrustedLiveSupervisor.ClassifyFailure(execution));
     }
@@ -362,7 +385,7 @@ public sealed class TrustedLiveAgentTests : IDisposable
     }
 
     [Fact]
-    public void FailedPhaseIsRetainedWithSanitizedEvidence()
+    public void FailedPhaseIsSeparatedFromPassingPhaseEvidence()
     {
         var receipt = FailureReceipt(
             R3LiveAgentCodes.CompositionFailed,
@@ -387,7 +410,7 @@ public sealed class TrustedLiveAgentTests : IDisposable
                 string.Empty),
             receipt,
             CanaryDetected: false,
-            DiagnosticCode: receipt.OutcomeCode);
+            ReceiptFilePresent: true);
         var phases = new List<TrustedLivePhaseReceipt>();
 
         Assert.False(TrustedLiveSupervisor.TryAdmitPhase(
@@ -399,9 +422,12 @@ public sealed class TrustedLiveAgentTests : IDisposable
             out var failure));
 
         Assert.Equal(TrustedLiveCodes.Infrastructure, code);
-        Assert.Equal(receipt, Assert.Single(phases));
+        Assert.Empty(phases);
         Assert.NotNull(failure);
-        Assert.Equal(TrustedLiveDiagnosticCodes.PhaseReceipt, failure.Kind);
+        Assert.Equal(TrustedLiveFailureKinds.Application, failure.Kind);
+        Assert.Equal(
+            R3LiveAgentDiagnosticCodes.TransportFailed,
+            failure.Stage);
         Assert.Equal(
             R3LiveAgentDiagnosticCodes.TransportFailed,
             failure.DiagnosticCode);
@@ -430,8 +456,7 @@ public sealed class TrustedLiveAgentTests : IDisposable
                 string.Empty,
                 string.Empty),
             receipt,
-            CanaryDetected: true,
-            DiagnosticCode: receipt.OutcomeCode);
+            CanaryDetected: true);
         var phases = new List<TrustedLivePhaseReceipt>();
 
         Assert.False(TrustedLiveSupervisor.TryAdmitPhase(
@@ -445,7 +470,7 @@ public sealed class TrustedLiveAgentTests : IDisposable
         Assert.Equal(TrustedLiveCodes.Canary, code);
         Assert.Empty(phases);
         Assert.NotNull(failure);
-        Assert.Equal(TrustedLiveDiagnosticCodes.PhaseCanary, failure.Kind);
+        Assert.Equal(TrustedLiveFailureKinds.Canary, failure.Kind);
         Assert.Null(failure.ProductCode);
         Assert.Null(failure.OutcomeCode);
         Assert.Null(failure.QualityClassification);
@@ -453,21 +478,14 @@ public sealed class TrustedLiveAgentTests : IDisposable
     }
 
     [Theory]
-    [InlineData("ArgumentNullException", "phase_exception_argument")]
-    [InlineData("IOException", "phase_exception_io")]
-    [InlineData("UnauthorizedAccessException", "phase_exception_access")]
-    [InlineData("PlatformNotSupportedException", "phase_exception_unsupported")]
-    [InlineData("CryptographicException", "phase_exception_cryptography")]
-    [InlineData("JsonException", "phase_exception_json")]
-    [InlineData("Win32Exception", "phase_exception_process")]
-    [InlineData("InvalidOperationException", "phase_exception_other")]
-    public void RawExceptionTypesMapToStablePublicDiagnostics(
-        string exceptionType,
+    [MemberData(nameof(ExceptionCategories))]
+    public void ExceptionsMapDirectlyToClosedPrivateCategories(
+        Exception exception,
         string expected)
     {
         Assert.Equal(
             expected,
-            TrustedLiveSupervisor.ClassifyException(exceptionType));
+            TrustedLiveFailureCategories.FromException(exception));
     }
 
     [Theory]
@@ -552,8 +570,8 @@ public sealed class TrustedLiveAgentTests : IDisposable
             buildPair.BuildPairSha256);
 
         var value = TrustedLiveReceiptCodec.WriteCompletion(
-            "passed",
-            TrustedLiveCodes.Passed,
+            "failed",
+            TrustedLiveCodes.Infrastructure,
             new string('a', 40),
             "SolusQuest/agentic-pr-review/.github/workflows/" +
                 "r3-live-proof.yml@refs/heads/main",
@@ -563,9 +581,13 @@ public sealed class TrustedLiveAgentTests : IDisposable
             [phase],
             new TrustedLiveFailureEvidence(
                 phase.Scenario,
-                TrustedLiveDiagnosticCodes.PhaseReceipt,
+                TrustedLiveFailureKinds.Application,
+                R3LiveAgentDiagnosticCodes.TransportFailed,
+                Category: null,
                 R3LiveAgentDiagnosticCodes.TransportFailed,
                 1,
+                ModelCalls: 0,
+                ToolCalls: 0,
                 R3LiveAgentCodes.CompositionFailed,
                 R3LiveAgentDiagnosticCodes.TransportFailed,
                 QualityClassification: null,
@@ -576,6 +598,23 @@ public sealed class TrustedLiveAgentTests : IDisposable
         Assert.DoesNotContain("Authorization", value);
         using var document = JsonDocument.Parse(value);
         Assert.Equal(1, document.RootElement.GetProperty("phase_count").GetInt32());
+        Assert.Equal(
+            2,
+            document.RootElement.GetProperty("attempted_phase_count").GetInt32());
+        Assert.Equal(
+            [
+                "scenario",
+                "outcome_code",
+                "generation",
+                "transition",
+                "model_calls",
+                "tool_calls",
+                "terminal_sha256",
+                "lineage_sha256",
+            ],
+            document.RootElement.GetProperty("phases")[0]
+                .EnumerateObject()
+                .Select(property => property.Name));
         var failure = document.RootElement.GetProperty("failure");
         Assert.Equal(
             R3LiveAgentDiagnosticCodes.TransportFailed,
@@ -584,21 +623,377 @@ public sealed class TrustedLiveAgentTests : IDisposable
         Assert.True(value.Length < 8 * 1024);
     }
 
-    [Fact]
-    public void ReceiptRejectsAnOversizedPublicDiagnostic()
+    [Theory]
+    [InlineData("upstream_response_invalid")]
+    [InlineData("request_body_invalid")]
+    [InlineData("InvalidOperationException")]
+    [InlineData("C:\\private\\state.key")]
+    public void ReceiptRejectsUnownedOrSensitiveLookingDiagnostics(
+        string diagnostic)
     {
-        Directory.CreateDirectory(root);
-        var path = Path.Join(root, "oversized-receipt.json");
         var receipt = FailureReceipt(
+            R3LiveAgentCodes.CompositionFailed,
+            qualityClassification: null,
+            qualityCode: null) with
+        {
+            OutcomeCode = diagnostic,
+        };
+
+        Assert.Null(WriteAndReadReceipt(receipt));
+    }
+
+    [Fact]
+    public void ReceiptRejectsOverlongAndInconsistentCombinations()
+    {
+        var overlong = FailureReceipt(
             R3LiveAgentCodes.CompositionFailed,
             qualityClassification: null,
             qualityCode: null) with
         {
             OutcomeCode = new string('x', 129),
         };
-        File.WriteAllBytes(path, TrustedLiveReceiptCodec.Write(receipt));
+        var resetAsFailure = FailureReceipt(
+            AgentSessionCodes.ResetExplicit,
+            qualityClassification: null,
+            qualityCode: null);
+        var wrongApplicationProduct = FailureReceipt(
+            R3LiveAgentCodes.InputInvalid,
+            qualityClassification: null,
+            qualityCode: null) with
+        {
+            OutcomeCode = R3LiveAgentDiagnosticCodes.TransportFailed,
+        };
 
-        Assert.Null(TrustedLiveReceiptCodec.Read(path));
+        Assert.Null(WriteAndReadReceipt(overlong));
+        Assert.Null(WriteAndReadReceipt(resetAsFailure));
+        Assert.Null(WriteAndReadReceipt(wrongApplicationProduct));
+    }
+
+    [Theory]
+    [InlineData(AgentSessionCodes.ContinuationInvalid, TrustedLiveCodes.Continuation)]
+    [InlineData(AgentSessionCodes.TransitionRejected, TrustedLiveCodes.Continuation)]
+    [InlineData(AgentSessionCodes.RecordInvalid, TrustedLiveCodes.Grounding)]
+    [InlineData(AgentSessionCodes.CurrentMalformed, TrustedLiveCodes.Infrastructure)]
+    public void AdmittedSessionFailuresRetainTheirExactClassification(
+        string productCode,
+        string expected)
+    {
+        var receipt = FailureReceipt(
+            productCode,
+            qualityClassification: null,
+            qualityCode: null);
+        var admitted = WriteAndReadReceipt(receipt);
+
+        Assert.NotNull(admitted);
+        Assert.Equal(
+            expected,
+            TrustedLiveSupervisor.ClassifyFailure(
+                new TrustedLivePhaseExecution(
+                    FailedProcess(),
+                    admitted,
+                    CanaryDetected: false)));
+    }
+
+    [Fact]
+    public void UnknownSessionCodeBecomesNonReflectiveInvalidReceiptEvidence()
+    {
+        const string unknown = "session_future_response_failure";
+        var receipt = FailureReceipt(
+            unknown,
+            qualityClassification: null,
+            qualityCode: null);
+        var buildPair = new VerifierBuildPair(
+            VerifierExecutionKinds.Framework,
+            receipt.ExecutionArtifactSha256,
+            new string('3', 64),
+            receipt.BuildPairSha256);
+        var phases = new List<TrustedLivePhaseReceipt>();
+
+        Assert.False(TrustedLiveSupervisor.TryAdmitPhase(
+            new TrustedLivePhaseExecution(
+                FailedProcess(),
+                receipt,
+                CanaryDetected: false),
+            VerifierScenario.MustFind,
+            buildPair,
+            phases,
+            out var code,
+            out var failure));
+
+        Assert.Equal(TrustedLiveCodes.Infrastructure, code);
+        Assert.Empty(phases);
+        Assert.NotNull(failure);
+        Assert.Equal(TrustedLiveFailureKinds.ReceiptInvalid, failure.Kind);
+        Assert.Equal(
+            TrustedLiveDiagnosticCodes.PhaseReceiptInvalid,
+            failure.DiagnosticCode);
+        Assert.Null(failure.ProductCode);
+        Assert.Null(failure.OutcomeCode);
+        Assert.DoesNotContain(
+            unknown,
+            TrustedLiveReceiptCodec.WriteCompletion(
+                "failed",
+                code,
+                new string('a', 40),
+                "workflow-ref",
+                new string('a', 40),
+                fixtureSha256: null,
+                buildPair,
+                phases,
+                failure));
+    }
+
+    [Fact]
+    public void ProductCodeInventoryExactlyCoversCurrentSourceFamilies()
+    {
+        var sourceCodes = new[]
+            {
+                typeof(R3LiveAgentCodes),
+                typeof(LiveAgentFreshProcessCodes),
+                typeof(AgentFailureCodes),
+                typeof(RestrictedStateCodes),
+                typeof(AgentSessionCodes),
+            }
+            .SelectMany(type => type.GetFields(
+                BindingFlags.Static |
+                BindingFlags.Public |
+                BindingFlags.NonPublic))
+            .Where(field => field.IsLiteral &&
+                !field.IsInitOnly &&
+                field.FieldType == typeof(string))
+            .Select(field => Assert.IsType<string>(field.GetRawConstantValue()))
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.True(
+            sourceCodes.SetEquals(TrustedLiveDomain.ProductCodes),
+            string.Join(",", sourceCodes
+                .Except(TrustedLiveDomain.ProductCodes)
+                .Concat(TrustedLiveDomain.ProductCodes.Except(sourceCodes))));
+
+        var applicationCodes = typeof(R3LiveAgentDiagnosticCodes)
+            .GetFields(
+                BindingFlags.Static |
+                BindingFlags.Public |
+                BindingFlags.NonPublic)
+            .Where(field => field.IsLiteral &&
+                !field.IsInitOnly &&
+                field.FieldType == typeof(string))
+            .Select(field => Assert.IsType<string>(field.GetRawConstantValue()))
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.True(applicationCodes.SetEquals(
+            TrustedLiveDomain.ApplicationDiagnostics));
+    }
+
+    [Fact]
+    public void EveryChildStageProducesOnlyClosedPrivateFailureEvidence()
+    {
+        Directory.CreateDirectory(root);
+        foreach (var stage in TrustedLiveChildStages.All)
+        {
+            foreach (var category in TrustedLiveFailureCategories.All)
+            {
+                var marker = new TrustedLivePrivateFailure(
+                    TrustedLiveFailureKinds.Child,
+                    stage,
+                    category);
+                var path = Path.Join(root, $"{stage}-{category}.json");
+                File.WriteAllBytes(
+                    path,
+                    TrustedLivePrivateFailureCodec.Write(marker));
+                var read = TrustedLivePrivateFailureCodec.Read(path);
+                Assert.Equal(marker, read);
+
+                var evidence = TrustedLiveSupervisor.CreateFailureEvidence(
+                    new TrustedLivePhaseExecution(
+                        FailedProcess(),
+                        Receipt: null,
+                        CanaryDetected: false,
+                        ReceiptFilePresent: false,
+                        PrivateFailure: read),
+                    VerifierScenario.MustFind,
+                    receiptMatchesInvocation: false);
+                Assert.Equal(TrustedLiveFailureKinds.Child, evidence.Kind);
+                Assert.Equal(stage, evidence.Stage);
+                Assert.Equal(category, evidence.Category);
+                Assert.Equal(
+                    TrustedLiveDiagnosticCodes.PhaseChildFailed,
+                    evidence.DiagnosticCode);
+            }
+        }
+    }
+
+    [Fact]
+    public void PrivateFailureCodecRejectsUnknownDuplicateAndRawValues()
+    {
+        Directory.CreateDirectory(root);
+        var values = new[]
+        {
+            "{\"kind\":\"child\",\"stage\":\"unknown\",\"category\":\"other\"}",
+            "{\"kind\":\"child\",\"stage\":\"command_execution\",\"category\":\"InvalidOperationException\"}",
+            "{\"stage\":\"command_execution\",\"kind\":\"child\",\"category\":\"other\"}",
+            "{\"kind\":\"child\",\"stage\":\"command_execution\",\"stage\":\"lineage_read\",\"category\":\"other\"}",
+            "{\"kind\":\"child\",\"stage\":\"command_execution\",\"category\":\"other\",\"path\":\"C:\\\\private\"}",
+        };
+        for (var index = 0; index < values.Length; index++)
+        {
+            var path = Path.Join(root, $"invalid-{index}.json");
+            File.WriteAllText(path, values[index]);
+            Assert.Null(TrustedLivePrivateFailureCodec.Read(path));
+        }
+    }
+
+    [Fact]
+    public void PrivateFailureMarkerUsesCreateNewSemantics()
+    {
+        Directory.CreateDirectory(root);
+        AgenticPrReview.Runtime.LiveAgentVerifierFixture.Program
+            .WriteTrustedFailure(
+            root,
+            TrustedLiveChildStages.CommandExecution,
+            TrustedLiveFailureCategories.Process);
+
+        Assert.Throws<IOException>(() =>
+            AgenticPrReview.Runtime.LiveAgentVerifierFixture.Program
+                .WriteTrustedFailure(
+                    root,
+                    TrustedLiveChildStages.CommandExecution,
+                    TrustedLiveFailureCategories.Process));
+    }
+
+    [Fact]
+    public async Task TrustedChildWritesAClosedMarkerForMaterializationFailure()
+    {
+        Directory.CreateDirectory(root);
+        var phaseRoot = Path.Join(root, "phase");
+        var corpus = Path.Join(root, "invalid-corpus.json");
+        File.WriteAllText(corpus, "{}\n");
+        var executable = VerifierExecutable();
+        var manifest = WriteBuildPairManifest(executable);
+        var start = new ProcessStartInfo
+        {
+            FileName = executable,
+            WorkingDirectory = root,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+        foreach (var argument in new[]
+        {
+            "trusted-must-find",
+            "--root",
+            phaseRoot,
+            "--corpus",
+            corpus,
+            "--output",
+            Path.Join(phaseRoot, "private", "trusted-must-find.json"),
+            "--execution-kind",
+            VerifierExecutionKinds.Framework,
+            "--execution-artifact",
+            executable,
+            "--build-pair-manifest",
+            manifest,
+        })
+        {
+            start.ArgumentList.Add(argument);
+        }
+        using var process = Process.Start(start);
+        Assert.NotNull(process);
+        await process.WaitForExitAsync();
+        var output = await process.StandardOutput.ReadToEndAsync();
+        var error = await process.StandardError.ReadToEndAsync();
+
+        Assert.Equal(3, process.ExitCode);
+        Assert.Equal(string.Empty, output);
+        Assert.Contains(VerifierCodes.FixtureInvalid, error);
+        Assert.False(File.Exists(Path.Join(phaseRoot, "private", "failure.code")));
+        var marker = TrustedLivePrivateFailureCodec.Read(Path.Join(
+            phaseRoot,
+            "private",
+            "failure.json"));
+        Assert.NotNull(marker);
+        Assert.Equal(
+            TrustedLiveChildStages.FixtureMaterialization,
+            marker.Stage);
+        Assert.Equal(TrustedLiveFailureCategories.Invalid, marker.Category);
+    }
+
+    [Fact]
+    public void CanaryCompletionClearsAllPhaseDerivedEvidence()
+    {
+        var phase = FailureReceipt(
+            AgentSessionCodes.RecordInvalid,
+            qualityClassification: null,
+            qualityCode: null);
+        var failure = new TrustedLiveFailureEvidence(
+            phase.Scenario,
+            TrustedLiveFailureKinds.Canary,
+            Stage: null,
+            Category: null,
+            TrustedLiveCodes.Canary,
+            1,
+            ModelCalls: 0,
+            ToolCalls: 0,
+            ProductCode: null,
+            OutcomeCode: null,
+            QualityClassification: null,
+            QualityCode: null);
+        var completion = TrustedLiveReceiptCodec.WriteCompletion(
+            "failed",
+            TrustedLiveCodes.Canary,
+            new string('a', 40),
+            "workflow-ref",
+            new string('a', 40),
+            fixtureSha256: null,
+            buildPair: null,
+            [phase],
+            failure);
+
+        Assert.DoesNotContain(AgentSessionCodes.RecordInvalid, completion);
+        using var document = JsonDocument.Parse(completion);
+        Assert.Equal(0, document.RootElement.GetProperty("phase_count").GetInt32());
+        Assert.Equal(
+            0,
+            document.RootElement.GetProperty("attempted_phase_count").GetInt32());
+        Assert.Empty(document.RootElement.GetProperty("phases").EnumerateArray());
+        Assert.Equal(
+            JsonValueKind.Null,
+            document.RootElement.GetProperty("failure").ValueKind);
+    }
+
+    [Fact]
+    public void CanonicalProductResultBytesRemainDiagnosticFree()
+    {
+        var value = new LiveAgentFreshProcessResultDocument(
+            "apr-r3-live-agent-result",
+            R3LiveAgentCodes.CompositionFailed,
+            Generation: null,
+            "same_head",
+            0,
+            0,
+            StablePlanSha256: null,
+            TerminalSha256: null,
+            SessionSha256: null,
+            EnvelopeSha256: null,
+            LineageSha256: null,
+            SecondRequestSha256: null,
+            new string('a', 64),
+            HandoffReady: false);
+        var bytes = LiveAgentFreshProcessCodec.Write(value);
+        var json = Encoding.UTF8.GetString(bytes);
+
+        Assert.Equal(
+            "{\"kind\":\"apr-r3-live-agent-result\"," +
+            "\"code\":\"r3_live_composition_failed\"," +
+            "\"generation\":null,\"transition_class\":\"same_head\"," +
+            "\"model_calls\":0,\"tool_calls\":0," +
+            "\"stable_plan_sha256\":null,\"terminal_sha256\":null," +
+            "\"session_sha256\":null,\"envelope_sha256\":null," +
+            "\"lineage_sha256\":null,\"second_request_sha256\":null," +
+            $"\"invocation_identity_sha256\":\"{new string('a', 64)}\"," +
+            "\"handoff_ready\":false}",
+            json);
+        Assert.DoesNotContain("diagnostic", json);
     }
 
     public void Dispose()
@@ -627,6 +1022,25 @@ public sealed class TrustedLiveAgentTests : IDisposable
             timeout,
             cancellationToken);
     }
+
+    private TrustedLivePhaseReceipt? WriteAndReadReceipt(
+        TrustedLivePhaseReceipt receipt)
+    {
+        Directory.CreateDirectory(root);
+        var path = Path.Join(root, Guid.NewGuid().ToString("N") + ".json");
+        File.WriteAllBytes(path, TrustedLiveReceiptCodec.Write(receipt));
+        return TrustedLiveReceiptCodec.Read(path);
+    }
+
+    private static TrustedLiveProcessResult FailedProcess() =>
+        new(
+            1,
+            TimedOut: false,
+            Cancelled: false,
+            SensitiveBytesObserved: false,
+            OutputLimitExceeded: false,
+            string.Empty,
+            string.Empty);
 
     private static TrustedLivePhaseReceipt FailureReceipt(
         string productCode,

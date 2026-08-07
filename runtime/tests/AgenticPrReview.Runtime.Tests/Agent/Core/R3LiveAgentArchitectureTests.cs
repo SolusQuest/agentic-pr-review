@@ -198,6 +198,22 @@ public sealed partial class AgentCapabilityArchitectureTests
         Assert.DoesNotContain(
             types,
             registeredTypes.Contains);
+        Assert.False(typeof(LiveAgentFreshProcessCommandResult).IsPublic);
+        Assert.DoesNotContain(
+            typeof(LiveAgentFreshProcessCommandResult),
+            registeredTypes);
+        Assert.Equal(
+            [
+                ("DiagnosticCode", typeof(string)),
+                ("ExitCode", typeof(int)),
+            ],
+            typeof(LiveAgentFreshProcessCommandResult)
+                .GetProperties(
+                    BindingFlags.Instance |
+                    BindingFlags.Public |
+                    BindingFlags.DeclaredOnly)
+                .Select(property => (property.Name, property.PropertyType))
+                .OrderBy(property => property.Name, StringComparer.Ordinal));
 
         AssertExactInternalAutoPropertyStorage(
             typeof(R3LiveAgentResult),

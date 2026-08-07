@@ -98,12 +98,19 @@ internal static class Program
         catch (Exception exception) when (exception is not OutOfMemoryException and
             not StackOverflowException and not AccessViolationException)
         {
+            if (parsedCommand.Verb.StartsWith(
+                    "trusted-",
+                    StringComparison.Ordinal))
+            {
+                Console.Error.WriteLine(VerifierCodes.PhaseFailed);
+                return 1;
+            }
             try
             {
                 Directory.CreateDirectory(Path.Join(parsedCommand.Root, "private"));
                 File.WriteAllText(
                     Path.Join(parsedCommand.Root, "private", "failure.code"),
-                    exception.GetType().Name);
+                    VerifierCodes.PhaseFailed);
             }
             catch (Exception diagnosticException) when (
                 diagnosticException is ArgumentException or
@@ -432,110 +439,161 @@ internal static class Program
         VerifierScenario scenario,
         VerifierBuildPair buildPair)
     {
-        var corpusBytes = File.ReadAllBytes(command.Corpus);
-        if (!FreshProcessMaterializer.TryMaterialize(
-                scenario,
-                command.Root,
-                corpusBytes,
-                out var materialized,
-                command.ExpectedLineageSha256) ||
-            materialized is null ||
-            !LiveAgentFreshProcessFileSystem.TryCreate(
-                command.Root,
-                out var fileSystem) ||
-            fileSystem is null)
+        var stage = TrustedLiveChildStages.FixtureInputRead;
+        TrustedLiveAgentProfile? profile = null;
+        try
         {
-            Console.Error.WriteLine(VerifierCodes.FixtureInvalid);
-            return 3;
-        }
-
-        var profile = new TrustedLiveAgentProfile(
-            scenario,
-            materialized.TestCase,
-            materialized.ReviewedIdentity);
-        var result = await LiveAgentFreshProcessCommand.RunAsync(
-            materialized.Phase,
-            fileSystem,
-            CancellationToken.None,
-            profile);
-        var resultPath = Path.Join(
-            command.Root,
-            "output",
-            "result.json");
-        var product = File.Exists(resultPath)
-            ? LiveAgentFreshProcessCodec.ReadResult(
-                File.ReadAllBytes(resultPath))
-            : null;
-        var execution = profile.Execution;
-        var observer = execution?.Observer;
-        var quality = observer?.Outcome;
-        var canonicalLineage = ReadAcceptedTuple(Path.Join(
-            command.Root,
-            "host",
-            "accepted-lineage.json"));
-        var acceptedTupleValidated = ProductMatches(
-            product,
-            canonicalLineage);
-        var seed = scenario == VerifierScenario.ContinuationSeed;
-        var passed = result.ExitCode == 0 &&
-            product is { HandoffReady: true } &&
-            execution is not null &&
-            observer is { ProofPassed: true } &&
-            acceptedTupleValidated &&
-            (seed || quality is
+            var corpusBytes = File.ReadAllBytes(command.Corpus);
+            stage = TrustedLiveChildStages.FixtureMaterialization;
+            if (!FreshProcessMaterializer.TryMaterialize(
+                    scenario,
+                    command.Root,
+                    corpusBytes,
+                    out var materialized,
+                    command.ExpectedLineageSha256) ||
+                materialized is null)
             {
-                Status: "passed",
-                Classification: "quality",
-                Code: R3QualityCodes.Passed,
-            });
-        var outcomeCode = passed
-            ? scenario switch
-            {
-                VerifierScenario.MustFind => "APR_R3_TRUSTED_LIVE_MUST_FIND_OK",
-                VerifierScenario.MustNotFind =>
-                    "APR_R3_TRUSTED_LIVE_MUST_NOT_FIND_OK",
-                VerifierScenario.ContinuationSeed =>
-                    "APR_R3_TRUSTED_LIVE_CONTINUATION_SEED_OK",
-                VerifierScenario.ContinuationRestore =>
-                    "APR_R3_TRUSTED_LIVE_CONTINUATION_RESTORE_OK",
-                _ => TrustedLiveCodes.Infrastructure,
+                WriteTrustedFailure(
+                    command.Root,
+                    stage,
+                    TrustedLiveFailureCategories.Invalid);
+                Console.Error.WriteLine(VerifierCodes.FixtureInvalid);
+                return 3;
             }
-            : quality?.Code ?? result.DiagnosticCode ??
-                product?.Code ?? TrustedLiveCodes.Infrastructure;
-        var receipt = new TrustedLivePhaseReceipt(
-            scenario.ToString(),
-            passed ? "passed" : "failed",
-            outcomeCode,
-            product?.Code ?? result.DiagnosticCode ??
-                TrustedLiveCodes.Infrastructure,
-            product?.Generation,
-            product?.TransitionClass ?? materialized.Transition,
-            product?.ModelCalls ?? 0,
-            product?.ToolCalls ?? 0,
-            product?.HandoffReady == true,
-            acceptedTupleValidated,
-            product?.InvocationIdentitySha256 ?? string.Empty,
-            product?.LineageSha256,
-            product?.SessionSha256,
-            product?.EnvelopeSha256,
-            product?.TerminalSha256,
-            quality?.Status,
-            quality?.Classification,
-            quality?.Code,
-            quality?.FindingCount ?? 0,
-            quality?.ToolCallCount ?? 0,
-            buildPair.ExecutionArtifactSha256,
-            buildPair.BuildPairSha256);
-        WriteNew(command.Output, TrustedLiveReceiptCodec.Write(receipt));
-        if (!passed)
+
+            stage = TrustedLiveChildStages.FreshProcessFilesystem;
+            if (!LiveAgentFreshProcessFileSystem.TryCreate(
+                    command.Root,
+                    out var fileSystem) ||
+                fileSystem is null)
+            {
+                WriteTrustedFailure(
+                    command.Root,
+                    stage,
+                    TrustedLiveFailureCategories.Invalid);
+                Console.Error.WriteLine(VerifierCodes.FixtureInvalid);
+                return 3;
+            }
+
+            stage = TrustedLiveChildStages.CommandPreparation;
+            profile = new TrustedLiveAgentProfile(
+                scenario,
+                materialized.TestCase,
+                materialized.ReviewedIdentity);
+            LiveAgentFreshProcessCommandResult result;
+            try
+            {
+                result = await LiveAgentFreshProcessCommand.RunAsync(
+                    materialized.Phase,
+                    fileSystem,
+                    CancellationToken.None,
+                    profile);
+            }
+            catch
+            {
+                stage = profile.ActivationStarted
+                    ? profile.ActivationCompleted
+                        ? TrustedLiveChildStages.CommandExecution
+                        : TrustedLiveChildStages.ProfileActivation
+                    : TrustedLiveChildStages.CommandPreparation;
+                throw;
+            }
+
+            stage = TrustedLiveChildStages.ProductResultRead;
+            var resultPath = Path.Join(
+                command.Root,
+                "output",
+                "result.json");
+            var product = File.Exists(resultPath)
+                ? LiveAgentFreshProcessCodec.ReadResult(
+                    File.ReadAllBytes(resultPath))
+                : null;
+            stage = TrustedLiveChildStages.LineageRead;
+            var canonicalLineage = ReadAcceptedTuple(Path.Join(
+                command.Root,
+                "host",
+                "accepted-lineage.json"));
+            stage = TrustedLiveChildStages.QualityProjection;
+            var execution = profile.Execution;
+            var observer = execution?.Observer;
+            var quality = observer?.Outcome;
+            var acceptedTupleValidated = ProductMatches(
+                product,
+                canonicalLineage);
+            stage = TrustedLiveChildStages.PhaseReceiptProjection;
+            var seed = scenario == VerifierScenario.ContinuationSeed;
+            var passed = result.ExitCode == 0 &&
+                product is { HandoffReady: true } &&
+                execution is not null &&
+                observer is { ProofPassed: true } &&
+                acceptedTupleValidated &&
+                (seed || quality is
+                {
+                    Status: "passed",
+                    Classification: "quality",
+                    Code: R3QualityCodes.Passed,
+                });
+            var outcomeCode = passed
+                ? scenario switch
+                {
+                    VerifierScenario.MustFind =>
+                        TrustedLiveSuccessCodes.MustFind,
+                    VerifierScenario.MustNotFind =>
+                        TrustedLiveSuccessCodes.MustNotFind,
+                    VerifierScenario.ContinuationSeed =>
+                        TrustedLiveSuccessCodes.ContinuationSeed,
+                    VerifierScenario.ContinuationRestore =>
+                        TrustedLiveSuccessCodes.ContinuationRestore,
+                    _ => TrustedLiveCodes.Infrastructure,
+                }
+                : quality?.Code ?? result.DiagnosticCode ??
+                    product?.Code ?? TrustedLiveCodes.Infrastructure;
+            var receipt = new TrustedLivePhaseReceipt(
+                scenario.ToString(),
+                passed ? "passed" : "failed",
+                outcomeCode,
+                product?.Code ?? result.DiagnosticCode ??
+                    TrustedLiveCodes.Infrastructure,
+                product?.Generation,
+                product?.TransitionClass ?? materialized.Transition,
+                product?.ModelCalls ?? 0,
+                product?.ToolCalls ?? 0,
+                product?.HandoffReady == true,
+                acceptedTupleValidated,
+                product?.InvocationIdentitySha256 ?? string.Empty,
+                product?.LineageSha256,
+                product?.SessionSha256,
+                product?.EnvelopeSha256,
+                product?.TerminalSha256,
+                quality?.Status,
+                quality?.Classification,
+                quality?.Code,
+                quality?.FindingCount ?? 0,
+                quality?.ToolCallCount ?? 0,
+                buildPair.ExecutionArtifactSha256,
+                buildPair.BuildPairSha256);
+            stage = TrustedLiveChildStages.PhaseReceiptWrite;
+            WriteNew(command.Output, TrustedLiveReceiptCodec.Write(receipt));
+            if (!passed)
+            {
+                Console.Error.WriteLine(VerifierCodes.PhaseFailed);
+                return 1;
+            }
+
+            Console.WriteLine(
+                string.Concat(VerifierCodes.PhaseOk, " ", scenario.ToString()));
+            return 0;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException and
+            not StackOverflowException and not AccessViolationException)
         {
+            WriteTrustedFailure(
+                command.Root,
+                stage,
+                TrustedLiveFailureCategories.FromException(exception));
             Console.Error.WriteLine(VerifierCodes.PhaseFailed);
             return 1;
         }
-
-        Console.WriteLine(
-            string.Concat(VerifierCodes.PhaseOk, " ", scenario.ToString()));
-        return 0;
     }
 
     private static int Aggregate(
@@ -1011,6 +1069,18 @@ internal static class Program
         Directory.CreateDirectory(Path.Join(root, "private"));
         File.WriteAllText(Path.Join(root, "private", "failure.code"), code);
     }
+
+    internal static void WriteTrustedFailure(
+        string root,
+        string stage,
+        string category) =>
+        WriteNew(
+            Path.Join(root, "private", "failure.json"),
+            TrustedLivePrivateFailureCodec.Write(
+                new TrustedLivePrivateFailure(
+                    TrustedLiveFailureKinds.Child,
+                    stage,
+                    category)));
 
     private sealed record AcceptedTuple(
         long Generation,
