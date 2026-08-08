@@ -439,6 +439,72 @@ public sealed class TrustedLiveAgentTests : IDisposable
         Assert.Equal(R3LiveAgentCodes.CompositionFailed, failure.ProductCode);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void RejectedPassingReceiptBecomesNonReflectiveInvalidEvidence(
+        bool processFailed)
+    {
+        var receipt = PassingReceipt();
+        if (!processFailed)
+        {
+            receipt = receipt with { Generation = 1 };
+        }
+        var buildPair = new VerifierBuildPair(
+            VerifierExecutionKinds.Framework,
+            receipt.ExecutionArtifactSha256,
+            new string('3', 64),
+            receipt.BuildPairSha256);
+        var process = new TrustedLiveProcessResult(
+            processFailed ? 1 : 0,
+            TimedOut: false,
+            Cancelled: false,
+            SensitiveBytesObserved: false,
+            OutputLimitExceeded: false,
+            string.Empty,
+            string.Empty);
+        var phases = new List<TrustedLivePhaseReceipt>();
+
+        Assert.True(TrustedLiveDomain.ReceiptIsAdmitted(receipt));
+        Assert.False(TrustedLiveSupervisor.TryAdmitPhase(
+            new TrustedLivePhaseExecution(
+                process,
+                receipt,
+                CanaryDetected: false,
+                ReceiptFilePresent: true),
+            VerifierScenario.MustFind,
+            buildPair,
+            phases,
+            out var code,
+            out var failure));
+
+        Assert.Equal(TrustedLiveCodes.Infrastructure, code);
+        Assert.Empty(phases);
+        Assert.NotNull(failure);
+        Assert.Equal(TrustedLiveFailureKinds.ReceiptInvalid, failure.Kind);
+        Assert.Equal(
+            TrustedLiveDiagnosticCodes.PhaseReceiptInvalid,
+            failure.DiagnosticCode);
+        Assert.Equal(0, failure.ModelCalls);
+        Assert.Equal(0, failure.ToolCalls);
+        Assert.Null(failure.ProductCode);
+        Assert.Null(failure.OutcomeCode);
+        Assert.Null(failure.QualityClassification);
+        Assert.Null(failure.QualityCode);
+        Assert.DoesNotContain(
+            TrustedLiveSuccessCodes.MustFind,
+            TrustedLiveReceiptCodec.WriteCompletion(
+                "failed",
+                code,
+                new string('a', 40),
+                "workflow-ref",
+                new string('a', 40),
+                fixtureSha256: null,
+                buildPair,
+                phases,
+                failure));
+    }
+
     [Fact]
     public void CanaryFailureSuppressesAllReceiptFields()
     {
@@ -1385,6 +1451,30 @@ public sealed class TrustedLiveAgentTests : IDisposable
             0,
             new string('1', 64),
             new string('2', 64));
+
+    private static TrustedLivePhaseReceipt PassingReceipt() => new(
+        VerifierScenario.MustFind.ToString(),
+        "passed",
+        TrustedLiveSuccessCodes.MustFind,
+        R3LiveAgentCodes.Completed,
+        0,
+        "same_head",
+        2,
+        2,
+        true,
+        true,
+        new string('4', 64),
+        new string('5', 64),
+        new string('6', 64),
+        new string('7', 64),
+        new string('8', 64),
+        "passed",
+        "quality",
+        R3QualityCodes.Passed,
+        1,
+        2,
+        new string('1', 64),
+        new string('2', 64));
 
     private static string QualityCorpus() => Path.Join(
         AppContext.BaseDirectory,

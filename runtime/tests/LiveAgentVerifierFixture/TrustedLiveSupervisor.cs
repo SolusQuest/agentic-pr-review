@@ -426,7 +426,8 @@ internal static class TrustedLiveSupervisor
                 QualityCode: null);
         }
         if (receipt is null && execution.ReceiptFilePresent ||
-            receipt is not null && !receiptMatchesInvocation)
+            receipt is not null &&
+            (!receiptMatchesInvocation || receipt.Status != "failed"))
         {
             return new TrustedLiveFailureEvidence(
                 scenario.ToString(),
