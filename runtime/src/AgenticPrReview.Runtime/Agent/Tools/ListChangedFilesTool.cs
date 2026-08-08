@@ -23,21 +23,46 @@ internal static partial class AgentToolArguments
     internal static bool TryListChangedFiles(
         string json,
         out ListChangedFilesArguments? arguments) =>
-        TryListChangedFiles(json, allowCanonicalNull: false, out arguments);
+        TryListChangedFiles(
+            json,
+            allowCanonicalNull: false,
+            allowProviderSpelling: false,
+            out arguments);
 
     internal static bool TryListChangedFilesCanonical(
         string json,
         out ListChangedFilesArguments? arguments) =>
-        TryListChangedFiles(json, allowCanonicalNull: true, out arguments);
+        TryListChangedFiles(
+            json,
+            allowCanonicalNull: true,
+            allowProviderSpelling: false,
+            out arguments);
+
+    internal static bool TryListChangedFilesProvider(
+        string json,
+        out ListChangedFilesArguments? arguments) =>
+        TryListChangedFiles(
+            json,
+            allowCanonicalNull: false,
+            allowProviderSpelling: true,
+            out arguments);
 
     private static bool TryListChangedFiles(
         string json,
         bool allowCanonicalNull,
+        bool allowProviderSpelling,
         out ListChangedFilesArguments? arguments)
     {
         arguments = null;
         var input = StrictInputBytes(json);
         if (input is null)
+        {
+            return false;
+        }
+        var providerComparison = allowProviderSpelling
+            ? ProviderComparisonBytes(input)
+            : null;
+        if (allowProviderSpelling && providerComparison is null)
         {
             return false;
         }
@@ -54,12 +79,12 @@ internal static partial class AgentToolArguments
             }
 
             var accepted = allowCanonicalNull
-                ? input.AsSpan().SequenceEqual(
+                ? MatchesInput(input, providerComparison,
                     WriteListChangedFiles(dto.After, includeAfter: true))
-                : input.AsSpan().SequenceEqual(
+                : MatchesInput(input, providerComparison,
                     WriteListChangedFiles(dto.After, includeAfter: false)) ||
                     dto.After is not null &&
-                    input.AsSpan().SequenceEqual(
+                    MatchesInput(input, providerComparison,
                         WriteListChangedFiles(dto.After, includeAfter: true));
             if (!accepted)
             {

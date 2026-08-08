@@ -41,7 +41,11 @@ There is no retry, parallel tool execution, partial success, automatic framework
 
 `runtime/src/AgenticPrReview.Runtime/Agent/AgentLimits.cs` is the only R2 authority. It contains all 41 rows from #78 in exact ordinal, registry-name, base-unit value, and unit order, including fields first consumed by later SESSION and STATE work. Later children consume this authority rather than introducing parallel limits families.
 
-Canonical JSON is UTF-8 without BOM or insignificant whitespace. Each owning schema fixes property and array order. Strings use the frozen lowercase control escapes and direct non-ASCII scalars without normalization. Strict input admission rejects duplicate, unknown, missing, reordered, alternate-escape, alternate-number, and trailing representations. The one permitted optional-argument variance is normalized immediately:
+Canonical JSON is UTF-8 without BOM or insignificant whitespace. Each owning schema fixes property and array order. Strings use the frozen lowercase control escapes and direct non-ASCII scalars without normalization. Prior logical history, SESSION/STATE restore, and canonical event re-admission remain strict: they reject duplicate, unknown, missing, reordered, alternate-escape, alternate-number, and trailing representations.
+
+The raw argument string on a current provider response has one narrower spelling boundary before it becomes a logical record. Agent/core parses it within the existing nonterminal or terminal byte cap, rejects duplicate or structurally invalid JSON, deserializes it through the closed source-generated tool DTO, applies every existing required/optional-property and domain rule, and compares it by bounded JSON value semantics with the exact provider shapes emitted by that tool's project writer. This permits only insignificant whitespace, object-property order, and equivalent string or bounded-Int32 number spelling for an otherwise admitted current call. Unknown or missing fields, explicit null for omitted-only optionals, wrong kinds, invalid domains, trailing content, and structural-cap failures remain rejected. The generic comparison is not a retained representation or a wider-integer compatibility reader; the existing schema-order writer immediately produces the only admitted bytes.
+
+The permitted optional-argument variance is normalized immediately:
 
 - `read_file` stores `path`, defaulted `start_line`, then defaulted `line_count`;
 - `search_text` stores `query`, then a string or JSON `null` path;

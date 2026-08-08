@@ -107,12 +107,30 @@ public sealed class R3QualityEvaluatorTests
             "{\"path\":\"",
             expectation.Evidence.Path,
             "\",\"start_line\":1,\"line_count\":5}");
+        var wrongToolCase = testCase with
+        {
+            Files = testCase.Files.Select(file =>
+                    StringComparer.Ordinal.Equals(
+                        file.Path,
+                        expectation.Evidence.Path)
+                        ? file with
+                        {
+                            Content = file.Content.Replace(
+                                "namespace SyntheticQuality;",
+                                string.Concat(
+                                    "namespace SyntheticQuality; // ",
+                                    expectation.TargetMarker),
+                                StringComparison.Ordinal),
+                        }
+                        : file)
+                .ToImmutableArray(),
+        };
         var wrongTool = await BootstrapAsync(
-            testCase,
+            wrongToolCase,
             [new ToolCall("read0", AgentToolRegistry.ReadFileName, wrongArguments)],
             "Observed through the wrong tool.",
             []);
-        var wrong = Evaluate(testCase, wrongTool.Input, Fresh());
+        var wrong = Evaluate(wrongToolCase, wrongTool.Input, Fresh());
         Assert.Equal(R3QualityCodes.RequiredToolWrong, wrong.Code);
 
         var nonmatching = await BootstrapAsync(
@@ -470,6 +488,47 @@ public sealed class R3QualityEvaluatorTests
     }
 
     [Fact]
+    public async Task ContinuationRejectsFindingsEvenWhenGroundedAndFactBearing()
+    {
+        var testCase = R3QualityCorpusTests.ParseCorpus().Cases[2];
+        var expectation = Assert.IsType<R3QualityContinuationExpectation>(
+            testCase.Expectation);
+        const string arguments =
+            "{\"path\":\"src/RetryBudget.cs\"}";
+        var observation = await ObserveAsync(
+            testCase,
+            AgentToolRegistry.ReadDiffName,
+            arguments);
+        var finding = Finding(
+            "low",
+            "Synthetic continuation finding",
+            expectation.PriorOnlyMarker,
+            new AgentEvidence(
+                observation.ObservationId,
+                "src/RetryBudget.cs",
+                4,
+                4));
+        using var completed = await ContinuationAsync(
+            testCase,
+            string.Concat("Restored fact: ", expectation.PriorOnlyMarker),
+            currentCalls:
+            [
+                new ToolCall(
+                    "diff-current",
+                    AgentToolRegistry.ReadDiffName,
+                    arguments),
+            ],
+            currentFindings: [finding]);
+        var fresh = Fresh(expectation.FreshInputNames.Select(name =>
+            (name, "synthetic current input")).ToArray());
+
+        var outcome = Evaluate(testCase, completed.Input, fresh);
+
+        Assert.Equal("failed", outcome.Status);
+        Assert.Equal(R3QualityCodes.ProhibitedFinding, outcome.Code);
+    }
+
+    [Fact]
     public async Task ContinuationRejectsUnrelatedPredecessorContext()
     {
         var testCase = R3QualityCorpusTests.ParseCorpus().Cases[2];
@@ -632,6 +691,11 @@ public sealed class R3QualityEvaluatorTests
         {
             prepared = new PreparedReadFileCall("read0", read!);
         }
+        else if (name == AgentToolRegistry.ReadDiffName &&
+            AgentToolArguments.TryReadDiff(argumentsJson, out var diff))
+        {
+            prepared = new PreparedReadDiffCall("diff0", diff!);
+        }
         else
         {
             throw new InvalidOperationException("Unsupported observation helper.");
@@ -649,7 +713,9 @@ public sealed class R3QualityEvaluatorTests
         R3QualityCase testCase,
         string terminalSummary,
         string? predecessorContextOverride = null,
-        string? trustedPolicyOverride = null)
+        string? trustedPolicyOverride = null,
+        IReadOnlyList<ToolCall>? currentCalls = null,
+        ImmutableArray<AgentFinding>? currentFindings = null)
     {
         var predecessorContext = predecessorContextOverride ??
             testCase.ProcessOneContext ??
@@ -689,9 +755,9 @@ public sealed class R3QualityEvaluatorTests
         var outcome = await CompleteAsync(
             testCase,
             run,
-            [],
+            currentCalls ?? [],
             terminalSummary,
-            [],
+            currentFindings ?? [],
             finishCallId: "finish1");
         Assert.True(outcome.CompletedSessionEligible, outcome.Diagnostic?.Code);
         return new ContinuationInput(

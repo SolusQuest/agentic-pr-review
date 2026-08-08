@@ -849,16 +849,17 @@ internal static class R3QualityEvaluator
         }
 
         var review = subject.Review!;
+        if (review.Findings.Length != 0)
+        {
+            return QualityFailure(
+                testCase,
+                subject,
+                R3QualityCodes.ProhibitedFinding);
+        }
+
         var present = review.Summary.Contains(
-                expectation.PriorOnlyMarker,
-                StringComparison.Ordinal) ||
-            review.Findings.Any(finding =>
-                finding.Title.Contains(
-                    expectation.PriorOnlyMarker,
-                    StringComparison.Ordinal) ||
-                finding.Message.Contains(
-                    expectation.PriorOnlyMarker,
-                    StringComparison.Ordinal));
+            expectation.PriorOnlyMarker,
+            StringComparison.Ordinal);
         return present
             ? Passed(testCase, subject)
             : QualityFailure(

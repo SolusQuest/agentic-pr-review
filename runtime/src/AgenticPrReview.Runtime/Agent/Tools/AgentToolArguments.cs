@@ -1,4 +1,6 @@
 using System.Text;
+using System.Text.Json;
+using AgenticPrReview.Runtime.Canonical;
 
 namespace AgenticPrReview.Runtime.Agent.Tools;
 
@@ -17,6 +19,52 @@ internal static partial class AgentToolArguments
         {
             return null;
         }
+    }
+
+    private static byte[]? ProviderComparisonBytes(
+        byte[] input,
+        int maximumBytes = AgentLimits.ToolArgumentsBytes)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(
+                input,
+                new JsonDocumentOptions { MaxDepth = 16 });
+            var canonical = JsonElementCanonicalizer.Canonicalize(
+                document.RootElement,
+                maxDepth: 8,
+                maxProperties: 64,
+                maxArrayItems: 64,
+                maxBytes: maximumBytes,
+                out var capExceeded);
+            return capExceeded ? null : canonical.ToArray();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        catch (Rfc8785CanonicalizationException)
+        {
+            return null;
+        }
+    }
+
+    private static bool MatchesInput(
+        ReadOnlySpan<byte> strictInput,
+        byte[]? providerComparison,
+        byte[] expected,
+        int maximumBytes = AgentLimits.ToolArgumentsBytes)
+    {
+        if (providerComparison is null)
+        {
+            return strictInput.SequenceEqual(expected);
+        }
+
+        var expectedComparison = ProviderComparisonBytes(
+            expected,
+            maximumBytes);
+        return expectedComparison is not null &&
+            providerComparison.AsSpan().SequenceEqual(expectedComparison);
     }
 }
 

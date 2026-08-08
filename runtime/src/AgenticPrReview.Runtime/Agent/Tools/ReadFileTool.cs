@@ -24,11 +24,29 @@ internal static partial class AgentToolArguments
 {
     internal static bool TryReadFile(
         string json,
+        out ReadFileArguments? arguments) =>
+        TryReadFile(json, allowProviderSpelling: false, out arguments);
+
+    internal static bool TryReadFileProvider(
+        string json,
+        out ReadFileArguments? arguments) =>
+        TryReadFile(json, allowProviderSpelling: true, out arguments);
+
+    private static bool TryReadFile(
+        string json,
+        bool allowProviderSpelling,
         out ReadFileArguments? arguments)
     {
         arguments = null;
         var input = StrictInputBytes(json);
         if (input is null)
+        {
+            return false;
+        }
+        var providerComparison = allowProviderSpelling
+            ? ProviderComparisonBytes(input)
+            : null;
+        if (allowProviderSpelling && providerComparison is null)
         {
             return false;
         }
@@ -48,7 +66,12 @@ internal static partial class AgentToolArguments
 
             var start = dto.StartLine ?? 1;
             var count = dto.LineCount ?? AgentLimits.ReadFileLines;
-            if (!MatchesReadInput(input, dto.Path, start, count))
+            if (!MatchesReadInput(
+                    input,
+                    providerComparison,
+                    dto.Path,
+                    start,
+                    count))
             {
                 return false;
             }
@@ -69,14 +92,19 @@ internal static partial class AgentToolArguments
 
     private static bool MatchesReadInput(
         ReadOnlySpan<byte> input,
+        byte[]? providerComparison,
         string path,
         int startLine,
         int lineCount)
     {
-        return input.SequenceEqual(WriteReadFile(path, startLine, lineCount, false, false)) ||
-            input.SequenceEqual(WriteReadFile(path, startLine, lineCount, true, false)) ||
-            input.SequenceEqual(WriteReadFile(path, startLine, lineCount, false, true)) ||
-            input.SequenceEqual(WriteReadFile(path, startLine, lineCount, true, true));
+        return MatchesInput(input, providerComparison,
+                WriteReadFile(path, startLine, lineCount, false, false)) ||
+            MatchesInput(input, providerComparison,
+                WriteReadFile(path, startLine, lineCount, true, false)) ||
+            MatchesInput(input, providerComparison,
+                WriteReadFile(path, startLine, lineCount, false, true)) ||
+            MatchesInput(input, providerComparison,
+                WriteReadFile(path, startLine, lineCount, true, true));
     }
 
     private static byte[] WriteReadFile(

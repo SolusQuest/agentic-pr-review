@@ -549,7 +549,7 @@ internal sealed class AgentLoop(
             switch (call.Name)
             {
                 case AgentToolRegistry.ListFilesName:
-                    if (!AgentToolArguments.TryListFiles(
+                    if (!AgentToolArguments.TryListFilesProvider(
                             call.ArgumentsJson,
                             out var list))
                     {
@@ -559,7 +559,7 @@ internal sealed class AgentLoop(
                     prepared.Add(new PreparedListFilesCall(call.CallId, list!));
                     break;
                 case AgentToolRegistry.ListChangedFilesName:
-                    if (!AgentToolArguments.TryListChangedFiles(
+                    if (!AgentToolArguments.TryListChangedFilesProvider(
                             call.ArgumentsJson,
                             out var changed))
                     {
@@ -571,7 +571,7 @@ internal sealed class AgentLoop(
                         changed!));
                     break;
                 case AgentToolRegistry.ReadDiffName:
-                    if (!AgentToolArguments.TryReadDiff(
+                    if (!AgentToolArguments.TryReadDiffProvider(
                             call.ArgumentsJson,
                             out var diff))
                     {
@@ -581,7 +581,7 @@ internal sealed class AgentLoop(
                     prepared.Add(new PreparedReadDiffCall(call.CallId, diff!));
                     break;
                 case AgentToolRegistry.ReadFileName:
-                    if (!AgentToolArguments.TryReadFile(
+                    if (!AgentToolArguments.TryReadFileProvider(
                             call.ArgumentsJson,
                             out var read))
                     {
@@ -591,7 +591,7 @@ internal sealed class AgentLoop(
                     prepared.Add(new PreparedReadFileCall(call.CallId, read!));
                     break;
                 case AgentToolRegistry.SearchTextName:
-                    if (!AgentToolArguments.TrySearchText(
+                    if (!AgentToolArguments.TrySearchTextProvider(
                             call.ArgumentsJson,
                             out var search))
                     {
@@ -601,7 +601,7 @@ internal sealed class AgentLoop(
                     prepared.Add(new PreparedSearchTextCall(call.CallId, search!));
                     break;
                 case AgentToolRegistry.FinishReviewName:
-                    if (!AgentToolArguments.TryFinishReview(
+                    if (!AgentToolArguments.TryFinishReviewProvider(
                             call.ArgumentsJson,
                             out var finish))
                     {

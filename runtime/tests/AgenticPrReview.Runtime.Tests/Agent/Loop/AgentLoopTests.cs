@@ -174,7 +174,7 @@ public sealed class AgentLoopTests
                 new ProjectToolCallContent(
                     "read",
                     "read_file",
-                    "{\"path\":\"a.txt\"}"),
+                    "{ \"start_line\" : 1, \"path\" : \"\\u0061.txt\" }"),
                 10,
                 2),
             Response(
@@ -604,6 +604,31 @@ public sealed class AgentLoopTests
                         "finish",
                         "finish_review",
                         "{\"summary\":\"done\",\"findings\":[null]}"),
+                ]),
+            new ProjectChatUsage(0, 0),
+            1);
+
+        var outcome = await new AgentLoop(
+            new ScriptedChatClient([response]),
+            new ScriptedToolExecutor()).RunAsync(
+                Request(),
+                CancellationToken.None);
+
+        AssertFailure(outcome, "agent_terminal_invalid");
+        Assert.IsType<AgentFailureEvent>(outcome.Events[^1]);
+    }
+
+    [Fact]
+    public async Task NonEquivalentProviderTerminalSpellingKeepsTerminalFailure()
+    {
+        var response = new ProjectChatResponse(
+            new ProjectChatMessage(
+                "assistant",
+                [
+                    new ProjectToolCallContent(
+                        "finish",
+                        "finish_review",
+                        "{\"findings\":[],\"summary\":\"done\",\"unknown\":true}"),
                 ]),
             new ProjectChatUsage(0, 0),
             1);
