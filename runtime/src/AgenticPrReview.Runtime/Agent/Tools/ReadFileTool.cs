@@ -46,7 +46,11 @@ internal static partial class AgentToolArguments
         var providerComparison = allowProviderSpelling
             ? ProviderComparisonBytes(input)
             : null;
-        if (allowProviderSpelling && providerComparison is null)
+        var deserializationInput = allowProviderSpelling
+            ? ProviderDeserializationBytes(input)
+            : input;
+        if (deserializationInput is null ||
+            allowProviderSpelling && providerComparison is null)
         {
             return false;
         }
@@ -54,7 +58,7 @@ internal static partial class AgentToolArguments
         try
         {
             var dto = JsonSerializer.Deserialize(
-                input,
+                deserializationInput,
                 AgentToolJsonContext.Default.ReadFileArgumentsDto);
             if (dto?.Path is null ||
                 !RepositoryPath.IsValid(dto.Path) ||

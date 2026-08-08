@@ -6,6 +6,9 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Tools;
 
 public sealed class AgentToolProviderArgumentTests
 {
+    private const string ObservationId =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
     public static TheoryData<string, string, string> EquivalentSpellings => new()
     {
         {
@@ -29,6 +32,11 @@ public sealed class AgentToolProviderArgumentTests
             "{\"path\":\"src/a.cs\",\"start_line\":2,\"line_count\":3}"
         },
         {
+            AgentToolRegistry.ReadFileName,
+            "{\"line_count\":4e0,\"path\":\"src/a.cs\",\"start_line\":1.0}",
+            "{\"path\":\"src/a.cs\",\"start_line\":1,\"line_count\":4}"
+        },
+        {
             AgentToolRegistry.SearchTextName,
             "{ \"path\" : \"src/\\u0061.cs\" , \"query\" : \"ne\\u0065dle\" }",
             "{\"query\":\"needle\",\"path\":\"src/a.cs\"}"
@@ -38,6 +46,41 @@ public sealed class AgentToolProviderArgumentTests
             "{ \"findings\" : [ ] , \"summary\" : \"d\\u006fne\" }",
             "{\"summary\":\"done\",\"findings\":[]}"
         },
+        {
+            AgentToolRegistry.FinishReviewName,
+            "{\"findings\":[{\"evidence\":[{\"end_line\":20.00," +
+                "\"observation_id\":\"" + ObservationId + "\"," +
+                "\"path\":\"src/a.cs\",\"start_line\":2e1}]," +
+                "\"message\":\"message\",\"severity\":\"high\"," +
+                "\"title\":\"title\"}],\"summary\":\"done\"}",
+            "{\"summary\":\"done\",\"findings\":[{" +
+                "\"severity\":\"high\",\"title\":\"title\"," +
+                "\"message\":\"message\",\"evidence\":[{" +
+                "\"observation_id\":\"" + ObservationId + "\"," +
+                "\"path\":\"src/a.cs\",\"start_line\":20," +
+                "\"end_line\":20}]}]}"
+        },
+    };
+
+    public static TheoryData<string, int> EquivalentInt32Spellings => new()
+    {
+        { "1.0", 1 },
+        { "1e0", 1 },
+        { "20.00", 20 },
+        { "2e1", 20 },
+        { "100e-2", 1 },
+        { "-2147483648.0", int.MinValue },
+        { "214748364700e-2", int.MaxValue },
+    };
+
+    public static TheoryData<string> InvalidInt32Spellings => new()
+    {
+        "1.5",
+        "2147483648",
+        "-2147483649",
+        "1.0000000000000000000000000000000000001",
+        "1e2147483647",
+        "1e-2147483647",
     };
 
     public static TheoryData<string, string> InvalidSpellings => new()
@@ -157,6 +200,28 @@ public sealed class AgentToolProviderArgumentTests
         Assert.Null(TryProvider(
             AgentToolRegistry.FinishReviewName,
             excessiveTerminal));
+    }
+
+    [Theory]
+    [MemberData(nameof(EquivalentInt32Spellings))]
+    public void ProviderInt32NormalizationUsesExactDecimalSemantics(
+        string input,
+        int expected)
+    {
+        Assert.True(AgentToolArguments.TryProviderInt32(
+            Encoding.UTF8.GetBytes(input),
+            out var actual));
+        Assert.Equal(expected, actual);
+    }
+
+    [Theory]
+    [MemberData(nameof(InvalidInt32Spellings))]
+    public void ProviderInt32NormalizationRejectsNonIntegralOrOutOfRangeValues(
+        string input)
+    {
+        Assert.False(AgentToolArguments.TryProviderInt32(
+            Encoding.UTF8.GetBytes(input),
+            out _));
     }
 
     private static byte[]? TryProvider(string tool, string input) => tool switch
