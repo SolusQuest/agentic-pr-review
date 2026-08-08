@@ -149,6 +149,19 @@ public sealed class DeepSeekResponseParserTests
     }
 
     [Fact]
+    public void AcceptsRequiredEmptyToolCallReasoning()
+    {
+        var result = Parse(Response(choice: Choice(Message(
+            reasoning: string.Empty))));
+
+        Assert.Equal(DeepSeekResponseParseOutcome.Success, result.Outcome);
+        var response = Assert.IsType<DeepSeekParsedToolResponse>(
+            result.Response);
+        Assert.Equal(string.Empty, response.Reasoning);
+        Assert.Single(response.Calls);
+    }
+
+    [Fact]
     public void ClassifiesAValidStandaloneResponseAsMissingTool()
     {
         var result = Parse(Response(choice: Choice(
@@ -251,7 +264,6 @@ public sealed class DeepSeekResponseParserTests
             Response(choice: Choice(Message(), index: "0.0")),
             Response(choice: Choice(Message(role: "user"))),
             Response(choice: Choice(Message(reasoningLiteral: "null"))),
-            Response(choice: Choice(Message(reasoning: ""))),
             Response(choice: Choice(Message(calls: "", callsLiteral: "null"))),
             Response(choice: Choice(Message(calls: "", callsLiteral: "[]"))),
             Response(choice: Choice(Message(calls: "", callsLiteral: "[0]"))),

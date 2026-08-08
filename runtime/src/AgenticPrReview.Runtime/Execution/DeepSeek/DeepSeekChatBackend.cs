@@ -22,10 +22,10 @@ internal sealed class DeepSeekAdapterContext(
         "\"content_rule\":\"zero-or-one-exact\",\"response_rule\":" +
         "\"reasoning,text-if-nonempty,calls\",\"codec_id\":" +
         "\"deepseek-reasoning-content\",\"codec_discriminator\":" +
-        "\"deepseek-v4-flash-thinking-v1\",\"encoding\":\"utf8\"," +
+        "\"deepseek-v4-flash-thinking-v2\",\"encoding\":\"utf8\"," +
         "\"framing\":\"deepseek.reasoning_content.utf8.v1\"}";
     internal const string Adapter =
-        "0c585a37957e31b864e137bde2fbfd7c14005d03c42fd1a6983171d54e8977e0";
+        "968abd371badaa785056ee783553d71763b8a8a6d0d07031f47acc3cfa24d502";
 
     internal string ProviderId { get; } = providerId;
     internal string ModelId { get; } = modelId;
@@ -272,7 +272,7 @@ internal sealed class DeepSeekChatBackend(
                 reasoning.Position != 0 ||
                 !AgentValueDomains.IsUtf8(
                     item.Readable,
-                    1,
+                    0,
                     AgentLimits.ContinuationItemBytes))
             {
                 return false;

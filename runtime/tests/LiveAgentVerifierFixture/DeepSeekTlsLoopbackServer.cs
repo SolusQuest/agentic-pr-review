@@ -817,7 +817,7 @@ internal sealed class VerifierProviderScript
         }
 
         var response = Finish(
-            "Commit the bounded seed with " + randomFact,
+            string.Empty,
             SeedFinishArguments(randomFact));
         HistoricalMessagesSha256 = HashSeedHistory(values, response);
         return response;
@@ -936,6 +936,8 @@ internal sealed class VerifierProviderScript
         [
             values => values[2]!["role"] = "user",
             values => values[1]!["content"] = "changed initial request",
+            values => values[2]!.AsObject().Remove("reasoning_content"),
+            values => values[2]!["reasoning_content"] = null,
             values => values[2]!["reasoning_content"] = "changed reasoning",
             values => values[2]!["tool_calls"]![0]!["id"] = "changed",
             values => values[2]!["tool_calls"]![0]!["function"]!["name"] =
@@ -991,7 +993,7 @@ internal sealed class VerifierProviderScript
             fact is null ||
             !HasExactToolCall(
                 values[2],
-                "Commit the bounded seed with " + fact,
+                string.Empty,
                 "seed_finish",
                 AgentToolRegistry.FinishReviewName,
                 SeedFinishArguments(fact)) ||
@@ -1203,20 +1205,51 @@ internal sealed class VerifierProviderScript
     private static bool HasNoReasoning(JsonElement message) =>
         !message.TryGetProperty("reasoning_content", out _);
 
-    private static bool TryExtractRandomFact(
+    private bool TryExtractRandomFact(
         JsonElement message,
         out string? fact)
     {
         fact = null;
-        var reasoning = message.GetProperty("reasoning_content").GetString();
-        const string prefix = "Commit the bounded seed with ";
-        if (reasoning is null ||
-            !reasoning.StartsWith(prefix, StringComparison.Ordinal))
+        if (!message.TryGetProperty("tool_calls", out var calls) ||
+            calls.ValueKind != JsonValueKind.Array ||
+            calls.GetArrayLength() != 1 ||
+            !calls[0].TryGetProperty("function", out var function) ||
+            function.ValueKind != JsonValueKind.Object ||
+            !function.TryGetProperty("arguments", out var argumentsValue) ||
+            argumentsValue.ValueKind != JsonValueKind.String)
         {
             return false;
         }
 
-        var candidate = reasoning[prefix.Length..];
+        string? summary;
+        try
+        {
+            using var arguments = JsonDocument.Parse(
+                argumentsValue.GetString() ?? string.Empty);
+            summary = arguments.RootElement.ValueKind == JsonValueKind.Object &&
+                arguments.RootElement.TryGetProperty("summary", out var value) &&
+                value.ValueKind == JsonValueKind.String
+                    ? value.GetString()
+                    : null;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        var prefix = string.Concat(
+            "Seeded ",
+            ((R3QualityContinuationExpectation)testCase.Expectation)
+                .PriorOnlyMarker,
+            " and ");
+        if (summary is null ||
+            !summary.StartsWith(prefix, StringComparison.Ordinal) ||
+            !summary.EndsWith(".", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var candidate = summary[prefix.Length..^1];
         if (candidate.Length != RandomPrefix.Length + 64 ||
             !candidate.StartsWith(RandomPrefix, StringComparison.Ordinal) ||
             candidate.AsSpan(RandomPrefix.Length).ToArray().Any(character =>
