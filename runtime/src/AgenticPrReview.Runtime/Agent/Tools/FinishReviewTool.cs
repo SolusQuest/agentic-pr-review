@@ -23,6 +23,17 @@ internal static partial class AgentToolArguments
 {
     internal static bool TryFinishReview(
         string json,
+        out FinishReviewArguments? arguments) =>
+        TryFinishReview(json, allowProviderSpelling: false, out arguments);
+
+    internal static bool TryFinishReviewProvider(
+        string json,
+        out FinishReviewArguments? arguments) =>
+        TryFinishReview(json, allowProviderSpelling: true, out arguments);
+
+    private static bool TryFinishReview(
+        string json,
+        bool allowProviderSpelling,
         out FinishReviewArguments? arguments)
     {
         arguments = null;
@@ -31,11 +42,22 @@ internal static partial class AgentToolArguments
         {
             return false;
         }
+        var providerComparison = allowProviderSpelling
+            ? ProviderComparisonBytes(input, AgentLimits.TerminalBytes)
+            : null;
+        var deserializationInput = allowProviderSpelling
+            ? ProviderDeserializationBytes(input, AgentLimits.TerminalBytes)
+            : input;
+        if (deserializationInput is null ||
+            allowProviderSpelling && providerComparison is null)
+        {
+            return false;
+        }
 
         try
         {
             var dto = JsonSerializer.Deserialize(
-                input,
+                deserializationInput,
                 AgentToolJsonContext.Default.FinishReviewArgumentsDto);
             if (dto?.Summary is null || dto.Findings is null)
             {
@@ -80,7 +102,11 @@ internal static partial class AgentToolArguments
             }
 
             var canonical = WriteFinishReview(dto.Summary, findings);
-            if (!input.AsSpan().SequenceEqual(canonical))
+            if (!MatchesInput(
+                    input,
+                    providerComparison,
+                    canonical,
+                    AgentLimits.TerminalBytes))
             {
                 return false;
             }

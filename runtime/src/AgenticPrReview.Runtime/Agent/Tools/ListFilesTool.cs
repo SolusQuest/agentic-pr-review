@@ -24,16 +24,34 @@ internal static partial class AgentToolArguments
     internal static bool TryListFiles(
         string json,
         out ListFilesArguments? arguments) =>
-        TryListFiles(json, allowCanonicalNulls: false, out arguments);
+        TryListFiles(
+            json,
+            allowCanonicalNulls: false,
+            allowProviderSpelling: false,
+            out arguments);
 
     internal static bool TryListFilesCanonical(
         string json,
         out ListFilesArguments? arguments) =>
-        TryListFiles(json, allowCanonicalNulls: true, out arguments);
+        TryListFiles(
+            json,
+            allowCanonicalNulls: true,
+            allowProviderSpelling: false,
+            out arguments);
+
+    internal static bool TryListFilesProvider(
+        string json,
+        out ListFilesArguments? arguments) =>
+        TryListFiles(
+            json,
+            allowCanonicalNulls: false,
+            allowProviderSpelling: true,
+            out arguments);
 
     private static bool TryListFiles(
         string json,
         bool allowCanonicalNulls,
+        bool allowProviderSpelling,
         out ListFilesArguments? arguments)
     {
         arguments = null;
@@ -42,11 +60,22 @@ internal static partial class AgentToolArguments
         {
             return false;
         }
+        var providerComparison = allowProviderSpelling
+            ? ProviderComparisonBytes(input)
+            : null;
+        var deserializationInput = allowProviderSpelling
+            ? ProviderDeserializationBytes(input)
+            : input;
+        if (deserializationInput is null ||
+            allowProviderSpelling && providerComparison is null)
+        {
+            return false;
+        }
 
         try
         {
             var dto = JsonSerializer.Deserialize(
-                input,
+                deserializationInput,
                 AgentToolJsonContext.Default.ListFilesArgumentsDto);
             if (dto is null ||
                 (dto.Prefix is not null && !RepositoryPath.IsValid(dto.Prefix)) ||
@@ -56,19 +85,19 @@ internal static partial class AgentToolArguments
             }
 
             var accepted = allowCanonicalNulls
-                ? input.AsSpan().SequenceEqual(
+                ? MatchesInput(input, providerComparison,
                     WriteListFiles(dto.Prefix, dto.After, true, true))
-                : input.AsSpan().SequenceEqual(
+                : MatchesInput(input, providerComparison,
                     WriteListFiles(dto.Prefix, dto.After, false, false)) ||
                     dto.Prefix is not null &&
-                    input.AsSpan().SequenceEqual(
+                    MatchesInput(input, providerComparison,
                         WriteListFiles(dto.Prefix, dto.After, true, false)) ||
                     dto.After is not null &&
-                    input.AsSpan().SequenceEqual(
+                    MatchesInput(input, providerComparison,
                         WriteListFiles(dto.Prefix, dto.After, false, true)) ||
                     dto.Prefix is not null &&
                     dto.After is not null &&
-                    input.AsSpan().SequenceEqual(
+                    MatchesInput(input, providerComparison,
                         WriteListFiles(dto.Prefix, dto.After, true, true));
             if (!accepted)
             {

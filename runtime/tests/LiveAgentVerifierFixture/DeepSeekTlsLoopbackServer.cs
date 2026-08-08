@@ -541,10 +541,6 @@ internal static class VerifierWireOracle
 internal sealed class VerifierProviderScript
 {
     private const string RandomPrefix = "APR111_RANDOM_";
-    private const string SeedReadArguments =
-        "{\"path\":\"src/RetryBudget.cs\",\"start_line\":1,\"line_count\":400}";
-    private const string RestoreDiffArguments =
-        "{\"path\":\"src/RetryBudget.cs\",\"start_hunk\":1,\"hunk_count\":20}";
     private readonly VerifierScenario scenario;
     private readonly R3QualityCase testCase;
     private readonly ReviewedIdentity reviewedIdentity;
@@ -583,8 +579,8 @@ internal sealed class VerifierProviderScript
     {
         VerifierScenario.MustFind => 3,
         VerifierScenario.MustNotFind => 4,
-        VerifierScenario.ContinuationSeed => 2,
-        VerifierScenario.ContinuationRestore => 2,
+        VerifierScenario.ContinuationSeed => 1,
+        VerifierScenario.ContinuationRestore => 1,
         VerifierScenario.CanaryRouting => 2,
         VerifierScenario.ProviderHttpFailure or
             VerifierScenario.ProviderMalformedResponse or
@@ -713,47 +709,33 @@ internal sealed class VerifierProviderScript
 
         using var document = JsonDocument.Parse(body);
         var messages = document.RootElement.GetProperty("messages");
-        return index switch
-        {
-            0 => SeedRead(messages),
-            1 => SeedFinish(messages),
-            _ => throw new VerifierWireException("script_index_invalid"),
-        };
+        return index == 0
+            ? SeedFinish(messages)
+            : throw new VerifierWireException("script_index_invalid");
     }
 
     private byte[] Restore(int index, byte[] body)
     {
+        if (index != 0)
+        {
+            throw new VerifierWireException("script_index_invalid");
+        }
+
         using var document = JsonDocument.Parse(body);
         var messages = document.RootElement.GetProperty("messages");
-        if (index == 0)
-        {
-            randomFact = ValidateRestoredFirstRequest(messages);
-            ValidateRestoredPrefixMutationMatrix(messages);
-            return Tool(
-                "Ground the restored review in the current diff.",
-                "restore_diff",
-                AgentToolRegistry.ReadDiffName,
-                RestoreDiffArguments);
-        }
-
-        if (index == 1 && randomFact is not null)
-        {
-            ValidateRestoredSecondRequest(messages, randomFact);
-            ValidateRestoredCurrentMutationMatrix(messages, randomFact);
-            ExactReplayValidated = true;
-            ReplayMutationMatrixValidated = true;
-            return Finish(
-                "Use only the restored prior fact.",
-                string.Concat(
-                    "{\"summary\":\"Restored ",
-                    ((R3QualityContinuationExpectation)testCase.Expectation)
-                        .PriorOnlyMarker,
-                    " and ",
-                    randomFact,
-                    ".\",\"findings\":[]}"));
-        }
-
-        throw new VerifierWireException("script_index_invalid");
+        randomFact = ValidateRestoredFirstRequest(messages);
+        ValidateRestoredPrefixMutationMatrix(messages);
+        ExactReplayValidated = true;
+        ReplayMutationMatrixValidated = true;
+        return Finish(
+            "Use only the restored prior fact.",
+            string.Concat(
+                "{\"summary\":\"Restored ",
+                ((R3QualityContinuationExpectation)testCase.Expectation)
+                    .PriorOnlyMarker,
+                " and ",
+                randomFact,
+                ".\",\"findings\":[]}"));
     }
 
     private byte[] Canary(int index, byte[] body)
@@ -821,54 +803,22 @@ internal sealed class VerifierProviderScript
         throw new VerifierWireException("script_index_invalid");
     }
 
-    private byte[] SeedRead(JsonElement messages)
-    {
-        if (!HasExactInitialMessages(
-                messages,
-                testCase.ProcessOneContext ?? string.Empty))
-        {
-            throw new VerifierWireException("seed_initial_request_invalid");
-        }
-
-        return Tool(
-            "Remember restored-only fact " + randomFact,
-            "seed_read",
-            AgentToolRegistry.ReadFileName,
-            SeedReadArguments);
-    }
-
     private byte[] SeedFinish(JsonElement messages)
     {
         var values = messages.EnumerateArray().ToArray();
         if (randomFact is null ||
-            values.Length != 4 ||
-            !Roles(values).SequenceEqual(
-                ["system", "user", "assistant", "tool"],
-                StringComparer.Ordinal) ||
-            !HasNoReasoning(values[0]) ||
-            !HasExactUser(values[1], testCase.ProcessOneContext) ||
-            !HasExactToolCall(
-                values[2],
-                "Remember restored-only fact " + randomFact,
-                "seed_read",
-                AgentToolRegistry.ReadFileName,
-                SeedReadArguments) ||
-            !TryValidateReadFileResult(
-                values[3],
-                "seed_read",
-                "src/RetryBudget.cs",
-                reviewedIdentity,
-                out var observation) ||
+            !HasExactInitialMessages(
+                messages,
+                testCase.ProcessOneContext ?? string.Empty) ||
             values[0].GetRawText().Contains(randomFact, StringComparison.Ordinal) ||
-            values[1].GetRawText().Contains(randomFact, StringComparison.Ordinal) ||
-            values[3].GetRawText().Contains(randomFact, StringComparison.Ordinal))
+            values[1].GetRawText().Contains(randomFact, StringComparison.Ordinal))
         {
             throw new VerifierWireException("seed_history_invalid");
         }
 
         var response = Finish(
             "Commit the bounded seed with " + randomFact,
-            SeedFinishArguments(randomFact, observation!));
+            SeedFinishArguments(randomFact));
         HistoricalMessagesSha256 = HashSeedHistory(values, response);
         return response;
     }
@@ -968,7 +918,7 @@ internal sealed class VerifierProviderScript
             throw new VerifierWireException("restore_history_shape_invalid");
         }
 
-        var actualHistorySha256 = HashMessagePrefix(values, 6);
+        var actualHistorySha256 = HashMessagePrefix(values, 4);
         if (!StringComparer.Ordinal.Equals(
                 actualHistorySha256,
                 expectedHistorySha256))
@@ -978,37 +928,6 @@ internal sealed class VerifierProviderScript
 
         HistoricalMessagesSha256 = actualHistorySha256;
         return fact;
-    }
-
-    private void ValidateRestoredSecondRequest(
-        JsonElement messages,
-        string fact)
-    {
-        var values = messages.EnumerateArray().ToArray();
-        if (values.Length != 9 ||
-            !TryValidateRestoredPrefix(values[..7], out var restoredFact) ||
-            !StringComparer.Ordinal.Equals(restoredFact, fact) ||
-            !StringComparer.Ordinal.Equals(
-                HashMessagePrefix(values, 6),
-                expectedHistorySha256) ||
-            !HasExactToolCall(
-                values[7],
-                "Ground the restored review in the current diff.",
-                "restore_diff",
-                AgentToolRegistry.ReadDiffName,
-                RestoreDiffArguments) ||
-            !TryValidateReadDiffResult(
-                values[8],
-                "restore_diff",
-                "src/RetryBudget.cs",
-                reviewedIdentity,
-                out _) ||
-            values[6].GetRawText().Contains(fact, StringComparison.Ordinal) ||
-            values[7].GetRawText().Contains(fact, StringComparison.Ordinal) ||
-            values[8].GetRawText().Contains(fact, StringComparison.Ordinal))
-        {
-            throw new VerifierWireException("restore_current_request_invalid");
-        }
     }
 
     private void ValidateRestoredPrefixMutationMatrix(JsonElement messages)
@@ -1023,13 +942,8 @@ internal sealed class VerifierProviderScript
                 AgentToolRegistry.ReadDiffName,
             values => values[2]!["tool_calls"]![0]!["function"]!["arguments"] =
                 "{}",
-            values => values[3]!["content"] = "{}",
-            values => values[4]!["reasoning_content"] = "changed reasoning",
-            values => values[4]!["tool_calls"]![0]!["id"] = "changed",
-            values => values[4]!["tool_calls"]![0]!["function"]!["arguments"] =
-                "{}",
-            values => values[5]!["content"] = "{\"changed\":true}",
-            values => values[6]!["content"] = "changed current request",
+            values => values[3]!["content"] = "{\"changed\":true}",
+            values => values[4]!["content"] = "changed current request",
         ];
         foreach (var mutate in mutations)
         {
@@ -1054,57 +968,16 @@ internal sealed class VerifierProviderScript
         }
     }
 
-    private void ValidateRestoredCurrentMutationMatrix(
-        JsonElement messages,
-        string fact)
-    {
-        Action<JsonArray>[] mutations =
-        [
-            values => values[7]!["role"] = "user",
-            values => values[7]!["reasoning_content"] = "changed reasoning",
-            values => values[7]!["tool_calls"]![0]!["id"] = "changed",
-            values => values[7]!["tool_calls"]![0]!["function"]!["name"] =
-                AgentToolRegistry.ReadFileName,
-            values => values[7]!["tool_calls"]![0]!["function"]!["arguments"] =
-                "{}",
-            values => values[8]!["tool_call_id"] = "changed",
-            values => values[8]!["content"] = "{}",
-        ];
-        foreach (var mutate in mutations)
-        {
-            var values = JsonNode.Parse(messages.GetRawText())!.AsArray();
-            mutate(values);
-            using var document = JsonDocument.Parse(values.ToJsonString());
-            var rejected = false;
-            try
-            {
-                ValidateRestoredSecondRequest(document.RootElement, fact);
-            }
-            catch (VerifierWireException)
-            {
-                rejected = true;
-            }
-
-            if (!rejected)
-            {
-                throw new VerifierWireException(
-                    "restore_current_mutation_accepted");
-            }
-        }
-    }
-
     private bool TryValidateRestoredPrefix(
         JsonElement[] values,
         out string? fact)
     {
         fact = null;
-        if (values.Length != 7 ||
+        if (values.Length != 5 ||
             !Roles(values).SequenceEqual(
                 [
                     "system",
                     "user",
-                    "assistant",
-                    "tool",
                     "assistant",
                     "tool",
                     "user",
@@ -1113,38 +986,20 @@ internal sealed class VerifierProviderScript
             !HasNoReasoning(values[0]) ||
             !HasExactUser(values[1], testCase.ProcessOneContext) ||
             !HasNoReasoning(values[3]) ||
-            !HasNoReasoning(values[5]) ||
-            !HasExactUser(values[6], testCase.InitialContext) ||
+            !HasExactUser(values[4], testCase.InitialContext) ||
             !TryExtractRandomFact(values[2], out fact) ||
             fact is null ||
             !HasExactToolCall(
                 values[2],
-                "Remember restored-only fact " + fact,
-                "seed_read",
-                AgentToolRegistry.ReadFileName,
-                SeedReadArguments) ||
-            !TryValidateReadFileResult(
-                values[3],
-                "seed_read",
-                "src/RetryBudget.cs",
-                new ReviewedIdentity(
-                    reviewedIdentity.RepositoryId,
-                    reviewedIdentity.ReviewTarget,
-                    new string('4', 40),
-                    reviewedIdentity.BaseSha),
-                out var observation) ||
-            !HasExactToolCall(
-                values[4],
                 "Commit the bounded seed with " + fact,
                 "seed_finish",
                 AgentToolRegistry.FinishReviewName,
-                SeedFinishArguments(fact, observation!)) ||
-            !IsExactToolResult(values[5], "seed_finish", "{}") ||
+                SeedFinishArguments(fact)) ||
+            !IsExactToolResult(values[3], "seed_finish", "{}") ||
             values[0].GetRawText().Contains(fact, StringComparison.Ordinal) ||
             values[1].GetRawText().Contains(fact, StringComparison.Ordinal) ||
             values[3].GetRawText().Contains(fact, StringComparison.Ordinal) ||
-            values[5].GetRawText().Contains(fact, StringComparison.Ordinal) ||
-            values[6].GetRawText().Contains(fact, StringComparison.Ordinal))
+            values[4].GetRawText().Contains(fact, StringComparison.Ordinal))
         {
             fact = null;
             return false;
@@ -1354,7 +1209,7 @@ internal sealed class VerifierProviderScript
     {
         fact = null;
         var reasoning = message.GetProperty("reasoning_content").GetString();
-        const string prefix = "Remember restored-only fact ";
+        const string prefix = "Commit the bounded seed with ";
         if (reasoning is null ||
             !reasoning.StartsWith(prefix, StringComparison.Ordinal))
         {
@@ -1375,21 +1230,13 @@ internal sealed class VerifierProviderScript
         return true;
     }
 
-    private string SeedFinishArguments(
-        string fact,
-        string observation) => string.Concat(
+    private string SeedFinishArguments(string fact) => string.Concat(
         "{\"summary\":\"Seeded ",
         ((R3QualityContinuationExpectation)testCase.Expectation)
             .PriorOnlyMarker,
         " and ",
         fact,
-        ".\",\"findings\":[{\"severity\":\"low\",",
-        "\"title\":\"seed evidence\",",
-        "\"message\":\"The current snapshot was grounded.\",",
-        "\"evidence\":[{\"observation_id\":\"",
-        observation,
-        "\",\"path\":\"src/RetryBudget.cs\",",
-        "\"start_line\":1,\"end_line\":1}]}]}");
+        ".\",\"findings\":[]}");
 
     private static string HashSeedHistory(
         IReadOnlyList<JsonElement> messages,

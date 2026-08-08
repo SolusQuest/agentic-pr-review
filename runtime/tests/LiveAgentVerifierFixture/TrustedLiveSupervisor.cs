@@ -234,6 +234,15 @@ internal static class TrustedLiveSupervisor
                 failure);
         }
 
+        if (!TryConsumeAdmittedReceipt(
+                continuationRoot,
+                "trusted-continuation-seed"))
+        {
+            return new TrustedLiveRunResult(
+                TrustedLiveCodes.Infrastructure,
+                Failure: null);
+        }
+
         var restore = await RunPhaseAsync(
             command,
             buildPair,
@@ -255,6 +264,35 @@ internal static class TrustedLiveSupervisor
         }
 
         return new TrustedLiveRunResult(TrustedLiveCodes.Passed, null);
+    }
+
+    internal static bool TryConsumeAdmittedReceipt(
+        string phaseRoot,
+        string verb)
+    {
+        try
+        {
+            var receiptPath = Path.Join(
+                phaseRoot,
+                "private",
+                string.Concat(verb, ".json"));
+            if (!File.Exists(receiptPath))
+            {
+                return false;
+            }
+
+            File.Delete(receiptPath);
+            return !File.Exists(receiptPath);
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or
+            IOException or
+            NotSupportedException or
+            UnauthorizedAccessException or
+            System.Security.SecurityException)
+        {
+            return false;
+        }
     }
 
     private static async Task<TrustedLivePhaseExecution> RunPhaseAsync(

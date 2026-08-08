@@ -24,6 +24,17 @@ internal static partial class AgentToolArguments
 {
     internal static bool TryReadDiff(
         string json,
+        out ReadDiffArguments? arguments) =>
+        TryReadDiff(json, allowProviderSpelling: false, out arguments);
+
+    internal static bool TryReadDiffProvider(
+        string json,
+        out ReadDiffArguments? arguments) =>
+        TryReadDiff(json, allowProviderSpelling: true, out arguments);
+
+    private static bool TryReadDiff(
+        string json,
+        bool allowProviderSpelling,
         out ReadDiffArguments? arguments)
     {
         arguments = null;
@@ -32,11 +43,22 @@ internal static partial class AgentToolArguments
         {
             return false;
         }
+        var providerComparison = allowProviderSpelling
+            ? ProviderComparisonBytes(input)
+            : null;
+        var deserializationInput = allowProviderSpelling
+            ? ProviderDeserializationBytes(input)
+            : input;
+        if (deserializationInput is null ||
+            allowProviderSpelling && providerComparison is null)
+        {
+            return false;
+        }
 
         try
         {
             var dto = JsonSerializer.Deserialize(
-                input,
+                deserializationInput,
                 AgentToolJsonContext.Default.ReadDiffArgumentsDto);
             if (dto?.Path is null ||
                 !RepositoryPath.IsValid(dto.Path) ||
@@ -48,7 +70,12 @@ internal static partial class AgentToolArguments
 
             var start = dto.StartHunk ?? 1;
             var count = dto.HunkCount ?? AgentLimits.ReadDiffHunks;
-            if (!MatchesReadDiffInput(input, dto.Path, start, count))
+            if (!MatchesReadDiffInput(
+                    input,
+                    providerComparison,
+                    dto.Path,
+                    start,
+                    count))
             {
                 return false;
             }
@@ -72,16 +99,17 @@ internal static partial class AgentToolArguments
 
     private static bool MatchesReadDiffInput(
         ReadOnlySpan<byte> input,
+        byte[]? providerComparison,
         string path,
         int startHunk,
         int hunkCount) =>
-        input.SequenceEqual(
+        MatchesInput(input, providerComparison,
             WriteReadDiff(path, startHunk, hunkCount, false, false)) ||
-        input.SequenceEqual(
+        MatchesInput(input, providerComparison,
             WriteReadDiff(path, startHunk, hunkCount, true, false)) ||
-        input.SequenceEqual(
+        MatchesInput(input, providerComparison,
             WriteReadDiff(path, startHunk, hunkCount, false, true)) ||
-        input.SequenceEqual(
+        MatchesInput(input, providerComparison,
             WriteReadDiff(path, startHunk, hunkCount, true, true));
 
     internal static byte[] WriteReadDiff(

@@ -32,6 +32,53 @@ public sealed class TrustedLiveAgentTests : IDisposable
     };
 
     [Fact]
+    public void SupervisorConsumesOnlyTheAdmittedSeedReceiptBeforeRestore()
+    {
+        var phaseRoot = Path.Join(root, "continuation");
+        var privateRoot = Path.Join(phaseRoot, "private");
+        var hostRoot = Path.Join(phaseRoot, "host");
+        var stateRoot = Path.Join(phaseRoot, "state");
+        Directory.CreateDirectory(privateRoot);
+        Directory.CreateDirectory(hostRoot);
+        Directory.CreateDirectory(stateRoot);
+        var receipt = Path.Join(
+            privateRoot,
+            "trusted-continuation-seed.json");
+        var lineage = Path.Join(hostRoot, "accepted-lineage.json");
+        var state = Path.Join(stateRoot, "current.state");
+        File.WriteAllText(receipt, "receipt");
+        File.WriteAllText(lineage, "lineage");
+        File.WriteAllText(state, "state");
+
+        Assert.True(TrustedLiveSupervisor.TryConsumeAdmittedReceipt(
+            phaseRoot,
+            "trusted-continuation-seed"));
+        Assert.False(File.Exists(receipt));
+        Assert.True(File.Exists(lineage));
+        Assert.True(File.Exists(state));
+        Assert.False(TrustedLiveSupervisor.TryConsumeAdmittedReceipt(
+            phaseRoot,
+            "trusted-continuation-seed"));
+    }
+
+    [Fact]
+    public void MaterializerUsesCaseSpecificEvidenceAndContinuationPolicies()
+    {
+        var evidence = FreshProcessMaterializer.TrustedPolicyFor(
+            R3QualityCaseKind.MustFind);
+        var mustNot = FreshProcessMaterializer.TrustedPolicyFor(
+            R3QualityCaseKind.MustNotFind);
+        var continuation = FreshProcessMaterializer.TrustedPolicyFor(
+            R3QualityCaseKind.Continuation);
+
+        Assert.Equal(evidence, mustNot);
+        Assert.Contains("first call list_changed_files", evidence);
+        Assert.Contains("Do not call list_files, list_changed_files", continuation);
+        Assert.Contains("an empty findings array", continuation);
+        Assert.DoesNotContain("first call list_changed_files", continuation);
+    }
+
+    [Fact]
     public void VerifierOwnsExactlyTheDeterministicAndTrustedProfiles()
     {
         var profiles = typeof(LiveAgentVerifierProfile).Assembly.GetTypes()
@@ -149,7 +196,9 @@ public sealed class TrustedLiveAgentTests : IDisposable
         var processId = int.Parse(
             File.ReadAllText(pidPath),
             System.Globalization.CultureInfo.InvariantCulture);
-        Assert.False(ProcessIsRunning(processId));
+        Assert.True(await WaitForProcessExitAsync(
+            processId,
+            TimeSpan.FromSeconds(5)));
     }
 
     [Fact]
@@ -172,7 +221,9 @@ public sealed class TrustedLiveAgentTests : IDisposable
         var processId = int.Parse(
             File.ReadAllText(pidPath),
             System.Globalization.CultureInfo.InvariantCulture);
-        Assert.False(ProcessIsRunning(processId));
+        Assert.True(await WaitForProcessExitAsync(
+            processId,
+            TimeSpan.FromSeconds(5)));
     }
 
     [Fact]
@@ -1537,5 +1588,23 @@ public sealed class TrustedLiveAgentTests : IDisposable
         {
             return false;
         }
+    }
+
+    private static async Task<bool> WaitForProcessExitAsync(
+        int processId,
+        TimeSpan timeout)
+    {
+        var elapsed = Stopwatch.StartNew();
+        while (elapsed.Elapsed < timeout)
+        {
+            if (!ProcessIsRunning(processId))
+            {
+                return true;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(50));
+        }
+
+        return !ProcessIsRunning(processId);
     }
 }

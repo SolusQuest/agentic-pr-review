@@ -25,16 +25,34 @@ internal static partial class AgentToolArguments
     internal static bool TrySearchText(
         string json,
         out SearchTextArguments? arguments) =>
-        TrySearchText(json, allowCanonicalNullPath: false, out arguments);
+        TrySearchText(
+            json,
+            allowCanonicalNullPath: false,
+            allowProviderSpelling: false,
+            out arguments);
 
     internal static bool TrySearchTextCanonical(
         string json,
         out SearchTextArguments? arguments) =>
-        TrySearchText(json, allowCanonicalNullPath: true, out arguments);
+        TrySearchText(
+            json,
+            allowCanonicalNullPath: true,
+            allowProviderSpelling: false,
+            out arguments);
+
+    internal static bool TrySearchTextProvider(
+        string json,
+        out SearchTextArguments? arguments) =>
+        TrySearchText(
+            json,
+            allowCanonicalNullPath: false,
+            allowProviderSpelling: true,
+            out arguments);
 
     private static bool TrySearchText(
         string json,
         bool allowCanonicalNullPath,
+        bool allowProviderSpelling,
         out SearchTextArguments? arguments)
     {
         arguments = null;
@@ -43,11 +61,22 @@ internal static partial class AgentToolArguments
         {
             return false;
         }
+        var providerComparison = allowProviderSpelling
+            ? ProviderComparisonBytes(input)
+            : null;
+        var deserializationInput = allowProviderSpelling
+            ? ProviderDeserializationBytes(input)
+            : input;
+        if (deserializationInput is null ||
+            allowProviderSpelling && providerComparison is null)
+        {
+            return false;
+        }
 
         try
         {
             var dto = JsonSerializer.Deserialize(
-                input,
+                deserializationInput,
                 AgentToolJsonContext.Default.SearchTextArgumentsDto);
             if (dto?.Query is null)
             {
@@ -57,8 +86,11 @@ internal static partial class AgentToolArguments
             var queryBytes = Encoding.UTF8.GetByteCount(dto.Query);
             if (queryBytes is < 1 or > AgentLimits.QueryBytes ||
                 dto.Query.IndexOfAny(['\0', '\r', '\n']) >= 0 ||
-                AgentTextValidation.IsOnlyFixedWhitespace(dto.Query) ||
-                (dto.Path is not null && !RepositoryPath.IsValid(dto.Path)))
+                AgentTextValidation.IsOnlyFixedWhitespace(dto.Query))
+            {
+                return false;
+            }
+            if (dto.Path is not null && !RepositoryPath.IsValid(dto.Path))
             {
                 return false;
             }
@@ -69,10 +101,10 @@ internal static partial class AgentToolArguments
                 : WriteSearchText(dto.Query, dto.Path, true);
             var accepted = allowCanonicalNullPath
                 ? present is not null &&
-                    input.AsSpan().SequenceEqual(present)
-                : input.AsSpan().SequenceEqual(absent) ||
+                    MatchesInput(input, providerComparison, present)
+                : MatchesInput(input, providerComparison, absent) ||
                     present is not null &&
-                    input.AsSpan().SequenceEqual(present);
+                    MatchesInput(input, providerComparison, present);
             if (!accepted)
             {
                 return false;

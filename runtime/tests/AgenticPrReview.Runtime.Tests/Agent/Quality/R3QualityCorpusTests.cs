@@ -56,13 +56,42 @@ public sealed class R3QualityCorpusTests
         var mustFind = Assert.IsType<R3QualityMustFindExpectation>(
             corpus.Cases[0].Expectation);
         Assert.Equal(
-            "03a00cfd78a9da418cc9d5952e7a77d63d8ebd07c590c5ef7146732e12da52b4",
+            "eb616af246c95c3c2c9e4d0ef278c50979d36ae91d07dcbfdb02df21149a3a7c",
             mustFind.RequiredObservationId);
+        var mustFindLines = corpus.Cases[0].DiffSource.Hunks
+            .SelectMany(hunk => hunk.Lines)
+            .ToArray();
+        var markerLine = Assert.Single(mustFindLines, line =>
+            line.Text.Contains(
+                mustFind.TargetMarker,
+                StringComparison.Ordinal));
+        Assert.Equal("deletion", markerLine.Kind);
+        Assert.Null(markerLine.NewLine);
+        var evidenceLine = Assert.Single(
+            mustFindLines,
+            line => line.NewLine == mustFind.Evidence.StartLine);
+        Assert.Equal("addition", evidenceLine.Kind);
+        Assert.DoesNotContain(
+            mustFind.TargetMarker,
+            evidenceLine.Text,
+            StringComparison.Ordinal);
         var mustNot = Assert.IsType<R3QualityMustNotFindExpectation>(
             corpus.Cases[1].Expectation);
         Assert.Equal(
-            "a217f4888ff3a7a47f53d089dea73717d93a2bc8d99d8e6eb408375c21d08488",
+            "d2f7244ec7994a88c9949616c8f07506ee3740d51802c89464acb36e5b799877",
             mustNot.RequiredObservationId);
+        var continuation = corpus.Cases[2];
+        Assert.Equal(
+            "674dda34d9ed6b5bf7594a1dc5e15af9931cf0ed1e9c44ff17be88093af4f3ed",
+            continuation.CaseSha256);
+        Assert.Contains(
+            "no findings",
+            continuation.InitialContext,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "no findings",
+            continuation.ProcessOneContext,
+            StringComparison.Ordinal);
 
         AssertPublicSafe(bytes);
     }
@@ -209,7 +238,7 @@ public sealed class R3QualityCorpusTests
             {
                 "incoherent observation",
                 text => text.Replace(
-                    "03a00cfd78a9da418cc9d5952e7a77d63d8ebd07c590c5ef7146732e12da52b4",
+                    "eb616af246c95c3c2c9e4d0ef278c50979d36ae91d07dcbfdb02df21149a3a7c",
                     new string('0', 64),
                     StringComparison.Ordinal)
             },

@@ -10,12 +10,12 @@
         "base_sha": "1111111111111111111111111111111111111111",
         "head_sha": "2222222222222222222222222222222222222222"
       },
-      "initial_context": "Review the synthetic change. If you report the defect, include token APR110_FINDING_Q7M4 in the finding title or message.",
+      "initial_context": "Review the synthetic change. If you report the defect, include token APR110_FINDING_Q7M4 in the finding title or message, use severity high, and cite exactly one evidence location at src/CacheGate.cs current line 4.",
       "process_one_context": null,
       "files": [
         {
           "path": "src/CacheGate.cs",
-          "content": "namespace SyntheticQuality;\ninternal static class CacheGate\n{\n    internal static string Select(string? value) => value!.Trim(); // APR110_TARGET_Q7M4\n}\n"
+          "content": "namespace SyntheticQuality;\ninternal static class CacheGate\n{\n    internal static string Select(string? value) => value!.Trim();\n}\n"
         }
       ],
       "change": {
@@ -58,13 +58,13 @@
                   "kind": "deletion",
                   "old_line": 4,
                   "new_line": null,
-                  "text": "    internal static string Select(string? value) => value.Trim();"
+                  "text": "    internal static string Select(string? value) => value?.Trim() ?? string.Empty; // APR110_TARGET_Q7M4"
                 },
                 {
                   "kind": "addition",
                   "old_line": null,
                   "new_line": 4,
-                  "text": "    internal static string Select(string? value) => value!.Trim(); // APR110_TARGET_Q7M4"
+                  "text": "    internal static string Select(string? value) => value!.Trim();"
                 },
                 { "kind": "context", "old_line": 5, "new_line": 5, "text": "}" }
               ]
@@ -76,7 +76,7 @@
         "required_tool": "read_diff",
         "required_start_hunk": 1,
         "required_hunk_count": 20,
-        "required_observation_id": "03a00cfd78a9da418cc9d5952e7a77d63d8ebd07c590c5ef7146732e12da52b4",
+        "required_observation_id": "eb616af246c95c3c2c9e4d0ef278c50979d36ae91d07dcbfdb02df21149a3a7c",
         "evidence": {
           "path": "src/CacheGate.cs",
           "start_line": 4,
@@ -101,7 +101,7 @@
       "files": [
         {
           "path": "src/ReadyGate.cs",
-          "content": "namespace SyntheticQuality;\ninternal static class ReadyGate\n{\n    internal static bool IsReady(bool ready) => ready; // APR110_SAFE_K2R8\n}\n"
+          "content": "namespace SyntheticQuality;\ninternal static class ReadyGate\n{\n    internal static bool IsReady(bool ready) => ready;\n}\n"
         }
       ],
       "change": {
@@ -144,13 +144,13 @@
                   "kind": "deletion",
                   "old_line": 4,
                   "new_line": null,
-                  "text": "    internal static bool IsReady(bool ready) => !ready;"
+                  "text": "    internal static bool IsReady(bool ready) => ready == true;"
                 },
                 {
                   "kind": "addition",
                   "old_line": null,
                   "new_line": 4,
-                  "text": "    internal static bool IsReady(bool ready) => ready; // APR110_SAFE_K2R8"
+                  "text": "    internal static bool IsReady(bool ready) => ready;"
                 },
                 { "kind": "context", "old_line": 5, "new_line": 5, "text": "}" }
               ]
@@ -162,7 +162,7 @@
         "required_tool": "read_diff",
         "required_start_hunk": 1,
         "required_hunk_count": 20,
-        "required_observation_id": "a217f4888ff3a7a47f53d089dea73717d93a2bc8d99d8e6eb408375c21d08488",
+        "required_observation_id": "d2f7244ec7994a88c9949616c8f07506ee3740d51802c89464acb36e5b799877",
         "path": "src/ReadyGate.cs",
         "prohibited_lines": [4]
       }
@@ -176,12 +176,12 @@
         "base_sha": "5555555555555555555555555555555555555555",
         "head_sha": "6666666666666666666666666666666666666666"
       },
-      "initial_context": "Continue the synthetic review using only the restored prior session and the current bounded inputs.",
-      "process_one_context": "The prior review established APR110_PRIOR_ONLY_6V3N as the bounded retry fact.",
+      "initial_context": "Continue the synthetic review using only the restored prior session and the current bounded inputs. This continuation case tests restored-fact continuity, not defect detection. Do not inspect repository content or call any repository inspection tool. Immediately call finish_review exactly once with no findings and include the restored bounded retry fact verbatim in the summary; do not answer standalone.",
+      "process_one_context": "The prior review established APR110_PRIOR_ONLY_6V3N as the bounded retry fact. This continuation case tests restored-fact continuity, not defect detection. Treat that fact as the complete bounded input: do not inspect repository content or call any repository inspection tool. Immediately call finish_review exactly once with no findings and include that fact verbatim in the summary; do not answer standalone.",
       "files": [
         {
           "path": "src/RetryBudget.cs",
-          "content": "namespace SyntheticQuality;\ninternal static class RetryBudget\n{\n    internal const int Maximum = 3;\n}\n"
+          "content": "namespace SyntheticQuality;\ninternal static class RetryBudget\n{\n    internal const int Maximum = 3; // Bounded retry budget.\n}\n"
         }
       ],
       "change": {
@@ -224,13 +224,13 @@
                   "kind": "deletion",
                   "old_line": 4,
                   "new_line": null,
-                  "text": "    internal const int Maximum = 2;"
+                  "text": "    internal const int Maximum = 3;"
                 },
                 {
                   "kind": "addition",
                   "old_line": null,
                   "new_line": 4,
-                  "text": "    internal const int Maximum = 3;"
+                  "text": "    internal const int Maximum = 3; // Bounded retry budget."
                 },
                 { "kind": "context", "old_line": 5, "new_line": 5, "text": "}" }
               ]

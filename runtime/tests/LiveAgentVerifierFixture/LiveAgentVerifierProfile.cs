@@ -1,6 +1,7 @@
 using AgenticPrReview.Runtime.Agent.Quality;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.State;
 
@@ -169,16 +170,22 @@ internal sealed class VerifierCommitObserver(
 
     internal bool SeedReceiptValid { get; private set; }
 
-    internal bool ProofPassed => scenario is
-            VerifierScenario.ContinuationSeed or
-            VerifierScenario.CanaryRouting
-        ? SeedReceiptValid && CommitResult?.HandoffReady == true
-        : Outcome is
-        {
-            Status: "passed",
-            Classification: "quality",
-            Code: R3QualityCodes.Passed,
-        } && CommitResult?.HandoffReady == true;
+    internal bool ContinuationOnlyReviewValid { get; private set; }
+
+    internal bool ProofPassed => scenario switch
+    {
+        VerifierScenario.ContinuationSeed =>
+            SeedReceiptValid &&
+            ContinuationOnlyReviewValid &&
+            CommitResult?.HandoffReady == true,
+        VerifierScenario.CanaryRouting =>
+            SeedReceiptValid && CommitResult?.HandoffReady == true,
+        VerifierScenario.ContinuationRestore =>
+            QualityPassed() &&
+            ContinuationOnlyReviewValid &&
+            CommitResult?.HandoffReady == true,
+        _ => QualityPassed() && CommitResult?.HandoffReady == true,
+    };
 
     internal void SetInner(ILiveAgentStateCommitCoordinator coordinator)
     {
@@ -210,7 +217,19 @@ internal sealed class VerifierCommitObserver(
         try
         {
             if (scenario is VerifierScenario.ContinuationSeed or
-                VerifierScenario.CanaryRouting)
+                VerifierScenario.ContinuationRestore)
+            {
+                ContinuationOnlyReviewValid =
+                    IsContinuationOnlyReview(candidate.Outcome, testCase);
+            }
+
+            if (scenario == VerifierScenario.ContinuationSeed)
+            {
+                SeedReceiptValid = candidate.Outcome.CompletedSessionEligible &&
+                    candidate.Predecessor is null &&
+                    candidate.Transition == AgentSessionHeadTransition.SameHead;
+            }
+            else if (scenario == VerifierScenario.CanaryRouting)
             {
                 SeedReceiptValid = candidate.Outcome.CompletedSessionEligible &&
                     candidate.Predecessor is null &&
@@ -276,6 +295,51 @@ internal sealed class VerifierCommitObserver(
             cancellationToken);
         return CommitResult;
     }
+
+    internal static bool IsContinuationOnlyReview(
+        AgentRunOutcome outcome,
+        R3QualityCase testCase)
+    {
+        ArgumentNullException.ThrowIfNull(outcome);
+        ArgumentNullException.ThrowIfNull(testCase);
+        if (testCase.Expectation is not
+                R3QualityContinuationExpectation expectation ||
+            !outcome.CompletedSessionEligible ||
+            outcome.Review is not { } review ||
+            review.Findings.Length != 0 ||
+            !review.Summary.Contains(
+                expectation.PriorOnlyMarker,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var calls = outcome.Events.OfType<AgentToolCallEvent>().ToArray();
+        var terminals = outcome.Events.OfType<AgentTerminalEvent>().ToArray();
+        return calls is
+            [
+            {
+                Name: AgentToolRegistry.FinishReviewName,
+            } terminalCall,
+            ] &&
+            terminalCall.CanonicalArguments.AsSpan().SequenceEqual(
+                review.CanonicalBytes) &&
+            StringComparer.Ordinal.Equals(
+                terminalCall.ArgumentsSha256,
+                review.TerminalSha256) &&
+            !outcome.Events.OfType<AgentToolResultEvent>().Any() &&
+            terminals is [var terminal] &&
+            StringComparer.Ordinal.Equals(
+                terminal.TerminalSha256,
+                review.TerminalSha256);
+    }
+
+    private bool QualityPassed() => Outcome is
+    {
+        Status: "passed",
+        Classification: "quality",
+        Code: R3QualityCodes.Passed,
+    };
 }
 
 internal sealed class VerifierTransportFactory(

@@ -1,12 +1,15 @@
+using System.Collections.Immutable;
 using System.Reflection;
 using System.Reflection.Metadata;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.Agent.Chat;
+using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Quality;
 using AgenticPrReview.Runtime.Agent.Tools;
+using AgenticPrReview.Runtime.Canonical;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.LiveAgentVerifierFixture;
@@ -626,6 +629,95 @@ public sealed class LiveAgentVerifierContractTests
         }
     }
 
+    [Theory]
+    [InlineData("valid", true)]
+    [InlineData("repository_tool", false)]
+    [InlineData("finding", false)]
+    [InlineData("summary_missing", false)]
+    public void ContinuationOnlyReviewAdmissionIsFailClosed(
+        string variant,
+        bool expected)
+    {
+        Assert.True(R3QualityCorpusParser.TryParse(
+            File.ReadAllBytes(Corpus()),
+            out var corpus,
+            out var diagnostic),
+            diagnostic?.ToString());
+        var testCase = Assert.Single(
+            corpus!.Cases,
+            item => item.Kind == R3QualityCaseKind.Continuation);
+        var expectation = Assert.IsType<R3QualityContinuationExpectation>(
+            testCase.Expectation);
+        var summary = variant == "summary_missing"
+            ? "The prior fact was omitted."
+            : string.Concat("Restored ", expectation.PriorOnlyMarker, ".");
+        ImmutableArray<AgentFinding> findings = variant == "finding"
+            ?
+            [
+                new AgentFinding(
+                    "low",
+                    "Unexpected continuation finding",
+                    "Continuation is continuity-only.",
+                    [
+                        new AgentEvidence(
+                            new string('a', 64),
+                            "src/RetryBudget.cs",
+                            1,
+                            1),
+                    ]),
+            ]
+            : [];
+        var terminalBytes = Encoding.UTF8.GetBytes(
+            variant == "finding"
+                ? string.Concat(
+                    "{\"summary\":",
+                    JsonSerializer.Serialize(summary),
+                    ",\"findings\":[{\"severity\":\"low\",",
+                    "\"title\":\"Unexpected continuation finding\",",
+                    "\"message\":\"Continuation is continuity-only.\",",
+                    "\"evidence\":[{\"observation_id\":\"",
+                    new string('a', 64),
+                    "\",\"path\":\"src/RetryBudget.cs\",",
+                    "\"start_line\":1,\"end_line\":1}]}]}")
+                : string.Concat(
+                    "{\"summary\":",
+                    JsonSerializer.Serialize(summary),
+                    ",\"findings\":[]}"));
+        var terminalSha256 = AgentCanonical.HashDomain(
+            AgentCanonical.TerminalDomain,
+            terminalBytes);
+        var events = ImmutableArray.CreateBuilder<AgentLogicalEvent>();
+        if (variant == "repository_tool")
+        {
+            events.Add(new AgentToolCallEvent(
+                "list0",
+                AgentToolRegistry.ListChangedFilesName,
+                AgentCanonical.HashRaw("{}"u8),
+                ImmutableArray.CreateRange("{}"u8.ToArray())));
+        }
+
+        events.Add(new AgentToolCallEvent(
+            "finish0",
+            AgentToolRegistry.FinishReviewName,
+            terminalSha256,
+            ImmutableArray.CreateRange(terminalBytes)));
+        events.Add(new AgentTerminalEvent(terminalSha256));
+        var outcome = AgentRunOutcome.Success(
+            new AgentTerminalReview(
+                summary,
+                findings,
+                terminalSha256,
+                terminalBytes),
+            events.ToImmutable(),
+            continuation: null);
+
+        Assert.Equal(
+            expected,
+            VerifierCommitObserver.IsContinuationOnlyReview(
+                outcome,
+                testCase));
+    }
+
     [Fact]
     public void LiveAgentVerifierTransportProofIsFailClosed()
     {
@@ -746,7 +838,7 @@ public sealed class LiveAgentVerifierContractTests
             envelope,
             lineage,
             ActivationCount: 1,
-            ProviderRequests: 2,
+            ProviderRequests: 1,
             CommitDelegationCount: 1,
             HandoffReady: false,
             AcceptedTruthPreserved: true,

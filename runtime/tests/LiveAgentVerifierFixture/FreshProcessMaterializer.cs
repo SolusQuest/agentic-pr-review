@@ -19,11 +19,21 @@ internal sealed record MaterializedVerifierPhase(
 internal static class FreshProcessMaterializer
 {
     private const string WorkflowIdentity = "trusted-r3-live-verifier";
-    private const string TrustedPolicy =
+    private const string EvidenceTrustedPolicy =
         "Use only the immutable reviewed snapshot and grounded tool evidence. " +
         "Interact only through the supplied tools, never a standalone answer. " +
-        "Inspect repository evidence as needed, then end every run with exactly " +
-        "one finish_review call.";
+        "For this bounded proof, first call list_changed_files with an empty " +
+        "object, then call read_diff with only each returned changed path. " +
+        "The synthetic diff is complete; do not call list_files, read_file, " +
+        "or search_text, and omit unused optional properties instead of " +
+        "sending null. End every run with exactly one finish_review call.";
+    private const string ContinuationTrustedPolicy =
+        "Continuation phases prove restored-fact continuity, not defect " +
+        "detection. Interact only through the supplied tools, never a " +
+        "standalone answer. Do not call list_files, list_changed_files, " +
+        "read_diff, read_file, or search_text. End every run with exactly one " +
+        "finish_review call, an empty findings array, and the required prior " +
+        "fact verbatim in the summary.";
     private const string BuildId = "build-111";
     private const string SeedBaseSha =
         "4444444444444444444444444444444444444444";
@@ -65,6 +75,7 @@ internal static class FreshProcessMaterializer
         {
             return false;
         }
+        var trustedPolicy = TrustedPolicyFor(testCase.Kind);
 
         Directory.CreateDirectory(Path.Join(root, "input"));
         Directory.CreateDirectory(Path.Join(root, "host"));
@@ -76,7 +87,7 @@ internal static class FreshProcessMaterializer
             identity.RepositoryId,
             identity.ReviewTarget,
             WorkflowIdentity,
-            Encoding.UTF8.GetBytes(TrustedPolicy),
+            Encoding.UTF8.GetBytes(trustedPolicy),
             BuildId,
             DeepSeekAdapterContext.Provider,
             DeepSeekAdapterContext.Model,
@@ -170,7 +181,7 @@ internal static class FreshProcessMaterializer
                 trusted.RepositoryId,
                 trusted.ReviewTarget,
                 trusted.WorkflowIdentity,
-                TrustedPolicy,
+                trustedPolicy,
                 trusted.BuildId,
                 trusted.ProviderId,
                 trusted.ModelId,
@@ -234,6 +245,16 @@ internal static class FreshProcessMaterializer
                 : null);
         return true;
     }
+
+    internal static string TrustedPolicyFor(R3QualityCaseKind kind) =>
+        kind switch
+        {
+            R3QualityCaseKind.MustFind or R3QualityCaseKind.MustNotFind =>
+                EvidenceTrustedPolicy,
+            R3QualityCaseKind.Continuation => ContinuationTrustedPolicy,
+            _ => throw new InvalidOperationException(
+                $"Unsupported R3 quality case kind: {kind}."),
+        };
 
     private static bool TrySelectCase(
         R3QualityCorpus corpus,
