@@ -176,8 +176,8 @@
         "base_sha": "5555555555555555555555555555555555555555",
         "head_sha": "6666666666666666666666666666666666666666"
       },
-      "initial_context": "Continue the synthetic review using only the restored prior session and the current bounded inputs. This continuation case tests restored-fact continuity, not defect detection: return no findings, include the restored bounded retry fact verbatim in the finish_review summary, and do not answer outside the supplied tools.",
-      "process_one_context": "Review the synthetic retry-budget change. The prior review established APR110_PRIOR_ONLY_6V3N as the bounded retry fact. This continuation case tests restored-fact continuity, not defect detection: return no findings, include that fact verbatim in the finish_review summary, complete the run through the supplied tools, and do not answer standalone.",
+      "initial_context": "Continue the synthetic review using only the restored prior session and the current bounded inputs. This continuation case tests restored-fact continuity, not defect detection. Do not inspect repository content or call any repository inspection tool. Immediately call finish_review exactly once with no findings and include the restored bounded retry fact verbatim in the summary; do not answer standalone.",
+      "process_one_context": "The prior review established APR110_PRIOR_ONLY_6V3N as the bounded retry fact. This continuation case tests restored-fact continuity, not defect detection. Treat that fact as the complete bounded input: do not inspect repository content or call any repository inspection tool. Immediately call finish_review exactly once with no findings and include that fact verbatim in the summary; do not answer standalone.",
       "files": [
         {
           "path": "src/RetryBudget.cs",

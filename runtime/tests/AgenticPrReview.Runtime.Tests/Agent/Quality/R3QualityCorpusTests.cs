@@ -82,14 +82,14 @@ public sealed class R3QualityCorpusTests
             mustNot.RequiredObservationId);
         var continuation = corpus.Cases[2];
         Assert.Equal(
-            "7cb321ee5466d660789e6eccc39d7f07c1d0355e15756934310636551d2ac5b9",
+            "674dda34d9ed6b5bf7594a1dc5e15af9931cf0ed1e9c44ff17be88093af4f3ed",
             continuation.CaseSha256);
         Assert.Contains(
-            "return no findings",
+            "no findings",
             continuation.InitialContext,
             StringComparison.Ordinal);
         Assert.Contains(
-            "return no findings",
+            "no findings",
             continuation.ProcessOneContext,
             StringComparison.Ordinal);
 
