@@ -857,6 +857,14 @@ internal static class R3QualityEvaluator
                 R3QualityCodes.ProhibitedFinding);
         }
 
+        if (!subject.ToolObservations.IsEmpty)
+        {
+            return QualityFailure(
+                testCase,
+                subject,
+                R3QualityCodes.RequiredToolWrong);
+        }
+
         var present = review.Summary.Contains(
             expectation.PriorOnlyMarker,
             StringComparison.Ordinal);

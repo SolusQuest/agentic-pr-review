@@ -729,11 +729,11 @@ internal static class Program
         var observer = execution?.Observer;
         var resultAfter = FileSha256(target);
         var acceptedTruthPreserved = attemptedProduct is
-            {
-                Code: R3LiveAgentCodes.Completed,
-                Generation: 1,
-                HandoffReady: true,
-            } &&
+        {
+            Code: R3LiveAgentCodes.Completed,
+            Generation: 1,
+            HandoffReady: true,
+        } &&
             acceptedBefore is { Generation: 0 } &&
             acceptedAfter is { Generation: 1 } &&
             ProductMatches(attemptedProduct, acceptedAfter) &&
@@ -745,17 +745,17 @@ internal static class Program
             prior.AsSpan().SequenceEqual(File.ReadAllBytes(target)) &&
             StringComparer.Ordinal.Equals(resultBefore, resultAfter);
         var passed = result is
-            {
-                ExitCode: 40,
-                DiagnosticCode: LiveAgentFreshProcessCodes.OutputFailed,
-            } &&
+        {
+            ExitCode: 40,
+            DiagnosticCode: LiveAgentFreshProcessCodes.OutputFailed,
+        } &&
             failingFileSystem.PublishResultAttempts == 1 &&
             failingFileSystem.ReplacementConflictObserved &&
             restoreProfile.ActivationCount == 1 &&
             wire is
             {
                 Succeeded: true,
-                RequestCount: 2,
+                RequestCount: 1,
             } &&
             observer is
             {

@@ -415,7 +415,7 @@ internal static class VerifierEvidence
             return "evidence_must_not_invalid";
         }
 
-        if (!PhaseShape(seed, "ContinuationSeed", 0, "same_head", 2, 2) ||
+        if (!PhaseShape(seed, "ContinuationSeed", 0, "same_head", 1, 1) ||
             seed.Quality is not null ||
             !LiveAgentFreshProcessDomain.IsSha256(seed.SeedIdentitySha256) ||
             !LiveAgentFreshProcessDomain.IsSha256(
@@ -430,13 +430,13 @@ internal static class VerifierEvidence
                 "ContinuationRestore",
                 1,
                 "verified_ahead",
-                2,
-                2) ||
+                1,
+                1) ||
             !QualityShape(
                 restore.Quality,
                 "continuation-prior-only",
                 0,
-                1) ||
+                0) ||
             restore.SeedIdentitySha256 is not null ||
             !restore.ExactReplayValidated ||
             !restore.ReplayMutationMatrixValidated ||
@@ -478,13 +478,13 @@ internal static class VerifierEvidence
         string caseId,
         int findings,
         int tools) => quality is
-    {
-        Status: "passed",
-        Classification: "quality",
-        Code: R3QualityCodes.Passed,
-        TerminalPresent: true,
-        ExpectedCaseBound: true,
-    } &&
+        {
+            Status: "passed",
+            Classification: "quality",
+            Code: R3QualityCodes.Passed,
+            TerminalPresent: true,
+            ExpectedCaseBound: true,
+        } &&
         quality.CaseId == caseId &&
         LiveAgentFreshProcessDomain.IsSha256(quality.CaseSha256) &&
         quality.FindingCount == findings &&
@@ -521,7 +521,7 @@ internal static class VerifierEvidence
                 receipt.AcceptedGeneration == 1 &&
                 AcceptedIdentityMatches(receipt) &&
                 receipt.ActivationCount == 1 &&
-                receipt.ProviderRequests == 2 &&
+                receipt.ProviderRequests == 1 &&
                 receipt.CommitDelegationCount == 1 &&
                 receipt.StateBeforeSha256 != receipt.StateAfterSha256 &&
                 LiveAgentFreshProcessDomain.IsSha256(

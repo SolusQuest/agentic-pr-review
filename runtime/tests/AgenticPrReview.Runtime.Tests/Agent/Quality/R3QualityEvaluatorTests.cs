@@ -529,6 +529,33 @@ public sealed class R3QualityEvaluatorTests
     }
 
     [Fact]
+    public async Task ContinuationRejectsRepositoryInspectionWithoutFindings()
+    {
+        var testCase = R3QualityCorpusTests.ParseCorpus().Cases[2];
+        var expectation = Assert.IsType<R3QualityContinuationExpectation>(
+            testCase.Expectation);
+        const string arguments =
+            "{\"path\":\"src/RetryBudget.cs\"}";
+        using var completed = await ContinuationAsync(
+            testCase,
+            string.Concat("Restored fact: ", expectation.PriorOnlyMarker),
+            currentCalls:
+            [
+                new ToolCall(
+                    "diff-current",
+                    AgentToolRegistry.ReadDiffName,
+                    arguments),
+            ]);
+        var fresh = Fresh(expectation.FreshInputNames.Select(name =>
+            (name, "synthetic current input")).ToArray());
+
+        var outcome = Evaluate(testCase, completed.Input, fresh);
+
+        Assert.Equal("failed", outcome.Status);
+        Assert.Equal(R3QualityCodes.RequiredToolWrong, outcome.Code);
+    }
+
+    [Fact]
     public async Task ContinuationRejectsUnrelatedPredecessorContext()
     {
         var testCase = R3QualityCorpusTests.ParseCorpus().Cases[2];
