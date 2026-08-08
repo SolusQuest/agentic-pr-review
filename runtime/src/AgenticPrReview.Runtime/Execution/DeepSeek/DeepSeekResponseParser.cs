@@ -193,6 +193,7 @@ internal static class DeepSeekResponseParser
     private static readonly string[] ToolCallProperties =
     [
         "id",
+        "index",
         "type",
         "function",
     ];
@@ -385,9 +386,9 @@ internal static class DeepSeekResponseParser
 
         var builder = ImmutableArray.CreateBuilder<DeepSeekParsedToolCall>(
             toolCalls.GetArrayLength());
-        foreach (var toolCall in toolCalls.EnumerateArray())
+        for (var index = 0; index < toolCalls.GetArrayLength(); index++)
         {
-            if (!TryReadToolCall(toolCall, out var parsed))
+            if (!TryReadToolCall(toolCalls[index], index, out var parsed))
             {
                 return false;
             }
@@ -428,11 +429,15 @@ internal static class DeepSeekResponseParser
 
     private static bool TryReadToolCall(
         JsonElement toolCall,
+        int expectedIndex,
         out DeepSeekParsedToolCall? parsed)
     {
         parsed = null;
         if (toolCall.ValueKind != JsonValueKind.Object ||
             !HasOnlyProperties(toolCall, ToolCallProperties) ||
+            (toolCall.TryGetProperty("index", out var index) &&
+             (!TryReadNonnegativeInt64(index, out var providerIndex) ||
+              providerIndex != expectedIndex)) ||
             !TryReadIdentifier(toolCall, "id", out var id) ||
             !TryReadExactString(toolCall, "type", "function") ||
             !toolCall.TryGetProperty("function", out var function) ||

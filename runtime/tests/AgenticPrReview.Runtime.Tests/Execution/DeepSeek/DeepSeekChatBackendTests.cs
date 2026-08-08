@@ -1134,9 +1134,11 @@ public sealed class DeepSeekChatBackendTests
     {
         var callJson = string.Join(
             ",",
-            calls.Select(call => string.Concat(
+            calls.Select((call, index) => string.Concat(
                 "{\"id\":",
                 JsonSerializer.Serialize(call.Id),
+                ",\"index\":",
+                index,
                 ",\"type\":\"function\",\"function\":{\"name\":",
                 JsonSerializer.Serialize(call.Name),
                 ",\"arguments\":",

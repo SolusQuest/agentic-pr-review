@@ -60,6 +60,55 @@ public sealed class DeepSeekResponseParserTests
     }
 
     [Fact]
+    public void ValidatesOptionalToolCallIndicesAgainstPhysicalOrder()
+    {
+        var indexedCalls = string.Join(
+            ",",
+            Call("call_0", "read_file", "{}", indexLiteral: "0"),
+            Call("call_1", "finish_review", "{}", indexLiteral: "1"));
+        var indexed = Parse(Response(
+            choice: Choice(Message(calls: indexedCalls))));
+
+        Assert.Equal(DeepSeekResponseParseOutcome.Success, indexed.Outcome);
+        var indexedResponse = Assert.IsType<DeepSeekParsedToolResponse>(
+            indexed.Response);
+        Assert.Equal(
+            ["call_0", "call_1"],
+            indexedResponse.Calls.Select(call => call.Id));
+
+        AssertSuccess(Response(choice: Choice(Message(calls: string.Join(
+            ",",
+            Call("call_0", "read_file", "{}"),
+            Call("call_1", "finish_review", "{}", indexLiteral: "1"))))));
+
+        foreach (var indexLiteral in new[]
+                 {
+                     "-1",
+                     "0.0",
+                     "\"0\"",
+                     "9223372036854775808",
+                     "null",
+                     "true",
+                     "{}",
+                     "[]",
+                     "1",
+                 })
+        {
+            AssertInvalid(Response(choice: Choice(Message(calls: Call(
+                "call_0",
+                "finish_review",
+                "{}",
+                indexLiteral: indexLiteral)))));
+        }
+
+        AssertInvalid(Response(choice: Choice(Message(calls: Call(
+            "call_0",
+            "finish_review",
+            "{}",
+            indexLiteral: "0,\"index\":0")))));
+    }
+
+    [Fact]
     public void AcceptsShuffledPropertiesAndNullableOptionalFields()
     {
         var json =
@@ -804,8 +853,10 @@ public sealed class DeepSeekResponseParserTests
         string id,
         string name,
         string arguments,
-        string type = "function") =>
+        string type = "function",
+        string? indexLiteral = null) =>
         "{\"id\":" + Quote(id) +
+        (indexLiteral is null ? "" : ",\"index\":" + indexLiteral) +
         ",\"type\":" + Quote(type) +
         ",\"function\":{\"name\":" + Quote(name) +
         ",\"arguments\":" + Quote(arguments) +
