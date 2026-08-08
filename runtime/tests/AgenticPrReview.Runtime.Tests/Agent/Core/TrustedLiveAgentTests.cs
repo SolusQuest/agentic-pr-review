@@ -326,6 +326,7 @@ public sealed class TrustedLiveAgentTests : IDisposable
 
     [Theory]
     [InlineData(AgentFailureCodes.ChatFailed, null, null, TrustedLiveCodes.Provider)]
+    [InlineData(AgentFailureCodes.MissingTool, null, null, TrustedLiveCodes.MissingTool)]
     [InlineData(R3LiveAgentCodes.Completed, "provider", R3QualityCodes.ProviderFailed, TrustedLiveCodes.Provider)]
     [InlineData(R3LiveAgentCodes.Completed, "quality", R3QualityCodes.RequiredToolMissing, TrustedLiveCodes.MissingTool)]
     [InlineData(R3LiveAgentCodes.Completed, "quality", R3QualityCodes.RequiredObservationMissing, TrustedLiveCodes.Grounding)]

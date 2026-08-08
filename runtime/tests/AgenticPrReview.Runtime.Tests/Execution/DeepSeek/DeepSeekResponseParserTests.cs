@@ -87,6 +87,36 @@ public sealed class DeepSeekResponseParserTests
     }
 
     [Fact]
+    public void NormalizesNullableToolCallContentToEmptyText()
+    {
+        var result = Parse(Response(choice: Choice(Message(
+            contentLiteral: "null"))));
+
+        Assert.Equal(DeepSeekResponseParseOutcome.Success, result.Outcome);
+        var response = Assert.IsType<DeepSeekParsedToolResponse>(
+            result.Response);
+        Assert.Equal(string.Empty, response.Content);
+        Assert.Single(response.Calls);
+    }
+
+    [Fact]
+    public void ClassifiesAValidStandaloneResponseAsMissingTool()
+    {
+        var result = Parse(Response(choice: Choice(
+            Message(
+                contentLiteral: "null",
+                reasoningLiteral: "null",
+                callsLiteral: "null"),
+            finishReason: "\"stop\"")));
+
+        Assert.Equal(
+            DeepSeekResponseParseOutcome.MissingTool,
+            result.Outcome);
+        Assert.Null(result.Response);
+        Assert.Equal("missing_tool", result.ToString());
+    }
+
+    [Fact]
     public void RejectsEveryNonSuccessTransportOutcome()
     {
         var outcomes = new[]
@@ -171,7 +201,6 @@ public sealed class DeepSeekResponseParserTests
             Response(choice: Choice(Message(), index: "1")),
             Response(choice: Choice(Message(), index: "0.0")),
             Response(choice: Choice(Message(role: "user"))),
-            Response(choice: Choice(Message(contentLiteral: "null"))),
             Response(choice: Choice(Message(reasoningLiteral: "null"))),
             Response(choice: Choice(Message(reasoning: ""))),
             Response(choice: Choice(Message(calls: "", callsLiteral: "null"))),

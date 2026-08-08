@@ -153,11 +153,11 @@ internal sealed class AgentLoop(
                     toolCalls,
                         events);
             }
-            catch (ProjectChatNormalizationException)
+            catch (ProjectChatNormalizationException exception)
             {
                 return Failure(
                     StopReason(started, cancellationToken) ??
-                        AgentFailureCodes.ResponseInvalid,
+                        exception.DiagnosticCode,
                     modelCalls,
                     toolCalls,
                     events);

@@ -103,6 +103,12 @@ internal sealed class DeepSeekChatBackend(
         MinimalChatRequest request)
     {
         var parsed = DeepSeekResponseParser.Parse(transportResult);
+        if (parsed.Outcome == DeepSeekResponseParseOutcome.MissingTool)
+        {
+            throw new ProjectChatNormalizationException(
+                AgentFailureCodes.MissingTool);
+        }
+
         if (parsed.Outcome != DeepSeekResponseParseOutcome.Success ||
             parsed.Response is not { } response)
         {

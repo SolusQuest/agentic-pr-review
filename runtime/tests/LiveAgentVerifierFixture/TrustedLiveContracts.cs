@@ -278,6 +278,7 @@ internal static class TrustedLiveDomain
             AgentFailureCodes.ResponseTooLarge,
             AgentFailureCodes.UsageInvalid,
             AgentFailureCodes.ResponseInvalid,
+            AgentFailureCodes.MissingTool,
             AgentFailureCodes.UnknownTool,
             AgentFailureCodes.ToolArgumentsInvalid,
             AgentFailureCodes.TerminalSequenceInvalid,
@@ -371,6 +372,7 @@ internal static class TrustedLiveDomain
             AgentFailureCodes.ChatFailed);
         AddFailureClassification(
             TrustedLiveCodes.MissingTool,
+            AgentFailureCodes.MissingTool,
             AgentFailureCodes.UnknownTool,
             AgentFailureCodes.ToolArgumentsInvalid);
         AddFailureClassification(

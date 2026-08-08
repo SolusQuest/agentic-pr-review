@@ -142,7 +142,7 @@ public sealed class DeepSeekChatBackendTests
         var transport = new FakeTransport(DeepSeekTransportResult.Success(
             Response(
                 reasoning,
-                content: string.Empty,
+                content: null,
                 ("call_same", "unknown_tool", "{not-json"),
                 ("call_same", "finish_review", "{ \"x\" : 1 }"))));
         var client = DeepSeekChatBackend.CreateClient(Context(), transport);
@@ -557,6 +557,23 @@ public sealed class DeepSeekChatBackendTests
                 ProjectRequest(),
                 CancellationToken.None));
         Assert.Equal(1, nullTransport.RequestCount);
+    }
+
+    [Fact]
+    public async Task StandaloneProviderResponseIsDistinctlyMissingTool()
+    {
+        var transport = new FakeTransport(
+            DeepSeekTransportResult.Success(StandaloneResponse()));
+        var client = DeepSeekChatBackend.CreateClient(Context(), transport);
+
+        var exception = await Assert.ThrowsAsync<
+            ProjectChatNormalizationException>(() =>
+                client.GetResponseAsync(
+                    ProjectRequest(),
+                    CancellationToken.None));
+
+        Assert.Equal(AgentFailureCodes.MissingTool, exception.DiagnosticCode);
+        Assert.Single(transport.Requests);
     }
 
     [Fact]
@@ -1112,7 +1129,7 @@ public sealed class DeepSeekChatBackendTests
 
     private static byte[] Response(
         string reasoning,
-        string content,
+        string? content,
         params (string Id, string Name, string Arguments)[] calls)
     {
         var callJson = string.Join(
@@ -1140,6 +1157,15 @@ public sealed class DeepSeekChatBackendTests
             "\"prompt_cache_miss_tokens\":2}}" );
         return Encoding.UTF8.GetBytes(json);
     }
+
+    private static byte[] StandaloneResponse() => Encoding.UTF8.GetBytes(
+        "{\"choices\":[{\"index\":0,\"message\":{\"role\":" +
+        "\"assistant\",\"content\":null,\"reasoning_content\":null," +
+        "\"tool_calls\":null},\"finish_reason\":\"stop\"}]," +
+        "\"model\":\"deepseek-v4-flash\",\"usage\":{" +
+        "\"prompt_tokens\":3,\"completion_tokens\":2," +
+        "\"total_tokens\":5,\"prompt_cache_hit_tokens\":1," +
+        "\"prompt_cache_miss_tokens\":2}}");
 
     private sealed class FakeTransport : IDeepSeekTransport
     {

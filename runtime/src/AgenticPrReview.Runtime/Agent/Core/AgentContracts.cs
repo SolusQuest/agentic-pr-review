@@ -15,6 +15,7 @@ internal static class AgentFailureCodes
     internal const string ResponseTooLarge = "agent_response_too_large";
     internal const string UsageInvalid = "agent_usage_invalid";
     internal const string ResponseInvalid = "agent_response_invalid";
+    internal const string MissingTool = "agent_missing_tool";
     internal const string UnknownTool = "agent_unknown_tool";
     internal const string ToolArgumentsInvalid = "agent_tool_arguments_invalid";
     internal const string TerminalSequenceInvalid = "agent_terminal_sequence_invalid";

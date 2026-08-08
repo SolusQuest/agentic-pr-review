@@ -20,7 +20,10 @@ internal static class FreshProcessMaterializer
 {
     private const string WorkflowIdentity = "trusted-r3-live-verifier";
     private const string TrustedPolicy =
-        "Use only the immutable reviewed snapshot and grounded tool evidence.";
+        "Use only the immutable reviewed snapshot and grounded tool evidence. " +
+        "Interact only through the supplied tools, never a standalone answer. " +
+        "Inspect repository evidence as needed, then end every run with exactly " +
+        "one finish_review call.";
     private const string BuildId = "build-111";
     private const string SeedBaseSha =
         "4444444444444444444444444444444444444444";

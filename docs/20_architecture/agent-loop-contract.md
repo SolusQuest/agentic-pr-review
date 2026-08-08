@@ -75,7 +75,7 @@ Every evidence reference must match an admitted current-run observation with the
 
 ## Stable outcomes and precedence
 
-The implementation uses only the stable outcome taxonomy in #78. Before starting an operation the first outcome is caller cancellation, elapsed deadline, then the applicable limit. After an await the first outcome is caller cancellation, elapsed deadline, operation/chat failure, response shape/size, usage, then result limits. A backend or transport exception is `agent_chat_failed`; a response received by the selected adapter but not normalizable into the project shape is `agent_response_invalid`.
+The implementation uses only the stable outcome taxonomy in #78 as extended by #114's trusted-live missing-tool distinction. Before starting an operation the first outcome is caller cancellation, elapsed deadline, then the applicable limit. After an await the first outcome is caller cancellation, elapsed deadline, operation/chat failure, response shape/size, usage, then result limits. A backend or transport exception is `agent_chat_failed`. A malformed, unknown, or otherwise unusable response received by the selected adapter is `agent_response_invalid`. When the selected adapter proves that a response is structurally valid but is a standalone final answer with no tool call in a run that requires tool interaction, it reports `agent_missing_tool`; the loop propagates only that stable code and bounded counters. `agent_missing_tool` is never inferred from a malformed or unknown provider shape.
 
 Diagnostics contain only the stable code and bounded counters. They never contain repository or tool text, prompts, reasoning/continuation, raw arguments/results, credentials, authorization values, absolute roots, or exception messages/objects.
 
