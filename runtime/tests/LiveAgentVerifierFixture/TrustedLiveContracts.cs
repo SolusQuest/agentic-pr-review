@@ -1,5 +1,11 @@
+using System.ComponentModel;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent.Quality;
+using AgenticPrReview.Runtime.Agent.Session;
+using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 
 namespace AgenticPrReview.Runtime.LiveAgentVerifierFixture;
@@ -46,6 +52,558 @@ internal sealed record TrustedLivePhaseReceipt(
     string ExecutionArtifactSha256,
     string BuildPairSha256,
     string Kind = "apr-r3-trusted-live-phase-v1");
+
+internal static class TrustedLiveDiagnosticCodes
+{
+    internal const string PhaseChildFailed = "phase_child_failed";
+    internal const string PhaseCanary = "phase_canary";
+    internal const string PhaseReceiptInvalid = "phase_receipt_invalid";
+    internal const string PhaseReceiptMissing = "phase_receipt_missing";
+}
+
+internal static class TrustedLiveFailureKinds
+{
+    internal const string Application = "application";
+    internal const string Child = "child";
+    internal const string ReceiptInvalid = "receipt_invalid";
+    internal const string ReceiptMissing = "receipt_missing";
+    internal const string Canary = "canary";
+}
+
+internal static class TrustedLiveChildStages
+{
+    internal const string FixtureInputRead = "fixture_input_read";
+    internal const string FixtureMaterialization = "fixture_materialization";
+    internal const string FreshProcessFilesystem = "fresh_process_filesystem";
+    internal const string CommandPreparation = "command_preparation";
+    internal const string ProfileActivation = "profile_activation";
+    internal const string CommandExecution = "command_execution";
+    internal const string ProductResultRead = "product_result_read";
+    internal const string LineageRead = "lineage_read";
+    internal const string QualityProjection = "quality_projection";
+    internal const string PhaseReceiptProjection = "phase_receipt_projection";
+    internal const string PhaseReceiptWrite = "phase_receipt_write";
+
+    internal static IReadOnlySet<string> All { get; } =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            FixtureInputRead,
+            FixtureMaterialization,
+            FreshProcessFilesystem,
+            CommandPreparation,
+            ProfileActivation,
+            CommandExecution,
+            ProductResultRead,
+            LineageRead,
+            QualityProjection,
+            PhaseReceiptProjection,
+            PhaseReceiptWrite,
+        };
+}
+
+internal static class TrustedLiveFailureCategories
+{
+    internal const string Invalid = "invalid";
+    internal const string Argument = "argument";
+    internal const string Io = "io";
+    internal const string Access = "access";
+    internal const string Unsupported = "unsupported";
+    internal const string Cryptography = "cryptography";
+    internal const string Json = "json";
+    internal const string Process = "process";
+    internal const string Cancelled = "cancelled";
+    internal const string Other = "other";
+
+    internal static IReadOnlySet<string> All { get; } =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            Invalid,
+            Argument,
+            Io,
+            Access,
+            Unsupported,
+            Cryptography,
+            Json,
+            Process,
+            Cancelled,
+            Other,
+        };
+
+    internal static string FromException(Exception exception) =>
+        exception switch
+        {
+            ArgumentException or
+            FormatException or
+            OverflowException => Argument,
+            IOException => Io,
+            System.Security.SecurityException or
+            UnauthorizedAccessException => Access,
+            NotSupportedException => Unsupported,
+            CryptographicException => Cryptography,
+            JsonException => Json,
+            Win32Exception => Process,
+            OperationCanceledException => Cancelled,
+            _ => Other,
+        };
+}
+
+internal static class TrustedLiveSuccessCodes
+{
+    internal const string MustFind = "APR_R3_TRUSTED_LIVE_MUST_FIND_OK";
+    internal const string MustNotFind = "APR_R3_TRUSTED_LIVE_MUST_NOT_FIND_OK";
+    internal const string ContinuationSeed =
+        "APR_R3_TRUSTED_LIVE_CONTINUATION_SEED_OK";
+    internal const string ContinuationRestore =
+        "APR_R3_TRUSTED_LIVE_CONTINUATION_RESTORE_OK";
+}
+
+internal sealed record TrustedLiveFailureEvidence(
+    string Scenario,
+    string Kind,
+    string? Stage,
+    string? Category,
+    string DiagnosticCode,
+    int ProcessExitCode,
+    int ModelCalls,
+    int ToolCalls,
+    string? ProductCode,
+    string? OutcomeCode,
+    string? QualityClassification,
+    string? QualityCode);
+
+internal sealed record TrustedLivePrivateFailure(
+    string Kind,
+    string Stage,
+    string Category);
+
+internal static class TrustedLivePrivateFailureCodec
+{
+    private const int MaximumBytes = 512;
+
+    internal static byte[] Write(TrustedLivePrivateFailure failure)
+    {
+        ArgumentNullException.ThrowIfNull(failure);
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("kind", failure.Kind);
+            writer.WriteString("stage", failure.Stage);
+            writer.WriteString("category", failure.Category);
+            writer.WriteEndObject();
+        }
+        var bytes = stream.ToArray();
+        if (bytes.Length > MaximumBytes || !IsAdmitted(failure))
+        {
+            throw new InvalidOperationException(
+                "The trusted-live private failure is invalid.");
+        }
+        return bytes;
+    }
+
+    internal static TrustedLivePrivateFailure? Read(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists || info.Length is <= 0 or > MaximumBytes)
+            {
+                return null;
+            }
+            using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.EnumerateObject().Select(item => item.Name)
+                    .SequenceEqual(
+                        ["kind", "stage", "category"],
+                        StringComparer.Ordinal))
+            {
+                return null;
+            }
+            var failure = new TrustedLivePrivateFailure(
+                RequiredString(root, "kind"),
+                RequiredString(root, "stage"),
+                RequiredString(root, "category"));
+            return IsAdmitted(failure) ? failure : null;
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or
+            IOException or
+            InvalidOperationException or
+            JsonException or
+            NotSupportedException or
+            UnauthorizedAccessException or
+            System.Security.SecurityException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsAdmitted(TrustedLivePrivateFailure failure) =>
+        failure.Kind == TrustedLiveFailureKinds.Child &&
+        TrustedLiveChildStages.All.Contains(failure.Stage) &&
+        TrustedLiveFailureCategories.All.Contains(failure.Category);
+
+    private static string RequiredString(JsonElement root, string name) =>
+        root.GetProperty(name).GetString() ?? throw new JsonException();
+}
+
+internal static class TrustedLiveDomain
+{
+    private static readonly HashSet<string> productCodes =
+        new(StringComparer.Ordinal)
+        {
+            R3LiveAgentCodes.Completed,
+            R3LiveAgentCodes.InputInvalid,
+            R3LiveAgentCodes.SecretInvalid,
+            R3LiveAgentCodes.CompositionFailed,
+            R3LiveAgentCodes.HandoffUnavailable,
+            R3LiveAgentCodes.HandoffCleanupFailed,
+            LiveAgentFreshProcessCodes.UsageInvalid,
+            LiveAgentFreshProcessCodes.AuthorizationInvalid,
+            LiveAgentFreshProcessCodes.RootInvalid,
+            LiveAgentFreshProcessCodes.InputInvalid,
+            LiveAgentFreshProcessCodes.LineageInvalid,
+            LiveAgentFreshProcessCodes.TransitionRejected,
+            LiveAgentFreshProcessCodes.ProcessIdentityReused,
+            LiveAgentFreshProcessCodes.TransportProofFailed,
+            LiveAgentFreshProcessCodes.OutputFailed,
+            AgentFailureCodes.Cancelled,
+            AgentFailureCodes.DeadlineExceeded,
+            AgentFailureCodes.ChatFailed,
+            AgentFailureCodes.ModelLimit,
+            AgentFailureCodes.ToolLimit,
+            AgentFailureCodes.TokenLimit,
+            AgentFailureCodes.RequestTooLarge,
+            AgentFailureCodes.ResponseTooLarge,
+            AgentFailureCodes.UsageInvalid,
+            AgentFailureCodes.ResponseInvalid,
+            AgentFailureCodes.UnknownTool,
+            AgentFailureCodes.ToolArgumentsInvalid,
+            AgentFailureCodes.TerminalSequenceInvalid,
+            AgentFailureCodes.TerminalInvalid,
+            AgentFailureCodes.ToolPathInvalid,
+            AgentFailureCodes.ToolPathNotTracked,
+            AgentFailureCodes.ToolCursorInvalid,
+            AgentFailureCodes.ToolPathUnsafe,
+            AgentFailureCodes.ToolFileTooLarge,
+            AgentFailureCodes.ToolFileBinary,
+            AgentFailureCodes.ToolFileInvalidUtf8,
+            AgentFailureCodes.ToolFileLoneCr,
+            AgentFailureCodes.ToolIoFailed,
+            AgentFailureCodes.ToolResultLimit,
+            AgentSessionCodes.BootstrapAbsent,
+            AgentSessionCodes.BootstrapIncompatible,
+            AgentSessionCodes.ResetExplicit,
+            AgentSessionCodes.ExplicitMissing,
+            AgentSessionCodes.ExplicitIncompatible,
+            AgentSessionCodes.CurrentMalformed,
+            AgentSessionCodes.CurrentOversized,
+            AgentSessionCodes.ScopeMismatch,
+            AgentSessionCodes.TransitionRejected,
+            AgentSessionCodes.RecordInvalid,
+            AgentSessionCodes.ClassificationInvalid,
+            AgentSessionCodes.AssociationInvalid,
+            AgentSessionCodes.ContinuationInvalid,
+            AgentSessionCodes.ConstructionLimit,
+        };
+
+    private static readonly HashSet<string> applicationDiagnostics =
+        new(StringComparer.Ordinal)
+        {
+            R3LiveAgentDiagnosticCodes.PreparationFailed,
+            R3LiveAgentDiagnosticCodes.StateRestoreFailed,
+            R3LiveAgentDiagnosticCodes.SnapshotFailed,
+            R3LiveAgentDiagnosticCodes.TransportFailed,
+            R3LiveAgentDiagnosticCodes.AgentRunFailed,
+            R3LiveAgentDiagnosticCodes.StateCommitFailed,
+            R3LiveAgentDiagnosticCodes.ResultFailed,
+        };
+
+    private static readonly HashSet<string> nonFailureProductCodes =
+        new(StringComparer.Ordinal)
+        {
+            R3LiveAgentCodes.Completed,
+            RestrictedStateCodes.Authorized,
+            RestrictedStateCodes.Enumerated,
+            RestrictedStateCodes.Prepared,
+            RestrictedStateCodes.Absent,
+            RestrictedStateCodes.Restored,
+            RestrictedStateCodes.Accepted,
+            RestrictedStateCodes.Idempotent,
+            RestrictedStateCodes.Reset,
+            RestrictedStateCodes.HandoffReady,
+            AgentSessionCodes.BootstrapAbsent,
+            AgentSessionCodes.ResetExplicit,
+        };
+
+    private static readonly Dictionary<string, string>
+        productFailureClassifications = new(StringComparer.Ordinal);
+
+    static TrustedLiveDomain()
+    {
+        productCodes.UnionWith(RestrictedStateCodes.All);
+        AddFailureClassification(
+            TrustedLiveCodes.Cleanup,
+            R3LiveAgentCodes.HandoffCleanupFailed,
+            RestrictedStateCodes.CleanupFailed);
+        AddFailureClassification(
+            TrustedLiveCodes.Continuation,
+            LiveAgentFreshProcessCodes.LineageInvalid,
+            LiveAgentFreshProcessCodes.TransitionRejected,
+            LiveAgentFreshProcessCodes.ProcessIdentityReused,
+            RestrictedStateCodes.ExplicitMissing,
+            RestrictedStateCodes.CurrentMissing,
+            RestrictedStateCodes.Expired,
+            RestrictedStateCodes.ReplayRejected,
+            AgentSessionCodes.ContinuationInvalid);
+        AddFailureClassification(
+            TrustedLiveCodes.Grounding,
+            AgentFailureCodes.TerminalSequenceInvalid,
+            AgentFailureCodes.TerminalInvalid,
+            AgentSessionCodes.ScopeMismatch,
+            AgentSessionCodes.RecordInvalid,
+            AgentSessionCodes.ClassificationInvalid,
+            AgentSessionCodes.AssociationInvalid);
+        AddFailureClassification(
+            TrustedLiveCodes.Provider,
+            R3LiveAgentCodes.SecretInvalid,
+            AgentFailureCodes.ChatFailed);
+        AddFailureClassification(
+            TrustedLiveCodes.MissingTool,
+            AgentFailureCodes.UnknownTool,
+            AgentFailureCodes.ToolArgumentsInvalid);
+        AddFailureClassification(
+            TrustedLiveCodes.Infrastructure,
+            R3LiveAgentCodes.InputInvalid,
+            R3LiveAgentCodes.CompositionFailed,
+            R3LiveAgentCodes.HandoffUnavailable,
+            LiveAgentFreshProcessCodes.UsageInvalid,
+            LiveAgentFreshProcessCodes.AuthorizationInvalid,
+            LiveAgentFreshProcessCodes.RootInvalid,
+            LiveAgentFreshProcessCodes.InputInvalid,
+            LiveAgentFreshProcessCodes.TransportProofFailed,
+            LiveAgentFreshProcessCodes.OutputFailed,
+            AgentFailureCodes.Cancelled,
+            AgentFailureCodes.DeadlineExceeded,
+            AgentFailureCodes.ModelLimit,
+            AgentFailureCodes.ToolLimit,
+            AgentFailureCodes.TokenLimit,
+            AgentFailureCodes.RequestTooLarge,
+            AgentFailureCodes.ResponseTooLarge,
+            AgentFailureCodes.UsageInvalid,
+            AgentFailureCodes.ResponseInvalid,
+            AgentFailureCodes.ToolPathInvalid,
+            AgentFailureCodes.ToolPathNotTracked,
+            AgentFailureCodes.ToolCursorInvalid,
+            AgentFailureCodes.ToolPathUnsafe,
+            AgentFailureCodes.ToolFileTooLarge,
+            AgentFailureCodes.ToolFileBinary,
+            AgentFailureCodes.ToolFileInvalidUtf8,
+            AgentFailureCodes.ToolFileLoneCr,
+            AgentFailureCodes.ToolIoFailed,
+            AgentFailureCodes.ToolResultLimit,
+            AgentSessionCodes.BootstrapIncompatible,
+            AgentSessionCodes.ExplicitMissing,
+            AgentSessionCodes.ExplicitIncompatible,
+            AgentSessionCodes.CurrentMalformed,
+            AgentSessionCodes.CurrentOversized,
+            AgentSessionCodes.ConstructionLimit,
+            RestrictedStateCodes.AccessDenied,
+            RestrictedStateCodes.EnumerationInvalid,
+            RestrictedStateCodes.Cancelled,
+            RestrictedStateCodes.EnvelopeInvalid,
+            RestrictedStateCodes.KeyUnavailable,
+            RestrictedStateCodes.AuthenticationFailed,
+            RestrictedStateCodes.Conflict,
+            RestrictedStateCodes.IoFailed);
+
+        var expectedFailures = productCodes
+            .Where(code => !nonFailureProductCodes.Contains(code))
+            .ToHashSet(StringComparer.Ordinal);
+        if (!expectedFailures.SetEquals(productFailureClassifications.Keys))
+        {
+            throw new InvalidOperationException(
+                "The trusted-live product failure classification is incomplete.");
+        }
+    }
+
+    internal static IReadOnlySet<string> ProductCodes => productCodes;
+
+    internal static IReadOnlySet<string> ApplicationDiagnostics =>
+        applicationDiagnostics;
+
+    internal static IReadOnlyDictionary<string, string>
+        ProductFailureClassifications => productFailureClassifications;
+
+    internal static bool ReceiptIsAdmitted(TrustedLivePhaseReceipt receipt)
+    {
+        if (receipt.Kind != "apr-r3-trusted-live-phase-v1" ||
+            !Enum.TryParse<VerifierScenario>(
+                receipt.Scenario,
+                ignoreCase: false,
+                out var scenario) ||
+            receipt.Scenario != scenario.ToString() ||
+            scenario is not (VerifierScenario.MustFind or
+                VerifierScenario.MustNotFind or
+                VerifierScenario.ContinuationSeed or
+                VerifierScenario.ContinuationRestore) ||
+            receipt.Status is not ("passed" or "failed") ||
+            receipt.Transition is not ("same_head" or "verified_ahead") ||
+            !productCodes.Contains(receipt.ProductCode) ||
+            !QualityIsAdmitted(receipt))
+        {
+            return false;
+        }
+
+        if (receipt.Status == "passed")
+        {
+            return receipt.ProductCode == R3LiveAgentCodes.Completed &&
+                receipt.OutcomeCode == SuccessCode(scenario) &&
+                (scenario == VerifierScenario.ContinuationSeed
+                    ? receipt.QualityStatus is null &&
+                        receipt.QualityClassification is null &&
+                        receipt.QualityCode is null
+                    : receipt.QualityStatus == "passed" &&
+                        receipt.QualityClassification == "quality" &&
+                        receipt.QualityCode == R3QualityCodes.Passed);
+        }
+
+        if (applicationDiagnostics.Contains(receipt.OutcomeCode))
+        {
+            return receipt.ProductCode == R3LiveAgentCodes.CompositionFailed;
+        }
+
+        if (receipt.QualityStatus is "failed" or "not_evaluated" &&
+            receipt.QualityCode is not null and not R3QualityCodes.Passed &&
+            receipt.OutcomeCode == receipt.QualityCode)
+        {
+            return receipt.ProductCode is R3LiveAgentCodes.Completed or
+                LiveAgentFreshProcessCodes.TransportProofFailed;
+        }
+
+        if (ProductFailureCodeIsAdmitted(receipt.ProductCode))
+        {
+            return receipt.OutcomeCode == receipt.ProductCode;
+        }
+
+        return false;
+    }
+
+    internal static string? ApplicationStage(string diagnosticCode) =>
+        applicationDiagnostics.Contains(diagnosticCode)
+            ? diagnosticCode
+            : null;
+
+    internal static string FailureOutcomeCode(
+        string? applicationDiagnostic,
+        string? productCode,
+        R3QualityOutcome? quality)
+    {
+        if (applicationDiagnostic is not null &&
+            applicationDiagnostics.Contains(applicationDiagnostic))
+        {
+            return applicationDiagnostic;
+        }
+        if (StringComparer.Ordinal.Equals(
+                productCode,
+                LiveAgentFreshProcessCodes.TransportProofFailed) &&
+            quality is
+            {
+                Status: "failed" or "not_evaluated",
+                Code: not R3QualityCodes.Passed,
+            })
+        {
+            return quality.Code;
+        }
+        if (productCode is not null &&
+            ProductFailureCodeIsAdmitted(productCode))
+        {
+            return productCode;
+        }
+        if (quality is
+            {
+                Status: "failed" or "not_evaluated",
+                Code: not R3QualityCodes.Passed,
+            })
+        {
+            return quality.Code;
+        }
+
+        return TrustedLiveCodes.Infrastructure;
+    }
+
+    internal static bool TryClassifyProductFailure(
+        string code,
+        out string classification) =>
+        productFailureClassifications.TryGetValue(code, out classification!);
+
+    private static bool QualityIsAdmitted(TrustedLivePhaseReceipt receipt)
+    {
+        if (receipt.QualityStatus is null &&
+            receipt.QualityClassification is null &&
+            receipt.QualityCode is null)
+        {
+            return true;
+        }
+        if (receipt.QualityStatus is null ||
+            receipt.QualityClassification is null ||
+            receipt.QualityCode is null)
+        {
+            return false;
+        }
+
+        var sourceCode = receipt.QualityClassification == "quality" ||
+            receipt.QualityCode is
+                R3QualityCodes.FixtureInvalid or
+                R3QualityCodes.SubjectInvalid or
+                R3QualityCodes.InitialContextLeak or
+                R3QualityCodes.FreshInputInvalid or
+                R3QualityCodes.ObservationIsolationInvalid
+            ? null
+            : receipt.ProductCode;
+        return R3QualityOutcome.TryCreate(
+            "trusted_live",
+            new string('a', 64),
+            receipt.QualityStatus,
+            receipt.QualityClassification,
+            receipt.QualityCode,
+            sourceCode,
+            receipt.FindingCount,
+            receipt.QualityToolCallCount,
+            receipt.TerminalSha256,
+            out _);
+    }
+
+    private static string SuccessCode(VerifierScenario scenario) =>
+        scenario switch
+        {
+            VerifierScenario.MustFind => TrustedLiveSuccessCodes.MustFind,
+            VerifierScenario.MustNotFind => TrustedLiveSuccessCodes.MustNotFind,
+            VerifierScenario.ContinuationSeed =>
+                TrustedLiveSuccessCodes.ContinuationSeed,
+            VerifierScenario.ContinuationRestore =>
+                TrustedLiveSuccessCodes.ContinuationRestore,
+            _ => string.Empty,
+        };
+
+    internal static bool ProductFailureCodeIsAdmitted(string code) =>
+        productFailureClassifications.ContainsKey(code);
+
+    private static void AddFailureClassification(
+        string classification,
+        params string[] codes)
+    {
+        foreach (var code in codes)
+        {
+            if (!productFailureClassifications.TryAdd(code, classification))
+            {
+                throw new InvalidOperationException(
+                    "The trusted-live product failure classification overlaps.");
+            }
+        }
+    }
+}
 
 internal static class TrustedLiveReceiptCodec
 {
@@ -194,8 +752,15 @@ internal static class TrustedLiveReceiptCodec
         string workflowSha,
         string? fixtureSha256,
         VerifierBuildPair? buildPair,
-        IReadOnlyList<TrustedLivePhaseReceipt> phases)
+        IReadOnlyList<TrustedLivePhaseReceipt> phases,
+        TrustedLiveFailureEvidence? failure = null)
     {
+        var canaryDominant = code == TrustedLiveCodes.Canary ||
+            failure?.Kind == TrustedLiveFailureKinds.Canary;
+        var admittedPhases = canaryDominant
+            ? Array.Empty<TrustedLivePhaseReceipt>()
+            : phases;
+        var admittedFailure = canaryDominant ? null : failure;
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
         {
@@ -230,11 +795,18 @@ internal static class TrustedLiveReceiptCodec
                 writer,
                 "build_pair_sha256",
                 buildPair?.BuildPairSha256);
-            writer.WriteNumber("phase_count", phases.Count);
-            writer.WriteNumber("model_calls", phases.Sum(item => item.ModelCalls));
-            writer.WriteNumber("tool_calls", phases.Sum(item => item.ToolCalls));
+            writer.WriteNumber("phase_count", admittedPhases.Count);
+            writer.WriteNumber(
+                "attempted_phase_count",
+                admittedPhases.Count + (admittedFailure is null ? 0 : 1));
+            writer.WriteNumber(
+                "model_calls",
+                admittedPhases.Sum(item => item.ModelCalls));
+            writer.WriteNumber(
+                "tool_calls",
+                admittedPhases.Sum(item => item.ToolCalls));
             writer.WriteStartArray("phases");
-            foreach (var phase in phases)
+            foreach (var phase in admittedPhases)
             {
                 writer.WriteStartObject();
                 writer.WriteString("scenario", phase.Scenario);
@@ -254,21 +826,77 @@ internal static class TrustedLiveReceiptCodec
                 writer.WriteEndObject();
             }
             writer.WriteEndArray();
+            if (admittedFailure is null)
+            {
+                writer.WriteNull("failure");
+            }
+            else
+            {
+                writer.WriteStartObject("failure");
+                writer.WriteString("scenario", admittedFailure.Scenario);
+                writer.WriteString("kind", admittedFailure.Kind);
+                WriteNullableString(
+                    writer,
+                    "stage",
+                    admittedFailure.Stage);
+                WriteNullableString(
+                    writer,
+                    "category",
+                    admittedFailure.Category);
+                writer.WriteString(
+                    "diagnostic_code",
+                    admittedFailure.DiagnosticCode);
+                writer.WriteNumber(
+                    "process_exit_code",
+                    admittedFailure.ProcessExitCode);
+                writer.WriteNumber(
+                    "model_calls",
+                    admittedFailure.ModelCalls);
+                writer.WriteNumber(
+                    "tool_calls",
+                    admittedFailure.ToolCalls);
+                WriteNullableString(
+                    writer,
+                    "product_code",
+                    admittedFailure.ProductCode);
+                WriteNullableString(
+                    writer,
+                    "outcome_code",
+                    admittedFailure.OutcomeCode);
+                WriteNullableString(
+                    writer,
+                    "quality_classification",
+                    admittedFailure.QualityClassification);
+                WriteNullableString(
+                    writer,
+                    "quality_code",
+                    admittedFailure.QualityCode);
+                writer.WriteEndObject();
+            }
             writer.WriteEndObject();
         }
         return Encoding.UTF8.GetString(stream.ToArray());
     }
 
     private static bool PhaseIsBounded(TrustedLivePhaseReceipt receipt) =>
-        receipt.Kind == "apr-r3-trusted-live-phase-v1" &&
-        receipt.Status is "passed" or "failed" &&
+        TrustedLiveDomain.ReceiptIsAdmitted(receipt) &&
         receipt.ModelCalls is >= 0 and <= 8 &&
         receipt.ToolCalls is >= 0 and <= 16 &&
         receipt.FindingCount is >= 0 and <= 32 &&
         receipt.QualityToolCallCount is >= 0 and <= 16 &&
+        (receipt.InvocationIdentitySha256.Length == 0 ||
+            LiveAgentFreshProcessDomain.IsSha256(
+                receipt.InvocationIdentitySha256)) &&
+        IsOptionalSha256(receipt.LineageSha256) &&
+        IsOptionalSha256(receipt.AcceptedSessionSha256) &&
+        IsOptionalSha256(receipt.AcceptedEnvelopeSha256) &&
+        IsOptionalSha256(receipt.TerminalSha256) &&
         LiveAgentFreshProcessDomain.IsSha256(
             receipt.ExecutionArtifactSha256) &&
         LiveAgentFreshProcessDomain.IsSha256(receipt.BuildPairSha256);
+
+    private static bool IsOptionalSha256(string? value) =>
+        value is null || LiveAgentFreshProcessDomain.IsSha256(value);
 
     private static string RequiredString(JsonElement root, string name) =>
         root.GetProperty(name).GetString() ?? throw new JsonException();

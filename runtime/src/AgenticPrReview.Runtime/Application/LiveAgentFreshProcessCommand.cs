@@ -279,7 +279,9 @@ internal static class LiveAgentFreshProcessCommand
 
         return handoffReady
             ? new LiveAgentFreshProcessCommandResult(0, null)
-            : Failure(exitCode: 1, code);
+            : Failure(
+                exitCode: 1,
+                execution.DiagnosticCode ?? code);
     }
 
     private static bool TryParse(

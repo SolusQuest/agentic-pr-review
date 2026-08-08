@@ -218,12 +218,26 @@ internal sealed class VerifierCommitObserver(
             }
             else if (scenario == VerifierScenario.QualityFailedAfterCommit)
             {
-                R3QualitySubject.TryCreateEvaluatorFailure(
-                    "quality_after_commit_injected",
-                    findingCount: 0,
-                    toolCallCount: 0,
-                    out var subject);
-                Outcome = R3QualityEvaluator.Evaluate(testCase, subject!);
+                var creation = R3QualitySubject.TryCreateCompleted(
+                    new AgentSessionBuildInput(
+                        candidate.Run,
+                        candidate.Outcome,
+                        candidate.TrustedRequest,
+                        candidate.CurrentReviewContextIndex,
+                        candidate.ContinuationCodec,
+                        candidate.Predecessor,
+                        candidate.Transition),
+                    freshInputs);
+                var expectation = (R3QualityMustFindExpectation)
+                    testCase.Expectation;
+                var failedCase = testCase with
+                {
+                    Expectation = expectation with
+                    {
+                        RequiredObservationId = "quality_missing_observation",
+                    },
+                };
+                Outcome = R3QualityEvaluator.Evaluate(failedCase, creation);
             }
             else
             {
