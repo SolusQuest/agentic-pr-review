@@ -99,6 +99,29 @@ public sealed class AgentLoopTests
     }
 
     [Fact]
+    public async Task BackendMissingToolClassificationRemainsBoundedAndDistinct()
+    {
+        var chat = new ThrowingChatClient(_ =>
+            Task.FromException<ProjectChatResponse>(
+                new ProjectChatNormalizationException(
+                    AgentFailureCodes.MissingTool)));
+
+        var outcome = await new AgentLoop(
+            chat,
+            new ScriptedToolExecutor()).RunAsync(
+                Request(),
+                CancellationToken.None);
+
+        AssertFailure(outcome, AgentFailureCodes.MissingTool);
+        Assert.Equal(1, outcome.Diagnostic!.ModelCalls);
+        Assert.Equal(0, outcome.Diagnostic.ToolCalls);
+        Assert.DoesNotContain(
+            "standalone",
+            outcome.Diagnostic.ToString(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task MinimalAdapterPreservesThinkingUsageBodyAndContinuation()
     {
         var continuation = new MinimalChatContinuation(

@@ -1,3 +1,5 @@
+using AgenticPrReview.Runtime.Agent.Core;
+
 namespace AgenticPrReview.Runtime.Agent.Chat;
 
 internal interface IProjectChatClient
@@ -10,9 +12,24 @@ internal interface IProjectChatClient
 internal sealed class ProjectChatNormalizationException : Exception
 {
     internal ProjectChatNormalizationException()
-        : base("The backend response could not be normalized.")
+        : this(AgentFailureCodes.ResponseInvalid)
     {
     }
+
+    internal ProjectChatNormalizationException(string diagnosticCode)
+        : base("The backend response could not be normalized.")
+    {
+        if (diagnosticCode is not (
+            AgentFailureCodes.ResponseInvalid or
+            AgentFailureCodes.MissingTool))
+        {
+            throw new ArgumentOutOfRangeException(nameof(diagnosticCode));
+        }
+
+        DiagnosticCode = diagnosticCode;
+    }
+
+    internal string DiagnosticCode { get; }
 }
 
 internal sealed record ProjectChatRequest(

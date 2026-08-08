@@ -8,6 +8,7 @@ namespace AgenticPrReview.Runtime.Execution.DeepSeek;
 internal enum DeepSeekResponseParseOutcome
 {
     Invalid,
+    MissingTool,
     Success,
 }
 
@@ -34,6 +35,10 @@ internal sealed class DeepSeekResponseParseResult
         DeepSeekResponseParseOutcome.Invalid,
         null);
 
+    internal static DeepSeekResponseParseResult MissingTool() => new(
+        DeepSeekResponseParseOutcome.MissingTool,
+        null);
+
     internal static DeepSeekResponseParseResult Success(
         DeepSeekParsedToolResponse response)
     {
@@ -46,6 +51,7 @@ internal sealed class DeepSeekResponseParseResult
     public override string ToString() => Outcome switch
     {
         DeepSeekResponseParseOutcome.Invalid => "invalid",
+        DeepSeekResponseParseOutcome.MissingTool => "missing_tool",
         DeepSeekResponseParseOutcome.Success => "success",
         _ => nameof(DeepSeekResponseParseResult),
     };
@@ -237,12 +243,9 @@ internal static class DeepSeekResponseParser
                     CommentHandling = JsonCommentHandling.Disallow,
                     MaxDepth = 64,
                 });
-            return TryParse(
-                    document.RootElement,
-                    transportResult.CapturedCount.Value,
-                    out var response)
-                ? DeepSeekResponseParseResult.Success(response!)
-                : DeepSeekResponseParseResult.Invalid();
+            return ParseRoot(
+                document.RootElement,
+                transportResult.CapturedCount.Value);
         }
         catch (Exception exception) when (
             exception is ArgumentException or
@@ -254,12 +257,10 @@ internal static class DeepSeekResponseParser
         }
     }
 
-    private static bool TryParse(
+    private static DeepSeekResponseParseResult ParseRoot(
         JsonElement root,
-        int capturedBytes,
-        out DeepSeekParsedToolResponse? response)
+        int capturedBytes)
     {
-        response = null;
         if (root.ValueKind != JsonValueKind.Object ||
             !HasOnlyProperties(root, RootProperties) ||
             !TryReadExactString(root, "model", DeepSeekRequestWriter.Model) ||
@@ -269,7 +270,7 @@ internal static class DeepSeekResponseParser
             choices.GetArrayLength() != 1 ||
             !TryReadUsage(root, out var usage))
         {
-            return false;
+            return DeepSeekResponseParseResult.Invalid();
         }
 
         var choice = choices[0];
@@ -277,29 +278,33 @@ internal static class DeepSeekResponseParser
             !HasOnlyProperties(choice, ChoiceProperties) ||
             !TryReadNonnegativeInt64(choice, "index", out var index) ||
             index != 0 ||
-            !TryReadExactString(
-                choice,
-                "finish_reason",
-                "tool_calls") ||
             choice.TryGetProperty("logprobs", out var logprobs) &&
             logprobs.ValueKind != JsonValueKind.Null ||
-            !choice.TryGetProperty("message", out var message) ||
-            !TryReadMessage(
+            !choice.TryGetProperty("message", out var message))
+        {
+            return DeepSeekResponseParseResult.Invalid();
+        }
+
+        if (TryReadExactString(choice, "finish_reason", "tool_calls") &&
+            TryReadToolMessage(
                 message,
                 out var content,
                 out var reasoning,
                 out var calls))
         {
-            return false;
+            return DeepSeekResponseParseResult.Success(
+                new DeepSeekParsedToolResponse(
+                    content!,
+                    calls,
+                    reasoning!,
+                    usage!,
+                    capturedBytes));
         }
 
-        response = new DeepSeekParsedToolResponse(
-            content!,
-            calls,
-            reasoning!,
-            usage!,
-            capturedBytes);
-        return true;
+        return TryReadExactString(choice, "finish_reason", "stop") &&
+            IsValidNoToolMessage(message)
+            ? DeepSeekResponseParseResult.MissingTool()
+            : DeepSeekResponseParseResult.Invalid();
     }
 
     private static bool ValidateOptionalRootFields(JsonElement root)
@@ -345,7 +350,7 @@ internal static class DeepSeekResponseParser
         return true;
     }
 
-    private static bool TryReadMessage(
+    private static bool TryReadToolMessage(
         JsonElement message,
         out string? content,
         out string? reasoning,
@@ -358,9 +363,8 @@ internal static class DeepSeekResponseParser
             !HasOnlyProperties(message, MessageProperties) ||
             !TryReadExactString(message, "role", "assistant") ||
             !message.TryGetProperty("content", out var contentElement) ||
-            !TryReadUtf8String(
+            !TryReadNullableUtf8StringAsEmpty(
                 contentElement,
-                0,
                 AgentLimits.ContentBytes,
                 out content) ||
             !message.TryGetProperty(
@@ -393,6 +397,33 @@ internal static class DeepSeekResponseParser
 
         calls = builder.MoveToImmutable();
         return true;
+    }
+
+    private static bool IsValidNoToolMessage(JsonElement message)
+    {
+        if (message.ValueKind != JsonValueKind.Object ||
+            !HasOnlyProperties(message, MessageProperties) ||
+            !TryReadExactString(message, "role", "assistant") ||
+            !message.TryGetProperty("content", out var content) ||
+            !IsNullableUtf8String(content, AgentLimits.ContentBytes))
+        {
+            return false;
+        }
+
+        if (message.TryGetProperty("reasoning_content", out var reasoning) &&
+            !IsNullableUtf8String(reasoning, AgentLimits.ContentBytes))
+        {
+            return false;
+        }
+
+        if (!message.TryGetProperty("tool_calls", out var calls))
+        {
+            return true;
+        }
+
+        return calls.ValueKind == JsonValueKind.Null ||
+            calls.ValueKind == JsonValueKind.Array &&
+            calls.GetArrayLength() == 0;
     }
 
     private static bool TryReadToolCall(
@@ -527,6 +558,26 @@ internal static class DeepSeekResponseParser
             minimumBytes,
             maximumBytes);
     }
+
+    private static bool TryReadNullableUtf8StringAsEmpty(
+        JsonElement element,
+        int maximumBytes,
+        out string? value)
+    {
+        if (element.ValueKind == JsonValueKind.Null)
+        {
+            value = string.Empty;
+            return true;
+        }
+
+        return TryReadUtf8String(element, 0, maximumBytes, out value);
+    }
+
+    private static bool IsNullableUtf8String(
+        JsonElement element,
+        int maximumBytes) =>
+        element.ValueKind == JsonValueKind.Null ||
+        TryReadUtf8String(element, 0, maximumBytes, out _);
 
     private static bool TryReadNonnegativeInt64(
         JsonElement container,
