@@ -521,62 +521,18 @@ internal static class Program
                 product,
                 canonicalLineage);
             stage = TrustedLiveChildStages.PhaseReceiptProjection;
-            var seed = scenario == VerifierScenario.ContinuationSeed;
-            var passed = result.ExitCode == 0 &&
-                product is { HandoffReady: true } &&
-                execution is not null &&
-                observer is { ProofPassed: true } &&
-                acceptedTupleValidated &&
-                (seed || quality is
-                {
-                    Status: "passed",
-                    Classification: "quality",
-                    Code: R3QualityCodes.Passed,
-                });
-            var outcomeCode = passed
-                ? scenario switch
-                {
-                    VerifierScenario.MustFind =>
-                        TrustedLiveSuccessCodes.MustFind,
-                    VerifierScenario.MustNotFind =>
-                        TrustedLiveSuccessCodes.MustNotFind,
-                    VerifierScenario.ContinuationSeed =>
-                        TrustedLiveSuccessCodes.ContinuationSeed,
-                    VerifierScenario.ContinuationRestore =>
-                        TrustedLiveSuccessCodes.ContinuationRestore,
-                    _ => TrustedLiveCodes.Infrastructure,
-                }
-                : TrustedLiveDomain.FailureOutcomeCode(
-                    result.DiagnosticCode,
-                    product?.Code ?? result.DiagnosticCode,
-                    quality);
-            var receipt = new TrustedLivePhaseReceipt(
-                scenario.ToString(),
-                passed ? "passed" : "failed",
-                outcomeCode,
-                product?.Code ?? result.DiagnosticCode ??
-                    TrustedLiveCodes.Infrastructure,
-                product?.Generation,
-                product?.TransitionClass ?? materialized.Transition,
-                product?.ModelCalls ?? 0,
-                product?.ToolCalls ?? 0,
-                product?.HandoffReady == true,
+            var receipt = CreateTrustedPhaseReceipt(
+                scenario,
+                result,
+                product,
+                quality,
+                observer?.ProofPassed == true,
                 acceptedTupleValidated,
-                product?.InvocationIdentitySha256 ?? string.Empty,
-                product?.LineageSha256,
-                product?.SessionSha256,
-                product?.EnvelopeSha256,
-                product?.TerminalSha256,
-                quality?.Status,
-                quality?.Classification,
-                quality?.Code,
-                quality?.FindingCount ?? 0,
-                quality?.ToolCallCount ?? 0,
-                buildPair.ExecutionArtifactSha256,
-                buildPair.BuildPairSha256);
+                materialized.Transition,
+                buildPair);
             stage = TrustedLiveChildStages.PhaseReceiptWrite;
             WriteNew(command.Output, TrustedLiveReceiptCodec.Write(receipt));
-            if (!passed)
+            if (receipt.Status != "passed")
             {
                 Console.Error.WriteLine(VerifierCodes.PhaseFailed);
                 return 1;
@@ -596,6 +552,69 @@ internal static class Program
             Console.Error.WriteLine(VerifierCodes.PhaseFailed);
             return 1;
         }
+    }
+
+    internal static TrustedLivePhaseReceipt CreateTrustedPhaseReceipt(
+        VerifierScenario scenario,
+        LiveAgentFreshProcessCommandResult result,
+        LiveAgentFreshProcessResultDocument? product,
+        R3QualityOutcome? quality,
+        bool proofPassed,
+        bool acceptedTupleValidated,
+        string materializedTransition,
+        VerifierBuildPair buildPair)
+    {
+        var seed = scenario == VerifierScenario.ContinuationSeed;
+        var passed = result.ExitCode == 0 &&
+            product is { HandoffReady: true } &&
+            proofPassed &&
+            acceptedTupleValidated &&
+            (seed || quality is
+            {
+                Status: "passed",
+                Classification: "quality",
+                Code: R3QualityCodes.Passed,
+            });
+        var outcomeCode = passed
+            ? scenario switch
+            {
+                VerifierScenario.MustFind => TrustedLiveSuccessCodes.MustFind,
+                VerifierScenario.MustNotFind =>
+                    TrustedLiveSuccessCodes.MustNotFind,
+                VerifierScenario.ContinuationSeed =>
+                    TrustedLiveSuccessCodes.ContinuationSeed,
+                VerifierScenario.ContinuationRestore =>
+                    TrustedLiveSuccessCodes.ContinuationRestore,
+                _ => TrustedLiveCodes.Infrastructure,
+            }
+            : TrustedLiveDomain.FailureOutcomeCode(
+                result.DiagnosticCode,
+                product?.Code ?? result.DiagnosticCode,
+                quality);
+        return new TrustedLivePhaseReceipt(
+            scenario.ToString(),
+            passed ? "passed" : "failed",
+            outcomeCode,
+            product?.Code ?? result.DiagnosticCode ??
+                TrustedLiveCodes.Infrastructure,
+            product?.Generation,
+            product?.TransitionClass ?? materializedTransition,
+            product?.ModelCalls ?? 0,
+            product?.ToolCalls ?? 0,
+            product?.HandoffReady == true,
+            acceptedTupleValidated,
+            product?.InvocationIdentitySha256 ?? string.Empty,
+            product?.LineageSha256,
+            product?.SessionSha256,
+            product?.EnvelopeSha256,
+            product?.TerminalSha256,
+            quality?.Status,
+            quality?.Classification,
+            quality?.Code,
+            quality?.FindingCount ?? 0,
+            quality?.ToolCallCount ?? 0,
+            buildPair.ExecutionArtifactSha256,
+            buildPair.BuildPairSha256);
     }
 
     private static int Aggregate(

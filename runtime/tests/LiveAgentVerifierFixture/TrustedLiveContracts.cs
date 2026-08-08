@@ -474,15 +474,20 @@ internal static class TrustedLiveDomain
             return receipt.ProductCode == R3LiveAgentCodes.CompositionFailed;
         }
 
+        if (receipt.QualityStatus is "failed" or "not_evaluated" &&
+            receipt.QualityCode is not null and not R3QualityCodes.Passed &&
+            receipt.OutcomeCode == receipt.QualityCode)
+        {
+            return receipt.ProductCode is R3LiveAgentCodes.Completed or
+                LiveAgentFreshProcessCodes.TransportProofFailed;
+        }
+
         if (ProductFailureCodeIsAdmitted(receipt.ProductCode))
         {
             return receipt.OutcomeCode == receipt.ProductCode;
         }
 
-        return receipt.ProductCode == R3LiveAgentCodes.Completed &&
-            receipt.QualityStatus is "failed" or "not_evaluated" &&
-            receipt.QualityCode is not null and not R3QualityCodes.Passed &&
-            receipt.OutcomeCode == receipt.QualityCode;
+        return false;
     }
 
     internal static string? ApplicationStage(string diagnosticCode) =>
@@ -499,6 +504,17 @@ internal static class TrustedLiveDomain
             applicationDiagnostics.Contains(applicationDiagnostic))
         {
             return applicationDiagnostic;
+        }
+        if (StringComparer.Ordinal.Equals(
+                productCode,
+                LiveAgentFreshProcessCodes.TransportProofFailed) &&
+            quality is
+            {
+                Status: "failed" or "not_evaluated",
+                Code: not R3QualityCodes.Passed,
+            })
+        {
+            return quality.Code;
         }
         if (productCode is not null &&
             ProductFailureCodeIsAdmitted(productCode))
