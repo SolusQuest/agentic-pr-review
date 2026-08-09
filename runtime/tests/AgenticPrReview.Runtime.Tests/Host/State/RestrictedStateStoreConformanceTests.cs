@@ -226,15 +226,48 @@ public sealed class RestrictedStateStoreConformanceTests
     }
 
     [Fact]
-    public async Task AmbiguousIndexRollbackAfterReadbackMapsToIo()
+    public async Task AmbiguousIndexRollbackPreservesRecoveryEvidence()
     {
-        var store = new SyntheticRestrictedStateStore(failDelete: true);
-        store.AfterReadBack = (call, _) =>
+        var store = new SyntheticRestrictedStateStore
         {
-            if (call == 2)
-            {
-                store.FailLists = true;
-            }
+            FailDeleteOnCall = 1,
+            FailListOnCall = 2,
+        };
+        var access = RestrictedStateTestData.Access();
+        var keys = new TestKeyResolver();
+        var coordinator = new RestrictedStateOpaqueSnapshotStore(store, keys);
+        var candidate = RestrictedStateTestData.Candidate(access, keys);
+        var replacement = new RestrictedStateSnapshot([candidate], null);
+
+        var result = await coordinator.CompareExchangeAsync(
+            access,
+            RestrictedStateSnapshotVersion.Absent,
+            replacement,
+            CancellationToken.None);
+
+        Assert.False(result.Committed);
+        Assert.Equal(RestrictedStateStoreFailure.Io, result.Failure);
+        Assert.Equal(2, store.ObjectCount);
+        var recovered = await coordinator.ReadAsync(
+            access,
+            CancellationToken.None);
+        Assert.True(recovered.Succeeded);
+        Assert.Null(recovered.Snapshot!.Staging);
+        var recoveredCandidate = Assert.Single(recovered.Snapshot.Accepted);
+        Assert.Equal(candidate.Binding, recoveredCandidate.Binding);
+        Assert.Equal(candidate.SessionSha256, recoveredCandidate.SessionSha256);
+        Assert.Equal(candidate.EnvelopeSha256, recoveredCandidate.EnvelopeSha256);
+        Assert.Equal(candidate.ObjectIdentity, recoveredCandidate.ObjectIdentity);
+        Assert.Equal(candidate.Envelope, recoveredCandidate.Envelope);
+    }
+
+    [Fact]
+    public async Task AmbiguousIndexUploadReadBackPreservesRecoveryEvidence()
+    {
+        var store = new SyntheticRestrictedStateStore
+        {
+            FailDeleteOnCall = 1,
+            FailReadBackOnCall = 2,
         };
         var access = RestrictedStateTestData.Access();
         var keys = new TestKeyResolver();
@@ -250,6 +283,14 @@ public sealed class RestrictedStateStoreConformanceTests
         Assert.False(result.Committed);
         Assert.Equal(RestrictedStateStoreFailure.Io, result.Failure);
         Assert.Equal(2, store.ObjectCount);
+        var recovered = await coordinator.ReadAsync(
+            access,
+            CancellationToken.None);
+        Assert.True(recovered.Succeeded);
+        var recoveredCandidate = Assert.Single(
+            recovered.Snapshot!.Accepted);
+        Assert.Equal(candidate.ObjectIdentity, recoveredCandidate.ObjectIdentity);
+        Assert.Equal(candidate.Envelope, recoveredCandidate.Envelope);
     }
 
     [Fact]
@@ -390,11 +431,61 @@ public sealed class RestrictedStateStoreConformanceTests
 
     private static async Task WithStoreAsync(
         bool synthetic,
-        Func<IRestrictedStateStore, Task> action)
+        Func<RestrictedStateStoreConformanceDriver, Task> action)
     {
         if (synthetic)
         {
-            await action(new SyntheticRestrictedStateStore());
+            var store = new SyntheticRestrictedStateStore();
+            await action(new RestrictedStateStoreConformanceDriver(
+                store,
+                async expected =>
+                {
+                    store.DuplicateListResults = true;
+                    try
+                    {
+                        return await store.ListExactAsync(
+                            new OpaqueStoreListRequest(
+                                expected.Reference.Name,
+                                OpaqueStoreLimits.MaximumObjects),
+                            CancellationToken.None);
+                    }
+                    finally
+                    {
+                        store.DuplicateListResults = false;
+                    }
+                },
+                expected =>
+                {
+                    store.MissNextReadBack = true;
+                    return store.ReadBackExactAsync(
+                        new OpaqueStoreReadBackRequest(expected),
+                        CancellationToken.None);
+                },
+                async expected =>
+                {
+                    var previous = store.CurrentUnixSeconds;
+                    store.CurrentUnixSeconds = expected.ExpiresAtUnixSeconds;
+                    try
+                    {
+                        return await store.DownloadAsync(
+                            new OpaqueStoreDownloadRequest(
+                                expected,
+                                checked((int)expected.Size)),
+                            CancellationToken.None);
+                    }
+                    finally
+                    {
+                        store.CurrentUnixSeconds = previous;
+                    }
+                },
+                () => store.ReportNextUploadMayCommitted = true,
+                expected =>
+                {
+                    store.MakeNextDeleteOutcomeUnknown = true;
+                    return store.DeleteExactAsync(
+                        new OpaqueStoreDeleteRequest(expected),
+                        CancellationToken.None);
+                }));
             return;
         }
 
@@ -404,9 +495,117 @@ public sealed class RestrictedStateStoreConformanceTests
         Directory.CreateDirectory(root);
         try
         {
-            await action(new LocalRestrictedStateStore(
+            var timeProvider = new AdjustableTimeProvider();
+            var failNextSync = false;
+            var makeNextDeleteUnknown = false;
+            var store = new LocalRestrictedStateStore(
                 root,
-                timeProvider: new FrozenTimeProvider()));
+                deleteTemporaryTestHook: path =>
+                {
+                    if (makeNextDeleteUnknown &&
+                        path.EndsWith(".delete", StringComparison.Ordinal))
+                    {
+                        makeNextDeleteUnknown = false;
+                        Directory.CreateDirectory(
+                            OriginalPathFromTombstone(path));
+                        return false;
+                    }
+
+                    File.Delete(path);
+                    return true;
+                },
+                syncDirectoryTestHook: _ =>
+                {
+                    if (!failNextSync)
+                    {
+                        return true;
+                    }
+
+                    failNextSync = false;
+                    return false;
+                },
+                timeProvider: timeProvider);
+            await action(new RestrictedStateStoreConformanceDriver(
+                store,
+                async expected =>
+                {
+                    var source = FindLocalRecord(root, expected);
+                    var fileName = Path.GetFileName(source);
+                    const string extension = ".aprobject";
+                    var prefix = fileName[..^(
+                        64 + extension.Length)];
+                    var duplicate = Path.Join(
+                        root,
+                        string.Concat(
+                            prefix,
+                            new string('f', 64),
+                            extension));
+                    File.Copy(source, duplicate, overwrite: false);
+                    try
+                    {
+                        return await store.ListExactAsync(
+                            new OpaqueStoreListRequest(
+                                expected.Reference.Name,
+                                OpaqueStoreLimits.MaximumObjects),
+                            CancellationToken.None);
+                    }
+                    finally
+                    {
+                        File.Delete(duplicate);
+                    }
+                },
+                async expected =>
+                {
+                    var source = FindLocalRecord(root, expected);
+                    var hidden = string.Concat(source, ".missing");
+                    File.Move(source, hidden, overwrite: false);
+                    try
+                    {
+                        return await store.ReadBackExactAsync(
+                            new OpaqueStoreReadBackRequest(expected),
+                            CancellationToken.None);
+                    }
+                    finally
+                    {
+                        File.Move(hidden, source, overwrite: false);
+                    }
+                },
+                async expected =>
+                {
+                    var previous = timeProvider.UnixSeconds;
+                    timeProvider.UnixSeconds =
+                        expected.ExpiresAtUnixSeconds;
+                    try
+                    {
+                        return await store.DownloadAsync(
+                            new OpaqueStoreDownloadRequest(
+                                expected,
+                                checked((int)expected.Size)),
+                            CancellationToken.None);
+                    }
+                    finally
+                    {
+                        timeProvider.UnixSeconds = previous;
+                    }
+                },
+                () => failNextSync = true,
+                async expected =>
+                {
+                    makeNextDeleteUnknown = true;
+                    var result = await store.DeleteExactAsync(
+                        new OpaqueStoreDeleteRequest(expected),
+                        CancellationToken.None);
+                    var tombstone = Assert.Single(
+                        Directory.GetFiles(root, "*.delete"));
+                    var original = OriginalPathFromTombstone(tombstone);
+                    if (Directory.Exists(original))
+                    {
+                        Directory.Delete(original);
+                    }
+
+                    File.Move(tombstone, original, overwrite: false);
+                    return result;
+                }));
         }
         finally
         {
@@ -414,10 +613,30 @@ public sealed class RestrictedStateStoreConformanceTests
         }
     }
 
-    private sealed class FrozenTimeProvider : TimeProvider
+    private static string FindLocalRecord(
+        string root,
+        OpaqueStoreObjectMetadata expected) =>
+        Directory.GetFiles(root, "*.aprobject").Single(path =>
+            LocalOpaqueStoreRecordCodec.TryRead(
+                File.ReadAllBytes(path),
+                out var metadata,
+                out _) &&
+            metadata == expected);
+
+    private static string OriginalPathFromTombstone(string tombstonePath)
     {
+        var fileName = Path.GetFileName(tombstonePath);
+        const int suffixLength = 1 + 32 + 7;
+        var originalName = fileName[1..^suffixLength];
+        return Path.Join(Path.GetDirectoryName(tombstonePath), originalName);
+    }
+
+    private sealed class AdjustableTimeProvider : TimeProvider
+    {
+        internal long UnixSeconds { get; set; } = RestrictedStateTestData.Now;
+
         public override DateTimeOffset GetUtcNow() =>
-            DateTimeOffset.FromUnixTimeSeconds(RestrictedStateTestData.Now);
+            DateTimeOffset.FromUnixTimeSeconds(UnixSeconds);
     }
 
     private sealed class SyntheticRestrictedStateStore
@@ -431,6 +650,8 @@ public sealed class RestrictedStateStoreConformanceTests
         private readonly Dictionary<string, (OpaqueStoreObjectMetadata, byte[])>
             objects = new(StringComparer.Ordinal);
         private int deleteCalls;
+        private int listCalls;
+        private int readBackAttempts;
 
         internal SyntheticRestrictedStateStore(
             Func<
@@ -449,9 +670,22 @@ public sealed class RestrictedStateStoreConformanceTests
 
         internal int FailDeleteOnCall { get; init; }
 
+        internal int FailListOnCall { get; init; }
+
+        internal int FailReadBackOnCall { get; init; }
+
         internal bool FailLists { get; set; }
 
-        internal bool DuplicateListResults { get; init; }
+        internal bool DuplicateListResults { get; set; }
+
+        internal bool MissNextReadBack { get; set; }
+
+        internal bool ReportNextUploadMayCommitted { get; set; }
+
+        internal bool MakeNextDeleteOutcomeUnknown { get; set; }
+
+        internal long CurrentUnixSeconds { get; set; } =
+            RestrictedStateTestData.Now;
 
         internal Action<int, OpaqueStoreObjectMetadata>? AfterReadBack
         {
@@ -464,7 +698,8 @@ public sealed class RestrictedStateStoreConformanceTests
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (FailLists)
+            listCalls++;
+            if (FailLists || listCalls == FailListOnCall)
             {
                 return Task.FromResult(OpaqueStoreListResult.Fail(
                     OpaqueStoreFailure.Io));
@@ -526,6 +761,18 @@ public sealed class RestrictedStateStoreConformanceTests
                     OpaqueStoreFailure.Conflict));
             }
 
+            if (value.Metadata.ExpiresAtUnixSeconds <= CurrentUnixSeconds)
+            {
+                return Task.FromResult(OpaqueStoreDownloadResult.Fail(
+                    OpaqueStoreFailure.Expired));
+            }
+
+            if (value.Bytes.Length > request.MaximumBytes)
+            {
+                return Task.FromResult(OpaqueStoreDownloadResult.Fail(
+                    OpaqueStoreFailure.DigestMismatch));
+            }
+
             return Task.FromResult(new OpaqueStoreDownloadResult(
                 OpaqueStoreFailure.None,
                 value.Metadata,
@@ -563,6 +810,15 @@ public sealed class RestrictedStateStoreConformanceTests
             metadata = mutateUploadMetadata?.Invoke(metadata, request) ??
                 metadata;
             objects.Add(objectId.Value, (metadata, bytes));
+            if (ReportNextUploadMayCommitted)
+            {
+                ReportNextUploadMayCommitted = false;
+                return Task.FromResult(OpaqueStoreUploadResult.Fail(
+                    OpaqueStoreFailure.Io,
+                    OpaqueStoreMutationState.Committed,
+                    metadata));
+            }
+
             return Task.FromResult(new OpaqueStoreUploadResult(
                 OpaqueStoreFailure.None,
                 OpaqueStoreMutationState.Committed,
@@ -574,6 +830,20 @@ public sealed class RestrictedStateStoreConformanceTests
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            readBackAttempts++;
+            if (readBackAttempts == FailReadBackOnCall)
+            {
+                return Task.FromResult(OpaqueStoreReadBackResult.Fail(
+                    OpaqueStoreFailure.NotFound));
+            }
+
+            if (MissNextReadBack)
+            {
+                MissNextReadBack = false;
+                return Task.FromResult(OpaqueStoreReadBackResult.Fail(
+                    OpaqueStoreFailure.NotFound));
+            }
+
             var result =
                 TryGet(request.Expected.Reference, out var value) &&
                 value.Metadata == request.Expected
@@ -608,6 +878,14 @@ public sealed class RestrictedStateStoreConformanceTests
                     OpaqueStoreFailure.Conflict));
             }
 
+            if (MakeNextDeleteOutcomeUnknown)
+            {
+                MakeNextDeleteOutcomeUnknown = false;
+                return Task.FromResult(OpaqueStoreDeleteResult.Fail(
+                    OpaqueStoreFailure.OutcomeUnknown,
+                    OpaqueStoreMutationState.OutcomeUnknown));
+            }
+
             deleteCalls++;
             if (failDelete || deleteCalls == FailDeleteOnCall)
             {
@@ -639,13 +917,48 @@ public sealed class RestrictedStateStoreConformanceTests
     }
 }
 
+internal sealed class RestrictedStateStoreConformanceDriver(
+    IRestrictedStateStore store,
+    Func<OpaqueStoreObjectMetadata, Task<OpaqueStoreListResult>>
+        observeDuplicateList,
+    Func<OpaqueStoreObjectMetadata, Task<OpaqueStoreReadBackResult>>
+        observeMissingReadBack,
+    Func<OpaqueStoreObjectMetadata, Task<OpaqueStoreDownloadResult>>
+        observeExpiredDownload,
+    Action makeNextUploadMayCommitted,
+    Func<OpaqueStoreObjectMetadata, Task<OpaqueStoreDeleteResult>>
+        observeDeleteOutcomeUnknown)
+{
+    internal IRestrictedStateStore Store => store;
+
+    internal Task<OpaqueStoreListResult> ObserveDuplicateListAsync(
+        OpaqueStoreObjectMetadata expected) =>
+        observeDuplicateList(expected);
+
+    internal Task<OpaqueStoreReadBackResult> ObserveMissingReadBackAsync(
+        OpaqueStoreObjectMetadata expected) =>
+        observeMissingReadBack(expected);
+
+    internal Task<OpaqueStoreDownloadResult> ObserveExpiredDownloadAsync(
+        OpaqueStoreObjectMetadata expected) =>
+        observeExpiredDownload(expected);
+
+    internal void MakeNextUploadMayCommitted() =>
+        makeNextUploadMayCommitted();
+
+    internal Task<OpaqueStoreDeleteResult> ObserveDeleteOutcomeUnknownAsync(
+        OpaqueStoreObjectMetadata expected) =>
+        observeDeleteOutcomeUnknown(expected);
+}
+
 internal static class RestrictedStateStoreConformanceHarness
 {
     internal static async Task VerifyAsync(
-        Func<Func<IRestrictedStateStore, Task>, Task> withStore)
+        Func<Func<RestrictedStateStoreConformanceDriver, Task>, Task> withStore)
     {
-        await withStore(async store =>
+        await withStore(async driver =>
         {
+            var store = driver.Store;
             var bytes = new byte[] { 0, 7, 0xff, 0, 9 };
             var name = new OpaqueStoreName("conformance");
             var upload = Request(name, "operation-1", bytes);
@@ -665,6 +978,9 @@ internal static class RestrictedStateStoreConformanceHarness
             Assert.Equal(
                 uploaded.Metadata.Reference,
                 Assert.Single(listed.Objects));
+            var duplicate = await driver.ObserveDuplicateListAsync(
+                uploaded.Metadata);
+            Assert.False(duplicate.Succeeded);
 
             var metadata = await store.ReadMetadataAsync(
                 new OpaqueStoreMetadataRequest(uploaded.Metadata.Reference),
@@ -680,6 +996,19 @@ internal static class RestrictedStateStoreConformanceHarness
             Assert.Equal(
                 upload.EncryptedObjectDigest,
                 download.Metadata!.EncryptedObjectDigest);
+            var expired = await driver.ObserveExpiredDownloadAsync(
+                uploaded.Metadata);
+            Assert.Equal(OpaqueStoreFailure.Expired, expired.Failure);
+            Assert.False(expired.Succeeded);
+
+            var delayed = await driver.ObserveMissingReadBackAsync(
+                uploaded.Metadata);
+            var persistedReadBack = await store.ReadBackExactAsync(
+                new OpaqueStoreReadBackRequest(uploaded.Metadata),
+                CancellationToken.None);
+            Assert.Equal(OpaqueStoreFailure.NotFound, delayed.Failure);
+            Assert.True(persistedReadBack.Succeeded);
+            Assert.Equal(uploaded.Metadata, persistedReadBack.Metadata);
 
             var wrongAuthority = uploaded.Metadata with
             {
@@ -691,11 +1020,26 @@ internal static class RestrictedStateStoreConformanceHarness
             var wrongReadBack = await store.ReadBackExactAsync(
                 new OpaqueStoreReadBackRequest(wrongAuthority),
                 CancellationToken.None);
+            var wrongRun = await store.ReadBackExactAsync(
+                new OpaqueStoreReadBackRequest(uploaded.Metadata with
+                {
+                    ProducingRun = uploaded.Metadata.ProducingRun with
+                    {
+                        Identity = "other-run",
+                    },
+                }),
+                CancellationToken.None);
             var wrongArchive = await store.ReadBackExactAsync(
                 new OpaqueStoreReadBackRequest(uploaded.Metadata with
                 {
                     ArchiveDigest = new OpaqueStoreArchiveDigest(
                         new string('0', 64)),
+                }),
+                CancellationToken.None);
+            var missingArchive = await store.ReadBackExactAsync(
+                new OpaqueStoreReadBackRequest(uploaded.Metadata with
+                {
+                    ArchiveDigest = new OpaqueStoreArchiveDigest(string.Empty),
                 }),
                 CancellationToken.None);
             var wrongDownload = await store.DownloadAsync(
@@ -708,9 +1052,21 @@ internal static class RestrictedStateStoreConformanceHarness
                     },
                     bytes.Length),
                 CancellationToken.None);
+            var missingEncryptedDigest = await store.DownloadAsync(
+                new OpaqueStoreDownloadRequest(
+                    uploaded.Metadata with
+                    {
+                        EncryptedObjectDigest =
+                            new OpaqueStoreEncryptedObjectDigest(string.Empty),
+                    },
+                    bytes.Length),
+                CancellationToken.None);
             Assert.False(wrongReadBack.Succeeded);
+            Assert.False(wrongRun.Succeeded);
             Assert.False(wrongArchive.Succeeded);
+            Assert.False(missingArchive.Succeeded);
             Assert.False(wrongDownload.Succeeded);
+            Assert.False(missingEncryptedDigest.Succeeded);
 
             var second = await store.UploadImmutableAsync(
                 upload with
@@ -727,6 +1083,62 @@ internal static class RestrictedStateStoreConformanceHarness
                 CancellationToken.None);
             Assert.Equal(OpaqueStoreFailure.Incomplete, incomplete.Failure);
             Assert.False(incomplete.Succeeded);
+
+            var maximumBytes = new byte[OpaqueStoreLimits.MaximumObjectBytes];
+            maximumBytes[0] = 1;
+            maximumBytes[^1] = 2;
+            var maximum = await store.UploadImmutableAsync(
+                Request(
+                    new OpaqueStoreName("conformance-bound"),
+                    "maximum",
+                    maximumBytes),
+                CancellationToken.None);
+            var oversizedBytes = new byte[
+                OpaqueStoreLimits.MaximumObjectBytes + 1];
+            var oversized = await store.UploadImmutableAsync(
+                Request(
+                    new OpaqueStoreName("conformance-bound"),
+                    "oversized",
+                    oversizedBytes),
+                CancellationToken.None);
+            Assert.True(maximum.Succeeded);
+            Assert.Equal(
+                OpaqueStoreLimits.MaximumObjectBytes,
+                maximum.Metadata!.Size);
+            Assert.Equal(OpaqueStoreFailure.Invalid, oversized.Failure);
+
+            var mayCommitRequest = Request(
+                name,
+                "may-commit",
+                [3, 1, 4, 1, 5]);
+            driver.MakeNextUploadMayCommitted();
+            var mayCommit = await store.UploadImmutableAsync(
+                mayCommitRequest,
+                CancellationToken.None);
+            Assert.False(mayCommit.Succeeded);
+            Assert.Equal(OpaqueStoreFailure.Io, mayCommit.Failure);
+            Assert.Equal(
+                OpaqueStoreMutationState.Committed,
+                mayCommit.MutationState);
+            Assert.NotNull(mayCommit.Metadata);
+            var mayCommitReadBack = await store.ReadBackExactAsync(
+                new OpaqueStoreReadBackRequest(mayCommit.Metadata!),
+                CancellationToken.None);
+            Assert.True(mayCommitReadBack.Succeeded);
+
+            var unknownDelete = await driver
+                .ObserveDeleteOutcomeUnknownAsync(mayCommit.Metadata!);
+            Assert.False(unknownDelete.Succeeded);
+            Assert.Equal(
+                OpaqueStoreFailure.OutcomeUnknown,
+                unknownDelete.Failure);
+            Assert.Equal(
+                OpaqueStoreMutationState.OutcomeUnknown,
+                unknownDelete.MutationState);
+            var retainedAfterUnknownDelete = await store.ReadBackExactAsync(
+                new OpaqueStoreReadBackRequest(mayCommit.Metadata!),
+                CancellationToken.None);
+            Assert.True(retainedAfterUnknownDelete.Succeeded);
 
             var invalidDigest = await store.UploadImmutableAsync(
                 upload with
@@ -775,10 +1187,20 @@ internal static class RestrictedStateStoreConformanceHarness
                     new OpaqueStoreDeleteRequest(uploaded.Metadata),
                     cancelled.Token));
 
-            var deleted = await store.DeleteExactAsync(
-                new OpaqueStoreDeleteRequest(uploaded.Metadata),
-                CancellationToken.None);
-            Assert.True(deleted.Succeeded);
+            foreach (var expected in new[]
+            {
+                uploaded.Metadata,
+                second.Metadata,
+                maximum.Metadata,
+                mayCommit.Metadata,
+            })
+            {
+                var deleted = await store.DeleteExactAsync(
+                    new OpaqueStoreDeleteRequest(expected!),
+                    CancellationToken.None);
+                Assert.True(deleted.Succeeded);
+            }
+
             var missing = await store.ReadBackExactAsync(
                 new OpaqueStoreReadBackRequest(uploaded.Metadata),
                 CancellationToken.None);

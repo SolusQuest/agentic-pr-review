@@ -211,10 +211,28 @@ internal class RestrictedStateOpaqueSnapshotStore
                         .ConfigureAwait(false);
                     if (!upload.Succeeded)
                     {
+                        if (upload.MayHaveCommitted)
+                        {
+                            if (upload.Metadata is null)
+                            {
+                                return WriteFailure(
+                                    RestrictedStateStoreFailure.Io);
+                            }
+
+                            var rollback = await store.DeleteExactAsync(
+                                    new OpaqueStoreDeleteRequest(
+                                        upload.Metadata),
+                                    CancellationToken.None)
+                                .ConfigureAwait(false);
+                            if (!rollback.Succeeded)
+                            {
+                                return WriteFailure(
+                                    RestrictedStateStoreFailure.Io);
+                            }
+                        }
+
                         var cleanup = await CleanupExactAsync(
-                                upload.Metadata is null
-                                    ? newlyUploaded
-                                    : newlyUploaded.Append(upload.Metadata),
+                                newlyUploaded,
                                 CancellationToken.None)
                             .ConfigureAwait(false);
                         return WriteFailure(
@@ -240,19 +258,21 @@ internal class RestrictedStateOpaqueSnapshotStore
                                     upload.Metadata!),
                                 CancellationToken.None)
                             .ConfigureAwait(false);
-                        var cleanup = await CleanupExactAsync(
-                                newlyUploaded.Where(item =>
-                                    item != upload.Metadata),
-                                CancellationToken.None)
-                            .ConfigureAwait(false);
                         var failure = observed.Succeeded
                             ? RestrictedStateStoreFailure.Conflict
                             : observed.Failure;
                         if (!rollback.Succeeded)
                         {
-                            failure = RestrictedStateStoreFailure.Io;
+                            return WriteFailure(
+                                RestrictedStateStoreFailure.Io);
                         }
-                        else if (cleanup != RestrictedStateStoreFailure.None)
+
+                        var cleanup = await CleanupExactAsync(
+                                newlyUploaded.Where(item =>
+                                    item != upload.Metadata),
+                                CancellationToken.None)
+                            .ConfigureAwait(false);
+                        if (cleanup != RestrictedStateStoreFailure.None)
                         {
                             failure = RestrictedStateStoreFailure.Cleanup;
                         }
@@ -635,7 +655,10 @@ internal class RestrictedStateOpaqueSnapshotStore
             upload.MutationState == OpaqueStoreMutationState.NotCommitted)
         {
             return RestrictedStateObjectUpload.Fail(
-                MapFailure(upload.Failure));
+                MapFailure(upload.Failure),
+                upload.Metadata,
+                upload.MutationState !=
+                    OpaqueStoreMutationState.NotCommitted);
         }
 
         if (!OpaqueStoreValidation.IsValid(upload.Metadata) ||
@@ -646,7 +669,8 @@ internal class RestrictedStateOpaqueSnapshotStore
         {
             return RestrictedStateObjectUpload.Fail(
                 RestrictedStateStoreFailure.Invalid,
-                upload.Metadata);
+                upload.Metadata,
+                MayHaveCommitted: true);
         }
 
         var readBack = await store.ReadBackExactAsync(
@@ -659,7 +683,8 @@ internal class RestrictedStateOpaqueSnapshotStore
                 readBack.Succeeded
                     ? RestrictedStateStoreFailure.Invalid
                     : MapFailure(readBack.Failure),
-                upload.Metadata);
+                upload.Metadata,
+                MayHaveCommitted: true);
         }
 
         return RestrictedStateObjectUpload.Success(upload.Metadata);
@@ -1178,19 +1203,24 @@ internal sealed record RestrictedStateSnapshotReadCore(
 
 internal sealed record RestrictedStateObjectUpload(
     RestrictedStateStoreFailure Failure,
-    OpaqueStoreObjectMetadata? Metadata)
+    OpaqueStoreObjectMetadata? Metadata,
+    bool MayHaveCommitted)
 {
     internal bool Succeeded =>
         Failure == RestrictedStateStoreFailure.None && Metadata is not null;
 
     internal static RestrictedStateObjectUpload Success(
         OpaqueStoreObjectMetadata metadata) =>
-        new(RestrictedStateStoreFailure.None, metadata);
+        new(
+            RestrictedStateStoreFailure.None,
+            metadata,
+            MayHaveCommitted: true);
 
     internal static RestrictedStateObjectUpload Fail(
         RestrictedStateStoreFailure failure,
-        OpaqueStoreObjectMetadata? metadata = null) =>
-        new(failure, metadata);
+        OpaqueStoreObjectMetadata? metadata = null,
+        bool MayHaveCommitted = false) =>
+        new(failure, metadata, MayHaveCommitted);
 }
 
 internal sealed record RestrictedStateIndexedCandidateResult(
