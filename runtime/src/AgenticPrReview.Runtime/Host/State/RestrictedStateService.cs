@@ -812,7 +812,8 @@ internal sealed class RestrictedStateService
             access,
             read.Version!,
             cancellationToken).ConfigureAwait(false);
-        if (!write.Committed)
+        if (!write.Committed ||
+            write.Failure != RestrictedStateStoreFailure.None)
         {
             return Failure(MapWriteFailure(write.Failure));
         }
@@ -867,7 +868,10 @@ internal sealed class RestrictedStateService
         }
 
         RestrictedStateStoreWrite write;
-        if (ReferenceEquals(current, read.Snapshot.Accepted[0]))
+        var deletingWholeScope = ReferenceEquals(
+            current,
+            read.Snapshot.Accepted[0]);
+        if (deletingWholeScope)
         {
             write = await DeleteAsync(
                 access,
@@ -886,7 +890,9 @@ internal sealed class RestrictedStateService
                 cancellationToken).ConfigureAwait(false);
         }
 
-        if (!write.Committed)
+        if (!write.Committed ||
+            (deletingWholeScope &&
+                write.Failure != RestrictedStateStoreFailure.None))
         {
             return Failure(MapWriteFailure(write.Failure));
         }

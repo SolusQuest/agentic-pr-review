@@ -60,7 +60,9 @@ public sealed class LocalRestrictedStateStoreTests
             var deleted = await fresh.DeleteExactAsync(
                 new OpaqueStoreDeleteRequest(uploaded.Metadata),
                 CancellationToken.None);
-            Assert.True(deleted.Succeeded);
+            Assert.True(
+                deleted.Succeeded,
+                $"{deleted.Failure}/{deleted.MutationState}");
             var missing = await fresh.ReadMetadataAsync(
                 new OpaqueStoreMetadataRequest(uploaded.Metadata.Reference),
                 CancellationToken.None);
@@ -477,6 +479,184 @@ public sealed class LocalRestrictedStateStoreTests
         });
     }
 
+    [Fact]
+    public async Task OpaqueObjectIdsNeverBecomeFilesystemPathSyntax()
+    {
+        await WithParentRootAsync(async (parent, root) =>
+        {
+            var name = new OpaqueStoreName("path-identities");
+            var bytes = new byte[] { 7 };
+            var maliciousId = new OpaqueStoreObjectId(
+                "slot/../../outside-object");
+            var reference = new OpaqueStoreObjectReference(name, maliciousId);
+            var metadata = new OpaqueStoreObjectMetadata(
+                reference,
+                new OpaqueStoreProducingRun("run", 1),
+                new OpaqueStoreArchiveDigest(OpaqueStoreHash.Sha256(bytes)),
+                new OpaqueStoreEncryptedObjectDigest(
+                    OpaqueStoreHash.Sha256(bytes)),
+                RestrictedStateTestData.Expires,
+                bytes.Length);
+            Assert.True(LocalOpaqueStoreRecordCodec.TryWrite(
+                metadata,
+                bytes,
+                out var record));
+            var prefix = string.Concat(
+                "opaque-",
+                OpaqueStoreHash.Sha256(
+                    System.Text.Encoding.UTF8.GetBytes(name.Value)),
+                "-");
+            Directory.CreateDirectory(Path.Join(root, prefix + "slot"));
+            var outside = Path.Join(parent, "outside-object.aprobject");
+            await File.WriteAllBytesAsync(outside, record);
+            var crafted = Path.Join(root, prefix + "crafted.aprobject");
+            await File.WriteAllBytesAsync(crafted, record);
+            var store = Store(root, RestrictedStateTestData.Now);
+
+            foreach (var objectId in new[]
+            {
+                "../outside",
+                "slash/value",
+                @"backslash\value",
+                @"C:\drive",
+                @"\\server\share",
+                "scheme://value",
+                "nul\0value",
+                maliciousId.Value,
+            })
+            {
+                var item = metadata with
+                {
+                    Reference = reference with
+                    {
+                        ObjectId = new OpaqueStoreObjectId(objectId),
+                    },
+                };
+                var read = await store.ReadMetadataAsync(
+                    new OpaqueStoreMetadataRequest(item.Reference),
+                    CancellationToken.None);
+                var deleted = await store.DeleteExactAsync(
+                    new OpaqueStoreDeleteRequest(item),
+                    CancellationToken.None);
+                Assert.Equal(OpaqueStoreFailure.NotFound, read.Failure);
+                Assert.Equal(OpaqueStoreFailure.NotFound, deleted.Failure);
+            }
+
+            var listed = await store.ListExactAsync(
+                new OpaqueStoreListRequest(name, 8),
+                CancellationToken.None);
+            Assert.Equal(OpaqueStoreFailure.Invalid, listed.Failure);
+            Assert.Equal(record, await File.ReadAllBytesAsync(outside));
+        });
+    }
+
+    [Fact]
+    public async Task ExactDeleteRejectsObjectSubstitutedAfterValidation()
+    {
+        await WithRootAsync(async root =>
+        {
+            var initial = Store(root, RestrictedStateTestData.Now);
+            var expected = await initial.UploadImmutableAsync(
+                Upload("substitution", [1], RestrictedStateTestData.Expires),
+                CancellationToken.None);
+            var replacement = await initial.UploadImmutableAsync(
+                Upload("substitution", [2], RestrictedStateTestData.Expires),
+                CancellationToken.None);
+            Assert.True(expected.Succeeded);
+            Assert.True(replacement.Succeeded);
+            var expectedPath = FindRecord(root, expected.Metadata!);
+            var replacementPath = FindRecord(root, replacement.Metadata!);
+            var displacedPath = Path.Join(root, "displaced.aprobject");
+            var deleteStore = new LocalRestrictedStateStore(
+                root,
+                afterFinalRootProofTestHook: () =>
+                {
+                    File.Move(expectedPath, displacedPath);
+                    File.Move(replacementPath, expectedPath);
+                },
+                timeProvider: new FrozenTimeProvider(RestrictedStateTestData.Now));
+
+            var deleted = await deleteStore.DeleteExactAsync(
+                new OpaqueStoreDeleteRequest(expected.Metadata!),
+                CancellationToken.None);
+
+            Assert.Equal(OpaqueStoreFailure.Conflict, deleted.Failure);
+            Assert.Equal(
+                OpaqueStoreMutationState.NotCommitted,
+                deleted.MutationState);
+            var payloads = Directory.GetFiles(root, "*.aprobject")
+                .Select(path =>
+                {
+                    Assert.True(LocalOpaqueStoreRecordCodec.TryRead(
+                        File.ReadAllBytes(path),
+                        out _,
+                        out var payload));
+                    return Assert.Single(payload.ToArray());
+                })
+                .Order()
+                .ToArray();
+            Assert.Equal(new byte[] { 1, 2 }, payloads);
+        });
+    }
+
+    [Fact]
+    public async Task PartialPhysicalDeletionCannotCommitAggregateDelete()
+    {
+        await WithRootAsync(async root =>
+        {
+            var access = RestrictedStateTestData.Access();
+            var keys = new TestKeyResolver();
+            var candidate = RestrictedStateTestData.Candidate(access, keys);
+            var initial = new RestrictedStateOpaqueSnapshotStore(
+                Store(root, RestrictedStateTestData.Now),
+                keys);
+            var written = await initial.CompareExchangeAsync(
+                access,
+                RestrictedStateSnapshotVersion.Absent,
+                new RestrictedStateSnapshot([candidate], null),
+                CancellationToken.None);
+            Assert.True(written.Committed);
+            var deletes = 0;
+            var failing = new LocalRestrictedStateStore(
+                root,
+                deleteTemporaryTestHook: path =>
+                {
+                    if (!path.EndsWith(
+                            ".delete",
+                            StringComparison.Ordinal))
+                    {
+                        File.Delete(path);
+                        return true;
+                    }
+
+                    deletes++;
+                    if (deletes == 2)
+                    {
+                        return false;
+                    }
+
+                    File.Delete(path);
+                    return true;
+                },
+                timeProvider: new FrozenTimeProvider(RestrictedStateTestData.Now));
+            var coordinator = new RestrictedStateOpaqueSnapshotStore(
+                failing,
+                keys);
+            var raw = await coordinator.ReadRawVersionAsync(
+                access,
+                CancellationToken.None);
+
+            var result = await coordinator.CompareDeleteRawAsync(
+                access,
+                raw.Version!,
+                CancellationToken.None);
+
+            Assert.False(result.Committed);
+            Assert.Equal(RestrictedStateStoreFailure.Cleanup, result.Failure);
+            Assert.Single(Directory.GetFiles(root, "*.aprobject"));
+        });
+    }
+
     private static LocalRestrictedStateStore Store(string root, long now) =>
         new(root, timeProvider: new FrozenTimeProvider(now));
 
@@ -548,6 +728,34 @@ public sealed class LocalRestrictedStateStoreTests
         Directory.Move(root, displaced);
         Directory.CreateSymbolicLink(root, outside);
     }
+
+    private static async Task WithParentRootAsync(
+        Func<string, string, Task> action)
+    {
+        var parent = Path.Join(
+            Path.GetTempPath(),
+            $"apr-state-parent-{Guid.NewGuid():N}");
+        var root = Path.Join(parent, "root");
+        Directory.CreateDirectory(root);
+        try
+        {
+            await action(parent, root);
+        }
+        finally
+        {
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    private static string FindRecord(
+        string root,
+        OpaqueStoreObjectMetadata expected) =>
+        Directory.GetFiles(root, "*.aprobject").Single(path =>
+            LocalOpaqueStoreRecordCodec.TryRead(
+                File.ReadAllBytes(path),
+                out var metadata,
+                out _) &&
+            metadata == expected);
 
     private sealed class FrozenTimeProvider(long unixSeconds) : TimeProvider
     {

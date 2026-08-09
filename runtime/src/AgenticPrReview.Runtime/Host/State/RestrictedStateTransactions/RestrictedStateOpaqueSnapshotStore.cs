@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Security.Cryptography;
@@ -224,7 +226,7 @@ internal class RestrictedStateOpaqueSnapshotStore
                     newlyUploaded.Add(upload.Metadata!);
                     var observed = await ReadCoreAsync(
                             access,
-                            cancellationToken)
+                            CancellationToken.None)
                         .ConfigureAwait(false);
                     if (!observed.Succeeded ||
                         observed.Index is null ||
@@ -246,8 +248,11 @@ internal class RestrictedStateOpaqueSnapshotStore
                         var failure = observed.Succeeded
                             ? RestrictedStateStoreFailure.Conflict
                             : observed.Failure;
-                        if (!rollback.Succeeded ||
-                            cleanup != RestrictedStateStoreFailure.None)
+                        if (!rollback.Succeeded)
+                        {
+                            failure = RestrictedStateStoreFailure.Io;
+                        }
+                        else if (cleanup != RestrictedStateStoreFailure.None)
                         {
                             failure = RestrictedStateStoreFailure.Cleanup;
                         }
@@ -318,7 +323,10 @@ internal class RestrictedStateOpaqueSnapshotStore
 
             var raw = await ReadRawCoreAsync(access, cancellationToken)
                 .ConfigureAwait(false);
-            return await DeleteRawCoreAsync(raw, cancellationToken)
+            return await DeleteRawCoreAsync(
+                    access,
+                    raw,
+                    cancellationToken)
                 .ConfigureAwait(false);
         }
         finally
@@ -371,7 +379,10 @@ internal class RestrictedStateOpaqueSnapshotStore
                 return WriteFailure(RestrictedStateStoreFailure.Conflict);
             }
 
-            return await DeleteRawCoreAsync(raw, cancellationToken)
+            return await DeleteRawCoreAsync(
+                    access,
+                    raw,
+                    cancellationToken)
                 .ConfigureAwait(false);
         }
         finally
@@ -832,37 +843,20 @@ internal class RestrictedStateOpaqueSnapshotStore
                 []);
         }
 
-        var canonical = string.Join(
-            '\n',
-            metadata
-                .OrderBy(
-                    item => item.Reference.Name.Value,
-                    StringComparer.Ordinal)
-                .ThenBy(
-                    item => item.Reference.ObjectId.Value,
-                    StringComparer.Ordinal)
-                .Select(item => string.Join(
-                    ':',
-                    item.Reference.Name.Value,
-                    item.Reference.ObjectId.Value,
-                    item.ProducingRun.Identity,
-                    item.ProducingRun.Attempt,
-                    item.ArchiveDigest.Sha256,
-                    item.EncryptedObjectDigest.Sha256,
-                    item.ExpiresAtUnixSeconds,
-                    item.Size)));
+        var canonical = CanonicalRawMetadata(metadata);
         return new RestrictedStateRawReadCore(
             RestrictedStateStoreFailure.None,
             new RestrictedStateRawVersion(
                 AgentCanonical.HashDomain(
                     "apr.state-r3-opaque-raw.s1",
-                    Encoding.UTF8.GetBytes(canonical)),
+                    canonical),
                 metadata.Sum(item => item.Size),
                 Exists: true),
             metadata.ToImmutable());
     }
 
     private async Task<RestrictedStateStoreWrite> DeleteRawCoreAsync(
+        AuthorizedStateAccess access,
         RestrictedStateRawReadCore raw,
         CancellationToken cancellationToken)
     {
@@ -880,6 +874,7 @@ internal class RestrictedStateOpaqueSnapshotStore
         }
 
         var firstMutation = true;
+        var failure = RestrictedStateStoreFailure.None;
         foreach (var metadata in raw.Metadata
             .OrderBy(item => item.Reference.Name.Value, StringComparer.Ordinal)
             .ThenBy(
@@ -895,19 +890,88 @@ internal class RestrictedStateOpaqueSnapshotStore
                 .ConfigureAwait(false);
             if (!deleted.Succeeded)
             {
-                return new RestrictedStateStoreWrite(
-                    MapFailure(deleted.Failure),
-                    null,
-                    Committed: !firstMutation);
+                failure = MapFailure(deleted.Failure);
+                break;
             }
 
             firstMutation = false;
         }
 
-        return new RestrictedStateStoreWrite(
-            RestrictedStateStoreFailure.None,
-            RestrictedStateSnapshotVersion.Absent,
-            Committed: true);
+        var observed = await ReadRawCoreAsync(
+                access,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+        if (observed.Succeeded && !observed.Version!.Exists)
+        {
+            return new RestrictedStateStoreWrite(
+                RestrictedStateStoreFailure.None,
+                RestrictedStateSnapshotVersion.Absent,
+                Committed: true);
+        }
+
+        return WriteFailure(
+            failure != RestrictedStateStoreFailure.None
+                ? failure
+                : observed.Succeeded
+                    ? RestrictedStateStoreFailure.Cleanup
+                    : observed.Failure);
+    }
+
+    private static byte[] CanonicalRawMetadata(
+        IEnumerable<OpaqueStoreObjectMetadata> metadata)
+    {
+        var ordered = metadata
+            .OrderBy(
+                item => item.Reference.Name.Value,
+                StringComparer.Ordinal)
+            .ThenBy(
+                item => item.Reference.ObjectId.Value,
+                StringComparer.Ordinal)
+            .ToArray();
+        var writer = new ArrayBufferWriter<byte>();
+        WriteRawInt32(writer, ordered.Length);
+        foreach (var item in ordered)
+        {
+            WriteRawString(writer, item.Reference.Name.Value);
+            WriteRawString(writer, item.Reference.ObjectId.Value);
+            WriteRawString(writer, item.ProducingRun.Identity);
+            WriteRawInt64(writer, item.ProducingRun.Attempt);
+            WriteRawString(writer, item.ArchiveDigest.Sha256);
+            WriteRawString(writer, item.EncryptedObjectDigest.Sha256);
+            WriteRawInt64(writer, item.ExpiresAtUnixSeconds);
+            WriteRawInt64(writer, item.Size);
+        }
+
+        return writer.WrittenSpan.ToArray();
+    }
+
+    private static void WriteRawString(
+        ArrayBufferWriter<byte> writer,
+        string value)
+    {
+        var maximumLength = Encoding.UTF8.GetMaxByteCount(value.Length);
+        var span = writer.GetSpan(sizeof(int) + maximumLength);
+        var length = Encoding.UTF8.GetBytes(value, span[sizeof(int)..]);
+        BinaryPrimitives.WriteInt32LittleEndian(span, length);
+        writer.Advance(sizeof(int) + length);
+    }
+
+    private static void WriteRawInt32(
+        ArrayBufferWriter<byte> writer,
+        int value)
+    {
+        var span = writer.GetSpan(sizeof(int));
+        BinaryPrimitives.WriteInt32LittleEndian(span, value);
+        writer.Advance(sizeof(int));
+    }
+
+    private static void WriteRawInt64(
+        ArrayBufferWriter<byte> writer,
+        long value)
+    {
+        var span = writer.GetSpan(sizeof(long));
+        BinaryPrimitives.WriteInt64LittleEndian(span, value);
+        writer.Advance(sizeof(long));
     }
 
     private async Task<RestrictedStateStoreFailure> CleanupExactAsync(

@@ -101,7 +101,12 @@ internal sealed class LocalRestrictedStateStore
                         .ConfigureAwait(false);
                     if (read.Failure != OpaqueStoreFailure.None ||
                         read.Metadata is null ||
-                        read.Metadata.Reference.Name != request.Name)
+                        read.Metadata.Reference.Name != request.Name ||
+                        !StringComparer.Ordinal.Equals(
+                            Path.GetFileName(path),
+                            ObjectFileName(
+                                operation,
+                                read.Metadata.Reference.ObjectId)))
                     {
                         return OpaqueStoreListResult.Fail(
                             read.Failure == OpaqueStoreFailure.None
@@ -495,6 +500,25 @@ internal sealed class LocalRestrictedStateStore
                         OpaqueStoreFailure.Invalid);
                 }
 
+                var revalidated = await ReadRecordAsync(
+                        operation,
+                        path,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (revalidated.Failure != OpaqueStoreFailure.None ||
+                    revalidated.Metadata != request.Expected ||
+                    revalidated.Identity != read.Identity ||
+                    revalidated.RecordLength != read.RecordLength ||
+                    !PayloadMatchesMetadata(
+                        revalidated.Payload.Span,
+                        request.Expected))
+                {
+                    return OpaqueStoreDeleteResult.Fail(
+                        revalidated.Failure == OpaqueStoreFailure.None
+                            ? OpaqueStoreFailure.Conflict
+                            : revalidated.Failure);
+                }
+
                 var tombstonePath = Path.Join(
                     operation.OperationRoot,
                     string.Concat(
@@ -508,6 +532,23 @@ internal sealed class LocalRestrictedStateStore
                 {
                     File.Move(path, tombstonePath, overwrite: false);
                     moved = true;
+                    if (!MovedPathStillNamesIdentity(
+                            tombstonePath,
+                            read.Identity,
+                            read.RecordLength))
+                    {
+                        if (TryRestoreMovedFile(tombstonePath, path))
+                        {
+                            moved = false;
+                            return OpaqueStoreDeleteResult.Fail(
+                                OpaqueStoreFailure.Conflict);
+                        }
+
+                        return OpaqueStoreDeleteResult.Fail(
+                            OpaqueStoreFailure.OutcomeUnknown,
+                            OpaqueStoreMutationState.OutcomeUnknown);
+                    }
+
                     if (!OperationIsCurrent(operation))
                     {
                         if (TryRestoreMovedFile(tombstonePath, path))
@@ -705,7 +746,9 @@ internal sealed class LocalRestrictedStateStore
                 return new LocalOpaqueStoreRead(
                     OpaqueStoreFailure.None,
                     metadata,
-                    payload);
+                    payload,
+                    identity,
+                    length);
             }
             catch (OperationCanceledException)
             {
@@ -800,12 +843,20 @@ internal sealed class LocalRestrictedStateStore
     private static string ResolveObjectPath(
         LocalOpaqueStoreOperation operation,
         OpaqueStoreObjectId objectId) =>
-        Path.Join(
-            operation.OperationRoot,
-            string.Concat(
-                operation.FilePrefix,
-                objectId.Value,
-                ".aprobject"));
+        Path.Join(operation.OperationRoot, ObjectFileName(operation, objectId));
+
+    private static string ObjectFileName(
+        LocalOpaqueStoreOperation operation,
+        OpaqueStoreObjectId objectId)
+    {
+        var identity = Encoding.UTF8.GetBytes(string.Concat(
+            "apr.local-opaque-object-id.s1\0",
+            objectId.Value));
+        return string.Concat(
+            operation.FilePrefix,
+            OpaqueStoreHash.Sha256(identity),
+            ".aprobject");
+    }
 
     private static bool OperationIsCurrent(
         LocalOpaqueStoreOperation operation) =>
@@ -919,6 +970,44 @@ internal sealed class LocalRestrictedStateStore
         }
     }
 
+    private static bool MovedPathStillNamesIdentity(
+        string path,
+        RestrictedStateFileIdentity expectedIdentity,
+        long expectedLength)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return PathStillNamesIdentity(
+                path,
+                expectedIdentity,
+                expectedLength);
+        }
+
+        try
+        {
+            using var handle = File.OpenHandle(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete,
+                FileOptions.RandomAccess);
+            var attributes = File.GetAttributes(handle);
+            return (attributes &
+                    (FileAttributes.Directory |
+                        FileAttributes.ReparsePoint)) == 0 &&
+                NativeRestrictedStateFiles.TryGetIdentity(
+                    handle,
+                    expectDirectory: false,
+                    out var identity) &&
+                identity == expectedIdentity &&
+                RandomAccess.GetLength(handle) == expectedLength;
+        }
+        catch (Exception exception) when (IsFileFailure(exception))
+        {
+            return false;
+        }
+    }
+
     private bool SyncDirectory(LocalOpaqueStoreOperation operation)
     {
         if (syncDirectoryTestHook is not null)
@@ -1009,10 +1098,17 @@ internal sealed class LocalOpaqueStoreOperation(
 internal sealed record LocalOpaqueStoreRead(
     OpaqueStoreFailure Failure,
     OpaqueStoreObjectMetadata? Metadata,
-    ReadOnlyMemory<byte> Payload)
+    ReadOnlyMemory<byte> Payload,
+    RestrictedStateFileIdentity Identity,
+    long RecordLength)
 {
     internal static LocalOpaqueStoreRead Fail(OpaqueStoreFailure failure) =>
-        new(failure, null, ReadOnlyMemory<byte>.Empty);
+        new(
+            failure,
+            null,
+            ReadOnlyMemory<byte>.Empty,
+            default,
+            0);
 }
 
 internal static class LocalOpaqueStoreRecordCodec
