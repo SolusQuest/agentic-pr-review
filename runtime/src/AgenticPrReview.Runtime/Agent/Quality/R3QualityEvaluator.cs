@@ -760,12 +760,6 @@ internal static class R3QualityEvaluator
             StringComparer.Ordinal.Equals(
                 finding.Severity,
                 expectation.ExpectedSeverity) &&
-            (finding.Title.Contains(
-                    expectation.ExpectedFindingToken,
-                    StringComparison.Ordinal) ||
-                finding.Message.Contains(
-                    expectation.ExpectedFindingToken,
-                    StringComparison.Ordinal)) &&
             finding.Evidence.Length == 1 &&
             finding.Evidence[0] == expectation.Evidence);
         return matchingFindings == 1

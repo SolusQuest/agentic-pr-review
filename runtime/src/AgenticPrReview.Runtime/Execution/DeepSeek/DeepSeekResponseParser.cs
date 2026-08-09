@@ -78,7 +78,7 @@ internal sealed class DeepSeekParsedToolResponse
                 AgentLimits.ContentBytes) ||
             !AgentValueDomains.IsUtf8(
                 reasoning,
-                1,
+                0,
                 AgentLimits.ContentBytes) ||
             capturedBytes is < 0 or >
                 DeepSeekTransportPolicy.SuccessBodyMaxBytes)
@@ -373,7 +373,7 @@ internal static class DeepSeekResponseParser
                 out var reasoningElement) ||
             !TryReadUtf8String(
                 reasoningElement,
-                1,
+                0,
                 AgentLimits.ContentBytes,
                 out reasoning) ||
             !message.TryGetProperty("tool_calls", out var toolCalls) ||

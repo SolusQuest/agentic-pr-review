@@ -75,11 +75,31 @@ public sealed class R3QualityCorpusTests
             mustFind.TargetMarker,
             evidenceLine.Text,
             StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            mustFind.Evidence.Path,
+            corpus.Cases[0].InitialContext,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "report the defect",
+            corpus.Cases[0].InitialContext,
+            StringComparison.OrdinalIgnoreCase);
         var mustNot = Assert.IsType<R3QualityMustNotFindExpectation>(
             corpus.Cases[1].Expectation);
         Assert.Equal(
             "d2f7244ec7994a88c9949616c8f07506ee3740d51802c89464acb36e5b799877",
             mustNot.RequiredObservationId);
+        Assert.DoesNotContain(
+            mustNot.Path,
+            corpus.Cases[1].InitialContext,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "no findings",
+            corpus.Cases[1].InitialContext,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            "no actionable defect",
+            corpus.Cases[1].InitialContext,
+            StringComparison.OrdinalIgnoreCase);
         var continuation = corpus.Cases[2];
         Assert.Equal(
             "674dda34d9ed6b5bf7594a1dc5e15af9931cf0ed1e9c44ff17be88093af4f3ed",
@@ -240,6 +260,20 @@ public sealed class R3QualityCorpusTests
                 text => text.Replace(
                     "eb616af246c95c3c2c9e4d0ef278c50979d36ae91d07dcbfdb02df21149a3a7c",
                     new string('0', 64),
+                    StringComparison.Ordinal)
+            },
+            {
+                "must-find expectation leak",
+                text => text.Replace(
+                    "Review the synthetic change.",
+                    "Review the synthetic change. src/CacheGate.cs",
+                    StringComparison.Ordinal)
+            },
+            {
+                "must-not-find expectation leak",
+                text => text.Replace(
+                    "Review the synthetic readiness change.",
+                    "Review the synthetic readiness change. src/ReadyGate.cs",
                     StringComparison.Ordinal)
             },
             {

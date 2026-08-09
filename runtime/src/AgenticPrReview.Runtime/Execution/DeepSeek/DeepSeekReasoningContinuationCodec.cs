@@ -10,7 +10,7 @@ internal sealed class DeepSeekReasoningContinuationCodec :
     IAgentContinuationStructurePolicy
 {
     internal const string Id = "deepseek-reasoning-content";
-    internal const string Discriminator = "deepseek-v4-flash-thinking-v1";
+    internal const string Discriminator = "deepseek-v4-flash-thinking-v2";
     internal const string EncodingName = "utf8";
     internal const string FramingName =
         "deepseek.reasoning_content.utf8.v1";
@@ -36,7 +36,7 @@ internal sealed class DeepSeekReasoningContinuationCodec :
         if (value is null ||
             !AgentValueDomains.IsUtf8(
                 value.Readable,
-                1,
+                0,
                 AgentLimits.ContinuationItemBytes) ||
             value.Opaque is not { Length: 0 } ||
             !StringComparer.Ordinal.Equals(value.Framing, FramingName))
@@ -64,7 +64,7 @@ internal sealed class DeepSeekReasoningContinuationCodec :
     {
         value = null;
         if (!StringComparer.Ordinal.Equals(encoding, EncodingName) ||
-            payload.Length is < 1 or > AgentLimits.ContinuationItemBytes)
+            payload.Length > AgentLimits.ContinuationItemBytes)
         {
             return false;
         }
@@ -74,7 +74,7 @@ internal sealed class DeepSeekReasoningContinuationCodec :
             var readable = StrictUtf8.GetString(payload);
             if (!AgentValueDomains.IsUtf8(
                     readable,
-                    1,
+                    0,
                     AgentLimits.ContinuationItemBytes) ||
                 !StrictUtf8.GetBytes(readable).AsSpan().SequenceEqual(payload))
             {
@@ -129,7 +129,7 @@ internal sealed class DeepSeekReasoningContinuationCodec :
                     FramingName) ||
                 !AgentValueDomains.IsUtf8(
                     item.Value.Readable,
-                    1,
+                    0,
                     AgentLimits.ContinuationItemBytes))
             {
                 return false;

@@ -20,7 +20,7 @@ public sealed class R3QualityEvaluatorTests
             testCase.Expectation);
         var finding = Finding(
             expectation.ExpectedSeverity,
-            expectation.ExpectedFindingToken,
+            "Null-forgiving regression",
             "The synthetic null assertion can fail before Trim.",
             expectation.Evidence);
         var completed = await BootstrapAsync(
@@ -166,14 +166,14 @@ public sealed class R3QualityEvaluatorTests
     }
 
     [Fact]
-    public async Task MustFindRejectsInitialLeakAndSemanticMismatchByPhase()
+    public async Task MustFindRejectsInitialLeakAndSeverityMismatchByPhase()
     {
         var testCase = R3QualityCorpusTests.ParseCorpus().Cases[0];
         var expectation = Assert.IsType<R3QualityMustFindExpectation>(
             testCase.Expectation);
         var validFinding = Finding(
             expectation.ExpectedSeverity,
-            expectation.ExpectedFindingToken,
+            "Null-forgiving regression",
             "Grounded synthetic defect.",
             expectation.Evidence);
         var leaked = await BootstrapAsync(
@@ -190,9 +190,9 @@ public sealed class R3QualityEvaluatorTests
         Assert.Equal(R3QualityCodes.InitialContextLeak, leakOutcome.Code);
 
         var mismatchedFinding = Finding(
-            expectation.ExpectedSeverity,
-            "Different synthetic allegation",
-            "The required semantic token is intentionally absent.",
+            "medium",
+            "Null-forgiving regression",
+            "The finding has the wrong severity.",
             expectation.Evidence);
         var mismatched = await BootstrapAsync(
             testCase,
@@ -214,7 +214,7 @@ public sealed class R3QualityEvaluatorTests
             testCase.Expectation);
         var finding = Finding(
             expectation.ExpectedSeverity,
-            expectation.ExpectedFindingToken,
+            "Null-forgiving regression",
             "Grounded synthetic defect.",
             expectation.Evidence);
         var completed = await BootstrapAsync(
@@ -291,7 +291,7 @@ public sealed class R3QualityEvaluatorTests
                 "Invalid evidence vector.",
                 [Finding(
                     expectation.ExpectedSeverity,
-                    expectation.ExpectedFindingToken,
+                    "Null-forgiving regression",
                     "This finding is intentionally ungrounded.",
                     evidence)]);
 

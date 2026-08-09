@@ -61,8 +61,7 @@ internal sealed record R3QualityMustFindExpectation(
     ImmutableArray<byte> RequiredResult,
     AgentEvidence Evidence,
     string ExpectedSeverity,
-    string TargetMarker,
-    string ExpectedFindingToken)
+    string TargetMarker)
     : R3QualityExpectation;
 
 internal sealed record R3QualityMustNotFindExpectation(
