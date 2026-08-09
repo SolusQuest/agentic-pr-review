@@ -93,27 +93,16 @@ The near-term roadmap does not include:
 
 The current implementation on `main` includes:
 
-- TypeScript Action host and deterministic publisher;
-- Claude Code CLI live provider path;
-- deterministic and ledger-oriented C# runtime paths;
-- project-owned DeepSeek live provider adapter;
-- structured findings, sticky comments, optional inline comments, and duplicate suppression;
-- durable state artifacts, selection, acceptance, and stale-writer safeguards;
-- canonical ledger and prefix foundations;
-- provider metadata and usage normalization;
-- framework-dependent and Native AOT CI;
-- extensive cross-language contract fixtures.
+- no public Action metadata or generated wrapper on the development head;
+- no Claude Code CLI, legacy TypeScript coordinator, or superseded single-request C# product route;
+- one project-minimal C# chat seam and bounded multi-turn Agent with six read-only repository tools;
+- validated tool arguments/results, canonical SESSION history, grounded structured findings, and must-find/must-not-find quality evaluation;
+- the project-owned DeepSeek thinking adapter with exact provider continuation and a protected no-publication official-endpoint proof;
+- authenticated encrypted local STATE with same-head/verified-ahead admission and two-fresh-process continuation;
+- framework-dependent and Linux x64 Native AOT product validation;
+- retained TypeScript invocation, state, publisher, ledger, prefix, protocol, and provider-metadata families only as named R4 replacement evidence.
 
-The current DeepSeek path is a bounded single provider request that returns a structured review. The durable ledger records review context and outcome, not a full provider/tool conversation. The following core product behaviors are still missing:
-
-- provider-requested tools;
-- a multi-turn agent loop;
-- validated tool arguments;
-- bounded tool execution;
-- tool results returned to the provider;
-- durable agent history containing bounded tool results;
-- structured evidence binding from findings to observed content;
-- agent-quality must-find and must-not-find evaluation.
+R3 is complete at `736508728acc6b2064b75f2e1da81b9342aac70b`. Production GitHub/Actions authorization, exact GitHub snapshot acquisition, downstream artifact-backed encrypted state, C# publication, the thin wrapper, and downstream release delivery remain absent and belong to R4 and R7 as allocated below.
 
 ## Historical Milestones
 
@@ -129,26 +118,17 @@ Their completed code and documents are evidence and migration inputs. They do no
 
 The old M3-M6 sequencing document is retained as historical implementation context and is explicitly superseded for new sequencing by this roadmap.
 
-### GitHub Milestone Transition
+### Historical GitHub Milestone Transition
 
-As of 2026-07-25:
+The following is a completed transition record, not current execution instructions. The 2026-07-25 rebaseline was activated by PR #76 and completed through issue #75. Live metadata was rechecked on 2026-08-09:
 
-- M0, M1, M2, and M3 are closed with no open issues;
-- M4 remains open with eight closed issues and one open issue, #54;
-- issue #54 and draft PR #74 implement a TypeScript-only cost-evaluation harness bound to the pre-agent M4 ledger, prefix, provider-metadata, and graduation model.
+- PR #74 is closed without merge;
+- issue #54 is closed as `not planned`;
+- M4 is closed with no open issues;
+- R1, R2, and R3 are closed with no open issues;
+- R4 is open with refinement parent #138 and no implementation leaves before the R4 docs gate merges.
 
-This table is a point-in-time planning snapshot and must be rechecked against live GitHub state before any mutation.
-
-Creating the design issue does not activate the reset. The reset becomes active only when a maintainer merges the coordinated documentation PR that references, but does not close, that issue. The maintainer then:
-
-1. closes PR #74 without merging, with an explicit superseded-by-roadmap comment;
-2. closes issue #54 as `not planned`, because its existing design is superseded rather than migrated;
-3. closes M4 as superseded/incomplete after it has no open issue;
-4. creates only the near-term R1 and R2 GitHub milestones and their parent refinement issues;
-5. closes the design issue after those transition actions are complete;
-6. keeps R3-R7 roadmap-only until the preceding phase produces enough evidence to refine their issue and milestone boundaries.
-
-R6 may reuse ideas or tests from #54 or PR #74 only after real resumed Agent traffic exists and a new issue proves they fit the actual thinking, tool, session, telemetry, and cost model. Existing implementation effort is not a reason to merge an obsolete ordering or contract dependency.
+The earlier plan to create R1/R2 immediately and defer R3-R7 refinement was executed through R3. It no longer instructs agents to create, close, or defer those completed milestones. R6 may reuse ideas or tests from #54 or PR #74 only after real resumed Agent traffic exists and a new issue proves they fit the actual thinking, tool, session, telemetry, and cost model. Existing implementation effort is not a reason to merge an obsolete ordering or contract dependency.
 
 ## New Critical Path
 
@@ -188,6 +168,8 @@ Exit criteria:
 
 Goal: remove the legacy live runtime from the development head and stop preserving migration scaffolding as public architecture.
 
+Implementation status: complete. The R1 milestone is closed with no open issues; the development head has no Claude execution path, mixed runtime selector, or public Action surface.
+
 Entry criteria:
 
 - R0 has activated the reset;
@@ -206,7 +188,7 @@ In scope:
 - public outputs that expose internal candidate, marker, selector, session, ledger, or transition machinery without a real consumer;
 - documentation and tests for removed behavior.
 
-Target public direction:
+Delivered public direction:
 
 - one project-owned runtime;
 - provider selection describes the actual provider;
@@ -229,7 +211,7 @@ Exit criteria:
 
 Goal: answer the hard runtime questions with the smallest executable agent slice.
 
-Implementation status: the focused R2 children have supplied the selected project-minimal chat seam, explicit loop/tools, current SESSION, restricted encrypted STATE, and issue #88's two-fresh-process framework and Linux x64 Native AOT product proof. The obsolete two-candidate comparison fixture and test-only MEAI dependency were removed after the replacement passed. R3 now owns the live provider path and quality evidence; R4 owns production GitHub/Actions Host, state transport, publisher, and wrapper migration.
+Implementation status: complete. The focused R2 children supplied the selected project-minimal chat seam, explicit loop/tools, current SESSION, restricted encrypted STATE, and issue #88's two-fresh-process framework and Linux x64 Native AOT product proof. The obsolete two-candidate comparison fixture and test-only MEAI dependency were removed after the replacement passed. R3 subsequently completed the live provider path and quality evidence; R4 owns production GitHub/Actions Host, state transport, publisher, and wrapper migration.
 
 Entry criteria:
 
@@ -301,7 +283,7 @@ Exit criteria:
 
 Goal: prove a real provider can use bounded repository tools and continue a completed review session in a fresh executable invocation.
 
-Implementation status: issue [#109](https://github.com/SolusQuest/agentic-pr-review/issues/109) supplies the deterministic concrete Host boundary, and issues [#111](https://github.com/SolusQuest/agentic-pr-review/issues/111) and [#112](https://github.com/SolusQuest/agentic-pr-review/issues/112) establish the real Agent transport plus the full six-tool loop, exact continuation, encrypted local STATE, quality corpus, negative/canary matrices, and two fresh runtime processes in framework-dependent and Linux x64 Native AOT modes. Issue [#113](https://github.com/SolusQuest/agentic-pr-review/issues/113) retires the superseded single-request C# path behind an exact route/composition oracle and checked R4 handoff. Issue [#114](https://github.com/SolusQuest/agentic-pr-review/issues/114) adds the sole protected no-publish DeepSeek proof route for an exact merged default-branch artifact; it does not restore a public Action or production Host. Production GitHub/Actions Host work, public Action restoration, and release payloads remain owned by later focused issues.
+Implementation status: complete. Issue [#109](https://github.com/SolusQuest/agentic-pr-review/issues/109) supplied the deterministic concrete Host boundary, and issues [#111](https://github.com/SolusQuest/agentic-pr-review/issues/111) and [#112](https://github.com/SolusQuest/agentic-pr-review/issues/112) established the real Agent transport plus the full six-tool loop, exact continuation, encrypted local STATE, quality corpus, negative/canary matrices, and two fresh runtime processes in framework-dependent and Linux x64 Native AOT modes. Issue [#113](https://github.com/SolusQuest/agentic-pr-review/issues/113) retired the superseded single-request C# path behind an exact route/composition oracle and checked R4 handoff. Issue [#114](https://github.com/SolusQuest/agentic-pr-review/issues/114) added the sole protected no-publish DeepSeek proof route for an exact merged default-branch artifact; it did not restore a public Action or production Host. Production GitHub/Actions Host work and public Action restoration belong to R4; release payloads remain R7.
 
 Initial live tools, consisting of the R2 subset plus the three R3 additions:
 
@@ -352,24 +334,27 @@ Exit criteria:
 
 Goal: converge on one C# business implementation and remove cross-language duplication.
 
+Planning status: milestone [R4](https://github.com/SolusQuest/agentic-pr-review/milestone/10) and refinement parent [#138](https://github.com/SolusQuest/agentic-pr-review/issues/138) own the design gate. The prospective decision-complete contract is [`r4-actionhost-wrapper-plan.md`](../20_architecture/r4-actionhost-wrapper-plan.md). No implementation issue is published until that docs contract is merged and remotely activated.
+
 In scope:
 
-- C# GitHub event and input interpretation;
+- C# trusted `workflow_run`/`workflow_dispatch` event and input interpretation;
 - C# GitHub REST reads and writes;
 - PR, diff, and tracked-file snapshots;
-- C# state selection, provenance, acceptance, and stale-writer protection;
+- C# state selection, provenance, immutable candidate/acceptance records, conflict-safe lineage advancement, and stale-writer protection;
 - one C# executable with explicit Host, Agent, tool, provider, state, and publisher modules;
 - separate GitHub and provider HTTP clients, handlers, endpoints, and credentials;
 - candidate result and state validation;
 - C# fingerprinting, duplicate suppression, line mapping, sticky/inline publisher;
 - thin Node.js wrapper;
 - a small direct-input allowlist and one workflow-authorized configuration resolved at an immutable Host-selected trusted commit SHA;
-- a small stable-output allowlist;
+- no stable public outputs until a named consumer requires one;
 - official JavaScript artifact bridge where retained;
 - deletion of duplicate TypeScript business modules, review-domain cross-language protocols, duplicate validators, and parity-only fixtures;
 - one minimal lockstep launcher/Host contract for cancellation, bounded outcome/output handoff, exit status, and executable build identity;
 - a two-run trusted-workflow proof using an explicitly prepared trusted payload path;
-- a production continuation transport satisfying the authenticated, scope-bound restricted storage class and fork/untrusted denial.
+- a downstream-repository-owned encrypted GitHub Actions artifact adapter satisfying the scope-bound state class while allowing public metadata/ciphertext visibility;
+- one asynchronous internal opaque-snapshot state-store seam and conformance suite, with Supabase and any public extension protocol deferred.
 
 Exit criteria:
 
@@ -379,11 +364,11 @@ Exit criteria:
 - every public input and output has a named external consumer and no migration-only selector is exposed;
 - Agent inputs contain no GitHub or Actions credential-bearing object;
 - provider request capture and secret-canary tests pass;
-- restricted state cannot become repository-visible plaintext, and the selected production transport prevents fork/untrusted workflows from enumerating, restoring, overwriting, decrypting, deleting, or publishing it;
+- restricted state cannot become repository-visible plaintext; public artifact metadata and ciphertext visibility are allowed, while fork/untrusted workflows cannot obtain the key, decrypt or admit SESSION, mutate or accept trusted lineage, invoke the provider through the trusted route, or publish;
 - authorization rejection occurs before state decryption, provider construction, provider network activity, or publication;
 - an integrated Action canary using GitHub/Actions-shaped Host credentials proves those values are absent from provider requests, model-visible content, tools, state, diagnostics, logs, outputs, summaries, annotations, and child environments;
 - invalid Agent output cannot reach GitHub writes;
-- stale head and concurrent writer cases fail closed;
+- both supported credential-bearing routes use the same verified authoritative repository/PR workflow concurrency group, while exact-head barriers, immutable receipts, unique-successor selection, and explicit conflict still fail closed on stale or externally introduced records;
 - sticky, inline, duplicate, artifact, cancellation, and partial-failure behavior have end-to-end coverage;
 - two independent GitHub Actions workflow runs prove bootstrap/select, continuation, state acceptance, stale-writer protection, and deterministic publication;
 - TypeScript canonicalization, prefix, provider metadata, state-v2, state-acceptance, and runtime business modules are removed or have a named final deletion issue;
@@ -464,10 +449,10 @@ Exit criteria:
 ## Issue And Milestone Policy
 
 - Do not mechanically reuse old M5/M6 placeholders.
-- Create the R1 legacy-removal and R2 Agent-loop parent refinement issues only after the coordinated R0 docs PR activates the reset.
+- The historical R1/R2 parent-creation gate is complete; do not replay it as current work.
 - Do not create an R0 GitHub milestone.
 - The two parent issues may split into multiple focused implementation issues or PRs after live-tree refinement; do not assume one parent equals one PR.
-- Do not create detailed R3-R7 implementation or deletion issues until the preceding phase provides their entry evidence.
+- Do not create R4 implementation or deletion issues until the R4 docs contract merges; apply the same evidence-before-refinement rule to R5-R7.
 - At each milestone entry, re-inventory live references and refine that milestone's migration and retirement issues before implementation.
 - Each issue must identify its target owner: wrapper, C# Host, Agent, tools, provider adapter, state, publisher, migration deletion, or validation.
 - Transitional code requires a named removal gate.

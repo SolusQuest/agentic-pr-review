@@ -13,10 +13,7 @@ provide a stable public API.
 
 ## Development Head Status
 
-The current development head intentionally has no supported public GitHub
-Action. R1 retired the mixed legacy Action metadata, bundled JavaScript
-entrypoint, and Action-dependent workflows before the replacement runtime is
-ready.
+The current development head intentionally has no supported public GitHub Action. R1 retired the mixed legacy Action metadata, bundled JavaScript entrypoint, and Action-dependent workflows before the replacement runtime is ready. R3 is complete; the prospective R4 contract is documented in [`r4-actionhost-wrapper-plan.md`](docs/20_architecture/r4-actionhost-wrapper-plan.md), but its Action metadata and wrapper do not exist yet.
 
 Do not reference `main` or another moving development-head commit as an Action.
 There is no compatibility wrapper or supported bootstrap/reset path during this
@@ -67,10 +64,9 @@ roadmap phase explicitly introduces it.
 - R1 removes the mixed public Action and the Claude Code CLI coordinator.
 - R2 proves the minimal C# Agent loop, `read_file`, `search_text`,
   `finish_review`, secure session restore, and the AI-abstraction decision.
-- R3 may add only a trusted no-publish live-provider workflow and completes the
-  initial read-only tool profile.
+- R3 completed the trusted no-publish live-provider route and initial six-tool read-only profile.
 - R4 introduces the replacement thin Node wrapper, C# `ActionHost`, public
-  Action surface, production state transport, and integrated two-run proof.
+  Action surface, downstream-owned encrypted artifact state, and integrated two-run proof.
 - R7 owns release assets, checksums, exact automatic payload selection, and the
   public default.
 

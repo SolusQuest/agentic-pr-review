@@ -2,7 +2,7 @@
 
 The development head is currently between public Action generations. R1 removed the mixed JavaScript Action metadata and bundle while retaining direct TypeScript/C# validation. The selected target is a thin bundled Node.js Action wrapper plus pinned, self-contained .NET payloads.
 
-See [`agent-runtime-rebaseline.md`](./agent-runtime-rebaseline.md) for component ownership and migration sequencing.
+See [`agent-runtime-rebaseline.md`](./agent-runtime-rebaseline.md) for component ownership and migration sequencing and [`r4-actionhost-wrapper-plan.md`](./r4-actionhost-wrapper-plan.md) for the prospective R4 product contract.
 
 ## Distribution Goals
 
@@ -126,26 +126,28 @@ The payload version and state format are different identities:
 
 Use canonical content digests for policy, instructions, ordered tools, and cache-relevant configuration, plus resolved provider/model and runtime build identity. Do not add parallel manual version and id fields for the same content.
 
-Before 1.0, an automatically discovered incompatible state format causes observable safe bootstrap, while an explicitly supplied incompatible artifact fails closed. Release assets do not need to carry converters for unused historical state.
+Before 1.0, a Host-classified non-current historical namespace or discriminator may cause observable safe bootstrap. A selected-current record that is malformed, unauthenticated, scope-incompatible, continuation-invalid, missing required data, ambiguous, or ancestry-invalid fails closed even when discovered automatically; an explicitly supplied incompatible artifact also fails closed. Release assets do not need to carry converters for unused historical state.
 
 ## Restricted State Transport
 
-The Agent session has project-owned logical records plus a separate provider-scoped continuation envelope. Because it may contain readable reasoning and bounded repository tool results, it is more sensitive than the existing M4 metadata-oriented state.
+The Agent session has project-owned logical records plus a separate provider-scoped continuation envelope. Because it may contain readable reasoning and bounded repository tool results, it is more sensitive than the existing M4 metadata-oriented state. R4 selects downstream-owned GitHub Actions artifacts as the sole built-in production/default adapter.
 
 Production transport must document:
 
-- visibility and authorized principals;
+- platform visibility and authorized decryption/mutation principals;
 - read, write, enumeration, restore, deletion, and publication authority;
 - retention and deletion behavior;
-- fork and untrusted-workflow denial;
+- fork and untrusted-workflow key, mutation, provider, and publication denial;
 - confidentiality-at-rest and encryption requirements;
 - authenticated binding to the current-format discriminator, Host-authoritative state identity, provider/adapter scope, session identity, and required generation/provenance.
 
-Plaintext reasoning, repository tool results, and provider continuation material must not enter Git objects, Git history, repository-visible state refs, caches, or normal public artifacts. A transport that is visible beyond workflow-authorized principals requires workflow-authorized Host-side encryption, with the key stored separately from the payload and never exposed to the Agent or model. Without an adequate transport or key path, readable continuation content is not persisted.
+Plaintext reasoning, repository tool results, and provider continuation material must not enter Git objects, Git history, repository-visible state refs, caches, or unencrypted public artifacts. The selected artifact adapter stores only authenticated ciphertext and bounded encrypted receipts. In a public repository, opaque artifact names, metadata, provenance, digests, and encrypted bytes may be public. The downstream-owned 256-bit state key remains separate from the payload and provider key and is never exposed to the Agent or model. Without that key path, readable continuation content is not persisted.
 
 Encrypted payloads provide authenticated confidentiality or equivalent independent integrity protection. The key or key identifier is not payload authority. Authentication failure, identity mismatch, cross-scope substitution, stale replay, or decryption failure is handled before content reaches the Agent or provider.
 
-R2 defines a storage-conformance interface and negative matrix. R4 proves that the selected production transport prevents untrusted and fork-origin workflows from enumerating, restoring, overwriting, decrypting, deleting, or causing publication of restricted state. Authorization rejection occurs before state decryption, provider construction, provider network activity, or publication.
+R2 defines a storage-conformance interface and negative matrix. R4 evolves it into an asynchronous internal opaque-snapshot seam shared by the local and GitHub artifact adapters. `RestrictedStateService` owns authorization, encryption, SESSION admission, scope, lineage, retention, and transitions; adapters own bounded opaque list/download/immutable-upload/readback/delete outcomes. R4 does not expose a dynamic .NET plugin ABI or external adapter protocol. A maintained Supabase/Postgres adapter is a future candidate after a separate transactional, RLS, authentication, and operations proof.
+
+R4 proves that public observers can see only allowed metadata and ciphertext, while untrusted and fork-origin workflows cannot obtain the state key, decrypt or admit SESSION, create or delete trusted state, replace or accept lineage, call the provider through the trusted route, or publish. Authorization rejection occurs before key resolution, state decryption, provider construction, provider network activity, or publication.
 
 ## Release Assets
 

@@ -259,7 +259,7 @@ No model or Agent output is publishable until `ActionHost`:
 
 If the reviewed head changed, the host does not publish the stale review or accept its state.
 
-Workflow-level per-PR concurrency remains defense in depth. It does not replace the final host recheck.
+R4 requires both supported credential-bearing entrypoints to share one verified workflow-level repository/PR concurrency group with `cancel-in-progress: false`. GitHub's one-running-run guarantee for that group is the authoritative exclusion primitive between candidate admission and public/state side effects; the Host rejects an unverified workflow definition before state or provider admission. Final Host head, ownership, receipt, and readback checks remain mandatory for stale work, crash recovery, and artifacts introduced outside a valid serialized run, but artifacts themselves are not a cross-run lock.
 
 ## Session State Artifact Boundary
 
@@ -307,16 +307,16 @@ State artifacts must be:
 - authenticated and bound to every logical record's kind, provider-facing role or framing, tool-call association, and control/data classification;
 - retained only for the documented period;
 - deletable according to the documented lifecycle;
-- readable only by workflow-authorized principals;
-- safely bootstrapped or failed when missing, incompatible, corrupt, oversized, or unsafe.
+- decryptable and admissible only by workflow-authorized principals; production metadata and ciphertext may follow the downstream repository's visibility;
+- observably bootstrapped only when no current family exists or the Host classifies a family as historical non-current; selected-current incompatibility, corruption, missing data, ambiguity, or unsafe state fails closed.
 
 A content-addressed reference needed for session reconstruction must resolve to durable, bounded, access-controlled content. A dangling reference cannot be treated as a successful continuation.
 
-Plaintext reasoning, repository tool results, and provider continuation material must not be committed to repository Git objects, Git history, repository-visible state refs, caches, or normal public artifacts. If the selected transport cannot provide confidentiality from ordinary repository visibility, the payload requires workflow-authorized Host-side encryption; the key remains a Host-only credential and is never stored with the payload or exposed to the Agent or model. If no such key path exists, readable continuation content is not persisted.
+Plaintext reasoning, repository tool results, and provider continuation material must not be committed to repository Git objects, Git history, repository-visible state refs, caches, or unencrypted public artifacts. R4 deliberately stores authenticated ciphertext in each downstream repository's GitHub Actions artifacts. Public-repository observers may see opaque artifact metadata and encrypted bytes, while the downstream-owned state key remains a Host-only credential that is never stored with the payload or exposed to the Agent or model. If no such key path exists, readable continuation content is not persisted.
 
 Encryption provides authenticated confidentiality or equivalent independent integrity protection. The key or key identifier is not payload authority. Authentication failure, identity mismatch, cross-scope substitution, stale replay, or decryption failure is rejected before any state content reaches the Agent or provider. Automatic restore follows the observable bootstrap policy; explicit restore fails closed.
 
-R2 defines the storage conformance interface and negative matrix before R3 begins. R4 proves the selected production transport prevents untrusted and fork-origin workflows from enumerating, restoring, overwriting, decrypting, deleting, or causing publication of restricted continuation state.
+R2 defines the storage conformance interface and negative matrix before R3 begins. R4 proves public metadata/ciphertext visibility and opaque naming positively, while proving that untrusted and fork-origin workflows cannot obtain the state key, decrypt or admit SESSION, create or delete trusted state, replace or accept lineage, invoke the provider through the trusted route, hand off state, or publish. The full production class is defined in [`r4-actionhost-wrapper-plan.md`](./r4-actionhost-wrapper-plan.md).
 
 ## Thinking And Reasoning Content
 
@@ -337,7 +337,7 @@ The security rule is data-flow separation, not blanket deletion:
 - logs, normal traces, annotations, summaries, outputs, comments, replay reports, and diagnostics must not contain the payload;
 - bounded metadata such as kind, byte count, content hash, and validation outcome may be recorded;
 - credentials, authorization headers, ambient environment data, raw HTTP bodies, headers, unrelated provider fields, and transport framing remain prohibited;
-- incompatible, missing, altered, oversized, or structurally misplaced continuation state causes explicit failure or safe bootstrap rather than best-effort replay.
+- absent or Host-classified historical non-current continuation state may bootstrap observably, while selected-current incompatibility, missing data, alteration, oversize, structural error, or ancestry failure causes explicit failure rather than best-effort replay.
 
 If a provider documents that a prior reasoning item is ignored or unnecessary after a particular boundary, its adapter may omit that item only under provider-specific tested policy. A generic sanitizer must not guess which reasoning state is disposable.
 
