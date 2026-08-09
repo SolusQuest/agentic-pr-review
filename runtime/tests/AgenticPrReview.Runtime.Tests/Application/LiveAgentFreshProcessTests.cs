@@ -11,6 +11,7 @@ using AgenticPrReview.Runtime.Host.State;
 
 namespace AgenticPrReview.Runtime.Tests.Application;
 
+[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class LiveAgentFreshProcessTests
 {
     private const string ProviderSecret =

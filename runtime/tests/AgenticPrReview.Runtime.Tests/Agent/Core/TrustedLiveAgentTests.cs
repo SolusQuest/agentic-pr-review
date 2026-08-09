@@ -12,6 +12,7 @@ using AgenticPrReview.Runtime.LiveAgentVerifierFixture;
 
 namespace AgenticPrReview.Runtime.Tests.Agent.Core;
 
+[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class TrustedLiveAgentTests : IDisposable
 {
     private readonly string root = Path.Join(
