@@ -38,8 +38,8 @@ Before 1.0, an incompatible durable state change should normally:
 
 1. use the new Agent-state namespace and increment its one current-format discriminator;
 2. ensure automatic selection cannot interpret old M4 or non-current bytes as current state;
-3. perform an observable safe bootstrap for automatically discovered incompatible candidates;
-4. fail closed for an explicitly supplied incompatible artifact;
+3. perform an observable safe bootstrap only for true absence or Host-classified historical non-current candidates;
+4. fail closed for selected-current incompatibility whether discovered automatically or supplied explicitly;
 5. document the reset in the PR and release notes.
 
 Do not add conversion, backfill, parallel readers, or parallel writers without an identified downstream that needs them.

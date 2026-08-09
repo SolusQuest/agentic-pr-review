@@ -126,7 +126,7 @@ The payload version and state format are different identities:
 
 Use canonical content digests for policy, instructions, ordered tools, and cache-relevant configuration, plus resolved provider/model and runtime build identity. Do not add parallel manual version and id fields for the same content.
 
-Before 1.0, an automatically discovered incompatible state format causes observable safe bootstrap, while an explicitly supplied incompatible artifact fails closed. Release assets do not need to carry converters for unused historical state.
+Before 1.0, a Host-classified non-current historical namespace or discriminator may cause observable safe bootstrap. A selected-current record that is malformed, unauthenticated, scope-incompatible, continuation-invalid, missing required data, ambiguous, or ancestry-invalid fails closed even when discovered automatically; an explicitly supplied incompatible artifact also fails closed. Release assets do not need to carry converters for unused historical state.
 
 ## Restricted State Transport
 

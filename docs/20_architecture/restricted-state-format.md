@@ -22,6 +22,10 @@ Artifact names are domain-separated keyed opaque values and contain no raw repos
 
 The internal store seam becomes asynchronous and transport-neutral in R4. `RestrictedStateService` continues to own every authorization, encryption, SESSION, lineage, retention, and transition rule in this document. The GitHub artifact adapter owns only bounded opaque list/metadata/download/immutable-upload/readback/delete outcomes and shares one conformance suite with the local store. R4 exposes no public adapter ABI; future maintained adapters and any external wire contract require a later design.
 
+R4 adds a repository-level encrypted locator-root sentinel and derives scoped artifact names from the stable root rather than directly from the rotatable encryption key. The fixed generic sentinel name reveals product use but no scope mapping. Existing sentinel records that authenticate under neither the current nor authorized previous key fail as key-unavailable/authentication error; they cannot be mistaken for first-use absence. Successful rotation rewraps the same locator root under the current key without adding another configured secret.
+
+The R2 table below remains the implemented local-store contract. The R4 production overlay narrows automatic selection: only true absence or a Host-classified historical non-current family may bootstrap. Once a current family is selected, malformed, unauthenticated, missing-current, scope-incompatible, continuation-invalid, ambiguous, diverged, unrelated, force-pushed, or unknown-ancestry state fails closed unless an authorized explicit reset fully completes with a new lineage epoch and session identity.
+
 ## Scope, retention, and independent lineage
 
 The stable storage scope contains repository ID, workflow identity, review target, session ID, provider ID, model ID, adapter ID, policy SHA-256, limits SHA-256, toolset SHA-256, and build ID. It excludes the dynamic current base/head. Stored producer base/head remain authenticated provenance, while current dynamic reviewed identity is admitted separately through the SESSION `same_head` or `verified_ahead` transition.

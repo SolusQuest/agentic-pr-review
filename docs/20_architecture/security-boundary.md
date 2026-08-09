@@ -308,7 +308,7 @@ State artifacts must be:
 - retained only for the documented period;
 - deletable according to the documented lifecycle;
 - decryptable and admissible only by workflow-authorized principals; production metadata and ciphertext may follow the downstream repository's visibility;
-- safely bootstrapped or failed when missing, incompatible, corrupt, oversized, or unsafe.
+- observably bootstrapped only when no current family exists or the Host classifies a family as historical non-current; selected-current incompatibility, corruption, missing data, ambiguity, or unsafe state fails closed.
 
 A content-addressed reference needed for session reconstruction must resolve to durable, bounded, access-controlled content. A dangling reference cannot be treated as a successful continuation.
 
@@ -337,7 +337,7 @@ The security rule is data-flow separation, not blanket deletion:
 - logs, normal traces, annotations, summaries, outputs, comments, replay reports, and diagnostics must not contain the payload;
 - bounded metadata such as kind, byte count, content hash, and validation outcome may be recorded;
 - credentials, authorization headers, ambient environment data, raw HTTP bodies, headers, unrelated provider fields, and transport framing remain prohibited;
-- incompatible, missing, altered, oversized, or structurally misplaced continuation state causes explicit failure or safe bootstrap rather than best-effort replay.
+- absent or Host-classified historical non-current continuation state may bootstrap observably, while selected-current incompatibility, missing data, alteration, oversize, structural error, or ancestry failure causes explicit failure rather than best-effort replay.
 
 If a provider documents that a prior reasoning item is ignored or unnecessary after a particular boundary, its adapter may omit that item only under provider-specific tested policy. A generic sanitizer must not guess which reasoning state is disposable.
 

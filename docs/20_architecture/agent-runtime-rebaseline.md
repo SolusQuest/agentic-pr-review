@@ -1,18 +1,18 @@
 # Agent Runtime Architecture Rebaseline
 
-Status: selected target architecture; R1 is complete and the R2 executable Agent slice is implemented and verified.
+Status: selected target architecture; R1, R2, and R3 are complete. R4 is the active docs-gated Host, artifact-state, publisher, and thin-wrapper migration.
 
 Drafted: 2026-07-24.
 
-Last revised: 2026-07-30.
+Last revised: 2026-08-09.
 
-Activation record: [PR #76](https://github.com/SolusQuest/agentic-pr-review/pull/76); its merge commit is the normative activation point.
+Rebaseline activation record: [PR #76](https://github.com/SolusQuest/agentic-pr-review/pull/76); its merge commit is the normative reset activation point. The prospective R4 contract remains unactivated until the maintainer merges its docs-only design PR.
 
-This document records the architecture rebaseline for the project-owned code review agent. It supersedes the earlier long-term assumption that TypeScript remains the business-capable GitHub Action host and C# remains behind a broad language-neutral protocol. Existing M1-M4 documents continue to describe the implementation currently on `main` until migration work removes or replaces those surfaces.
+This document records the architecture rebaseline for the project-owned code review agent. It supersedes the earlier long-term assumption that TypeScript remains the business-capable GitHub Action host and C# remains behind a broad language-neutral protocol. Dated M0-M4 planning documents are historical evidence; current implementation contracts and the R3 removal handoff describe the surviving development-head surfaces until R4 replaces them.
 
-The breaking-reset governance gate and post-merge transition are tracked by [issue #75](https://github.com/SolusQuest/agentic-pr-review/issues/75). The coordinated documentation PR #76 references that issue without closing it; the issue remains open until the authorized GitHub metadata transition and R1/R2 parent creation are complete.
+The breaking-reset governance gate and post-merge transition were completed through [issue #75](https://github.com/SolusQuest/agentic-pr-review/issues/75) and documentation PR #76. Issue #75 is closed; the R1, R2, and R3 milestones and their implementation graphs subsequently completed.
 
-## R2 Implementation Record And Remaining Migration Inventory
+## R2-R3 Implementation Record And Remaining R4 Migration Inventory
 
 Issue #88 completes the R2 product-path proof. `runtime/scripts/verify-agent-loop.sh all` runs the real selected `MinimalChatClient`, `AgentLoop`, tool executor, current SESSION implementation, and restricted STATE implementation through focused tests, framework-dependent Release, and Linux x64 Native AOT with reflection-based JSON serialization disabled. Two fresh invocations prove grounded thinking/tool execution, completed-session-only encrypted acceptance, exact continuation reconstruction, a prior-only fact, verified-ahead generation 1, independent Host lineage, exact five-header loopback transport, nine named canary classes, and the owned fail-closed matrix. This is synthetic conformance evidence, not live provider quality or production GitHub workflow transport evidence.
 
@@ -40,19 +40,19 @@ The project will converge on a C#-owned product architecture:
 8. Restricted continuation state is never repository-visible plaintext. A transport that cannot keep readable reasoning, bounded tool results, and provider continuation material confidential must use workflow-authorized encryption or must not persist the readable payload.
 9. Encrypted continuation state provides authenticated confidentiality or equivalent integrity protection bound to its format, Host-authoritative identity, provider/adapter scope, session, and required generation/provenance. Altered, substituted, stale, or undecryptable state is rejected before Agent/provider admission.
 10. R2 selected project-minimal in-memory exchange types after both they and `Microsoft.Extensions.AI.Abstractions` 10.8.1 passed the same reasoning-enabled framework and Native AOT tool-loop/restoration proof. The agent loop, durable session model, provider-neutral request planning, provider-specific request materialization, budgets, checkpoints, and final result validation remain project-owned under the core/adapter boundary below.
-11. The legacy Claude Code CLI implementation will be removed from the development head. The existing immutable `v0.1.0` tag remains the historical legacy pin; the project will not publish later unshipped post-`v0.1.0` legacy work merely to create a final snapshot.
+11. The legacy Claude Code CLI implementation was removed from the development head in R1. The existing immutable `v0.1.0` tag remains the historical legacy pin; the project will not publish later unshipped post-`v0.1.0` legacy work merely to create a final snapshot.
 12. Versioning is retained only for independently released artifacts and durable cross-run formats. Cache-relevant policy, prompt, tool, and provider configuration use canonical content identities instead of parallel manual version and id families.
 
-### Recommended Option
+### Selected Ordering
 
-Implement a vertical slice before completing the TypeScript-to-C# host migration:
+The approved sequence placed the vertical slice before the TypeScript-to-C# Host migration. R1-R3 completed the first three steps; R4 begins the remaining Host migration:
 
-1. remove the Claude Code CLI and legacy backend selection from the new head;
-2. prove the C# agent loop, tool execution, session round-trip, Native AOT, and model-visible secret boundary inside the existing C# executable;
-3. use the existing deterministic host/publisher behavior temporarily where it shortens the path to the vertical slice;
-4. migrate stable GitHub host responsibilities into `.NET ActionHost`;
-5. delete duplicate TypeScript business logic and contract implementations;
-6. resume broad cost-evaluation and release-graduation work only after real resumed agent traffic exists.
+1. R1 removed the Claude Code CLI and legacy backend selection from the new head;
+2. R2-R3 proved the C# Agent loop, tool execution, session round-trip, Native AOT, model-visible secret boundary, and live-provider continuation;
+3. the existing deterministic Host/publisher behavior was retained only where it shortened the path to that vertical slice and now has named R4 replacement gates;
+4. R4 migrates stable GitHub Host responsibilities into `.NET ActionHost`;
+5. R4 deletes duplicate TypeScript business logic and contract implementations after replacement evidence;
+6. broad cost evaluation and release graduation remain deferred until real resumed Agent traffic exists.
 
 This ordering prevents another host or contract project from delaying the core review agent.
 
@@ -941,22 +941,13 @@ The design issue does not perform every migration or deletion itself. It establi
 
 The inventories in this document are planning baselines, not permanent executable file lists. Before implementing a follow-up issue, refine it again against the live tree, current references, replacement evidence, release state, and milestone gates. That refinement may split or combine mechanical deletion work, but it must not silently weaken the selected architecture or leave a transitional surface without a named owner.
 
-### Immediate Follow-Up Issue Set
+### Historical Immediate Follow-Up Issue Set
 
-After the coordinated R0 documentation PR is merged and the reset is active, create two parent refinement issues:
+The R0 activation created the R1 legacy-removal and R2 Agent-loop parent refinements. Both were split through live-tree analysis and completed; R3 was later refined and completed from their evidence. This record explains the origin of those milestones and is not an instruction to recreate their issues. R4 now follows its own merged-docs-before-execution gate, and R5-R7 remain evidence-driven.
 
-| Issue                             | Starts                                                                                                                                       | Approved refinement brief                                                                                                                                                                                                                 | Refinement boundary                                                                                                                             |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| R1: remove legacy runtime surface | after reset activation and R1 live-tree refinement                                                                                           | Re-inventory and remove Claude Code CLI installation, invocation, parsing, resume, configuration, debug capture, state compatibility, docs, and tests; withdraw the mixed public Action surface; internalize fake/deterministic controls. | Produce an executable issue split with exact paths, preserved safety behavior, validation, ordering, and a named owner for retained transition. |
-| R2: prove the C# agent-loop slice | refinement may parallel R1; implementation waits for R1 completion or an approved non-overlap boundary and uses explicit shared-path handoff | Refine the fake-provider thinking-capable loop, initial read-only tools, provisional in-process records, state classification and round-trip, secret canaries, Native AOT execution, and the AI-abstraction choice.                       | Produce one or more executable issues whose combined gates prove a real Agent seam without freezing one-PR scope prematurely.                   |
+### Historical Contract And Fixture Disposition Baseline
 
-The count of parent issues is fixed at two; the number of implementation issues or PRs is not. Each parent may split after live-tree analysis when one focused PR cannot satisfy its milestone gate safely.
-
-Do not immediately create detailed R3-R7 implementation issues. Their approximate migration obligations are recorded below, but each issue is refined when its entry evidence exists. This avoids freezing file-level work around code that the earlier milestone has not produced yet.
-
-### Current Contract And Fixture Disposition Baseline
-
-The repository currently contains eleven JSON Schema files plus large TypeScript, C#, and fixture families. Their initial disposition is:
+At R0 activation, the repository contained eleven JSON Schema files plus large TypeScript, C#, and fixture families. Their initial disposition was:
 
 | Current family                                                                                                                                       | Initial disposition | Retirement starts | Required replacement or preservation gate                                                                                                                                                                                    |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -974,6 +965,8 @@ The repository currently contains eleven JSON Schema files plus large TypeScript
 An old schema or fixture does not survive merely because an existing test imports it. The follow-up issue must determine whether the test protects a target behavior, a temporary migration seam, or only the obsolete architecture.
 
 ### Milestone Migration And Retirement Schedule
+
+Rows R0-R3 are the completed historical schedule; their verbs record the plan used at those phases and are not current execution instructions. R4 is active only through its docs gate, while R5-R7 remain future evidence-driven phases.
 
 | Phase | When migration or retirement analysis begins                  | Approximate work                                                                                                                                                                                                                                                                                                             | Phase retirement gate                                                                                                                                                      |
 | ----- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

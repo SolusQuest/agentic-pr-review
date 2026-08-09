@@ -50,31 +50,26 @@ C# and Native AOT are architecture commitments, not product success criteria. Re
 
 The current implementation contains:
 
-- no public GitHub Action and no legacy TypeScript coordinator or Claude Code CLI execution path;
-- deterministic and ledger-oriented C# runtime paths;
-- a project-owned DeepSeek provider adapter;
-- structured review output and optional inline comments;
-- retained internal TypeScript state selection, acceptance, publisher, and prefix-contract evidence for R2-R4 migration;
-- extensive TypeScript/C# conformance fixtures;
-- framework-dependent and Native AOT validation.
+- no public GitHub Action and no legacy TypeScript coordinator, Claude Code CLI, or superseded single-request C# product route;
+- one project-owned C# Agent with the six bounded read-only tools `list_changed_files`, `read_diff`, `list_files`, `search_text`, `read_file`, and `finish_review`;
+- a bounded multi-turn tool loop whose validated tool results become canonical SESSION history and whose terminal findings are grounded in admitted evidence;
+- a project-owned DeepSeek thinking adapter with exact continuation reconstruction across two fresh Host processes;
+- authenticated encrypted local STATE, independent Host lineage, same-head and verified-ahead admission, and framework-dependent plus Linux x64 Native AOT validation;
+- must-find, must-not-find, invalid-tool, tamper, replay, scope, continuation, and secret-canary evaluation;
+- a protected, default-branch, no-publication live-provider proof at the final R3 commit;
+- retained internal TypeScript state, publisher, invocation, protocol, prefix, and metadata families only as named R4 replacement evidence.
 
-This is a reliable stateful provider pipeline, but it is not yet the target code review agent. The core missing product slice is:
+R3 is complete. The development head proves the target review Agent and continuation core, but it does not yet provide production GitHub event authorization, immutable GitHub snapshot acquisition, downstream artifact-backed encrypted state, deterministic GitHub publication through C# ActionHost, or a restored public Action wrapper.
 
-- provider-requested repository tools;
-- multi-turn tool execution;
-- tool results returned to the provider;
-- canonical agent conversation state containing bounded tool results;
-- findings bound to observed tool evidence;
-- must-find and must-not-find quality evaluation.
+The selected next direction is R4:
 
-The selected next direction is:
-
-- prove a C# agent loop and read-only tools before another broad contract program;
-- let R2 compare a pinned `Microsoft.Extensions.AI.Abstractions` dependency with project-minimal exchange types and select the smaller Native AOT-proven surface;
-- keep the agent loop, durable state, budgets, provider capabilities, and prefix semantics project-owned;
-- let R3 prove the trusted live tool workflow after the R2 vertical slice;
-- let R4 migrate GitHub business logic into the trusted Host module, restore a thin Action wrapper and artifact bridge, and delete duplicate TypeScript validators only after equivalent Host behavior is proven;
-- defer broad cost-graduation work until real resumed agent traffic exists.
+- keep the completed R3 Agent, tools, SESSION, grounding, DeepSeek continuation, and capability boundaries as the product core;
+- add trusted GitHub event/configuration authorization and exact-SHA snapshot materialization in C# ActionHost;
+- add downstream-repository-owned encrypted artifact state behind the internal asynchronous state-store seam;
+- move deterministic sticky/inline publication and transaction recovery into C# Host code;
+- restore only a thin Node Action wrapper and private artifact bridge after equivalent Host behavior is proven;
+- delete retained TypeScript business families only through named replacement gates;
+- keep downstream release/payload delivery and broad cost graduation in their later milestones.
 
 A separate Agent process is deferred until fault, resource, extension, or trust evidence justifies the additional protocol and distribution surface.
 
