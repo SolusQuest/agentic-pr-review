@@ -83,6 +83,16 @@ public sealed class R4StickyRendererTests
             "&lt;&#x21;&#x2D;&#x2D;script&#x2D;&#x2D;&#x3E;",
             rendered.Body);
         Assert.Contains("&#x3A;&#x3A;warning&#x3A;&#x3A;boom", rendered.Body);
+        Assert.Contains("U+0000", rendered.Body);
+        Assert.Contains("U+0009", rendered.Body);
+        Assert.Contains("U+000D", rendered.Body);
+        Assert.Contains("U+0085", rendered.Body);
+        Assert.Contains("U+202E", rendered.Body);
+        Assert.DoesNotContain("&#x0;", rendered.Body);
+        Assert.DoesNotContain("&#x9;", rendered.Body);
+        Assert.DoesNotContain("&#xD;", rendered.Body);
+        Assert.DoesNotContain("&#x85;", rendered.Body);
+        Assert.DoesNotContain("&#x202E;", rendered.Body);
     }
 
     [Fact]

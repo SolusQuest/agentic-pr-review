@@ -403,6 +403,19 @@ export const residualReferenceRules = [
     deletionGate: 'replace the R1 integration fixture with R4 Host integration',
     milestone: 'R4',
   },
+  {
+    id: 'RR-036',
+    term: /distinct from legacy lineage metadata/iu,
+    path: /^runtime\/tests\/AgenticPrReview\.Runtime\.Tests\/Host\/Publishing\/Rendering\/R4TypeScriptReplacementLedgerTests\.cs$/u,
+    lifecycleClass: 'state-migration',
+    currentConsumer: 'named R4 TypeScript replacement ledger conformance evidence',
+    owner: 'R4 deterministic sticky rendering',
+    interpretation:
+      'exact historical M4 lineage comparison only, not accepted publication metadata',
+    deletionGate:
+      'issue #170 removes the TypeScript replacement ledger after R4 migration acceptance',
+    milestone: 'R4',
+  },
   permanent(
     'RR-037',
     /^docs\/20_architecture\/r3-single-shot-removal-handoff\.md$/u,

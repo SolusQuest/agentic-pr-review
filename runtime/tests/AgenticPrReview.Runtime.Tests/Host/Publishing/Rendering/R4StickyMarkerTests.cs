@@ -139,6 +139,43 @@ public sealed class R4StickyMarkerTests
             R4StickyInvalidReason.BodyDigestMismatch);
     }
 
+    [Theory]
+    [InlineData("\r")]
+    [InlineData("\v")]
+    [InlineData("\f")]
+    [InlineData("\u0085")]
+    [InlineData("\u2028")]
+    [InlineData("\u2029")]
+    public void BodyHashAndInspectorRejectEveryNonLfLineSeparator(
+        string separator)
+    {
+        var body = "left" + separator + "right";
+        var failure = Assert.Throws<R4PublicationException>(() =>
+            R4PublicationIdentityV1.ComputeBodySha256(body));
+        Assert.Equal(R4PublicationFailureCodes.IdentityInvalid, failure.Code);
+
+        var forgedIdentity = new R4PublicationIdentityV1(
+            new string('a', 64),
+            R4CanonicalUtf8Framing.Hash(
+                R4PublicationIdentityV1.BodyDomain,
+                [body]),
+            new string('b', 40));
+        var comment = body + "\n\n" + R4StickyMarker.Create(forgedIdentity);
+
+        AssertInvalid(comment, R4StickyInvalidReason.InvalidLf);
+    }
+
+    [Fact]
+    public void BodyHashRejectsInvalidUtf16()
+    {
+        var body = "left" + new string('\ud800', 1) + "right";
+
+        var failure = Assert.Throws<R4PublicationException>(() =>
+            R4PublicationIdentityV1.ComputeBodySha256(body));
+
+        Assert.Equal(R4PublicationFailureCodes.IdentityInvalid, failure.Code);
+    }
+
     private static void AssertInvalid(
         string comment,
         R4StickyInvalidReason reason)

@@ -67,13 +67,14 @@ internal static class R4StickyMarker
                 R4StickyInvalidReason.WrongCase);
         }
 
-        if (!R4Markdown.TryMeasure(comment, out _, out _))
+        var bodyTextValidation = R4Markdown.ValidateBodyText(comment);
+        if (bodyTextValidation == R4BodyTextValidation.InvalidUnicode)
         {
             return R4StickyInspection.Invalid(
                 R4StickyInvalidReason.InvalidUnicode);
         }
 
-        if (comment.Contains('\r', StringComparison.Ordinal))
+        if (bodyTextValidation == R4BodyTextValidation.InvalidLineBreak)
         {
             return R4StickyInspection.Invalid(
                 R4StickyInvalidReason.InvalidLf);

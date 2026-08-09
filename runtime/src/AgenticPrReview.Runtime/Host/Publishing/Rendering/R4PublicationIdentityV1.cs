@@ -52,8 +52,8 @@ internal sealed partial record R4PublicationIdentityV1
 
     internal static string ComputeBodySha256(string body)
     {
-        if (body.Contains('\r', StringComparison.Ordinal) ||
-            !R4Markdown.TryMeasure(body, out _, out _))
+        if (R4Markdown.ValidateBodyText(body) !=
+            R4BodyTextValidation.Valid)
         {
             throw new R4PublicationException(
                 R4PublicationFailureCodes.IdentityInvalid);

@@ -4,6 +4,13 @@ using System.Text;
 
 namespace AgenticPrReview.Runtime.Host.Publishing.Rendering;
 
+internal enum R4BodyTextValidation
+{
+    Valid,
+    InvalidUnicode,
+    InvalidLineBreak,
+}
+
 internal static class R4Markdown
 {
     private const string UnsafeAscii = "\\`*_{}[]()#+-.!|:>~=";
@@ -45,14 +52,19 @@ internal static class R4Markdown
                 continue;
             }
 
-            var category = Rune.GetUnicodeCategory(rune);
-            if (rune.IsAscii && UnsafeAscii.Contains((char)rune.Value) ||
-                category is UnicodeCategory.Control or
-                    UnicodeCategory.Format or
-                    UnicodeCategory.LineSeparator or
-                    UnicodeCategory.ParagraphSeparator)
+            if (rune.IsAscii && UnsafeAscii.Contains((char)rune.Value))
             {
                 AppendScalarEntity(builder, rune.Value);
+                continue;
+            }
+
+            var category = Rune.GetUnicodeCategory(rune);
+            if (category is UnicodeCategory.Control or
+                UnicodeCategory.Format or
+                UnicodeCategory.LineSeparator or
+                UnicodeCategory.ParagraphSeparator)
+            {
+                AppendVisibleScalarNotation(builder, rune.Value);
                 continue;
             }
 
@@ -103,11 +115,54 @@ internal static class R4Markdown
         }
     }
 
+    internal static R4BodyTextValidation ValidateBodyText(string? value)
+    {
+        if (value is null)
+        {
+            return R4BodyTextValidation.InvalidUnicode;
+        }
+
+        var remaining = value.AsSpan();
+        while (!remaining.IsEmpty)
+        {
+            var status = Rune.DecodeFromUtf16(
+                remaining,
+                out var rune,
+                out var consumed);
+            if (status != OperationStatus.Done)
+            {
+                return R4BodyTextValidation.InvalidUnicode;
+            }
+
+            var category = Rune.GetUnicodeCategory(rune);
+            if (rune.Value is '\r' or '\v' or '\f' or 0x85 ||
+                category is UnicodeCategory.LineSeparator or
+                    UnicodeCategory.ParagraphSeparator)
+            {
+                return R4BodyTextValidation.InvalidLineBreak;
+            }
+
+            remaining = remaining[consumed..];
+        }
+
+        return R4BodyTextValidation.Valid;
+    }
+
     private static void AppendScalarEntity(StringBuilder builder, int value)
     {
         builder.Append("&#x");
         builder.Append(value.ToString("X", CultureInfo.InvariantCulture));
         builder.Append(';');
+    }
+
+    private static void AppendVisibleScalarNotation(
+        StringBuilder builder,
+        int value)
+    {
+        builder.Append("U+");
+        builder.Append(value.ToString(
+            value <= 0xffff ? "X4" : "X6",
+            CultureInfo.InvariantCulture));
     }
 }
 
