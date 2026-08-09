@@ -7,6 +7,7 @@ using AgenticPrReview.Runtime.Execution.DeepSeek;
 
 namespace AgenticPrReview.Runtime.Tests.Execution.DeepSeek;
 
+[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class DeepSeekRequestWriterTests
 {
     [Fact]
