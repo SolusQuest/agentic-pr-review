@@ -58,6 +58,86 @@ public sealed class ActionHostSerializationTests
             launch.Inputs.StateKey!.ExportForPrivateLaunch());
     }
 
+    [Fact]
+    public void WorstCaseOpaqueSecretsFitTheDerivedLaunchBound()
+    {
+        var secret = new string('\u0001', 4000);
+        Assert.True(ActionHostInputParser.TryParse(
+            [
+                new ActionHostRawInput("github-token", secret),
+                new ActionHostRawInput("provider-api-key", secret),
+                new ActionHostRawInput("state-key", secret),
+                new ActionHostRawInput("previous-state-key", secret),
+            ],
+            out var inputs,
+            out _));
+        var launch = CreateLaunch(inputs!);
+
+        Assert.True(ActionHostJsonCodec.TryWriteLaunch(launch, out var bytes));
+        Assert.True(bytes.Length <=
+            ActionHostContractBounds.MaximumLaunchDocumentBytes);
+        Assert.True(ActionHostJsonCodec.TryReadLaunch(
+            bytes,
+            out var parsed,
+            out _));
+        var preserved = new[]
+        {
+            parsed!.Inputs.GitHubToken!.ExportForPrivateLaunch(),
+            parsed.Inputs.ProviderApiKey!.ExportForPrivateLaunch(),
+            parsed.Inputs.StateKey!.ExportForPrivateLaunch(),
+            parsed.Inputs.PreviousStateKey!.ExportForPrivateLaunch(),
+        }.All(value => StringComparer.Ordinal.Equals(value, secret));
+        Assert.True(preserved);
+    }
+
+    [Fact]
+    public void PrivateTransportRecordsNeverRenderTheirValues()
+    {
+        var canary = "secret::error::%0Aprivate-value";
+        var inputs = new ActionHostInputsDocument(
+            canary,
+            canary,
+            canary,
+            canary,
+            canary,
+            "146",
+            "auto");
+        var launch = new ActionHostLaunchDocument(
+            inputs,
+            canary,
+            new string('a', 64),
+            "owner/repo",
+            "1",
+            "2",
+            "3",
+            canary,
+            canary,
+            new string('b', 40),
+            new string('c', 40),
+            new string('d', 64),
+            Build,
+            "active",
+            canary);
+        var command = new ActionHostPrivateCommandEnvelope<TestPrivateCommand>(
+            Build,
+            new TestPrivateCommand("read", canary));
+        var result = new ActionHostPrivateCommandResultEnvelope<TestPrivateResult>(
+            Build,
+            new TestPrivateResult(canary, new string('e', 64)));
+        object[] privateValues =
+        [
+            new ActionHostRawInput("state-key", canary),
+            inputs,
+            launch,
+            command,
+            result,
+        ];
+
+        var leaked = privateValues.Any(value =>
+            value.ToString()!.Contains(canary, StringComparison.Ordinal));
+        Assert.False(leaked);
+    }
+
     [Theory]
     [InlineData("0")]
     [InlineData("-1")]
@@ -376,7 +456,7 @@ public sealed class ActionHostSerializationTests
     private static string FixturePath(
         string name,
         [CallerFilePath] string sourceFile = "") =>
-        Path.Combine(Path.GetDirectoryName(sourceFile)!, "Fixtures", name);
+        Path.Join(Path.GetDirectoryName(sourceFile)!, "Fixtures", name);
 
     private static JsonTypeInfo<T> RequireTypeInfo<T>(
         JsonSerializerContext context) =>

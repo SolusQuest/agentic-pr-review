@@ -42,6 +42,11 @@ internal static class ActionHostErrorCode
 
 internal static class ActionHostContractBounds
 {
+    private const int MaximumJsonEscapedByteExpansion = 6;
+    private const int MaximumLaunchFramingBytes = 8 * 1024;
+    private const int MaximumLaunchFixedValueBytes =
+        64 + 19 + 19 + 10 + 40 + 40 + 64 + 9;
+
     internal const int MaximumRawInputs = 7;
     internal const int MaximumRawInputNameBytes = 64;
     internal const int MaximumRawInputAggregateBytes = 16 * 1024;
@@ -55,7 +60,17 @@ internal static class ActionHostContractBounds
     internal const int MaximumWorkflowRefBytes = 1024;
     internal const int MaximumBuildDiscriminatorBytes = 128;
     internal const int MaximumBridgeEndpointBytes = 2 * 1024;
-    internal const int MaximumLaunchDocumentBytes = 64 * 1024;
+    internal const int MaximumLaunchDocumentBytes =
+        MaximumJsonEscapedByteExpansion *
+        (MaximumRawInputAggregateBytes +
+            MaximumEventJsonPathBytes +
+            MaximumRepositoryNameBytes +
+            MaximumWorkflowPathBytes +
+            MaximumWorkflowRefBytes +
+            MaximumBuildDiscriminatorBytes +
+            MaximumBridgeEndpointBytes +
+            MaximumLaunchFixedValueBytes) +
+        MaximumLaunchFramingBytes;
     internal const int MaximumCompletionDocumentBytes = 16 * 1024;
     internal const int MaximumPrivateCommandDocumentBytes = 256 * 1024;
     internal const int MaximumPublicationUrlBytes = 2 * 1024;

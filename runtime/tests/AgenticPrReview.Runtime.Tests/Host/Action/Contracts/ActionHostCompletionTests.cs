@@ -284,6 +284,56 @@ public sealed class ActionHostCompletionTests
     }
 
     [Fact]
+    public void EverySuccessStatusRequiresAnExplicitProcessExitCode()
+    {
+        foreach (var status in new[]
+        {
+            ActionHostStatus.Reviewed,
+            ActionHostStatus.ReviewedWithInlineWarnings,
+            ActionHostStatus.SkippedUntrustedEvent,
+            ActionHostStatus.SkippedFork,
+            ActionHostStatus.SkippedDraft,
+            ActionHostStatus.SkippedClosed,
+        })
+        {
+            var reviewed = status is ActionHostStatus.Reviewed or
+                ActionHostStatus.ReviewedWithInlineWarnings;
+            Assert.True(ActionHostStepSummary.TryCreate(
+                reviewed ? ReviewedSha : null,
+                reviewed ? PublicationUrl : null,
+                reviewed ? 1 : null,
+                reviewed
+                    ? ActionHostStateDisposition.Accepted
+                    : ActionHostStateDisposition.NotAccessed,
+                out var summary));
+            Assert.True(ActionHostStatusRules.TryClassify(
+                status,
+                out _,
+                out _,
+                out var annotation));
+            Assert.True(ActionHostCompletion.TryCreate(
+                Build,
+                status,
+                summary,
+                AnnotationList(annotation),
+                out var completion));
+            Assert.True(ActionHostJsonCodec.TryWriteCompletion(
+                completion,
+                out var bytes));
+            var withoutProcessExit = Encoding.UTF8.GetString(bytes).Replace(
+                "\"process_exit_code\":0,",
+                string.Empty,
+                StringComparison.Ordinal);
+
+            Assert.False(ActionHostJsonCodec.TryReadCompletion(
+                Encoding.UTF8.GetBytes(withoutProcessExit),
+                out _,
+                out var error));
+            Assert.Equal(ActionHostContractError.InvalidCompletion, error);
+        }
+    }
+
+    [Fact]
     public void CompletionReaderAcceptsItsOuterCapAndRejectsCapPlusOne()
     {
         var completion = CreateFailure(ActionHostStatus.InternalFailure);

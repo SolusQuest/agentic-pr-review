@@ -22,7 +22,10 @@ internal enum ActionHostInputError
 
 internal readonly record struct ActionHostRawInput(
     string? Name,
-    string? Value);
+    string? Value)
+{
+    public override string ToString() => "[PRIVATE]";
+}
 
 internal abstract class ActionHostOpaqueSecret
 {

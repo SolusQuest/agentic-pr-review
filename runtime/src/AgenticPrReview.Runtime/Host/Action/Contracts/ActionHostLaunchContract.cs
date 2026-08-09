@@ -180,6 +180,8 @@ internal sealed record ActionHostPrivateCommandEnvelope<TCommand>(
 {
     internal ActionHostPrivacyClass Privacy =>
         ActionHostPrivacyClass.PrivateLaunch;
+
+    public override string ToString() => "[PRIVATE]";
 }
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
@@ -191,6 +193,8 @@ internal sealed record ActionHostPrivateCommandResultEnvelope<TResult>(
 {
     internal ActionHostPrivacyClass Privacy =>
         ActionHostPrivacyClass.PrivateLaunch;
+
+    public override string ToString() => "[PRIVATE]";
 }
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]

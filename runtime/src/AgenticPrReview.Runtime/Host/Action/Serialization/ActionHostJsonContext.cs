@@ -14,7 +14,10 @@ internal sealed record ActionHostInputsDocument(
     string? PreviousStateKey,
     string? ConfigPath,
     string? PrNumber,
-    string StateMode);
+    string StateMode)
+{
+    public override string ToString() => "[PRIVATE]";
+}
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 internal sealed record ActionHostLaunchDocument(
@@ -32,7 +35,10 @@ internal sealed record ActionHostLaunchDocument(
     string PayloadSha256,
     string BuildDiscriminator,
     string Cancellation,
-    string ArtifactBridgeEndpoint);
+    string ArtifactBridgeEndpoint)
+{
+    public override string ToString() => "[PRIVATE]";
+}
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 internal sealed record ActionHostStepSummaryDocument(
@@ -52,7 +58,7 @@ internal sealed record ActionHostCompletionDocument(
     string BuildDiscriminator,
     string Status,
     string ExitClass,
-    int ProcessExitCode,
+    int? ProcessExitCode,
     ActionHostStepSummaryDocument Summary,
     ActionHostAnnotationDocument[] Annotations);
 
@@ -229,6 +235,7 @@ internal static class ActionHostJsonCodec
                 stateDisposition,
                 out var summary) ||
             !TryMapAnnotations(document.Annotations, out var annotations) ||
+            document.ProcessExitCode is not { } wireProcessExitCode ||
             !ActionHostCompletion.TryCreate(
                 document.BuildDiscriminator,
                 status,
@@ -236,7 +243,7 @@ internal static class ActionHostJsonCodec
                 annotations,
                 out completion) ||
             completion!.ExitClass != wireExitClass ||
-            completion.ProcessExitCode != document.ProcessExitCode)
+            completion.ProcessExitCode != wireProcessExitCode)
         {
             completion = null;
             return false;
@@ -278,7 +285,7 @@ internal static class ActionHostJsonCodec
                 typeInfo,
                 out ActionHostPrivateCommandEnvelope<
                     ActionHostNoPrivateCommandDocument>? document) &&
-            document.Payload is null;
+            document is { Payload: null };
     }
 
     internal static bool TryWriteNoPrivateCommandResult(
@@ -313,7 +320,7 @@ internal static class ActionHostJsonCodec
                 typeInfo,
                 out ActionHostPrivateCommandResultEnvelope<
                     ActionHostNoPrivateCommandResultDocument>? document) &&
-            document.Payload is null;
+            document is { Payload: null };
     }
 
     private static ActionHostInputsDocument InputsDocument(
