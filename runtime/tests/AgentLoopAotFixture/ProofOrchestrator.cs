@@ -54,7 +54,7 @@ internal static class ProofOrchestrator
                 AgentSessionHeadTransition.SameHead,
                 SyntheticContinuationCodec.Instance,
                 null));
-        var restored = service.Restore(
+        var restored = await service.RestoreAsync(
             access,
             new RestrictedStateRestoreRequest(
                 RestrictedStateLocatorFamily.Absent,
@@ -167,7 +167,7 @@ internal static class ProofOrchestrator
             built.Artifact,
             identity,
             AgentSessionHeadTransition.SameHead);
-        var prepared = service.Prepare(
+        var prepared = await service.PrepareAsync(
             access,
             new RestrictedStatePrepareRequest(
                 null,
@@ -186,7 +186,7 @@ internal static class ProofOrchestrator
             return Fail();
         }
 
-        var accepted = service.Accept(
+        var accepted = await service.AcceptAsync(
             access,
             null,
             prepared.Receipt,
@@ -305,7 +305,7 @@ internal static class ProofOrchestrator
                 AgentSessionHeadTransition.VerifiedAhead,
                 SyntheticContinuationCodec.Instance,
                 null));
-        var restored = service.Restore(
+        var restored = await service.RestoreAsync(
             access,
             new RestrictedStateRestoreRequest(
                 RestrictedStateLocatorFamily.Current,
@@ -391,7 +391,7 @@ internal static class ProofOrchestrator
             built.Artifact,
             identity,
             AgentSessionHeadTransition.VerifiedAhead);
-        var prepared = service.Prepare(
+        var prepared = await service.PrepareAsync(
             access,
             new RestrictedStatePrepareRequest(
                 lineage,
@@ -410,7 +410,7 @@ internal static class ProofOrchestrator
             return Fail();
         }
 
-        var accepted = service.Accept(
+        var accepted = await service.AcceptAsync(
             access,
             lineage,
             prepared.Receipt,

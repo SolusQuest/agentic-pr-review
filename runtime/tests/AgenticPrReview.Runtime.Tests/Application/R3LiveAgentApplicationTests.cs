@@ -680,7 +680,7 @@ public sealed partial class R3LiveAgentApplicationTests
                 stateKeys!,
                 new AgentSessionRestrictedStateAdmission(),
                 () => now);
-            var prepared = service.Prepare(
+            var prepared = await service.PrepareAsync(
                 firstAccess,
                 new RestrictedStatePrepareRequest(
                     Lineage: null,
@@ -690,7 +690,7 @@ public sealed partial class R3LiveAgentApplicationTests
             Assert.Equal(StateAction.Prepared, prepared.Result.Action);
             var receipt = Assert.IsType<PreparedStateReceipt>(
                 prepared.Receipt);
-            var accepted = service.Accept(
+            var accepted = await service.AcceptAsync(
                 firstAccess,
                 lineage: null,
                 receipt,
@@ -728,7 +728,7 @@ public sealed partial class R3LiveAgentApplicationTests
                 RestrictedStateRestoreIntent.Explicit,
                 lineage,
                 nextContext);
-            var expected = service.Restore(
+            var expected = await service.RestoreAsync(
                 firstAccess,
                 restoreRequest,
                 CancellationToken.None);
@@ -1024,14 +1024,14 @@ public sealed partial class R3LiveAgentApplicationTests
     {
         var json = string.Concat(
             "{\"choices\":[{\"index\":0,\"message\":{\"role\":" +
-            "\"assistant\",\"content\":\"\",\"reasoning_content\":" ,
+            "\"assistant\",\"content\":\"\",\"reasoning_content\":",
             JsonSerializer.Serialize(reasoning),
             ",\"tool_calls\":[{\"id\":\"call_",
             name,
             callSuffix,
-            "\",\"type\":\"function\",\"function\":{\"name\":" ,
+            "\",\"type\":\"function\",\"function\":{\"name\":",
             JsonSerializer.Serialize(name),
-            ",\"arguments\":" ,
+            ",\"arguments\":",
             JsonSerializer.Serialize(arguments),
             "}}]},\"finish_reason\":\"tool_calls\"}]," +
             "\"model\":\"deepseek-v4-flash\",\"usage\":{" +
@@ -1062,7 +1062,7 @@ public sealed partial class R3LiveAgentApplicationTests
 
         internal AuthorizedStateAccess? Access { get; private set; }
 
-        public LiveAgentStateCommitResult Commit(
+        public Task<LiveAgentStateCommitResult> CommitAsync(
             LiveAgentCandidate candidate,
             AuthorizedStateAccess access,
             AcceptedLineage? priorLineage,
@@ -1074,19 +1074,19 @@ public sealed partial class R3LiveAgentApplicationTests
             CallCount++;
             Candidate = candidate;
             Access = access;
-            return new LiveAgentStateCommitResult(
+            return Task.FromResult(new LiveAgentStateCommitResult(
                 R3LiveAgentCodes.Completed,
                 0,
                 new string('c', 64),
                 new string('d', 64),
-                handoffReady: true);
+                handoffReady: true));
         }
     }
 
     private sealed class ControlledStateCommitCoordinator(string failureMode)
         : ILiveAgentStateCommitCoordinator
     {
-        public LiveAgentStateCommitResult Commit(
+        public Task<LiveAgentStateCommitResult> CommitAsync(
             LiveAgentCandidate candidate,
             AuthorizedStateAccess access,
             AcceptedLineage? priorLineage,
@@ -1095,19 +1095,23 @@ public sealed partial class R3LiveAgentApplicationTests
             IRestrictedStateKeyResolver keyResolver,
             CancellationToken cancellationToken) => failureMode switch
             {
-                "commit_result" => LiveAgentStateCommitResult.Failure(
-                    AgentSessionCodes.RecordInvalid),
-                "commit_exception" => throw new InvalidOperationException(
-                    "synthetic commit failure"),
+                "commit_result" => Task.FromResult(
+                    LiveAgentStateCommitResult.Failure(
+                        AgentSessionCodes.RecordInvalid)),
+                "commit_exception" => Task.FromException<
+                    LiveAgentStateCommitResult>(
+                        new InvalidOperationException(
+                            "synthetic commit failure")),
                 "result_projection_exception" =>
-                    new LiveAgentStateCommitResult(
-                        R3LiveAgentCodes.Completed,
-                        0,
-                        new string('c', 64),
-                        new string('d', 64),
-                        handoffReady: true),
-                _ => throw new InvalidOperationException(
-                    "Unknown controlled commit mode."),
+                    Task.FromResult(new LiveAgentStateCommitResult(
+                            R3LiveAgentCodes.Completed,
+                            0,
+                            new string('c', 64),
+                            new string('d', 64),
+                            handoffReady: true)),
+                _ => Task.FromException<LiveAgentStateCommitResult>(
+                    new InvalidOperationException(
+                        "Unknown controlled commit mode.")),
             };
     }
 
@@ -1258,7 +1262,7 @@ public sealed partial class R3LiveAgentApplicationTests
     {
         internal int CallCount { get; private set; }
 
-        public RestrictedStateRestoreResult Restore(
+        public Task<RestrictedStateRestoreResult> RestoreAsync(
             string stateRoot,
             IRestrictedStateKeyResolver keyResolver,
             AuthorizedStateAccess access,
@@ -1267,7 +1271,7 @@ public sealed partial class R3LiveAgentApplicationTests
             CancellationToken cancellationToken)
         {
             CallCount++;
-            return result;
+            return Task.FromResult(result);
         }
     }
 
@@ -1275,7 +1279,7 @@ public sealed partial class R3LiveAgentApplicationTests
     {
         internal int CallCount { get; private set; }
 
-        public RestrictedStateRestoreResult Restore(
+        public Task<RestrictedStateRestoreResult> RestoreAsync(
             string stateRoot,
             IRestrictedStateKeyResolver keyResolver,
             AuthorizedStateAccess access,
@@ -1284,7 +1288,8 @@ public sealed partial class R3LiveAgentApplicationTests
             CancellationToken cancellationToken)
         {
             CallCount++;
-            throw new InvalidOperationException();
+            return Task.FromException<RestrictedStateRestoreResult>(
+                new InvalidOperationException());
         }
     }
 

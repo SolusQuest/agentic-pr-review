@@ -7,6 +7,7 @@ using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Host.State;
+using AgenticPrReview.Runtime.Host.State.RestrictedStateTransactions;
 
 namespace AgenticPrReview.Runtime.AgentLoopAotFixture;
 
@@ -51,46 +52,46 @@ internal static class StateNegativeProofRunner
     {
         return command.Case switch
         {
-            "head-same" => RestoreTransition(
+            "head-same" => await RestoreTransitionAsync(
                 command,
                 ProofScenario.BootstrapIdentity(),
                 AgentSessionHeadTransition.SameHead,
                 shouldRestore: true),
-            "head-unknown" => RestoreTransition(
+            "head-unknown" => await RestoreTransitionAsync(
                 command,
                 ProofScenario.ContinueIdentity(),
                 AgentSessionHeadTransition.Unknown,
                 shouldRestore: false),
-            "head-diverged" => RestoreTransition(
+            "head-diverged" => await RestoreTransitionAsync(
                 command,
                 ProofScenario.ContinueIdentity(),
                 AgentSessionHeadTransition.Diverged,
                 shouldRestore: false),
-            "head-unrelated" => RestoreTransition(
+            "head-unrelated" => await RestoreTransitionAsync(
                 command,
                 ProofScenario.ContinueIdentity(),
                 AgentSessionHeadTransition.Unrelated,
                 shouldRestore: false),
-            "state-no-lineage" => RestoreDefect(
+            "state-no-lineage" => await RestoreDefectAsync(
                 command,
                 noLineage: true,
                 invalidAssociation: false,
                 invalidClassification: false,
                 stale: false),
             "state-classification-invalid" =>
-                RestoreSessionDefect(command, invalidClassification: true),
+                await RestoreSessionDefectAsync(command, invalidClassification: true),
             "state-association-invalid" =>
-                RestoreSessionDefect(command, invalidClassification: false),
-            "state-stale-replay" => RestoreDefect(
+                await RestoreSessionDefectAsync(command, invalidClassification: false),
+            "state-stale-replay" => await RestoreDefectAsync(
                 command,
                 noLineage: false,
                 invalidAssociation: false,
                 invalidClassification: false,
                 stale: true),
-            "state-cross-scope" => EnvelopeCrossScope(command),
+            "state-cross-scope" => await EnvelopeCrossScopeAsync(command),
             "state-oversize" => EnvelopeOversize(),
             "state-old-format-disguise" =>
-                RestoreEnvelopeMutation(command, command.Case!),
+                await RestoreEnvelopeMutationAsync(command, command.Case!),
             "state-accepted-newer-present" =>
                 await AcceptedNewerPresentAsync(command),
             "state-accepted-newer-hidden" =>
@@ -100,11 +101,11 @@ internal static class StateNegativeProofRunner
             "state-randomized-envelope-conflict" =>
                 await RandomizedEnvelopeConflictAsync(command),
             "state-cleanup-failure" => await CleanupFailureAsync(command),
-            "state-capacity-limit" => StateCapacity(command),
+            "state-capacity-limit" => await StateCapacityAsync(command),
             "session-construction-limit" =>
                 await SessionConstructionLimitAsync(),
             "continuation-limit" => await ContinuationLimitAsync(),
-            _ => RestoreEnvelopeMutation(command, command.Case!),
+            _ => await RestoreEnvelopeMutationAsync(command, command.Case!),
         };
     }
 
@@ -117,7 +118,7 @@ internal static class StateNegativeProofRunner
             return false;
         }
 
-        var accepted = prepared.Service.Accept(
+        var accepted = await prepared.Service.AcceptAsync(
             prepared.Access,
             prepared.Lineage,
             prepared.Receipt,
@@ -129,7 +130,7 @@ internal static class StateNegativeProofRunner
             return false;
         }
 
-        var replay = prepared.Service.Restore(
+        var replay = await prepared.Service.RestoreAsync(
             prepared.Access,
             new RestrictedStateRestoreRequest(
                 RestrictedStateLocatorFamily.Current,
@@ -153,7 +154,7 @@ internal static class StateNegativeProofRunner
             return false;
         }
 
-        var accepted = prepared.Service.Accept(
+        var accepted = await prepared.Service.AcceptAsync(
             prepared.Access,
             prepared.Lineage,
             prepared.Receipt,
@@ -169,7 +170,7 @@ internal static class StateNegativeProofRunner
 
         var local = new LocalRestrictedStateStore(
             ProofPaths.StateRoot(command));
-        var read = local.Read(
+        var read = await ProofOpaqueState.ReadAsync(local,
             prepared.Access,
             CancellationToken.None);
         var older = read.Snapshot?.Accepted.FirstOrDefault(
@@ -181,7 +182,7 @@ internal static class StateNegativeProofRunner
             return false;
         }
 
-        var hidden = local.CompareExchange(
+        var hidden = await ProofOpaqueState.CompareExchangeAsync(local,
             prepared.Access,
             read.Version!,
             new RestrictedStateSnapshot([older], null),
@@ -201,7 +202,7 @@ internal static class StateNegativeProofRunner
             ProofScenario.Now +
                 RestrictedStateFormat.MaximumRetentionSeconds,
             TransitionAuthorized: true);
-        var missing = prepared.Service.Restore(
+        var missing = await prepared.Service.RestoreAsync(
             prepared.Access,
             new RestrictedStateRestoreRequest(
                 RestrictedStateLocatorFamily.Current,
@@ -227,18 +228,18 @@ internal static class StateNegativeProofRunner
 
         var local = new LocalRestrictedStateStore(
             ProofPaths.StateRoot(command));
-        var before = local.Read(
+        var before = (await ProofOpaqueState.ReadAsync(local,
             prepared.Access,
-            CancellationToken.None).Snapshot?.Staging;
-        var reconciled = prepared.Service.Reconcile(
+            CancellationToken.None)).Snapshot?.Staging;
+        var reconciled = await prepared.Service.ReconcileAsync(
             prepared.Access,
             prepared.Lineage,
             prepared.Receipt,
             prepared.Context,
             CancellationToken.None);
-        var after = local.Read(
+        var after = (await ProofOpaqueState.ReadAsync(local,
             prepared.Access,
-            CancellationToken.None).Snapshot?.Staging;
+            CancellationToken.None)).Snapshot?.Staging;
         return before is not null &&
             after is not null &&
             reconciled.Action == StateAction.Idempotent &&
@@ -262,9 +263,9 @@ internal static class StateNegativeProofRunner
 
         var local = new LocalRestrictedStateStore(
             ProofPaths.StateRoot(command));
-        var staging = local.Read(
+        var staging = (await ProofOpaqueState.ReadAsync(local,
             prepared.Access,
-            CancellationToken.None).Snapshot?.Staging;
+            CancellationToken.None)).Snapshot?.Staging;
         var keys = new SyntheticStateKeyResolver("issue88-proof");
         if (staging is null ||
             !RestrictedStateEnvelope.TryEncrypt(
@@ -296,7 +297,7 @@ internal static class StateNegativeProofRunner
             return false;
         }
 
-        var conflict = prepared.Service.Accept(
+        var conflict = await prepared.Service.AcceptAsync(
             prepared.Access,
             prepared.Lineage,
             new PreparedStateReceipt(
@@ -322,7 +323,8 @@ internal static class StateNegativeProofRunner
 
         var local = new LocalRestrictedStateStore(
             ProofPaths.StateRoot(command));
-        var before = local.Read(
+        var coordinator = ProofOpaqueState.Coordinator(local);
+        var before = await ProofOpaqueState.ReadAsync(local,
             prepared.Access,
             CancellationToken.None);
         if (!before.Succeeded ||
@@ -334,19 +336,19 @@ internal static class StateNegativeProofRunner
             return false;
         }
 
-        var failingStore = new CleanupFailureStore(local);
+        var failingStore = new CleanupFailureStore(coordinator);
         var failingService = new RestrictedStateService(
             failingStore,
             new SyntheticStateKeyResolver("issue88-proof"),
             new AgentSessionRestrictedStateAdmission(),
             () => ProofScenario.Now);
-        var result = failingService.Accept(
+        var result = await failingService.AcceptAsync(
             prepared.Access,
             prepared.Lineage,
             prepared.Receipt,
             prepared.Context,
             CancellationToken.None);
-        var after = local.Read(
+        var after = await ProofOpaqueState.ReadAsync(local,
             prepared.Access,
             CancellationToken.None);
         if (result.Action != StateAction.Failed ||
@@ -369,11 +371,11 @@ internal static class StateNegativeProofRunner
             return false;
         }
 
-        var restore = new RestrictedStateService(
+        var restore = await new RestrictedStateService(
             local,
             new SyntheticStateKeyResolver("issue88-proof"),
             new AgentSessionRestrictedStateAdmission(),
-            () => ProofScenario.Now).Restore(
+            () => ProofScenario.Now).RestoreAsync(
                 prepared.Access,
                 new RestrictedStateRestoreRequest(
                     RestrictedStateLocatorFamily.Current,
@@ -415,7 +417,7 @@ internal static class StateNegativeProofRunner
             identity,
             AgentSessionHeadTransition.VerifiedAhead,
             envelopeSha256: null);
-        var restored = service!.Restore(
+        var restored = await service!.RestoreAsync(
             access!,
             new RestrictedStateRestoreRequest(
                 RestrictedStateLocatorFamily.Current,
@@ -477,7 +479,7 @@ internal static class StateNegativeProofRunner
             built.Artifact,
             identity,
             AgentSessionHeadTransition.VerifiedAhead);
-        var prepared = service.Prepare(
+        var prepared = await service.PrepareAsync(
             access!,
             new RestrictedStatePrepareRequest(
                 lineage,
@@ -499,7 +501,7 @@ internal static class StateNegativeProofRunner
             prepared.Receipt);
     }
 
-    private static bool RestoreTransition(
+    private static async Task<bool> RestoreTransitionAsync(
         ProofCommand command,
         ReviewedIdentity current,
         AgentSessionHeadTransition transition,
@@ -521,7 +523,7 @@ internal static class StateNegativeProofRunner
             current,
             transition,
             envelopeSha256: null);
-        var result = service!.Restore(
+        var result = await service!.RestoreAsync(
             access!,
             new RestrictedStateRestoreRequest(
                 RestrictedStateLocatorFamily.Current,
@@ -540,7 +542,7 @@ internal static class StateNegativeProofRunner
                 admission!.Calls == 1;
     }
 
-    private static bool RestoreDefect(
+    private static async Task<bool> RestoreDefectAsync(
         ProofCommand command,
         bool noLineage,
         bool invalidAssociation,
@@ -581,7 +583,7 @@ internal static class StateNegativeProofRunner
             AgentSessionHeadTransition.VerifiedAhead,
             envelopeSha256: null);
 
-        var result = service!.Restore(
+        var result = await service!.RestoreAsync(
             access!,
             new RestrictedStateRestoreRequest(
                 invalidClassification
@@ -595,7 +597,7 @@ internal static class StateNegativeProofRunner
             result.Session is null;
     }
 
-    private static bool RestoreSessionDefect(
+    private static async Task<bool> RestoreSessionDefectAsync(
         ProofCommand command,
         bool invalidClassification)
     {
@@ -612,7 +614,7 @@ internal static class StateNegativeProofRunner
 
         var local = new LocalRestrictedStateStore(
             ProofPaths.StateRoot(command));
-        var read = local.Read(access!, CancellationToken.None);
+        var read = await ProofOpaqueState.ReadAsync(local, access!, CancellationToken.None);
         var current = read.Snapshot?.Accepted.FirstOrDefault();
         var lineageBytes = File.ReadAllBytes(ProofPaths.Lineage(command));
         var keys = new SyntheticStateKeyResolver("issue88-proof");
@@ -715,7 +717,7 @@ internal static class StateNegativeProofRunner
         {
             Accepted = read.Snapshot.Accepted.SetItem(0, invalidCandidate),
         };
-        var injected = local.CompareExchange(
+        var injected = await ProofOpaqueState.CompareExchangeAsync(local,
             access!,
             read.Version,
             replacement,
@@ -730,7 +732,7 @@ internal static class StateNegativeProofRunner
             ProofScenario.ContinueIdentity(),
             AgentSessionHeadTransition.VerifiedAhead,
             envelopeSha256: null);
-        var result = service!.Restore(
+        var result = await service!.RestoreAsync(
             access!,
             new RestrictedStateRestoreRequest(
                 RestrictedStateLocatorFamily.Current,
@@ -738,7 +740,7 @@ internal static class StateNegativeProofRunner
                 lineage,
                 context),
             CancellationToken.None);
-        var after = local.Read(access!, CancellationToken.None);
+        var after = await ProofOpaqueState.ReadAsync(local, access!, CancellationToken.None);
         return result.Result.Action == StateAction.Failed &&
             StringComparer.Ordinal.Equals(
                 result.Result.Code,
@@ -772,7 +774,7 @@ internal static class StateNegativeProofRunner
             _ => throw new InvalidOperationException(),
         };
 
-    private static bool RestoreEnvelopeMutation(
+    private static async Task<bool> RestoreEnvelopeMutationAsync(
         ProofCommand command,
         string @case)
     {
@@ -789,7 +791,7 @@ internal static class StateNegativeProofRunner
 
         var local = new LocalRestrictedStateStore(
             ProofPaths.StateRoot(command));
-        var read = local.Read(access!, CancellationToken.None);
+        var read = await ProofOpaqueState.ReadAsync(local, access!, CancellationToken.None);
         var candidate = read.Snapshot?.Accepted.FirstOrDefault();
         var lineageBytes = File.ReadAllBytes(ProofPaths.Lineage(command));
         if (!read.Succeeded ||
@@ -874,7 +876,7 @@ internal static class StateNegativeProofRunner
         {
             Accepted = read.Snapshot.Accepted.SetItem(0, invalidCandidate),
         };
-        var injected = local.CompareExchange(
+        var injected = await ProofOpaqueState.CompareExchangeAsync(local,
             access!,
             read.Version,
             replacement,
@@ -884,7 +886,7 @@ internal static class StateNegativeProofRunner
             return false;
         }
 
-        var result = service!.Restore(
+        var result = await service!.RestoreAsync(
             access!,
             new RestrictedStateRestoreRequest(
                 RestrictedStateLocatorFamily.Current,
@@ -896,7 +898,7 @@ internal static class StateNegativeProofRunner
                     AgentSessionHeadTransition.VerifiedAhead,
                     envelopeSha256: null)),
             CancellationToken.None);
-        var after = local.Read(access!, CancellationToken.None);
+        var after = await ProofOpaqueState.ReadAsync(local, access!, CancellationToken.None);
         var expectedCode = @case switch
         {
             "state-tamper" => RestrictedStateCodes.AuthenticationFailed,
@@ -920,12 +922,27 @@ internal static class StateNegativeProofRunner
                 .SequenceEqual(lineageBytes);
     }
 
-    private static bool EnvelopeCrossScope(ProofCommand command)
+    private static async Task<bool> EnvelopeCrossScopeAsync(
+        ProofCommand command)
     {
-        if (!TryCandidate(
-                command,
-                out var access,
-                out var candidate))
+        var authorization = ProofState.Authorize(
+            trusted: true,
+            sameRepository: true,
+            fork: false,
+            out var access);
+        if (authorization.Action != StateAction.Authorized || access is null)
+        {
+            return false;
+        }
+
+        var local = new LocalRestrictedStateStore(
+            ProofPaths.StateRoot(command));
+        var read = await ProofOpaqueState.ReadAsync(
+            local,
+            access,
+            CancellationToken.None);
+        var candidate = read.Snapshot?.Accepted.FirstOrDefault();
+        if (!read.Succeeded || candidate is null)
         {
             return false;
         }
@@ -939,7 +956,7 @@ internal static class StateNegativeProofRunner
         };
         var keys = new SyntheticStateKeyResolver("issue88-proof");
         return !RestrictedStateEnvelope.TryDecrypt(
-                access!,
+                access,
                 binding,
                 candidate.Envelope,
                 keys,
@@ -958,7 +975,7 @@ internal static class StateNegativeProofRunner
         return !RestrictedStateEnvelope.TryParse(bytes, out _);
     }
 
-    private static bool StateCapacity(ProofCommand command)
+    private static async Task<bool> StateCapacityAsync(ProofCommand command)
     {
         var authorization = ProofState.Authorize(
             trusted: true,
@@ -973,7 +990,7 @@ internal static class StateNegativeProofRunner
 
         var local = new LocalRestrictedStateStore(
             ProofPaths.StateRoot(command));
-        var read = local.Read(access, CancellationToken.None);
+        var read = await ProofOpaqueState.ReadAsync(local, access, CancellationToken.None);
         var candidate = read.Snapshot?.Accepted.FirstOrDefault();
         if (!read.Succeeded ||
             read.Version is null ||
@@ -985,7 +1002,7 @@ internal static class StateNegativeProofRunner
         var overCapacity = new RestrictedStateSnapshot(
             [candidate, candidate, candidate],
             null);
-        var rejectedWrite = local.CompareExchange(
+        var rejectedWrite = await ProofOpaqueState.CompareExchangeAsync(local,
             access,
             read.Version,
             overCapacity,
@@ -1002,15 +1019,18 @@ internal static class StateNegativeProofRunner
             new SyntheticStateKeyResolver("issue88-proof"),
             new AgentSessionRestrictedStateAdmission(),
             () => ProofScenario.Now);
-        var result = service.Enumerate(access, CancellationToken.None);
+        var result = await service.EnumerateAsync(access, CancellationToken.None);
+        var persisted = await ProofOpaqueState.ReadAsync(
+            local,
+            access,
+            CancellationToken.None);
         return result.Result.Action == StateAction.Failed &&
             StringComparer.Ordinal.Equals(
                 result.Result.Code,
                 RestrictedStateCodes.EnumerationInvalid) &&
             result.Candidates.IsEmpty &&
             store.ReadCalls == 1 &&
-            local.Read(access, CancellationToken.None).Version?.Sha256 ==
-                read.Version.Sha256;
+            persisted.Version?.Sha256 == read.Version.Sha256;
     }
 
     private static async Task<bool> ContinuationLimitAsync()
@@ -1169,31 +1189,6 @@ internal static class StateNegativeProofRunner
         return true;
     }
 
-    private static bool TryCandidate(
-        ProofCommand command,
-        out AuthorizedStateAccess? access,
-        out RestrictedStateCandidate? candidate)
-    {
-        candidate = null;
-        var authorization = ProofState.Authorize(
-            trusted: true,
-            sameRepository: true,
-            fork: false,
-            out access);
-        if (authorization.Action != StateAction.Authorized ||
-            access is null)
-        {
-            return false;
-        }
-
-        var read = new LocalRestrictedStateStore(
-            ProofPaths.StateRoot(command)).Read(
-                access,
-                CancellationToken.None);
-        candidate = read.Snapshot?.Accepted.FirstOrDefault();
-        return read.Succeeded && candidate is not null;
-    }
-
     private static RestrictedStateSessionAdmissionContext Context(
         AcceptedLineage lineage,
         ReviewedIdentity current,
@@ -1258,85 +1253,87 @@ internal static class StateNegativeProofRunner
         PreparedStateReceipt Receipt);
 
     private sealed class CleanupFailureStore(
-        IRestrictedStateStore inner) : IRestrictedStateStore
+        RestrictedStateOpaqueSnapshotStore inner)
+        : RestrictedStateOpaqueSnapshotStore
     {
         internal int AcceptWrites { get; private set; }
 
-        public RestrictedStateStoreRead Read(
+        internal override Task<RestrictedStateStoreRead> ReadAsync(
             AuthorizedStateAccess access,
             CancellationToken cancellationToken) =>
-            inner.Read(access, cancellationToken);
+            inner.ReadAsync(access, cancellationToken);
 
-        public RestrictedStateStoreRawRead ReadRawVersion(
+        internal override Task<RestrictedStateStoreRawRead> ReadRawVersionAsync(
             AuthorizedStateAccess access,
             CancellationToken cancellationToken) =>
-            inner.ReadRawVersion(access, cancellationToken);
+            inner.ReadRawVersionAsync(access, cancellationToken);
 
-        public RestrictedStateStoreWrite CompareExchange(
+        internal override Task<RestrictedStateStoreWrite> CompareExchangeAsync(
             AuthorizedStateAccess access,
             RestrictedStateSnapshotVersion expected,
             RestrictedStateSnapshot replacement,
             CancellationToken cancellationToken)
         {
             AcceptWrites++;
-            return new RestrictedStateStoreWrite(
+            return Task.FromResult(new RestrictedStateStoreWrite(
                 RestrictedStateStoreFailure.Cleanup,
                 Version: null,
-                Committed: false);
+                Committed: false));
         }
 
-        public RestrictedStateStoreWrite CompareDelete(
+        internal override Task<RestrictedStateStoreWrite> CompareDeleteAsync(
             AuthorizedStateAccess access,
             RestrictedStateSnapshotVersion expected,
             CancellationToken cancellationToken) =>
-            inner.CompareDelete(access, expected, cancellationToken);
+            inner.CompareDeleteAsync(access, expected, cancellationToken);
 
-        public RestrictedStateStoreWrite CompareDeleteRaw(
+        internal override Task<RestrictedStateStoreWrite> CompareDeleteRawAsync(
             AuthorizedStateAccess access,
             RestrictedStateRawVersion expected,
             CancellationToken cancellationToken) =>
-            inner.CompareDeleteRaw(access, expected, cancellationToken);
+            inner.CompareDeleteRawAsync(access, expected, cancellationToken);
     }
 
     private sealed class FixedSnapshotStore(
-        RestrictedStateSnapshot snapshot) : IRestrictedStateStore
+        RestrictedStateSnapshot snapshot)
+        : RestrictedStateOpaqueSnapshotStore
     {
         internal int ReadCalls { get; private set; }
 
-        public RestrictedStateStoreRead Read(
+        internal override Task<RestrictedStateStoreRead> ReadAsync(
             AuthorizedStateAccess access,
             CancellationToken cancellationToken)
         {
             ReadCalls++;
-            return new RestrictedStateStoreRead(
+            return Task.FromResult(new RestrictedStateStoreRead(
                 RestrictedStateStoreFailure.None,
                 snapshot,
                 new RestrictedStateSnapshotVersion(
                     new string('0', 64),
-                    Exists: true));
+                    Exists: true)));
         }
 
-        public RestrictedStateStoreRawRead ReadRawVersion(
+        internal override Task<RestrictedStateStoreRawRead> ReadRawVersionAsync(
             AuthorizedStateAccess access,
             CancellationToken cancellationToken) =>
-            new(
+            Task.FromResult(new RestrictedStateStoreRawRead(
                 RestrictedStateStoreFailure.None,
-                RestrictedStateRawVersion.Absent);
+                RestrictedStateRawVersion.Absent));
 
-        public RestrictedStateStoreWrite CompareExchange(
+        internal override Task<RestrictedStateStoreWrite> CompareExchangeAsync(
             AuthorizedStateAccess access,
             RestrictedStateSnapshotVersion expected,
             RestrictedStateSnapshot replacement,
             CancellationToken cancellationToken) =>
             throw new InvalidOperationException();
 
-        public RestrictedStateStoreWrite CompareDelete(
+        internal override Task<RestrictedStateStoreWrite> CompareDeleteAsync(
             AuthorizedStateAccess access,
             RestrictedStateSnapshotVersion expected,
             CancellationToken cancellationToken) =>
             throw new InvalidOperationException();
 
-        public RestrictedStateStoreWrite CompareDeleteRaw(
+        internal override Task<RestrictedStateStoreWrite> CompareDeleteRawAsync(
             AuthorizedStateAccess access,
             RestrictedStateRawVersion expected,
             CancellationToken cancellationToken) =>

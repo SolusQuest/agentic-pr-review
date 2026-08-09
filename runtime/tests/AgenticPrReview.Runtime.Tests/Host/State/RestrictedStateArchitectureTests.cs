@@ -1,7 +1,10 @@
 using System.Reflection;
+using System.Reflection.Emit;
 using System.Runtime.InteropServices;
 using AgenticPrReview.Runtime;
+using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Host.State;
+using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 
 namespace AgenticPrReview.Runtime.Tests.Host.State;
 
@@ -44,11 +47,11 @@ public sealed class RestrictedStateArchitectureTests
 
         var constructor = Assert.Single(constructors);
         Assert.True(constructor.IsPrivate);
-        Assert.All(
-            typeof(IRestrictedStateStore).GetMethods(),
-            method => Assert.Equal(
-                typeof(AuthorizedStateAccess),
-                method.GetParameters()[0].ParameterType));
+        Assert.DoesNotContain(
+            typeof(IRestrictedStateStore).GetMethods()
+                .SelectMany(method => method.GetParameters()),
+            parameter => ReferencedTypes(parameter.ParameterType)
+                .Contains(typeof(AuthorizedStateAccess)));
         Assert.All(
             typeof(IRestrictedStateKeyResolver).GetMethods(),
             method => Assert.Equal(
@@ -66,14 +69,14 @@ public sealed class RestrictedStateArchitectureTests
                 BindingFlags.DeclaredOnly)
             .Where(method => new[]
             {
-                "Enumerate",
-                "Prepare",
-                "Restore",
-                "Accept",
-                "Reconcile",
-                "Reset",
-                "CleanupExpired",
-                "PrepareHandoff",
+                "EnumerateAsync",
+                "PrepareAsync",
+                "RestoreAsync",
+                "AcceptAsync",
+                "ReconcileAsync",
+                "ResetAsync",
+                "CleanupExpiredAsync",
+                "PrepareHandoffAsync",
             }.Contains(method.Name, StringComparer.Ordinal))
             .OrderBy(method => method.Name, StringComparer.Ordinal)
             .ToArray();
@@ -83,6 +86,93 @@ public sealed class RestrictedStateArchitectureTests
             method => Assert.Equal(
                 typeof(AuthorizedStateAccess),
                 method.GetParameters()[0].ParameterType));
+    }
+
+    [Fact]
+    public void OpaqueStoreBoundaryIsInternalAndExactlySixAsyncOperations()
+    {
+        var store = typeof(IRestrictedStateStore);
+        Assert.True(store.IsNotPublic);
+        Assert.Equal(
+            AgentLimits.StateEnvelopeBytes,
+            OpaqueStoreLimits.MaximumObjectBytes);
+        var methods = store.GetMethods()
+            .OrderBy(method => method.Name, StringComparer.Ordinal)
+            .ToArray();
+        Assert.Equal(
+            new[]
+            {
+                "DeleteExactAsync",
+                "DownloadAsync",
+                "ListExactAsync",
+                "ReadBackExactAsync",
+                "ReadMetadataAsync",
+                "UploadImmutableAsync",
+            },
+            methods.Select(method => method.Name));
+        Assert.All(methods, method =>
+        {
+            Assert.Equal(2, method.GetParameters().Length);
+            Assert.Equal(
+                typeof(CancellationToken),
+                method.GetParameters()[1].ParameterType);
+            Assert.True(method.ReturnType.IsGenericType);
+            Assert.Equal(typeof(Task<>), method.ReturnType.GetGenericTypeDefinition());
+            Assert.EndsWith("Request", method.GetParameters()[0].ParameterType.Name);
+            Assert.EndsWith(
+                "Result",
+                method.ReturnType.GetGenericArguments()[0].Name);
+        });
+
+        var contractTypes = store.Assembly.GetTypes()
+            .Where(type => type.Namespace ==
+                "AgenticPrReview.Runtime.Host.State.OpaqueStore")
+            .ToArray();
+        Assert.NotEmpty(contractTypes);
+        Assert.All(contractTypes, type => Assert.False(type.IsPublic));
+        Assert.DoesNotContain(
+            contractTypes.SelectMany(ReferencedTypes),
+            IsForbiddenAdapterType);
+    }
+
+    [Fact]
+    public void LocalAdapterSignaturesAndAsyncBodiesRemainTransportOnly()
+    {
+        var roots = ExpandNestedTypes(
+            typeof(IRestrictedStateStore).Assembly.GetTypes()
+                .Where(type => type.Namespace ==
+                    "AgenticPrReview.Runtime.Host.State.OpaqueStore")
+                .Concat(new[]
+                {
+                    typeof(LocalRestrictedStateStore),
+                    typeof(LocalOpaqueStoreOperation),
+                    typeof(LocalOpaqueStoreRead),
+                    typeof(LocalOpaqueStoreRecordCodec),
+                    typeof(NativeRestrictedStateFiles),
+                    typeof(RestrictedStateFileIdentity),
+                    typeof(RestrictedStateRootEntry),
+                    typeof(RestrictedStateOpenResult),
+                })).ToArray();
+
+        var referenced = roots
+            .SelectMany(ReferencedTypes)
+            .Concat(roots.SelectMany(ReferencedBodyTypes))
+            .Distinct()
+            .ToArray();
+        Assert.DoesNotContain(referenced, IsForbiddenAdapterType);
+    }
+
+    [Fact]
+    public async Task IlScannerFindsForbiddenReferenceInsideAsyncMoveNext()
+    {
+        await ForbiddenAsyncFixture.RunAsync();
+        var roots = ExpandNestedTypes(new[]
+        {
+            typeof(ForbiddenAsyncFixture),
+        });
+        Assert.Contains(
+            roots.SelectMany(ReferencedBodyTypes),
+            type => type == typeof(RestrictedStateSnapshot));
     }
 
     [Fact]
@@ -248,7 +338,231 @@ public sealed class RestrictedStateArchitectureTests
                 }
             }
         }
+
+        foreach (var constructor in type.GetConstructors(
+            BindingFlags.Instance |
+            BindingFlags.Static |
+            BindingFlags.Public |
+            BindingFlags.NonPublic |
+            BindingFlags.DeclaredOnly))
+        {
+            foreach (var parameter in constructor.GetParameters())
+            {
+                foreach (var nested in Expand(parameter.ParameterType))
+                {
+                    yield return nested;
+                }
+            }
+        }
     }
+
+    private static IEnumerable<Type> ExpandNestedTypes(
+        IEnumerable<Type> roots)
+    {
+        foreach (var root in roots)
+        {
+            yield return root;
+            foreach (var nested in ExpandNestedTypes(root.GetNestedTypes(
+                BindingFlags.Public | BindingFlags.NonPublic)))
+            {
+                yield return nested;
+            }
+        }
+    }
+
+    private static IEnumerable<Type> ReferencedBodyTypes(Type type)
+    {
+        var methods = type.GetMethods(
+                BindingFlags.Instance |
+                BindingFlags.Static |
+                BindingFlags.Public |
+                BindingFlags.NonPublic |
+                BindingFlags.DeclaredOnly)
+            .Cast<MethodBase>()
+            .Concat(type.GetConstructors(
+                BindingFlags.Instance |
+                BindingFlags.Static |
+                BindingFlags.Public |
+                BindingFlags.NonPublic |
+                BindingFlags.DeclaredOnly));
+        foreach (var method in methods)
+        {
+            var body = method.GetMethodBody();
+            if (body is null)
+            {
+                continue;
+            }
+
+            foreach (var local in body.LocalVariables)
+            {
+                foreach (var expanded in Expand(local.LocalType))
+                {
+                    yield return expanded;
+                }
+            }
+
+            foreach (var clause in body.ExceptionHandlingClauses)
+            {
+                if (clause.Flags == ExceptionHandlingClauseOptions.Clause &&
+                    clause.CatchType is { } catchType)
+                {
+                    yield return catchType;
+                }
+            }
+
+            foreach (var member in ResolveMethodBodyMembers(method))
+            {
+                foreach (var referenced in MemberTypes(member))
+                {
+                    foreach (var expanded in Expand(referenced))
+                    {
+                        yield return expanded;
+                    }
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<MemberInfo> ResolveMethodBodyMembers(
+        MethodBase method)
+    {
+        var body = method.GetMethodBody();
+        if (body is null)
+        {
+            yield break;
+        }
+
+        var il = body.GetILAsByteArray()!;
+        var offset = 0;
+        while (offset < il.Length)
+        {
+            var opCode = ReadOpCode(il, ref offset);
+            var tokenOffset = offset;
+            var operandSize = OperandSize(opCode.OperandType, il, offset);
+            if (opCode.OperandType is
+                OperandType.InlineField or
+                OperandType.InlineMethod or
+                OperandType.InlineTok or
+                OperandType.InlineType)
+            {
+                var token = BitConverter.ToInt32(il, tokenOffset);
+                yield return method.Module.ResolveMember(
+                    token,
+                    method.DeclaringType?.GetGenericArguments(),
+                    method is MethodInfo info
+                        ? info.GetGenericArguments()
+                        : null)!;
+            }
+
+            offset += operandSize;
+        }
+    }
+
+    private static IEnumerable<Type> MemberTypes(MemberInfo member)
+    {
+        if (member.DeclaringType is { } declaring)
+        {
+            yield return declaring;
+        }
+
+        switch (member)
+        {
+            case Type type:
+                yield return type;
+                break;
+            case FieldInfo field:
+                yield return field.FieldType;
+                break;
+            case MethodInfo method:
+                yield return method.ReturnType;
+                foreach (var parameter in method.GetParameters())
+                {
+                    yield return parameter.ParameterType;
+                }
+                break;
+            case ConstructorInfo constructor:
+                foreach (var parameter in constructor.GetParameters())
+                {
+                    yield return parameter.ParameterType;
+                }
+                break;
+        }
+    }
+
+    private static OpCode ReadOpCode(byte[] il, ref int offset)
+    {
+        var first = il[offset++];
+        var value = first == 0xfe
+            ? (ushort)(0xfe00 | il[offset++])
+            : first;
+        return OpCodesByValue[value];
+    }
+
+    private static int OperandSize(
+        OperandType operandType,
+        byte[] il,
+        int offset) =>
+        operandType switch
+        {
+            OperandType.InlineNone => 0,
+            OperandType.ShortInlineBrTarget or
+            OperandType.ShortInlineI or
+            OperandType.ShortInlineVar => 1,
+            OperandType.InlineVar => 2,
+            OperandType.InlineBrTarget or
+            OperandType.InlineField or
+            OperandType.InlineI or
+            OperandType.InlineMethod or
+            OperandType.InlineSig or
+            OperandType.InlineString or
+            OperandType.InlineTok or
+            OperandType.InlineType or
+            OperandType.ShortInlineR => 4,
+            OperandType.InlineI8 or OperandType.InlineR => 8,
+            OperandType.InlineSwitch =>
+                4 + checked(BitConverter.ToInt32(il, offset) * 4),
+            _ => throw new InvalidOperationException(
+                $"Unsupported IL operand type {operandType}."),
+        };
+
+    private static bool IsForbiddenAdapterType(Type type)
+    {
+        var name = type.FullName ?? type.Name;
+        return new[]
+        {
+            "RestrictedStateSnapshot",
+            "RestrictedStateCandidate",
+            "RestrictedStateBinding",
+            "AcceptedLineage",
+            "AgentSession",
+            "RestrictedStateKey",
+            "StateResult",
+            "AgenticPrReview.Runtime.Agent",
+            "Octokit",
+            "System.Net.Http",
+            "IServiceProvider",
+            "System.Diagnostics.Process",
+            "ProviderSession",
+            "Publication",
+            "GitHub",
+        }.Any(value => name.Contains(value, StringComparison.Ordinal));
+    }
+
+    private sealed class ForbiddenAsyncFixture
+    {
+        internal static async Task RunAsync()
+        {
+            await Task.Yield();
+            GC.KeepAlive(RestrictedStateSnapshot.Empty);
+        }
+    }
+
+    private static readonly IReadOnlyDictionary<ushort, OpCode>
+        OpCodesByValue = typeof(OpCodes)
+            .GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(field => field.FieldType == typeof(OpCode))
+            .Select(field => (OpCode)field.GetValue(null)!)
+            .ToDictionary(opCode => unchecked((ushort)opCode.Value));
 
     private static IEnumerable<Type> Expand(Type type)
     {

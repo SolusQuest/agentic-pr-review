@@ -20,13 +20,13 @@ public sealed partial class AgentCapabilityArchitectureTests
             .Where(call => call.Member.DeclaringType ==
                 typeof(RestrictedStateService))
             .Select(call =>
-                $"{call.Type.FullName}|{call.Member.Name}")
+                $"{LogicalAsyncOwner(call.Type).FullName}|{call.Member.Name}")
             .Order(StringComparer.Ordinal)
             .ToArray();
 
         Assert.Equal(
             [
-                "AgenticPrReview.Runtime.R3LiveAgentStateRestorer|Restore",
+                "AgenticPrReview.Runtime.R3LiveAgentStateRestorer|RestoreAsync",
             ],
             calls);
         Assert.DoesNotContain(
@@ -50,7 +50,7 @@ public sealed partial class AgentCapabilityArchitectureTests
                             typeof(RestrictedStateService) ||
                         member.DeclaringType == typeof(AgentSessionBuilder))
                     .Select(member =>
-                        $"{type.FullName}|{member.DeclaringType!.Name}." +
+                        $"{LogicalAsyncOwner(type).FullName}|{member.DeclaringType!.Name}." +
                             member.Name)))
             .Order(StringComparer.Ordinal)
             .ToArray();
@@ -58,9 +58,9 @@ public sealed partial class AgentCapabilityArchitectureTests
         Assert.Equal(
             [
                 "AgenticPrReview.Runtime.LiveAgentStateCommitCoordinator|AgentSessionBuilder.Build",
-                "AgenticPrReview.Runtime.LiveAgentStateTransaction|RestrictedStateService.Accept",
-                "AgenticPrReview.Runtime.LiveAgentStateTransaction|RestrictedStateService.Prepare",
-                "AgenticPrReview.Runtime.LiveAgentStateTransaction|RestrictedStateService.Reconcile",
+                "AgenticPrReview.Runtime.LiveAgentStateTransaction|RestrictedStateService.AcceptAsync",
+                "AgenticPrReview.Runtime.LiveAgentStateTransaction|RestrictedStateService.PrepareAsync",
+                "AgenticPrReview.Runtime.LiveAgentStateTransaction|RestrictedStateService.ReconcileAsync",
             ],
             calls);
         Assert.DoesNotContain(
@@ -281,6 +281,18 @@ public sealed partial class AgentCapabilityArchitectureTests
                 yield return descendant;
             }
         }
+    }
+
+    private static Type LogicalAsyncOwner(Type type)
+    {
+        var current = type;
+        while (current.DeclaringType is { } declaring &&
+            current.Name.StartsWith('<'))
+        {
+            current = declaring;
+        }
+
+        return current;
     }
 
     private static List<string> FindR3CapabilityViolations(

@@ -199,7 +199,7 @@ internal sealed class VerifierCommitObserver(
         inner = coordinator;
     }
 
-    public LiveAgentStateCommitResult Commit(
+    public async Task<LiveAgentStateCommitResult> CommitAsync(
         LiveAgentCandidate candidate,
         AuthorizedStateAccess access,
         AcceptedLineage? priorLineage,
@@ -285,14 +285,15 @@ internal sealed class VerifierCommitObserver(
         }
 
         DelegationCount++;
-        CommitResult = inner.Commit(
-            candidate,
-            access,
-            priorLineage,
-            authorizedTransition,
-            stateRoot,
-            keyResolver,
-            cancellationToken);
+        CommitResult = await inner.CommitAsync(
+                candidate,
+                access,
+                priorLineage,
+                authorizedTransition,
+                stateRoot,
+                keyResolver,
+                cancellationToken)
+            .ConfigureAwait(false);
         return CommitResult;
     }
 
