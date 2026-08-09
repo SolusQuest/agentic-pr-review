@@ -22,6 +22,8 @@ R3 replaced the single-request C# provider path with the real thinking/tool Agen
 
 R4 owns the retained deterministic CLI/application/protocol/storage path, C# `Ledger/**` and `Prefix/**`, TypeScript runtime-invocation/live-runtime-invocation/state-v2/state-acceptance/publisher families, GitHub reads and publication, production restricted-state transport and keys, the thin Node bridge, and the final public wrapper. Those families are not R2 comparison infrastructure and were deliberately retained for their named migration consumers.
 
+The prospective decision-complete R4 contract, including the trusted workflow entrypoint, immutable GitHub snapshot, downstream-owned encrypted artifact adapter, key policy, publisher transaction, wrapper seam, and dependency-ordered replacement graph, is defined in [`r4-actionhost-wrapper-plan.md`](./r4-actionhost-wrapper-plan.md).
+
 ## Decision Summary
 
 ### Decision
@@ -779,16 +781,16 @@ Durable state may contain bounded repository content that the agent actually obs
 Artifacts must remain:
 
 - tied to the repository and workflow trust domain;
-- readable only by workflow-authorized principals;
+- decryptable and admissible only by workflow-authorized principals; production metadata and ciphertext may follow downstream repository visibility;
 - bounded;
 - free of credentials and raw transport data;
 - covered by retention policy;
 - deletable according to the documented lifecycle;
 - invalidated or safely bootstrapped when identity or integrity checks fail.
 
-Plaintext reasoning, repository tool results, and provider continuation material must not be committed to repository Git objects, Git history, repository-visible state refs, caches, or normal public artifacts. A transport whose visibility is broader than the approved workflow principals requires workflow-authorized Host-side encryption, with the key stored separately from the payload; if no such key path exists, it cannot store the readable payload.
+Plaintext reasoning, repository tool results, and provider continuation material must not be committed to repository Git objects, Git history, repository-visible state refs, caches, or unencrypted public artifacts. R4 stores authenticated ciphertext in downstream-owned GitHub Actions artifacts. Public-repository artifact metadata, provenance, digests, and encrypted bytes may be public, while the key remains a separate workflow-authorized Host secret; if no such key path exists, the product cannot persist readable continuation.
 
-Untrusted and fork-origin workflows cannot enumerate, restore, overwrite, delete, or cause publication of restricted state. Public source visibility does not make provider reasoning or continuation material public by default.
+Untrusted and fork-origin workflows cannot obtain the state key, decrypt or admit SESSION, create or delete trusted state, replace or accept lineage, invoke the provider through the trusted route, or cause publication. Public source and ciphertext visibility do not make provider reasoning or continuation plaintext public.
 
 ## Versioning Policy
 
@@ -849,22 +851,9 @@ The post-reset Action API should describe user intent and stable review outcomes
 
 The current mixed Action surface is retired rather than incrementally preserved. The target should use a small direct-input layer plus one trusted repository configuration file.
 
-The provisional direct-input allowlist is:
+R4 freezes the direct-input allowlist as `github-token`, `provider-api-key`, `state-key`, optional `previous-state-key`, `config-path`, manual-only `pr-number`, and `state-mode` with `auto` or authorized manual `reset`. Exact secret conventions, event restrictions, validation, and rotation are normative in [`r4-actionhost-wrapper-plan.md`](./r4-actionhost-wrapper-plan.md). No migration-only runtime selector, model endpoint, state artifact/run ID, arbitrary session, payload path, debug switch, or security-budget input survives.
 
-- `github_token`, supplied as a secret;
-- `provider_api_key`, supplied as a secret;
-- `config_path`, defaulting to one documented repository path;
-- `pr_number`, only as a manual-event override when the event does not identify the pull request;
-- `session`, limited initially to normal automatic behavior and an explicit reset.
-
-Names remain provisional until the R4 Action-surface issue is refined, but R4 must justify every addition beyond this list with an external consumer and per-run need.
-
-Stable product policy belongs in one bounded configuration file, not in a large set of Action inputs. The first configuration should cover only demonstrated user choices such as:
-
-- provider selection and model configuration;
-- one stable review-instructions path;
-- publishing mode and small finding/comment caps;
-- bounded state-retention policy.
+Stable product policy belongs in one bounded configuration file, not in a large set of Action inputs. R4 fixes the initial closed JSON configuration to one trusted instruction path plus sticky or sticky-and-inline publication and a high/critical inline threshold. DeepSeek/model identity, endpoint, thinking, tools, limits, five-inline cap, and seven-day retention remain product-owned constants.
 
 The first configuration must not merely reproduce every current input. Thinking remains enabled, the initial read-only tool set remains fixed, security budgets remain product-owned, prompt caching remains enabled, test providers remain CI-only, and raw provider-body capture remains outside the public Action.
 
@@ -876,13 +865,7 @@ Fake and deterministic providers are test infrastructure, not public runtime bac
 
 Candidate ids, marker ids, selector revisions, ledger/session epochs, internal transition reasons, raw trace hashes, and similar state-machine details should move to bounded diagnostics, summaries, or restricted evaluation artifacts unless a real downstream automation consumes them.
 
-The provisional stable outputs are limited to:
-
-- overall review status;
-- reviewed head SHA;
-- published finding count;
-- comment URL when one exists;
-- session status such as bootstrap, resumed, or reset.
+R4 publishes no stable Action outputs because no current consumer makes a decision from them. Bounded status, reviewed head, finding count, comment URL, and state action may appear in the step summary or diagnostics but do not become `action.yml` outputs.
 
 Before retaining an output, identify:
 
@@ -1164,7 +1147,7 @@ Gate:
 
 - wrapper responsibilities match the explicit allowlist in this document;
 - policy bytes are loaded only from an immutable Host-selected trusted commit and their source identity participates in session/cache identity;
-- the production state transport meets the restricted storage class and denies fork/untrusted enumeration, restore, overwrite, decrypt, deletion, and publication;
+- the production artifact transport allows public metadata/ciphertext visibility but denies fork/untrusted key access, SESSION decryption/admission, trusted mutation/acceptance, provider admission, and publication;
 - authorization rejection occurs before state decryption, provider construction, provider network activity, or publication;
 - an integrated Action canary using GitHub/Actions-shaped Host credentials proves those values are absent from provider requests, model-visible content, tools, state, diagnostics, logs, outputs, summaries, annotations, and child environments;
 - provider-request capture and dependency-boundary tests pass;
@@ -1283,7 +1266,7 @@ Gate:
 - stale concurrent writers cannot replace newer accepted state;
 - plaintext reasoning, tool results, and provider continuation material never enter Git objects, repository-visible refs, or normal public artifacts;
 - R2 local conformance tests reject altered, substituted, stale, or undecryptable state before Agent/provider admission;
-- R4 production transport tests prove fork and untrusted workflows cannot enumerate, restore, overwrite, decrypt, delete, or publish restricted state.
+- R4 production transport tests prove allowed public metadata/ciphertext visibility and opaque naming, plus denial of fork/untrusted key access, SESSION decryption/admission, trusted mutation/acceptance, provider admission, and publication.
 
 ### Native AOT
 

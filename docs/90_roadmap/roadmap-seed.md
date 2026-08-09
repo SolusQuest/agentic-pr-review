@@ -352,24 +352,27 @@ Exit criteria:
 
 Goal: converge on one C# business implementation and remove cross-language duplication.
 
+Planning status: milestone [R4](https://github.com/SolusQuest/agentic-pr-review/milestone/10) and refinement parent [#138](https://github.com/SolusQuest/agentic-pr-review/issues/138) own the design gate. The prospective decision-complete contract is [`r4-actionhost-wrapper-plan.md`](../20_architecture/r4-actionhost-wrapper-plan.md). No implementation issue is published until that docs contract is merged and remotely activated.
+
 In scope:
 
-- C# GitHub event and input interpretation;
+- C# trusted `workflow_run`/`workflow_dispatch` event and input interpretation;
 - C# GitHub REST reads and writes;
 - PR, diff, and tracked-file snapshots;
-- C# state selection, provenance, acceptance, and stale-writer protection;
+- C# state selection, provenance, immutable candidate/acceptance records, conflict-safe lineage advancement, and stale-writer protection;
 - one C# executable with explicit Host, Agent, tool, provider, state, and publisher modules;
 - separate GitHub and provider HTTP clients, handlers, endpoints, and credentials;
 - candidate result and state validation;
 - C# fingerprinting, duplicate suppression, line mapping, sticky/inline publisher;
 - thin Node.js wrapper;
 - a small direct-input allowlist and one workflow-authorized configuration resolved at an immutable Host-selected trusted commit SHA;
-- a small stable-output allowlist;
+- no stable public outputs until a named consumer requires one;
 - official JavaScript artifact bridge where retained;
 - deletion of duplicate TypeScript business modules, review-domain cross-language protocols, duplicate validators, and parity-only fixtures;
 - one minimal lockstep launcher/Host contract for cancellation, bounded outcome/output handoff, exit status, and executable build identity;
 - a two-run trusted-workflow proof using an explicitly prepared trusted payload path;
-- a production continuation transport satisfying the authenticated, scope-bound restricted storage class and fork/untrusted denial.
+- a downstream-repository-owned encrypted GitHub Actions artifact adapter satisfying the scope-bound state class while allowing public metadata/ciphertext visibility;
+- one asynchronous internal opaque-snapshot state-store seam and conformance suite, with Supabase and any public extension protocol deferred.
 
 Exit criteria:
 
@@ -379,11 +382,11 @@ Exit criteria:
 - every public input and output has a named external consumer and no migration-only selector is exposed;
 - Agent inputs contain no GitHub or Actions credential-bearing object;
 - provider request capture and secret-canary tests pass;
-- restricted state cannot become repository-visible plaintext, and the selected production transport prevents fork/untrusted workflows from enumerating, restoring, overwriting, decrypting, deleting, or publishing it;
+- restricted state cannot become repository-visible plaintext; public artifact metadata and ciphertext visibility are allowed, while fork/untrusted workflows cannot obtain the key, decrypt or admit SESSION, mutate or accept trusted lineage, invoke the provider through the trusted route, or publish;
 - authorization rejection occurs before state decryption, provider construction, provider network activity, or publication;
 - an integrated Action canary using GitHub/Actions-shaped Host credentials proves those values are absent from provider requests, model-visible content, tools, state, diagnostics, logs, outputs, summaries, annotations, and child environments;
 - invalid Agent output cannot reach GitHub writes;
-- stale head and concurrent writer cases fail closed;
+- stale head and concurrent writer cases fail closed through exact-head barriers, immutable receipts, unique-successor selection, explicit conflict, and workflow concurrency defense in depth;
 - sticky, inline, duplicate, artifact, cancellation, and partial-failure behavior have end-to-end coverage;
 - two independent GitHub Actions workflow runs prove bootstrap/select, continuation, state acceptance, stale-writer protection, and deterministic publication;
 - TypeScript canonicalization, prefix, provider metadata, state-v2, state-acceptance, and runtime business modules are removed or have a named final deletion issue;

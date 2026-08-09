@@ -307,16 +307,16 @@ State artifacts must be:
 - authenticated and bound to every logical record's kind, provider-facing role or framing, tool-call association, and control/data classification;
 - retained only for the documented period;
 - deletable according to the documented lifecycle;
-- readable only by workflow-authorized principals;
+- decryptable and admissible only by workflow-authorized principals; production metadata and ciphertext may follow the downstream repository's visibility;
 - safely bootstrapped or failed when missing, incompatible, corrupt, oversized, or unsafe.
 
 A content-addressed reference needed for session reconstruction must resolve to durable, bounded, access-controlled content. A dangling reference cannot be treated as a successful continuation.
 
-Plaintext reasoning, repository tool results, and provider continuation material must not be committed to repository Git objects, Git history, repository-visible state refs, caches, or normal public artifacts. If the selected transport cannot provide confidentiality from ordinary repository visibility, the payload requires workflow-authorized Host-side encryption; the key remains a Host-only credential and is never stored with the payload or exposed to the Agent or model. If no such key path exists, readable continuation content is not persisted.
+Plaintext reasoning, repository tool results, and provider continuation material must not be committed to repository Git objects, Git history, repository-visible state refs, caches, or unencrypted public artifacts. R4 deliberately stores authenticated ciphertext in each downstream repository's GitHub Actions artifacts. Public-repository observers may see opaque artifact metadata and encrypted bytes, while the downstream-owned state key remains a Host-only credential that is never stored with the payload or exposed to the Agent or model. If no such key path exists, readable continuation content is not persisted.
 
 Encryption provides authenticated confidentiality or equivalent independent integrity protection. The key or key identifier is not payload authority. Authentication failure, identity mismatch, cross-scope substitution, stale replay, or decryption failure is rejected before any state content reaches the Agent or provider. Automatic restore follows the observable bootstrap policy; explicit restore fails closed.
 
-R2 defines the storage conformance interface and negative matrix before R3 begins. R4 proves the selected production transport prevents untrusted and fork-origin workflows from enumerating, restoring, overwriting, decrypting, deleting, or causing publication of restricted continuation state.
+R2 defines the storage conformance interface and negative matrix before R3 begins. R4 proves public metadata/ciphertext visibility and opaque naming positively, while proving that untrusted and fork-origin workflows cannot obtain the state key, decrypt or admit SESSION, create or delete trusted state, replace or accept lineage, invoke the provider through the trusted route, hand off state, or publish. The full production class is defined in [`r4-actionhost-wrapper-plan.md`](./r4-actionhost-wrapper-plan.md).
 
 ## Thinking And Reasoning Content
 
