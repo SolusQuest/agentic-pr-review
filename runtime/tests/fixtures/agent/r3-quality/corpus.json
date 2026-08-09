@@ -10,7 +10,7 @@
         "base_sha": "1111111111111111111111111111111111111111",
         "head_sha": "2222222222222222222222222222222222222222"
       },
-      "initial_context": "Review the synthetic change. First call list_changed_files. Then call read_diff exactly once for the returned changed path and treat that diff observation as authoritative. Do not call read_file, list_files, search_text, or any other repository inspection tool. Then call finish_review exactly once. Report the defect with token APR110_FINDING_Q7M4 in the finding title or message, use severity high, and cite exactly one evidence location from that read_diff observation at src/CacheGate.cs current line 4.",
+      "initial_context": "Review the synthetic change. First call list_changed_files. Then call read_diff exactly once for the returned changed path and treat that diff observation as authoritative. Do not call read_file, list_files, search_text, or any other repository inspection tool. Then call finish_review exactly once based only on the admitted diff.",
       "process_one_context": null,
       "files": [
         {
@@ -83,8 +83,7 @@
           "end_line": 4
         },
         "expected_severity": "high",
-        "target_marker": "APR110_TARGET_Q7M4",
-        "expected_finding_token": "APR110_FINDING_Q7M4"
+        "target_marker": "APR110_TARGET_Q7M4"
       }
     },
     {
@@ -96,7 +95,7 @@
         "base_sha": "3333333333333333333333333333333333333333",
         "head_sha": "4444444444444444444444444444444444444444"
       },
-      "initial_context": "Review the synthetic readiness change. First call list_changed_files. Then call read_diff exactly once for the returned changed path and treat that diff observation as authoritative. Do not call read_file, list_files, search_text, or any other repository inspection tool. Then call finish_review exactly once with no findings because the admitted diff contains no actionable defect.",
+      "initial_context": "Review the synthetic readiness change. First call list_changed_files. Then call read_diff exactly once for the returned changed path and treat that diff observation as authoritative. Do not call read_file, list_files, search_text, or any other repository inspection tool. Then call finish_review exactly once based only on the admitted diff.",
       "process_one_context": null,
       "files": [
         {

@@ -415,6 +415,7 @@ internal static class R3QualityCorpusParser
             R3QualityCaseKind.MustNotFind => ParseMustNotFind(
                 element,
                 identity,
+                initialContext,
                 source),
             R3QualityCaseKind.Continuation => ParseContinuation(
                 element,
@@ -440,8 +441,7 @@ internal static class R3QualityCorpusParser
                 "required_observation_id",
                 "evidence",
                 "expected_severity",
-                "target_marker",
-                "expected_finding_token"))
+                "target_marker"))
         {
             throw new FormatException("Invalid must-find expectation shape.");
         }
@@ -460,12 +460,10 @@ internal static class R3QualityCorpusParser
             evidenceElement.GetProperty("end_line").GetInt32());
         var severity = RequiredString(element, "expected_severity");
         var targetMarker = RequiredString(element, "target_marker");
-        var findingToken = RequiredString(element, "expected_finding_token");
         if (severity is not ("critical" or "high" or "medium" or "low") ||
             !AgentValueDomains.IsIdentifier(targetMarker) ||
-            !AgentValueDomains.IsIdentifier(findingToken) ||
-            StringComparer.Ordinal.Equals(targetMarker, findingToken) ||
             Contains(initialContext, targetMarker) ||
+            Contains(initialContext, evidence.Path) ||
             !RequiredResultGrounds(required.Result, evidence) ||
             Count(required.Result.AsSpan(), StrictUtf8.GetBytes(targetMarker)) != 1)
         {
@@ -478,13 +476,13 @@ internal static class R3QualityCorpusParser
             required.Result,
             evidence,
             severity,
-            targetMarker,
-            findingToken);
+            targetMarker);
     }
 
     private static R3QualityMustNotFindExpectation ParseMustNotFind(
         JsonElement element,
         ReviewedIdentity identity,
+        string initialContext,
         ReviewedDiffSource source)
     {
         if (!HasProperties(
@@ -513,6 +511,7 @@ internal static class R3QualityCorpusParser
             .Select(item => item.GetInt32())
             .ToImmutableArray();
         if (!RepositoryPath.IsValid(path) ||
+            Contains(initialContext, path) ||
             lines.Any(line => line < 1) ||
             lines.Distinct().Count() != lines.Length ||
             !lines.SequenceEqual(lines.Order()) ||

@@ -663,7 +663,7 @@ internal sealed class VerifierProviderScript
                 string.Concat(
                     "{\"summary\":\"Grounded synthetic defect.\",",
                     "\"findings\":[{\"severity\":\"high\",",
-                    "\"title\":\"APR110_FINDING_Q7M4 null-forgiving regression\",",
+                    "\"title\":\"Null-forgiving regression\",",
                     "\"message\":\"The change hides a nullable failure.\",",
                     "\"evidence\":[{\"observation_id\":\"",
                     LastObservation(messages, "must_find_diff"),
