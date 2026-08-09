@@ -368,7 +368,7 @@ Exit criteria:
 - authorization rejection occurs before state decryption, provider construction, provider network activity, or publication;
 - an integrated Action canary using GitHub/Actions-shaped Host credentials proves those values are absent from provider requests, model-visible content, tools, state, diagnostics, logs, outputs, summaries, annotations, and child environments;
 - invalid Agent output cannot reach GitHub writes;
-- stale head and concurrent writer cases fail closed through exact-head barriers, immutable receipts, unique-successor selection, explicit conflict, and workflow concurrency defense in depth;
+- both supported credential-bearing routes use the same verified authoritative repository/PR workflow concurrency group, while exact-head barriers, immutable receipts, unique-successor selection, and explicit conflict still fail closed on stale or externally introduced records;
 - sticky, inline, duplicate, artifact, cancellation, and partial-failure behavior have end-to-end coverage;
 - two independent GitHub Actions workflow runs prove bootstrap/select, continuation, state acceptance, stale-writer protection, and deterministic publication;
 - TypeScript canonicalization, prefix, provider metadata, state-v2, state-acceptance, and runtime business modules are removed or have a named final deletion issue;

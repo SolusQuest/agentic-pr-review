@@ -259,7 +259,7 @@ No model or Agent output is publishable until `ActionHost`:
 
 If the reviewed head changed, the host does not publish the stale review or accept its state.
 
-Workflow-level per-PR concurrency remains defense in depth. It does not replace the final host recheck.
+R4 requires both supported credential-bearing entrypoints to share one verified workflow-level repository/PR concurrency group with `cancel-in-progress: false`. GitHub's one-running-run guarantee for that group is the authoritative exclusion primitive between candidate admission and public/state side effects; the Host rejects an unverified workflow definition before state or provider admission. Final Host head, ownership, receipt, and readback checks remain mandatory for stale work, crash recovery, and artifacts introduced outside a valid serialized run, but artifacts themselves are not a cross-run lock.
 
 ## Session State Artifact Boundary
 
