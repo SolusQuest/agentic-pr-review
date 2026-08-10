@@ -855,6 +855,177 @@ public sealed class LineageServiceLifecycleTests
         });
     }
 
+    [Theory]
+    [InlineData("candidate")]
+    [InlineData("publication_intent")]
+    public async Task UnderRetainedLaterOwnedSuccessorDoesNotRollBack(
+        string objectClassName)
+    {
+        await WithRootAsync(async root =>
+        {
+            var objectClass = objectClassName switch
+            {
+                "candidate" => StateObjectClass.Candidate,
+                "publication_intent" => StateObjectClass.PublicationIntent,
+                _ => throw new InvalidOperationException(objectClassName)
+            };
+            using var lease = LineageTestData.Context();
+            var store = new LocalRestrictedStateStore(
+                root,
+                timeProvider: lease.Time);
+            var service = new LineageService(store, lease.Time);
+            var initialized = await service.ResolveAsync(
+                lease.Context,
+                LineageTestData.Request(lease.Access),
+                CancellationToken.None);
+            Assert.True(initialized.Succeeded, initialized.Code);
+            SelectedLineageSnapshot selected;
+            using (initialized.Context)
+            {
+                Assert.True(initialized.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                selected = snapshot!;
+            }
+
+            var predecessor = await UploadStateObjectAsync(
+                store,
+                lease,
+                selected,
+                StateObjectClass.Candidate,
+                predecessorIdentity: null,
+                logicalExpiry: LineageTestData.LogicalExpiry,
+                payloadMarker: 1);
+            _ = await UploadStateObjectAsync(
+                store,
+                lease,
+                selected,
+                objectClass,
+                predecessor.Header.ObjectIdentity,
+                logicalExpiry: LineageTestData.LogicalExpiry,
+                payloadMarker: 2,
+                underRetained: true);
+
+            var candidateName = ResolveName(
+                lease,
+                StateObjectClass.Candidate);
+            var successorName = ResolveName(lease, objectClass);
+            var candidatesBefore = await store.ListExactAsync(
+                new OpaqueStoreListRequest(
+                    candidateName,
+                    LineageFormat.MaximumPhysicalPerClass),
+                CancellationToken.None);
+            var successorsBefore = await store.ListExactAsync(
+                new OpaqueStoreListRequest(
+                    successorName,
+                    LineageFormat.MaximumPhysicalPerClass),
+                CancellationToken.None);
+            Assert.True(candidatesBefore.Succeeded);
+            Assert.True(successorsBefore.Succeeded);
+
+            var result = await service.ResolveAsync(
+                lease.Context,
+                LineageTestData.Request(lease.Access),
+                CancellationToken.None);
+
+            Assert.False(result.Succeeded);
+            Assert.Equal(LineageCodes.RetentionFailed, result.Code);
+            Assert.Null(result.Context);
+            var candidatesAfter = await store.ListExactAsync(
+                new OpaqueStoreListRequest(
+                    candidateName,
+                    LineageFormat.MaximumPhysicalPerClass),
+                CancellationToken.None);
+            var successorsAfter = await store.ListExactAsync(
+                new OpaqueStoreListRequest(
+                    successorName,
+                    LineageFormat.MaximumPhysicalPerClass),
+                CancellationToken.None);
+            Assert.True(candidatesAfter.Succeeded);
+            Assert.True(successorsAfter.Succeeded);
+            Assert.Equal(candidatesBefore.Objects
+                    .OrderBy(item => item.ObjectId.Value,
+                        StringComparer.Ordinal),
+                candidatesAfter.Objects.OrderBy(
+                    item => item.ObjectId.Value,
+                    StringComparer.Ordinal));
+            Assert.Equal(successorsBefore.Objects
+                    .OrderBy(item => item.ObjectId.Value,
+                        StringComparer.Ordinal),
+                successorsAfter.Objects.OrderBy(
+                    item => item.ObjectId.Value,
+                    StringComparer.Ordinal));
+        });
+    }
+
+    [Fact]
+    public async Task UnderRetainedEquivalentLaterOwnedCopyCanBeCleaned()
+    {
+        await WithRootAsync(async root =>
+        {
+            using var lease = LineageTestData.Context();
+            var store = new LocalRestrictedStateStore(
+                root,
+                timeProvider: lease.Time);
+            var service = new LineageService(store, lease.Time);
+            var initialized = await service.ResolveAsync(
+                lease.Context,
+                LineageTestData.Request(lease.Access),
+                CancellationToken.None);
+            Assert.True(initialized.Succeeded, initialized.Code);
+            SelectedLineageSnapshot selected;
+            using (initialized.Context)
+            {
+                Assert.True(initialized.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                selected = snapshot!;
+            }
+
+            var retained = await UploadStateObjectAsync(
+                store,
+                lease,
+                selected,
+                StateObjectClass.Candidate,
+                predecessorIdentity: null,
+                logicalExpiry: LineageTestData.LogicalExpiry,
+                payloadMarker: 1);
+            var underRetained = await UploadStateObjectAsync(
+                store,
+                lease,
+                selected,
+                StateObjectClass.Candidate,
+                predecessorIdentity: null,
+                logicalExpiry: LineageTestData.LogicalExpiry,
+                payloadMarker: 1,
+                underRetained: true);
+            Assert.Equal(
+                retained.Header.ObjectIdentity,
+                underRetained.Header.ObjectIdentity);
+            Assert.NotEqual(
+                retained.Metadata.Reference,
+                underRetained.Metadata.Reference);
+
+            var result = await service.ResolveAsync(
+                lease.Context,
+                LineageTestData.Request(lease.Access),
+                CancellationToken.None);
+
+            Assert.True(result.Succeeded, result.Code);
+            result.Context!.Dispose();
+            var name = ResolveName(lease, StateObjectClass.Candidate);
+            var after = await store.ListExactAsync(
+                new OpaqueStoreListRequest(
+                    name,
+                    LineageFormat.MaximumPhysicalPerClass),
+                CancellationToken.None);
+            Assert.True(after.Succeeded);
+            Assert.Equal(
+                retained.Metadata.Reference,
+                Assert.Single(after.Objects));
+        });
+    }
+
     private static async Task UploadExpiredAcceptanceAsync(
         IRestrictedStateStore store,
         LineageTestData.ContextLease lease,
@@ -900,6 +1071,30 @@ public sealed class LineageServiceLifecycleTests
         byte payloadMarker,
         bool underRetained = false)
     {
+        var uploaded = await UploadStateObjectAsync(
+            store,
+            lease,
+            selected,
+            StateObjectClass.Acceptance,
+            predecessorIdentity,
+            logicalExpiry,
+            payloadMarker,
+            underRetained);
+        return uploaded.Header;
+    }
+
+    private static async Task<(
+        StateControlHeaderV1 Header,
+        OpaqueStoreObjectMetadata Metadata)> UploadStateObjectAsync(
+        IRestrictedStateStore store,
+        LineageTestData.ContextLease lease,
+        SelectedLineageSnapshot selected,
+        StateObjectClass objectClass,
+        string? predecessorIdentity,
+        long logicalExpiry,
+        byte payloadMarker,
+        bool underRetained = false)
+    {
         Assert.True(LineageBaseScopeCodec.TryEncode(
             LineageTestData.Scope(),
             out var canonicalScope));
@@ -907,7 +1102,7 @@ public sealed class LineageServiceLifecycleTests
         {
             Assert.True(lease.Context.TryDeriveOpaqueName(
                 lease.Access,
-                StateObjectClasses.ToWireName(StateObjectClass.Acceptance),
+                StateObjectClasses.ToWireName(objectClass),
                 canonicalScope,
                 out var name));
             Assert.NotNull(name);
@@ -915,7 +1110,7 @@ public sealed class LineageServiceLifecycleTests
                 selected.BaseScopeDigest,
                 selected.Epoch,
                 selected.SessionId,
-                StateObjectClass.Acceptance,
+                objectClass,
                 predecessorIdentity,
                 SuccessorIdentity: null,
                 "state-generation-run",
@@ -934,6 +1129,7 @@ public sealed class LineageServiceLifecycleTests
                 out var code), code);
             try
             {
+                OpaqueStoreObjectMetadata metadata;
                 if (underRetained)
                 {
                     var uploaded = await store.UploadImmutableAsync(
@@ -951,6 +1147,7 @@ public sealed class LineageServiceLifecycleTests
                     Assert.NotNull(uploaded.Metadata);
                     Assert.True(uploaded.Metadata!.ExpiresAtUnixSeconds <
                         draft.RequiredPlatformExpiresAtUnixSeconds);
+                    metadata = uploaded.Metadata;
                 }
                 else
                 {
@@ -961,14 +1158,16 @@ public sealed class LineageServiceLifecycleTests
                             draft.RequiredPlatformExpiresAtUnixSeconds,
                             CancellationToken.None);
                     Assert.True(uploaded.Succeeded, uploaded.Code);
+                    Assert.NotNull(uploaded.Metadata);
+                    metadata = uploaded.Metadata!;
                 }
+
+                return (header!, metadata);
             }
             finally
             {
                 CryptographicOperations.ZeroMemory(envelope);
             }
-
-            return header!;
         }
         finally
         {
