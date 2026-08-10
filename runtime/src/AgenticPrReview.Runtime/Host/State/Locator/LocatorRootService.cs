@@ -55,6 +55,23 @@ internal sealed class LocatorRootService
         {
             read = await ReadSelectionAsync(access!, cancellationToken)
                 .ConfigureAwait(false);
+            for (var attempt = 0;
+                 read.RequiresCleanup && attempt < ReconciliationAttempts;
+                 attempt++)
+            {
+                var recovered = await CleanupDebtAndReadAsync(
+                        access!,
+                        read.CleanupDebt)
+                    .ConfigureAwait(false);
+                ClearSelection(read);
+                read = recovered;
+            }
+
+            if (read.RequiresCleanup)
+            {
+                return LocatorRootResult.Fail(LocatorCodes.Unavailable);
+            }
+
             if (!read.Succeeded)
             {
                 return LocatorRootResult.Fail(read.Code);
@@ -276,6 +293,14 @@ internal sealed class LocatorRootService
                 return LocatorRootResult.Fail(LocatorCodes.Unavailable);
             }
 
+            if (upload.Metadata.ExpiresAtUnixSeconds <
+                target.RequiredExpiresAtUnixSeconds)
+            {
+                await DeleteRejectedUploadAsync(upload.Metadata)
+                    .ConfigureAwait(false);
+                return LocatorRootResult.Fail(LocatorCodes.Unavailable);
+            }
+
             var token = CancellationToken.None;
             var uploadedReadBack = await ReadBackWithRetriesAsync(
                     upload.Metadata,
@@ -284,14 +309,6 @@ internal sealed class LocatorRootService
             if (!uploadedReadBack.Succeeded ||
                 uploadedReadBack.Metadata != upload.Metadata)
             {
-                return LocatorRootResult.Fail(LocatorCodes.Unavailable);
-            }
-
-            if (upload.Metadata.ExpiresAtUnixSeconds <
-                target.RequiredExpiresAtUnixSeconds)
-            {
-                await DeleteRejectedUploadAsync(upload.Metadata)
-                    .ConfigureAwait(false);
                 return LocatorRootResult.Fail(LocatorCodes.Unavailable);
             }
 
@@ -416,6 +433,24 @@ internal sealed class LocatorRootService
             .ConfigureAwait(false);
     }
 
+    private async Task<LocatorSelectionResult> CleanupDebtAndReadAsync(
+        AuthorizedLocatorAccess access,
+        ImmutableArray<OpaqueStoreObjectMetadata> cleanupDebt)
+    {
+        foreach (var metadata in cleanupDebt)
+        {
+            _ = await store.DeleteExactAsync(
+                    new OpaqueStoreDeleteRequest(metadata),
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+
+        return await ReadSelectionAsync(
+                access,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+    }
+
     private async Task<LocatorSelectionResult>
         ReadSelectionWithRetriesAsync(
             AuthorizedLocatorAccess access,
@@ -432,6 +467,14 @@ internal sealed class LocatorRootService
                 .ConfigureAwait(false);
             if (current.Succeeded && !current.IsAbsent)
             {
+                if (current.RequiresCleanup)
+                {
+                    return target is null
+                        ? current
+                        : LocatorSelectionResult.Fail(
+                            LocatorCodes.Unavailable);
+                }
+
                 if (target is null)
                 {
                     return current;
@@ -590,7 +633,9 @@ internal sealed class LocatorRootService
                 authenticated.ToImmutable(),
                 unknown.ToImmutable(),
                 list.Objects.Length);
-            if (!selected.Succeeded || selected.IsAbsent)
+            if (!selected.Succeeded ||
+                selected.IsAbsent ||
+                selected.RequiresCleanup)
             {
                 return selected;
             }
@@ -679,6 +724,7 @@ internal sealed class LocatorRootService
                     CancellationToken.None)
                 .ConfigureAwait(false);
             if (list.Succeeded &&
+                list.Complete &&
                 !list.Objects.Contains(metadata.Reference))
             {
                 return;

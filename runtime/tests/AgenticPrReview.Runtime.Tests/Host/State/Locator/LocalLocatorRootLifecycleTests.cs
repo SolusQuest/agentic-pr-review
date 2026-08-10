@@ -388,7 +388,76 @@ public sealed class LocalLocatorRootLifecycleTests
     }
 
     [Fact]
-    public async Task TamperedActualExpiryBelowSignedFloorIsRejectedLocally()
+    public async Task ExpiredImmediatePredecessorIsRecoveredLocally()
+    {
+        await WithRootAsync(async root =>
+        {
+            using var access = LocatorTestData.Access();
+            using var keys = LocatorTestData.KeyRing(access);
+            var initialTime = new FrozenLocatorTimeProvider(
+                LocatorTestData.Now);
+            var initialStore = new LocalRestrictedStateStore(
+                root,
+                timeProvider: initialTime);
+            var initialized = await new LocatorRootService(
+                    initialStore,
+                    keys,
+                    initialTime)
+                .ResolveAsync(access, 0, CancellationToken.None);
+            Assert.True(initialized.Succeeded, initialized.Code);
+            initialized.Context!.Dispose();
+            var predecessor = await ReadSingleAsync(initialStore);
+
+            var refreshTime = new FrozenLocatorTimeProvider(
+                LocatorTestData.Now + 2 * 24 * 60 * 60);
+            var interruptedStore = new LocalRestrictedStateStore(
+                root,
+                deleteTemporaryTestHook: AmbiguousDeleteHook(
+                    objectRemains: true),
+                timeProvider: refreshTime);
+            var interrupted = await new LocatorRootService(
+                    interruptedStore,
+                    keys,
+                    refreshTime)
+                .ResolveAsync(
+                    access,
+                    LocatorTestData.Now + 20 * 24 * 60 * 60,
+                    CancellationToken.None);
+            Assert.Equal(LocatorCodes.CleanupFailed, interrupted.Code);
+            Assert.Equal(2, (await ListAsync(
+                interruptedStore)).Objects.Length);
+
+            var recoveryTime = new FrozenLocatorTimeProvider(
+                LocatorTestData.Now + 11 * 24 * 60 * 60);
+            var recoveryStore = new LocalRestrictedStateStore(
+                root,
+                timeProvider: recoveryTime);
+            var recovered = await new LocatorRootService(
+                    recoveryStore,
+                    keys,
+                    recoveryTime)
+                .ResolveAsync(access, 0, CancellationToken.None);
+
+            Assert.True(recovered.Succeeded, recovered.Code);
+            recovered.Context!.Dispose();
+            var survivor = Assert.Single(
+                (await ListAsync(recoveryStore)).Objects);
+            Assert.NotEqual(predecessor.Metadata.Reference, survivor);
+            var current = await ReadSingleAsync(recoveryStore);
+            Assert.True(LocatorRootSentinelCodec.TryDecrypt(
+                access,
+                keys,
+                current.Bytes,
+                out var sentinel,
+                out var code),
+                code);
+            Assert.Equal<ulong>(1, sentinel!.Generation);
+            CryptographicOperations.ZeroMemory(sentinel.Root);
+        });
+    }
+
+    [Fact]
+    public async Task UnderFloorRecordIsCleanedAndReinitializedLocally()
     {
         await WithRootAsync(async root =>
         {
@@ -436,7 +505,13 @@ public sealed class LocalLocatorRootLifecycleTests
                     time)
                 .ResolveAsync(access, 0, CancellationToken.None);
 
-            Assert.Equal(LocatorCodes.Unavailable, rejected.Code);
+            Assert.True(rejected.Succeeded, rejected.Code);
+            rejected.Context!.Dispose();
+            var replacement = Assert.Single(
+                (await ListAsync(new LocalRestrictedStateStore(
+                    root,
+                    timeProvider: time))).Objects);
+            Assert.NotEqual(current.Metadata.Reference, replacement);
             CryptographicOperations.ZeroMemory(sentinel.Root);
             CryptographicOperations.ZeroMemory(record);
         });

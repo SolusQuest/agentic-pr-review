@@ -65,20 +65,28 @@ internal sealed record LocatorSelection(
 internal sealed record LocatorSelectionResult(
     string Code,
     bool IsAbsent,
-    LocatorSelection? Selection)
+    LocatorSelection? Selection,
+    ImmutableArray<OpaqueStoreObjectMetadata> CleanupDebt)
 {
     internal bool Succeeded =>
         StringComparer.Ordinal.Equals(Code, LocatorCodes.Ready);
 
+    internal bool RequiresCleanup =>
+        Succeeded && !CleanupDebt.IsDefaultOrEmpty;
+
     internal static LocatorSelectionResult Absent() =>
-        new(LocatorCodes.Ready, IsAbsent: true, null);
+        new(LocatorCodes.Ready, IsAbsent: true, null, []);
 
     internal static LocatorSelectionResult Success(
         LocatorSelection selection) =>
-        new(LocatorCodes.Ready, IsAbsent: false, selection);
+        new(LocatorCodes.Ready, IsAbsent: false, selection, []);
+
+    internal static LocatorSelectionResult Cleanup(
+        ImmutableArray<OpaqueStoreObjectMetadata> cleanupDebt) =>
+        new(LocatorCodes.Ready, IsAbsent: false, null, cleanupDebt);
 
     internal static LocatorSelectionResult Fail(string code) =>
-        new(code, IsAbsent: false, null);
+        new(code, IsAbsent: false, null, []);
 }
 
 internal sealed record LocatorRootResult(

@@ -210,7 +210,10 @@ public sealed class LocatorCodecAndSelectionTests
             ],
             [],
             1);
-        Assert.Equal(LocatorCodes.Unavailable, below.Code);
+        Assert.True(below.RequiresCleanup);
+        Assert.Equal(
+            "below",
+            Assert.Single(below.CleanupDebt).Reference.ObjectId.Value);
 
         foreach (var actual in new[] { floor, floor + 1 })
         {
@@ -321,7 +324,7 @@ public sealed class LocatorCodecAndSelectionTests
     }
 
     [Fact]
-    public void PrunedHistoryIsAllowedButUnknownMustBeExactlySuperseded()
+    public void PrunedHistoryAndExactUnknownPredecessorAreCleanupSafe()
     {
         using var access = LocatorTestData.Access();
         using var keys = LocatorTestData.KeyRing(access);
@@ -340,9 +343,12 @@ public sealed class LocatorCodecAndSelectionTests
         var unknown = new LocatorUnknownArtifact(
             missing,
             LocatorCodes.AuthenticationFailed);
-        Assert.Equal(
-            LocatorCodes.AuthenticationFailed,
-            LocatorRootSelection.Select([lone], [unknown], 2).Code);
+        var predecessorSelected = LocatorRootSelection.Select(
+            [lone],
+            [unknown],
+            2);
+        Assert.True(predecessorSelected.Succeeded);
+        Assert.Single(predecessorSelected.Selection!.SafeToDelete);
 
         var accountingHead = lone with
         {
@@ -364,5 +370,135 @@ public sealed class LocatorCodecAndSelectionTests
             2);
         Assert.True(selected.Succeeded, selected.Code);
         Assert.Single(selected.Selection!.SafeToDelete);
+    }
+
+    [Fact]
+    public void ExpiredOnlyEvidenceIsUnavailableWithDeterministicPrecedence()
+    {
+        var expired = new LocatorUnknownArtifact(
+            LocatorTestData.Metadata(
+                "expired",
+                LocatorTestData.Now - 1),
+            LocatorCodes.Unavailable);
+        var authenticationFailure = new LocatorUnknownArtifact(
+            LocatorTestData.Metadata(
+                "tampered",
+                LocatorTestData.Now + 1),
+            LocatorCodes.AuthenticationFailed);
+        var keyUnavailable = new LocatorUnknownArtifact(
+            LocatorTestData.Metadata(
+                "unknown-key",
+                LocatorTestData.Now + 1),
+            LocatorCodes.KeyUnavailable);
+
+        Assert.Equal(
+            LocatorCodes.Unavailable,
+            LocatorRootSelection.Select([], [expired], 1).Code);
+        Assert.Equal(
+            LocatorCodes.AuthenticationFailed,
+            LocatorRootSelection.Select(
+                [],
+                [expired, authenticationFailure],
+                2).Code);
+        Assert.Equal(
+            LocatorCodes.KeyUnavailable,
+            LocatorRootSelection.Select(
+                [],
+                [expired, authenticationFailure, keyUnavailable],
+                3).Code);
+    }
+
+    [Fact]
+    public void SupersededCannotAbsorbKnownIncomparableSibling()
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var expiry = LocatorTestData.Now + 100;
+        var parent = new LocatorPhysicalCandidate(
+            LocatorTestData.Metadata("parent", expiry),
+            LocatorTestData.Sentinel(
+                keys,
+                requiredExpiry: expiry));
+        var parentIdentity = LocatorRootSentinelCodec.Identity(
+            parent.Metadata);
+        var siblingA = new LocatorPhysicalCandidate(
+            LocatorTestData.Metadata("sibling-a", expiry),
+            LocatorTestData.Sentinel(
+                keys,
+                parent.Sentinel.Root,
+                generation: 1,
+                requiredExpiry: expiry,
+                predecessors: [parentIdentity]));
+        var unrelatedHistory = LocatorRootSentinelCodec.Identity(
+            LocatorTestData.Metadata("unrelated-history", expiry));
+        var siblingB = new LocatorPhysicalCandidate(
+            LocatorTestData.Metadata("sibling-b", expiry),
+            siblingA.Sentinel with
+            {
+                Superseded = [unrelatedHistory],
+            });
+        var head = new LocatorPhysicalCandidate(
+            LocatorTestData.Metadata("head", expiry),
+            LocatorTestData.Sentinel(
+                keys,
+                parent.Sentinel.Root,
+                generation: 2,
+                requiredExpiry: expiry,
+                predecessors:
+                [
+                    LocatorRootSentinelCodec.Identity(
+                        siblingA.Metadata),
+                ],
+                superseded:
+                [
+                    parentIdentity,
+                    LocatorRootSentinelCodec.Identity(
+                        siblingB.Metadata),
+                ]));
+
+        var result = LocatorRootSelection.Select(
+            [parent, siblingA, siblingB, head],
+            [],
+            4);
+
+        Assert.Equal(LocatorCodes.Conflict, result.Code);
+    }
+
+    [Fact]
+    public void EquivalentSelectionPreservesStrongestAuthenticatedFloor()
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var lowerFloor = LocatorTestData.Now + 100;
+        var strongerFloor = lowerFloor + 100;
+        var lowerPromise = new LocatorPhysicalCandidate(
+            LocatorTestData.Metadata(
+                "longer-actual",
+                strongerFloor + 200),
+            LocatorTestData.Sentinel(
+                keys,
+                requiredExpiry: lowerFloor));
+        var strongerPromise = new LocatorPhysicalCandidate(
+            LocatorTestData.Metadata(
+                "stronger-floor",
+                strongerFloor + 100),
+            lowerPromise.Sentinel with
+            {
+                RequiredExpiresAtUnixSeconds = strongerFloor,
+            });
+
+        var selected = LocatorRootSelection.Select(
+            [lowerPromise, strongerPromise],
+            [],
+            2);
+
+        Assert.True(selected.Succeeded, selected.Code);
+        Assert.Equal(
+            "stronger-floor",
+            selected.Selection!.Head.Metadata.Reference.ObjectId.Value);
+        Assert.Equal(
+            "longer-actual",
+            Assert.Single(selected.Selection.SafeToDelete)
+                .Reference.ObjectId.Value);
     }
 }

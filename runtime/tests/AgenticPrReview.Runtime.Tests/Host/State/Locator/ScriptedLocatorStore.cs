@@ -25,6 +25,7 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
     internal OpaqueStoreFailure NextDeleteFailure { get; set; }
     internal OpaqueStoreMutationState NextDeleteMutationState { get; set; }
         = OpaqueStoreMutationState.NotCommitted;
+    internal int DeleteFailuresRemaining { get; set; }
     internal bool RemoveOnDeleteFailure { get; set; }
     internal long ExtraRetentionSeconds { get; set; } = 3_600;
     internal int HideExistingObjectsForNextLists { get; set; }
@@ -329,10 +330,19 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
                     request.Expected.Reference.ObjectId.Value);
             }
 
-            NextDeleteFailure = OpaqueStoreFailure.None;
-            NextDeleteMutationState =
-                OpaqueStoreMutationState.NotCommitted;
-            RemoveOnDeleteFailure = false;
+            if (DeleteFailuresRemaining > 0)
+            {
+                DeleteFailuresRemaining--;
+            }
+
+            if (DeleteFailuresRemaining == 0)
+            {
+                NextDeleteFailure = OpaqueStoreFailure.None;
+                NextDeleteMutationState =
+                    OpaqueStoreMutationState.NotCommitted;
+                RemoveOnDeleteFailure = false;
+            }
+
             return Task.FromResult(failure == OpaqueStoreFailure.None
                 ? new OpaqueStoreDeleteResult(
                     OpaqueStoreFailure.None,

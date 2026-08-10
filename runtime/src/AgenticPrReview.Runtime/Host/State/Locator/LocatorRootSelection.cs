@@ -40,12 +40,7 @@ internal static class LocatorRootSelection
 
         if (authenticated.IsEmpty)
         {
-            return LocatorSelectionResult.Fail(
-                unknown.Any(item => StringComparer.Ordinal.Equals(
-                    item.FailureCode,
-                    LocatorCodes.KeyUnavailable))
-                    ? LocatorCodes.KeyUnavailable
-                    : LocatorCodes.AuthenticationFailed);
+            return LocatorSelectionResult.Fail(ClassifyUnknown(unknown));
         }
 
         var root = authenticated[0].Sentinel.Root;
@@ -75,23 +70,6 @@ internal static class LocatorRootSelection
             return LocatorSelectionResult.Fail(LocatorCodes.Conflict);
         }
 
-        var retainedMaximal = maximal
-            .Where(HasProvenAuthenticatedFloor)
-            .ToImmutableArray();
-        if (retainedMaximal.IsEmpty)
-        {
-            return LocatorSelectionResult.Fail(LocatorCodes.Unavailable);
-        }
-
-        var head = retainedMaximal
-            .OrderByDescending(candidate =>
-                candidate.Metadata.ExpiresAtUnixSeconds)
-            .ThenByDescending(candidate =>
-                candidate.Sentinel.RequiredExpiresAtUnixSeconds)
-            .ThenBy(
-                candidate => candidate.Metadata.Reference.ObjectId.Value,
-                StringComparer.Ordinal)
-            .First();
         var byObjectId = authenticated.ToDictionary(
             candidate => candidate.Metadata.Reference.ObjectId.Value,
             StringComparer.Ordinal);
@@ -100,42 +78,55 @@ internal static class LocatorRootSelection
             return LocatorSelectionResult.Fail(LocatorCodes.Conflict);
         }
 
+        var retainedMaximal = maximal
+            .Where(HasProvenAuthenticatedFloor)
+            .ToImmutableArray();
+        if (retainedMaximal.IsEmpty)
+        {
+            return SelectCleanupDebt(
+                authenticated,
+                unknown,
+                physicalCount,
+                maximal);
+        }
+
+        var head = retainedMaximal
+            .OrderByDescending(candidate =>
+                candidate.Sentinel.RequiredExpiresAtUnixSeconds)
+            .ThenByDescending(candidate =>
+                candidate.Metadata.ExpiresAtUnixSeconds)
+            .ThenBy(
+                candidate => candidate.Metadata.Reference.ObjectId.Value,
+                StringComparer.Ordinal)
+            .First();
+
+        var reachable = BuildReachableLineage(
+            head,
+            unknown,
+            byObjectId,
+            out var authorizedUnknown);
+
         foreach (var candidate in authenticated)
         {
-            if (ReferenceEquals(candidate, head) ||
-                Equivalent(head.Sentinel, candidate.Sentinel))
+            if (reachable.Any(reachableCandidate =>
+                    Equivalent(
+                        reachableCandidate.Sentinel,
+                        candidate.Sentinel)))
             {
                 continue;
             }
 
-            if (!ContainsExact(
-                    head.Sentinel.Predecessors,
-                    candidate.Metadata) &&
-                !ContainsExact(
-                    head.Sentinel.Superseded,
-                    candidate.Metadata))
-            {
-                return LocatorSelectionResult.Fail(LocatorCodes.Conflict);
-            }
+            return LocatorSelectionResult.Fail(LocatorCodes.Conflict);
         }
 
-        foreach (var artifact in unknown)
+        var unauthorizedUnknown = unknown
+            .Where(artifact => !authorizedUnknown.Contains(
+                artifact.Metadata.Reference.ObjectId.Value))
+            .ToImmutableArray();
+        if (!unauthorizedUnknown.IsEmpty)
         {
-            if (!ContainsExact(
-                    head.Sentinel.Superseded,
-                    artifact.Metadata))
-            {
-                return LocatorSelectionResult.Fail(
-                    StringComparer.Ordinal.Equals(
-                        artifact.FailureCode,
-                        LocatorCodes.KeyUnavailable)
-                        ? LocatorCodes.KeyUnavailable
-                        : StringComparer.Ordinal.Equals(
-                            artifact.FailureCode,
-                            LocatorCodes.Unavailable)
-                            ? LocatorCodes.Unavailable
-                            : LocatorCodes.AuthenticationFailed);
-            }
+            return LocatorSelectionResult.Fail(
+                ClassifyUnknown(unauthorizedUnknown));
         }
 
         var safeToDelete = authenticated
@@ -165,6 +156,147 @@ internal static class LocatorRootSelection
         LocatorPhysicalCandidate candidate) =>
         candidate.Metadata.ExpiresAtUnixSeconds >=
             candidate.Sentinel.RequiredExpiresAtUnixSeconds;
+
+    private static LocatorSelectionResult SelectCleanupDebt(
+        ImmutableArray<LocatorPhysicalCandidate> authenticated,
+        ImmutableArray<LocatorUnknownArtifact> unknown,
+        int physicalCount,
+        ImmutableArray<LocatorPhysicalCandidate> maximal)
+    {
+        var debt = maximal
+            .Select(candidate => candidate.Metadata)
+            .OrderBy(
+                metadata => metadata.Reference.ObjectId.Value,
+                StringComparer.Ordinal)
+            .ToImmutableArray();
+        var maximumGeneration = maximal[0].Sentinel.Generation;
+        var remaining = authenticated
+            .Where(candidate =>
+                candidate.Sentinel.Generation < maximumGeneration)
+            .ToImmutableArray();
+
+        if (maximumGeneration == 0)
+        {
+            return remaining.IsEmpty && unknown.IsEmpty
+                ? LocatorSelectionResult.Cleanup(debt)
+                : LocatorSelectionResult.Fail(
+                    unknown.IsEmpty
+                        ? LocatorCodes.Conflict
+                        : ClassifyUnknown(unknown));
+        }
+
+        var fallback = Select(
+            remaining,
+            unknown,
+            physicalCount - maximal.Length);
+        if (!fallback.Succeeded)
+        {
+            return LocatorSelectionResult.Fail(fallback.Code);
+        }
+
+        if (fallback.IsAbsent)
+        {
+            return LocatorSelectionResult.Fail(LocatorCodes.Conflict);
+        }
+
+        if (fallback.RequiresCleanup || fallback.Selection is null)
+        {
+            return LocatorSelectionResult.Fail(LocatorCodes.Unavailable);
+        }
+
+        var fallbackHead = fallback.Selection.Head;
+        var hasExactFallback = maximal.All(candidate =>
+            candidate.Sentinel.Predecessors.Any(predecessor =>
+                remaining.Any(possibleFallback =>
+                    LocatorRootSentinelCodec.IdentityEquals(
+                        predecessor,
+                        possibleFallback.Metadata) &&
+                    Equivalent(
+                        possibleFallback.Sentinel,
+                        fallbackHead.Sentinel))));
+        return hasExactFallback
+            ? LocatorSelectionResult.Cleanup(debt)
+            : LocatorSelectionResult.Fail(LocatorCodes.Conflict);
+    }
+
+    private static string ClassifyUnknown(
+        ImmutableArray<LocatorUnknownArtifact> unknown)
+    {
+        if (unknown.Any(item => StringComparer.Ordinal.Equals(
+                item.FailureCode,
+                LocatorCodes.KeyUnavailable)))
+        {
+            return LocatorCodes.KeyUnavailable;
+        }
+
+        return unknown.All(item => StringComparer.Ordinal.Equals(
+            item.FailureCode,
+            LocatorCodes.Unavailable))
+            ? LocatorCodes.Unavailable
+            : LocatorCodes.AuthenticationFailed;
+    }
+
+    private static ImmutableArray<LocatorPhysicalCandidate>
+        BuildReachableLineage(
+        LocatorPhysicalCandidate head,
+        ImmutableArray<LocatorUnknownArtifact> unknown,
+        Dictionary<string, LocatorPhysicalCandidate> byObjectId,
+        out HashSet<string> authorizedUnknown)
+    {
+        var reachableBuilder = ImmutableArray.CreateBuilder<
+            LocatorPhysicalCandidate>();
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        authorizedUnknown = new HashSet<string>(StringComparer.Ordinal);
+        var unknownByObjectId = unknown.ToDictionary(
+            artifact => artifact.Metadata.Reference.ObjectId.Value,
+            StringComparer.Ordinal);
+        var pending = new Stack<LocatorPhysicalCandidate>();
+        pending.Push(head);
+
+        while (pending.Count > 0)
+        {
+            var current = pending.Pop();
+            if (!visited.Add(current.Metadata.Reference.ObjectId.Value))
+            {
+                continue;
+            }
+
+            reachableBuilder.Add(current);
+            foreach (var predecessor in current.Sentinel.Predecessors)
+            {
+                if (byObjectId.TryGetValue(
+                        predecessor.ObjectId,
+                        out var resolved))
+                {
+                    pending.Push(resolved);
+                }
+                else if (unknownByObjectId.TryGetValue(
+                        predecessor.ObjectId,
+                        out var unknownPredecessor) &&
+                    LocatorRootSentinelCodec.IdentityEquals(
+                        predecessor,
+                        unknownPredecessor.Metadata))
+                {
+                    authorizedUnknown.Add(predecessor.ObjectId);
+                }
+            }
+
+            foreach (var superseded in current.Sentinel.Superseded)
+            {
+                if (unknownByObjectId.TryGetValue(
+                        superseded.ObjectId,
+                        out var unknownSuperseded) &&
+                    LocatorRootSentinelCodec.IdentityEquals(
+                        superseded,
+                        unknownSuperseded.Metadata))
+                {
+                    authorizedUnknown.Add(superseded.ObjectId);
+                }
+            }
+        }
+
+        return reachableBuilder.ToImmutable();
+    }
 
     private static bool EdgesAreValid(
         ImmutableArray<LocatorPhysicalCandidate> authenticated,
@@ -252,10 +384,4 @@ internal static class LocatorRootSelection
 
         return true;
     }
-
-    private static bool ContainsExact(
-        ImmutableArray<LocatorArtifactIdentity> references,
-        OpaqueStoreObjectMetadata metadata) =>
-        references.Any(reference =>
-            LocatorRootSentinelCodec.IdentityEquals(reference, metadata));
 }
