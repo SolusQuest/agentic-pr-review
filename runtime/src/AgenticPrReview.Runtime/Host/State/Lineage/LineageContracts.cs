@@ -103,13 +103,11 @@ internal static class StateObjectClasses
 
     internal static bool TryParse(string value, out StateObjectClass result)
     {
-        foreach (var candidate in All)
+        foreach (var candidate in All.Where(candidate =>
+            StringComparer.Ordinal.Equals(ToWireName(candidate), value)))
         {
-            if (StringComparer.Ordinal.Equals(ToWireName(candidate), value))
-            {
-                result = candidate;
-                return true;
-            }
+            result = candidate;
+            return true;
         }
 
         result = default;

@@ -1312,13 +1312,13 @@ internal sealed class LineageService
         ImmutableArray<LineageArtifactEvidence> evidence)
     {
         var targets = ImmutableArray.CreateBuilder<OpaqueStoreObjectMetadata>();
-        foreach (var item in evidence)
-        {
-            var matches = snapshot.Authenticated
+        foreach (var matches in evidence.Select(item =>
+            snapshot.Authenticated
                 .Select(value => value.Metadata)
                 .Concat(snapshot.Unknown.Select(value => value.Metadata))
                 .Where(metadata => LineageHeadCodec.Matches(item, metadata))
-                .ToImmutableArray();
+                .ToImmutableArray()))
+        {
             if (matches.Length > 1)
             {
                 return null;

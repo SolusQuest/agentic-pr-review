@@ -118,12 +118,10 @@ internal static class LineageHeadSelector
         {
             var survivor = ChooseSurvivor(group, currentKeyId);
             var groupIdentity = survivor.Header.ObjectIdentity;
-            foreach (var duplicate in group)
+            foreach (var duplicate in group.Where(duplicate =>
+                duplicate.Metadata != survivor.Metadata))
             {
-                if (duplicate.Metadata != survivor.Metadata)
-                {
-                    safe.Add(duplicate.Metadata);
-                }
+                safe.Add(duplicate.Metadata);
             }
 
             if (chainIdentities.Contains(groupIdentity))
