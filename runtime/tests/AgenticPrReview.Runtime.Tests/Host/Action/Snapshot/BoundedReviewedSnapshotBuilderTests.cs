@@ -216,6 +216,73 @@ public sealed class BoundedReviewedSnapshotBuilderTests
         Directory.Delete(parent, recursive: true);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FinalAdmissionRejectsExpiredOrCancelledSnapshots(
+        bool cancel)
+    {
+        var invocation = await H5SnapshotTestSupport.AuthorizedInvocation();
+        var parent = H5SnapshotTestSupport.TemporaryDirectory();
+        var before = "before\n"u8.ToArray();
+        var after = "after\n"u8.ToArray();
+        var time = new H5ManualTimeProvider();
+        var budget = ReviewedSnapshotTestAccess.Budget(
+            ReviewedContentLimits.GitObjectRequests,
+            ReviewedContentLimits.GitObjectResponseBytes,
+            ReviewedContentLimits.AggregateResponseBytes,
+            ReviewedContentLimits.AcquisitionAndMaterializationTimeout,
+            time);
+        var tree = await H5SnapshotTestSupport.TreeWithBudgetAsync(
+            invocation,
+            parent,
+            budget,
+            new H5HeadEntry(
+                "file.txt",
+                "100644",
+                ReviewedTreeEntryKind.Regular,
+                after));
+        var script = new Script(
+            H5SnapshotTestSupport.PullRequest(invocation.PullRequest),
+            new ActionHostPullRequestFileObject(
+                H5SnapshotTestSupport.BlobSha(after),
+                "file.txt",
+                null,
+                "modified",
+                1,
+                1,
+                2,
+                null),
+            invocation.PullRequest.BaseSha,
+            before);
+        using var cancellation = new CancellationTokenSource();
+        System.Action beforeFinalAdmission = cancel
+            ? cancellation.Cancel
+            : () => time.Advance(
+                ReviewedContentLimits.AcquisitionAndMaterializationTimeout);
+
+        var result = await new BoundedReviewedSnapshotBuilder(
+                new ScriptedFactory(script))
+            .BuildAsync(
+                invocation,
+                H5SnapshotTestSupport.Token(),
+                tree,
+                parent,
+                cancellation.Token,
+                beforeFinalAdmission: beforeFinalAdmission);
+
+        Assert.Null(result.Lease);
+        Assert.Equal(
+            cancel
+                ? ReviewedSnapshotReadFailure.Cancelled
+                : ReviewedSnapshotReadFailure.UnsupportedSize,
+            result.Failure);
+        Assert.Empty(Directory.EnumerateDirectories(
+            parent,
+            "apr-tool-root-*"));
+        Directory.Delete(parent, recursive: true);
+    }
+
     private sealed class ScriptedFactory : IReviewedSnapshotTransportFactory
     {
         private readonly Script _script;

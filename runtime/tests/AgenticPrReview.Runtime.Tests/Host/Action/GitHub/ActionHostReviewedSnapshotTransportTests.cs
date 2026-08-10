@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Text;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.ActionHost.Snapshot;
 using Xunit;
@@ -137,6 +138,84 @@ public sealed class ActionHostReviewedSnapshotTransportTests
             ActionHostGitObjectFailure.InvalidResponse,
             result.Failure);
         Assert.Equal(5, result.CapturedResponseBytes);
+    }
+
+    [Fact]
+    public async Task MalformedJsonPreservesEveryCapturedResponseByte()
+    {
+        const string body = "{\"malformed\":";
+        var handler = new CapturingHandler(_ => Json(body));
+        using var transport = ActionHostReviewedSnapshotTransport.CreateForTesting(
+            "token-canary",
+            handler,
+            new FailIfCalledObjectTransport());
+
+        var result = await transport.GetCurrentPullRequestAsync(
+            "owner/repository",
+            17,
+            CancellationToken.None);
+
+        Assert.Null(result.Value);
+        Assert.Equal(ActionHostGitObjectFailure.InvalidResponse, result.Failure);
+        Assert.Equal(
+            Encoding.UTF8.GetByteCount(body),
+            result.CapturedResponseBytes);
+    }
+
+    [Fact]
+    public async Task UnknownLengthJsonCapPlusOneReportsConsumedBytes()
+    {
+        const int maximumBytes = 2 * 1024 * 1024;
+        var body = new byte[maximumBytes + 1];
+        Array.Fill<byte>(body, 0x20);
+        var handler = new CapturingHandler(_ => new HttpResponseMessage(
+            HttpStatusCode.OK)
+        {
+            Content = new UnknownLengthContent(body)
+            {
+                Headers =
+                {
+                    ContentType = new MediaTypeHeaderValue("application/json"),
+                },
+            },
+        });
+        using var transport = ActionHostReviewedSnapshotTransport.CreateForTesting(
+            "token-canary",
+            handler,
+            new FailIfCalledObjectTransport());
+
+        var result = await transport.GetCurrentPullRequestAsync(
+            "owner/repository",
+            17,
+            CancellationToken.None);
+
+        Assert.Null(result.Value);
+        Assert.Equal(ActionHostGitObjectFailure.ResponseTooLarge, result.Failure);
+        Assert.Equal(body.Length, result.CapturedResponseBytes);
+    }
+
+    [Fact]
+    public async Task MapperRejectionKeepsCapturedBodyChargedOnce()
+    {
+        const string body = "[{\"status\":\"modified\"}]";
+        var handler = new CapturingHandler(_ => Json(body));
+        using var transport = ActionHostReviewedSnapshotTransport.CreateForTesting(
+            "token-canary",
+            handler,
+            new FailIfCalledObjectTransport());
+
+        var result = await transport.GetPullRequestFilesAsync(
+            "owner/repository",
+            17,
+            1,
+            ReviewedContentLimits.ChangedFilesPerPage,
+            CancellationToken.None);
+
+        Assert.Null(result.Value);
+        Assert.Equal(ActionHostGitObjectFailure.InvalidResponse, result.Failure);
+        Assert.Equal(
+            Encoding.UTF8.GetByteCount(body),
+            result.CapturedResponseBytes);
     }
 
     private static HttpResponseMessage Json(string body) => new(

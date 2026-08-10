@@ -280,13 +280,20 @@ internal sealed class ReviewedExactDiffBuilder
         }
 
         var completed = built.ToImmutable();
+        var finalChangedIdentity = ReviewedFinalChangedFileIdentityWriter.Write(
+            changedFiles.Identity,
+            completed);
+        var diffIdentity = ReviewedDiffIdentityWriter.Write(completed);
+        if (!_budget.TryContinue(cancellationToken))
+        {
+            return Unsupported();
+        }
+
         return ReviewedSnapshotReadResult<ReviewedDiffBuildSet>.Success(
             new(
                 completed,
-                ReviewedFinalChangedFileIdentityWriter.Write(
-                    changedFiles.Identity,
-                    completed),
-                ReviewedDiffIdentityWriter.Write(completed)));
+                finalChangedIdentity,
+                diffIdentity));
     }
 
     private static ReviewedSnapshotReadResult<ReviewedDiffBuildSet>
@@ -1057,7 +1064,9 @@ internal sealed class ReviewedExactDiffBuilder
         ImmutableArray<TextLine> newLines,
         CancellationToken cancellationToken)
     {
-        if (file.Patch is null || file.PatchIncomplete)
+        if (file.Patch is null ||
+            file.PatchIncomplete ||
+            !file.Patch.EndsWith('\n'))
         {
             return PatchEvidence.NotAvailableOrIncomplete;
         }
@@ -1105,6 +1114,9 @@ internal sealed class ReviewedExactDiffBuilder
             var oldConsumed = 0;
             var newConsumed = 0;
             var lastWasContent = false;
+            var lastContentKind = '\0';
+            var lastOldLine = 0;
+            var lastNewLine = 0;
             while (index < lines.Length &&
                 !lines[index].StartsWith("@@", StringComparison.Ordinal))
             {
@@ -1125,7 +1137,13 @@ internal sealed class ReviewedExactDiffBuilder
                         line,
                         "\\ No newline at end of file"))
                 {
-                    if (!lastWasContent)
+                    if (!lastWasContent ||
+                        !NoNewlineClaimMatches(
+                            lastContentKind,
+                            oldLines,
+                            newLines,
+                            lastOldLine,
+                            lastNewLine))
                     {
                         return PatchEvidence.NotAvailableOrIncomplete;
                     }
@@ -1179,6 +1197,13 @@ internal sealed class ReviewedExactDiffBuilder
                 }
 
                 lastWasContent = true;
+                lastContentKind = line[0];
+                lastOldLine = line[0] == '+'
+                    ? 0
+                    : oldStart + oldConsumed - 1;
+                lastNewLine = line[0] == '-'
+                    ? 0
+                    : newStart + newConsumed - 1;
                 index++;
             }
 
@@ -1264,17 +1289,38 @@ internal sealed class ReviewedExactDiffBuilder
 
         if (comma < 0)
         {
-            return start < int.MaxValue;
+            return start is > 0 and < int.MaxValue;
         }
 
         return int.TryParse(
                 value[(comma + 1)..],
                 NumberStyles.None,
                 CultureInfo.InvariantCulture,
-                out count) &&
+            out count) &&
             count >= 0 &&
+            (start != 0 || count == 0) &&
             start <= int.MaxValue - count;
     }
+
+    private static bool NoNewlineClaimMatches(
+        char kind,
+        ImmutableArray<TextLine> oldLines,
+        ImmutableArray<TextLine> newLines,
+        int oldLine,
+        int newLine) => kind switch
+    {
+        ' ' => IsUnterminated(oldLines, oldLine) &&
+            IsUnterminated(newLines, newLine),
+        '-' => IsUnterminated(oldLines, oldLine),
+        '+' => IsUnterminated(newLines, newLine),
+        _ => false,
+    };
+
+    private static bool IsUnterminated(
+        ImmutableArray<TextLine> lines,
+        int oneBased) => oneBased > 0 &&
+        oneBased <= lines.Length &&
+        !lines[oneBased - 1].Terminated;
 
     private static bool MatchesPatchLine(
         ImmutableArray<TextLine> lines,

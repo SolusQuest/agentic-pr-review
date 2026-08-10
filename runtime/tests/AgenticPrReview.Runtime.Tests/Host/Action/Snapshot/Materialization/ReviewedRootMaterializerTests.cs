@@ -322,6 +322,51 @@ public sealed class ReviewedRootMaterializerTests
     }
 
     [Fact]
+    public async Task LinuxCancellationAfterParentOpenDisposesRetainedHandle()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var invocation = await H5SnapshotTestSupport.AuthorizedInvocation();
+        var parent = H5SnapshotTestSupport.TemporaryDirectory();
+        var tree = await H5SnapshotTestSupport.TreeAsync(invocation, parent);
+        using var cancellation = new CancellationTokenSource();
+        var baseline = CountLinuxHandlesTo(parent);
+        try
+        {
+            var result = await ReviewedRootMaterializer.MaterializeAsync(
+                tree,
+                parent,
+                cancellation.Token,
+                new ReviewedRootMaterializationHooks
+                {
+                    AfterParentOpen = openedParent =>
+                    {
+                        Assert.Equal(parent, openedParent);
+                        Assert.Equal(
+                            baseline + 1,
+                            CountLinuxHandlesTo(parent));
+                        cancellation.Cancel();
+                    },
+                });
+
+            Assert.Null(result.Lease);
+            Assert.Equal(ReviewedRootFailure.Cancelled, result.Failure);
+            Assert.Equal(baseline, CountLinuxHandlesTo(parent));
+            Assert.Empty(Directory.EnumerateDirectories(
+                parent,
+                "apr-tool-root-*"));
+        }
+        finally
+        {
+            await tree.DisposeAsync();
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task RootCapOverflowFailsBeforeRootCreation()
     {
         var invocation = await H5SnapshotTestSupport.AuthorizedInvocation();
@@ -535,7 +580,7 @@ public sealed class ReviewedRootMaterializerTests
         {
             if (new DirectoryInfo(lease.AbsoluteRoot).LinkTarget is not null)
             {
-                Directory.Delete(lease.AbsoluteRoot);
+                File.Delete(lease.AbsoluteRoot);
             }
 
             if (moved is not null && Directory.Exists(moved))
@@ -609,6 +654,35 @@ public sealed class ReviewedRootMaterializerTests
             Directory.Delete(parent, recursive: true);
             Directory.Delete(outside, recursive: true);
         }
+    }
+
+    private static int CountLinuxHandlesTo(string target)
+    {
+        var canonical = Path.GetFullPath(target);
+        var count = 0;
+        foreach (var descriptor in Directory.EnumerateFileSystemEntries(
+                     "/proc/self/fd"))
+        {
+            try
+            {
+                var resolved = File.ResolveLinkTarget(
+                    descriptor,
+                    returnFinalTarget: false);
+                if (resolved is not null &&
+                    StringComparer.Ordinal.Equals(
+                        Path.GetFullPath(resolved.FullName),
+                        canonical))
+                {
+                    count++;
+                }
+            }
+            catch (Exception exception) when (exception is IOException or
+                UnauthorizedAccessException)
+            {
+            }
+        }
+
+        return count;
     }
 
     [SupportedOSPlatform("linux")]

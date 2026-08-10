@@ -132,6 +132,7 @@ internal sealed class ReviewedRootLease : IAsyncDisposable
 
 internal sealed class ReviewedRootMaterializationHooks
 {
+    internal Action<string>? AfterParentOpen { get; init; }
     internal Action<string>? BeforeRootCreate { get; init; }
     internal Action<string>? BeforeRootCleanup { get; init; }
     internal Action<string>? BeforeChildCleanup { get; init; }
@@ -157,11 +158,22 @@ internal static class ReviewedRootMaterializer
                 ReviewedRootFailure.UnsafeRoot);
         }
 
-        if (!tree.Budget.TryContinue(cancellationToken))
+        try
+        {
+            hooks?.AfterParentOpen?.Invoke(parent);
+            if (!tree.Budget.TryContinue(cancellationToken))
+            {
+                parentHandle!.Dispose();
+                return ReviewedRootMaterializationResult.Failed(
+                    ReviewedRootFailure.UnsupportedSize);
+            }
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
         {
             parentHandle!.Dispose();
             return ReviewedRootMaterializationResult.Failed(
-                ReviewedRootFailure.UnsupportedSize);
+                ReviewedRootFailure.Cancelled);
         }
 
         var regular = tree.Records
@@ -247,6 +259,22 @@ internal static class ReviewedRootMaterializer
                     hooks);
             }
 
+            var materializationIdentity =
+                ReviewedMaterializationIdentityWriter.Write(tree, regular);
+            if (!tree.Budget.TryContinue(cancellationToken))
+            {
+                return FailedWithCleanup(
+                    parentHandle!,
+                    parent,
+                    parentIdentity,
+                    rootName,
+                    rootHandle!,
+                    root,
+                    rootIdentity,
+                    ReviewedRootFailure.UnsupportedSize,
+                    hooks);
+            }
+
             var lease = new ReviewedRootLease(
                 root,
                 parentHandle!,
@@ -255,7 +283,7 @@ internal static class ReviewedRootMaterializer
                 rootHandle!,
                 rootIdentity,
                 regular.Select(static record => record.Path),
-                ReviewedMaterializationIdentityWriter.Write(tree, regular),
+                materializationIdentity,
                 hooks);
             parentHandle = null;
             rootHandle = null;

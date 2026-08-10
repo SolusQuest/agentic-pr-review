@@ -101,7 +101,8 @@ internal sealed class BoundedReviewedSnapshotBuilder
         CancellationToken cancellationToken,
         ReviewedRootMaterializationHooks? rootHooks = null,
         long maximumChangedMetadataBytes =
-            AgentLimits.ChangedFilesMetadataBytes)
+            AgentLimits.ChangedFilesMetadataBytes,
+        Action? beforeFinalAdmission = null)
     {
         ArgumentNullException.ThrowIfNull(invocation);
         ArgumentNullException.ThrowIfNull(token);
@@ -224,6 +225,17 @@ internal sealed class BoundedReviewedSnapshotBuilder
                 built.Value.ChangedFileIdentity.Sha256,
                 built.Value.Identity.Sha256,
                 root.Identity.Sha256);
+            beforeFinalAdmission?.Invoke();
+            if (!tree.Budget.TryContinue(cancellationToken))
+            {
+                await root.DisposeAsync();
+                var cleanupIncomplete = root.CleanupIncomplete;
+                root = null;
+                return BoundedReviewedSnapshotResult.Failed(
+                    ReviewedSnapshotReadFailure.UnsupportedSize,
+                    cleanupIncomplete);
+            }
+
             var lease = new BoundedReviewedSnapshotLease(
                 agentSnapshot,
                 identities,

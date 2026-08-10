@@ -276,7 +276,7 @@ public sealed class ReviewedExactDiffBuilderTests
                     "text.txt",
                     text,
                     "added",
-                    patch: "@@ -0,0 +1 @@\n+different"),
+                    patch: "@@ -0,0 +1 @@\n+different\n"),
             }.ToImmutableArray();
             var result = await new ReviewedExactDiffBuilder(tree.Budget)
                 .BuildAsync(
@@ -434,20 +434,31 @@ public sealed class ReviewedExactDiffBuilderTests
         var invocation = await H5SnapshotTestSupport.AuthorizedInvocation();
         var parent = H5SnapshotTestSupport.TemporaryDirectory();
         var actual = "actual\n"u8.ToArray();
+        var partial = "partial\n"u8.ToArray();
+        var multiple = "one\ntwo\n"u8.ToArray();
         var bom = "\uFEFFactual\n"u8.ToArray();
+        var unterminated = "actual"u8.ToArray();
+        var removed = "removed"u8.ToArray();
         var tree = await H5SnapshotTestSupport.TreeAsync(
             invocation,
             parent,
             Regular("truncated.txt", actual),
+            Regular("terminal-truncated.txt", partial),
             Regular("malformed.txt", actual),
             Regular("overflow.txt", actual),
+            Regular("consistent.txt", actual),
+            Regular("multiple.txt", multiple),
             Regular("bom.txt", bom),
+            Regular("old-zero-positive.txt", actual),
+            Regular("new-zero-positive.txt", actual),
+            Regular("false-no-newline.txt", actual),
+            Regular("true-no-newline.txt", unterminated),
             Regular("contradictory.txt", actual));
         var transport = new ScriptedTransport(
             invocation.PullRequest.BaseSha,
             new string('b', 40),
-            [],
-            []);
+            [BaseEntry("removed.txt", removed)],
+            [removed]);
         using var staging = ReviewedBaseBlobStagingLease.TryCreate(
             parent,
             tree.Budget);
@@ -469,6 +480,12 @@ public sealed class ReviewedExactDiffBuilderTests
                     additions: 1,
                     patch: "@@ -0,0 +1,2 @@\n+actual"),
                 Fact(
+                    "terminal-truncated.txt",
+                    partial,
+                    "added",
+                    additions: 1,
+                    patch: "@@ -0,0 +1 @@\n+part"),
+                Fact(
                     "malformed.txt",
                     actual,
                     "added",
@@ -481,17 +498,59 @@ public sealed class ReviewedExactDiffBuilderTests
                     additions: 1,
                     patch: "@@ -0,0 +2147483647 @@\n+actual"),
                 Fact(
+                    "consistent.txt",
+                    actual,
+                    "added",
+                    additions: 1,
+                    patch: "@@ -0,0 +1 @@\n+actual\n"),
+                Fact(
+                    "multiple.txt",
+                    multiple,
+                    "added",
+                    additions: 2,
+                    patch: "@@ -0,0 +1 @@\n+one\n@@ -0,0 +2 @@\n+two\n"),
+                Fact(
                     "bom.txt",
                     bom,
                     "added",
                     additions: 1,
-                    patch: "@@ -0,0 +1 @@\n+\uFEFFactual"),
+                    patch: "@@ -0,0 +1 @@\n+\uFEFFactual\n"),
+                Fact(
+                    "old-zero-positive.txt",
+                    actual,
+                    "added",
+                    additions: 1,
+                    patch: "@@ -0,1 +1 @@\n-wrong\n+different\n"),
+                Fact(
+                    "new-zero-positive.txt",
+                    actual,
+                    "added",
+                    additions: 1,
+                    patch: "@@ -0,0 +0,1 @@\n+different\n"),
+                Fact(
+                    "false-no-newline.txt",
+                    actual,
+                    "added",
+                    additions: 1,
+                    patch: "@@ -0,0 +1 @@\n+different\n\\ No newline at end of file\n"),
+                Fact(
+                    "true-no-newline.txt",
+                    unterminated,
+                    "added",
+                    additions: 1,
+                    patch: "@@ -0,0 +1 @@\n+different\n\\ No newline at end of file\n"),
+                Fact(
+                    "removed.txt",
+                    removed,
+                    "removed",
+                    deletions: 1,
+                    patch: "@@ -1 +0,0 @@\n-different\n\\ No newline at end of file\n"),
                 Fact(
                     "contradictory.txt",
                     actual,
                     "added",
                     additions: 1,
-                    patch: "@@ -0,0 +1 @@\n+different"),
+                    patch: "@@ -0,0 +1 @@\n+different\n"),
             }.ToImmutableArray();
 
             var result = await new ReviewedExactDiffBuilder(tree.Budget)
@@ -512,6 +571,11 @@ public sealed class ReviewedExactDiffBuilderTests
             Assert.Equal(
                 "available",
                 built.Changes.Single(change =>
+                    change.Change.Path == "terminal-truncated.txt")
+                    .Change.PatchStatus);
+            Assert.Equal(
+                "available",
+                built.Changes.Single(change =>
                     change.Change.Path == "malformed.txt").Change.PatchStatus);
             Assert.Equal(
                 "available",
@@ -520,7 +584,40 @@ public sealed class ReviewedExactDiffBuilderTests
             Assert.Equal(
                 "available",
                 built.Changes.Single(change =>
+                    change.Change.Path == "consistent.txt").Change.PatchStatus);
+            Assert.Equal(
+                "available",
+                built.Changes.Single(change =>
+                    change.Change.Path == "multiple.txt").Change.PatchStatus);
+            Assert.Equal(
+                "available",
+                built.Changes.Single(change =>
                     change.Change.Path == "bom.txt").Change.PatchStatus);
+            Assert.Equal(
+                "available",
+                built.Changes.Single(change =>
+                    change.Change.Path == "old-zero-positive.txt")
+                    .Change.PatchStatus);
+            Assert.Equal(
+                "available",
+                built.Changes.Single(change =>
+                    change.Change.Path == "new-zero-positive.txt")
+                    .Change.PatchStatus);
+            Assert.Equal(
+                "available",
+                built.Changes.Single(change =>
+                    change.Change.Path == "false-no-newline.txt")
+                    .Change.PatchStatus);
+            Assert.Equal(
+                ReviewedUnavailableReason.PatchContradiction,
+                built.Changes.Single(change =>
+                    change.Change.Path == "true-no-newline.txt")
+                    .UnavailableReason);
+            Assert.Equal(
+                ReviewedUnavailableReason.PatchContradiction,
+                built.Changes.Single(change =>
+                    change.Change.Path == "removed.txt")
+                    .UnavailableReason);
             Assert.Equal(
                 ReviewedUnavailableReason.PatchContradiction,
                 built.Changes.Single(change =>
