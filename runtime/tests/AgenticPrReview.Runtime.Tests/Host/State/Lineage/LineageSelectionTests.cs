@@ -188,15 +188,15 @@ public sealed class LineageSelectionTests
             },
             unknownMetadata with { Size = unknownMetadata.Size + 1 },
         };
-        foreach (var changed in changedVariants)
-        {
-            var rejected = LineageHeadSelector.Select(
+        foreach (var rejected in changedVariants.Select(changed =>
+            LineageHeadSelector.Select(
                 [current],
                 [new UnknownStateObject(
                     changed,
                     LineageCodes.KeyUnavailable)],
                 physicalCount: 2,
-                currentKeyId: new string('1', 64));
+                currentKeyId: new string('1', 64))))
+        {
             Assert.False(rejected.Succeeded);
             Assert.Equal(LineageCodes.KeyUnavailable, rejected.Code);
         }

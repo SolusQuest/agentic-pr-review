@@ -1521,18 +1521,16 @@ internal sealed class LineageService
 
         var referenced = ImmutableHashSet.CreateBuilder<string>(
             StringComparer.Ordinal);
-        foreach (var group in groups.Values)
+        foreach (var predecessor in groups.Values
+            .Select(group => group[0].Header.PredecessorIdentity)
+            .OfType<string>())
         {
-            var predecessor = group[0].Header.PredecessorIdentity;
-            if (predecessor is not null)
+            if (!groups.ContainsKey(predecessor))
             {
-                if (!groups.ContainsKey(predecessor))
-                {
-                    return ExpiredAcceptanceResult.Fail(LineageCodes.Conflict);
-                }
-
-                referenced.Add(predecessor);
+                return ExpiredAcceptanceResult.Fail(LineageCodes.Conflict);
             }
+
+            referenced.Add(predecessor);
         }
 
         var leaves = groups
