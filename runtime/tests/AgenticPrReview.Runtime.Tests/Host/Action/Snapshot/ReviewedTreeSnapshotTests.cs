@@ -15,7 +15,8 @@ public sealed class ReviewedTreeSnapshotTests
             ReviewedContentBudget.Mint(authority, TimeProvider.System));
         Assert.Null(ReviewedBlobStagingLease.TryCreate(
             authority,
-            Path.GetFullPath(Path.GetTempPath())));
+            Path.GetFullPath(Path.GetTempPath()),
+            ReviewedSnapshotTestAccess.ProductionBudget()));
     }
 
     [Fact]

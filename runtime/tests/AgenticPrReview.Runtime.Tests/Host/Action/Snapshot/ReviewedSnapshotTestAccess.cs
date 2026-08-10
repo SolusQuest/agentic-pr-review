@@ -62,14 +62,19 @@ internal static class ReviewedSnapshotTestAccess
             client);
     }
 
-    internal static ReviewedBlobStagingLease Staging(string parent)
+    internal static ReviewedBlobStagingLease Staging(
+        string parent,
+        ReviewedContentBudget budget)
     {
         var authority = typeof(ReviewedTreeReader).GetField(
             "MintAuthority",
             BindingFlags.Static | BindingFlags.NonPublic)?.GetValue(null) ??
             throw new InvalidOperationException(
                 "Reviewed-tree mint authority was not found.");
-        return ReviewedBlobStagingLease.TryCreate(authority, parent) ??
+        return ReviewedBlobStagingLease.TryCreate(
+                authority,
+                parent,
+                budget) ??
             throw new InvalidOperationException(
                 "Test staging lease could not be created.");
     }
@@ -81,6 +86,14 @@ internal static class ReviewedSnapshotTestAccess
             as string ??
         throw new InvalidOperationException(
             "The staged blob path was not found.");
+
+    internal static FileStream StagedStream(ReviewedStagedBlob blob) =>
+        typeof(ReviewedStagedBlob).GetField(
+            "_source",
+            BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(blob)
+            as FileStream ??
+        throw new InvalidOperationException(
+            "The staged blob source was not found.");
 
     [UnsafeAccessor(UnsafeAccessorKind.Constructor)]
     private static extern ReviewedContentBudget CreateBudget(

@@ -164,6 +164,15 @@ internal sealed class ReviewedContentBudget
         }
     }
 
+    internal bool TryContinue(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            return _usable && !DeadlineExceededLocked();
+        }
+    }
+
     internal bool TryGetRemaining(
         out ReviewedContentBudgetRemaining? remaining)
     {

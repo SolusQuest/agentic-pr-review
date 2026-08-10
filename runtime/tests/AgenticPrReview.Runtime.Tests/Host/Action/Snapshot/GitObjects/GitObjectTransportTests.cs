@@ -43,10 +43,11 @@ public sealed partial class GitObjectTransportTests
                     }
                     """);
         });
+        var budget = ProductionBudget();
         using var transport = ReviewedSnapshotTestAccess.Transport(
             invocation,
             Token(),
-            ProductionBudget(),
+            budget,
             handler);
 
         var commit = await transport.GetCommitAsync(CancellationToken.None);
@@ -93,15 +94,16 @@ public sealed partial class GitObjectTransportTests
                 },
             },
         });
+        var budget = ProductionBudget();
         using var transport = ReviewedSnapshotTestAccess.Transport(
             invocation,
             Token(),
-            ProductionBudget(),
+            budget,
             handler);
         var parent = CreateTemporaryDirectory();
         try
         {
-            var staging = ReviewedSnapshotTestAccess.Staging(parent);
+            var staging = ReviewedSnapshotTestAccess.Staging(parent, budget);
             var result = await transport.StageBlobAsync(
                 sha,
                 bytes.Length,
@@ -130,9 +132,12 @@ public sealed partial class GitObjectTransportTests
         var staged = await Stage("trusted"u8.ToArray());
         try
         {
-            var path = ReviewedSnapshotTestAccess.StagedPath(staged.Blob);
-            File.SetAttributes(path, FileAttributes.Normal);
-            await File.WriteAllBytesAsync(path, "altered"u8.ToArray());
+            var stream = ReviewedSnapshotTestAccess.StagedStream(staged.Blob);
+            await RandomAccess.WriteAsync(
+                stream.SafeFileHandle,
+                "altered"u8.ToArray(),
+                0,
+                CancellationToken.None);
             using var destination = new MemoryStream();
 
             Assert.False(await staged.Blob.CopyVerifiedToAsync(
@@ -148,29 +153,22 @@ public sealed partial class GitObjectTransportTests
     }
 
     [Fact]
-    public async Task SymlinkReplacementProducesNoBytes()
+    public async Task ExpiredSharedDeadlinePreventsStagedCopy()
     {
-        var bytes = "trusted"u8.ToArray();
-        var staged = await Stage(bytes);
+        var time = new ManualTimeProvider();
+        var budget = ReviewedSnapshotTestAccess.Budget(
+            ReviewedContentLimits.GitObjectRequests,
+            ReviewedContentLimits.GitObjectResponseBytes,
+            ReviewedContentLimits.AggregateResponseBytes,
+            ReviewedContentLimits.AcquisitionAndMaterializationTimeout,
+            time);
+        var staged = await Stage("trusted"u8.ToArray(), budget);
         try
         {
-            var path = ReviewedSnapshotTestAccess.StagedPath(staged.Blob);
-            var target = Path.Join(staged.Parent, "symlink-target");
-            await File.WriteAllBytesAsync(target, bytes);
-            File.SetAttributes(path, FileAttributes.Normal);
-            File.Delete(path);
-            try
-            {
-                File.CreateSymbolicLink(path, target);
-            }
-            catch (Exception exception) when (
-                OperatingSystem.IsWindows() &&
-                exception is IOException or UnauthorizedAccessException)
-            {
-                return;
-            }
-
+            time.Advance(
+                ReviewedContentLimits.AcquisitionAndMaterializationTimeout);
             using var destination = new MemoryStream();
+
             Assert.False(await staged.Blob.CopyVerifiedToAsync(
                 destination,
                 CancellationToken.None));
@@ -184,7 +182,40 @@ public sealed partial class GitObjectTransportTests
     }
 
     [Fact]
-    public async Task LinuxFifoReplacementDoesNotBlockOrProduceBytes()
+    public async Task LinuxSymlinkPathCannotRedirectHandleBackedBlob()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var bytes = "trusted"u8.ToArray();
+        var staged = await Stage(bytes);
+        try
+        {
+            var path = ReviewedSnapshotTestAccess.StagedPath(staged.Blob);
+            var target = Path.Join(staged.Parent, "symlink-target");
+            await File.WriteAllBytesAsync(target, bytes);
+            Assert.False(File.Exists(path));
+            File.CreateSymbolicLink(path, target);
+
+            using var destination = new MemoryStream();
+            Assert.True(await staged.Blob.CopyVerifiedToAsync(
+                destination,
+                CancellationToken.None));
+            Assert.Equal(bytes, destination.ToArray());
+            Assert.True(staged.Lease.Cleanup());
+            Assert.True(File.Exists(path));
+        }
+        finally
+        {
+            staged.Lease.Cleanup();
+            Directory.Delete(staged.Parent, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task LinuxFifoPathCannotBlockOrRedirectHandleBackedBlob()
     {
         if (!OperatingSystem.IsLinux())
         {
@@ -195,7 +226,7 @@ public sealed partial class GitObjectTransportTests
         try
         {
             var path = ReviewedSnapshotTestAccess.StagedPath(staged.Blob);
-            File.Delete(path);
+            Assert.False(File.Exists(path));
             Assert.Equal(0, MakeFifo(path, Convert.ToUInt32("600", 8)));
             using var destination = new MemoryStream();
 
@@ -204,8 +235,10 @@ public sealed partial class GitObjectTransportTests
                     CancellationToken.None)
                 .WaitAsync(TimeSpan.FromSeconds(2));
 
-            Assert.False(copied);
-            Assert.Empty(destination.ToArray());
+            Assert.True(copied);
+            Assert.Equal("trusted"u8.ToArray(), destination.ToArray());
+            Assert.True(staged.Lease.Cleanup());
+            Assert.True(File.Exists(path));
         }
         finally
         {
@@ -454,15 +487,18 @@ public sealed partial class GitObjectTransportTests
     private static async Task<(
         ReviewedStagedBlob Blob,
         ReviewedBlobStagingLease Lease,
-        string Parent)> Stage(byte[] bytes)
+        string Parent)> Stage(
+            byte[] bytes,
+            ReviewedContentBudget? suppliedBudget = null)
     {
         var invocation = await AuthorizedInvocation();
         var parent = CreateTemporaryDirectory();
-        var lease = ReviewedSnapshotTestAccess.Staging(parent);
+        var budget = suppliedBudget ?? ProductionBudget();
+        var lease = ReviewedSnapshotTestAccess.Staging(parent, budget);
         using var transport = ReviewedSnapshotTestAccess.Transport(
             invocation,
             Token(),
-            ProductionBudget(),
+            budget,
             new CapturingHandler(_ => new HttpResponseMessage(
                 HttpStatusCode.OK)
             {
@@ -555,6 +591,18 @@ public sealed partial class GitObjectTransportTests
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             return new HttpResponseMessage(HttpStatusCode.OK);
         }
+    }
+
+    private sealed class ManualTimeProvider : TimeProvider
+    {
+        private long _timestamp;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp() => _timestamp;
+
+        internal void Advance(TimeSpan time) =>
+            _timestamp = checked(_timestamp + time.Ticks);
     }
 
     private sealed class StallingReadStream : Stream

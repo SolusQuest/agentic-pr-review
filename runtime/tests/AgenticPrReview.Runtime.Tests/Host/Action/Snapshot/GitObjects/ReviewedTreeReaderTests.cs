@@ -429,6 +429,85 @@ public sealed class ReviewedTreeReaderTests
     }
 
     [Fact]
+    public async Task ShortNameRepeatedFanoutFailsWithOnlyThreeCachedTrees()
+    {
+        var rootSha = new string('a', 40);
+        var repeatedSha = new string('b', 40);
+        var emptySha = new string('c', 40);
+        var rootEntries = Enumerable.Range(0, 1_000)
+            .Select(index => Entry(
+                "r" + index.ToString("D4", CultureInfo.InvariantCulture),
+                "040000",
+                "tree",
+                repeatedSha,
+                null))
+            .ToArray();
+        var repeatedEntries = Enumerable.Range(0, 1_000)
+            .Select(index => Entry(
+                "s" + index.ToString("D4", CultureInfo.InvariantCulture),
+                "040000",
+                "tree",
+                emptySha,
+                null))
+            .ToArray();
+        var transport = new ScriptedTransport(
+            ActionHostAuthorizationScenario.HeadSha,
+            rootSha,
+            new Dictionary<string, IReadOnlyList<ReviewedGitTreeEntryFact>>
+            {
+                [rootSha] = rootEntries,
+                [repeatedSha] = repeatedEntries,
+                [emptySha] = [],
+            },
+            new Dictionary<string, byte[]>());
+
+        var result = await Read(transport);
+
+        Assert.Equal(ReviewedTreeFailure.UnsupportedSize,
+            result.Result.Failure);
+        Assert.Null(result.Result.Snapshot);
+        Assert.Empty(transport.StageCalls);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(result.Parent));
+        Directory.Delete(result.Parent, recursive: true);
+    }
+
+    [Fact]
+    public async Task CachedTraversalCannotOutrunSharedDeadline()
+    {
+        var rootSha = new string('d', 40);
+        var emptySha = new string('f', 40);
+        var transport = new ScriptedTransport(
+            ActionHostAuthorizationScenario.HeadSha,
+            rootSha,
+            new Dictionary<string, IReadOnlyList<ReviewedGitTreeEntryFact>>
+            {
+                [rootSha] = Enumerable.Range(0, 1_000)
+                    .Select(index => Entry(
+                        "d" + index.ToString(
+                            "D4",
+                            CultureInfo.InvariantCulture),
+                        "040000",
+                        "tree",
+                        emptySha,
+                        null))
+                    .ToArray(),
+                [emptySha] = [],
+            },
+            new Dictionary<string, byte[]>());
+
+        var result = await Read(
+            transport,
+            new AdvancingTimeProvider(TimeSpan.FromSeconds(1)));
+
+        Assert.Equal(ReviewedTreeFailure.UnsupportedSize,
+            result.Result.Failure);
+        Assert.Null(result.Result.Snapshot);
+        Assert.Empty(transport.StageCalls);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(result.Parent));
+        Directory.Delete(result.Parent, recursive: true);
+    }
+
+    [Fact]
     public async Task AlreadyCancelledRunReturnsValueFreeCancellation()
     {
         using var cancellation = new CancellationTokenSource();
@@ -511,12 +590,14 @@ public sealed class ReviewedTreeReaderTests
 
     private static async Task<(
         ReviewedTreeMaterializationResult Result,
-        string Parent)> Read(ScriptedTransport transport)
+        string Parent)> Read(
+            ScriptedTransport transport,
+            TimeProvider? timeProvider = null)
     {
         var parent = CreateTemporaryDirectory();
         var reader = ReviewedSnapshotTestAccess.Reader(
             new ScriptedFactory(transport),
-            TimeProvider.System);
+            timeProvider ?? TimeProvider.System);
         var result = await reader.MaterializeAsync(
             await AuthorizedInvocation(),
             Token(),
@@ -592,6 +673,26 @@ public sealed class ReviewedTreeReaderTests
             "apr-h4-reader-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
         return path;
+    }
+
+    private sealed class AdvancingTimeProvider : TimeProvider
+    {
+        private readonly long _step;
+        private long _timestamp;
+
+        internal AdvancingTimeProvider(TimeSpan step)
+        {
+            _step = step.Ticks;
+        }
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp()
+        {
+            var current = _timestamp;
+            _timestamp = checked(_timestamp + _step);
+            return current;
+        }
     }
 
     private sealed class ScriptedFactory : IReviewedGitObjectTransportFactory

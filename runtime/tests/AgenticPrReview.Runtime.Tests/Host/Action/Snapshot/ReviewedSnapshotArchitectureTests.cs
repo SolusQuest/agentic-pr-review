@@ -168,6 +168,7 @@ public sealed class ReviewedSnapshotArchitectureTests
     {
         AssertPrivateConstructors(typeof(ReviewedContentBudget));
         AssertPrivateConstructors(typeof(ReviewedTreePathRecord));
+        AssertPrivateConstructors(typeof(ReviewedTreeIdentity));
         AssertPrivateConstructors(typeof(ReviewedTreeSnapshot));
         AssertPrivateConstructors(typeof(ReviewedStagedBlob));
         AssertPrivateConstructors(typeof(ReviewedBlobStagingLease));
@@ -189,6 +190,9 @@ public sealed class ReviewedSnapshotArchitectureTests
         AssertOnlyCalledBy(
             Method(typeof(ReviewedTreeIdentityWriter), "Mint"),
             typeof(ReviewedTreeSnapshot));
+        AssertOnlyCalledBy(
+            Method(typeof(ReviewedTreeIdentity), "Mint"),
+            typeof(ReviewedTreeIdentityWriter));
         AssertOnlyCalledBy(
             Method(typeof(ReviewedStagedBlob), "Mint"),
             typeof(ReviewedBlobStagingLease));
