@@ -155,7 +155,7 @@ internal sealed class BoundedGitHubPublisherTransport :
             var comments = new List<BoundedGitHubIssueComment>(docs.Length);
             foreach (var doc in docs)
             {
-                if (!TryMap(doc, out var comment))
+                if (doc is null || !TryMap(doc, out var comment))
                     return Fail<BoundedGitHubIssueCommentPage>(
                         BoundedGitHubHttpOutcome.KnownNotSent,
                         BoundedGitHubPublisherReason.InvalidResponse);

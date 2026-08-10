@@ -48,6 +48,22 @@ public sealed class BoundedGitHubPublisherTransportTests
     }
 
     [Fact]
+    public async Task NullCommentDocumentFailsClosed()
+    {
+        var data = await StickyPublicationTestData.CreateAsync();
+        using var transport = Create(data, new DelegateHandler(_ =>
+            Task.FromResult(Json(HttpStatusCode.OK, "[null]"))));
+
+        var result = await transport.ListIssueCommentsAsync(1,
+            CancellationToken.None);
+
+        Assert.Null(result.Value);
+        Assert.Equal(BoundedGitHubHttpOutcome.KnownNotSent, result.Outcome);
+        Assert.Equal(BoundedGitHubPublisherReason.InvalidResponse,
+            result.Reason);
+    }
+
+    [Fact]
     public async Task ForeignPaginationLinkFailsClosed()
     {
         var data = await StickyPublicationTestData.CreateAsync();
