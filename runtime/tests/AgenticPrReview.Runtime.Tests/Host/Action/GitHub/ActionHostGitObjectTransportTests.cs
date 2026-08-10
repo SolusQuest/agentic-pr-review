@@ -216,6 +216,8 @@ public sealed class ActionHostGitObjectTransportTests
         "YWJj_ZA=",
         "YWJjZA",
         "YW\rJjZA==",
+        "\nYWJjZA==",
+        "\r\nYWJjZA==",
     };
 
     [Theory]
@@ -369,6 +371,36 @@ public sealed class ActionHostGitObjectTransportTests
     }
 
     [Fact]
+    public async Task EncodedCapDoesNotChargeCanonicalLineBreaks()
+    {
+        var bytes = new byte[930 * 1024];
+        Array.Fill<byte>(bytes, 0x5b);
+        var sha = GitBlobSha(bytes);
+        var encoded = Convert.ToBase64String(bytes);
+        var wrapped = WrapEveryQuantum(encoded);
+        Assert.True(wrapped.Length >
+            ActionHostGitBlobReadBudget.MaximumSupported
+                .MaximumEncodedCharacters);
+        var handler = new CapturingHandler(_ => JsonResponse(
+            BlobResponse(bytes, sha, wrapped)));
+        using var transport = ActionHostGitObjectTransport.CreateForTesting(
+            "token-canary",
+            handler);
+
+        var result = await transport.GetBlobObjectAsync(
+            "SolusQuest/agentic-pr-review",
+            sha,
+            ActionHostGitBlobReadBudget.MaximumSupported,
+            CancellationToken.None);
+
+        Assert.Equal(bytes, result.Value!.Bytes);
+        Assert.InRange(result.CapturedResponseBytes,
+            bytes.Length,
+            ActionHostGitBlobReadBudget.MaximumSupported
+                .MaximumResponseBytes);
+    }
+
+    [Fact]
     public async Task ResponseCapFailsBeforeCompleteRetention()
     {
         var handler = new CapturingHandler(_ => JsonResponse(
@@ -410,6 +442,23 @@ public sealed class ActionHostGitObjectTransportTests
             .Replace("\n", "\\n", StringComparison.Ordinal)
             .Replace("\t", "\\t", StringComparison.Ordinal)
             .Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+
+    private static string WrapEveryQuantum(string encoded)
+    {
+        var wrapped = new StringBuilder(
+            encoded.Length + encoded.Length / 4);
+        for (var index = 0; index < encoded.Length; index += 4)
+        {
+            if (index > 0)
+            {
+                wrapped.Append('\n');
+            }
+
+            wrapped.Append(encoded, index, 4);
+        }
+
+        return wrapped.ToString();
+    }
 
     private static string GitBlobSha(byte[] bytes)
     {

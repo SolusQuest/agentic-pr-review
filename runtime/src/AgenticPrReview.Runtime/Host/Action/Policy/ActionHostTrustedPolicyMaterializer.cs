@@ -21,7 +21,6 @@ internal sealed partial class ActionHostTrustedPolicy
         TimeSpan.FromSeconds(60);
     private const int ConfigByteCap = 16 * 1024;
     private const int InstructionsByteCap = 64 * 1024;
-    private const long SevenDaysInSeconds = 7 * 24 * 60 * 60;
     private const string IdentityDomain =
         "apr.action-host.trusted-policy.v1";
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
@@ -84,9 +83,7 @@ internal sealed partial class ActionHostTrustedPolicy
                         : ActionHostTrustedPolicyFailure.MalformedInstructions);
             }
 
-            if (AgentToolRegistry.Definitions.Length != 6 ||
-                RestrictedStateFormat.MaximumRetentionSeconds !=
-                    SevenDaysInSeconds)
+            if (AgentToolRegistry.Definitions.Length != 6)
             {
                 return ActionHostTrustedPolicyMaterialization.Failed(
                     ActionHostTrustedPolicyFailure.InternalInvariant);

@@ -234,14 +234,15 @@ internal static class ActionHostGitHubBase64
     {
         bytes = [];
         if (content is null ||
-            content.Length > maximumEncodedCharacters ||
             maximumEncodedCharacters < 0 ||
             maximumDecodedBytes < 0)
         {
             return false;
         }
 
-        var canonical = new char[content.Length];
+        var canonical = new char[Math.Min(
+            content.Length,
+            maximumEncodedCharacters)];
         var count = 0;
         for (var index = 0; index < content.Length; index++)
         {
@@ -250,6 +251,7 @@ internal static class ActionHostGitHubBase64
             {
                 if (index + 1 >= content.Length ||
                     content[index + 1] != '\n' ||
+                    count == 0 ||
                     count % 4 != 0)
                 {
                     return false;
@@ -261,7 +263,7 @@ internal static class ActionHostGitHubBase64
 
             if (character == '\n')
             {
-                if (count % 4 != 0)
+                if (count == 0 || count % 4 != 0)
                 {
                     return false;
                 }
@@ -272,6 +274,11 @@ internal static class ActionHostGitHubBase64
             if (!(character is >= 'A' and <= 'Z' or
                     >= 'a' and <= 'z' or
                     >= '0' and <= '9' or '+' or '/' or '='))
+            {
+                return false;
+            }
+
+            if (count >= maximumEncodedCharacters)
             {
                 return false;
             }
