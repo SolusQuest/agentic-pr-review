@@ -1016,7 +1016,7 @@ public sealed class RestrictedStateStoreConformanceTests
             set;
         }
 
-        internal Action<OpaqueStoreObjectMetadata>? BeforeDelete
+        internal System.Action<OpaqueStoreObjectMetadata>? BeforeDelete
         {
             get;
             set;
@@ -1268,7 +1268,7 @@ internal sealed class RestrictedStateStoreConformanceDriver(
         observeMissingReadBack,
     Func<OpaqueStoreObjectMetadata, Task<OpaqueStoreDownloadResult>>
         observeExpiredDownload,
-    Action makeNextUploadMayCommitted,
+    System.Action makeNextUploadMayCommitted,
     Func<OpaqueStoreObjectMetadata, Task<OpaqueStoreDeleteResult>>
         observeDeleteOutcomeUnknown)
 {
