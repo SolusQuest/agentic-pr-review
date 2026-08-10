@@ -1,0 +1,578 @@
+using System.Collections.Immutable;
+using AgenticPrReview.Runtime.ActionHost.Authorization;
+using AgenticPrReview.Runtime.ActionHost.Contracts;
+
+namespace AgenticPrReview.Runtime.ActionHost.Snapshot.GitObjects;
+
+internal sealed class ReviewedTreeReader
+{
+    private readonly IReviewedGitObjectTransportFactory _transportFactory;
+    private readonly TimeProvider _timeProvider;
+
+    internal ReviewedTreeReader()
+        : this(new ReviewedGitObjectTransportFactory(), TimeProvider.System)
+    {
+    }
+
+    internal ReviewedTreeReader(
+        IReviewedGitObjectTransportFactory transportFactory,
+        TimeProvider timeProvider)
+    {
+        _transportFactory = transportFactory ??
+            throw new ArgumentNullException(nameof(transportFactory));
+        _timeProvider = timeProvider ??
+            throw new ArgumentNullException(nameof(timeProvider));
+    }
+
+    internal async Task<ReviewedTreeMaterializationResult> MaterializeAsync(
+        ActionHostAuthorizer.AuthorizedInvocation invocation,
+        ActionHostGitHubToken token,
+        string stagingParent,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(invocation);
+        ArgumentNullException.ThrowIfNull(token);
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return ReviewedTreeMaterializationResult.Failed(
+                ReviewedTreeFailure.Cancelled);
+        }
+
+        if (!ReviewedGitObjectTransport.TryAuthorizedSource(
+                invocation,
+                out _,
+                out _))
+        {
+            return ReviewedTreeMaterializationResult.Failed(
+                ReviewedTreeFailure.InvalidGraph);
+        }
+
+        var budget = ReviewedContentBudget.Create(
+            ReviewedContentLimits.Production,
+            _timeProvider);
+        var staging = ReviewedBlobStagingLease.TryCreate(stagingParent);
+        if (staging is null)
+        {
+            budget.Invalidate();
+            return ReviewedTreeMaterializationResult.Failed(
+                ReviewedTreeFailure.InternalFailure);
+        }
+
+        try
+        {
+            using var transport = _transportFactory.Create(
+                invocation,
+                token,
+                budget);
+            var core = await MaterializeCoreAsync(
+                invocation,
+                transport,
+                budget,
+                staging,
+                cancellationToken);
+            if (core.Snapshot is not null)
+            {
+                return ReviewedTreeMaterializationResult.Success(
+                    core.Snapshot);
+            }
+
+            return Fail(budget, staging, core.Failure);
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            return Fail(budget, staging, ReviewedTreeFailure.Cancelled);
+        }
+        catch (Exception exception) when (IsNonFatal(exception))
+        {
+            return Fail(budget, staging, ReviewedTreeFailure.InternalFailure);
+        }
+    }
+
+    private static async Task<CoreResult> MaterializeCoreAsync(
+        ActionHostAuthorizer.AuthorizedInvocation invocation,
+        IReviewedGitObjectTransport transport,
+        ReviewedContentBudget budget,
+        ReviewedBlobStagingLease staging,
+        CancellationToken cancellationToken)
+    {
+        var pullRequest = invocation.PullRequest;
+        var commitResult = await transport.GetCommitAsync(cancellationToken);
+        if (commitResult.Value is null)
+        {
+            return CoreResult.Failed(MapFailure(commitResult.Failure));
+        }
+
+        var commit = commitResult.Value;
+        var meter = new ReviewedTreeTraversalMeter();
+        var claims = new Dictionary<string, ObjectClaim>(StringComparer.Ordinal)
+        {
+            [commit.Sha] = new(ObjectKind.Commit, null),
+        };
+        var rootClaim = TryClaim(
+                claims,
+                meter,
+                commit.TreeSha,
+                ObjectKind.Tree,
+                null,
+                countTowardLimit: true);
+        if (rootClaim != AdmissionResult.Success)
+        {
+            return CoreResult.Failed(
+                AdmissionFailure(rootClaim));
+        }
+
+        var treeCache = new Dictionary<string, ReviewedGitTreeFact>(
+            StringComparer.Ordinal);
+        var directories = new HashSet<string>(StringComparer.Ordinal);
+        var leaves = new HashSet<string>(StringComparer.Ordinal);
+        var drafts = new List<EntryDraft>();
+        var queue = new Queue<TreeWork>();
+        queue.Enqueue(new TreeWork(
+            commit.TreeSha,
+            string.Empty,
+            0,
+            ImmutableHashSet.Create(
+                StringComparer.Ordinal,
+                commit.TreeSha)));
+
+        while (queue.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var work = queue.Dequeue();
+            if (!treeCache.TryGetValue(work.Sha, out var tree))
+            {
+                var treeResult = await transport.GetTreeAsync(
+                    work.Sha,
+                    cancellationToken);
+                if (treeResult.Value is null)
+                {
+                    return CoreResult.Failed(MapFailure(treeResult.Failure));
+                }
+
+                tree = new ReviewedGitTreeFact(
+                    treeResult.Value.Sha,
+                    treeResult.Value.Entries.ToImmutableArray());
+                treeCache.Add(work.Sha, tree);
+            }
+
+            foreach (var entry in tree.Entries
+                         .OrderBy(static item => item.Path,
+                             StringComparer.Ordinal)
+                         .ThenBy(static item => item.Mode,
+                             StringComparer.Ordinal)
+                         .ThenBy(static item => item.Type,
+                             StringComparer.Ordinal)
+                         .ThenBy(static item => item.Sha,
+                             StringComparer.Ordinal))
+            {
+                var entryDepth = work.Depth + 1;
+                if (entryDepth > ReviewedContentLimits.TreeDepth)
+                {
+                    return CoreResult.Failed(
+                        ReviewedTreeFailure.UnsupportedSize);
+                }
+
+                if (!ReviewedTreePath.TryAppend(
+                        work.Prefix,
+                        entry.Path,
+                        out var path,
+                        out var pathBytes))
+                {
+                    return CoreResult.Failed(
+                        ReviewedTreeFailure.InvalidGraph);
+                }
+
+                if (!meter.TryAddLogicalEntry(pathBytes))
+                {
+                    return CoreResult.Failed(
+                        ReviewedTreeFailure.UnsupportedSize);
+                }
+
+                switch (EntryShape(entry))
+                {
+                    case EntryShapeKind.Tree:
+                        if (!directories.Add(path) || leaves.Contains(path) ||
+                            work.Ancestors.Contains(entry.Sha))
+                        {
+                            return CoreResult.Failed(
+                                ReviewedTreeFailure.InvalidGraph);
+                        }
+
+                        var treeClaim = TryClaim(
+                                claims,
+                                meter,
+                                entry.Sha,
+                                ObjectKind.Tree,
+                                null,
+                                countTowardLimit: true);
+                        if (treeClaim != AdmissionResult.Success)
+                        {
+                            return CoreResult.Failed(
+                                AdmissionFailure(treeClaim));
+                        }
+
+                        queue.Enqueue(new TreeWork(
+                            entry.Sha,
+                            path,
+                            entryDepth,
+                            work.Ancestors.Add(entry.Sha)));
+                        break;
+
+                    case EntryShapeKind.Regular:
+                        if (entry.Size is not { } regularSize ||
+                            regularSize < 0)
+                        {
+                            return CoreResult.Failed(
+                                ReviewedTreeFailure.InvalidGraph);
+                        }
+
+                        if (regularSize > ReviewedContentLimits.HeadBlobBytes ||
+                            !meter.TryAddLogicalHeadBlobBytes(regularSize))
+                        {
+                            return CoreResult.Failed(
+                                ReviewedTreeFailure.UnsupportedSize);
+                        }
+
+                        var regularLeaf = TryAddLeaf(
+                            path,
+                            directories,
+                            leaves,
+                            meter);
+                        if (regularLeaf != AdmissionResult.Success)
+                        {
+                            return CoreResult.Failed(
+                                AdmissionFailure(regularLeaf));
+                        }
+
+                        var regularClaim = TryClaim(
+                                claims,
+                                meter,
+                                entry.Sha,
+                                ObjectKind.Blob,
+                                regularSize,
+                                countTowardLimit: true);
+                        if (regularClaim != AdmissionResult.Success)
+                        {
+                            return CoreResult.Failed(
+                                AdmissionFailure(regularClaim));
+                        }
+
+                        drafts.Add(new EntryDraft(
+                            path,
+                            entry.Mode,
+                            ReviewedTreeEntryKind.Regular,
+                            entry.Sha,
+                            regularSize));
+                        break;
+
+                    case EntryShapeKind.Symlink:
+                        if (entry.Size is < 0)
+                        {
+                            return CoreResult.Failed(
+                                ReviewedTreeFailure.InvalidGraph);
+                        }
+
+                        var symlinkLeaf = TryAddLeaf(
+                            path,
+                            directories,
+                            leaves,
+                            meter);
+                        if (symlinkLeaf != AdmissionResult.Success)
+                        {
+                            return CoreResult.Failed(
+                                AdmissionFailure(symlinkLeaf));
+                        }
+
+                        var symlinkClaim = TryClaim(
+                                claims,
+                                meter,
+                                entry.Sha,
+                                ObjectKind.Blob,
+                                entry.Size,
+                                countTowardLimit: true);
+                        if (symlinkClaim != AdmissionResult.Success)
+                        {
+                            return CoreResult.Failed(
+                                AdmissionFailure(symlinkClaim));
+                        }
+
+                        drafts.Add(new EntryDraft(
+                            path,
+                            entry.Mode,
+                            ReviewedTreeEntryKind.Symlink,
+                            entry.Sha,
+                            null));
+                        break;
+
+                    case EntryShapeKind.Submodule:
+                        var submoduleLeaf = TryAddLeaf(
+                            path,
+                            directories,
+                            leaves,
+                            meter);
+                        if (submoduleLeaf != AdmissionResult.Success)
+                        {
+                            return CoreResult.Failed(
+                                AdmissionFailure(submoduleLeaf));
+                        }
+
+                        var submoduleClaim = TryClaim(
+                                claims,
+                                meter,
+                                entry.Sha,
+                                ObjectKind.Commit,
+                                null,
+                                countTowardLimit: false);
+                        if (submoduleClaim != AdmissionResult.Success)
+                        {
+                            return CoreResult.Failed(
+                                AdmissionFailure(submoduleClaim));
+                        }
+
+                        drafts.Add(new EntryDraft(
+                            path,
+                            entry.Mode,
+                            ReviewedTreeEntryKind.Submodule,
+                            entry.Sha,
+                            null));
+                        break;
+
+                    default:
+                        return CoreResult.Failed(
+                            ReviewedTreeFailure.InvalidGraph);
+                }
+            }
+        }
+
+        var stagedBySha = new Dictionary<string, ReviewedStagedBlob>(
+            StringComparer.Ordinal);
+        foreach (var regular in drafts
+                     .Where(static item =>
+                         item.Kind == ReviewedTreeEntryKind.Regular)
+                     .GroupBy(static item => item.Sha, StringComparer.Ordinal)
+                     .Select(static group => group.First())
+                     .OrderBy(static item => item.Sha, StringComparer.Ordinal))
+        {
+            var blobResult = await transport.StageBlobAsync(
+                regular.Sha,
+                regular.Size!.Value,
+                staging,
+                cancellationToken);
+            if (blobResult.Value is null)
+            {
+                return CoreResult.Failed(MapFailure(blobResult.Failure));
+            }
+
+            stagedBySha.Add(regular.Sha, blobResult.Value);
+        }
+
+        if (!budget.TryGetRemaining(out _))
+        {
+            return CoreResult.Failed(ReviewedTreeFailure.UnsupportedSize);
+        }
+
+        var records = drafts.Select(draft => new ReviewedTreePathRecord(
+            draft.Path,
+            draft.Mode,
+            draft.Kind,
+            draft.Sha,
+            draft.Size,
+            draft.Kind == ReviewedTreeEntryKind.Regular
+                ? stagedBySha[draft.Sha]
+                : null));
+        var snapshot = new ReviewedTreeSnapshot(
+            pullRequest.RepositoryId,
+            pullRequest.Number,
+            commit.Sha,
+            commit.TreeSha,
+            records,
+            budget,
+            staging);
+        return CoreResult.Success(snapshot);
+    }
+
+    private static EntryShapeKind EntryShape(ReviewedGitTreeEntryFact entry)
+    {
+        if (!ReviewedGitObjectValidation.IsSha(entry.Sha))
+        {
+            return EntryShapeKind.Invalid;
+        }
+
+        return (entry.Mode, entry.Type, entry.Size) switch
+        {
+            ("040000", "tree", null) => EntryShapeKind.Tree,
+            ("100644" or "100755", "blob", not null) =>
+                EntryShapeKind.Regular,
+            ("120000", "blob", _) => EntryShapeKind.Symlink,
+            ("160000", "commit", null) => EntryShapeKind.Submodule,
+            _ => EntryShapeKind.Invalid,
+        };
+    }
+
+    private static AdmissionResult TryAddLeaf(
+        string path,
+        HashSet<string> directories,
+        HashSet<string> leaves,
+        ReviewedTreeTraversalMeter meter)
+    {
+        if (directories.Contains(path) || !leaves.Add(path))
+        {
+            return AdmissionResult.Invalid;
+        }
+
+        return meter.TryAddLeafPath()
+            ? AdmissionResult.Success
+            : AdmissionResult.UnsupportedSize;
+    }
+
+    private static AdmissionResult TryClaim(
+        Dictionary<string, ObjectClaim> claims,
+        ReviewedTreeTraversalMeter meter,
+        string sha,
+        ObjectKind kind,
+        long? declaredSize,
+        bool countTowardLimit)
+    {
+        if (!ReviewedGitObjectValidation.IsSha(sha) || declaredSize is < 0)
+        {
+            return AdmissionResult.Invalid;
+        }
+
+        if (claims.TryGetValue(sha, out var existing))
+        {
+            if (existing.Kind != kind)
+            {
+                return AdmissionResult.Invalid;
+            }
+
+            if (kind == ObjectKind.Blob)
+            {
+                if (existing.DeclaredSize is { } existingSize &&
+                    declaredSize is { } candidateSize &&
+                    existingSize != candidateSize)
+                {
+                    return AdmissionResult.Invalid;
+                }
+
+                existing.DeclaredSize ??= declaredSize;
+            }
+
+            return AdmissionResult.Success;
+        }
+
+        if (countTowardLimit && !meter.TryAddUniqueObject())
+        {
+            return AdmissionResult.UnsupportedSize;
+        }
+
+        claims.Add(sha, new ObjectClaim(kind, declaredSize));
+        return AdmissionResult.Success;
+    }
+
+    private static ReviewedTreeFailure AdmissionFailure(
+        AdmissionResult result) => result switch
+    {
+        AdmissionResult.UnsupportedSize => ReviewedTreeFailure.UnsupportedSize,
+        _ => ReviewedTreeFailure.InvalidGraph,
+    };
+
+    private static ReviewedTreeFailure MapFailure(
+        ReviewedGitObjectFailure failure) => failure switch
+    {
+        ReviewedGitObjectFailure.UnsupportedSize =>
+            ReviewedTreeFailure.UnsupportedSize,
+        ReviewedGitObjectFailure.NotFound => ReviewedTreeFailure.MissingObject,
+        ReviewedGitObjectFailure.IdentityMismatch =>
+            ReviewedTreeFailure.IdentityMismatch,
+        ReviewedGitObjectFailure.InvalidRequest or
+        ReviewedGitObjectFailure.InvalidResponse =>
+            ReviewedTreeFailure.InvalidGraph,
+        ReviewedGitObjectFailure.Unauthorized or
+        ReviewedGitObjectFailure.Forbidden or
+        ReviewedGitObjectFailure.RateLimited or
+        ReviewedGitObjectFailure.UpstreamFailure or
+        ReviewedGitObjectFailure.TransportFailure =>
+            ReviewedTreeFailure.GitHubUnavailable,
+        ReviewedGitObjectFailure.StagingFailure =>
+            ReviewedTreeFailure.InternalFailure,
+        _ => ReviewedTreeFailure.InternalFailure,
+    };
+
+    private static ReviewedTreeMaterializationResult Fail(
+        ReviewedContentBudget budget,
+        ReviewedBlobStagingLease staging,
+        ReviewedTreeFailure failure)
+    {
+        budget.Invalidate();
+        var cleanupIncomplete = !staging.Cleanup();
+        return ReviewedTreeMaterializationResult.Failed(
+            failure,
+            cleanupIncomplete);
+    }
+
+    private static bool IsNonFatal(Exception exception) =>
+        exception is not OutOfMemoryException and
+        not StackOverflowException and
+        not AccessViolationException;
+
+    private sealed record CoreResult(
+        ReviewedTreeSnapshot? Snapshot,
+        ReviewedTreeFailure Failure)
+    {
+        internal static CoreResult Success(ReviewedTreeSnapshot snapshot) =>
+            new(snapshot, ReviewedTreeFailure.None);
+
+        internal static CoreResult Failed(ReviewedTreeFailure failure) =>
+            new(null, failure);
+    }
+
+    private sealed record TreeWork(
+        string Sha,
+        string Prefix,
+        int Depth,
+        ImmutableHashSet<string> Ancestors);
+
+    private sealed record EntryDraft(
+        string Path,
+        string Mode,
+        ReviewedTreeEntryKind Kind,
+        string Sha,
+        long? Size);
+
+    private sealed class ObjectClaim
+    {
+        internal ObjectClaim(ObjectKind kind, long? declaredSize)
+        {
+            Kind = kind;
+            DeclaredSize = declaredSize;
+        }
+
+        internal ObjectKind Kind { get; }
+
+        internal long? DeclaredSize { get; set; }
+    }
+
+    private enum ObjectKind
+    {
+        Tree = 1,
+        Blob,
+        Commit,
+    }
+
+    private enum EntryShapeKind
+    {
+        Invalid = 0,
+        Tree,
+        Regular,
+        Symlink,
+        Submodule,
+    }
+
+    private enum AdmissionResult
+    {
+        Success = 1,
+        Invalid,
+        UnsupportedSize,
+    }
+}
