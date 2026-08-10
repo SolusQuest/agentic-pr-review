@@ -48,6 +48,32 @@ public sealed class ActionHostReviewedSnapshotTransportTests
     }
 
     [Fact]
+    public async Task OversizedOptionalPatchStillMapsWithinThePageByteCap()
+    {
+        const string sha = "0123456789abcdef0123456789abcdef01234567";
+        var patch = new string('a', 1024 * 1024 + 1);
+        var handler = new CapturingHandler(_ => Json(
+            $$"""
+            [{"sha":"{{sha}}","filename":"src/file.cs","status":"modified","additions":1,"deletions":0,"changes":1,"patch":"{{patch}}"}]
+            """));
+        using var transport = ActionHostReviewedSnapshotTransport.CreateForTesting(
+            "token-canary",
+            handler,
+            new FailIfCalledObjectTransport());
+
+        var result = await transport.GetPullRequestFilesAsync(
+            "owner/repository",
+            17,
+            1,
+            ReviewedContentLimits.ChangedFilesPerPage,
+            CancellationToken.None);
+
+        var page = Assert.IsType<ActionHostPullRequestFilePageObject>(
+            result.Value);
+        Assert.Equal(patch.Length, Assert.Single(page.Files).Patch!.Length);
+    }
+
+    [Fact]
     public async Task RawBlobStreamsFixedChunksAndRejectsTrailingBytes()
     {
         const string sha = "0123456789abcdef0123456789abcdef01234567";
@@ -97,12 +123,13 @@ public sealed class ActionHostReviewedSnapshotTransportTests
             "token-canary",
             handler,
             new FailIfCalledObjectTransport());
+        using var destination = new MemoryStream();
 
         var result = await transport.CopyBlobObjectAsync(
             "owner/repository",
             sha,
             6,
-            new MemoryStream(),
+            destination,
             CancellationToken.None);
 
         Assert.Null(result.Value);

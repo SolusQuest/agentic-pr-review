@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using AgenticPrReview.Runtime.ActionHost.Snapshot;
 using AgenticPrReview.Runtime.ActionHost.Snapshot.Materialization;
 using Xunit;
@@ -177,6 +178,10 @@ public sealed class ReviewedRootMaterializerTests
                     File.WriteAllText(
                         Path.Join(first.AbsoluteRoot, "new.txt"),
                         "forbidden"));
+                Assert.Throws<UnauthorizedAccessException>(() =>
+                    File.Move(
+                        Path.Join(first.AbsoluteRoot, "src", "file.txt"),
+                        Path.Join(first.AbsoluteRoot, "src", "renamed.txt")));
             }
 
             var firstPath = first.AbsoluteRoot;
@@ -274,6 +279,356 @@ public sealed class ReviewedRootMaterializerTests
         {
             await tree.DisposeAsync();
             Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExpiredEmptyRootIsRejectedBeforeCreation()
+    {
+        var invocation = await H5SnapshotTestSupport.AuthorizedInvocation();
+        var parent = H5SnapshotTestSupport.TemporaryDirectory();
+        var time = new H5ManualTimeProvider();
+        var budget = ReviewedSnapshotTestAccess.Budget(
+            ReviewedContentLimits.GitObjectRequests,
+            ReviewedContentLimits.GitObjectResponseBytes,
+            ReviewedContentLimits.AggregateResponseBytes,
+            ReviewedContentLimits.AcquisitionAndMaterializationTimeout,
+            time);
+        var tree = await H5SnapshotTestSupport.TreeWithBudgetAsync(
+            invocation,
+            parent,
+            budget);
+        try
+        {
+            time.Advance(
+                ReviewedContentLimits.AcquisitionAndMaterializationTimeout);
+
+            var result = await ReviewedRootMaterializer.MaterializeAsync(
+                tree,
+                parent,
+                CancellationToken.None);
+
+            Assert.Null(result.Lease);
+            Assert.Equal(ReviewedRootFailure.UnsupportedSize, result.Failure);
+            Assert.Empty(Directory.EnumerateDirectories(
+                parent,
+                "apr-tool-root-*"));
+        }
+        finally
+        {
+            await tree.DisposeAsync();
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RootCapOverflowFailsBeforeRootCreation()
+    {
+        var invocation = await H5SnapshotTestSupport.AuthorizedInvocation();
+        var parent = H5SnapshotTestSupport.TemporaryDirectory();
+        var rootCreateCalled = false;
+        var tree = await H5SnapshotTestSupport.TreeAsync(
+            invocation,
+            parent,
+            new H5HeadEntry(
+                "file.txt",
+                "100644",
+                ReviewedTreeEntryKind.Regular,
+                "123"u8.ToArray()));
+        try
+        {
+            var result = await ReviewedRootMaterializer.MaterializeAsync(
+                tree,
+                parent,
+                CancellationToken.None,
+                new ReviewedRootMaterializationHooks
+                {
+                    BeforeRootCreate = _ => rootCreateCalled = true,
+                },
+                maximumRootBytes: 2);
+
+            Assert.Null(result.Lease);
+            Assert.Equal(ReviewedRootFailure.UnsupportedSize, result.Failure);
+            Assert.False(rootCreateCalled);
+            Assert.Empty(Directory.EnumerateDirectories(
+                parent,
+                "apr-tool-root-*"));
+        }
+        finally
+        {
+            await tree.DisposeAsync();
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task LinuxParentReplacementCannotRedirectRootCreation()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var invocation = await H5SnapshotTestSupport.AuthorizedInvocation();
+        var parent = H5SnapshotTestSupport.TemporaryDirectory();
+        var moved = parent + "-moved";
+        var tree = await H5SnapshotTestSupport.TreeAsync(
+            invocation,
+            parent,
+            new H5HeadEntry(
+                "file.txt",
+                "100644",
+                ReviewedTreeEntryKind.Regular,
+                "private"u8.ToArray()));
+        try
+        {
+            var result = await ReviewedRootMaterializer.MaterializeAsync(
+                tree,
+                parent,
+                CancellationToken.None,
+                new ReviewedRootMaterializationHooks
+                {
+                    BeforeRootCreate = _ =>
+                    {
+                        Directory.Move(parent, moved);
+                        Directory.CreateDirectory(parent);
+                    },
+                });
+
+            Assert.Null(result.Lease);
+            Assert.Equal(ReviewedRootFailure.UnsafeRoot, result.Failure);
+            Assert.Empty(Directory.EnumerateFileSystemEntries(parent));
+            Assert.Empty(Directory.EnumerateDirectories(
+                moved,
+                "apr-tool-root-*"));
+        }
+        finally
+        {
+            if (Directory.Exists(parent))
+            {
+                Directory.Delete(parent, recursive: true);
+            }
+
+            if (Directory.Exists(moved))
+            {
+                Directory.Move(moved, parent);
+            }
+
+            await tree.DisposeAsync();
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task LinuxRootReplacementReportsIncompleteWithoutDeletingIt()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var invocation = await H5SnapshotTestSupport.AuthorizedInvocation();
+        var parent = H5SnapshotTestSupport.TemporaryDirectory();
+        string? moved = null;
+        var tree = await H5SnapshotTestSupport.TreeAsync(
+            invocation,
+            parent,
+            new H5HeadEntry(
+                "file.txt",
+                "100644",
+                ReviewedTreeEntryKind.Regular,
+                "private"u8.ToArray()));
+        var result = await ReviewedRootMaterializer.MaterializeAsync(
+            tree,
+            parent,
+            CancellationToken.None,
+            new ReviewedRootMaterializationHooks
+            {
+                BeforeRootCleanup = root =>
+                {
+                    moved = root + "-renamed";
+                    Directory.Move(root, moved);
+                    File.WriteAllText(root, "outside-sentinel");
+                },
+            });
+        var lease = Assert.IsType<ReviewedRootLease>(result.Lease);
+        try
+        {
+            var root = lease.AbsoluteRoot;
+            await lease.DisposeAsync();
+
+            Assert.True(lease.CleanupIncomplete);
+            Assert.Equal("outside-sentinel", File.ReadAllText(root));
+            Assert.NotNull(moved);
+            Assert.Equal(
+                "private",
+                File.ReadAllText(Path.Join(moved!, "file.txt")));
+        }
+        finally
+        {
+            var root = lease.AbsoluteRoot;
+            if (File.Exists(root))
+            {
+                File.Delete(root);
+            }
+
+            if (moved is not null && Directory.Exists(moved))
+            {
+                MakeWritableRecursive(moved);
+                Directory.Delete(moved, recursive: true);
+            }
+
+            await tree.DisposeAsync();
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task LinuxDanglingRootLinkReportsIncompleteWithoutFollowingIt()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var invocation = await H5SnapshotTestSupport.AuthorizedInvocation();
+        var parent = H5SnapshotTestSupport.TemporaryDirectory();
+        string? moved = null;
+        string? missing = null;
+        var tree = await H5SnapshotTestSupport.TreeAsync(
+            invocation,
+            parent,
+            new H5HeadEntry(
+                "file.txt",
+                "100644",
+                ReviewedTreeEntryKind.Regular,
+                "private"u8.ToArray()));
+        var result = await ReviewedRootMaterializer.MaterializeAsync(
+            tree,
+            parent,
+            CancellationToken.None,
+            new ReviewedRootMaterializationHooks
+            {
+                BeforeRootCleanup = root =>
+                {
+                    moved = root + "-renamed";
+                    missing = root + "-missing";
+                    Directory.Move(root, moved);
+                    Directory.CreateSymbolicLink(root, missing);
+                },
+            });
+        var lease = Assert.IsType<ReviewedRootLease>(result.Lease);
+        try
+        {
+            await lease.DisposeAsync();
+
+            Assert.True(lease.CleanupIncomplete);
+            Assert.Equal(
+                missing,
+                new DirectoryInfo(lease.AbsoluteRoot).LinkTarget);
+            Assert.NotNull(moved);
+            Assert.Equal(
+                "private",
+                File.ReadAllText(Path.Join(moved!, "file.txt")));
+        }
+        finally
+        {
+            if (new DirectoryInfo(lease.AbsoluteRoot).LinkTarget is not null)
+            {
+                Directory.Delete(lease.AbsoluteRoot);
+            }
+
+            if (moved is not null && Directory.Exists(moved))
+            {
+                MakeWritableRecursive(moved);
+                Directory.Delete(moved, recursive: true);
+            }
+
+            await tree.DisposeAsync();
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task LinuxChildReplacementDoesNotTouchOutsideSentinel()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var invocation = await H5SnapshotTestSupport.AuthorizedInvocation();
+        var parent = H5SnapshotTestSupport.TemporaryDirectory();
+        var outside = H5SnapshotTestSupport.TemporaryDirectory();
+        var sentinel = Path.Join(outside, "sentinel.txt");
+        File.WriteAllText(sentinel, "outside");
+        var replaced = false;
+        var tree = await H5SnapshotTestSupport.TreeAsync(
+            invocation,
+            parent,
+            new H5HeadEntry(
+                "src/file.txt",
+                "100644",
+                ReviewedTreeEntryKind.Regular,
+                "private"u8.ToArray()));
+        var result = await ReviewedRootMaterializer.MaterializeAsync(
+            tree,
+            parent,
+            CancellationToken.None,
+            new ReviewedRootMaterializationHooks
+            {
+                BeforeChildCleanup = child =>
+                {
+                    if (replaced || !child.EndsWith("src", StringComparison.Ordinal))
+                    {
+                        return;
+                    }
+
+                    replaced = true;
+                    Directory.Move(child, child + "-away");
+                    Directory.CreateSymbolicLink(child, outside);
+                },
+            });
+        var lease = Assert.IsType<ReviewedRootLease>(result.Lease);
+        try
+        {
+            await lease.DisposeAsync();
+
+            Assert.True(lease.CleanupIncomplete);
+            Assert.Equal("outside", File.ReadAllText(sentinel));
+        }
+        finally
+        {
+            if (Directory.Exists(lease.AbsoluteRoot))
+            {
+                MakeWritableRecursive(lease.AbsoluteRoot);
+                Directory.Delete(lease.AbsoluteRoot, recursive: true);
+            }
+
+            await tree.DisposeAsync();
+            Directory.Delete(parent, recursive: true);
+            Directory.Delete(outside, recursive: true);
+        }
+    }
+
+    [SupportedOSPlatform("linux")]
+    private static void MakeWritableRecursive(string root)
+    {
+        File.SetUnixFileMode(
+            root,
+            UnixFileMode.UserRead |
+                UnixFileMode.UserWrite |
+                UnixFileMode.UserExecute);
+        foreach (var directory in Directory.EnumerateDirectories(
+                     root,
+                     "*",
+                     SearchOption.AllDirectories))
+        {
+            File.SetUnixFileMode(
+                directory,
+                UnixFileMode.UserRead |
+                    UnixFileMode.UserWrite |
+                    UnixFileMode.UserExecute);
         }
     }
 

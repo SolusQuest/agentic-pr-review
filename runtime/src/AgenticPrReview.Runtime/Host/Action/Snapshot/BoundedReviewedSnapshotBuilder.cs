@@ -5,6 +5,7 @@ using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.ActionHost.Snapshot.ChangedFiles;
 using AgenticPrReview.Runtime.ActionHost.Snapshot.Diff;
 using AgenticPrReview.Runtime.ActionHost.Snapshot.Materialization;
+using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Tools;
 
@@ -97,7 +98,10 @@ internal sealed class BoundedReviewedSnapshotBuilder
         ActionHostGitHubToken token,
         ReviewedTreeSnapshot tree,
         string absoluteStagingParent,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ReviewedRootMaterializationHooks? rootHooks = null,
+        long maximumChangedMetadataBytes =
+            AgentLimits.ChangedFilesMetadataBytes)
     {
         ArgumentNullException.ThrowIfNull(invocation);
         ArgumentNullException.ThrowIfNull(token);
@@ -155,10 +159,20 @@ internal sealed class BoundedReviewedSnapshotBuilder
                 return BoundedReviewedSnapshotResult.Failed(built.Failure);
             }
 
+            if (!tree.Budget.TryContinue(cancellationToken) ||
+                !ChangedMetadataFits(
+                    built.Value.Changes,
+                    maximumChangedMetadataBytes))
+            {
+                return BoundedReviewedSnapshotResult.Failed(
+                    ReviewedSnapshotReadFailure.UnsupportedSize);
+            }
+
             var materialized = await ReviewedRootMaterializer.MaterializeAsync(
                 tree,
                 absoluteStagingParent,
-                cancellationToken);
+                cancellationToken,
+                rootHooks);
             if (materialized.Lease is null)
             {
                 return BoundedReviewedSnapshotResult.Failed(
@@ -167,6 +181,16 @@ internal sealed class BoundedReviewedSnapshotBuilder
             }
 
             root = materialized.Lease;
+            if (!tree.Budget.TryContinue(cancellationToken))
+            {
+                await root.DisposeAsync();
+                var cleanupIncomplete = root.CleanupIncomplete;
+                root = null;
+                return BoundedReviewedSnapshotResult.Failed(
+                    ReviewedSnapshotReadFailure.UnsupportedSize,
+                    cleanupIncomplete);
+            }
+
             var changes = built.Value.Changes;
             ReviewedSnapshot agentSnapshot;
             try
@@ -250,4 +274,29 @@ internal sealed class BoundedReviewedSnapshotBuilder
                 ReviewedSnapshotReadFailure.Cancelled,
             _ => ReviewedSnapshotReadFailure.StagingFailure,
         };
+
+    private static bool ChangedMetadataFits(
+        IEnumerable<ReviewedBuiltChange> changes,
+        long maximumBytes)
+    {
+        if (maximumBytes < 0 ||
+            maximumBytes > AgentLimits.ChangedFilesMetadataBytes)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maximumBytes));
+        }
+
+        long bytes = 0;
+        foreach (var change in changes)
+        {
+            var length = ReviewedChangedFileWriter.Write(change.Change).Length;
+            if (bytes > maximumBytes - length)
+            {
+                return false;
+            }
+
+            bytes += length;
+        }
+
+        return true;
+    }
 }

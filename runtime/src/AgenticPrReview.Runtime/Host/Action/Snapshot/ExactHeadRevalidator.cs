@@ -36,15 +36,18 @@ internal static class ExactHeadRevalidator
         ActionHostAuthorizer.FrozenPullRequest frozen,
         ActionHostGitHubToken token,
         IActionHostReviewedSnapshotTransportFactory factory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TimeSpan? requestDeadline = null)
     {
         ArgumentNullException.ThrowIfNull(frozen);
         ArgumentNullException.ThrowIfNull(token);
         ArgumentNullException.ThrowIfNull(factory);
 
+        using var timeout = new CancellationTokenSource(
+            requestDeadline ?? RequestDeadline);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(
-            cancellationToken);
-        deadline.CancelAfter(RequestDeadline);
+            cancellationToken,
+            timeout.Token);
         try
         {
             using var transport = factory.CreateReviewedSnapshotTransport(token);
@@ -86,7 +89,7 @@ internal static class ExactHeadRevalidator
                 frozen,
                 observedHeadSha: null);
         }
-        catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
         {
             return Result(
                 ExactHeadRevalidationStatus.DeadlineExceeded,

@@ -323,62 +323,101 @@ internal sealed class ReviewedBaseStagedBlob : IDisposable
     internal long Size { get; }
 
     internal async Task<byte[]?> ReadVerifiedAsync(
+        CancellationToken cancellationToken) =>
+        (await ReadVerifiedDetailedAsync(cancellationToken)).Bytes;
+
+    internal async Task<ReviewedBaseBlobReadResult> ReadVerifiedDetailedAsync(
         CancellationToken cancellationToken)
     {
-        if (_disposed ||
-            !_budget.TryBeginOperation(cancellationToken, out var operation))
+        if (_disposed)
         {
-            return null;
+            return new(null, ReviewedStagedBlobCopyFailure.IoFailure);
+        }
+
+        if (!_budget.TryBeginOperation(cancellationToken, out var operation))
+        {
+            return new(null, ReviewedStagedBlobCopyFailure.UnsupportedSize);
         }
 
         using (operation)
         {
-            if (!ReviewedStagedFileAccess.TryInspectRegular(
-                    _stream.SafeFileHandle,
-                    out var identity,
-                    out var length) ||
-                identity != _identity || length != Size)
+            try
             {
-                return null;
-            }
-
-            var bytes = GC.AllocateUninitializedArray<byte>(checked((int)Size));
-            var offset = 0;
-            while (offset < bytes.Length)
-            {
-                var read = await RandomAccess.ReadAsync(
-                    _stream.SafeFileHandle,
-                    bytes.AsMemory(offset),
-                    offset,
-                    operation!.Token);
-                if (read == 0)
+                if (!ReviewedStagedFileAccess.TryInspectRegular(
+                        _stream.SafeFileHandle,
+                        out var identity,
+                        out var length) ||
+                    identity != _identity || length != Size)
                 {
-                    return null;
+                    return new(
+                        null,
+                        ReviewedStagedBlobCopyFailure.IdentityMismatch);
                 }
 
-                offset += read;
-            }
+                var bytes = GC.AllocateUninitializedArray<byte>(
+                    checked((int)Size));
+                var offset = 0;
+                while (offset < bytes.Length)
+                {
+                    var read = await RandomAccess.ReadAsync(
+                        _stream.SafeFileHandle,
+                        bytes.AsMemory(offset),
+                        offset,
+                        operation!.Token);
+                    if (read == 0)
+                    {
+                        return new(
+                            null,
+                            ReviewedStagedBlobCopyFailure.IdentityMismatch);
+                    }
 
-            var extra = new byte[1];
-            if (await RandomAccess.ReadAsync(
-                    _stream.SafeFileHandle,
-                    extra,
-                    offset,
-                    operation!.Token) != 0)
+                    offset += read;
+                }
+
+                var extra = new byte[1];
+                if (await RandomAccess.ReadAsync(
+                        _stream.SafeFileHandle,
+                        extra,
+                        offset,
+                        operation!.Token) != 0)
+                {
+                    return new(
+                        null,
+                        ReviewedStagedBlobCopyFailure.IdentityMismatch);
+                }
+
+                using var hash = IncrementalHash.CreateHash(
+                    HashAlgorithmName.SHA1);
+                hash.AppendData(Encoding.ASCII.GetBytes(
+                    "blob " + Size.ToString(
+                        CultureInfo.InvariantCulture) + "\0"));
+                hash.AppendData(bytes);
+                return StringComparer.Ordinal.Equals(
+                        Convert.ToHexString(hash.GetHashAndReset())
+                            .ToLowerInvariant(),
+                        Sha)
+                    ? new(bytes, ReviewedStagedBlobCopyFailure.None)
+                    : new(
+                        null,
+                        ReviewedStagedBlobCopyFailure.IdentityMismatch);
+            }
+            catch (OperationCanceledException)
+                when (operation!.DeadlineExpired)
             {
-                return null;
+                return new(
+                    null,
+                    ReviewedStagedBlobCopyFailure.UnsupportedSize);
             }
-
-            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA1);
-            hash.AppendData(Encoding.ASCII.GetBytes(
-                "blob " + Size.ToString(CultureInfo.InvariantCulture) + "\0"));
-            hash.AppendData(bytes);
-            return StringComparer.Ordinal.Equals(
-                    Convert.ToHexString(hash.GetHashAndReset())
-                        .ToLowerInvariant(),
-                    Sha)
-                ? bytes
-                : null;
+            catch (OperationCanceledException)
+                when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception) when (exception is IOException or
+                UnauthorizedAccessException)
+            {
+                return new(null, ReviewedStagedBlobCopyFailure.IoFailure);
+            }
         }
     }
 
@@ -393,3 +432,7 @@ internal sealed class ReviewedBaseStagedBlob : IDisposable
         _stream.Dispose();
     }
 }
+
+internal sealed record ReviewedBaseBlobReadResult(
+    byte[]? Bytes,
+    ReviewedStagedBlobCopyFailure Failure);

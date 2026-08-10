@@ -53,10 +53,20 @@ internal static class H5SnapshotTestSupport
     internal static async Task<ReviewedTreeSnapshot> TreeAsync(
         ActionHostAuthorizer.AuthorizedInvocation invocation,
         string parent,
+        params H5HeadEntry[] entries) =>
+        await TreeWithBudgetAsync(
+            invocation,
+            parent,
+            ReviewedSnapshotTestAccess.ProductionBudget(),
+            entries);
+
+    internal static async Task<ReviewedTreeSnapshot> TreeWithBudgetAsync(
+        ActionHostAuthorizer.AuthorizedInvocation invocation,
+        string parent,
+        ReviewedContentBudget budget,
         params H5HeadEntry[] entries)
     {
         var authority = MintAuthority();
-        var budget = ReviewedSnapshotTestAccess.ProductionBudget();
         var staging = ReviewedBlobStagingLease.TryCreate(
                 authority,
                 parent,
@@ -146,4 +156,35 @@ internal static class H5SnapshotTestSupport
             "MintAuthority",
             BindingFlags.Static | BindingFlags.NonPublic)?.GetValue(null) ??
         throw new InvalidOperationException("H4 mint authority was not found.");
+}
+
+internal sealed class H5ManualTimeProvider : TimeProvider
+{
+    private long _timestamp;
+
+    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+    public override long GetTimestamp() => _timestamp;
+
+    internal void Advance(TimeSpan time) =>
+        _timestamp = checked(_timestamp + time.Ticks);
+}
+
+internal sealed class H5SteppedTimeProvider(TimeSpan step) : TimeProvider
+{
+    private long _timestamp;
+
+    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+    internal bool AdvanceOnRead { get; set; }
+
+    public override long GetTimestamp()
+    {
+        if (AdvanceOnRead)
+        {
+            _timestamp = checked(_timestamp + step.Ticks);
+        }
+
+        return _timestamp;
+    }
 }

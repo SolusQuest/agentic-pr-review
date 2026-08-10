@@ -4,6 +4,9 @@ using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.ActionHost.Snapshot;
 using AgenticPrReview.Runtime.ActionHost.Snapshot.ChangedFiles;
 using AgenticPrReview.Runtime.ActionHost.Snapshot.Diff;
+using AgenticPrReview.Runtime.ActionHost.Snapshot.Materialization;
+using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent.Tools;
 using Xunit;
 
 namespace AgenticPrReview.Runtime.Tests.Host.Action.Snapshot;
@@ -92,6 +95,63 @@ public sealed class BoundedReviewedSnapshotBuilderTests
             Assert.Equal(2, script.CurrentPullRequestCalls);
             Assert.Equal(1, script.PullRequestFileCalls);
             Assert.Equal(1, script.BaseBlobCalls);
+
+            var executor = new SnapshotToolExecutor(
+                lease.Snapshot,
+                new VerifiedReviewedFileAccess());
+            Assert.True(AgentToolArguments.TryListFiles(
+                "{}",
+                out var listFiles));
+            Assert.True(AgentToolArguments.TryListChangedFiles(
+                "{}",
+                out var listChangedFiles));
+            Assert.True(AgentToolArguments.TryReadDiff(
+                "{\"path\":\"file.txt\"}",
+                out var readDiff));
+            Assert.True(AgentToolArguments.TryReadFile(
+                "{\"path\":\"file.txt\"}",
+                out var readFile));
+            Assert.True(AgentToolArguments.TrySearchText(
+                "{\"query\":\"after\",\"path\":\"file.txt\"}",
+                out var searchText));
+            Assert.True(AgentToolArguments.TryFinishReview(
+                "{\"summary\":\"done\",\"findings\":[]}",
+                out var finishReview));
+
+            PreparedAgentToolCall[] calls =
+            [
+                new PreparedListFilesCall("list-files", listFiles!),
+                new PreparedListChangedFilesCall(
+                    "list-changed-files",
+                    listChangedFiles!),
+                new PreparedReadDiffCall("read-diff", readDiff!),
+                new PreparedReadFileCall("read-file", readFile!),
+                new PreparedSearchTextCall("search-text", searchText!),
+            ];
+            foreach (var call in calls)
+            {
+                Assert.Null(executor.Preflight(call));
+                var execution = await executor.ExecuteAsync(
+                    call,
+                    CancellationToken.None);
+                Assert.True(execution.Succeeded, execution.FailureCode);
+                Assert.NotNull(execution.Observation);
+                Assert.Contains("file.txt", execution.ResultJson);
+            }
+
+            var terminal = new PreparedFinishReviewCall(
+                "finish-review",
+                finishReview!);
+            Assert.Equal(
+                AgentFailureCodes.UnknownTool,
+                executor.Preflight(terminal));
+            var terminalExecution = await executor.ExecuteAsync(
+                terminal,
+                CancellationToken.None);
+            Assert.False(terminalExecution.Succeeded);
+            Assert.Equal(
+                AgentFailureCodes.UnknownTool,
+                terminalExecution.FailureCode);
         }
         finally
         {
@@ -99,6 +159,61 @@ public sealed class BoundedReviewedSnapshotBuilderTests
             Assert.False(Directory.Exists(root));
             Directory.Delete(parent, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task ChangedMetadataOverflowFailsBeforeRootCreation()
+    {
+        var invocation = await H5SnapshotTestSupport.AuthorizedInvocation();
+        var parent = H5SnapshotTestSupport.TemporaryDirectory();
+        var before = "before\n"u8.ToArray();
+        var after = "after\n"u8.ToArray();
+        var rootCreateCalled = false;
+        var tree = await H5SnapshotTestSupport.TreeAsync(
+            invocation,
+            parent,
+            new H5HeadEntry(
+                "file.txt",
+                "100644",
+                ReviewedTreeEntryKind.Regular,
+                after));
+        var script = new Script(
+            H5SnapshotTestSupport.PullRequest(invocation.PullRequest),
+            new ActionHostPullRequestFileObject(
+                H5SnapshotTestSupport.BlobSha(after),
+                "file.txt",
+                null,
+                "modified",
+                1,
+                1,
+                2,
+                null),
+            invocation.PullRequest.BaseSha,
+            before);
+
+        var result = await new BoundedReviewedSnapshotBuilder(
+                new ScriptedFactory(script))
+            .BuildAsync(
+                invocation,
+                H5SnapshotTestSupport.Token(),
+                tree,
+                parent,
+                CancellationToken.None,
+                new ReviewedRootMaterializationHooks
+                {
+                    BeforeRootCreate = _ => rootCreateCalled = true,
+                },
+                maximumChangedMetadataBytes: 1);
+
+        Assert.Null(result.Lease);
+        Assert.Equal(
+            ReviewedSnapshotReadFailure.UnsupportedSize,
+            result.Failure);
+        Assert.False(rootCreateCalled);
+        Assert.Empty(Directory.EnumerateDirectories(
+            parent,
+            "apr-tool-root-*"));
+        Directory.Delete(parent, recursive: true);
     }
 
     private sealed class ScriptedFactory : IReviewedSnapshotTransportFactory

@@ -59,17 +59,32 @@ internal sealed class ReviewedRootMaterializationResult
 
 internal sealed class ReviewedRootLease : IAsyncDisposable
 {
+    private readonly SafeFileHandle _parentHandle;
+    private readonly ReviewedStagedFileIdentity _parentIdentity;
+    private readonly string _rootName;
+    private readonly SafeFileHandle _rootHandle;
     private readonly ReviewedStagedFileIdentity _identity;
+    private readonly ReviewedRootMaterializationHooks? _hooks;
     private bool _disposed;
 
     internal ReviewedRootLease(
         string absoluteRoot,
+        SafeFileHandle parentHandle,
+        ReviewedStagedFileIdentity parentIdentity,
+        string rootName,
+        SafeFileHandle rootHandle,
         ReviewedStagedFileIdentity identity,
         IEnumerable<string> regularPaths,
-        ReviewedMaterializationIdentity materializationIdentity)
+        ReviewedMaterializationIdentity materializationIdentity,
+        ReviewedRootMaterializationHooks? hooks)
     {
         AbsoluteRoot = absoluteRoot;
+        _parentHandle = parentHandle;
+        _parentIdentity = parentIdentity;
+        _rootName = rootName;
+        _rootHandle = rootHandle;
         _identity = identity;
+        _hooks = hooks;
         RegularPaths = regularPaths
             .Order(StringComparer.Ordinal)
             .ToImmutableArray();
@@ -92,11 +107,34 @@ internal sealed class ReviewedRootLease : IAsyncDisposable
         }
 
         _disposed = true;
-        CleanupIncomplete = !ReviewedRootCleanup.TryDelete(
-            AbsoluteRoot,
-            _identity);
+        try
+        {
+            _hooks?.BeforeRootCleanup?.Invoke(AbsoluteRoot);
+            CleanupIncomplete = !ReviewedRootCleanup.TryDelete(
+                _parentHandle,
+                Path.GetDirectoryName(AbsoluteRoot)!,
+                _parentIdentity,
+                _rootName,
+                _rootHandle,
+                AbsoluteRoot,
+                _identity,
+                _hooks);
+        }
+        finally
+        {
+            _rootHandle.Dispose();
+            _parentHandle.Dispose();
+        }
+
         return ValueTask.CompletedTask;
     }
+}
+
+internal sealed class ReviewedRootMaterializationHooks
+{
+    internal Action<string>? BeforeRootCreate { get; init; }
+    internal Action<string>? BeforeRootCleanup { get; init; }
+    internal Action<string>? BeforeChildCleanup { get; init; }
 }
 
 internal static class ReviewedRootMaterializer
@@ -104,13 +142,26 @@ internal static class ReviewedRootMaterializer
     internal static async Task<ReviewedRootMaterializationResult> MaterializeAsync(
         ReviewedTreeSnapshot tree,
         string absoluteParent,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ReviewedRootMaterializationHooks? hooks = null,
+        long maximumRootBytes = ReviewedContentLimits.MaterializedRootBytes)
     {
         ArgumentNullException.ThrowIfNull(tree);
-        if (!TryResolveSafeParent(absoluteParent, out var parent))
+        if (!TryResolveSafeParent(
+                absoluteParent,
+                out var parent,
+                out var parentHandle,
+                out var parentIdentity))
         {
             return ReviewedRootMaterializationResult.Failed(
                 ReviewedRootFailure.UnsafeRoot);
+        }
+
+        if (!tree.Budget.TryContinue(cancellationToken))
+        {
+            parentHandle!.Dispose();
+            return ReviewedRootMaterializationResult.Failed(
+                ReviewedRootFailure.UnsupportedSize);
         }
 
         var regular = tree.Records
@@ -119,41 +170,46 @@ internal static class ReviewedRootMaterializer
             .ToImmutableArray();
         if (!TargetPathsAreCollisionFree(regular))
         {
+            parentHandle!.Dispose();
             return ReviewedRootMaterializationResult.Failed(
                 ReviewedRootFailure.UnsafeRoot);
         }
 
-        var rootBytes = new ReviewedMaterializedRootByteMeter();
+        var rootBytes = new ReviewedMaterializedRootByteMeter(
+            maximumRootBytes);
         foreach (var record in regular)
         {
             if (!rootBytes.TryAdd(record.Size!.Value))
             {
+                parentHandle!.Dispose();
                 return ReviewedRootMaterializationResult.Failed(
                     ReviewedRootFailure.UnsupportedSize);
             }
         }
 
-        var root = Path.Join(
-            parent,
-            "apr-tool-root-" + Guid.NewGuid().ToString("N"));
+        var rootName = "apr-tool-root-" + Guid.NewGuid().ToString("N");
+        var root = Path.Join(parent, rootName);
+        SafeFileHandle? rootHandle = null;
         ReviewedStagedFileIdentity rootIdentity = default;
-        var created = false;
         try
         {
-            Directory.CreateDirectory(root);
-            created = true;
-            if (!ReviewedStagedFileAccess.TryOpenDirectory(
-                    root,
-                    out var rootHandle,
-                    out rootIdentity))
+            hooks?.BeforeRootCreate?.Invoke(root);
+            if (!ReviewedStagedFileAccess.TryCreateChildDirectoryExclusive(
+                    parentHandle!,
+                    parent,
+                    parentIdentity,
+                    rootName,
+                    out rootHandle,
+                    out rootIdentity,
+                    out _))
             {
-                return FailedWithCleanup(
-                    root,
-                    rootIdentity,
+                parentHandle!.Dispose();
+                return ReviewedRootMaterializationResult.Failed(
                     ReviewedRootFailure.UnsafeRoot);
             }
 
             var copied = await CopyFilesAsync(
+                tree.Budget,
                 root,
                 rootHandle!,
                 rootIdentity,
@@ -161,32 +217,65 @@ internal static class ReviewedRootMaterializer
                 cancellationToken);
             if (copied != ReviewedRootFailure.None)
             {
-                return FailedWithCleanup(root, rootIdentity, copied);
+                return FailedWithCleanup(
+                    parentHandle!,
+                    parent,
+                    parentIdentity,
+                    rootName,
+                    rootHandle!,
+                    root,
+                    rootIdentity,
+                    copied,
+                    hooks);
             }
 
-            if (!TryMakeDirectoriesReadOnly(root) ||
+            var budgetContinues = tree.Budget.TryContinue(cancellationToken);
+            if (!budgetContinues ||
                 !ReviewedStagedFileAccess.DirectoryMatches(root, rootIdentity))
             {
                 return FailedWithCleanup(
+                    parentHandle!,
+                    parent,
+                    parentIdentity,
+                    rootName,
+                    rootHandle!,
                     root,
                     rootIdentity,
-                    ReviewedRootFailure.UnsafeRoot);
+                    budgetContinues
+                        ? ReviewedRootFailure.UnsafeRoot
+                        : ReviewedRootFailure.UnsupportedSize,
+                    hooks);
             }
 
-            return ReviewedRootMaterializationResult.Success(
-                new ReviewedRootLease(
-                    root,
-                    rootIdentity,
-                    regular.Select(static record => record.Path),
-                    ReviewedMaterializationIdentityWriter.Write(
-                        tree,
-                        regular)));
+            var lease = new ReviewedRootLease(
+                root,
+                parentHandle!,
+                parentIdentity,
+                rootName,
+                rootHandle!,
+                rootIdentity,
+                regular.Select(static record => record.Path),
+                ReviewedMaterializationIdentityWriter.Write(tree, regular),
+                hooks);
+            parentHandle = null;
+            rootHandle = null;
+            return ReviewedRootMaterializationResult.Success(lease);
         }
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
         {
-            var cleanupComplete = !created ||
-                ReviewedRootCleanup.TryDelete(root, rootIdentity);
+            var cleanupComplete = rootHandle is null ||
+                ReviewedRootCleanup.TryDelete(
+                    parentHandle!,
+                    parent,
+                    parentIdentity,
+                    rootName,
+                    rootHandle,
+                    root,
+                    rootIdentity,
+                    hooks);
+            rootHandle?.Dispose();
+            parentHandle?.Dispose();
             return ReviewedRootMaterializationResult.Failed(
                 ReviewedRootFailure.Cancelled,
                 !cleanupComplete);
@@ -196,8 +285,18 @@ internal static class ReviewedRootMaterializer
             ArgumentException or
             NotSupportedException)
         {
-            var cleanupComplete = !created ||
-                ReviewedRootCleanup.TryDelete(root, rootIdentity);
+            var cleanupComplete = rootHandle is null ||
+                ReviewedRootCleanup.TryDelete(
+                    parentHandle!,
+                    parent,
+                    parentIdentity,
+                    rootName,
+                    rootHandle,
+                    root,
+                    rootIdentity,
+                    hooks);
+            rootHandle?.Dispose();
+            parentHandle?.Dispose();
             return ReviewedRootMaterializationResult.Failed(
                 ReviewedRootFailure.IoFailure,
                 !cleanupComplete);
@@ -206,9 +305,13 @@ internal static class ReviewedRootMaterializer
 
     private static bool TryResolveSafeParent(
         string candidate,
-        out string parent)
+        out string parent,
+        out SafeFileHandle? handle,
+        out ReviewedStagedFileIdentity identity)
     {
         parent = string.Empty;
+        handle = null;
+        identity = default;
         if (string.IsNullOrWhiteSpace(candidate) ||
             !Path.IsPathFullyQualified(candidate))
         {
@@ -221,10 +324,8 @@ internal static class ReviewedRootMaterializer
                 Path.GetFullPath(candidate));
             return ReviewedStagedFileAccess.TryOpenDirectory(
                 parent,
-                out var handle,
-                out _)
-                ? DisposeAndTrue(handle!)
-                : false;
+                out handle,
+                out identity);
         }
         catch (Exception exception) when (exception is IOException or
             UnauthorizedAccessException or
@@ -232,14 +333,11 @@ internal static class ReviewedRootMaterializer
             NotSupportedException)
         {
             parent = string.Empty;
+            handle?.Dispose();
+            handle = null;
+            identity = default;
             return false;
         }
-    }
-
-    private static bool DisposeAndTrue(IDisposable value)
-    {
-        value.Dispose();
-        return true;
     }
 
     private static bool TargetPathsAreCollisionFree(
@@ -278,6 +376,7 @@ internal static class ReviewedRootMaterializer
     }
 
     private static async Task<ReviewedRootFailure> CopyFilesAsync(
+        ReviewedContentBudget budget,
         string root,
         SafeFileHandle rootHandle,
         ReviewedStagedFileIdentity rootIdentity,
@@ -293,7 +392,11 @@ internal static class ReviewedRootMaterializer
         {
             foreach (var record in regular)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                if (!budget.TryContinue(cancellationToken))
+                {
+                    return ReviewedRootFailure.UnsupportedSize;
+                }
+
                 var segments = record.Path.Split('/');
                 var relativeParent = string.Empty;
                 var current = directories[string.Empty];
@@ -343,11 +446,20 @@ internal static class ReviewedRootMaterializer
                 var destinationPath = Path.Join(current.Path, segments[^1]);
                 await using (destination)
                 {
-                    if (!await record.StagedBlob!.CopyVerifiedToAsync(
+                    var copied = await record.StagedBlob!
+                        .CopyVerifiedDetailedAsync(
                             destination!,
-                            cancellationToken))
+                            cancellationToken);
+                    if (copied != ReviewedStagedBlobCopyFailure.None)
                     {
-                        return ReviewedRootFailure.IdentityMismatch;
+                        return copied switch
+                        {
+                            ReviewedStagedBlobCopyFailure.IdentityMismatch =>
+                                ReviewedRootFailure.IdentityMismatch,
+                            ReviewedStagedBlobCopyFailure.UnsupportedSize =>
+                                ReviewedRootFailure.UnsupportedSize,
+                            _ => ReviewedRootFailure.IoFailure,
+                        };
                     }
 
                     await destination!.FlushAsync(cancellationToken);
@@ -363,6 +475,29 @@ internal static class ReviewedRootMaterializer
                 }
             }
 
+            if (!budget.TryContinue(cancellationToken))
+            {
+                return ReviewedRootFailure.UnsupportedSize;
+            }
+
+            if (OperatingSystem.IsLinux())
+            {
+                foreach (var directory in directories.Values.OrderByDescending(
+                             static value => value.Path.Length))
+                {
+                    if (!ReviewedStagedFileAccess.TrySetDirectoryWritable(
+                            directory.Handle,
+                            writable: false))
+                    {
+                        return ReviewedRootFailure.UnsafeRoot;
+                    }
+                }
+            }
+            else if (!TryMakeDirectoriesReadOnly(root))
+            {
+                return ReviewedRootFailure.UnsafeRoot;
+            }
+
             return ReviewedStagedFileAccess.DirectoryMatches(
                     root,
                     rootIdentity)
@@ -371,9 +506,10 @@ internal static class ReviewedRootMaterializer
         }
         finally
         {
-            foreach (var directory in directories.Values)
+            foreach (var directory in directories.Where(
+                         static pair => pair.Key.Length != 0))
             {
-                directory.Handle.Dispose();
+                directory.Value.Handle.Dispose();
             }
         }
     }
@@ -431,11 +567,27 @@ internal static class ReviewedRootMaterializer
     }
 
     private static ReviewedRootMaterializationResult FailedWithCleanup(
+        SafeFileHandle parentHandle,
+        string parentPath,
+        ReviewedStagedFileIdentity parentIdentity,
+        string rootName,
+        SafeFileHandle rootHandle,
         string root,
         ReviewedStagedFileIdentity identity,
-        ReviewedRootFailure failure)
+        ReviewedRootFailure failure,
+        ReviewedRootMaterializationHooks? hooks)
     {
-        var cleanupComplete = ReviewedRootCleanup.TryDelete(root, identity);
+        var cleanupComplete = ReviewedRootCleanup.TryDelete(
+            parentHandle,
+            parentPath,
+            parentIdentity,
+            rootName,
+            rootHandle,
+            root,
+            identity,
+            hooks);
+        rootHandle.Dispose();
+        parentHandle.Dispose();
         return ReviewedRootMaterializationResult.Failed(
             failure,
             !cleanupComplete);
@@ -444,12 +596,26 @@ internal static class ReviewedRootMaterializer
 
 internal sealed class ReviewedMaterializedRootByteMeter
 {
+    private readonly long _maximumBytes;
+
+    internal ReviewedMaterializedRootByteMeter(
+        long maximumBytes = ReviewedContentLimits.MaterializedRootBytes)
+    {
+        if (maximumBytes < 0 ||
+            maximumBytes > ReviewedContentLimits.MaterializedRootBytes)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maximumBytes));
+        }
+
+        _maximumBytes = maximumBytes;
+    }
+
     internal long Bytes { get; private set; }
 
     internal bool TryAdd(long size)
     {
         if (size < 0 ||
-            Bytes > ReviewedContentLimits.MaterializedRootBytes - size)
+            Bytes > _maximumBytes - size)
         {
             return false;
         }
@@ -510,18 +676,189 @@ internal static class ReviewedMaterializationIdentityWriter
 internal static class ReviewedRootCleanup
 {
     internal static bool TryDelete(
+        SafeFileHandle parentHandle,
+        string parentPath,
+        ReviewedStagedFileIdentity parentIdentity,
+        string rootName,
+        SafeFileHandle rootHandle,
+        string rootPath,
+        ReviewedStagedFileIdentity expectedIdentity,
+        ReviewedRootMaterializationHooks? hooks)
+    {
+        try
+        {
+            if (expectedIdentity == default)
+            {
+                return false;
+            }
+
+            if (OperatingSystem.IsLinux())
+            {
+                if (!ReviewedStagedFileAccess.TryOpenChildDirectory(
+                        parentHandle,
+                        parentPath,
+                        parentIdentity,
+                        rootName,
+                        out var currentRoot,
+                        out var currentIdentity))
+                {
+                    return false;
+                }
+
+                using (currentRoot)
+                {
+                    if (currentIdentity != expectedIdentity)
+                    {
+                        return false;
+                    }
+                }
+
+                if (!ReviewedStagedFileAccess.TrySetDirectoryWritable(
+                        rootHandle,
+                        writable: true) ||
+                    !TryDeleteDirectoryContents(
+                        rootHandle,
+                        rootPath,
+                        expectedIdentity,
+                        hooks))
+                {
+                    return false;
+                }
+
+                if (!ReviewedStagedFileAccess.TryOpenChildDirectory(
+                        parentHandle,
+                        parentPath,
+                        parentIdentity,
+                        rootName,
+                        out currentRoot,
+                        out currentIdentity))
+                {
+                    return false;
+                }
+
+                using (currentRoot)
+                {
+                    if (currentIdentity != expectedIdentity)
+                    {
+                        return false;
+                    }
+                }
+
+                return ReviewedStagedFileAccess.TryRemoveChild(
+                    parentHandle,
+                    parentPath,
+                    parentIdentity,
+                    rootName,
+                    directory: true);
+            }
+
+            return TryDeletePath(rootPath, expectedIdentity);
+        }
+        catch (Exception exception) when (exception is IOException or
+            UnauthorizedAccessException or
+            ArgumentException or
+            NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryDeleteDirectoryContents(
+        SafeFileHandle directoryHandle,
+        string displayPath,
+        ReviewedStagedFileIdentity identity,
+        ReviewedRootMaterializationHooks? hooks)
+    {
+        var descriptor = checked((int)directoryHandle.DangerousGetHandle());
+        var enumerationPath = "/proc/self/fd/" + descriptor;
+        var names = Directory.EnumerateFileSystemEntries(
+                enumerationPath,
+                "*",
+                SearchOption.TopDirectoryOnly)
+            .Select(Path.GetFileName)
+            .Where(static name => !string.IsNullOrEmpty(name))
+            .ToArray();
+        foreach (var name in names)
+        {
+            var childName = name!;
+            var childDisplayPath = Path.Join(displayPath, childName);
+            hooks?.BeforeChildCleanup?.Invoke(childDisplayPath);
+            if (ReviewedStagedFileAccess.TryOpenChildDirectory(
+                    directoryHandle,
+                    enumerationPath,
+                    identity,
+                    childName,
+                    out var childHandle,
+                    out var childIdentity))
+            {
+                using (childHandle)
+                {
+                    if (!ReviewedStagedFileAccess.TrySetDirectoryWritable(
+                            childHandle!,
+                            writable: true) ||
+                        !TryDeleteDirectoryContents(
+                            childHandle!,
+                            childDisplayPath,
+                            childIdentity,
+                            hooks))
+                    {
+                        return false;
+                    }
+                }
+
+                if (!ReviewedStagedFileAccess.TryOpenChildDirectory(
+                        directoryHandle,
+                        enumerationPath,
+                        identity,
+                        childName,
+                        out var currentChild,
+                        out var currentIdentity))
+                {
+                    return false;
+                }
+
+                using (currentChild)
+                {
+                    if (currentIdentity != childIdentity)
+                    {
+                        return false;
+                    }
+                }
+
+                if (!ReviewedStagedFileAccess.TryRemoveChild(
+                        directoryHandle,
+                        enumerationPath,
+                        identity,
+                        childName,
+                        directory: true))
+                {
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (!ReviewedStagedFileAccess.TryRemoveChild(
+                    directoryHandle,
+                    enumerationPath,
+                    identity,
+                    childName,
+                    directory: false))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool TryDeletePath(
         string root,
         ReviewedStagedFileIdentity expectedIdentity)
     {
         try
         {
-            if (!Directory.Exists(root))
-            {
-                return true;
-            }
-
-            if (expectedIdentity == default ||
-                !ReviewedStagedFileAccess.DirectoryMatches(
+            if (!ReviewedStagedFileAccess.DirectoryMatches(
                     root,
                     expectedIdentity))
             {
@@ -557,7 +894,6 @@ internal static class ReviewedRootCleanup
         var attributes = File.GetAttributes(path);
         if ((attributes & FileAttributes.ReparsePoint) != 0)
         {
-            MakeWritable(path);
             if ((attributes & FileAttributes.Directory) != 0)
             {
                 Directory.Delete(path, recursive: false);

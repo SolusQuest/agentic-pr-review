@@ -61,8 +61,7 @@ internal static class ActionHostReviewedSnapshotMapper
             document.Status.Length > 32 ||
             document.Additions < 0 ||
             document.Deletions < 0 ||
-            document.Changes < 0 ||
-            document.Patch is { Length: > 1024 * 1024 })
+            document.Changes < 0)
         {
             return false;
         }

@@ -137,15 +137,15 @@ internal sealed class ReviewedExactDiffBuilder
             }
             else
             {
-                var verifiedBaseBytes = await baseOperand!.Blob!.ReadVerifiedAsync(
-                    cancellationToken);
-                if (verifiedBaseBytes is null)
+                var verifiedBase = await baseOperand!.Blob!
+                    .ReadVerifiedDetailedAsync(cancellationToken);
+                if (verifiedBase.Bytes is null)
                 {
                     return ReviewedSnapshotReadResult<ReviewedDiffBuildSet>
-                        .Failed(ReviewedSnapshotReadFailure.IdentityMismatch);
+                        .Failed(Map(verifiedBase.Failure));
                 }
 
-                baseBytes = verifiedBaseBytes;
+                baseBytes = verifiedBase.Bytes;
                 if (baseBytes.LongLength != baseOperand.Size)
                 {
                     return ReviewedSnapshotReadResult<ReviewedDiffBuildSet>
@@ -162,19 +162,25 @@ internal sealed class ReviewedExactDiffBuilder
             {
                 using var destination = new MemoryStream(
                     checked((int)headRecord!.Size!.Value));
-                if (!await headRecord.StagedBlob!.CopyVerifiedToAsync(
-                        destination,
-                        cancellationToken))
+                var copied = await headRecord.StagedBlob!
+                    .CopyVerifiedDetailedAsync(destination, cancellationToken);
+                if (copied != ReviewedStagedBlobCopyFailure.None)
                 {
                     return ReviewedSnapshotReadResult<ReviewedDiffBuildSet>
-                        .Failed(ReviewedSnapshotReadFailure.IdentityMismatch);
+                        .Failed(Map(copied));
                 }
 
                 headBytes = destination.ToArray();
             }
 
-            var baseText = Decode(baseBytes);
-            var headText = Decode(headBytes);
+            var baseText = Decode(baseBytes, cancellationToken);
+            var headText = Decode(headBytes, cancellationToken);
+            if (baseText.Status == TextStatus.Unsupported ||
+                headText.Status == TextStatus.Unsupported)
+            {
+                return Unsupported();
+            }
+
             if (baseText.Status == TextStatus.Binary ||
                 headText.Status == TextStatus.Binary)
             {
@@ -196,10 +202,11 @@ internal sealed class ReviewedExactDiffBuilder
                 continue;
             }
 
-            if (!PatchCorroborates(
+            if (EvaluatePatch(
                     file,
                     baseText.Lines,
-                    headText.Lines))
+                    headText.Lines,
+                    cancellationToken) == PatchEvidence.Contradictory)
             {
                 built.Add(Unavailable(
                     file,
@@ -216,7 +223,13 @@ internal sealed class ReviewedExactDiffBuilder
                     operations,
                     baseText.Lines.Length,
                     headText.Lines.Length,
+                    cancellationToken,
                     out var hunks))
+            {
+                return Unsupported();
+            }
+
+            if (!_budget.TryContinue(cancellationToken))
             {
                 return Unsupported();
             }
@@ -261,6 +274,11 @@ internal sealed class ReviewedExactDiffBuilder
                 ReviewedUnavailableReason.None));
         }
 
+        if (!_budget.TryContinue(cancellationToken))
+        {
+            return Unsupported();
+        }
+
         var completed = built.ToImmutable();
         return ReviewedSnapshotReadResult<ReviewedDiffBuildSet>.Success(
             new(
@@ -274,6 +292,16 @@ internal sealed class ReviewedExactDiffBuilder
     private static ReviewedSnapshotReadResult<ReviewedDiffBuildSet>
         Unsupported() => ReviewedSnapshotReadResult<ReviewedDiffBuildSet>.Failed(
             ReviewedSnapshotReadFailure.UnsupportedSize);
+
+    private static ReviewedSnapshotReadFailure Map(
+        ReviewedStagedBlobCopyFailure failure) => failure switch
+        {
+            ReviewedStagedBlobCopyFailure.IdentityMismatch =>
+                ReviewedSnapshotReadFailure.IdentityMismatch,
+            ReviewedStagedBlobCopyFailure.UnsupportedSize =>
+                ReviewedSnapshotReadFailure.UnsupportedSize,
+            _ => ReviewedSnapshotReadFailure.StagingFailure,
+        };
 
     private static ReviewedUnavailableReason ClassifyNonRegular(
         ReviewedPullRequestFileFact file,
@@ -324,8 +352,15 @@ internal sealed class ReviewedExactDiffBuilder
             reason);
     }
 
-    private static DecodedText Decode(byte[] bytes)
+    private DecodedText Decode(
+        byte[] bytes,
+        CancellationToken cancellationToken)
     {
+        if (!_budget.TryContinue(cancellationToken))
+        {
+            return new(TextStatus.Unsupported, []);
+        }
+
         if (bytes.AsSpan().IndexOf((byte)0) >= 0)
         {
             return new(TextStatus.Binary, []);
@@ -349,6 +384,12 @@ internal sealed class ReviewedExactDiffBuilder
 
         for (var index = 0; index < text.Length; index++)
         {
+            if ((index & 1023) == 0 &&
+                !_budget.TryContinue(cancellationToken))
+            {
+                return new(TextStatus.Unsupported, []);
+            }
+
             if (text[index] == '\r' &&
                 (index + 1 >= text.Length || text[index + 1] != '\n'))
             {
@@ -368,6 +409,12 @@ internal sealed class ReviewedExactDiffBuilder
         var lines = ImmutableArray.CreateBuilder<TextLine>(count);
         for (var index = 0; index < count; index++)
         {
+            if ((index & 255) == 0 &&
+                !_budget.TryContinue(cancellationToken))
+            {
+                return new(TextStatus.Unsupported, []);
+            }
+
             try
             {
                 if (StrictUtf8.GetByteCount(values[index]) >
@@ -411,8 +458,10 @@ internal sealed class ReviewedExactDiffBuilder
             return false;
         }
 
-        operations = Number(builder.ToImmutable());
-        return true;
+        return TryNumber(
+            builder.ToImmutable(),
+            cancellationToken,
+            out operations);
     }
 
     private bool DiffRange(
@@ -434,6 +483,12 @@ internal sealed class ReviewedExactDiffBuilder
         while (oldStart < oldEnd && newStart < newEnd &&
             oldLines[oldStart] == newLines[newStart])
         {
+            if ((oldStart & 255) == 0 &&
+                !_budget.TryContinue(cancellationToken))
+            {
+                return false;
+            }
+
             output.Add(DiffOperation.Equal(oldLines[oldStart]));
             oldStart++;
             newStart++;
@@ -445,6 +500,11 @@ internal sealed class ReviewedExactDiffBuilder
             oldLines[oldEnd - suffix - 1] == newLines[newEnd - suffix - 1])
         {
             suffix++;
+            if ((suffix & 255) == 0 &&
+                !_budget.TryContinue(cancellationToken))
+            {
+                return false;
+            }
         }
 
         oldEnd -= suffix;
@@ -453,32 +513,62 @@ internal sealed class ReviewedExactDiffBuilder
         {
             for (var index = oldStart; index < oldEnd; index++)
             {
+                if ((index & 255) == 0 &&
+                    !_budget.TryContinue(cancellationToken))
+                {
+                    return false;
+                }
+
                 output.Add(DiffOperation.Delete(oldLines[index]));
             }
 
             for (var index = newStart; index < newEnd; index++)
             {
+                if ((index & 255) == 0 &&
+                    !_budget.TryContinue(cancellationToken))
+                {
+                    return false;
+                }
+
                 output.Add(DiffOperation.Add(newLines[index]));
             }
         }
         else
         {
-            var anchors = UniqueAnchors(
-                oldLines,
-                oldStart,
-                oldEnd,
-                newLines,
-                newStart,
-                newEnd);
+            if (!TryUniqueAnchors(
+                    oldLines,
+                    oldStart,
+                    oldEnd,
+                    newLines,
+                    newStart,
+                    newEnd,
+                    cancellationToken,
+                    out var anchors))
+            {
+                return false;
+            }
+
             if (anchors.Length == 0)
             {
                 for (var index = oldStart; index < oldEnd; index++)
                 {
+                    if ((index & 255) == 0 &&
+                        !_budget.TryContinue(cancellationToken))
+                    {
+                        return false;
+                    }
+
                     output.Add(DiffOperation.Delete(oldLines[index]));
                 }
 
                 for (var index = newStart; index < newEnd; index++)
                 {
+                    if ((index & 255) == 0 &&
+                        !_budget.TryContinue(cancellationToken))
+                    {
+                        return false;
+                    }
+
                     output.Add(DiffOperation.Add(newLines[index]));
                 }
             }
@@ -525,34 +615,79 @@ internal sealed class ReviewedExactDiffBuilder
 
         for (var index = suffix; index > 0; index--)
         {
+            if ((index & 255) == 0 &&
+                !_budget.TryContinue(cancellationToken))
+            {
+                return false;
+            }
+
             output.Add(DiffOperation.Equal(oldLines[oldEnd + index - 1]));
         }
 
         return true;
     }
 
-    private static ImmutableArray<Anchor> UniqueAnchors(
+    private bool TryUniqueAnchors(
         ImmutableArray<TextLine> oldLines,
         int oldStart,
         int oldEnd,
         ImmutableArray<TextLine> newLines,
         int newStart,
-        int newEnd)
+        int newEnd,
+        CancellationToken cancellationToken,
+        out ImmutableArray<Anchor> anchors)
     {
-        var oldCounts = Count(oldLines, oldStart, oldEnd);
-        var newCounts = Count(newLines, newStart, newEnd);
-        var candidates = oldCounts
-            .Where(pair => pair.Value.Count == 1 &&
+        if (!TryCount(
+                oldLines,
+                oldStart,
+                oldEnd,
+                cancellationToken,
+                out var oldCounts) ||
+            !TryCount(
+                newLines,
+                newStart,
+                newEnd,
+                cancellationToken,
+                out var newCounts))
+        {
+            anchors = default;
+            return false;
+        }
+
+        var candidateBuilder = new List<Anchor>();
+        var candidateIndex = 0;
+        foreach (var pair in oldCounts)
+        {
+            if ((candidateIndex++ & 255) == 0 &&
+                !_budget.TryContinue(cancellationToken))
+            {
+                anchors = default;
+                return false;
+            }
+
+            if (pair.Value.Count == 1 &&
                 newCounts.TryGetValue(pair.Key, out var other) &&
                 other.Count == 1)
-            .Select(pair => new Anchor(
-                pair.Value.Index,
-                newCounts[pair.Key].Index))
-            .OrderBy(static anchor => anchor.Old)
-            .ToArray();
+            {
+                candidateBuilder.Add(new Anchor(
+                    pair.Value.Index,
+                    other.Index));
+            }
+        }
+
+        candidateBuilder.Sort(static (left, right) =>
+            left.Old.CompareTo(right.Old));
+        if (!_budget.TryContinue(cancellationToken))
+        {
+            anchors = default;
+            return false;
+        }
+
+        var candidates = candidateBuilder.ToArray();
         if (candidates.Length == 0)
         {
-            return [];
+            anchors = [];
+            return true;
         }
 
         var tails = new int[candidates.Length];
@@ -561,6 +696,13 @@ internal sealed class ReviewedExactDiffBuilder
         var length = 0;
         for (var index = 0; index < candidates.Length; index++)
         {
+            if ((index & 255) == 0 &&
+                !_budget.TryContinue(cancellationToken))
+            {
+                anchors = default;
+                return false;
+            }
+
             var value = candidates[index].New;
             var low = 0;
             var high = length;
@@ -594,34 +736,53 @@ internal sealed class ReviewedExactDiffBuilder
             current = previous[current];
         }
 
-        return ImmutableArray.Create(result);
+        anchors = ImmutableArray.Create(result);
+        return true;
     }
 
-    private static Dictionary<TextLine, LineOccurrence> Count(
+    private bool TryCount(
         ImmutableArray<TextLine> lines,
         int start,
-        int end)
+        int end,
+        CancellationToken cancellationToken,
+        out Dictionary<TextLine, LineOccurrence> result)
     {
-        var result = new Dictionary<TextLine, LineOccurrence>();
+        result = new Dictionary<TextLine, LineOccurrence>();
         for (var index = start; index < end; index++)
         {
+            if ((index & 255) == 0 &&
+                !_budget.TryContinue(cancellationToken))
+            {
+                return false;
+            }
+
             result[lines[index]] = result.TryGetValue(lines[index], out var value)
                 ? new(value.Index, value.Count + 1)
                 : new(index, 1);
         }
 
-        return result;
+        return true;
     }
 
-    private static ImmutableArray<DiffOperation> Number(
-        ImmutableArray<DiffOperation> operations)
+    private bool TryNumber(
+        ImmutableArray<DiffOperation> operations,
+        CancellationToken cancellationToken,
+        out ImmutableArray<DiffOperation> numbered)
     {
         var oldLine = 1;
         var newLine = 1;
         var builder = ImmutableArray.CreateBuilder<DiffOperation>(
             operations.Length);
-        foreach (var operation in operations)
+        for (var index = 0; index < operations.Length; index++)
         {
+            if ((index & 255) == 0 &&
+                !_budget.TryContinue(cancellationToken))
+            {
+                numbered = default;
+                return false;
+            }
+
+            var operation = operations[index];
             builder.Add(operation with
             {
                 OldPosition = oldLine,
@@ -638,20 +799,34 @@ internal sealed class ReviewedExactDiffBuilder
             }
         }
 
-        return builder.ToImmutable();
+        numbered = builder.ToImmutable();
+        return true;
     }
 
-    private static bool TryBuildHunks(
+    private bool TryBuildHunks(
         ImmutableArray<DiffOperation> operations,
         int oldLineCount,
         int newLineCount,
+        CancellationToken cancellationToken,
         out ImmutableArray<ReviewedDiffHunk> hunks)
     {
         var builder = ImmutableArray.CreateBuilder<ReviewedDiffHunk>();
         var cursor = 0;
         while (cursor < operations.Length)
         {
-            var first = FindChange(operations, cursor);
+            if (!_budget.TryContinue(cancellationToken))
+            {
+                hunks = default;
+                return false;
+            }
+
+            var first = FindChange(operations, cursor, cancellationToken);
+            if (first == -2)
+            {
+                hunks = default;
+                return false;
+            }
+
             if (first < 0)
             {
                 break;
@@ -671,7 +846,13 @@ internal sealed class ReviewedExactDiffBuilder
             var scan = first + 1;
             while (scan < operations.Length)
             {
-                var next = FindChange(operations, scan);
+                var next = FindChange(operations, scan, cancellationToken);
+                if (next == -2)
+                {
+                    hunks = default;
+                    return false;
+                }
+
                 if (next < 0)
                 {
                     break;
@@ -680,6 +861,13 @@ internal sealed class ReviewedExactDiffBuilder
                 var equalGap = 0;
                 for (var index = last + 1; index < next; index++)
                 {
+                    if ((index & 255) == 0 &&
+                        !_budget.TryContinue(cancellationToken))
+                    {
+                        hunks = default;
+                        return false;
+                    }
+
                     if (operations[index].Kind == DiffKind.Equal)
                     {
                         equalGap++;
@@ -712,6 +900,13 @@ internal sealed class ReviewedExactDiffBuilder
                 var records = 0;
                 while (chunkEnd < end)
                 {
+                    if ((chunkEnd & 255) == 0 &&
+                        !_budget.TryContinue(cancellationToken))
+                    {
+                        hunks = default;
+                        return false;
+                    }
+
                     var required = operations[chunkEnd].Line.Terminated ? 1 : 2;
                     if (records != 0 &&
                         records > AgentLimits.DiffLinesPerHunk - required)
@@ -729,6 +924,7 @@ internal sealed class ReviewedExactDiffBuilder
                         chunkEnd,
                         oldLineCount,
                         newLineCount,
+                        cancellationToken,
                         out var hunk))
                 {
                     hunks = default;
@@ -752,12 +948,19 @@ internal sealed class ReviewedExactDiffBuilder
         return true;
     }
 
-    private static int FindChange(
+    private int FindChange(
         ImmutableArray<DiffOperation> operations,
-        int start)
+        int start,
+        CancellationToken cancellationToken)
     {
         for (var index = start; index < operations.Length; index++)
         {
+            if ((index & 255) == 0 &&
+                !_budget.TryContinue(cancellationToken))
+            {
+                return -2;
+            }
+
             if (operations[index].Kind != DiffKind.Equal)
             {
                 return index;
@@ -767,12 +970,13 @@ internal sealed class ReviewedExactDiffBuilder
         return -1;
     }
 
-    private static bool TryCreateHunk(
+    private bool TryCreateHunk(
         ImmutableArray<DiffOperation> operations,
         int start,
         int end,
         int oldLineCount,
         int newLineCount,
+        CancellationToken cancellationToken,
         out ReviewedDiffHunk? hunk)
     {
         hunk = null;
@@ -781,6 +985,12 @@ internal sealed class ReviewedExactDiffBuilder
         var newCount = 0;
         for (var index = start; index < end; index++)
         {
+            if ((index & 255) == 0 &&
+                !_budget.TryContinue(cancellationToken))
+            {
+                return false;
+            }
+
             var operation = operations[index];
             switch (operation.Kind)
             {
@@ -841,115 +1051,250 @@ internal sealed class ReviewedExactDiffBuilder
         }
     }
 
-    private static bool PatchCorroborates(
+    private PatchEvidence EvaluatePatch(
         ReviewedPullRequestFileFact file,
         ImmutableArray<TextLine> oldLines,
-        ImmutableArray<TextLine> newLines)
+        ImmutableArray<TextLine> newLines,
+        CancellationToken cancellationToken)
     {
         if (file.Patch is null || file.PatchIncomplete)
         {
-            return true;
+            return PatchEvidence.NotAvailableOrIncomplete;
         }
 
         var patch = file.Patch.Replace("\r\n", "\n", StringComparison.Ordinal);
         if (patch.Contains('\r'))
         {
-            return true;
+            return PatchEvidence.NotAvailableOrIncomplete;
         }
 
         var lines = patch.Split('\n');
-        var sawHeader = false;
-        var oldLine = 0;
-        var newLine = 0;
-        foreach (var line in lines)
+        var sawHunk = false;
+        var consistent = true;
+        var previousOldEnd = 0;
+        var previousNewEnd = 0;
+        var index = 0;
+        while (index < lines.Length)
         {
-            if (line.StartsWith("@@", StringComparison.Ordinal))
+            if ((index & 255) == 0 &&
+                !_budget.TryContinue(cancellationToken))
             {
-                if (!TryParseHunkHeader(line, out oldLine, out newLine))
+                return PatchEvidence.NotAvailableOrIncomplete;
+            }
+
+            if (index == lines.Length - 1 && lines[index].Length == 0)
+            {
+                index++;
+                continue;
+            }
+
+            if (!TryParseHunkHeader(
+                    lines[index],
+                    out var oldStart,
+                    out var oldCount,
+                    out var newStart,
+                    out var newCount) ||
+                oldStart < previousOldEnd ||
+                newStart < previousNewEnd)
+            {
+                return PatchEvidence.NotAvailableOrIncomplete;
+            }
+
+            sawHunk = true;
+            index++;
+            var oldConsumed = 0;
+            var newConsumed = 0;
+            var lastWasContent = false;
+            while (index < lines.Length &&
+                !lines[index].StartsWith("@@", StringComparison.Ordinal))
+            {
+                if ((index & 255) == 0 &&
+                    !_budget.TryContinue(cancellationToken))
                 {
-                    return true;
+                    return PatchEvidence.NotAvailableOrIncomplete;
                 }
 
-                sawHeader = true;
-                continue;
+                var line = lines[index];
+                if (index == lines.Length - 1 && line.Length == 0)
+                {
+                    index++;
+                    break;
+                }
+
+                if (StringComparer.Ordinal.Equals(
+                        line,
+                        "\\ No newline at end of file"))
+                {
+                    if (!lastWasContent)
+                    {
+                        return PatchEvidence.NotAvailableOrIncomplete;
+                    }
+
+                    lastWasContent = false;
+                    index++;
+                    continue;
+                }
+
+                if (line.Length == 0)
+                {
+                    return PatchEvidence.NotAvailableOrIncomplete;
+                }
+
+                var text = line[1..];
+                switch (line[0])
+                {
+                    case ' ':
+                        oldConsumed++;
+                        newConsumed++;
+                        consistent &= MatchesPatchLine(
+                            oldLines,
+                            oldStart + oldConsumed - 1,
+                            text);
+                        consistent &= MatchesPatchLine(
+                            newLines,
+                            newStart + newConsumed - 1,
+                            text);
+                        break;
+                    case '-':
+                        oldConsumed++;
+                        consistent &= MatchesPatchLine(
+                            oldLines,
+                            oldStart + oldConsumed - 1,
+                            text);
+                        break;
+                    case '+':
+                        newConsumed++;
+                        consistent &= MatchesPatchLine(
+                            newLines,
+                            newStart + newConsumed - 1,
+                            text);
+                        break;
+                    default:
+                        return PatchEvidence.NotAvailableOrIncomplete;
+                }
+
+                if (oldConsumed > oldCount || newConsumed > newCount)
+                {
+                    return PatchEvidence.NotAvailableOrIncomplete;
+                }
+
+                lastWasContent = true;
+                index++;
             }
 
-            if (!sawHeader || line.Length == 0 || line[0] == '\\')
+            if (oldConsumed != oldCount || newConsumed != newCount)
             {
-                continue;
+                return PatchEvidence.NotAvailableOrIncomplete;
             }
 
-            var text = line[1..];
-            switch (line[0])
-            {
-                case ' ':
-                    if (!Matches(oldLines, oldLine++, text) ||
-                        !Matches(newLines, newLine++, text))
-                    {
-                        return false;
-                    }
-                    break;
-                case '-':
-                    if (!Matches(oldLines, oldLine++, text))
-                    {
-                        return false;
-                    }
-                    break;
-                case '+':
-                    if (!Matches(newLines, newLine++, text))
-                    {
-                        return false;
-                    }
-                    break;
-                default:
-                    return true;
-            }
+            previousOldEnd = checked(oldStart + oldCount);
+            previousNewEnd = checked(newStart + newCount);
         }
 
-        return true;
+        if (!sawHunk)
+        {
+            return PatchEvidence.NotAvailableOrIncomplete;
+        }
+
+        return consistent
+            ? PatchEvidence.Consistent
+            : PatchEvidence.Contradictory;
     }
 
     private static bool TryParseHunkHeader(
         string line,
-        out int oldLine,
-        out int newLine)
+        out int oldStart,
+        out int oldCount,
+        out int newStart,
+        out int newCount)
     {
-        oldLine = 0;
-        newLine = 0;
-        var minus = line.IndexOf('-', StringComparison.Ordinal);
-        var plus = line.IndexOf('+', StringComparison.Ordinal);
-        var closing = line.IndexOf("@@", 2, StringComparison.Ordinal);
-        if (minus < 0 || plus <= minus || closing <= plus)
+        oldStart = 0;
+        oldCount = 0;
+        newStart = 0;
+        newCount = 0;
+        if (!line.StartsWith("@@ -", StringComparison.Ordinal))
         {
             return false;
         }
 
-        return TryRangeStart(line.AsSpan(minus + 1, plus - minus - 1), out oldLine) &&
-            TryRangeStart(line.AsSpan(plus + 1, closing - plus - 1), out newLine);
+        var closing = line.IndexOf("@@", 3, StringComparison.Ordinal);
+        if (closing < 0)
+        {
+            return false;
+        }
+
+        var header = line.AsSpan(3, closing - 3);
+        var separator = header.IndexOf(" +".AsSpan());
+        if (separator <= 0)
+        {
+            return false;
+        }
+
+        var oldRange = header[1..separator];
+        var newRange = header[(separator + 2)..].Trim();
+        var trailing = newRange.IndexOf(' ');
+        if (trailing >= 0)
+        {
+            newRange = newRange[..trailing];
+        }
+
+        return TryRange(oldRange, out oldStart, out oldCount) &&
+            TryRange(newRange, out newStart, out newCount);
     }
 
-    private static bool TryRangeStart(ReadOnlySpan<char> value, out int start)
+    private static bool TryRange(
+        ReadOnlySpan<char> value,
+        out int start,
+        out int count)
     {
+        start = 0;
+        count = 1;
         value = value.Trim();
         var comma = value.IndexOf(',');
-        if (comma >= 0)
+        var startValue = comma >= 0 ? value[..comma] : value;
+        if (!int.TryParse(
+                startValue,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out start) ||
+            start < 0)
         {
-            value = value[..comma];
+            return false;
+        }
+
+        if (comma < 0)
+        {
+            return start < int.MaxValue;
         }
 
         return int.TryParse(
-            value,
-            NumberStyles.None,
-            CultureInfo.InvariantCulture,
-            out start) && start >= 0;
+                value[(comma + 1)..],
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out count) &&
+            count >= 0 &&
+            start <= int.MaxValue - count;
     }
 
-    private static bool Matches(
+    private static bool MatchesPatchLine(
         ImmutableArray<TextLine> lines,
         int oneBased,
-        string text) =>
-        oneBased > 0 && oneBased <= lines.Length &&
-        StringComparer.Ordinal.Equals(lines[oneBased - 1].Text, text);
+        string text)
+    {
+        if (oneBased <= 0 || oneBased > lines.Length)
+        {
+            return false;
+        }
+
+        if (oneBased == 1 && text.StartsWith('\uFEFF'))
+        {
+            text = text[1..];
+        }
+
+        return StringComparer.Ordinal.Equals(
+            lines[oneBased - 1].Text,
+            text);
+    }
 
     private enum TextStatus
     {
@@ -957,6 +1302,14 @@ internal sealed class ReviewedExactDiffBuilder
         Binary,
         Unavailable,
         LineTooLong,
+        Unsupported,
+    }
+
+    private enum PatchEvidence
+    {
+        NotAvailableOrIncomplete = 0,
+        Consistent,
+        Contradictory,
     }
 
     private enum DiffKind

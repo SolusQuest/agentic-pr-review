@@ -64,6 +64,12 @@ internal sealed class ReviewedBaseObjectResolver
         }
 
         var segments = path.Split('/');
+        if (segments.Length > ReviewedContentLimits.TreeDepth)
+        {
+            return ReviewedSnapshotReadResult<ReviewedBaseOperand>.Failed(
+                ReviewedSnapshotReadFailure.UnsupportedSize);
+        }
+
         var treeSha = _rootTreeSha;
         ActionHostGitTreeEntryObject? selected = null;
         for (var index = 0; index < segments.Length; index++)

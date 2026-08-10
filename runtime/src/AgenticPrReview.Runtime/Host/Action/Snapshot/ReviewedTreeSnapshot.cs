@@ -469,6 +469,14 @@ internal readonly record struct ReviewedStagedFileIdentity(
     ulong Device,
     ulong File);
 
+internal enum ReviewedStagedBlobCopyFailure
+{
+    None = 0,
+    IdentityMismatch,
+    UnsupportedSize,
+    IoFailure,
+}
+
 internal sealed class ReviewedStagedBlob
 {
     private readonly object _authority;
@@ -536,14 +544,21 @@ internal sealed class ReviewedStagedBlob
 
     internal async Task<bool> CopyVerifiedToAsync(
         Stream destination,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) =>
+        await CopyVerifiedDetailedAsync(destination, cancellationToken) ==
+            ReviewedStagedBlobCopyFailure.None;
+
+    internal async Task<ReviewedStagedBlobCopyFailure>
+        CopyVerifiedDetailedAsync(
+            Stream destination,
+            CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(destination);
         if (!_budget.TryBeginOperation(
                 cancellationToken,
                 out var operationLease))
         {
-            return false;
+            return ReviewedStagedBlobCopyFailure.UnsupportedSize;
         }
 
         using var operation = operationLease!;
@@ -556,7 +571,7 @@ internal sealed class ReviewedStagedBlob
                 openedIdentity != _identity ||
                 openedLength != Size)
             {
-                return false;
+                return ReviewedStagedBlobCopyFailure.IdentityMismatch;
             }
 
             var buffer = new byte[ReviewedContentLimits.StreamBufferBytes];
@@ -575,7 +590,7 @@ internal sealed class ReviewedStagedBlob
                     operation.Token);
                 if (read == 0)
                 {
-                    return false;
+                    return ReviewedStagedBlobCopyFailure.IdentityMismatch;
                 }
 
                 hash.AppendData(buffer.AsSpan(0, read));
@@ -593,7 +608,7 @@ internal sealed class ReviewedStagedBlob
             if (actual != Size || extraRead != 0 ||
                 !StringComparer.Ordinal.Equals(actualSha, Sha))
             {
-                return false;
+                return ReviewedStagedBlobCopyFailure.IdentityMismatch;
             }
 
             if (!ReviewedStagedFileAccess.TryInspectRegular(
@@ -603,7 +618,7 @@ internal sealed class ReviewedStagedBlob
                 openedIdentity != _identity ||
                 openedLength != Size)
             {
-                return false;
+                return ReviewedStagedBlobCopyFailure.IdentityMismatch;
             }
 
             actual = 0;
@@ -620,7 +635,7 @@ internal sealed class ReviewedStagedBlob
                     operation.Token);
                 if (read == 0)
                 {
-                    return false;
+                    return ReviewedStagedBlobCopyFailure.IdentityMismatch;
                 }
 
                 hash.AppendData(buffer.AsSpan(0, read));
@@ -640,14 +655,14 @@ internal sealed class ReviewedStagedBlob
                 openedIdentity != _identity ||
                 openedLength != Size)
             {
-                return false;
+                return ReviewedStagedBlobCopyFailure.IdentityMismatch;
             }
 
-            return true;
+            return ReviewedStagedBlobCopyFailure.None;
         }
         catch (OperationCanceledException) when (operation.DeadlineExpired)
         {
-            return false;
+            return ReviewedStagedBlobCopyFailure.UnsupportedSize;
         }
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
@@ -657,7 +672,7 @@ internal sealed class ReviewedStagedBlob
         catch (Exception exception) when (exception is IOException or
             UnauthorizedAccessException)
         {
-            return false;
+            return ReviewedStagedBlobCopyFailure.IoFailure;
         }
     }
 
@@ -676,6 +691,7 @@ internal static partial class ReviewedStagedFileAccess
     private const int OpenDirectory = 0x10000;
     private const int OpenNoFollow = 0x20000;
     private const int OpenCloseOnExec = 0x80000;
+    private const int UnlinkRemoveDirectory = 0x200;
     private const uint FileTypeMask = 0xf000;
     private const uint RegularFile = 0x8000;
     private const uint DirectoryFile = 0x4000;
@@ -897,6 +913,167 @@ internal static partial class ReviewedStagedFileAccess
         return false;
     }
 
+    internal static bool TryCreateChildDirectoryExclusive(
+        SafeFileHandle parent,
+        string parentPath,
+        ReviewedStagedFileIdentity parentIdentity,
+        string name,
+        out SafeFileHandle? handle,
+        out ReviewedStagedFileIdentity identity,
+        out string childPath)
+    {
+        handle = null;
+        identity = default;
+        childPath = Path.Join(parentPath, name);
+        try
+        {
+            if (OperatingSystem.IsLinux())
+            {
+                var parentDescriptor = checked(
+                    (int)parent.DangerousGetHandle());
+                if (MakeDirectoryAt(parentDescriptor, name, 0x1c0) != 0)
+                {
+                    return false;
+                }
+
+                var descriptor = OpenAt(
+                    parentDescriptor,
+                    name,
+                    OpenReadOnly |
+                        OpenDirectory |
+                        OpenNoFollow |
+                        OpenCloseOnExec,
+                    0);
+                if (descriptor < 0)
+                {
+                    _ = UnlinkAt(
+                        parentDescriptor,
+                        name,
+                        UnlinkRemoveDirectory);
+                    return false;
+                }
+
+                handle = new SafeFileHandle(
+                    (nint)descriptor,
+                    ownsHandle: true);
+                if (TryInspectDirectory(handle, out identity))
+                {
+                    return true;
+                }
+
+                handle.Dispose();
+                handle = null;
+                _ = UnlinkAt(
+                    parentDescriptor,
+                    name,
+                    UnlinkRemoveDirectory);
+                return false;
+            }
+
+            if (OperatingSystem.IsWindows() &&
+                DirectoryMatches(parentPath, parentIdentity) &&
+                !Directory.Exists(childPath))
+            {
+                Directory.CreateDirectory(childPath);
+                if (DirectoryMatches(parentPath, parentIdentity) &&
+                    TryOpenDirectory(childPath, out handle, out identity))
+                {
+                    return true;
+                }
+
+                handle?.Dispose();
+                handle = null;
+                identity = default;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or
+            UnauthorizedAccessException or
+            ArgumentException or
+            NotSupportedException)
+        {
+            handle?.Dispose();
+            handle = null;
+            identity = default;
+        }
+
+        return false;
+    }
+
+    internal static bool TryOpenChildDirectory(
+        SafeFileHandle parent,
+        string parentPath,
+        ReviewedStagedFileIdentity parentIdentity,
+        string name,
+        out SafeFileHandle? handle,
+        out ReviewedStagedFileIdentity identity)
+    {
+        handle = null;
+        identity = default;
+        if (OperatingSystem.IsLinux())
+        {
+            var descriptor = OpenAt(
+                checked((int)parent.DangerousGetHandle()),
+                name,
+                OpenReadOnly |
+                    OpenDirectory |
+                    OpenNoFollow |
+                    OpenCloseOnExec,
+                0);
+            if (descriptor >= 0)
+            {
+                handle = new SafeFileHandle(
+                    (nint)descriptor,
+                    ownsHandle: true);
+                if (TryInspectDirectory(handle, out identity))
+                {
+                    return true;
+                }
+
+                handle.Dispose();
+            }
+
+            handle = null;
+            identity = default;
+            return false;
+        }
+
+        return DirectoryMatches(parentPath, parentIdentity) &&
+            TryOpenDirectory(Path.Join(parentPath, name), out handle, out identity);
+    }
+
+    internal static bool TryRemoveChild(
+        SafeFileHandle parent,
+        string parentPath,
+        ReviewedStagedFileIdentity parentIdentity,
+        string name,
+        bool directory)
+    {
+        if (OperatingSystem.IsLinux())
+        {
+            return UnlinkAt(
+                checked((int)parent.DangerousGetHandle()),
+                name,
+                directory ? UnlinkRemoveDirectory : 0) == 0;
+        }
+
+        if (!DirectoryMatches(parentPath, parentIdentity))
+        {
+            return false;
+        }
+
+        var child = Path.Join(parentPath, name);
+        if (directory)
+        {
+            Directory.Delete(child, recursive: false);
+        }
+        else
+        {
+            File.Delete(child);
+        }
+
+        return true;
+    }
+
     internal static bool TryCreateVisibleFile(
         SafeFileHandle parent,
         string parentPath,
@@ -929,7 +1106,7 @@ internal static partial class ReviewedStagedFileAccess
                     new SafeFileHandle((nint)descriptor, ownsHandle: true),
                     FileAccess.ReadWrite,
                     ReviewedContentLimits.StreamBufferBytes,
-                    isAsync: true);
+                    isAsync: false);
                 return true;
             }
 
@@ -985,6 +1162,14 @@ internal static partial class ReviewedStagedFileAccess
     internal static bool TryMakeReadOnly(SafeFileHandle handle) =>
         !OperatingSystem.IsLinux() ||
         FChmod(checked((int)handle.DangerousGetHandle()), 0x100) == 0;
+
+    internal static bool TrySetDirectoryWritable(
+        SafeFileHandle handle,
+        bool writable) =>
+        !OperatingSystem.IsLinux() ||
+        FChmod(
+            checked((int)handle.DangerousGetHandle()),
+            writable ? 0x1c0u : 0x140u) == 0;
 
     private static bool TryInspectDirectory(
         SafeFileHandle handle,

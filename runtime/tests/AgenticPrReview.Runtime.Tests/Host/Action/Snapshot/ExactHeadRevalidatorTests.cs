@@ -102,6 +102,70 @@ public sealed class ExactHeadRevalidatorTests
         Assert.False(missing.MayMutate);
     }
 
+    [Fact]
+    public async Task EveryTransportFailureKeepsItsClosedClassification()
+    {
+        var invocation = await H5SnapshotTestSupport.AuthorizedInvocation();
+        var cases = new[]
+        {
+            (ActionHostGitObjectFailure.Unauthorized,
+                ExactHeadRevalidationStatus.Unauthorized),
+            (ActionHostGitObjectFailure.Forbidden,
+                ExactHeadRevalidationStatus.Forbidden),
+            (ActionHostGitObjectFailure.RateLimited,
+                ExactHeadRevalidationStatus.RateLimited),
+            (ActionHostGitObjectFailure.UpstreamFailure,
+                ExactHeadRevalidationStatus.UpstreamUnavailable),
+            (ActionHostGitObjectFailure.InvalidResponse,
+                ExactHeadRevalidationStatus.InvalidResponse),
+            (ActionHostGitObjectFailure.ResponseTooLarge,
+                ExactHeadRevalidationStatus.InvalidResponse),
+            (ActionHostGitObjectFailure.InvalidRequest,
+                ExactHeadRevalidationStatus.InvalidResponse),
+            (ActionHostGitObjectFailure.TransportFailure,
+                ExactHeadRevalidationStatus.TransportFailure),
+        };
+        foreach (var (failure, expected) in cases)
+        {
+            var result = await ExactHeadRevalidator.RevalidateAsync(
+                invocation.PullRequest,
+                H5SnapshotTestSupport.Token(),
+                new ScriptedFactory(ActionHostGitObjectResult<
+                    ActionHostGitHubPullRequestFact>.Failed(failure)),
+                CancellationToken.None);
+
+            Assert.Equal(expected, result.Status);
+            Assert.False(result.MayMutate);
+        }
+    }
+
+    [Fact]
+    public async Task CallerCancellationAndDeadlineStayDistinct()
+    {
+        var invocation = await H5SnapshotTestSupport.AuthorizedInvocation();
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+
+        var callerResult = await ExactHeadRevalidator.RevalidateAsync(
+            invocation.PullRequest,
+            H5SnapshotTestSupport.Token(),
+            new BlockingFactory(),
+            cancelled.Token);
+        var deadlineResult = await ExactHeadRevalidator.RevalidateAsync(
+            invocation.PullRequest,
+            H5SnapshotTestSupport.Token(),
+            new BlockingFactory(),
+            CancellationToken.None,
+            TimeSpan.Zero);
+
+        Assert.Equal(
+            ExactHeadRevalidationStatus.Cancelled,
+            callerResult.Status);
+        Assert.Equal(
+            ExactHeadRevalidationStatus.DeadlineExceeded,
+            deadlineResult.Status);
+    }
+
     private sealed class ScriptedFactory :
         IActionHostReviewedSnapshotTransportFactory
     {
@@ -137,6 +201,64 @@ public sealed class ExactHeadRevalidatorTests
                 long pullRequestNumber,
                 CancellationToken cancellationToken) =>
             Task.FromResult(_result);
+
+        public Task<ActionHostGitObjectResult<
+            ActionHostPullRequestFilePageObject>> GetPullRequestFilesAsync(
+            string repositoryName,
+            long pullRequestNumber,
+            int page,
+            int perPage,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Files must not be listed.");
+
+        public Task<ActionHostGitObjectResult<ActionHostGitCommitObject>>
+            GetCommitObjectAsync(
+                string repositoryName,
+                string commitSha,
+                CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Commit must not be read.");
+
+        public Task<ActionHostGitObjectResult<ActionHostGitTreeObject>>
+            GetTreeObjectAsync(
+                string repositoryName,
+                string treeSha,
+                CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Tree must not be read.");
+
+        public Task<ActionHostGitObjectResult<ActionHostStreamedBlobObject>>
+            CopyBlobObjectAsync(
+                string repositoryName,
+                string blobSha,
+                long declaredSize,
+                Stream destination,
+                CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Blob must not be read.");
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class BlockingFactory :
+        IActionHostReviewedSnapshotTransportFactory
+    {
+        public IActionHostReviewedSnapshotTransport
+            CreateReviewedSnapshotTransport(ActionHostGitHubToken token) =>
+            new BlockingTransport();
+    }
+
+    private sealed class BlockingTransport :
+        IActionHostReviewedSnapshotTransport
+    {
+        public async Task<ActionHostGitObjectResult<
+            ActionHostGitHubPullRequestFact>> GetCurrentPullRequestAsync(
+            string repositoryName,
+            long pullRequestNumber,
+            CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("Unreachable.");
+        }
 
         public Task<ActionHostGitObjectResult<
             ActionHostPullRequestFilePageObject>> GetPullRequestFilesAsync(
