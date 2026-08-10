@@ -17,6 +17,14 @@ public sealed class GitHubArtifactBridgeConformanceTests
         var controlRoot = Path.Join(testRoot, "control");
         var bundlePath = Path.Join(testRoot, "fixture-server.mjs");
         Directory.CreateDirectory(stagingRoot);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(
+                stagingRoot,
+                UnixFileMode.UserRead |
+                UnixFileMode.UserWrite |
+                UnixFileMode.UserExecute);
+        }
         Directory.CreateDirectory(controlRoot);
         Process? server = null;
         try

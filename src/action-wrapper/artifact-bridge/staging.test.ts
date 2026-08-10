@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -58,6 +58,51 @@ describe('artifact bridge staging root', () => {
     await expect(staging.readSource('linked/source.bin')).rejects.toBeInstanceOf(
       ArtifactBridgeStagingError,
     );
+  });
+
+  it('rejects a configured root symlink and a replaced root identity', async () => {
+    const target = await temporaryRoot();
+    const parent = await temporaryRoot();
+    const linkedRoot = path.join(parent, 'linked-root');
+    try {
+      await symlink(target, linkedRoot, 'junction');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EPERM') return;
+      throw error;
+    }
+    await expect(ArtifactBridgeStaging.create(linkedRoot)).rejects.toBeInstanceOf(
+      ArtifactBridgeStagingError,
+    );
+
+    const root = await temporaryRoot();
+    const staging = await ArtifactBridgeStaging.create(root);
+    const original = `${root}-original`;
+    roots.push(original);
+    await rename(root, original);
+    await mkdir(root, { mode: 0o700 });
+    await expect(staging.createOperationDirectory()).rejects.toBeInstanceOf(
+      ArtifactBridgeStagingError,
+    );
+  });
+
+  it('does not follow a substituted final destination', async () => {
+    const root = await temporaryRoot();
+    const outside = await temporaryRoot();
+    const parent = path.join(root, 'csharp', 'op');
+    await mkdir(parent, { recursive: true });
+    const marker = path.join(outside, 'keep');
+    await writeFile(marker, 'keep');
+    try {
+      await symlink(marker, path.join(parent, 'destination.bin'), 'file');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EPERM') return;
+      throw error;
+    }
+    const staging = await ArtifactBridgeStaging.create(root);
+    await expect(
+      staging.writeDestination('csharp/op/destination.bin', Buffer.from('changed')),
+    ).rejects.toBeInstanceOf(ArtifactBridgeStagingError);
+    await expect(readFile(marker, 'utf8')).resolves.toBe('keep');
   });
 
   it('never cleans a directory outside its generated operation root', async () => {

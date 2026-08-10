@@ -139,11 +139,11 @@ describe('official artifact output containment', () => {
       repository: 'repository',
       currentRunId: '7001',
       currentRunAttempt: '2',
-      artifactToken: 'TOKEN_CANARY',
       artifactClient,
       actions: {
         listArtifactsForRepo: unsupported,
         getArtifact: unsupported,
+        downloadArtifactArchive: unsupported,
         getWorkflowRunAttempt: unsupported,
         deleteArtifact: unsupported,
       },

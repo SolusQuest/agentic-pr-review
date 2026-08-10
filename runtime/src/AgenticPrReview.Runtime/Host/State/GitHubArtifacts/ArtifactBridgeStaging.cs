@@ -23,6 +23,14 @@ internal sealed class ArtifactBridgeStaging
         }
         csharpRoot = Path.Join(root, "csharp");
         Directory.CreateDirectory(csharpRoot);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(
+                csharpRoot,
+                UnixFileMode.UserRead |
+                UnixFileMode.UserWrite |
+                UnixFileMode.UserExecute);
+        }
         if (!IsSafeDirectory(csharpRoot))
         {
             throw new IOException("artifact_bridge_staging_root_invalid");
@@ -99,16 +107,30 @@ internal sealed class ArtifactBridgeStaging
         {
             throw new IOException("artifact_bridge_staging_invalid");
         }
+        var pathAttributes = File.GetAttributes(scope.FullPath);
+        if ((pathAttributes & (FileAttributes.Directory |
+                FileAttributes.ReparsePoint |
+                FileAttributes.Device)) != 0)
+        {
+            throw new IOException("artifact_bridge_staging_invalid");
+        }
         using var handle = File.OpenHandle(
             scope.FullPath,
             FileMode.Open,
             FileAccess.Read,
-            FileShare.Read,
+            FileShare.None,
             FileOptions.Asynchronous | FileOptions.RandomAccess);
         var attributes = File.GetAttributes(handle);
         var length = RandomAccess.GetLength(handle);
+        var namedAttributes = File.GetAttributes(scope.FullPath);
+        var namedLength = new FileInfo(scope.FullPath).Length;
         if ((attributes & (FileAttributes.Directory |
-                FileAttributes.ReparsePoint)) != 0 ||
+                FileAttributes.ReparsePoint |
+                FileAttributes.Device)) != 0 ||
+            (namedAttributes & (FileAttributes.Directory |
+                FileAttributes.ReparsePoint |
+                FileAttributes.Device)) != 0 ||
+            namedLength != length ||
             length is < 1 or >
                 ArtifactBridgeLimits.MaximumEncryptedObjectBytes ||
             length > maximumBytes)
@@ -131,7 +153,13 @@ internal sealed class ArtifactBridgeStaging
             }
             offset += read;
         }
-        if (RandomAccess.GetLength(handle) != length)
+        namedAttributes = File.GetAttributes(scope.FullPath);
+        namedLength = new FileInfo(scope.FullPath).Length;
+        if (RandomAccess.GetLength(handle) != length ||
+            (namedAttributes & (FileAttributes.Directory |
+                FileAttributes.ReparsePoint |
+                FileAttributes.Device)) != 0 ||
+            namedLength != length)
         {
             throw new IOException("artifact_bridge_staging_invalid");
         }
@@ -171,9 +199,28 @@ internal sealed class ArtifactBridgeStaging
         try
         {
             var info = new DirectoryInfo(path);
-            return info.Exists &&
+            if (!info.Exists ||
                 (info.Attributes & (FileAttributes.ReparsePoint |
-                    FileAttributes.Device)) == 0;
+                    FileAttributes.Device)) != 0)
+            {
+                return false;
+            }
+            if (!OperatingSystem.IsWindows())
+            {
+                var mode = File.GetUnixFileMode(path);
+                const UnixFileMode forbidden =
+                    UnixFileMode.GroupRead |
+                    UnixFileMode.GroupWrite |
+                    UnixFileMode.GroupExecute |
+                    UnixFileMode.OtherRead |
+                    UnixFileMode.OtherWrite |
+                    UnixFileMode.OtherExecute;
+                if ((mode & forbidden) != 0)
+                {
+                    return false;
+                }
+            }
+            return true;
         }
         catch (Exception exception) when (exception is IOException or
             UnauthorizedAccessException or

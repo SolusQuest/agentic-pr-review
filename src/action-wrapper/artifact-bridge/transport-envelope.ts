@@ -4,13 +4,13 @@ import { open, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createInflateRaw } from 'node:zlib';
 
-import { strictParseJson } from '../../state-v2/strict-json.js';
 import { safePositiveDecimal, sha256 } from './contracts.js';
 import {
   ARTIFACT_BRIDGE_LIMITS,
   ARTIFACT_ENVELOPE_DISCRIMINATOR,
   ARTIFACT_ENVELOPE_ENTRY,
 } from './limits.js';
+import { strictParseArtifactBridgeJson } from './strict-json.js';
 
 export interface ArtifactTransportEnvelopeMetadata {
   readonly producingRunId: string;
@@ -235,7 +235,7 @@ async function extractOneBoundedEntry(archive: Buffer): Promise<Buffer> {
 function decodeEnvelope(bytes: Buffer): DecodedArtifactTransportEnvelope {
   let parsed: unknown;
   try {
-    parsed = strictParseJson(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    parsed = strictParseArtifactBridgeJson(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
   } catch {
     throw new ArtifactTransportEnvelopeError();
   }

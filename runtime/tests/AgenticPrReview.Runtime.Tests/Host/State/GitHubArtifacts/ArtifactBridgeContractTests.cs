@@ -6,6 +6,7 @@ using System.Text.Json.Serialization.Metadata;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHost.Serialization;
 using AgenticPrReview.Runtime.Host.State.GitHubArtifacts;
+using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 
 namespace AgenticPrReview.Runtime.Tests.Host.State.GitHubArtifacts;
 
@@ -156,10 +157,7 @@ public sealed class ArtifactBridgeContractTests
     [Fact]
     public async Task CSharpStagingEnforcesTheEncryptedObjectCap()
     {
-        var root = Path.Join(
-            Path.GetTempPath(),
-            $"apr-artifact-staging-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(root);
+        var root = CreatePrivateTemporaryDirectory("apr-artifact-staging");
         try
         {
             var staging = new ArtifactBridgeStaging(root);
@@ -188,13 +186,10 @@ public sealed class ArtifactBridgeContractTests
     [Fact]
     public async Task CSharpStagingRefusesReparseCleanup()
     {
-        var root = Path.Join(
-            Path.GetTempPath(),
-            $"apr-artifact-cleanup-{Guid.NewGuid():N}");
+        var root = CreatePrivateTemporaryDirectory("apr-artifact-cleanup");
         var outside = Path.Join(
             Path.GetTempPath(),
             $"apr-artifact-outside-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(root);
         Directory.CreateDirectory(outside);
         var marker = Path.Join(outside, "keep");
         await File.WriteAllTextAsync(marker, "keep");
@@ -245,6 +240,169 @@ public sealed class ArtifactBridgeContractTests
         }
     }
 
+    [Fact]
+    public async Task CSharpDownloadRefusesFinalFileSymlink()
+    {
+        var root = CreatePrivateTemporaryDirectory("apr-artifact-download-link");
+        var outside = Path.Join(
+            Path.GetTempPath(),
+            $"apr-artifact-download-outside-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(outside);
+        var marker = Path.Join(outside, "keep");
+        await File.WriteAllTextAsync(marker, "keep");
+        try
+        {
+            var staging = new ArtifactBridgeStaging(root);
+            var scope = staging.PrepareDownload();
+            try
+            {
+                File.CreateSymbolicLink(scope.FullPath, marker);
+            }
+            catch (Exception exception) when (exception is IOException or
+                UnauthorizedAccessException or
+                PlatformNotSupportedException)
+            {
+                await scope.DisposeAsync();
+                return;
+            }
+
+            await Assert.ThrowsAsync<IOException>(() =>
+                staging.ReadDownloadAsync(
+                    scope,
+                    maximumBytes: 16,
+                    CancellationToken.None));
+            Assert.Equal("keep", await File.ReadAllTextAsync(marker));
+            await scope.DisposeAsync();
+            Assert.Equal("keep", await File.ReadAllTextAsync(marker));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+            if (Directory.Exists(outside))
+            {
+                Directory.Delete(outside, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task UploadCancellationBeforeRequestBoundaryCleansAndPropagates()
+    {
+        var root = CreatePrivateTemporaryDirectory("apr-artifact-cancel-before");
+        using var cancellation = new CancellationTokenSource();
+        try
+        {
+            var store = new GitHubArtifactRestrictedStateStore(
+                "synthetic-endpoint",
+                "build-152",
+                root,
+                new SingleStreamConnectionFactory(
+                    new CancellingWriteStream(cancellation, cancelAfterWrite: 1)));
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                store.UploadImmutableAsync(
+                    UploadRequest(),
+                    cancellation.Token));
+
+            Assert.Empty(OperationDirectories(root));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task UploadCancellationAfterRequestBoundaryIsUnknownAndCleans()
+    {
+        var root = CreatePrivateTemporaryDirectory("apr-artifact-cancel-after");
+        using var cancellation = new CancellationTokenSource();
+        try
+        {
+            var store = new GitHubArtifactRestrictedStateStore(
+                "synthetic-endpoint",
+                "build-152",
+                root,
+                new SingleStreamConnectionFactory(
+                    new CancellingWriteStream(cancellation, cancelAfterWrite: 2)));
+
+            var result = await store.UploadImmutableAsync(
+                UploadRequest(),
+                cancellation.Token);
+
+            Assert.Equal(OpaqueStoreFailure.OutcomeUnknown, result.Failure);
+            Assert.Equal(
+                OpaqueStoreMutationState.OutcomeUnknown,
+                result.MutationState);
+            Assert.Empty(OperationDirectories(root));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task LogicalDeadlineStartsBeforeUploadStaging()
+    {
+        var root = CreatePrivateTemporaryDirectory("apr-artifact-deadline");
+        try
+        {
+            var store = new GitHubArtifactRestrictedStateStore(
+                "synthetic-endpoint",
+                "build-152",
+                root,
+                new FailingConnectionFactory(),
+                testLogicalOperationTimeout: TimeSpan.Zero);
+
+            var result = await store.UploadImmutableAsync(
+                UploadRequest(),
+                CancellationToken.None);
+
+            Assert.Equal(OpaqueStoreFailure.Cancelled, result.Failure);
+            Assert.Equal(
+                OpaqueStoreMutationState.NotCommitted,
+                result.MutationState);
+            Assert.Empty(OperationDirectories(root));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DeleteCancellationAfterRequestBoundaryIsUnknown()
+    {
+        var root = CreatePrivateTemporaryDirectory("apr-artifact-delete-cancel");
+        using var cancellation = new CancellationTokenSource();
+        try
+        {
+            var store = new GitHubArtifactRestrictedStateStore(
+                "synthetic-endpoint",
+                "build-152",
+                root,
+                new SingleStreamConnectionFactory(
+                    new CancellingWriteStream(cancellation, cancelAfterWrite: 2)));
+
+            var result = await store.DeleteExactAsync(
+                new OpaqueStoreDeleteRequest(ExpectedMetadata()),
+                cancellation.Token);
+
+            Assert.Equal(OpaqueStoreFailure.OutcomeUnknown, result.Failure);
+            Assert.Equal(
+                OpaqueStoreMutationState.OutcomeUnknown,
+                result.MutationState);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static void AssertGenerated<TCommand>(
         ArtifactBridgeJsonContext context)
         where TCommand : class, IActionHostPrivateCommandDocument =>
@@ -276,5 +434,135 @@ public sealed class ArtifactBridgeContractTests
             directory = directory.Parent;
         }
         throw new DirectoryNotFoundException();
+    }
+
+    private static OpaqueStoreUploadRequest UploadRequest()
+    {
+        var bytes = new byte[] { 1, 2, 3 };
+        return new OpaqueStoreUploadRequest(
+            new OpaqueStoreName("opaque-state"),
+            new OpaqueStoreCorrelationId("cancel-correlation"),
+            bytes,
+            new OpaqueStoreEncryptedObjectDigest(
+                OpaqueStoreHash.Sha256(bytes)),
+            1);
+    }
+
+    private static OpaqueStoreObjectMetadata ExpectedMetadata() =>
+        new(
+            new OpaqueStoreObjectReference(
+                new OpaqueStoreName("opaque-state"),
+                new OpaqueStoreObjectId("1")),
+            new OpaqueStoreProducingRun("2", 1),
+            new OpaqueStoreArchiveDigest(new string('1', 64)),
+            new OpaqueStoreEncryptedObjectDigest(new string('2', 64)),
+            ExpiresAtUnixSeconds: 3,
+            Size: 1);
+
+    private static string CreatePrivateTemporaryDirectory(string prefix)
+    {
+        var root = Path.Join(
+            Path.GetTempPath(),
+            $"{prefix}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(
+                root,
+                UnixFileMode.UserRead |
+                UnixFileMode.UserWrite |
+                UnixFileMode.UserExecute);
+        }
+        return root;
+    }
+
+    private static string[] OperationDirectories(string root) =>
+        Directory.GetDirectories(
+            Path.Join(root, "csharp"),
+            "op-*",
+            SearchOption.TopDirectoryOnly);
+
+    private sealed class SingleStreamConnectionFactory(Stream stream)
+        : IArtifactBridgeConnectionFactory
+    {
+        public ValueTask<Stream> ConnectAsync(
+            string endpoint,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(stream);
+        }
+    }
+
+    private sealed class FailingConnectionFactory
+        : IArtifactBridgeConnectionFactory
+    {
+        public ValueTask<Stream> ConnectAsync(
+            string endpoint,
+            CancellationToken cancellationToken) =>
+            ValueTask.FromException<Stream>(
+                new InvalidOperationException("unexpected_connection"));
+    }
+
+    private sealed class CancellingWriteStream(
+        CancellationTokenSource cancellation,
+        int cancelAfterWrite) : Stream
+    {
+        private int writes;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => true;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override Task FlushAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        }
+
+        public override ValueTask WriteAsync(
+            ReadOnlyMemory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            writes += 1;
+            if (writes == cancelAfterWrite)
+            {
+                cancellation.Cancel();
+            }
+            return ValueTask.CompletedTask;
+        }
+
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromException<int>(
+                new InvalidOperationException("unexpected_read"));
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) =>
+            throw new NotSupportedException();
+
+        public override void SetLength(long value) =>
+            throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
     }
 }

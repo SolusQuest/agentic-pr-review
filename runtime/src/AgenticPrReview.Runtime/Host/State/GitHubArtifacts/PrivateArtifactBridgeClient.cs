@@ -71,9 +71,12 @@ internal sealed class ArtifactBridgeEndpointConnectionFactory
 }
 
 internal sealed class ArtifactBridgeExchangeException(
-    bool requestDispatched) : IOException("artifact_bridge_exchange_failed")
+    bool requestDispatched,
+    bool cancelled = false) : IOException("artifact_bridge_exchange_failed")
 {
     internal bool RequestDispatched { get; } = requestDispatched;
+
+    internal bool Cancelled { get; } = cancelled;
 }
 
 internal sealed class PrivateArtifactBridgeClient(
@@ -109,6 +112,7 @@ internal sealed class PrivateArtifactBridgeClient(
             frame,
             checked((uint)commandBytes.Length));
         commandBytes.CopyTo(frame, sizeof(int));
+        var requestTerminator = new byte[sizeof(int)];
         var dispatched = false;
         try
         {
@@ -119,9 +123,12 @@ internal sealed class PrivateArtifactBridgeClient(
             await WithRequestDeadlineAsync(
                     async token =>
                     {
-                        dispatched = true;
                         await stream.WriteAsync(frame, token)
                             .ConfigureAwait(false);
+                        await stream.FlushAsync(token).ConfigureAwait(false);
+                        await stream.WriteAsync(requestTerminator, token)
+                            .ConfigureAwait(false);
+                        dispatched = true;
                         await stream.FlushAsync(token).ConfigureAwait(false);
                     },
                     logicalCancellationToken)
@@ -170,14 +177,11 @@ internal sealed class PrivateArtifactBridgeClient(
             }
             return result.Payload;
         }
-        catch (OperationCanceledException) when (
-            !logicalCancellationToken.IsCancellationRequested)
-        {
-            throw new ArtifactBridgeExchangeException(dispatched);
-        }
         catch (OperationCanceledException)
         {
-            throw;
+            throw new ArtifactBridgeExchangeException(
+                dispatched,
+                cancelled: true);
         }
         catch (ArtifactBridgeExchangeException)
         {

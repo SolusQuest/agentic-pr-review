@@ -1,7 +1,4 @@
 import { DefaultArtifactClient, type ArtifactClient } from '@actions/artifact';
-import { lstat, readdir } from 'node:fs/promises';
-import path from 'node:path';
-
 import {
   type ArtifactBridgeCommand,
   type ArtifactBridgeFailure,
@@ -67,6 +64,16 @@ export interface ArtifactActionsRestClient {
     signal: AbortSignal,
   ): Promise<{ readonly status: number; readonly data: RepositoryArtifact }>;
 
+  downloadArtifactArchive(
+    input: {
+      readonly owner: string;
+      readonly repo: string;
+      readonly artifact_id: number;
+      readonly maximum_bytes: number;
+    },
+    signal: AbortSignal,
+  ): Promise<{ readonly status: number; readonly data: Uint8Array }>;
+
   getWorkflowRunAttempt(
     input: {
       readonly owner: string;
@@ -95,7 +102,6 @@ export interface OfficialArtifactOperationsContext {
   readonly repository: string;
   readonly currentRunId: string;
   readonly currentRunAttempt: string;
-  readonly artifactToken: string;
   readonly artifactClient?: ArtifactClient;
   readonly actions: ArtifactActionsRestClient;
   readonly staging: ArtifactBridgeStaging;
@@ -134,8 +140,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       !safePositiveDecimal(context.currentRunId) ||
       !safePositiveDecimal(context.currentRunAttempt) ||
       !context.owner ||
-      !context.repository ||
-      !context.artifactToken
+      !context.repository
     ) {
       throw new Error('artifact_bridge_context_invalid');
     }
@@ -313,7 +318,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       );
       cleanupMutationState = 'outcome_unknown';
       const objectId = platformId(response.id);
-      const archiveDigest = normalizePlatformDigest(response.digest);
+      const archiveDigest = parseUploadResponseDigest(response.digest);
       if (!objectId || !archiveDigest) {
         throw new BridgeOperationFailure('outcome_unknown', 'outcome_unknown');
       }
@@ -338,23 +343,53 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
         mutation_state: 'committed',
       };
     } catch (error) {
-      let propagatedError = error;
-      if (error instanceof BridgeOperationFailure && error.mutationState) {
-        cleanupMutationState = error.mutationState;
-        cleanupMetadata = error.metadata;
-      } else if (error instanceof BridgeOperationFailure && error.failure === 'cleanup') {
+      if (error instanceof OfficialCallTimeoutError) {
+        lateSettlement = error.settled;
+      }
+      let propagatedError: BridgeOperationFailure;
+      if (error instanceof BridgeOperationFailure) {
+        cleanupMutationState = error.mutationState ?? cleanupMutationState;
+        cleanupMetadata = error.metadata ?? cleanupMetadata;
         propagatedError = new BridgeOperationFailure(
-          'cleanup',
+          error.failure,
           cleanupMutationState,
           cleanupMetadata,
         );
-      } else if (error instanceof OfficialCallError && provenConflict(error.causeValue)) {
-        cleanupMutationState = 'not_committed';
-      } else if (error instanceof OfficialCallError || error instanceof OfficialCallTimeoutError) {
+      } else if (
+        cleanupMutationState === 'not_committed' &&
+        error instanceof OfficialCallError &&
+        provenConflict(error.causeValue)
+      ) {
+        propagatedError = new BridgeOperationFailure('conflict', 'not_committed');
+      } else if (
+        cleanupMutationState === 'not_committed' &&
+        (error instanceof OfficialCallError || error instanceof OfficialCallTimeoutError)
+      ) {
         cleanupMutationState = 'outcome_unknown';
-      }
-      if (error instanceof OfficialCallTimeoutError) {
-        lateSettlement = error.settled;
+        propagatedError = new BridgeOperationFailure('outcome_unknown', cleanupMutationState);
+      } else if (error instanceof OfficialCallTimeoutError) {
+        propagatedError = new BridgeOperationFailure(
+          'cancelled',
+          cleanupMutationState,
+          cleanupMetadata,
+        );
+      } else if (error instanceof OfficialCallError) {
+        propagatedError = new BridgeOperationFailure(
+          structuredStatus(error.causeValue) === 404 ? 'not_found' : 'io',
+          cleanupMutationState,
+          cleanupMetadata,
+        );
+      } else if (
+        error instanceof ArtifactBridgeStagingError ||
+        error instanceof ArtifactTransportEnvelopeError
+      ) {
+        propagatedError = new BridgeOperationFailure(
+          'invalid',
+          cleanupMutationState,
+          cleanupMetadata,
+        );
+      } else {
+        propagatedError = new BridgeOperationFailure('io', cleanupMutationState, cleanupMetadata);
       }
       throw propagatedError;
     } finally {
@@ -465,7 +500,7 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
     const artifact = response.data;
     const id = platformId(artifact.id);
     const runId = platformId(artifact.workflow_run?.id ?? undefined);
-    const archiveDigest = normalizePlatformDigest(artifact.digest);
+    const archiveDigest = parseRestArtifactDigest(artifact.digest);
     const expiry = parseExpiry(artifact.expires_at);
     if (
       id !== objectId ||
@@ -500,37 +535,32 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
     let lateSettlement: Promise<void> | undefined;
     try {
       const response = await this.callOfficial(
-        () =>
-          this.artifactClient.downloadArtifact(Number(platform.id), {
-            path: operationDirectory,
-            expectedHash: `sha256:${platform.archiveDigest}`,
-            skipDecompress: true,
-            findBy: {
-              token: this.context.artifactToken,
-              workflowRunId: Number(platform.producingRunId),
-              repositoryOwner: this.context.owner,
-              repositoryName: this.context.repository,
+        (requestSignal) =>
+          this.context.actions.downloadArtifactArchive(
+            {
+              owner: this.context.owner,
+              repo: this.context.repository,
+              artifact_id: Number(platform.id),
+              maximum_bytes: ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes,
             },
-          }),
+            requestSignal,
+          ),
         signal,
         startedAt,
       );
-      if (response.digestMismatch || response.downloadPath !== operationDirectory) {
-        throw new BridgeOperationFailure('digest_mismatch');
+      if (response.status !== 200) {
+        throw new BridgeOperationFailure('io');
       }
-      const entries = await readdir(operationDirectory, { withFileTypes: true });
-      if (entries.length !== 1 || !entries[0]!.isFile()) {
-        throw new BridgeOperationFailure('invalid');
-      }
-      const archivePath = path.join(operationDirectory, entries[0]!.name);
-      const archiveStat = await lstat(archivePath);
+      const archive = Buffer.from(response.data);
       if (
-        !archiveStat.isFile() ||
-        archiveStat.size !== platform.archiveSize ||
-        archiveStat.size > ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes
+        archive.length < 1 ||
+        archive.length !== platform.archiveSize ||
+        archive.length > ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes ||
+        digestBytes(archive) !== platform.archiveDigest
       ) {
         throw new BridgeOperationFailure('digest_mismatch');
       }
+      const archivePath = await this.context.staging.writeArchive(operationDirectory, archive);
       const envelope = await readArtifactArchive(archivePath, platform.archiveDigest);
       if (envelope.producingRunId !== platform.producingRunId) {
         throw new BridgeOperationFailure('conflict');
@@ -702,11 +732,15 @@ function platformId(value: unknown): string | undefined {
   return Number.isSafeInteger(value) && Number(value) > 0 ? String(value) : undefined;
 }
 
-function normalizePlatformDigest(value: unknown): string | undefined {
+function parseRestArtifactDigest(value: unknown): string | undefined {
   if (typeof value !== 'string' || !value.startsWith('sha256:')) {
     return undefined;
   }
   return sha256(value.slice('sha256:'.length));
+}
+
+function parseUploadResponseDigest(value: unknown): string | undefined {
+  return typeof value === 'string' ? sha256(value) : undefined;
 }
 
 function parseExpiry(value: unknown): string | undefined {

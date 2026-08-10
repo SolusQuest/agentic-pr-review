@@ -57,6 +57,47 @@ describe('repository-wide exact artifact enumeration', () => {
     expect(calls).toEqual([1, 2, 3]);
   });
 
+  it('allows three distinct 29-second page requests inside one 120-second operation', async () => {
+    let elapsed = 0;
+    const operations = await createOperations(
+      {
+        listArtifactsForRepo: async (input) => {
+          elapsed += 29_000;
+          const start = (input.page - 1) * input.per_page;
+          const count = input.page < 3 ? 100 : 56;
+          return {
+            status: 200,
+            data: {
+              total_count: 256,
+              artifacts: Array.from({ length: count }, (_, index) => ({
+                id: start + index + 1,
+                name: 'opaque-state',
+                size_in_bytes: 1,
+                expired: false,
+                expires_at: '2030-01-01T00:00:00Z',
+              })),
+            },
+          };
+        },
+      },
+      () => elapsed,
+    );
+
+    const result = await operations.execute(
+      {
+        operation: 'list_exact',
+        correlation_id: 'three-request-budget',
+        name: 'opaque-state',
+        maximum_objects: '256',
+      },
+      new AbortController().signal,
+    );
+
+    expect(result.failure).toBe('none');
+    expect(result.objects).toHaveLength(256);
+    expect(elapsed).toBe(87_000);
+  });
+
   it('returns incomplete with no partial authority at 257 records', async () => {
     const operations = await createOperations({
       listArtifactsForRepo: async () => ({
@@ -275,6 +316,10 @@ describe('artifact-specific producing attempt authority', () => {
           },
         };
       },
+      downloadArtifactArchive: async (input) => ({
+        status: 200,
+        data: archives.get(input.artifact_id)!,
+      }),
       getWorkflowRunAttempt: async (input) => {
         requestedAttempts.push(input.attempt_number);
         return {
@@ -290,11 +335,8 @@ describe('artifact-specific producing attempt authority', () => {
       uploadArtifact: async () => {
         throw new Error('unexpected upload');
       },
-      downloadArtifact: async (id, options) => {
-        const destination = options?.path;
-        if (!destination) throw new Error('missing destination');
-        await writeFile(path.join(destination, 'artifact.zip'), archives.get(id)!);
-        return { downloadPath: destination, digestMismatch: false };
+      downloadArtifact: async () => {
+        throw new Error('unexpected package download');
       },
       listArtifacts: async () => {
         throw new Error('unexpected list');
@@ -311,7 +353,6 @@ describe('artifact-specific producing attempt authority', () => {
       repository: 'repository',
       currentRunId: '7001',
       currentRunAttempt: '2',
-      artifactToken: 'SYNTHETIC_TOKEN',
       artifactClient,
       actions,
       staging,
@@ -340,6 +381,110 @@ describe('artifact-specific producing attempt authority', () => {
     expect(second.metadata?.producing_run_attempt).toBe('2');
     expect(requestedAttempts).toEqual([1, 2]);
   });
+});
+
+describe('post-dispatch upload mutation truthfulness', () => {
+  it.each([
+    ['malformed platform expiry', 'expiry', 'invalid'],
+    ['missing producing run metadata', 'run', 'invalid'],
+    ['invalid downloaded ZIP', 'zip', 'invalid'],
+    ['raw archive digest mismatch', 'digest', 'digest_mismatch'],
+    ['run-attempt authority failure', 'attempt', 'conflict'],
+  ] as const)(
+    'keeps a concrete created artifact committed after %s',
+    async (_description, failureCase, expectedFailure) => {
+      const root = await mkdtemp(path.join(os.tmpdir(), 'apr-upload-state-test-'));
+      roots.push(root);
+      const staging = await ArtifactBridgeStaging.create(root);
+      const sourceDirectory = path.join(root, 'source');
+      const envelopeDirectory = path.join(root, 'envelope');
+      await mkdir(sourceDirectory);
+      await mkdir(envelopeDirectory);
+      const encrypted = Buffer.from('opaque-encrypted-state');
+      const encryptedDigest = digestBytes(encrypted);
+      await writeFile(path.join(sourceDirectory, 'object.bin'), encrypted);
+      const envelopePath = await writeArtifactTransportEnvelope(
+        envelopeDirectory,
+        '7001',
+        '2',
+        encrypted,
+        encryptedDigest,
+      );
+      const validArchive = createTestZip([
+        { name: ARTIFACT_ENVELOPE_ENTRY, data: await readFile(envelopePath) },
+      ]);
+      const downloadedArchive = failureCase === 'zip' ? Buffer.from('not-a-zip') : validArchive;
+      const platformDigest =
+        failureCase === 'digest' ? 'f'.repeat(64) : digestBytes(downloadedArchive);
+      const unsupported = async (): Promise<never> => {
+        throw new Error('unexpected official call');
+      };
+      const artifactClient: ArtifactClient = {
+        uploadArtifact: async () => ({
+          id: 42,
+          size: downloadedArchive.length,
+          digest: platformDigest,
+        }),
+        downloadArtifact: unsupported,
+        listArtifacts: unsupported,
+        getArtifact: unsupported,
+        deleteArtifact: unsupported,
+      };
+      const actions: ArtifactActionsRestClient = {
+        listArtifactsForRepo: unsupported,
+        getArtifact: async () => ({
+          status: 200,
+          data: {
+            id: 42,
+            name: 'opaque-state',
+            size_in_bytes: downloadedArchive.length,
+            expired: false,
+            expires_at: failureCase === 'expiry' ? 'not-a-date' : '2030-01-01T00:00:00Z',
+            digest: `sha256:${platformDigest}`,
+            workflow_run: failureCase === 'run' ? null : { id: 7001 },
+          },
+        }),
+        downloadArtifactArchive: async () => ({
+          status: 200,
+          data: downloadedArchive,
+        }),
+        getWorkflowRunAttempt: async (input) => ({
+          status: failureCase === 'attempt' ? 404 : 200,
+          data:
+            failureCase === 'attempt'
+              ? { id: 999, run_attempt: 99 }
+              : { id: input.run_id, run_attempt: input.attempt_number },
+        }),
+        deleteArtifact: unsupported,
+      };
+      const operations = new OfficialArtifactOperations({
+        owner: 'owner',
+        repository: 'repository',
+        currentRunId: '7001',
+        currentRunAttempt: '2',
+        artifactClient,
+        actions,
+        staging,
+      });
+
+      const result = await operations.execute(
+        {
+          operation: 'upload_immutable',
+          correlation_id: `upload-${failureCase}`,
+          name: 'opaque-state',
+          source_relative_path: 'source/object.bin',
+          encrypted_object_digest: encryptedDigest,
+          minimum_expires_at_unix_seconds: '1',
+        },
+        new AbortController().signal,
+      );
+
+      expect(result).toMatchObject({
+        failure: expectedFailure,
+        mutation_state: 'committed',
+      });
+    },
+  );
 });
 
 describe('official artifact lifecycle', () => {
@@ -393,17 +538,11 @@ describe('official artifact lifecycle', () => {
         return {
           id: stored.id,
           size: archive.length,
-          digest: `sha256:${stored.archiveDigest}`,
+          digest: stored.archiveDigest,
         };
       },
-      downloadArtifact: async (id, options) => {
-        downloadCalls += 1;
-        expect(stored?.id).toBe(id);
-        expect(options?.expectedHash).toBe(`sha256:${stored?.archiveDigest}`);
-        const destination = options?.path;
-        if (!destination || !stored) throw new Error('missing synthetic artifact');
-        await writeFile(path.join(destination, 'artifact.zip'), stored.archive);
-        return { downloadPath: destination, digestMismatch: false };
+      downloadArtifact: async () => {
+        throw new Error('unexpected package download');
       },
       listArtifacts: async () => {
         throw new Error('unexpected artifact-client list');
@@ -437,6 +576,12 @@ describe('official artifact lifecycle', () => {
           },
         };
       },
+      downloadArtifactArchive: async (input) => {
+        downloadCalls += 1;
+        expect(input.artifact_id).toBe(stored?.id);
+        if (!stored) throw new Error('missing synthetic artifact');
+        return { status: 200, data: stored.archive };
+      },
       getWorkflowRunAttempt: async (input) => ({
         status: 200,
         data: { id: input.run_id, run_attempt: input.attempt_number },
@@ -453,7 +598,6 @@ describe('official artifact lifecycle', () => {
       repository: 'repository',
       currentRunId: '7001',
       currentRunAttempt: '2',
-      artifactToken: 'SYNTHETIC_TOKEN',
       artifactClient,
       actions,
       staging,
@@ -574,6 +718,7 @@ async function createOperations(
   const actions: ArtifactActionsRestClient = {
     listArtifactsForRepo: unsupported,
     getArtifact: unsupported,
+    downloadArtifactArchive: unsupported,
     getWorkflowRunAttempt: unsupported,
     deleteArtifact: unsupported,
     ...overrides,
@@ -590,7 +735,6 @@ async function createOperations(
     repository: 'repository',
     currentRunId: '7001',
     currentRunAttempt: '2',
-    artifactToken: 'SYNTHETIC_TOKEN',
     artifactClient,
     actions,
     staging,

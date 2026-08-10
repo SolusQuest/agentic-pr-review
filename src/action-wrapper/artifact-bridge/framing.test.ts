@@ -5,6 +5,7 @@ import { ArtifactBridgeCorrelationRegistry } from './correlations.js';
 import {
   ArtifactBridgeFrameError,
   decodeCommandFrame,
+  encodeCommandMessage,
   encodeJsonFrame,
   readCommandFrame,
 } from './framing.js';
@@ -19,7 +20,7 @@ function command() {
       name: 'state',
       maximum_objects: '8',
     },
-  };
+  } as const;
 }
 
 describe('artifact bridge framing', () => {
@@ -27,8 +28,22 @@ describe('artifact bridge framing', () => {
     const input = new PassThrough();
     const controller = new AbortController();
     const reading = readCommandFrame(input, controller.signal);
-    for (const byte of encodeJsonFrame(command())) input.write(Buffer.of(byte));
+    for (const byte of encodeCommandMessage(command())) input.write(Buffer.of(byte));
     await expect(reading).resolves.toEqual(command());
+  });
+
+  it('requires the request terminator and rejects delayed trailing bytes', async () => {
+    const missingBoundary = new PassThrough();
+    const missingRead = readCommandFrame(missingBoundary, new AbortController().signal);
+    missingBoundary.end(encodeJsonFrame(command()));
+    await expect(missingRead).rejects.toThrow(ArtifactBridgeFrameError);
+
+    const trailing = new PassThrough();
+    const trailingRead = readCommandFrame(trailing, new AbortController().signal);
+    trailing.write(encodeJsonFrame(command()));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    trailing.end(Buffer.of(1));
+    await expect(trailingRead).rejects.toThrow(ArtifactBridgeFrameError);
   });
 
   it('rejects trailing, truncated, zero, oversized, BOM, and invalid UTF-8 frames', () => {

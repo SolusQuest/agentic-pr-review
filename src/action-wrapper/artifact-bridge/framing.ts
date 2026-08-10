@@ -1,7 +1,6 @@
 import { once } from 'node:events';
 import type { Duplex } from 'node:stream';
 
-import { strictParseJson } from '../../state-v2/strict-json.js';
 import {
   type ArtifactBridgeCommandEnvelope,
   type ArtifactBridgeResultEnvelope,
@@ -9,8 +8,10 @@ import {
   parseArtifactBridgeCommandEnvelope,
 } from './contracts.js';
 import { ARTIFACT_BRIDGE_LIMITS } from './limits.js';
+import { strictParseArtifactBridgeJson } from './strict-json.js';
 
 const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false });
+const requestTerminatorBytes = 4;
 
 export class ArtifactBridgeFrameError extends Error {
   constructor() {
@@ -26,6 +27,10 @@ export function encodeResultFrame(envelope: ArtifactBridgeResultEnvelope): Buffe
   return encodeJsonFrame(envelope);
 }
 
+export function encodeCommandMessage(envelope: ArtifactBridgeCommandEnvelope): Buffer {
+  return Buffer.concat([encodeJsonFrame(envelope), Buffer.alloc(requestTerminatorBytes)]);
+}
+
 export function decodeCommandFrame(frame: Uint8Array): ArtifactBridgeCommandEnvelope {
   const bytes = decodePayload(frame);
   let parsed: unknown;
@@ -34,7 +39,7 @@ export function decodeCommandFrame(frame: Uint8Array): ArtifactBridgeCommandEnve
       throw new ArtifactBridgeFrameError();
     }
     const text = decoder.decode(bytes);
-    parsed = strictParseJson(text);
+    parsed = strictParseArtifactBridgeJson(text);
   } catch {
     throw new ArtifactBridgeFrameError();
   }
@@ -106,6 +111,7 @@ async function readFrame(stream: Duplex, signal: AbortSignal): Promise<Buffer> {
     let chunks: Buffer[] = [];
     let total = 0;
     let expected: number | undefined;
+    let boundarySeen = false;
 
     const cleanup = (): void => {
       stream.off('data', onData);
@@ -122,8 +128,12 @@ async function readFrame(stream: Duplex, signal: AbortSignal): Promise<Buffer> {
     };
     const finish = (): void => {
       if (settled) return;
+      if (expected === undefined) {
+        fail();
+        return;
+      }
       settled = true;
-      const result = Buffer.concat(chunks, total);
+      const result = Buffer.concat(chunks, total).subarray(0, expected);
       cleanup();
       resolve(result);
     };
@@ -135,12 +145,16 @@ async function readFrame(stream: Duplex, signal: AbortSignal): Promise<Buffer> {
     };
     const onError = (): void => fail();
     const onEnd = (): void => {
-      if (expected === total) finish();
+      if (expected !== undefined && expected + requestTerminatorBytes === total) finish();
       else fail();
     };
     const onData = (chunk: Buffer): void => {
+      if (boundarySeen) {
+        fail();
+        return;
+      }
       total += chunk.length;
-      if (total > ARTIFACT_BRIDGE_LIMITS.maximumDocumentBytes + 4) {
+      if (total > ARTIFACT_BRIDGE_LIMITS.maximumDocumentBytes + 4 + requestTerminatorBytes) {
         fail();
         return;
       }
@@ -154,8 +168,17 @@ async function readFrame(stream: Duplex, signal: AbortSignal): Promise<Buffer> {
         }
         expected = 4 + length;
       }
-      if (expected !== undefined && total > expected) fail();
-      else if (expected === total) setImmediate(finish);
+      if (expected !== undefined && total > expected + requestTerminatorBytes) {
+        fail();
+      } else if (expected !== undefined && total === expected + requestTerminatorBytes) {
+        const message = Buffer.concat(chunks, total);
+        if (!message.subarray(expected).equals(Buffer.alloc(requestTerminatorBytes))) {
+          fail();
+        } else {
+          boundarySeen = true;
+          setImmediate(finish);
+        }
+      }
     };
 
     stream.on('data', onData);

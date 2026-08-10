@@ -49,7 +49,13 @@ export async function handleArtifactBridgeConnection(
     }
     const admission = registry.admit(command.correlation_id);
     if (!admission.accepted) {
-      await writeInvalid(stream, options.buildDiscriminator, command, outer.signal);
+      await writeInvalid(
+        stream,
+        options.buildDiscriminator,
+        command,
+        outer.signal,
+        admission.reason === 'duplicate' ? 'outcome_unknown' : 'not_committed',
+      );
       return;
     }
     admitted = true;
@@ -59,7 +65,7 @@ export async function handleArtifactBridgeConnection(
       result.operation !== command.operation ||
       result.correlation_id !== command.correlation_id
     ) {
-      result = invalidResult(command);
+      result = invalidResult(command, 'outcome_unknown');
     }
     const writeController = innerController(outer.signal);
     try {
@@ -94,15 +100,18 @@ export function createArtifactBridgeServer(options: ArtifactBridgeServerOptions)
   });
 }
 
-function invalidResult(command: ArtifactBridgeCommand): ArtifactBridgeResult {
-  const mutation =
-    command.operation === 'upload_immutable' || command.operation === 'delete_exact'
-      ? { mutation_state: 'not_committed' as const }
-      : {};
+function invalidResult(
+  command: ArtifactBridgeCommand,
+  mutationState: 'not_committed' | 'outcome_unknown' = 'not_committed',
+): ArtifactBridgeResult {
+  const mutationOperation =
+    command.operation === 'upload_immutable' || command.operation === 'delete_exact';
+  const mutation = mutationOperation ? { mutation_state: mutationState } : {};
   return {
     operation: command.operation,
     correlation_id: command.correlation_id,
-    failure: 'invalid',
+    failure:
+      mutationOperation && mutationState === 'outcome_unknown' ? 'outcome_unknown' : 'invalid',
     ...mutation,
     ...(command.operation === 'list_exact' ? { complete: false } : {}),
   };
@@ -113,6 +122,7 @@ async function writeInvalid(
   buildDiscriminator: string,
   command: ArtifactBridgeCommand,
   outerSignal: AbortSignal,
+  mutationState: 'not_committed' | 'outcome_unknown' = 'not_committed',
 ): Promise<void> {
   const controller = innerController(outerSignal);
   try {
@@ -120,7 +130,7 @@ async function writeInvalid(
       stream,
       {
         build_discriminator: buildDiscriminator,
-        payload: invalidResult(command),
+        payload: invalidResult(command, mutationState),
       },
       controller.signal,
     );

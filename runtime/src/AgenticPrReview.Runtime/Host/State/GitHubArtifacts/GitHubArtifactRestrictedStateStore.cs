@@ -11,12 +11,14 @@ internal sealed class GitHubArtifactRestrictedStateStore
 {
     private readonly PrivateArtifactBridgeClient client;
     private readonly ArtifactBridgeStaging staging;
+    private readonly TimeSpan logicalOperationTimeout;
 
     internal GitHubArtifactRestrictedStateStore(
         string artifactBridgeEndpoint,
         string buildDiscriminator,
         string? explicitBridgeOwnedStagingRoot = null,
-        IArtifactBridgeConnectionFactory? connectionFactory = null)
+        IArtifactBridgeConnectionFactory? connectionFactory = null,
+        TimeSpan? testLogicalOperationTimeout = null)
     {
         client = new PrivateArtifactBridgeClient(
             artifactBridgeEndpoint,
@@ -25,6 +27,16 @@ internal sealed class GitHubArtifactRestrictedStateStore
         staging = new ArtifactBridgeStaging(
             explicitBridgeOwnedStagingRoot ??
             ArtifactBridgeStaging.DeriveRoot(artifactBridgeEndpoint));
+        logicalOperationTimeout =
+            testLogicalOperationTimeout ??
+            ArtifactBridgeLimits.LogicalOperationTimeout;
+        if (logicalOperationTimeout < TimeSpan.Zero ||
+            logicalOperationTimeout >
+                ArtifactBridgeLimits.LogicalOperationTimeout)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(testLogicalOperationTimeout));
+        }
     }
 
     public async Task<OpaqueStoreListResult> ListExactAsync(
@@ -36,6 +48,7 @@ internal sealed class GitHubArtifactRestrictedStateStore
         {
             return OpaqueStoreListResult.Fail(OpaqueStoreFailure.Invalid);
         }
+        using var logical = CreateLogicalCancellation(cancellationToken);
         var correlation = Correlation();
         var command = new ArtifactBridgeListExactCommandDocument(
             "list_exact",
@@ -45,7 +58,7 @@ internal sealed class GitHubArtifactRestrictedStateStore
         ArtifactBridgeResultDocument result;
         try
         {
-            result = await ExchangeAsync(command, cancellationToken)
+            result = await ExchangeAsync(command, logical.Token)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (
@@ -57,9 +70,17 @@ internal sealed class GitHubArtifactRestrictedStateStore
         {
             return OpaqueStoreListResult.Fail(OpaqueStoreFailure.Cancelled);
         }
-        catch (ArtifactBridgeExchangeException)
+        catch (ArtifactBridgeExchangeException) when (
+            cancellationToken.IsCancellationRequested)
         {
-            return OpaqueStoreListResult.Fail(OpaqueStoreFailure.Io);
+            throw new OperationCanceledException(cancellationToken);
+        }
+        catch (ArtifactBridgeExchangeException exception)
+        {
+            return OpaqueStoreListResult.Fail(
+                exception.Cancelled
+                    ? OpaqueStoreFailure.Cancelled
+                    : OpaqueStoreFailure.Io);
         }
         if (!ResultMatches(result, command.Operation, correlation))
         {
@@ -124,6 +145,7 @@ internal sealed class GitHubArtifactRestrictedStateStore
         {
             return OpaqueStoreMetadataResult.Fail(OpaqueStoreFailure.Invalid);
         }
+        using var logical = CreateLogicalCancellation(cancellationToken);
         var correlation = Correlation();
         var command = new ArtifactBridgeMetadataCommandDocument(
             "metadata",
@@ -132,6 +154,7 @@ internal sealed class GitHubArtifactRestrictedStateStore
             request.Reference.ObjectId.Value);
         var exchange = await ExchangeReadAsync(
                 command,
+                logical.Token,
                 cancellationToken)
             .ConfigureAwait(false);
         if (exchange.Failure != OpaqueStoreFailure.None ||
@@ -157,6 +180,7 @@ internal sealed class GitHubArtifactRestrictedStateStore
             return OpaqueStoreDownloadResult.Fail(OpaqueStoreFailure.Invalid);
         }
         cancellationToken.ThrowIfCancellationRequested();
+        using var logical = CreateLogicalCancellation(cancellationToken);
         var scope = staging.PrepareDownload();
         OpaqueStoreDownloadResult result;
         try
@@ -170,6 +194,7 @@ internal sealed class GitHubArtifactRestrictedStateStore
                 Decimal(request.MaximumBytes));
             var exchange = await ExchangeReadAsync(
                     command,
+                    logical.Token,
                     cancellationToken)
                 .ConfigureAwait(false);
             if (exchange.Failure != OpaqueStoreFailure.None ||
@@ -188,7 +213,7 @@ internal sealed class GitHubArtifactRestrictedStateStore
                 var bytes = await staging.ReadDownloadAsync(
                         scope,
                         request.MaximumBytes,
-                        cancellationToken)
+                        logical.Token)
                     .ConfigureAwait(false);
                 result = bytes.LongLength == request.Expected.Size &&
                     StringComparer.Ordinal.Equals(
@@ -221,7 +246,10 @@ internal sealed class GitHubArtifactRestrictedStateStore
             result = OpaqueStoreDownloadResult.Fail(
                 OpaqueStoreFailure.Invalid);
         }
-        await scope.DisposeAsync().ConfigureAwait(false);
+        finally
+        {
+            await scope.DisposeAsync().ConfigureAwait(false);
+        }
         return scope.CleanupSucceeded
             ? result
             : OpaqueStoreDownloadResult.Fail(OpaqueStoreFailure.Cleanup);
@@ -239,13 +267,14 @@ internal sealed class GitHubArtifactRestrictedStateStore
             return OpaqueStoreUploadResult.Fail(OpaqueStoreFailure.Invalid);
         }
         cancellationToken.ThrowIfCancellationRequested();
+        using var logical = CreateLogicalCancellation(cancellationToken);
         ArtifactBridgeStagingScope? scope = null;
         OpaqueStoreUploadResult result;
         try
         {
             scope = await staging.StageUploadAsync(
                     request.EncryptedBytes,
-                    cancellationToken)
+                    logical.Token)
                 .ConfigureAwait(false);
             var command = new ArtifactBridgeUploadCommandDocument(
                 "upload_immutable",
@@ -254,7 +283,7 @@ internal sealed class GitHubArtifactRestrictedStateStore
                 scope.RelativePath,
                 request.EncryptedObjectDigest.Sha256,
                 Decimal(request.MinimumExpiresAtUnixSeconds));
-            var document = await ExchangeAsync(command, cancellationToken)
+            var document = await ExchangeAsync(command, logical.Token)
                 .ConfigureAwait(false);
             if (!ResultMatches(
                     document,
@@ -278,15 +307,22 @@ internal sealed class GitHubArtifactRestrictedStateStore
         catch (OperationCanceledException)
         {
             result = OpaqueStoreUploadResult.Fail(
-                OpaqueStoreFailure.OutcomeUnknown,
-                OpaqueStoreMutationState.OutcomeUnknown);
+                OpaqueStoreFailure.Cancelled,
+                OpaqueStoreMutationState.NotCommitted);
         }
         catch (ArtifactBridgeExchangeException exception)
         {
+            if (!exception.RequestDispatched &&
+                cancellationToken.IsCancellationRequested)
+            {
+                throw new OperationCanceledException(cancellationToken);
+            }
             result = OpaqueStoreUploadResult.Fail(
                 exception.RequestDispatched
                     ? OpaqueStoreFailure.OutcomeUnknown
-                    : OpaqueStoreFailure.Io,
+                    : exception.Cancelled
+                        ? OpaqueStoreFailure.Cancelled
+                        : OpaqueStoreFailure.Io,
                 exception.RequestDispatched
                     ? OpaqueStoreMutationState.OutcomeUnknown
                     : OpaqueStoreMutationState.NotCommitted);
@@ -295,16 +331,19 @@ internal sealed class GitHubArtifactRestrictedStateStore
         {
             result = OpaqueStoreUploadResult.Fail(OpaqueStoreFailure.Io);
         }
-        if (scope is not null)
+        finally
         {
-            await scope.DisposeAsync().ConfigureAwait(false);
-            if (!scope.CleanupSucceeded)
+            if (scope is not null)
             {
-                return OpaqueStoreUploadResult.Fail(
-                    OpaqueStoreFailure.Cleanup,
-                    result.MutationState,
-                    result.Metadata);
+                await scope.DisposeAsync().ConfigureAwait(false);
             }
+        }
+        if (scope is not null && !scope.CleanupSucceeded)
+        {
+            return OpaqueStoreUploadResult.Fail(
+                OpaqueStoreFailure.Cleanup,
+                result.MutationState,
+                result.Metadata);
         }
         return result;
     }
@@ -318,6 +357,7 @@ internal sealed class GitHubArtifactRestrictedStateStore
         {
             return OpaqueStoreReadBackResult.Fail(OpaqueStoreFailure.Invalid);
         }
+        using var logical = CreateLogicalCancellation(cancellationToken);
         var correlation = Correlation();
         var command = new ArtifactBridgeReadBackCommandDocument(
             "readback_exact",
@@ -325,6 +365,7 @@ internal sealed class GitHubArtifactRestrictedStateStore
             expected!);
         var exchange = await ExchangeReadAsync(
                 command,
+                logical.Token,
                 cancellationToken)
             .ConfigureAwait(false);
         if (exchange.Failure != OpaqueStoreFailure.None ||
@@ -350,6 +391,7 @@ internal sealed class GitHubArtifactRestrictedStateStore
             return OpaqueStoreDeleteResult.Fail(OpaqueStoreFailure.Invalid);
         }
         cancellationToken.ThrowIfCancellationRequested();
+        using var logical = CreateLogicalCancellation(cancellationToken);
         var correlation = Correlation();
         var command = new ArtifactBridgeDeleteCommandDocument(
             "delete_exact",
@@ -357,7 +399,7 @@ internal sealed class GitHubArtifactRestrictedStateStore
             expected!);
         try
         {
-            var result = await ExchangeAsync(command, cancellationToken)
+            var result = await ExchangeAsync(command, logical.Token)
                 .ConfigureAwait(false);
             if (!ResultMatches(result, command.Operation, correlation))
             {
@@ -390,10 +432,17 @@ internal sealed class GitHubArtifactRestrictedStateStore
         }
         catch (ArtifactBridgeExchangeException exception)
         {
+            if (!exception.RequestDispatched &&
+                cancellationToken.IsCancellationRequested)
+            {
+                throw new OperationCanceledException(cancellationToken);
+            }
             return OpaqueStoreDeleteResult.Fail(
                 exception.RequestDispatched
                     ? OpaqueStoreFailure.OutcomeUnknown
-                    : OpaqueStoreFailure.Io,
+                    : exception.Cancelled
+                        ? OpaqueStoreFailure.Cancelled
+                        : OpaqueStoreFailure.Io,
                 exception.RequestDispatched
                     ? OpaqueStoreMutationState.OutcomeUnknown
                     : OpaqueStoreMutationState.NotCommitted);
@@ -405,28 +454,43 @@ internal sealed class GitHubArtifactRestrictedStateStore
         CancellationToken cancellationToken)
         where TCommand : class, IArtifactBridgeCommandDocument
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        using var logical = CancellationTokenSource.CreateLinkedTokenSource(
-            cancellationToken);
-        logical.CancelAfter(ArtifactBridgeLimits.LogicalOperationTimeout);
         var commandType = RequireTypeInfo<
             ActionHostPrivateCommandEnvelope<TCommand>>(
             ArtifactBridgeJsonContext.Default);
         return await client.ExchangeAsync(
                 command,
                 commandType,
-                logical.Token)
+                cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    private CancellationTokenSource CreateLogicalCancellation(
+        CancellationToken callerCancellationToken)
+    {
+        var logical = CancellationTokenSource.CreateLinkedTokenSource(
+            callerCancellationToken);
+        if (logicalOperationTimeout == TimeSpan.Zero)
+        {
+            logical.Cancel();
+        }
+        else
+        {
+            logical.CancelAfter(logicalOperationTimeout);
+        }
+        return logical;
     }
 
     private async Task<ArtifactBridgeReadExchange> ExchangeReadAsync<TCommand>(
         TCommand command,
-        CancellationToken cancellationToken)
+        CancellationToken logicalCancellationToken,
+        CancellationToken callerCancellationToken)
         where TCommand : class, IArtifactBridgeCommandDocument
     {
         try
         {
-            var result = await ExchangeAsync(command, cancellationToken)
+            var result = await ExchangeAsync(
+                    command,
+                    logicalCancellationToken)
                 .ConfigureAwait(false);
             if (!ResultMatches(
                     result,
@@ -462,7 +526,7 @@ internal sealed class GitHubArtifactRestrictedStateStore
                 result);
         }
         catch (OperationCanceledException) when (
-            cancellationToken.IsCancellationRequested)
+            callerCancellationToken.IsCancellationRequested)
         {
             throw;
         }
@@ -471,9 +535,17 @@ internal sealed class GitHubArtifactRestrictedStateStore
             return ArtifactBridgeReadExchange.Fail(
                 OpaqueStoreFailure.Cancelled);
         }
-        catch (ArtifactBridgeExchangeException)
+        catch (ArtifactBridgeExchangeException) when (
+            callerCancellationToken.IsCancellationRequested)
         {
-            return ArtifactBridgeReadExchange.Fail(OpaqueStoreFailure.Io);
+            throw new OperationCanceledException(callerCancellationToken);
+        }
+        catch (ArtifactBridgeExchangeException exception)
+        {
+            return ArtifactBridgeReadExchange.Fail(
+                exception.Cancelled
+                    ? OpaqueStoreFailure.Cancelled
+                    : OpaqueStoreFailure.Io);
         }
     }
 
