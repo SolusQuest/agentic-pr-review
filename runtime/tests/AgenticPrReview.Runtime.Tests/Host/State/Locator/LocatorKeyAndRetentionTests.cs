@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
@@ -130,11 +131,14 @@ public sealed class LocatorKeyAndRetentionTests
             Assert.Equal(
                 "6ed5509781ed7c790ea8adba57a7b7373a260065a28163f6d1026038f2597d0c",
                 Convert.ToHexStringLower(root));
-            using var context = new LocatorContext(
+            Assert.True(LocatorContext.TryCreate(
                 access,
                 keys,
                 root,
-                currentSingletonProven: true);
+                currentSingletonProven: true,
+                new FrozenLocatorTimeProvider(LocatorTestData.Now),
+                out var created));
+            using var context = Assert.IsType<LocatorContext>(created);
             Assert.True(context.TryDeriveOpaqueName(
                 access,
                 "restricted-state",
@@ -193,18 +197,22 @@ public sealed class LocatorKeyAndRetentionTests
     }
 
     [Fact]
-    public void ContextDoesNotExposeRootAndRetirementRequiresCompleteEvidence()
+    public void ContextOwnsKeysAndEvaluatesBoundRetirementInventory()
     {
         using var access = LocatorTestData.Access();
         using var keys = LocatorTestData.KeyRing(
             access,
             LocatorTestData.PreviousBase64);
         Assert.True(keys.TryDeriveInitialRoot(access, out var root));
-        using var context = new LocatorContext(
+        var time = new FrozenLocatorTimeProvider(LocatorTestData.Now);
+        Assert.True(LocatorContext.TryCreate(
             access,
             keys,
             root,
-            currentSingletonProven: true);
+            currentSingletonProven: true,
+            time,
+            out var created));
+        using var context = Assert.IsType<LocatorContext>(created);
         CryptographicOperations.ZeroMemory(root);
 
         Assert.DoesNotContain(
@@ -212,25 +220,175 @@ public sealed class LocatorKeyAndRetentionTests
                 BindingFlags.Instance | BindingFlags.Public |
                     BindingFlags.NonPublic),
             property => property.PropertyType == typeof(byte[]));
+
+        var forged = new LocatorContext.LocatorPreviousKeyRetirementEvidence(
+            new object(),
+            access,
+            "owner/repository",
+            keys.PreviousKeyId!,
+            LocatorTestData.Now,
+            enumerationComplete: true,
+            requiredDependencies: []);
+        Assert.False(context.CanRetirePreviousKey(access, forged));
+
         Assert.False(context.CanRetirePreviousKey(
             access,
-            new LocatorPreviousKeyRetirementEvidence(
-                EnumerationComplete: false,
-                NoLiveRestrictedStateDependencies: true,
-                NoLiveTransactionDependencies: true)));
+            Evidence(
+                context,
+                access,
+                enumerationComplete: false,
+                dependencies: [])));
+
+        var stale = Evidence(
+            context,
+            access,
+            enumerationComplete: true,
+            dependencies: []);
+        time.UnixSeconds = LocatorTestData.Now +
+            StateRetentionRequirements.PreStickyBudgetSeconds + 1;
+        Assert.False(context.CanRetirePreviousKey(
+            access,
+            stale));
+        time.UnixSeconds = LocatorTestData.Now;
+
+        var otherPrevious = Enumerable.Repeat((byte)0x9a, 32).ToArray();
+        using var otherKeys = LocatorTestData.KeyRing(
+            access,
+            Convert.ToBase64String(otherPrevious));
+        Assert.True(otherKeys.TryDeriveInitialRoot(
+            access,
+            out var otherRoot));
+        Assert.True(LocatorContext.TryCreate(
+            access,
+            otherKeys,
+            otherRoot,
+            currentSingletonProven: true,
+            time,
+            out var otherCreated));
+        using var otherContext = Assert.IsType<LocatorContext>(otherCreated);
+        CryptographicOperations.ZeroMemory(otherRoot);
+        CryptographicOperations.ZeroMemory(otherPrevious);
+        Assert.False(context.CanRetirePreviousKey(
+            access,
+            Evidence(
+                otherContext,
+                access,
+                enumerationComplete: true,
+                dependencies: [])));
+
+        using var otherAccess = LocatorTestData.Access("other/repository");
+        using var otherRepositoryKeys = LocatorTestData.KeyRing(
+            otherAccess,
+            LocatorTestData.PreviousBase64,
+            repositoryId: "other/repository");
+        Assert.True(otherRepositoryKeys.TryDeriveInitialRoot(
+            otherAccess,
+            out var otherRepositoryRoot));
+        Assert.True(LocatorContext.TryCreate(
+            otherAccess,
+            otherRepositoryKeys,
+            otherRepositoryRoot,
+            currentSingletonProven: true,
+            time,
+            out var otherRepositoryCreated));
+        using var otherRepositoryContext = Assert.IsType<LocatorContext>(
+            otherRepositoryCreated);
+        CryptographicOperations.ZeroMemory(otherRepositoryRoot);
+        Assert.False(context.CanRetirePreviousKey(
+            access,
+            Evidence(
+                otherRepositoryContext,
+                otherAccess,
+                enumerationComplete: true,
+                dependencies: [])));
+
+        Assert.False(context.CanRetirePreviousKey(
+            access,
+            Evidence(
+                context,
+                access,
+                enumerationComplete: true,
+                dependencies:
+                [
+                    new LocatorRequiredDependency(
+                        LocatorDependencyKind.RestrictedState,
+                        keys.PreviousKeyId!,
+                        LocatorTestData.Now + 1),
+                    new LocatorRequiredDependency(
+                        LocatorDependencyKind.Transaction,
+                        keys.CurrentKeyId,
+                        LocatorTestData.Now + 10),
+                ])));
         Assert.True(context.CanRetirePreviousKey(
             access,
-            new LocatorPreviousKeyRetirementEvidence(
-                EnumerationComplete: true,
-                NoLiveRestrictedStateDependencies: true,
-                NoLiveTransactionDependencies: true)));
+            Evidence(
+                context,
+                access,
+                enumerationComplete: true,
+                dependencies:
+                [
+                    new LocatorRequiredDependency(
+                        LocatorDependencyKind.Transaction,
+                        keys.PreviousKeyId!,
+                        LocatorTestData.Now),
+                ])));
+        Assert.True(context.CanRetirePreviousKey(
+            access,
+            Evidence(
+                context,
+                access,
+                enumerationComplete: true,
+                dependencies: [])));
+
+        var contextRoot = Assert.IsType<byte[]>(typeof(LocatorContext)
+            .GetField("root", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(context));
+        var ownedKeys = Assert.IsType<LocatorStateKeyRing>(
+            typeof(LocatorContext)
+                .GetField(
+                    "keys",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(context));
+        var ownedCurrent = Assert.IsType<byte[]>(
+            typeof(LocatorStateKeyRing)
+                .GetField(
+                    "current",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(ownedKeys));
+        var ownedPrevious = Assert.IsType<byte[]>(
+            typeof(LocatorStateKeyRing)
+                .GetField(
+                    "previous",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(ownedKeys));
 
         context.Dispose();
+        Assert.All(contextRoot, value => Assert.Equal(0, value));
+        Assert.All(ownedCurrent, value => Assert.Equal(0, value));
+        Assert.All(ownedPrevious, value => Assert.Equal(0, value));
         Span<byte> destination = stackalloc byte[32];
         Assert.False(context.TryCopyCurrentStateKey(
             access,
             destination,
             out _));
         Assert.Equal(new byte[32], destination.ToArray());
+
+        Assert.True(keys.TryGetCurrent(access, out var original));
+        original!.Dispose();
+    }
+
+    private static LocatorContext.LocatorPreviousKeyRetirementEvidence
+        Evidence(
+        LocatorContext context,
+        AuthorizedLocatorAccess access,
+        bool enumerationComplete,
+        ImmutableArray<LocatorRequiredDependency> dependencies)
+    {
+        Assert.True(context.TryCapturePreviousKeyRetirementEvidence(
+            access,
+            enumerationComplete,
+            dependencies,
+            out var evidence));
+        return evidence!;
     }
 }

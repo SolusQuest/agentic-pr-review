@@ -34,18 +34,26 @@ internal sealed class LocatorRootService
             return LocatorRootResult.Fail(LocatorCodes.AccessDenied);
         }
 
-        var now = timeProvider.GetUtcNow().ToUnixTimeSeconds();
-        if (!StateRetentionRequirements.TryGetRequiredSentinelExpiry(
-                now,
-                dependentExpiresAtUnixSeconds,
-                out var requiredExpiry))
+        if (dependentExpiresAtUnixSeconds is < 0 or >
+            RestrictedStateFormat.MaximumUnixSeconds)
         {
             return LocatorRootResult.Fail(LocatorCodes.Invalid);
         }
 
+        var now = timeProvider.GetUtcNow().ToUnixTimeSeconds();
+        if (now is < 0 or > RestrictedStateFormat.MaximumUnixSeconds ||
+            !StateRetentionRequirements.TryGetRequiredSentinelExpiry(
+                now,
+                dependentExpiresAtUnixSeconds,
+                out var requiredExpiry))
+        {
+            return LocatorRootResult.Fail(LocatorCodes.Unavailable);
+        }
+
+        LocatorSelectionResult? read = null;
         try
         {
-            var read = await ReadSelectionAsync(access!, cancellationToken)
+            read = await ReadSelectionAsync(access!, cancellationToken)
                 .ConfigureAwait(false);
             if (!read.Succeeded)
             {
@@ -91,16 +99,31 @@ internal sealed class LocatorRootService
                         access!,
                         selection)
                     .ConfigureAwait(false);
-                if (!cleaned.Succeeded || cleaned.IsAbsent)
+                try
                 {
-                    return LocatorRootResult.Fail(cleaned.Code);
-                }
+                    if (!cleaned.Succeeded || cleaned.IsAbsent)
+                    {
+                        return LocatorRootResult.Fail(cleaned.Code);
+                    }
 
-                selection = cleaned.Selection!;
-                if (selection.PhysicalCount >
-                    LocatorRootFormat.MaximumPhysicalSentinels - 1)
+                    selection = cleaned.Selection!;
+                    if (selection.PhysicalCount >
+                        LocatorRootFormat.MaximumPhysicalSentinels - 1)
+                    {
+                        return LocatorRootResult.Fail(LocatorCodes.Conflict);
+                    }
+
+                    return await AppendSuccessorAsync(
+                            access!,
+                            selection,
+                            now,
+                            requiredExpiry,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                finally
                 {
-                    return LocatorRootResult.Fail(LocatorCodes.Unavailable);
+                    ClearSelection(cleaned);
                 }
             }
 
@@ -123,6 +146,10 @@ internal sealed class LocatorRootService
                 CryptographicException)
         {
             return LocatorRootResult.Fail(LocatorCodes.Unavailable);
+        }
+        finally
+        {
+            ClearSelection(read);
         }
     }
 
@@ -244,43 +271,71 @@ internal sealed class LocatorRootService
                     MapStoreFailure(upload.Failure));
             }
 
-            var token = CancellationToken.None;
-            var read = await ReadSelectionWithRetriesAsync(access, token)
-                .ConfigureAwait(false);
-            if (!read.Succeeded || read.IsAbsent)
-            {
-                return LocatorRootResult.Fail(read.Code);
-            }
-
-            var selection = read.Selection!;
-            if (!SameRoot(target, selection.Head.Sentinel) ||
-                selection.Head.Sentinel.Generation < target.Generation ||
-                !StringComparer.Ordinal.Equals(
-                    selection.Head.Sentinel.WriterKeyId,
-                    keys.CurrentKeyId) ||
-                !IsAdequatelyRetained(selection.Head, requiredExpiry))
-            {
-                return LocatorRootResult.Fail(LocatorCodes.Conflict);
-            }
-
-            var readBack = await store.ReadBackExactAsync(
-                    new OpaqueStoreReadBackRequest(selection.Head.Metadata),
-                    token)
-                .ConfigureAwait(false);
-            if (!readBack.Succeeded ||
-                readBack.Metadata != selection.Head.Metadata ||
-                readBack.Metadata.ExpiresAtUnixSeconds < requiredExpiry)
+            if (upload.Metadata is null)
             {
                 return LocatorRootResult.Fail(LocatorCodes.Unavailable);
             }
 
-            return await CleanupAndFinalizeAsync(
-                    access,
-                    selection,
-                    target.Root,
-                    target.Generation,
-                    requiredExpiry)
+            var token = CancellationToken.None;
+            var uploadedReadBack = await ReadBackWithRetriesAsync(
+                    upload.Metadata,
+                    token)
                 .ConfigureAwait(false);
+            if (!uploadedReadBack.Succeeded ||
+                uploadedReadBack.Metadata != upload.Metadata)
+            {
+                return LocatorRootResult.Fail(LocatorCodes.Unavailable);
+            }
+
+            if (upload.Metadata.ExpiresAtUnixSeconds <
+                target.RequiredExpiresAtUnixSeconds)
+            {
+                await DeleteRejectedUploadAsync(upload.Metadata)
+                    .ConfigureAwait(false);
+                return LocatorRootResult.Fail(LocatorCodes.Unavailable);
+            }
+
+            var read = await ReadSelectionWithRetriesAsync(
+                    access,
+                    token,
+                    target,
+                    upload.Metadata)
+                .ConfigureAwait(false);
+            try
+            {
+                if (!read.Succeeded || read.IsAbsent)
+                {
+                    return LocatorRootResult.Fail(read.Code);
+                }
+
+                var selection = read.Selection!;
+                if (!SameRoot(target, selection.Head.Sentinel) ||
+                    selection.Head.Sentinel.Generation < target.Generation ||
+                    (selection.Head.Sentinel.Generation ==
+                            target.Generation &&
+                        !LocatorRootSelection.Equivalent(
+                            target,
+                            selection.Head.Sentinel)) ||
+                    !StringComparer.Ordinal.Equals(
+                        selection.Head.Sentinel.WriterKeyId,
+                        keys.CurrentKeyId) ||
+                    !IsAdequatelyRetained(selection.Head, requiredExpiry))
+                {
+                    return LocatorRootResult.Fail(LocatorCodes.Conflict);
+                }
+
+                return await CleanupAndFinalizeAsync(
+                        access,
+                        selection,
+                        target.Root,
+                        target.Generation,
+                        requiredExpiry)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                ClearSelection(read);
+            }
         }
         finally
         {
@@ -295,40 +350,52 @@ internal sealed class LocatorRootService
         ulong minimumGeneration,
         long requiredExpiry)
     {
-        var read = selection.SafeToDelete.IsEmpty
-            ? LocatorSelectionResult.Success(selection)
-            : await CleanupAndReadAsync(access, selection)
+        LocatorSelectionResult? ownedRead = null;
+        try
+        {
+            var read = selection.SafeToDelete.IsEmpty
+                ? LocatorSelectionResult.Success(selection)
+                : ownedRead = await CleanupAndReadAsync(access, selection)
+                    .ConfigureAwait(false);
+            if (!read.Succeeded || read.IsAbsent)
+            {
+                return LocatorRootResult.Fail(read.Code);
+            }
+
+            var final = read.Selection!;
+            if (final.PhysicalCount != 1 ||
+                !final.SafeToDelete.IsEmpty ||
+                final.Head.Sentinel.Generation < minimumGeneration ||
+                !CryptographicOperations.FixedTimeEquals(
+                    final.Head.Sentinel.Root,
+                    expectedRoot.Span) ||
+                !StringComparer.Ordinal.Equals(
+                    final.Head.Sentinel.WriterKeyId,
+                    keys.CurrentKeyId) ||
+                !IsAdequatelyRetained(final.Head, requiredExpiry))
+            {
+                return LocatorRootResult.Fail(LocatorCodes.CleanupFailed);
+            }
+
+            var readBack = await store.ReadBackExactAsync(
+                    new OpaqueStoreReadBackRequest(final.Head.Metadata),
+                    CancellationToken.None)
                 .ConfigureAwait(false);
-        if (!read.Succeeded || read.IsAbsent)
-        {
-            return LocatorRootResult.Fail(read.Code);
-        }
+            if (!readBack.Succeeded ||
+                readBack.Metadata != final.Head.Metadata ||
+                readBack.Metadata.ExpiresAtUnixSeconds <
+                    final.Head.Sentinel.RequiredExpiresAtUnixSeconds ||
+                readBack.Metadata.ExpiresAtUnixSeconds < requiredExpiry)
+            {
+                return LocatorRootResult.Fail(LocatorCodes.Unavailable);
+            }
 
-        var final = read.Selection!;
-        if (final.PhysicalCount != 1 ||
-            !final.SafeToDelete.IsEmpty ||
-            final.Head.Sentinel.Generation < minimumGeneration ||
-            !CryptographicOperations.FixedTimeEquals(
-                final.Head.Sentinel.Root,
-                expectedRoot.Span) ||
-            !StringComparer.Ordinal.Equals(
-                final.Head.Sentinel.WriterKeyId,
-                keys.CurrentKeyId) ||
-            !IsAdequatelyRetained(final.Head, requiredExpiry))
-        {
-            return LocatorRootResult.Fail(LocatorCodes.CleanupFailed);
+            return CreateContext(access, final.Head);
         }
-
-        var readBack = await store.ReadBackExactAsync(
-                new OpaqueStoreReadBackRequest(final.Head.Metadata),
-                CancellationToken.None)
-            .ConfigureAwait(false);
-        if (!readBack.Succeeded || readBack.Metadata != final.Head.Metadata)
+        finally
         {
-            return LocatorRootResult.Fail(LocatorCodes.Unavailable);
+            ClearSelection(ownedRead);
         }
-
-        return CreateContext(access, final.Head);
     }
 
     private async Task<LocatorSelectionResult> CleanupAndReadAsync(
@@ -352,21 +419,73 @@ internal sealed class LocatorRootService
     private async Task<LocatorSelectionResult>
         ReadSelectionWithRetriesAsync(
             AuthorizedLocatorAccess access,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            LocatorRootSentinel? target = null,
+            OpaqueStoreObjectMetadata? targetMetadata = null)
     {
         LocatorSelectionResult? last = null;
         for (var attempt = 0; attempt < ReconciliationAttempts; attempt++)
         {
-            last = await ReadSelectionAsync(access, cancellationToken)
+            var current = await ReadSelectionAsync(
+                    access,
+                    cancellationToken)
                 .ConfigureAwait(false);
-            if (last.Succeeded && !last.IsAbsent)
+            if (current.Succeeded && !current.IsAbsent)
             {
-                return last;
+                if (target is null)
+                {
+                    return current;
+                }
+
+                var selection = current.Selection!;
+                var head = selection.Head.Sentinel;
+                if (!SameRoot(target, head))
+                {
+                    return current;
+                }
+
+                var targetVisible = targetMetadata is not null &&
+                    (selection.Head.Metadata == targetMetadata ||
+                        selection.SafeToDelete.Contains(targetMetadata));
+                if (!targetVisible)
+                {
+                    ClearSelection(current);
+                    last = null;
+                    continue;
+                }
+
+                if (head.Generation > target.Generation ||
+                    (head.Generation == target.Generation &&
+                        LocatorRootSelection.Equivalent(target, head)))
+                {
+                    return current;
+                }
+
+                if (head.Generation == target.Generation)
+                {
+                    ClearSelection(current);
+                    return LocatorSelectionResult.Fail(
+                        LocatorCodes.Conflict);
+                }
+
+                ClearSelection(current);
+                last = null;
+                continue;
+            }
+
+            last = current;
+            if (!current.Succeeded &&
+                current.Code is LocatorCodes.Conflict or
+                    LocatorCodes.KeyUnavailable or
+                    LocatorCodes.AuthenticationFailed)
+            {
+                return current;
             }
         }
 
-        return last ?? LocatorSelectionResult.Fail(
-            LocatorCodes.Unavailable);
+        return target is null && last is not null
+            ? last
+            : LocatorSelectionResult.Fail(LocatorCodes.Unavailable);
     }
 
     private async Task<LocatorSelectionResult> ReadSelectionAsync(
@@ -379,90 +498,202 @@ internal sealed class LocatorRootService
                     LocatorRootFormat.MaximumPhysicalSentinels),
                 cancellationToken)
             .ConfigureAwait(false);
-        if (!list.Succeeded ||
-            list.Objects.Length >
-                LocatorRootFormat.MaximumPhysicalSentinels ||
-            list.Objects.Any(reference =>
-                reference.Name != SentinelName))
+        if (list.Failure == OpaqueStoreFailure.Incomplete ||
+            !list.Complete ||
+            (!list.Objects.IsDefault &&
+                list.Objects.Length >
+                    LocatorRootFormat.MaximumPhysicalSentinels))
+        {
+            return LocatorSelectionResult.Fail(LocatorCodes.Conflict);
+        }
+
+        if (!list.Succeeded)
         {
             return LocatorSelectionResult.Fail(
                 MapStoreFailure(list.Failure));
         }
 
+        if (list.Objects.Any(reference => reference.Name != SentinelName))
+        {
+            return LocatorSelectionResult.Fail(LocatorCodes.Conflict);
+        }
+
         var authenticated = ImmutableArray.CreateBuilder<
             LocatorPhysicalCandidate>(list.Objects.Length);
         var unknown = ImmutableArray.CreateBuilder<LocatorUnknownArtifact>();
-        foreach (var reference in list.Objects.OrderBy(
-            item => item.ObjectId.Value,
-            StringComparer.Ordinal))
+        try
         {
-            var metadataResult = await store.ReadMetadataAsync(
-                    new OpaqueStoreMetadataRequest(reference),
-                    cancellationToken)
-                .ConfigureAwait(false);
-            if (!metadataResult.Succeeded ||
-                metadataResult.Metadata is null ||
-                metadataResult.Metadata.Reference != reference)
+            var metadata = ImmutableArray.CreateBuilder<
+                OpaqueStoreObjectMetadata>(list.Objects.Length);
+            foreach (var reference in list.Objects.OrderBy(
+                item => item.ObjectId.Value,
+                StringComparer.Ordinal))
             {
-                return LocatorSelectionResult.Fail(
-                    MapStoreFailure(metadataResult.Failure));
+                var metadataResult = await store.ReadMetadataAsync(
+                        new OpaqueStoreMetadataRequest(reference),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (!metadataResult.Succeeded ||
+                    metadataResult.Metadata is null ||
+                    metadataResult.Metadata.Reference != reference)
+                {
+                    return LocatorSelectionResult.Fail(
+                        MapStoreFailure(metadataResult.Failure));
+                }
+
+                metadata.Add(metadataResult.Metadata);
             }
 
-            var metadata = metadataResult.Metadata;
-            var download = await store.DownloadAsync(
-                    new OpaqueStoreDownloadRequest(
-                        metadata,
-                        LocatorRootFormat.MaximumEnvelopeBytes),
-                    cancellationToken)
-                .ConfigureAwait(false);
-            if (!download.Succeeded ||
-                download.Metadata != metadata)
+            foreach (var item in metadata)
             {
-                return LocatorSelectionResult.Fail(
-                    MapStoreFailure(download.Failure));
+                var download = await store.DownloadAsync(
+                        new OpaqueStoreDownloadRequest(
+                            item,
+                            LocatorRootFormat.MaximumEnvelopeBytes),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (!download.Succeeded || download.Metadata != item)
+                {
+                    if (download.Failure == OpaqueStoreFailure.Expired)
+                    {
+                        unknown.Add(new LocatorUnknownArtifact(
+                            item,
+                            LocatorCodes.Unavailable));
+                        continue;
+                    }
+
+                    return LocatorSelectionResult.Fail(
+                        MapStoreFailure(download.Failure));
+                }
+
+                if (LocatorRootSentinelCodec.TryDecrypt(
+                        access,
+                        keys,
+                        download.EncryptedBytes.Span,
+                        out var sentinel,
+                        out var failureCode) &&
+                    sentinel is not null)
+                {
+                    authenticated.Add(new LocatorPhysicalCandidate(
+                        item,
+                        sentinel));
+                }
+                else
+                {
+                    unknown.Add(new LocatorUnknownArtifact(
+                        item,
+                        failureCode));
+                }
             }
 
-            if (LocatorRootSentinelCodec.TryDecrypt(
-                    access,
-                    keys,
-                    download.EncryptedBytes.Span,
-                    out var sentinel,
-                    out var failureCode) &&
-                sentinel is not null)
+            var selected = LocatorRootSelection.Select(
+                authenticated.ToImmutable(),
+                unknown.ToImmutable(),
+                list.Objects.Length);
+            if (!selected.Succeeded || selected.IsAbsent)
             {
-                authenticated.Add(new LocatorPhysicalCandidate(
-                    metadata,
-                    sentinel));
+                return selected;
             }
-            else
+
+            var selection = selected.Selection!;
+            var ownedHead = selection.Head with
             {
-                unknown.Add(new LocatorUnknownArtifact(
-                    metadata,
-                    failureCode));
+                Sentinel = selection.Head.Sentinel with
+                {
+                    Root = selection.Head.Sentinel.Root.ToArray(),
+                },
+            };
+            return LocatorSelectionResult.Success(
+                selection with { Head = ownedHead });
+        }
+        finally
+        {
+            foreach (var candidate in authenticated)
+            {
+                CryptographicOperations.ZeroMemory(
+                    candidate.Sentinel.Root);
             }
         }
-
-        return LocatorRootSelection.Select(
-            authenticated.ToImmutable(),
-            unknown.ToImmutable(),
-            list.Objects.Length);
     }
 
     private LocatorRootResult CreateContext(
         AuthorizedLocatorAccess access,
-        LocatorPhysicalCandidate candidate) =>
-        LocatorRootResult.Success(
-            new LocatorContext(
+        LocatorPhysicalCandidate candidate)
+    {
+        if (!LocatorContext.TryCreate(
                 access,
                 keys,
                 candidate.Sentinel.Root,
-                currentSingletonProven: true));
+                currentSingletonProven: true,
+                timeProvider,
+                out var context) ||
+            context is null)
+        {
+            context?.Dispose();
+            return LocatorRootResult.Fail(LocatorCodes.KeyUnavailable);
+        }
+
+        return LocatorRootResult.Success(context);
+    }
 
     private static bool IsAdequatelyRetained(
         LocatorPhysicalCandidate candidate,
         long requiredExpiry) =>
-        candidate.Metadata.ExpiresAtUnixSeconds >= requiredExpiry &&
+        LocatorRootSelection.HasProvenAuthenticatedFloor(candidate) &&
         candidate.Sentinel.RequiredExpiresAtUnixSeconds >= requiredExpiry;
+
+    private async Task<OpaqueStoreReadBackResult> ReadBackWithRetriesAsync(
+        OpaqueStoreObjectMetadata metadata,
+        CancellationToken cancellationToken)
+    {
+        OpaqueStoreReadBackResult? last = null;
+        for (var attempt = 0; attempt < ReconciliationAttempts; attempt++)
+        {
+            last = await store.ReadBackExactAsync(
+                    new OpaqueStoreReadBackRequest(metadata),
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (last.Succeeded)
+            {
+                return last;
+            }
+        }
+
+        return last ?? OpaqueStoreReadBackResult.Fail(
+            OpaqueStoreFailure.OutcomeUnknown);
+    }
+
+    private async Task DeleteRejectedUploadAsync(
+        OpaqueStoreObjectMetadata metadata)
+    {
+        for (var attempt = 0; attempt < ReconciliationAttempts; attempt++)
+        {
+            _ = await store.DeleteExactAsync(
+                    new OpaqueStoreDeleteRequest(metadata),
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            var list = await store.ListExactAsync(
+                    new OpaqueStoreListRequest(
+                        SentinelName,
+                        LocatorRootFormat.MaximumPhysicalSentinels),
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            if (list.Succeeded &&
+                !list.Objects.Contains(metadata.Reference))
+            {
+                return;
+            }
+        }
+    }
+
+    private static void ClearSelection(LocatorSelectionResult? result)
+    {
+        if (result?.Selection is not null)
+        {
+            CryptographicOperations.ZeroMemory(
+                result.Selection.Head.Sentinel.Root);
+        }
+    }
 
     private static bool SameRoot(
         LocatorRootSentinel left,
@@ -472,6 +703,7 @@ internal sealed class LocatorRootService
     private static string MapStoreFailure(OpaqueStoreFailure failure) =>
         failure switch
         {
+            OpaqueStoreFailure.Incomplete => LocatorCodes.Conflict,
             OpaqueStoreFailure.Conflict or
                 OpaqueStoreFailure.Duplicate => LocatorCodes.Conflict,
             OpaqueStoreFailure.Cleanup => LocatorCodes.CleanupFailed,

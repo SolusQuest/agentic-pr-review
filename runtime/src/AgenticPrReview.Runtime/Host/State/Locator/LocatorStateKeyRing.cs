@@ -196,6 +196,71 @@ internal sealed class LocatorStateKeyRing : IDisposable
         }
     }
 
+    internal bool TryClone(
+        AuthorizedLocatorAccess? access,
+        out LocatorStateKeyRing? clone)
+    {
+        clone = null;
+        if (!TryGetCurrent(access, out var currentKey) ||
+            currentKey is null)
+        {
+            currentKey?.Dispose();
+            return false;
+        }
+
+        using (currentKey)
+        {
+            var currentCopy = new byte[LocatorRootFormat.KeyBytes];
+            byte[]? previousCopy = null;
+            try
+            {
+                if (!currentKey.TryCopyMaterial(currentCopy))
+                {
+                    return false;
+                }
+
+                if (PreviousKeyId is not null)
+                {
+                    if (!TryGetApprovedRead(
+                            access,
+                            PreviousKeyId,
+                            out var previousKey) ||
+                        previousKey is null)
+                    {
+                        previousKey?.Dispose();
+                        return false;
+                    }
+
+                    using (previousKey)
+                    {
+                        previousCopy = new byte[LocatorRootFormat.KeyBytes];
+                        if (!previousKey.TryCopyMaterial(previousCopy))
+                        {
+                            return false;
+                        }
+                    }
+                }
+
+                clone = new LocatorStateKeyRing(
+                    authority,
+                    repositoryId,
+                    currentCopy,
+                    previousCopy);
+                currentCopy = [];
+                previousCopy = null;
+                return true;
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(currentCopy);
+                if (previousCopy is not null)
+                {
+                    CryptographicOperations.ZeroMemory(previousCopy);
+                }
+            }
+        }
+    }
+
     public void Dispose()
     {
         var currentMaterial = Interlocked.Exchange(ref current, null);

@@ -9,6 +9,8 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
     private readonly object gate = new();
     private readonly Dictionary<string, StoredObject> objects =
         new(StringComparer.Ordinal);
+    private readonly HashSet<string> expiredObjectIds =
+        new(StringComparer.Ordinal);
     private int nextObjectId;
 
     internal bool ListComplete { get; set; } = true;
@@ -26,6 +28,7 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
     internal bool RemoveOnDeleteFailure { get; set; }
     internal long ExtraRetentionSeconds { get; set; } = 3_600;
     internal int HideExistingObjectsForNextLists { get; set; }
+    internal int HideNewestObjectForNextLists { get; set; }
     internal int ListCalls { get; private set; }
     internal int MetadataCalls { get; private set; }
     internal int DownloadCalls { get; private set; }
@@ -85,6 +88,14 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
         }
     }
 
+    internal void MarkExpired(OpaqueStoreObjectMetadata metadata)
+    {
+        lock (gate)
+        {
+            expiredObjectIds.Add(metadata.Reference.ObjectId.Value);
+        }
+    }
+
     internal void ResetCounts()
     {
         ListCalls = 0;
@@ -122,6 +133,13 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
                     OpaqueStoreFailure.None,
                     [],
                     Complete: true));
+            }
+
+            if (references.Length > 1 &&
+                HideNewestObjectForNextLists > 0)
+            {
+                HideNewestObjectForNextLists--;
+                references = references[..^1];
             }
 
             if (!ListComplete || references.Length > request.MaximumObjects)
@@ -177,6 +195,14 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
             {
                 return Task.FromResult(
                     OpaqueStoreDownloadResult.Fail(DownloadFailure));
+            }
+
+            if (expiredObjectIds.Contains(
+                    request.Expected.Reference.ObjectId.Value))
+            {
+                return Task.FromResult(
+                    OpaqueStoreDownloadResult.Fail(
+                        OpaqueStoreFailure.Expired));
             }
 
             return Task.FromResult(objects.TryGetValue(
@@ -299,6 +325,8 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
                 mutationState == OpaqueStoreMutationState.Committed)
             {
                 objects.Remove(request.Expected.Reference.ObjectId.Value);
+                expiredObjectIds.Remove(
+                    request.Expected.Reference.ObjectId.Value);
             }
 
             NextDeleteFailure = OpaqueStoreFailure.None;

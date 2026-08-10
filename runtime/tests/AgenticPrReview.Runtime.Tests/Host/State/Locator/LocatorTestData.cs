@@ -65,8 +65,7 @@ internal static class LocatorTestData
             generation,
             writerKeyId ?? keys.CurrentKeyId,
             Now,
-            requiredExpiry ??
-                Now + StateRetentionRequirements.SentinelRequestSeconds,
+            requiredExpiry ?? Now + 1,
             predecessors ?? [],
             superseded ?? []);
 

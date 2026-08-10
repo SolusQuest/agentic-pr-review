@@ -14,10 +14,14 @@ internal static class LocatorRootSelection
         if (authenticated.IsDefault ||
             unknown.IsDefault ||
             physicalCount < 0 ||
-            physicalCount > LocatorRootFormat.MaximumPhysicalSentinels ||
             authenticated.Length + unknown.Length != physicalCount)
         {
             return LocatorSelectionResult.Fail(LocatorCodes.Unavailable);
+        }
+
+        if (physicalCount > LocatorRootFormat.MaximumPhysicalSentinels)
+        {
+            return LocatorSelectionResult.Fail(LocatorCodes.Conflict);
         }
 
         if (authenticated.Any(candidate =>
@@ -71,7 +75,15 @@ internal static class LocatorRootSelection
             return LocatorSelectionResult.Fail(LocatorCodes.Conflict);
         }
 
-        var head = maximal
+        var retainedMaximal = maximal
+            .Where(HasProvenAuthenticatedFloor)
+            .ToImmutableArray();
+        if (retainedMaximal.IsEmpty)
+        {
+            return LocatorSelectionResult.Fail(LocatorCodes.Unavailable);
+        }
+
+        var head = retainedMaximal
             .OrderByDescending(candidate =>
                 candidate.Metadata.ExpiresAtUnixSeconds)
             .ThenByDescending(candidate =>
@@ -118,7 +130,11 @@ internal static class LocatorRootSelection
                         artifact.FailureCode,
                         LocatorCodes.KeyUnavailable)
                         ? LocatorCodes.KeyUnavailable
-                        : LocatorCodes.AuthenticationFailed);
+                        : StringComparer.Ordinal.Equals(
+                            artifact.FailureCode,
+                            LocatorCodes.Unavailable)
+                            ? LocatorCodes.Unavailable
+                            : LocatorCodes.AuthenticationFailed);
             }
         }
 
@@ -144,6 +160,11 @@ internal static class LocatorRootSelection
         CryptographicOperations.FixedTimeEquals(left.Root, right.Root) &&
         left.Predecessors.SequenceEqual(right.Predecessors) &&
         left.Superseded.SequenceEqual(right.Superseded);
+
+    internal static bool HasProvenAuthenticatedFloor(
+        LocatorPhysicalCandidate candidate) =>
+        candidate.Metadata.ExpiresAtUnixSeconds >=
+            candidate.Sentinel.RequiredExpiresAtUnixSeconds;
 
     private static bool EdgesAreValid(
         ImmutableArray<LocatorPhysicalCandidate> authenticated,

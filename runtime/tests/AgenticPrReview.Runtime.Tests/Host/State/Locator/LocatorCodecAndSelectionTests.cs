@@ -193,6 +193,73 @@ public sealed class LocatorCodecAndSelectionTests
     }
 
     [Fact]
+    public void SelectionRequiresEachPhysicalHeadToProveItsSignedFloor()
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var floor = LocatorTestData.Now + 100;
+        var sentinel = LocatorTestData.Sentinel(
+            keys,
+            requiredExpiry: floor);
+
+        var below = LocatorRootSelection.Select(
+            [
+                new LocatorPhysicalCandidate(
+                    LocatorTestData.Metadata("below", floor - 1),
+                    sentinel),
+            ],
+            [],
+            1);
+        Assert.Equal(LocatorCodes.Unavailable, below.Code);
+
+        foreach (var actual in new[] { floor, floor + 1 })
+        {
+            var retained = LocatorRootSelection.Select(
+                [
+                    new LocatorPhysicalCandidate(
+                        LocatorTestData.Metadata(
+                            $"retained-{actual}",
+                            actual),
+                        sentinel),
+                ],
+                [],
+                1);
+            Assert.True(retained.Succeeded, retained.Code);
+        }
+    }
+
+    [Fact]
+    public void SelectionPrefersValidEquivalentOverHigherUnderFloorCopy()
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var validFloor = LocatorTestData.Now + 100;
+        var invalidFloor = LocatorTestData.Now + 200;
+        var valid = new LocatorPhysicalCandidate(
+            LocatorTestData.Metadata("valid", validFloor),
+            LocatorTestData.Sentinel(
+                keys,
+                requiredExpiry: validFloor));
+        var invalid = new LocatorPhysicalCandidate(
+            LocatorTestData.Metadata("invalid", invalidFloor - 1),
+            valid.Sentinel with
+            {
+                RequiredExpiresAtUnixSeconds = invalidFloor,
+            });
+
+        var result = LocatorRootSelection.Select(
+            [invalid, valid],
+            [],
+            2);
+
+        Assert.True(result.Succeeded, result.Code);
+        Assert.Equal(
+            "valid",
+            result.Selection!.Head.Metadata.Reference.ObjectId.Value);
+        Assert.Single(result.Selection.SafeToDelete);
+    }
+
+    [Fact]
     public void SelectionRejectsDistinctRootsSiblingsAndInvalidPresentEdges()
     {
         using var access = LocatorTestData.Access();

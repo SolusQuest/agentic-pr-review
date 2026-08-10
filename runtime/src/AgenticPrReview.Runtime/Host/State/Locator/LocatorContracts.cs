@@ -95,7 +95,13 @@ internal sealed record LocatorRootResult(
     internal static LocatorRootResult Fail(string code) => new(code, null);
 }
 
-internal sealed record LocatorPreviousKeyRetirementEvidence(
-    bool EnumerationComplete,
-    bool NoLiveRestrictedStateDependencies,
-    bool NoLiveTransactionDependencies);
+internal enum LocatorDependencyKind
+{
+    RestrictedState,
+    Transaction,
+}
+
+internal sealed record LocatorRequiredDependency(
+    LocatorDependencyKind Kind,
+    string KeyId,
+    long ExpiresAtUnixSeconds);
