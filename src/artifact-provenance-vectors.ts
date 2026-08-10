@@ -1,4 +1,8 @@
-export type ArtifactVectorDisposition = 'port' | 'obsolete';
+export type ArtifactVectorDisposition =
+  | 'direct-transport'
+  | 'negative-ownership'
+  | 'later-policy'
+  | 'obsolete-absent';
 
 export interface ArtifactProvenanceCase {
   readonly id: string;
@@ -17,12 +21,27 @@ export interface ArtifactProvenanceVector {
   readonly securityInvariant: string;
   readonly cases?: readonly ArtifactProvenanceCase[];
   readonly disposition: ArtifactVectorDisposition;
-  readonly futureConsumer?: 'R4 artifact bridge';
-  readonly deletionGate?: string;
+  readonly owner: 'R4 S2 private artifact bridge';
+  readonly evidenceClass: 'permanent-negative-conformance';
   readonly deletionRationale?: string;
 }
 
-const r4Gate = 'delete after equivalent R4 artifact-bridge conformance coverage exists';
+const directTransportIds = new Set([
+  'APV-001',
+  'APV-002',
+  'APV-003',
+  'APV-004',
+  'APV-005',
+  'APV-006',
+  'APV-007',
+  'APV-008',
+  'APV-026',
+  'APV-027',
+  'APV-028',
+  'APV-030',
+]);
+
+const laterPolicyIds = new Set(['APV-023', 'APV-024', 'APV-025']);
 
 function port(
   id: ArtifactProvenanceVector['id'],
@@ -32,6 +51,11 @@ function port(
   securityInvariant: string,
   cases?: readonly ArtifactProvenanceCase[],
 ): ArtifactProvenanceVector {
+  const disposition = directTransportIds.has(id)
+    ? 'direct-transport'
+    : laterPolicyIds.has(id)
+      ? 'later-policy'
+      : 'negative-ownership';
   return {
     id,
     inputMetadata,
@@ -39,9 +63,9 @@ function port(
     expectedOutcome,
     securityInvariant,
     ...(cases === undefined ? {} : { cases }),
-    disposition: 'port',
-    futureConsumer: 'R4 artifact bridge',
-    deletionGate: r4Gate,
+    disposition,
+    owner: 'R4 S2 private artifact bridge',
+    evidenceClass: 'permanent-negative-conformance',
   };
 }
 
@@ -59,14 +83,17 @@ function obsolete(
     selectionContext,
     expectedOutcome,
     securityInvariant,
-    disposition: 'obsolete',
+    disposition: 'obsolete-absent',
+    owner: 'R4 S2 private artifact bridge',
+    evidenceClass: 'permanent-negative-conformance',
     deletionRationale,
   };
 }
 
 /**
- * Provider-independent security inputs preserved from the retired R1 artifact adapter.
- * These vectors intentionally do not select an R4 transport or ordering algorithm.
+ * Permanent S2 security evidence transferred from the retired R1 artifact adapter.
+ * Direct transport vectors are executable bridge obligations. Negative-ownership
+ * and later-policy vectors prove that the Node bridge does not select state.
  */
 export const artifactProvenanceVectors = [
   port(

@@ -23,5 +23,8 @@
     "typescript": "^5.0.0",
     "vitest": "^3.0.0",
     "yaml": "^2.9.0"
+  },
+  "dependencies": {
+    "@actions/artifact": "6.2.1"
   }
 }

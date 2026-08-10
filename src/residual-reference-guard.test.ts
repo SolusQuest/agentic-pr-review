@@ -75,7 +75,7 @@ describe('R1 residual reference allowlist', () => {
       } else {
         expect(rule.status).not.toBe('');
         expect(rule.supersessionRule).not.toBe('');
-        expect(['governing', 'historical']).toContain(rule.lifecycleClass);
+        expect(['governing', 'historical', 'conformance']).toContain(rule.lifecycleClass);
       }
     }
   });
