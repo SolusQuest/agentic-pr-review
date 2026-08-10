@@ -213,7 +213,7 @@ public sealed class LocatorCodecAndSelectionTests
         Assert.True(below.RequiresCleanup);
         Assert.Equal(
             "below",
-            Assert.Single(below.CleanupDebt).Reference.ObjectId.Value);
+            Assert.Single(below.CleanupDebt!.Objects).Reference.ObjectId.Value);
 
         foreach (var actual in new[] { floor, floor + 1 })
         {

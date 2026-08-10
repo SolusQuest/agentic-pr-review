@@ -178,7 +178,11 @@ internal static class LocatorRootSelection
         if (maximumGeneration == 0)
         {
             return remaining.IsEmpty && unknown.IsEmpty
-                ? LocatorSelectionResult.Cleanup(debt)
+                ? LocatorSelectionResult.Cleanup(new LocatorCleanupDebt(
+                    debt,
+                    LocatorCleanupMode.GenerationZeroAbsenceAllowed,
+                    maximal[0].Sentinel.Root.ToArray(),
+                    MinimumGeneration: 0))
                 : LocatorSelectionResult.Fail(
                     unknown.IsEmpty
                         ? LocatorCodes.Conflict
@@ -201,6 +205,12 @@ internal static class LocatorRootSelection
 
         if (fallback.RequiresCleanup || fallback.Selection is null)
         {
+            if (fallback.CleanupDebt is not null)
+            {
+                CryptographicOperations.ZeroMemory(
+                    fallback.CleanupDebt.ExpectedRoot);
+            }
+
             return LocatorSelectionResult.Fail(LocatorCodes.Unavailable);
         }
 
@@ -215,7 +225,11 @@ internal static class LocatorRootSelection
                         possibleFallback.Sentinel,
                         fallbackHead.Sentinel))));
         return hasExactFallback
-            ? LocatorSelectionResult.Cleanup(debt)
+            ? LocatorSelectionResult.Cleanup(new LocatorCleanupDebt(
+                debt,
+                LocatorCleanupMode.SuccessorRequiresFallback,
+                fallbackHead.Sentinel.Root.ToArray(),
+                fallbackHead.Sentinel.Generation))
             : LocatorSelectionResult.Fail(LocatorCodes.Conflict);
     }
 

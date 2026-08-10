@@ -59,10 +59,45 @@ internal sealed class LocatorRootService
                  read.RequiresCleanup && attempt < ReconciliationAttempts;
                  attempt++)
             {
+                var cleanupDebt = read.CleanupDebt!;
                 var recovered = await CleanupDebtAndReadAsync(
                         access!,
-                        read.CleanupDebt)
+                        cleanupDebt)
                     .ConfigureAwait(false);
+                if (!recovered.Succeeded)
+                {
+                    ClearSelection(recovered);
+                    return LocatorRootResult.Fail(recovered.Code);
+                }
+
+                if (recovered.IsAbsent)
+                {
+                    ClearSelection(recovered);
+                    if (cleanupDebt.Mode !=
+                        LocatorCleanupMode.GenerationZeroAbsenceAllowed)
+                    {
+                        return LocatorRootResult.Fail(
+                            LocatorCodes.Unavailable);
+                    }
+
+                    return await InitializeWithRootAsync(
+                            access!,
+                            cleanupDebt.ExpectedRoot,
+                            now,
+                            requiredExpiry,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
+                var observationCode = ValidateCleanupObservation(
+                    cleanupDebt,
+                    recovered);
+                if (observationCode is not null)
+                {
+                    ClearSelection(recovered);
+                    return LocatorRootResult.Fail(observationCode);
+                }
+
                 ClearSelection(read);
                 read = recovered;
             }
@@ -88,11 +123,9 @@ internal sealed class LocatorRootService
             }
 
             var selection = read.Selection!;
-            var successorRequired =
-                !StringComparer.Ordinal.Equals(
-                    selection.Head.Sentinel.WriterKeyId,
-                    keys.CurrentKeyId) ||
-                !IsAdequatelyRetained(selection.Head, requiredExpiry);
+            var successorRequired = RequiresSuccessor(
+                selection,
+                requiredExpiry);
             if (!successorRequired)
             {
                 if (selection.SafeToDelete.IsEmpty)
@@ -112,22 +145,63 @@ internal sealed class LocatorRootService
             if (selection.PhysicalCount ==
                 LocatorRootFormat.MaximumPhysicalSentinels)
             {
+                var expectedRoot = selection.Head.Sentinel.Root;
+                var minimumGeneration = selection.Head.Sentinel.Generation;
                 var cleaned = await CleanupAndReadAsync(
                         access!,
                         selection)
                     .ConfigureAwait(false);
                 try
                 {
-                    if (!cleaned.Succeeded || cleaned.IsAbsent)
+                    if (!cleaned.Succeeded)
                     {
                         return LocatorRootResult.Fail(cleaned.Code);
                     }
 
+                    if (cleaned.IsAbsent ||
+                        cleaned.RequiresCleanup ||
+                        cleaned.Selection is null)
+                    {
+                        return LocatorRootResult.Fail(
+                            LocatorCodes.Unavailable);
+                    }
+
                     selection = cleaned.Selection!;
-                    if (selection.PhysicalCount >
-                        LocatorRootFormat.MaximumPhysicalSentinels - 1)
+                    if (!CryptographicOperations.FixedTimeEquals(
+                            selection.Head.Sentinel.Root,
+                            expectedRoot))
                     {
                         return LocatorRootResult.Fail(LocatorCodes.Conflict);
+                    }
+
+                    if (selection.Head.Sentinel.Generation <
+                        minimumGeneration)
+                    {
+                        return LocatorRootResult.Fail(
+                            LocatorCodes.Unavailable);
+                    }
+
+                    if (selection.PhysicalCount ==
+                        LocatorRootFormat.MaximumPhysicalSentinels)
+                    {
+                        return LocatorRootResult.Fail(
+                            LocatorCodes.CleanupFailed);
+                    }
+
+                    if (!RequiresSuccessor(selection, requiredExpiry))
+                    {
+                        if (selection.SafeToDelete.IsEmpty)
+                        {
+                            return CreateContext(access!, selection.Head);
+                        }
+
+                        return await CleanupAndFinalizeAsync(
+                                access!,
+                                selection,
+                                selection.Head.Sentinel.Root,
+                                selection.Head.Sentinel.Generation,
+                                requiredExpiry)
+                            .ConfigureAwait(false);
                     }
 
                     return await AppendSuccessorAsync(
@@ -183,14 +257,37 @@ internal sealed class LocatorRootService
 
         try
         {
-            var sentinel = new LocatorRootSentinel(
-                root,
-                Generation: 0,
-                keys.CurrentKeyId,
-                now,
-                requiredExpiry,
-                [],
-                []);
+            return await InitializeWithRootAsync(
+                    access,
+                    root,
+                    now,
+                    requiredExpiry,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(root);
+        }
+    }
+
+    private async Task<LocatorRootResult> InitializeWithRootAsync(
+        AuthorizedLocatorAccess access,
+        ReadOnlyMemory<byte> root,
+        long now,
+        long requiredExpiry,
+        CancellationToken cancellationToken)
+    {
+        var sentinel = new LocatorRootSentinel(
+            root.ToArray(),
+            Generation: 0,
+            keys.CurrentKeyId,
+            now,
+            requiredExpiry,
+            [],
+            []);
+        try
+        {
             return await UploadAndConvergeAsync(
                     access,
                     sentinel,
@@ -200,7 +297,7 @@ internal sealed class LocatorRootService
         }
         finally
         {
-            CryptographicOperations.ZeroMemory(root);
+            CryptographicOperations.ZeroMemory(sentinel.Root);
         }
     }
 
@@ -374,9 +471,16 @@ internal sealed class LocatorRootService
                 ? LocatorSelectionResult.Success(selection)
                 : ownedRead = await CleanupAndReadAsync(access, selection)
                     .ConfigureAwait(false);
-            if (!read.Succeeded || read.IsAbsent)
+            if (!read.Succeeded)
             {
                 return LocatorRootResult.Fail(read.Code);
+            }
+
+            if (read.IsAbsent ||
+                read.RequiresCleanup ||
+                read.Selection is null)
+            {
+                return LocatorRootResult.Fail(LocatorCodes.Unavailable);
             }
 
             var final = read.Selection!;
@@ -435,9 +539,9 @@ internal sealed class LocatorRootService
 
     private async Task<LocatorSelectionResult> CleanupDebtAndReadAsync(
         AuthorizedLocatorAccess access,
-        ImmutableArray<OpaqueStoreObjectMetadata> cleanupDebt)
+        LocatorCleanupDebt cleanupDebt)
     {
-        foreach (var metadata in cleanupDebt)
+        foreach (var metadata in cleanupDebt.Objects)
         {
             _ = await store.DeleteExactAsync(
                     new OpaqueStoreDeleteRequest(metadata),
@@ -445,7 +549,7 @@ internal sealed class LocatorRootService
                 .ConfigureAwait(false);
         }
 
-        return await ReadSelectionAsync(
+        return await ReadSelectionWithRetriesAsync(
                 access,
                 CancellationToken.None)
             .ConfigureAwait(false);
@@ -469,10 +573,14 @@ internal sealed class LocatorRootService
             {
                 if (current.RequiresCleanup)
                 {
-                    return target is null
-                        ? current
-                        : LocatorSelectionResult.Fail(
-                            LocatorCodes.Unavailable);
+                    if (target is null)
+                    {
+                        return current;
+                    }
+
+                    ClearSelection(current);
+                    return LocatorSelectionResult.Fail(
+                        LocatorCodes.Unavailable);
                 }
 
                 if (target is null)
@@ -739,6 +847,57 @@ internal sealed class LocatorRootService
             CryptographicOperations.ZeroMemory(
                 result.Selection.Head.Sentinel.Root);
         }
+
+        if (result?.CleanupDebt is not null)
+        {
+            CryptographicOperations.ZeroMemory(
+                result.CleanupDebt.ExpectedRoot);
+        }
+    }
+
+    private bool RequiresSuccessor(
+        LocatorSelection selection,
+        long requiredExpiry) =>
+        !StringComparer.Ordinal.Equals(
+            selection.Head.Sentinel.WriterKeyId,
+            keys.CurrentKeyId) ||
+        !IsAdequatelyRetained(selection.Head, requiredExpiry);
+
+    private static string? ValidateCleanupObservation(
+        LocatorCleanupDebt expectation,
+        LocatorSelectionResult observation)
+    {
+        if (observation.RequiresCleanup)
+        {
+            var nested = observation.CleanupDebt!;
+            if (!CryptographicOperations.FixedTimeEquals(
+                    nested.ExpectedRoot,
+                    expectation.ExpectedRoot))
+            {
+                return LocatorCodes.Conflict;
+            }
+
+            return nested.MinimumGeneration < expectation.MinimumGeneration
+                ? LocatorCodes.Unavailable
+                : null;
+        }
+
+        if (observation.Selection is null)
+        {
+            return LocatorCodes.Unavailable;
+        }
+
+        if (!CryptographicOperations.FixedTimeEquals(
+                observation.Selection.Head.Sentinel.Root,
+                expectation.ExpectedRoot))
+        {
+            return LocatorCodes.Conflict;
+        }
+
+        return observation.Selection.Head.Sentinel.Generation <
+            expectation.MinimumGeneration
+            ? LocatorCodes.Unavailable
+            : null;
     }
 
     private static bool SameRoot(

@@ -30,6 +30,8 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
     internal long ExtraRetentionSeconds { get; set; } = 3_600;
     internal int HideExistingObjectsForNextLists { get; set; }
     internal int HideNewestObjectForNextLists { get; set; }
+    internal System.Action? BeforeDelete { get; set; }
+    internal System.Action? AfterDelete { get; set; }
     internal int ListCalls { get; private set; }
     internal int MetadataCalls { get; private set; }
     internal int DownloadCalls { get; private set; }
@@ -309,6 +311,9 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
         cancellationToken.ThrowIfCancellationRequested();
         lock (gate)
         {
+            var beforeDelete = BeforeDelete;
+            BeforeDelete = null;
+            beforeDelete?.Invoke();
             DeleteCalls++;
             if (!objects.TryGetValue(
                     request.Expected.Reference.ObjectId.Value,
@@ -342,6 +347,10 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
                     OpaqueStoreMutationState.NotCommitted;
                 RemoveOnDeleteFailure = false;
             }
+
+            var afterDelete = AfterDelete;
+            AfterDelete = null;
+            afterDelete?.Invoke();
 
             return Task.FromResult(failure == OpaqueStoreFailure.None
                 ? new OpaqueStoreDeleteResult(

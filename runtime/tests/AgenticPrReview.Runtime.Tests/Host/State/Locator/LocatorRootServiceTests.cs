@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Security.Cryptography;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.Locator;
@@ -961,6 +962,311 @@ public sealed class LocatorRootServiceTests
     }
 
     [Fact]
+    public async Task AtCapacityPersistentCleanupFailureIsNotConflict()
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var (store, _, head) = await StoreAtCapacityAsync(access, keys);
+        store.NextDeleteFailure = OpaqueStoreFailure.OutcomeUnknown;
+        store.NextDeleteMutationState =
+            OpaqueStoreMutationState.OutcomeUnknown;
+        store.DeleteFailuresRemaining =
+            LocatorRootFormat.MaximumPhysicalSentinels - 1;
+        var dependent = head.ExpiresAtUnixSeconds -
+            StateRetentionRequirements.SentinelDependentMarginSeconds + 1;
+
+        var blocked = await Service(store, keys).ResolveAsync(
+            access,
+            dependent,
+            CancellationToken.None);
+
+        Assert.Equal(LocatorCodes.CleanupFailed, blocked.Code);
+        Assert.NotEqual(LocatorCodes.Conflict, blocked.Code);
+        Assert.Equal(0, store.UploadCalls);
+        Assert.Equal(
+            LocatorRootFormat.MaximumPhysicalSentinels,
+            store.Objects.Length);
+
+        store.ResetCounts();
+        var recovered = await Service(store, keys).ResolveAsync(
+            access,
+            dependent,
+            CancellationToken.None);
+
+        Assert.True(recovered.Succeeded, recovered.Code);
+        recovered.Context!.Dispose();
+        Assert.Equal(1, store.UploadCalls);
+        Assert.Single(store.Objects);
+    }
+
+    [Fact]
+    public async Task DuplicateCleanupRejectsConcurrentUnderRetainedSuccessor()
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var store = await StoreWithDuplicateAsync(access, keys);
+        var head = store.Objects
+            .OrderByDescending(item => item.ExpiresAtUnixSeconds)
+            .First();
+        var duplicate = store.Objects.Single(item => item != head);
+        var headSentinel = Decrypt(store, head, access, keys);
+        var successor = LocatorTestData.Sentinel(
+            keys,
+            root: headSentinel.Root.ToArray(),
+            generation: 1,
+            requiredExpiry: headSentinel.RequiredExpiresAtUnixSeconds,
+            predecessors: [LocatorRootSentinelCodec.Identity(head)],
+            superseded: [LocatorRootSentinelCodec.Identity(duplicate)]);
+        var successorEnvelope = Encrypt(access, keys, successor);
+        store.BeforeDelete = () => store.Add(
+            successorEnvelope,
+            successor.RequiredExpiresAtUnixSeconds - 1,
+            "concurrent-under-retained-duplicate-successor");
+
+        var blocked = await Service(store, keys).ResolveAsync(
+            access,
+            0,
+            CancellationToken.None);
+
+        Assert.Equal(LocatorCodes.Unavailable, blocked.Code);
+        Assert.NotEqual(LocatorCodes.Ready, blocked.Code);
+        Assert.Equal(0, store.UploadCalls);
+
+        store.ResetCounts();
+        var recovered = await Service(store, keys).ResolveAsync(
+            access,
+            0,
+            CancellationToken.None);
+        Assert.True(recovered.Succeeded, recovered.Code);
+        recovered.Context!.Dispose();
+        Assert.Equal(0, store.UploadCalls);
+        Assert.Single(store.Objects);
+    }
+
+    [Fact]
+    public async Task SuccessorPruningRejectsConcurrentUnderRetainedSuccessor()
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var store = new ScriptedLocatorStore();
+        var initialized = await Service(store, keys).ResolveAsync(
+            access,
+            0,
+            CancellationToken.None);
+        Assert.True(initialized.Succeeded, initialized.Code);
+        initialized.Context!.Dispose();
+        var originalMetadata = store.Objects.Single();
+        var original = Decrypt(store, originalMetadata, access, keys);
+        var dependent = original.RequiredExpiresAtUnixSeconds -
+            StateRetentionRequirements.SentinelDependentMarginSeconds + 1;
+        store.ResetCounts();
+        store.BeforeDelete = () =>
+        {
+            var successorMetadata = store.Objects.Single(item =>
+                item != originalMetadata);
+            var successor = Decrypt(
+                store,
+                successorMetadata,
+                access,
+                keys);
+            var concurrent = LocatorTestData.Sentinel(
+                keys,
+                root: successor.Root.ToArray(),
+                generation: checked(successor.Generation + 1),
+                requiredExpiry: successor.RequiredExpiresAtUnixSeconds,
+                predecessors:
+                [
+                    LocatorRootSentinelCodec.Identity(successorMetadata),
+                ],
+                superseded:
+                [
+                    LocatorRootSentinelCodec.Identity(originalMetadata),
+                ]);
+            store.Add(
+                Encrypt(access, keys, concurrent),
+                concurrent.RequiredExpiresAtUnixSeconds - 1,
+                "concurrent-under-retained-pruning-successor");
+        };
+
+        var blocked = await Service(store, keys).ResolveAsync(
+            access,
+            dependent,
+            CancellationToken.None);
+
+        Assert.Equal(LocatorCodes.Unavailable, blocked.Code);
+        Assert.NotEqual(LocatorCodes.Ready, blocked.Code);
+        Assert.Equal(1, store.UploadCalls);
+
+        store.ResetCounts();
+        var recovered = await Service(store, keys).ResolveAsync(
+            access,
+            dependent,
+            CancellationToken.None);
+        Assert.True(recovered.Succeeded, recovered.Code);
+        recovered.Context!.Dispose();
+        Assert.Equal(0, store.UploadCalls);
+        Assert.Single(store.Objects);
+    }
+
+    [Fact]
+    public async Task HeadroomCleanupRejectsConcurrentUnderRetainedSuccessor()
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var (store, sentinel, head) = await StoreAtCapacityAsync(
+            access,
+            keys);
+        var superseded = store.Objects
+            .Where(item => item != head)
+            .Select(LocatorRootSentinelCodec.Identity)
+            .OrderBy(item => item.ObjectId, StringComparer.Ordinal)
+            .ThenBy(item => item.ArchiveSha256, StringComparer.Ordinal)
+            .ThenBy(item => item.EnvelopeSha256, StringComparer.Ordinal)
+            .ToImmutableArray();
+        var requiredExpiry = head.ExpiresAtUnixSeconds + 1;
+        var concurrent = LocatorTestData.Sentinel(
+            keys,
+            root: sentinel.Root.ToArray(),
+            generation: 1,
+            requiredExpiry: requiredExpiry,
+            predecessors: [LocatorRootSentinelCodec.Identity(head)],
+            superseded: superseded);
+        var concurrentEnvelope = Encrypt(access, keys, concurrent);
+        store.BeforeDelete = () => store.Add(
+            concurrentEnvelope,
+            requiredExpiry - 1,
+            "concurrent-under-retained-headroom-successor");
+        var dependent = head.ExpiresAtUnixSeconds -
+            StateRetentionRequirements.SentinelDependentMarginSeconds + 1;
+
+        var blocked = await Service(store, keys).ResolveAsync(
+            access,
+            dependent,
+            CancellationToken.None);
+
+        Assert.Equal(LocatorCodes.Unavailable, blocked.Code);
+        Assert.NotEqual(LocatorCodes.Ready, blocked.Code);
+        Assert.Equal(0, store.UploadCalls);
+
+        store.ResetCounts();
+        var recovered = await Service(store, keys).ResolveAsync(
+            access,
+            dependent,
+            CancellationToken.None);
+        Assert.True(recovered.Succeeded, recovered.Code);
+        recovered.Context!.Dispose();
+        Assert.Equal(1, store.UploadCalls);
+        Assert.Single(store.Objects);
+    }
+
+    [Fact]
+    public async Task HeadroomCleanupAdoptsConcurrentAdequateSuccessor()
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var (store, sentinel, head) = await StoreAtCapacityAsync(
+            access,
+            keys);
+        var superseded = store.Objects
+            .Where(item => item != head)
+            .Select(LocatorRootSentinelCodec.Identity)
+            .OrderBy(item => item.ObjectId, StringComparer.Ordinal)
+            .ThenBy(item => item.ArchiveSha256, StringComparer.Ordinal)
+            .ThenBy(item => item.EnvelopeSha256, StringComparer.Ordinal)
+            .ToImmutableArray();
+        var requiredExpiry = head.ExpiresAtUnixSeconds + 1;
+        var concurrent = LocatorTestData.Sentinel(
+            keys,
+            root: sentinel.Root.ToArray(),
+            generation: 1,
+            requiredExpiry: requiredExpiry,
+            predecessors: [LocatorRootSentinelCodec.Identity(head)],
+            superseded: superseded);
+        var concurrentEnvelope = Encrypt(access, keys, concurrent);
+        store.BeforeDelete = () => store.Add(
+            concurrentEnvelope,
+            requiredExpiry + 3_600,
+            "concurrent-adequate-headroom-successor");
+        var dependent = head.ExpiresAtUnixSeconds -
+            StateRetentionRequirements.SentinelDependentMarginSeconds + 1;
+
+        var result = await Service(store, keys).ResolveAsync(
+            access,
+            dependent,
+            CancellationToken.None);
+
+        Assert.True(result.Succeeded, result.Code);
+        result.Context!.Dispose();
+        Assert.Equal(0, store.UploadCalls);
+        Assert.Single(store.Objects);
+        Assert.Equal<ulong>(1, DecryptSingle(
+            store,
+            access,
+            keys).Generation);
+    }
+
+    [Fact]
+    public async Task HiddenPreviousKeyFallbackPreservesRootDuringDebtCleanup()
+    {
+        using var access = LocatorTestData.Access();
+        using var oldKeys = LocatorTestData.KeyRing(
+            access,
+            currentBase64: LocatorTestData.PreviousBase64);
+        var store = new ScriptedLocatorStore();
+        var oldResult = await Service(store, oldKeys).ResolveAsync(
+            access,
+            0,
+            CancellationToken.None);
+        Assert.True(oldResult.Succeeded, oldResult.Code);
+        Assert.True(oldResult.Context!.TryDeriveOpaqueName(
+            access,
+            "hidden-fallback",
+            [1, 5, 3],
+            out var oldName));
+        oldResult.Context.Dispose();
+        var oldMetadata = store.Objects.Single();
+        var oldSentinel = Decrypt(store, oldMetadata, access, oldKeys);
+
+        using var rotated = LocatorTestData.KeyRing(
+            access,
+            previousBase64: LocatorTestData.PreviousBase64);
+        var underRetained = LocatorTestData.Sentinel(
+            rotated,
+            root: oldSentinel.Root.ToArray(),
+            generation: 1,
+            requiredExpiry:
+                oldSentinel.RequiredExpiresAtUnixSeconds + 1,
+            predecessors: [LocatorRootSentinelCodec.Identity(oldMetadata)]);
+        store.Add(
+            Encrypt(access, rotated, underRetained),
+            underRetained.RequiredExpiresAtUnixSeconds - 1,
+            "under-retained-rotated-successor");
+        store.AfterDelete = () =>
+            store.HideExistingObjectsForNextLists = 1;
+        store.ResetCounts();
+
+        var recovered = await Service(store, rotated).ResolveAsync(
+            access,
+            0,
+            CancellationToken.None);
+
+        Assert.True(recovered.Succeeded, recovered.Code);
+        Assert.True(recovered.Context!.TryDeriveOpaqueName(
+            access,
+            "hidden-fallback",
+            [1, 5, 3],
+            out var recoveredName));
+        recovered.Context.Dispose();
+        Assert.Equal(oldName, recoveredName);
+        Assert.Equal(1, store.UploadCalls);
+        Assert.Single(store.Objects);
+        Assert.Equal(rotated.CurrentKeyId, DecryptSingle(
+            store,
+            access,
+            rotated).WriterKeyId);
+    }
+
+    [Fact]
     public async Task PartialEnumerationWrongKeyAndOverflowFailClosed()
     {
         using var access = LocatorTestData.Access();
@@ -1030,6 +1336,15 @@ public sealed class LocatorRootServiceTests
         LocatorStateKeyRing keys)
     {
         var metadata = store.Objects.Single();
+        return Decrypt(store, metadata, access, keys);
+    }
+
+    private static LocatorRootSentinel Decrypt(
+        ScriptedLocatorStore store,
+        OpaqueStoreObjectMetadata metadata,
+        AuthorizedLocatorAccess access,
+        LocatorStateKeyRing keys)
+    {
         Assert.True(LocatorRootSentinelCodec.TryDecrypt(
             access,
             keys,
@@ -1038,6 +1353,55 @@ public sealed class LocatorRootServiceTests
             out var code),
             code);
         return sentinel!;
+    }
+
+    private static byte[] Encrypt(
+        AuthorizedLocatorAccess access,
+        LocatorStateKeyRing keys,
+        LocatorRootSentinel sentinel)
+    {
+        Assert.True(LocatorRootSentinelCodec.TryEncrypt(
+            access,
+            keys,
+            sentinel,
+            out var envelope,
+            out var code),
+            code);
+        return envelope!;
+    }
+
+    private static async Task<(
+        ScriptedLocatorStore Store,
+        LocatorRootSentinel Sentinel,
+        OpaqueStoreObjectMetadata Head)> StoreAtCapacityAsync(
+        AuthorizedLocatorAccess access,
+        LocatorStateKeyRing keys)
+    {
+        var store = new ScriptedLocatorStore();
+        var initialized = await Service(store, keys).ResolveAsync(
+            access,
+            0,
+            CancellationToken.None);
+        Assert.True(initialized.Succeeded, initialized.Code);
+        initialized.Context!.Dispose();
+        var original = store.Objects.Single();
+        var sentinel = Decrypt(store, original, access, keys);
+        for (var index = 0; index <
+            LocatorRootFormat.MaximumPhysicalSentinels - 1; index++)
+        {
+            store.Add(
+                Encrypt(access, keys, sentinel),
+                original.ExpiresAtUnixSeconds + index + 1);
+        }
+
+        var head = store.Objects
+            .OrderByDescending(item => item.ExpiresAtUnixSeconds)
+            .ThenBy(
+                item => item.Reference.ObjectId.Value,
+                StringComparer.Ordinal)
+            .First();
+        store.ResetCounts();
+        return (store, sentinel, head);
     }
 
     private static async Task<ScriptedLocatorStore> StoreWithDuplicateAsync(

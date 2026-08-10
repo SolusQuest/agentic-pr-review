@@ -62,31 +62,43 @@ internal sealed record LocatorSelection(
     ImmutableArray<OpaqueStoreObjectMetadata> SafeToDelete,
     int PhysicalCount);
 
+internal enum LocatorCleanupMode
+{
+    GenerationZeroAbsenceAllowed,
+    SuccessorRequiresFallback,
+}
+
+internal sealed record LocatorCleanupDebt(
+    ImmutableArray<OpaqueStoreObjectMetadata> Objects,
+    LocatorCleanupMode Mode,
+    byte[] ExpectedRoot,
+    ulong MinimumGeneration);
+
 internal sealed record LocatorSelectionResult(
     string Code,
     bool IsAbsent,
     LocatorSelection? Selection,
-    ImmutableArray<OpaqueStoreObjectMetadata> CleanupDebt)
+    LocatorCleanupDebt? CleanupDebt)
 {
     internal bool Succeeded =>
         StringComparer.Ordinal.Equals(Code, LocatorCodes.Ready);
 
     internal bool RequiresCleanup =>
-        Succeeded && !CleanupDebt.IsDefaultOrEmpty;
+        Succeeded && CleanupDebt is not null;
 
     internal static LocatorSelectionResult Absent() =>
-        new(LocatorCodes.Ready, IsAbsent: true, null, []);
+        new(LocatorCodes.Ready, IsAbsent: true, null, null);
 
     internal static LocatorSelectionResult Success(
         LocatorSelection selection) =>
-        new(LocatorCodes.Ready, IsAbsent: false, selection, []);
+        new(LocatorCodes.Ready, IsAbsent: false, selection, null);
 
     internal static LocatorSelectionResult Cleanup(
-        ImmutableArray<OpaqueStoreObjectMetadata> cleanupDebt) =>
+        LocatorCleanupDebt cleanupDebt) =>
         new(LocatorCodes.Ready, IsAbsent: false, null, cleanupDebt);
 
     internal static LocatorSelectionResult Fail(string code) =>
-        new(code, IsAbsent: false, null, []);
+        new(code, IsAbsent: false, null, null);
 }
 
 internal sealed record LocatorRootResult(
