@@ -1,4 +1,5 @@
 using System.Reflection;
+using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Tests.Host.Publishing.Rendering;
@@ -85,6 +86,7 @@ public sealed class StickyPublicationContractsTests
             Assert.Null(property.SetMethod));
         foreach (var type in new[]
         {
+            typeof(AuthorizedStickyReadbackRequest),
             typeof(StickyCommentPublisher.StickyPublicationReceipt),
             typeof(StickyCommentPublisher.StickyPublicationResult),
             typeof(StickyCommentPublisher.StickyDiscoveryResult),
@@ -99,7 +101,8 @@ public sealed class StickyPublicationContractsTests
         var fake = new FakeIssuerEvidence();
         Assert.Throws<InvalidOperationException>(() =>
             StickyCommentPublisher.StickyPublicationReceipt.FromReadback(
-                null!, StickyPublicationOperation.Create, fake));
+                (AuthorizedStickyPublicationRequest)null!,
+                StickyPublicationOperation.Create, fake));
         Assert.Throws<InvalidOperationException>(() =>
             StickyCommentPublisher.StickyPublicationResult.FromFailure(fake));
         Assert.Throws<InvalidOperationException>(() =>
@@ -130,6 +133,45 @@ public sealed class StickyPublicationContractsTests
         Assert.Throws<InvalidOperationException>(() =>
             StickyCommentPublisher.StickyPublicationResult.FromReadback(
                 receipt, new FakeIssuerEvidence()));
+    }
+
+    [Fact]
+    public async Task PersistedP1OrReceiptCanAuthorizeReadOnlyDiscovery()
+    {
+        var data = await StickyPublicationTestData.CreateAsync();
+        Assert.True(AuthorizedStickyReadbackRequest.TryCreate(
+            data.Request.Authorization, data.Request.Scope, data.Rendered,
+            out var persisted));
+        var comment = StickyPublicationTestData.Comment(7,
+            data.Rendered.Comment);
+        Assert.True(StickyCommentPublisher.StickyPublicationReceipt
+            .TryRehydrate(StickyPublicationOperation.Observed,
+                data.Request.Authorization.PullRequest.RepositoryId,
+                data.Request.Authorization.PullRequest.Number, comment.Id,
+                comment.HtmlUrl, data.Rendered.Identity.ScopeSha256,
+                data.Rendered.Identity.BodySha256,
+                data.Rendered.Identity.HeadSha, out var receipt));
+        Assert.True(AuthorizedStickyReadbackRequest.TryCreate(
+            data.Request.Authorization, data.Request.Scope, receipt,
+            out var rehydrated));
+
+        Assert.Equal(data.Rendered.Comment, persisted!.ExactComment);
+        Assert.Null(rehydrated!.ExactComment);
+        Assert.Equal(data.Rendered.Identity, rehydrated.ExpectedIdentity);
+        var inputs = typeof(AuthorizedStickyReadbackRequest)
+            .GetMethods(BindingFlags.Static | BindingFlags.NonPublic)
+            .Where(method => method.Name == "TryCreate")
+            .SelectMany(method => method.GetParameters())
+            .Select(parameter => parameter.ParameterType)
+            .ToArray();
+        Assert.DoesNotContain(typeof(R4ValidatedPublicationReview), inputs);
+        Assert.Contains(typeof(R4RenderedStickyComment), inputs);
+        Assert.Contains(
+            typeof(StickyCommentPublisher.StickyPublicationReceipt), inputs);
+        using var transport = BoundedGitHubPublisherTransport.CreateReadback(
+            data.Token.ExportForPrivateLaunch(), rehydrated);
+        Assert.IsAssignableFrom<IStickyGitHubReadbackTransport>(transport);
+        Assert.False(transport is IStickyGitHubPublisherTransport);
     }
 
     private sealed class FakeIssuerEvidence :

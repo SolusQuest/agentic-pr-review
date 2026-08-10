@@ -52,6 +52,32 @@ internal static class StickyPublicationTestData
             $"https://github.com/{ActionHostAuthorizationScenario.RepositoryName}/" +
             $"pull/{ActionHostAuthorizationScenario.PullRequestNumber}" +
             $"#issuecomment-{id}", body);
+
+    internal static AuthorizedStickyReadbackRequest Readback(
+        AuthorizedStickyPublicationRequest request)
+    {
+        Assert.True(AuthorizedStickyReadbackRequest.TryCreate(
+            request.Authorization, request.Scope, request.Rendered,
+            out var readback));
+        return Assert.IsType<AuthorizedStickyReadbackRequest>(readback);
+    }
+
+    internal static AuthorizedStickyReadbackRequest ReadbackFromReceipt(
+        AuthorizedStickyPublicationRequest request, long commentId = 7)
+    {
+        var comment = Comment(commentId, request.Rendered.Comment);
+        Assert.True(StickyCommentPublisher.StickyPublicationReceipt
+            .TryRehydrate(StickyPublicationOperation.Observed,
+                request.Authorization.PullRequest.RepositoryId,
+                request.Authorization.PullRequest.Number, comment.Id,
+                comment.HtmlUrl, request.Rendered.Identity.ScopeSha256,
+                request.Rendered.Identity.BodySha256,
+                request.Rendered.Identity.HeadSha, out var receipt));
+        Assert.True(AuthorizedStickyReadbackRequest.TryCreate(
+            request.Authorization, request.Scope, receipt,
+            out var readback));
+        return Assert.IsType<AuthorizedStickyReadbackRequest>(readback);
+    }
 }
 
 internal sealed class FakePublisherTransportFactory :
@@ -65,13 +91,24 @@ internal sealed class FakePublisherTransportFactory :
     {
         Creates++;
         Transport.Request = request;
+        Transport.ExpectedIdentity = request.Rendered.Identity;
+        return Transport;
+    }
+
+    public IStickyGitHubReadbackTransport CreateReadback(
+        ActionHostGitHubToken token, AuthorizedStickyReadbackRequest request)
+    {
+        Creates++;
+        Transport.ExpectedIdentity = request.ExpectedIdentity;
         return Transport;
     }
 }
 
-internal sealed class FakePublisherTransport : IStickyGitHubPublisherTransport
+internal sealed class FakePublisherTransport : IStickyGitHubPublisherTransport,
+    IStickyGitHubReadbackTransport
 {
     internal AuthorizedStickyPublicationRequest? Request { get; set; }
+    internal R4PublicationIdentityV1? ExpectedIdentity { get; set; }
     internal Queue<BoundedGitHubHttpResult<BoundedGitHubIssueCommentPage>>
         Pages
     { get; } = new();
@@ -96,6 +133,7 @@ internal sealed class FakePublisherTransport : IStickyGitHubPublisherTransport
     internal List<CancellationToken> ReadCancellationTokens { get; } = [];
     internal System.Action? OnMutation { get; set; }
     internal System.Action? OnList { get; set; }
+    internal System.Action? OnRead { get; set; }
     internal Func<bool>? DeadlineProbe { get; set; }
     private long? _targetId;
 
@@ -123,7 +161,7 @@ internal sealed class FakePublisherTransport : IStickyGitHubPublisherTransport
             BoundedGitHubHttpResult<BoundedGitHubIssueCommentPage>.Failed(
                 BoundedGitHubHttpOutcome.KnownNotSent,
                 BoundedGitHubPublisherReason.InvalidPagination);
-        if (result.Value is not null && Request is not null)
+        if (result.Value is not null && ExpectedIdentity is not null)
         {
             foreach (var comment in result.Value.Comments)
             {
@@ -131,7 +169,7 @@ internal sealed class FakePublisherTransport : IStickyGitHubPublisherTransport
                     inspection.Kind == R4StickyInspectionKind.ValidR4 &&
                     StringComparer.Ordinal.Equals(
                         inspection.Identity!.ScopeSha256,
-                        Request.Rendered.Identity.ScopeSha256))
+                        ExpectedIdentity.ScopeSha256))
                     _targetId = comment.Id;
             }
         }
@@ -158,6 +196,7 @@ internal sealed class FakePublisherTransport : IStickyGitHubPublisherTransport
     {
         Reads++;
         ReadCancellationTokens.Add(cancellationToken);
+        OnRead?.Invoke();
         return Task.FromResult(Read);
     }
 

@@ -133,12 +133,23 @@ public sealed class ActionHostAuthorizationArchitectureTests
     [Fact]
     public void PublisherMutationSurfaceRequiresTheBoundP2Capability()
     {
-        var factoryMethod = Assert.Single(
-            typeof(IStickyGitHubPublisherTransportFactory).GetMethods());
+        var factoryMethods =
+            typeof(IStickyGitHubPublisherTransportFactory).GetMethods();
+        var factoryMethod = Assert.Single(factoryMethods,
+            method => method.Name == "Create");
         Assert.Equal(
             [typeof(ActionHostGitHubToken),
                 typeof(AuthorizedStickyPublicationRequest)],
             factoryMethod.GetParameters()
+                .Select(static parameter => parameter.ParameterType));
+        var readbackFactory = Assert.Single(factoryMethods,
+            method => method.Name == "CreateReadback");
+        Assert.Equal(typeof(IStickyGitHubReadbackTransport),
+            readbackFactory.ReturnType);
+        Assert.Equal(
+            [typeof(ActionHostGitHubToken),
+                typeof(AuthorizedStickyReadbackRequest)],
+            readbackFactory.GetParameters()
                 .Select(static parameter => parameter.ParameterType));
 
         var commonMethods = typeof(IBoundedGitHubPublisherTransport)
@@ -154,6 +165,9 @@ public sealed class ActionHostAuthorizationArchitectureTests
             method => method.Name == "MutateStickyCommentAsync");
         Assert.Equal([typeof(CancellationToken)], mutation.GetParameters()
             .Select(static parameter => parameter.ParameterType));
+        Assert.DoesNotContain(
+            typeof(IStickyGitHubReadbackTransport).GetMethods(),
+            method => method.Name == "MutateStickyCommentAsync");
         Assert.All(typeof(BoundedGitHubPublisherTransport).GetConstructors(
             BindingFlags.Instance | BindingFlags.Public |
             BindingFlags.NonPublic), constructor =>

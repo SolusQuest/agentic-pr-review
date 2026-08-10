@@ -21,6 +21,15 @@ internal sealed class BoundedGitHubPublisherTransportFactory :
         return BoundedGitHubPublisherTransport.Create(
             token.ExportForPrivateLaunch(), request);
     }
+
+    public IStickyGitHubReadbackTransport CreateReadback(
+        ActionHostGitHubToken token, AuthorizedStickyReadbackRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(token);
+        ArgumentNullException.ThrowIfNull(request);
+        return BoundedGitHubPublisherTransport.CreateReadback(
+            token.ExportForPrivateLaunch(), request);
+    }
 }
 
 internal sealed class BoundedGitHubPublisherCredentialException : Exception
@@ -41,7 +50,8 @@ internal sealed class BoundedGitHubPublisherTransport :
     private readonly TimeSpan _overallTimeout;
     private readonly IBoundedGitHubOperationClock _operation;
     private readonly SemaphoreSlim _responseReadGate = new(1, 1);
-    private readonly AuthorizedStickyPublicationRequest _stickyRequest;
+    private readonly R4PublicationIdentityV1 _stickyIdentity;
+    private readonly AuthorizedStickyPublicationRequest? _stickyRequest;
     private int _requestCount;
     private long _aggregateBytes;
     private int _nextStickyPage = 1;
@@ -55,16 +65,20 @@ internal sealed class BoundedGitHubPublisherTransport :
     private bool _disposed;
 
     private BoundedGitHubPublisherTransport(string token,
-        AuthorizedStickyPublicationRequest request,
+        ActionHostAuthorizer.AuthorizedInvocation authorization,
+        R4PublicationIdentityV1 stickyIdentity,
+        AuthorizedStickyPublicationRequest? stickyRequest,
         HttpMessageHandler handler, TimeSpan requestTimeout,
         TimeSpan overallTimeout, IBoundedGitHubOperationClock operation)
     {
-        Validate(token, request.Authorization);
-        _stickyRequest = request;
+        Validate(token, authorization);
+        _stickyIdentity = stickyIdentity ?? throw new ArgumentNullException(
+            nameof(stickyIdentity));
+        _stickyRequest = stickyRequest;
         _token = token;
-        _repositoryName = request.Authorization.PullRequest.BaseRepositoryName;
+        _repositoryName = authorization.PullRequest.BaseRepositoryName;
         _repositoryPath = RepositoryPath(_repositoryName);
-        _pullRequestNumber = request.Authorization.PullRequest.Number;
+        _pullRequestNumber = authorization.PullRequest.Number;
         _requestTimeout = requestTimeout;
         _overallTimeout = overallTimeout;
         _operation = operation ?? throw new ArgumentNullException(
@@ -77,19 +91,30 @@ internal sealed class BoundedGitHubPublisherTransport :
     }
 
     internal static BoundedGitHubPublisherTransport Create(string token,
-        AuthorizedStickyPublicationRequest request) => new(token, request,
+        AuthorizedStickyPublicationRequest request) => new(token,
+            request.Authorization, request.Rendered.Identity, request,
             ActionHostGitHubAuthorizationTransport.CreateHandler(
                 TimeSpan.FromSeconds(10)),
             BoundedGitHubPublisherPolicy.RequestTimeout,
             BoundedGitHubPublisherPolicy.OverallTimeout,
             new StopwatchBoundedGitHubOperationClock());
 
+    internal static IStickyGitHubReadbackTransport CreateReadback(string token,
+        AuthorizedStickyReadbackRequest request) =>
+        new ReadbackTransport(new(token, request.Authorization,
+            request.ExpectedIdentity, null,
+            ActionHostGitHubAuthorizationTransport.CreateHandler(
+                TimeSpan.FromSeconds(10)),
+            BoundedGitHubPublisherPolicy.RequestTimeout,
+            BoundedGitHubPublisherPolicy.OverallTimeout,
+            new StopwatchBoundedGitHubOperationClock()));
+
     internal static BoundedGitHubPublisherTransport CreateForTesting(
         string token, AuthorizedStickyPublicationRequest request,
         HttpMessageHandler handler, TimeSpan? requestTimeout = null,
         TimeSpan? overallTimeout = null,
-        IBoundedGitHubOperationClock? operation = null) => new(token, request,
-            handler,
+        IBoundedGitHubOperationClock? operation = null) => new(token,
+            request.Authorization, request.Rendered.Identity, request, handler,
             requestTimeout ?? BoundedGitHubPublisherPolicy.RequestTimeout,
             overallTimeout ?? BoundedGitHubPublisherPolicy.OverallTimeout,
             operation ?? new StopwatchBoundedGitHubOperationClock());
@@ -158,6 +183,7 @@ internal sealed class BoundedGitHubPublisherTransport :
         MutateStickyCommentAsync(CancellationToken cancellationToken)
     {
         if (!_stickyDiscoveryComplete || _stickyDiscoveryInvalid ||
+            _stickyRequest is null ||
             Interlocked.Exchange(ref _mutationDispatched, 1) != 0 ||
             !StickyCommentSerializer.TrySerialize(
                 _stickyRequest.Rendered.Comment, out var body))
@@ -236,7 +262,7 @@ internal sealed class BoundedGitHubPublisherTransport :
             if (inspection.Kind == R4StickyInspectionKind.ValidR4 &&
                 StringComparer.Ordinal.Equals(
                     inspection.Identity!.ScopeSha256,
-                    _stickyRequest.Rendered.Identity.ScopeSha256))
+                    _stickyIdentity.ScopeSha256))
             {
                 if (_stickyTargetId is not null)
                 {
@@ -663,4 +689,23 @@ internal sealed class BoundedGitHubPublisherTransport :
 
     private sealed record CapturedResponse(byte[] Body,
         IReadOnlyList<string> Links);
+
+    private sealed class ReadbackTransport(
+        BoundedGitHubPublisherTransport inner) : IStickyGitHubReadbackTransport
+    {
+        public bool IsWithinOverallDeadline =>
+            inner.IsWithinOverallDeadline;
+
+        public Task<BoundedGitHubHttpResult<BoundedGitHubIssueCommentPage>>
+            ListIssueCommentsAsync(int page,
+                CancellationToken cancellationToken) =>
+            inner.ListIssueCommentsAsync(page, cancellationToken);
+
+        public Task<BoundedGitHubHttpResult<BoundedGitHubIssueComment>>
+            GetIssueCommentAsync(long commentId,
+                CancellationToken cancellationToken) =>
+            inner.GetIssueCommentAsync(commentId, cancellationToken);
+
+        public void Dispose() => inner.Dispose();
+    }
 }

@@ -282,7 +282,8 @@ public sealed class StickyCommentPublisherTests
         }
 
         var result = await new StickyCommentPublisher(factory).DiscoverAsync(
-            token, request, CancellationToken.None);
+            token, StickyPublicationTestData.Readback(request),
+            CancellationToken.None);
 
         Assert.Equal(StickyDiscoveryKind.Absent, result.Kind);
         Assert.Equal(BoundedGitHubPublisherPolicy.MaximumPages,
@@ -311,7 +312,8 @@ public sealed class StickyCommentPublisherTests
                 .ToArray());
 
         var records = await new StickyCommentPublisher(itemOverflow)
-            .DiscoverAsync(token, request, CancellationToken.None);
+            .DiscoverAsync(token, StickyPublicationTestData.Readback(request),
+                CancellationToken.None);
 
         Assert.Equal(StickyDiscoveryKind.InvalidOrIncomplete, records.Kind);
 
@@ -323,7 +325,8 @@ public sealed class StickyCommentPublisherTests
         }
 
         var pages = await new StickyCommentPublisher(pageOverflow)
-            .DiscoverAsync(token, request, CancellationToken.None);
+            .DiscoverAsync(token, StickyPublicationTestData.Readback(request),
+                CancellationToken.None);
 
         Assert.Equal(StickyDiscoveryKind.InvalidOrIncomplete, pages.Kind);
         Assert.Equal(BoundedGitHubPublisherPolicy.MaximumPages,
@@ -341,11 +344,119 @@ public sealed class StickyCommentPublisherTests
         factory.Transport.Read = Success(comment);
         factory.Transport.Enqueue(comment);
         var result = await new StickyCommentPublisher(factory).DiscoverAsync(
-            token, request, CancellationToken.None);
+            token, StickyPublicationTestData.Readback(request),
+            CancellationToken.None);
         Assert.Equal(StickyDiscoveryKind.ExactTarget, result.Kind);
         Assert.Equal(StickyPublicationOperation.Observed,
             result.Receipt!.Operation);
         Assert.Equal(0, factory.Transport.Creates + factory.Transport.Updates);
+    }
+
+    [Fact]
+    public async Task RehydratedReceiptClassifiesEveryReadOnlyPublicState()
+    {
+        var (token, request, rendered) =
+            await StickyPublicationTestData.CreateAsync();
+        var exact = StickyPublicationTestData.Comment(20, rendered.Comment);
+        var stale = StickyPublicationTestData.Comment(20,
+            R4PublicationTestData.Render("stale",
+                identity: new ReviewedIdentity(
+                    request.Authorization.PullRequest.RepositoryId.ToString(
+                        CultureInfo.InvariantCulture),
+                    request.Authorization.PullRequest.Number,
+                    request.Authorization.PullRequest.BaseSha,
+                    request.Authorization.PullRequest.HeadSha),
+                scope: request.Scope).Comment);
+        foreach (var scenario in new[]
+        {
+            ("exact", StickyDiscoveryKind.ExactTarget),
+            ("stale", StickyDiscoveryKind.StaleTarget),
+            ("absent", StickyDiscoveryKind.Absent),
+            ("malformed", StickyDiscoveryKind.InvalidOrIncomplete),
+            ("incomplete", StickyDiscoveryKind.InvalidOrIncomplete),
+        })
+        {
+            var factory = new FakePublisherTransportFactory();
+            switch (scenario.Item1)
+            {
+                case "exact":
+                    factory.Transport.Enqueue(exact);
+                    factory.Transport.Read = Success(exact);
+                    factory.Transport.Enqueue(exact);
+                    break;
+                case "stale":
+                    factory.Transport.Enqueue(stale);
+                    break;
+                case "absent":
+                    factory.Transport.Enqueue();
+                    break;
+                case "malformed":
+                    factory.Transport.Enqueue(
+                        StickyPublicationTestData.Comment(20,
+                            rendered.Comment + " trailing"));
+                    break;
+            }
+
+            var result = await new StickyCommentPublisher(factory)
+                .DiscoverAsync(token,
+                    StickyPublicationTestData.ReadbackFromReceipt(request, 20),
+                    CancellationToken.None);
+
+            Assert.Equal(scenario.Item2, result.Kind);
+            Assert.Equal(0,
+                factory.Transport.Creates + factory.Transport.Updates);
+        }
+    }
+
+    [Fact]
+    public async Task ReadOnlyDiscoveryHonorsCancellationAtEveryReadPhase()
+    {
+        foreach (var phase in new[]
+        {
+            "after-exact-list",
+            "during-get",
+            "after-absent-list",
+            "during-relist",
+        })
+        {
+            var (token, request, rendered) =
+                await StickyPublicationTestData.CreateAsync();
+            var comment = StickyPublicationTestData.Comment(19,
+                rendered.Comment);
+            var factory = new FakePublisherTransportFactory();
+            using var cancellation = new CancellationTokenSource();
+            if (phase == "after-absent-list") factory.Transport.Enqueue();
+            else
+            {
+                factory.Transport.Enqueue(comment);
+                factory.Transport.Read = Success(comment);
+                factory.Transport.Enqueue(comment);
+            }
+            factory.Transport.OnList = () =>
+            {
+                if (phase is "after-exact-list" or "after-absent-list" &&
+                        factory.Transport.Lists == 1 ||
+                    phase == "during-relist" &&
+                        factory.Transport.Lists == 2)
+                    cancellation.Cancel();
+            };
+            if (phase == "during-get")
+                factory.Transport.OnRead = cancellation.Cancel;
+
+            var result = await new StickyCommentPublisher(factory)
+                .DiscoverAsync(token,
+                    StickyPublicationTestData.Readback(request),
+                    cancellation.Token);
+
+            Assert.Equal(StickyDiscoveryKind.Cancelled, result.Kind);
+            Assert.Equal(StickyPublicationReason.Cancelled, result.Reason);
+            Assert.Null(result.Receipt);
+            Assert.Equal(0,
+                factory.Transport.Creates + factory.Transport.Updates);
+            if (factory.Transport.Reads > 0)
+                Assert.All(factory.Transport.ReadCancellationTokens,
+                    used => Assert.Equal(cancellation.Token, used));
+        }
     }
 
     [Fact]
@@ -357,7 +468,8 @@ public sealed class StickyCommentPublisherTests
         factory.Transport.EnqueuePageWithLast(null, null);
 
         var result = await new StickyCommentPublisher(factory).DiscoverAsync(
-            token, request, CancellationToken.None);
+            token, StickyPublicationTestData.Readback(request),
+            CancellationToken.None);
 
         Assert.Equal(StickyDiscoveryKind.InvalidOrIncomplete, result.Kind);
         Assert.Equal(StickyPublicationReason.DiscoveryIncomplete,
@@ -365,7 +477,7 @@ public sealed class StickyCommentPublisherTests
     }
 
     [Fact]
-    public async Task DeadlineBeforeWriteIsKnownNotWritten()
+    public async Task DeadlineDuringDiscoveryIsAuthorizationFailure()
     {
         var (token, request, _) = await StickyPublicationTestData.CreateAsync();
         var within = true;
@@ -373,6 +485,26 @@ public sealed class StickyCommentPublisherTests
         factory.Transport.Enqueue();
         factory.Transport.DeadlineProbe = () => within;
         factory.Transport.OnList = () => within = false;
+
+        var result = await new StickyCommentPublisher(factory).PublishAsync(
+            token, request, CancellationToken.None);
+
+        Assert.Equal(
+            BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure,
+            result.Outcome);
+        Assert.Equal(StickyPublicationReason.DiscoveryIncomplete,
+            result.Reason);
+        Assert.Equal(0, factory.Transport.Creates + factory.Transport.Updates);
+    }
+
+    [Fact]
+    public async Task DeadlineAfterCompleteDiscoveryIsKnownNotWritten()
+    {
+        var (token, request, _) = await StickyPublicationTestData.CreateAsync();
+        var probes = 0;
+        var factory = new FakePublisherTransportFactory();
+        factory.Transport.Enqueue();
+        factory.Transport.DeadlineProbe = () => ++probes <= 2;
 
         var result = await new StickyCommentPublisher(factory).PublishAsync(
             token, request, CancellationToken.None);
