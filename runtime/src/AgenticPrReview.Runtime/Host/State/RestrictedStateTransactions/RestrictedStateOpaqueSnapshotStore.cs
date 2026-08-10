@@ -246,12 +246,11 @@ internal class RestrictedStateOpaqueSnapshotStore
                             access,
                             CancellationToken.None)
                         .ConfigureAwait(false);
-                    if (!observed.Succeeded ||
-                        observed.Index is null ||
-                        !StringComparer.Ordinal.Equals(
-                            observed.Index.OperationIdentity,
-                            operationIdentity) ||
-                        observed.Version != replacementVersion)
+                    if (!ObservedCommittedSuccessor(
+                            current,
+                            observed,
+                            operationIdentity,
+                            replacementVersion))
                     {
                         var rollback = await store.DeleteExactAsync(
                                 new OpaqueStoreDeleteRequest(
@@ -923,11 +922,13 @@ internal class RestrictedStateOpaqueSnapshotStore
                     break;
                 }
 
-                var reachable = current.Index?.Accepted
-                    .Append(current.Index.Staging)
-                    .Where(candidate => candidate is not null)
-                    .Any(candidate =>
-                        candidate!.Transport == metadata) == true;
+                var selectedIndex = current.Index;
+                var reachable = selectedIndex is not null &&
+                    selectedIndex.Accepted
+                        .Append(selectedIndex.Staging)
+                        .Where(candidate => candidate is not null)
+                        .Any(candidate =>
+                            candidate!.Transport == metadata);
                 if (reachable)
                 {
                     continue;
@@ -1098,6 +1099,35 @@ internal class RestrictedStateOpaqueSnapshotStore
 
         leaf = leaves[0];
         return true;
+    }
+
+    private static bool ObservedCommittedSuccessor(
+        RestrictedStateSnapshotReadCore predecessor,
+        RestrictedStateSnapshotReadCore observed,
+        string operationIdentity,
+        RestrictedStateSnapshotVersion replacementVersion)
+    {
+        if (!observed.Succeeded ||
+            observed.Index is null ||
+            !StringComparer.Ordinal.Equals(
+                observed.Index.OperationIdentity,
+                operationIdentity) ||
+            observed.Version != replacementVersion)
+        {
+            return false;
+        }
+
+        if (predecessor.IndexMetadata is null)
+        {
+            return true;
+        }
+
+        return observed.Index.PredecessorIndex ==
+                predecessor.IndexMetadata &&
+            observed.Index.PredecessorVersion == predecessor.Version &&
+            observed.Nodes.Any(node =>
+                node.Metadata == predecessor.IndexMetadata &&
+                node.Index.LogicalVersion == predecessor.Version);
     }
 
     private static bool IndexMatchesScopeAndNames(

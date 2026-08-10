@@ -410,6 +410,63 @@ public sealed class RestrictedStateStoreConformanceTests
     }
 
     [Fact]
+    public async Task SuccessorCannotCommitAfterItsExactPredecessorDisappears()
+    {
+        var store = new SyntheticRestrictedStateStore();
+        var access = RestrictedStateTestData.Access();
+        var keys = new TestKeyResolver();
+        var coordinator = new RestrictedStateOpaqueSnapshotStore(store, keys);
+        var first = RestrictedStateTestData.Candidate(access, keys);
+        var staging = RestrictedStateTestData.Candidate(
+            access,
+            keys,
+            generation: 1,
+            predecessor: first.EnvelopeSha256,
+            plaintext: [4, 5, 6]);
+        var initial = new RestrictedStateSnapshot([first], null);
+        var successor = new RestrictedStateSnapshot([first], staging);
+        var created = await coordinator.CompareExchangeAsync(
+            access,
+            RestrictedStateSnapshotVersion.Absent,
+            initial,
+            CancellationToken.None);
+        Assert.True(created.Committed);
+        var predecessor = ReadIndex(
+            store,
+            access,
+            keys,
+            SnapshotVersion(initial));
+
+        store.AfterReadBack = (_, metadata) =>
+        {
+            if (metadata.Reference.Name != RawName(access, index: true) ||
+                metadata == predecessor.Metadata)
+            {
+                return;
+            }
+
+            store.AfterReadBack = null;
+            Assert.True(store.Remove(predecessor.Metadata));
+        };
+
+        var advanced = await coordinator.CompareExchangeAsync(
+            access,
+            created.Version!,
+            successor,
+            CancellationToken.None);
+        var observed = await coordinator.ReadAsync(
+            access,
+            CancellationToken.None);
+
+        Assert.False(advanced.Committed);
+        Assert.Equal(RestrictedStateStoreFailure.Conflict, advanced.Failure);
+        Assert.True(observed.Succeeded);
+        Assert.Equal(RestrictedStateSnapshotVersion.Absent, observed.Version);
+        Assert.Equal(RestrictedStateSnapshot.Empty, observed.Snapshot);
+        Assert.Equal(1, store.ObjectCount);
+    }
+
+    [Fact]
     public async Task RawDeletionPreservesCandidatesOfAConcurrentSuccessor()
     {
         var store = new SyntheticRestrictedStateStore();
@@ -1191,6 +1248,9 @@ public sealed class RestrictedStateStoreConformanceTests
 
         internal byte[] BytesFor(OpaqueStoreObjectMetadata metadata) =>
             objects[metadata.Reference.ObjectId.Value].Item2.ToArray();
+
+        internal bool Remove(OpaqueStoreObjectMetadata metadata) =>
+            objects.Remove(metadata.Reference.ObjectId.Value);
 
         private bool TryGet(
             OpaqueStoreObjectReference reference,
