@@ -41,19 +41,10 @@ internal static class LineageTransitionIntentCodec
             writer.WriteInt64(intent.ExpiryBoundaryUnixSeconds.Value);
         }
 
+        writer.WriteString(intent.Reviewed.BaseSha);
+        writer.WriteString(intent.Reviewed.HeadSha);
         writer.WriteString(intent.InventorySha256);
-        writer.WriteUInt32(checked((uint)intent.Targets.Length));
-        foreach (var target in intent.Targets
-            .OrderBy(value => value.Name, StringComparer.Ordinal)
-            .ThenBy(value => value.ObjectId, StringComparer.Ordinal)
-            .ThenBy(value => value.ArchiveSha256, StringComparer.Ordinal)
-            .ThenBy(value => value.EncryptedObjectSha256, StringComparer.Ordinal))
-        {
-            writer.WriteString(target.Name);
-            writer.WriteString(target.ObjectId);
-            writer.WriteString(target.ArchiveSha256);
-            writer.WriteString(target.EncryptedObjectSha256);
-        }
+        LineageHeadCodec.WriteEvidence(writer, intent.Targets);
 
         payload = writer.ToArray();
         return payload.Length <= LineageFormat.MaximumPayloadBytes;
@@ -102,33 +93,11 @@ internal static class LineageTransitionIntentCodec
             expiryBoundary = parsedExpiry;
         }
 
-        if (!reader.TryReadString(64, out var inventorySha256) ||
-            !reader.TryReadUInt32(out var count) ||
-            count > LineageFormat.MaximumEvidenceObjects)
-        {
-            return false;
-        }
-
-        var targets = ImmutableArray.CreateBuilder<LineageArtifactEvidence>(
-            checked((int)count));
-        for (var index = 0; index < count; index++)
-        {
-            if (!reader.TryReadString(256, out var name) ||
-                !reader.TryReadString(256, out var objectId) ||
-                !reader.TryReadString(64, out var archiveSha256) ||
-                !reader.TryReadString(64, out var encryptedSha256))
-            {
-                return false;
-            }
-
-            targets.Add(new LineageArtifactEvidence(
-                name,
-                objectId,
-                archiveSha256,
-                encryptedSha256));
-        }
-
-        if (!reader.IsComplete)
+        if (!reader.TryReadString(64, out var baseSha) ||
+            !reader.TryReadString(64, out var headSha) ||
+            !reader.TryReadString(64, out var inventorySha256) ||
+            !LineageHeadCodec.TryReadEvidence(ref reader, out var targets) ||
+            !reader.IsComplete)
         {
             return false;
         }
@@ -139,8 +108,9 @@ internal static class LineageTransitionIntentCodec
             priorEpoch,
             transitionEvidenceIdentity,
             expiryBoundary,
+            new ReviewedTransitionFacts(baseSha, headSha),
             inventorySha256,
-            targets.MoveToImmutable());
+            targets);
         if (!IsValid(candidate))
         {
             return false;
@@ -156,6 +126,7 @@ internal static class LineageTransitionIntentCodec
         LineageValidation.IsSha256(intent.PriorHeadIdentity) &&
         LineageValidation.IsSha256(intent.PriorEpoch) &&
         LineageValidation.IsSha256(intent.TransitionEvidenceIdentity) &&
+        LineageValidation.IsValid(intent.Reviewed) &&
         LineageValidation.IsSha256(intent.InventorySha256) &&
         !intent.Targets.IsDefault &&
         intent.Targets.Length <= LineageFormat.MaximumEvidenceObjects &&

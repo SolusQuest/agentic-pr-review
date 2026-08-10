@@ -67,6 +67,58 @@ public sealed class LineageConcurrencyTests
         }
     }
 
+    [Fact]
+    public async Task ConcurrentInitialClaimsWithDifferentReviewedFactsConflict()
+    {
+        var root = Path.Join(
+            Path.GetTempPath(),
+            $"apr-lineage-concurrent-distinct-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            using var firstLease = LineageTestData.Context();
+            using var secondLease = LineageTestData.Context();
+            var lineageName = ResolveName(
+                firstLease,
+                StateObjectClass.LineageHead);
+            var cleanupName = ResolveName(
+                firstLease,
+                StateObjectClass.Cleanup);
+            using var store = new ConcurrentInitialLineageStore(
+                new LocalRestrictedStateStore(
+                    root,
+                    timeProvider: firstLease.Time),
+                lineageName,
+                cleanupName,
+                waitForLoserDeletion: false);
+            var first = new LineageService(store, firstLease.Time)
+                .ResolveAsync(
+                    firstLease.Context,
+                    LineageTestData.Request(firstLease.Access),
+                    CancellationToken.None);
+            var second = new LineageService(store, secondLease.Time)
+                .ResolveAsync(
+                    secondLease.Context,
+                    LineageTestData.Request(
+                        secondLease.Access,
+                        reviewed: LineageTestData.Reviewed('3', '4')),
+                    CancellationToken.None);
+
+            var results = await Task.WhenAll(first, second);
+            Assert.All(results, result =>
+            {
+                Assert.False(result.Succeeded);
+                Assert.Equal(LineageCodes.Conflict, result.Code);
+                Assert.Null(result.Context);
+            });
+            Assert.Equal(2, Directory.GetFiles(root, "*.aprobject").Length);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static OpaqueStoreName ResolveName(
         LineageTestData.ContextLease lease,
         StateObjectClass objectClass)
@@ -93,7 +145,8 @@ public sealed class LineageConcurrencyTests
     private sealed class ConcurrentInitialLineageStore(
         IRestrictedStateStore inner,
         OpaqueStoreName lineageName,
-        OpaqueStoreName finalEnumerationName) :
+        OpaqueStoreName finalEnumerationName,
+        bool waitForLoserDeletion = true) :
         IRestrictedStateStore,
         IDisposable
     {
@@ -184,7 +237,7 @@ public sealed class LineageConcurrencyTests
             OpaqueStoreReadBackRequest request,
             CancellationToken cancellationToken)
         {
-            if (request.Expected == loserUpload)
+            if (waitForLoserDeletion && request.Expected == loserUpload)
             {
                 await loserDeletedGate.Task.WaitAsync(
                     TimeSpan.FromSeconds(10),

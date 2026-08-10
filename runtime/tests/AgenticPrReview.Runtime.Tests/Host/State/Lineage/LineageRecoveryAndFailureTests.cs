@@ -135,7 +135,7 @@ public sealed class LineageRecoveryAndFailureTests
                     LineageTestData.Request(
                         lease.Access,
                         reset,
-                        LineageTestData.Reviewed('3', '4')),
+                        LineageTestData.Reviewed('5', '6')),
                     CancellationToken.None);
             Assert.False(interrupted.Succeeded);
             Assert.Equal(LineageCodes.Unavailable, interrupted.Code);
@@ -182,6 +182,64 @@ public sealed class LineageRecoveryAndFailureTests
                 CancellationToken.None);
             Assert.True(afterRecovery.Succeeded);
             Assert.Empty(afterRecovery.Objects);
+        });
+    }
+
+    [Fact]
+    public async Task EightUnknownTransitionRecordsBlockIntentAppend()
+    {
+        await WithRootAsync(async root =>
+        {
+            using var lease = LineageTestData.Context();
+            var inner = new LocalRestrictedStateStore(
+                root,
+                timeProvider: lease.Time);
+            var initialized = await new LineageService(inner, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    LineageTestData.Request(lease.Access),
+                    CancellationToken.None);
+            Assert.True(initialized.Succeeded, initialized.Code);
+            SelectedLineageSnapshot selected;
+            using (initialized.Context)
+            {
+                Assert.True(initialized.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                selected = snapshot!;
+            }
+
+            var foreignKey = Convert.ToBase64String(
+                Enumerable.Repeat((byte)0xd4, 32).ToArray());
+            using (var foreignLease = LineageTestData.Context(
+                currentBase64: foreignKey))
+            {
+                for (byte marker = 1; marker <= 8; marker++)
+                {
+                    await UploadForeignTransitionObjectAsync(
+                        inner,
+                        foreignLease,
+                        selected,
+                        marker);
+                }
+            }
+
+            var probe = new ProbedLineageStore(inner);
+            var reset = LineageTestData.Reset(
+                lease.Access,
+                selected.LineageHeadIdentity,
+                new string('e', 64));
+            var result = await new LineageService(probe, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    LineageTestData.Request(lease.Access, reset),
+                    CancellationToken.None);
+
+            Assert.False(result.Succeeded);
+            Assert.Equal(LineageCodes.Conflict, result.Code);
+            Assert.Null(result.Context);
+            Assert.Equal(0, probe.UploadCalls);
+            Assert.Equal(9, Directory.GetFiles(root, "*.aprobject").Length);
         });
     }
 
@@ -248,6 +306,145 @@ public sealed class LineageRecoveryAndFailureTests
         });
     }
 
+    [Fact]
+    public async Task SuccessorConvergenceRetriesAStalePredecessorOnlyList()
+    {
+        await WithRootAsync(async root =>
+        {
+            using var lease = LineageTestData.Context();
+            var inner = new LocalRestrictedStateStore(
+                root,
+                timeProvider: lease.Time);
+            var initialized = await new LineageService(inner, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    LineageTestData.Request(lease.Access),
+                    CancellationToken.None);
+            Assert.True(initialized.Succeeded, initialized.Code);
+            SelectedLineageSnapshot selected;
+            using (initialized.Context)
+            {
+                Assert.True(initialized.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                selected = snapshot!;
+            }
+
+            var lineageName = await ResolveNameAsync(
+                lease,
+                StateObjectClass.LineageHead);
+            var initialHeads = await inner.ListExactAsync(
+                new OpaqueStoreListRequest(
+                    lineageName,
+                    LineageFormat.MaximumPhysicalPerClass),
+                CancellationToken.None);
+            Assert.True(initialHeads.Succeeded);
+            var predecessor = Assert.Single(initialHeads.Objects);
+            var probe = new ProbedLineageStore(inner)
+            {
+                StaleLineageReference = predecessor,
+            };
+            var reset = LineageTestData.Reset(
+                lease.Access,
+                selected.LineageHeadIdentity,
+                new string('e', 64));
+            var result = await new LineageService(probe, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    LineageTestData.Request(
+                        lease.Access,
+                        reset,
+                        LineageTestData.Reviewed('3', '4')),
+                    CancellationToken.None);
+
+            Assert.True(result.Succeeded, result.Code);
+            using (result.Context)
+            {
+                Assert.True(result.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                Assert.Equal(LineageTransitionKind.Reset, snapshot!.Transition);
+            }
+
+            Assert.True(probe.StaleLineageListInjected);
+        });
+    }
+
+    [Fact]
+    public async Task AuthenticatedRetentionFloorCannotBeDowngradedByRetry()
+    {
+        await WithRootAsync(async root =>
+        {
+            using var lease = LineageTestData.Context();
+            var inner = new LocalRestrictedStateStore(
+                root,
+                timeProvider: lease.Time);
+            var initialized = await new LineageService(inner, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    LineageTestData.Request(lease.Access),
+                    CancellationToken.None);
+            Assert.True(initialized.Succeeded, initialized.Code);
+            initialized.Context!.Dispose();
+
+            var probe = new ProbedLineageStore(inner)
+            {
+                ReadMetadataTransform = metadata => metadata with
+                {
+                    ExpiresAtUnixSeconds =
+                        metadata.ExpiresAtUnixSeconds - 3_601,
+                },
+            };
+            var service = new LineageService(probe, lease.Time);
+            var rejected = await service.ResolveAsync(
+                lease.Context,
+                LineageTestData.Request(lease.Access),
+                CancellationToken.None);
+            Assert.False(rejected.Succeeded);
+            Assert.Equal(LineageCodes.RetentionFailed, rejected.Code);
+
+            var lowerRequest = LineageTestData.Request(lease.Access) with
+            {
+                RequiredLogicalExpiresAtUnixSeconds = LineageTestData.Now + 1,
+            };
+            var retried = await service.ResolveAsync(
+                lease.Context,
+                lowerRequest,
+                CancellationToken.None);
+            Assert.False(retried.Succeeded);
+            Assert.Equal(LineageCodes.RetentionFailed, retried.Code);
+            Assert.Equal(0, probe.UploadCalls);
+        });
+    }
+
+    [Fact]
+    public async Task UnderRetainedUploadWithUnknownCleanupCannotSucceed()
+    {
+        await WithRootAsync(async root =>
+        {
+            var inner = new LocalRestrictedStateStore(
+                root,
+                timeProvider: new MutableLineageTimeProvider(
+                    LineageTestData.Now));
+            var probe = new ProbedLineageStore(inner)
+            {
+                UploadRequiredExpiryTransform = required => required - 3_601,
+                ReturnDeleteOutcomeUnknownOnce = true,
+            };
+            var result = await new ScopedStateUploadProtocol(probe)
+                .UploadAndReadBackAsync(
+                    new OpaqueStoreName("under-retained-upload"),
+                    new byte[] { 1, 2, 3 },
+                    LineageTestData.Now + 100,
+                    CancellationToken.None);
+
+            Assert.False(result.Succeeded);
+            Assert.Equal(LineageCodes.CleanupFailed, result.Code);
+            Assert.Equal(1, probe.DeleteCalls);
+            Assert.Single(Directory.GetFiles(root, "*.aprobject"));
+        });
+    }
+
     private static async Task UploadHistoricalResetIntentAsync(
         IRestrictedStateStore store,
         LineageTestData.ContextLease lease,
@@ -264,6 +461,7 @@ public sealed class LineageRecoveryAndFailureTests
             Convert.ToHexStringLower(SHA256.HashData(
                 System.Text.Encoding.UTF8.GetBytes($"request-{index}"))),
             ExpiryBoundaryUnixSeconds: null,
+            LineageTestData.Reviewed(),
             LineageCryptography.InventoryDigest(targets),
             targets);
         Assert.True(LineageTransitionIntentCodec.TryEncode(
@@ -314,6 +512,53 @@ public sealed class LineageRecoveryAndFailureTests
         }
     }
 
+    private static async Task UploadForeignTransitionObjectAsync(
+        IRestrictedStateStore store,
+        LineageTestData.ContextLease lease,
+        SelectedLineageSnapshot selected,
+        byte payloadMarker)
+    {
+        Assert.True(LineageBaseScopeCodec.TryDigest(
+            LineageTestData.Scope(),
+            out var baseScopeDigest));
+        var name = await ResolveNameAsync(lease, StateObjectClass.Reset);
+        var draft = new StateControlHeaderDraft(
+            baseScopeDigest,
+            selected.Epoch,
+            selected.SessionId,
+            StateObjectClass.Reset,
+            selected.LineageHeadIdentity,
+            SuccessorIdentity: null,
+            "foreign-run",
+            ProducingRunAttempt: payloadMarker,
+            LineageTestData.Now,
+            LineageTestData.LogicalExpiry,
+            LineageTestData.Now + 8 * 24 * 60 * 60);
+        Assert.True(StateControlEnvelopeV1Codec.TryEncrypt(
+            lease.Context,
+            lease.Access,
+            name,
+            draft,
+            [payloadMarker],
+            out var envelope,
+            out _,
+            out var code), code);
+        try
+        {
+            var uploaded = await new ScopedStateUploadProtocol(store)
+                .UploadAndReadBackAsync(
+                    name,
+                    envelope,
+                    draft.RequiredPlatformExpiresAtUnixSeconds,
+                    CancellationToken.None);
+            Assert.True(uploaded.Succeeded, uploaded.Code);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(envelope);
+        }
+    }
+
     private static async Task<OpaqueStoreName> ResolveNameAsync(
         LineageTestData.ContextLease lease,
         StateObjectClass objectClass)
@@ -359,46 +604,111 @@ public sealed class LineageRecoveryAndFailureTests
         internal int IncompleteAtListCall { get; set; }
         internal bool ThrowOnFirstDelete { get; set; }
         internal bool ReturnDeleteOutcomeUnknownOnce { get; set; }
+        internal Func<long, long>? UploadRequiredExpiryTransform
+        { get; set; }
+        internal OpaqueStoreObjectReference? StaleLineageReference
+        { get; set; }
         internal Func<
             OpaqueStoreObjectMetadata,
             OpaqueStoreObjectMetadata>? UploadMetadataTransform
+        { get; set; }
+        internal Func<
+            OpaqueStoreObjectMetadata,
+            OpaqueStoreObjectMetadata>? ReadMetadataTransform
         { get; set; }
         internal int UploadCalls { get; private set; }
         internal int ListCalls { get; private set; }
         internal int ReadBackCalls { get; private set; }
         internal int DeleteCalls { get; private set; }
+        internal bool StaleLineageListInjected { get; private set; }
 
-        public Task<OpaqueStoreListResult> ListExactAsync(
+        public async Task<OpaqueStoreListResult> ListExactAsync(
             OpaqueStoreListRequest request,
             CancellationToken cancellationToken)
         {
             ListCalls++;
             if (ListCalls == IncompleteAtListCall)
             {
-                return Task.FromResult(OpaqueStoreListResult.Fail(
-                    OpaqueStoreFailure.Incomplete));
+                return OpaqueStoreListResult.Fail(
+                    OpaqueStoreFailure.Incomplete);
             }
 
-            return inner.ListExactAsync(request, cancellationToken);
+            var result = await inner.ListExactAsync(
+                request,
+                cancellationToken);
+            if (!StaleLineageListInjected &&
+                UploadCalls >= 2 &&
+                StaleLineageReference is not null &&
+                request.Name == StaleLineageReference.Name &&
+                result.Succeeded &&
+                result.Objects.Length > 1 &&
+                result.Objects.Contains(StaleLineageReference))
+            {
+                StaleLineageListInjected = true;
+                return result with { Objects = [StaleLineageReference] };
+            }
+
+            return result;
         }
 
-        public Task<OpaqueStoreMetadataResult> ReadMetadataAsync(
+        public async Task<OpaqueStoreMetadataResult> ReadMetadataAsync(
             OpaqueStoreMetadataRequest request,
-            CancellationToken cancellationToken) =>
-            inner.ReadMetadataAsync(request, cancellationToken);
+            CancellationToken cancellationToken)
+        {
+            var result = await inner.ReadMetadataAsync(
+                request,
+                cancellationToken);
+            return result.Metadata is not null &&
+                ReadMetadataTransform is not null
+                ? result with
+                {
+                    Metadata = ReadMetadataTransform(result.Metadata),
+                }
+                : result;
+        }
 
-        public Task<OpaqueStoreDownloadResult> DownloadAsync(
+        public async Task<OpaqueStoreDownloadResult> DownloadAsync(
             OpaqueStoreDownloadRequest request,
-            CancellationToken cancellationToken) =>
-            inner.DownloadAsync(request, cancellationToken);
+            CancellationToken cancellationToken)
+        {
+            if (ReadMetadataTransform is null)
+            {
+                return await inner.DownloadAsync(request, cancellationToken);
+            }
+
+            var actual = await inner.ReadMetadataAsync(
+                new OpaqueStoreMetadataRequest(request.Expected.Reference),
+                cancellationToken);
+            if (!actual.Succeeded || actual.Metadata is null)
+            {
+                return OpaqueStoreDownloadResult.Fail(actual.Failure);
+            }
+
+            var downloaded = await inner.DownloadAsync(
+                new OpaqueStoreDownloadRequest(
+                    actual.Metadata,
+                    request.MaximumBytes),
+                cancellationToken);
+            return downloaded.Succeeded
+                ? downloaded with { Metadata = request.Expected }
+                : downloaded;
+        }
 
         public async Task<OpaqueStoreUploadResult> UploadImmutableAsync(
             OpaqueStoreUploadRequest request,
             CancellationToken cancellationToken)
         {
             UploadCalls++;
+            var transformed = UploadRequiredExpiryTransform is null
+                ? request
+                : request with
+                {
+                    MinimumExpiresAtUnixSeconds =
+                        UploadRequiredExpiryTransform(
+                            request.MinimumExpiresAtUnixSeconds),
+                };
             var result = await inner.UploadImmutableAsync(
-                request,
+                transformed,
                 cancellationToken);
             return result.Metadata is not null &&
                 UploadMetadataTransform is not null

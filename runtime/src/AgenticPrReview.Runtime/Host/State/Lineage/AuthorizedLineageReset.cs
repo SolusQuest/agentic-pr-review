@@ -8,6 +8,7 @@ internal sealed class AuthorizedLineageReset
 
     private AuthorizedLineageReset(
         AuthorizedLocatorAccess authority,
+        string baseScopeDigest,
         string repositoryId,
         long pullRequestNumber,
         string trustedWorkflowIdentity,
@@ -15,9 +16,10 @@ internal sealed class AuthorizedLineageReset
         string producingRunIdentity,
         long producingRunAttempt,
         string requestIdentity,
-        string? priorHeadIdentity)
+        string priorHeadIdentity)
     {
         this.authority = authority;
+        BaseScopeDigest = baseScopeDigest;
         RepositoryId = repositoryId;
         PullRequestNumber = pullRequestNumber;
         TrustedWorkflowIdentity = trustedWorkflowIdentity;
@@ -28,6 +30,7 @@ internal sealed class AuthorizedLineageReset
         PriorHeadIdentity = priorHeadIdentity;
     }
 
+    internal string BaseScopeDigest { get; }
     internal string RepositoryId { get; }
     internal long PullRequestNumber { get; }
     internal string TrustedWorkflowIdentity { get; }
@@ -35,16 +38,60 @@ internal sealed class AuthorizedLineageReset
     internal string ProducingRunIdentity { get; }
     internal long ProducingRunAttempt { get; }
     internal string RequestIdentity { get; }
-    internal string? PriorHeadIdentity { get; }
+    internal string PriorHeadIdentity { get; }
 
     internal bool Allows(
         AuthorizedLocatorAccess? access,
         LineageBaseScope scope,
+        string baseScopeDigest,
         string producingRunIdentity,
         long producingRunAttempt,
         string selectedHeadIdentity) =>
+        AllowsScope(
+            access,
+            scope,
+            baseScopeDigest,
+            producingRunIdentity,
+            producingRunAttempt) &&
+        StringComparer.Ordinal.Equals(
+            PriorHeadIdentity,
+            selectedHeadIdentity);
+
+    internal bool AllowsCompleted(
+        AuthorizedLocatorAccess? access,
+        LineageBaseScope scope,
+        string baseScopeDigest,
+        string producingRunIdentity,
+        long producingRunAttempt,
+        LineageHeadCandidate selected) =>
+        AllowsScope(
+            access,
+            scope,
+            baseScopeDigest,
+            producingRunIdentity,
+            producingRunAttempt) &&
+        selected.Head.Transition == LineageTransitionKind.Reset &&
+        StringComparer.Ordinal.Equals(
+            selected.Head.PreviousHeadIdentity,
+            PriorHeadIdentity) &&
+        StringComparer.Ordinal.Equals(
+            selected.Head.TransitionEvidenceIdentity,
+            RequestIdentity) &&
+        StringComparer.Ordinal.Equals(
+            selected.Header.ProducingRunIdentity,
+            ProducingRunIdentity) &&
+        selected.Header.ProducingRunAttempt == ProducingRunAttempt;
+
+    private bool AllowsScope(
+        AuthorizedLocatorAccess? access,
+        LineageBaseScope scope,
+        string baseScopeDigest,
+        string producingRunIdentity,
+        long producingRunAttempt) =>
         ReferenceEquals(authority, access) &&
         authority.Allows(access, scope.RepositoryId) &&
+        LineageValidation.IsSha256(BaseScopeDigest) &&
+        StringComparer.Ordinal.Equals(BaseScopeDigest, baseScopeDigest) &&
         StringComparer.Ordinal.Equals(RepositoryId, scope.RepositoryId) &&
         PullRequestNumber == scope.PullRequestNumber &&
         StringComparer.Ordinal.Equals(
@@ -58,10 +105,7 @@ internal sealed class AuthorizedLineageReset
             producingRunIdentity) &&
         ProducingRunAttempt == producingRunAttempt &&
         LineageValidation.IsSha256(RequestIdentity) &&
-        (PriorHeadIdentity is null ||
-            StringComparer.Ordinal.Equals(
-                PriorHeadIdentity,
-                selectedHeadIdentity));
+        LineageValidation.IsSha256(PriorHeadIdentity);
 
     public override string ToString() => nameof(AuthorizedLineageReset);
 }

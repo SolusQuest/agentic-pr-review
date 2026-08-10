@@ -177,6 +177,16 @@ internal sealed class ScopedStateInventory
                         LineageCodes.AuthenticationFailed);
                 }
 
+                if (item.Metadata.ExpiresAtUnixSeconds <
+                    header.RequiredPlatformExpiresAtUnixSeconds)
+                {
+                    CryptographicOperations.ZeroMemory(payload);
+                    unknown.Add(new UnknownStateObject(
+                        item.Metadata,
+                        LineageCodes.RetentionFailed));
+                    continue;
+                }
+
                 authenticated.Add(new AuthenticatedStateObject(
                     item.Metadata,
                     header,

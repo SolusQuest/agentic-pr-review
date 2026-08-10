@@ -180,8 +180,12 @@ internal enum LineageTransitionKind
 internal sealed record LineageArtifactEvidence(
     string Name,
     string ObjectId,
+    string ProducingRunIdentity,
+    long ProducingRunAttempt,
     string ArchiveSha256,
-    string EncryptedObjectSha256);
+    string EncryptedObjectSha256,
+    long ExpiresAtUnixSeconds,
+    long Size);
 
 internal sealed record LineageHeadV1(
     LineageTransitionKind Transition,
@@ -192,6 +196,7 @@ internal sealed record LineageHeadV1(
     string? TransitionEvidenceIdentity,
     long? ExpiryBoundaryUnixSeconds,
     ImmutableArray<LineageArtifactEvidence> PhysicalPredecessors,
+    ImmutableArray<LineageArtifactEvidence> PhysicalSuperseded,
     ImmutableArray<LineageArtifactEvidence> Superseded,
     ImmutableArray<LineageArtifactEvidence> CompletedCleanup);
 
@@ -203,8 +208,14 @@ internal sealed record LineageHeadCandidate(
 internal sealed record LineageHeadSelection(
     LineageHeadCandidate Head,
     LineageHeadCandidate? ImmediatePredecessor,
-    ImmutableArray<OpaqueStoreObjectMetadata> SafeToDelete,
-    int PhysicalCount);
+    ImmutableArray<OpaqueStoreObjectMetadata> EquivalentPhysical,
+    ImmutableArray<OpaqueStoreObjectMetadata> SafeNonAnchors,
+    ImmutableArray<OpaqueStoreObjectMetadata> SafeChainAnchors,
+    int PhysicalCount)
+{
+    internal ImmutableArray<OpaqueStoreObjectMetadata> SafeToDelete =>
+        SafeNonAnchors.AddRange(SafeChainAnchors);
+}
 
 internal sealed record LineageSelectionResult(
     string Code,
@@ -237,6 +248,7 @@ internal sealed record LineageTransitionIntentV1(
     string PriorEpoch,
     string TransitionEvidenceIdentity,
     long? ExpiryBoundaryUnixSeconds,
+    ReviewedTransitionFacts Reviewed,
     string InventorySha256,
     ImmutableArray<LineageArtifactEvidence> Targets);
 
@@ -375,8 +387,14 @@ internal static class LineageValidation
         value is not null &&
         IsText(value.Name, OpaqueStoreLimits.MaximumNameBytes) &&
         IsText(value.ObjectId, OpaqueStoreLimits.MaximumIdentityBytes) &&
+        IsText(
+            value.ProducingRunIdentity,
+            OpaqueStoreLimits.MaximumIdentityBytes) &&
+        value.ProducingRunAttempt >= 0 &&
         IsSha256(value.ArchiveSha256) &&
-        IsSha256(value.EncryptedObjectSha256);
+        IsSha256(value.EncryptedObjectSha256) &&
+        IsTime(value.ExpiresAtUnixSeconds) &&
+        value.Size is > 0 and <= OpaqueStoreLimits.MaximumObjectBytes;
 
     internal static bool IsSha256(string? value) =>
         value is { Length: LineageFormat.DigestBytes * 2 } &&

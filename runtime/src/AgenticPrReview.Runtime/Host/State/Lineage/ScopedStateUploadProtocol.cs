@@ -101,10 +101,46 @@ internal sealed class ScopedStateUploadProtocol
                     CancellationToken.None)
                 .ConfigureAwait(false);
             return ScopedStateUploadResult.Fail(
-                LineageCodes.RetentionFailed);
+                await VerifyAbsentAsync(metadata).ConfigureAwait(false)
+                    ? LineageCodes.RetentionFailed
+                    : LineageCodes.CleanupFailed);
         }
 
         return ScopedStateUploadResult.Success(metadata);
+    }
+
+    private async Task<bool> VerifyAbsentAsync(
+        OpaqueStoreObjectMetadata target)
+    {
+        for (var attempt = 0; attempt < ReconciliationAttempts; attempt++)
+        {
+            var listed = await store.ListExactAsync(
+                    new OpaqueStoreListRequest(
+                        target.Reference.Name,
+                        LineageFormat.MaximumPhysicalPerClass),
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            if (!listed.Succeeded)
+            {
+                continue;
+            }
+
+            if (!listed.Objects.Contains(target.Reference))
+            {
+                return true;
+            }
+
+            var metadata = await store.ReadMetadataAsync(
+                    new OpaqueStoreMetadataRequest(target.Reference),
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            if (metadata.Succeeded && metadata.Metadata != target)
+            {
+                return false;
+            }
+        }
+
+        return false;
     }
 
     private static string MapFailure(OpaqueStoreFailure failure) =>

@@ -78,11 +78,15 @@ internal static class LineageTestData
         long producingRunAttempt = 1,
         string trustedWorkflowRoute = "workflow_dispatch")
     {
+        Assert.True(LineageBaseScopeCodec.TryDigest(
+            Scope(),
+            out var baseScopeDigest));
         var constructor = typeof(AuthorizedLineageReset).GetConstructor(
             BindingFlags.Instance | BindingFlags.NonPublic,
             binder: null,
             [
                 typeof(AuthorizedLocatorAccess),
+                typeof(string),
                 typeof(string),
                 typeof(long),
                 typeof(string),
@@ -97,6 +101,7 @@ internal static class LineageTestData
         return (AuthorizedLineageReset)constructor.Invoke(
         [
             access,
+            baseScopeDigest,
             Scope().RepositoryId,
             Scope().PullRequestNumber,
             Scope().TrustedWorkflowIdentity,

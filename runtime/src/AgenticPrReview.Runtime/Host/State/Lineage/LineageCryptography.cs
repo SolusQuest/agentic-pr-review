@@ -9,61 +9,58 @@ internal static class LineageCryptography
         LocatorContext context,
         AuthorizedLocatorAccess access,
         string baseScopeDigest,
-        ReviewedTransitionFacts reviewed,
         out string epoch) =>
         TryDeriveEpoch(
             context,
             access,
             LineageFormat.InitialEpochDomain,
             baseScopeDigest,
-            previousEpoch: null,
             previousHeadIdentity: null,
             transitionEvidenceIdentity: null,
             expiryBoundaryUnixSeconds: null,
-            reviewed,
+            producingRunIdentity: null,
+            producingRunAttempt: null,
             out epoch);
 
     internal static bool TryDeriveResetEpoch(
         LocatorContext context,
         AuthorizedLocatorAccess access,
         string baseScopeDigest,
-        string previousEpoch,
         string previousHeadIdentity,
         string resetRequestIdentity,
-        ReviewedTransitionFacts reviewed,
+        string producingRunIdentity,
+        long producingRunAttempt,
         out string epoch) =>
         TryDeriveEpoch(
             context,
             access,
             LineageFormat.ResetEpochDomain,
             baseScopeDigest,
-            previousEpoch,
             previousHeadIdentity,
             resetRequestIdentity,
             expiryBoundaryUnixSeconds: null,
-            reviewed,
+            producingRunIdentity,
+            producingRunAttempt,
             out epoch);
 
     internal static bool TryDeriveExpiryEpoch(
         LocatorContext context,
         AuthorizedLocatorAccess access,
         string baseScopeDigest,
-        string previousEpoch,
         string previousHeadIdentity,
         string acceptanceIdentity,
         long expiryBoundaryUnixSeconds,
-        ReviewedTransitionFacts reviewed,
         out string epoch) =>
         TryDeriveEpoch(
             context,
             access,
             LineageFormat.ExpiryEpochDomain,
             baseScopeDigest,
-            previousEpoch,
             previousHeadIdentity,
             acceptanceIdentity,
             expiryBoundaryUnixSeconds,
-            reviewed,
+            producingRunIdentity: null,
+            producingRunAttempt: null,
             out epoch);
 
     internal static bool TryDeriveSessionId(
@@ -148,13 +145,21 @@ internal static class LineageCryptography
         foreach (var item in evidence
             .OrderBy(value => value.Name, StringComparer.Ordinal)
             .ThenBy(value => value.ObjectId, StringComparer.Ordinal)
+            .ThenBy(value => value.ProducingRunIdentity, StringComparer.Ordinal)
+            .ThenBy(value => value.ProducingRunAttempt)
             .ThenBy(value => value.ArchiveSha256, StringComparer.Ordinal)
-            .ThenBy(value => value.EncryptedObjectSha256, StringComparer.Ordinal))
+            .ThenBy(value => value.EncryptedObjectSha256, StringComparer.Ordinal)
+            .ThenBy(value => value.ExpiresAtUnixSeconds)
+            .ThenBy(value => value.Size))
         {
             writer.WriteString(item.Name);
             writer.WriteString(item.ObjectId);
+            writer.WriteString(item.ProducingRunIdentity);
+            writer.WriteInt64(item.ProducingRunAttempt);
             writer.WriteString(item.ArchiveSha256);
             writer.WriteString(item.EncryptedObjectSha256);
+            writer.WriteInt64(item.ExpiresAtUnixSeconds);
+            writer.WriteInt64(item.Size);
         }
 
         var bytes = writer.ToArray();
@@ -173,28 +178,30 @@ internal static class LineageCryptography
         AuthorizedLocatorAccess access,
         string domain,
         string baseScopeDigest,
-        string? previousEpoch,
         string? previousHeadIdentity,
         string? transitionEvidenceIdentity,
         long? expiryBoundaryUnixSeconds,
-        ReviewedTransitionFacts reviewed,
+        string? producingRunIdentity,
+        long? producingRunAttempt,
         out string epoch)
     {
         epoch = string.Empty;
         if (!LineageValidation.IsSha256(baseScopeDigest) ||
-            !LineageValidation.IsOptionalSha256(previousEpoch) ||
             !LineageValidation.IsOptionalSha256(previousHeadIdentity) ||
             !LineageValidation.IsOptionalSha256(transitionEvidenceIdentity) ||
             (expiryBoundaryUnixSeconds is not null &&
                 !LineageValidation.IsTime(expiryBoundaryUnixSeconds.Value)) ||
-            !LineageValidation.IsValid(reviewed))
+            (producingRunIdentity is not null &&
+                !LineageValidation.IsText(
+                    producingRunIdentity,
+                    LineageFormat.MaximumRunIdentityBytes)) ||
+            producingRunAttempt is < 0)
         {
             return false;
         }
 
         var writer = new LineageBinaryWriter();
         writer.WriteString(baseScopeDigest);
-        writer.WriteOptionalString(previousEpoch);
         writer.WriteOptionalString(previousHeadIdentity);
         writer.WriteOptionalString(transitionEvidenceIdentity);
         writer.WriteByte(expiryBoundaryUnixSeconds is null ? (byte)0 : (byte)1);
@@ -203,8 +210,12 @@ internal static class LineageCryptography
             writer.WriteInt64(expiryBoundaryUnixSeconds.Value);
         }
 
-        writer.WriteString(reviewed.BaseSha);
-        writer.WriteString(reviewed.HeadSha);
+        writer.WriteOptionalString(producingRunIdentity);
+        writer.WriteByte(producingRunAttempt is null ? (byte)0 : (byte)1);
+        if (producingRunAttempt is not null)
+        {
+            writer.WriteInt64(producingRunAttempt.Value);
+        }
         var input = writer.ToArray();
         Span<byte> derived = stackalloc byte[LineageFormat.DigestBytes];
         try

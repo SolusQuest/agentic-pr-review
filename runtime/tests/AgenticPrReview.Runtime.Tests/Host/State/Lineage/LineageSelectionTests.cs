@@ -80,6 +80,7 @@ public sealed class LineageSelectionTests
             ExpiryBoundaryUnixSeconds: null,
             [LineageHeadCodec.Evidence(predecessor.Metadata)],
             [],
+            [],
             []);
         var successor = Candidate(
             "successor",
@@ -130,7 +131,8 @@ public sealed class LineageSelectionTests
             new string('e', 64));
         var head = InitialHead() with
         {
-            Superseded = [LineageHeadCodec.Evidence(unknownMetadata)],
+            PhysicalSuperseded =
+                [LineageHeadCodec.Evidence(unknownMetadata)],
         };
         var current = Candidate(
             "head",
@@ -147,18 +149,110 @@ public sealed class LineageSelectionTests
         Assert.True(accepted.Succeeded, accepted.Code);
         Assert.Contains(unknownMetadata, accepted.Selection!.SafeToDelete);
 
-        var changed = unknownMetadata with
+        var changedVariants = new[]
         {
-            ArchiveDigest = new OpaqueStoreArchiveDigest(
-                new string('f', 64)),
+            unknownMetadata with
+            {
+                Reference = unknownMetadata.Reference with
+                {
+                    ObjectId = new OpaqueStoreObjectId("changed-object"),
+                },
+            },
+            unknownMetadata with
+            {
+                ProducingRun = new OpaqueStoreProducingRun(
+                    "changed-run",
+                    unknownMetadata.ProducingRun.Attempt),
+            },
+            unknownMetadata with
+            {
+                ProducingRun = new OpaqueStoreProducingRun(
+                    unknownMetadata.ProducingRun.Identity,
+                    unknownMetadata.ProducingRun.Attempt + 1),
+            },
+            unknownMetadata with
+            {
+                ArchiveDigest = new OpaqueStoreArchiveDigest(
+                    new string('f', 64)),
+            },
+            unknownMetadata with
+            {
+                EncryptedObjectDigest =
+                    new OpaqueStoreEncryptedObjectDigest(
+                        new string('f', 64)),
+            },
+            unknownMetadata with
+            {
+                ExpiresAtUnixSeconds =
+                    unknownMetadata.ExpiresAtUnixSeconds + 1,
+            },
+            unknownMetadata with { Size = unknownMetadata.Size + 1 },
         };
-        var rejected = LineageHeadSelector.Select(
-            [current],
-            [new UnknownStateObject(changed, LineageCodes.KeyUnavailable)],
-            physicalCount: 2,
+        foreach (var changed in changedVariants)
+        {
+            var rejected = LineageHeadSelector.Select(
+                [current],
+                [new UnknownStateObject(
+                    changed,
+                    LineageCodes.KeyUnavailable)],
+                physicalCount: 2,
+                currentKeyId: new string('1', 64));
+            Assert.False(rejected.Succeeded);
+            Assert.Equal(LineageCodes.KeyUnavailable, rejected.Code);
+        }
+    }
+
+    [Fact]
+    public void AuthenticatedSideBranchCannotBeRetroactivelySuperseded()
+    {
+        var predecessor = Candidate(
+            "predecessor",
+            new string('1', 64),
+            new string('a', 64),
+            InitialHead());
+        var first = Candidate(
+            "first",
+            new string('1', 64),
+            new string('b', 64),
+            Successor(predecessor, new string('1', 64)));
+        var side = Candidate(
+            "side",
+            new string('1', 64),
+            new string('c', 64),
+            Successor(predecessor, new string('2', 64)));
+        var newest = Candidate(
+            "newest",
+            new string('1', 64),
+            new string('d', 64),
+            Successor(first, new string('3', 64)) with
+            {
+                Superseded = [LineageHeadCodec.Evidence(side.Metadata)],
+            });
+
+        var result = LineageHeadSelector.Select(
+            [predecessor, first, side, newest],
+            [],
+            physicalCount: 4,
             currentKeyId: new string('1', 64));
-        Assert.False(rejected.Succeeded);
-        Assert.Equal(LineageCodes.KeyUnavailable, rejected.Code);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(LineageCodes.Conflict, result.Code);
+    }
+
+    [Fact]
+    public void InitialHeadCannotClaimTransitionCleanupAuthority()
+    {
+        var evidence = LineageHeadCodec.Evidence(Metadata(
+            "stale",
+            new string('c', 64),
+            new string('d', 64)));
+
+        Assert.False(LineageHeadCodec.TryEncode(
+            InitialHead() with { Superseded = [evidence] },
+            out _));
+        Assert.False(LineageHeadCodec.TryEncode(
+            InitialHead() with { CompletedCleanup = [evidence] },
+            out _));
     }
 
     [Theory]
@@ -192,8 +286,25 @@ public sealed class LineageSelectionTests
             TransitionEvidenceIdentity: null,
             ExpiryBoundaryUnixSeconds: null,
             PhysicalPredecessors: [],
+            PhysicalSuperseded: [],
             Superseded: [],
             CompletedCleanup: []);
+
+    private static LineageHeadV1 Successor(
+        LineageHeadCandidate predecessor,
+        string transitionEvidenceIdentity) =>
+        new(
+            LineageTransitionKind.Reset,
+            predecessor.Head.Ordinal + 1,
+            LineageTestData.Reviewed('3', '4'),
+            predecessor.Header.Epoch,
+            predecessor.Header.ObjectIdentity,
+            transitionEvidenceIdentity,
+            ExpiryBoundaryUnixSeconds: null,
+            [LineageHeadCodec.Evidence(predecessor.Metadata)],
+            [],
+            [],
+            []);
 
     private static LineageHeadCandidate Candidate(
         string objectId,

@@ -31,6 +31,7 @@ internal static class LineageHeadCodec
         }
 
         WriteEvidence(writer, head.PhysicalPredecessors);
+        WriteEvidence(writer, head.PhysicalSuperseded);
         WriteEvidence(writer, head.Superseded);
         WriteEvidence(writer, head.CompletedCleanup);
         payload = writer.ToArray();
@@ -85,6 +86,7 @@ internal static class LineageHeadCodec
         }
 
         if (!TryReadEvidence(ref reader, out var predecessors) ||
+            !TryReadEvidence(ref reader, out var physicalSuperseded) ||
             !TryReadEvidence(ref reader, out var superseded) ||
             !TryReadEvidence(ref reader, out var completedCleanup) ||
             !reader.IsComplete)
@@ -101,6 +103,7 @@ internal static class LineageHeadCodec
             transitionEvidenceIdentity,
             expiryBoundary,
             predecessors,
+            physicalSuperseded,
             superseded,
             completedCleanup);
         if (!IsValid(candidate))
@@ -116,8 +119,8 @@ internal static class LineageHeadCodec
     {
         byte[] leftBytes = [];
         byte[] rightBytes = [];
-        if (!TryEncode(left, out leftBytes) ||
-            !TryEncode(right, out rightBytes))
+        if (!TryEncodeIdentity(left, out leftBytes) ||
+            !TryEncodeIdentity(right, out rightBytes))
         {
             CryptographicOperations.ZeroMemory(leftBytes);
             CryptographicOperations.ZeroMemory(rightBytes);
@@ -142,8 +145,12 @@ internal static class LineageHeadCodec
         new(
             metadata.Reference.Name.Value,
             metadata.Reference.ObjectId.Value,
+            metadata.ProducingRun.Identity,
+            metadata.ProducingRun.Attempt,
             metadata.ArchiveDigest.Sha256,
-            metadata.EncryptedObjectDigest.Sha256);
+            metadata.EncryptedObjectDigest.Sha256,
+            metadata.ExpiresAtUnixSeconds,
+            metadata.Size);
 
     internal static bool Matches(
         LineageArtifactEvidence evidence,
@@ -155,11 +162,17 @@ internal static class LineageHeadCodec
             evidence.ObjectId,
             metadata.Reference.ObjectId.Value) &&
         StringComparer.Ordinal.Equals(
+            evidence.ProducingRunIdentity,
+            metadata.ProducingRun.Identity) &&
+        evidence.ProducingRunAttempt == metadata.ProducingRun.Attempt &&
+        StringComparer.Ordinal.Equals(
             evidence.ArchiveSha256,
             metadata.ArchiveDigest.Sha256) &&
         StringComparer.Ordinal.Equals(
             evidence.EncryptedObjectSha256,
-            metadata.EncryptedObjectDigest.Sha256);
+            metadata.EncryptedObjectDigest.Sha256) &&
+        evidence.ExpiresAtUnixSeconds == metadata.ExpiresAtUnixSeconds &&
+        evidence.Size == metadata.Size;
 
     internal static bool IsValid(LineageHeadV1? head)
     {
@@ -174,6 +187,7 @@ internal static class LineageHeadCodec
                 !LineageValidation.IsTime(
                     head.ExpiryBoundaryUnixSeconds.Value)) ||
             !IsEvidenceSet(head.PhysicalPredecessors) ||
+            !IsEvidenceSet(head.PhysicalSuperseded) ||
             !IsEvidenceSet(head.Superseded) ||
             !IsEvidenceSet(head.CompletedCleanup))
         {
@@ -187,19 +201,24 @@ internal static class LineageHeadCodec
                 head.PreviousEpoch is null &&
                 head.PreviousHeadIdentity is null &&
                 head.TransitionEvidenceIdentity is null &&
-                head.ExpiryBoundaryUnixSeconds is null,
+                head.ExpiryBoundaryUnixSeconds is null &&
+                head.PhysicalPredecessors.IsEmpty &&
+                head.Superseded.IsEmpty &&
+                head.CompletedCleanup.IsEmpty,
             LineageTransitionKind.Reset =>
                 head.Ordinal > 0 &&
                 head.PreviousEpoch is not null &&
                 head.PreviousHeadIdentity is not null &&
                 head.TransitionEvidenceIdentity is not null &&
-                head.ExpiryBoundaryUnixSeconds is null,
+                head.ExpiryBoundaryUnixSeconds is null &&
+                !head.PhysicalPredecessors.IsEmpty,
             LineageTransitionKind.Expiry =>
                 head.Ordinal > 0 &&
                 head.PreviousEpoch is not null &&
                 head.PreviousHeadIdentity is not null &&
                 head.TransitionEvidenceIdentity is not null &&
-                head.ExpiryBoundaryUnixSeconds is not null,
+                head.ExpiryBoundaryUnixSeconds is not null &&
+                !head.PhysicalPredecessors.IsEmpty,
             _ => false,
         };
     }
@@ -212,7 +231,38 @@ internal static class LineageHeadCodec
         evidence.Select(ItemKey).Distinct(StringComparer.Ordinal).Count() ==
             evidence.Length;
 
-    private static void WriteEvidence(
+    internal static bool TryEncodeIdentity(
+        LineageHeadV1? head,
+        out byte[] identity)
+    {
+        identity = [];
+        if (!IsValid(head))
+        {
+            return false;
+        }
+
+        var writer = new LineageBinaryWriter();
+        writer.WriteString(LineageFormat.HeadMagic);
+        writer.WriteUInt16(LineageFormat.Version);
+        writer.WriteByte((byte)head!.Transition);
+        writer.WriteUInt64(head.Ordinal);
+        writer.WriteString(head.Reviewed.BaseSha);
+        writer.WriteString(head.Reviewed.HeadSha);
+        writer.WriteOptionalString(head.PreviousEpoch);
+        writer.WriteOptionalString(head.PreviousHeadIdentity);
+        writer.WriteOptionalString(head.TransitionEvidenceIdentity);
+        writer.WriteByte(head.ExpiryBoundaryUnixSeconds is null ?
+            (byte)0 : (byte)1);
+        if (head.ExpiryBoundaryUnixSeconds is not null)
+        {
+            writer.WriteInt64(head.ExpiryBoundaryUnixSeconds.Value);
+        }
+
+        identity = writer.ToArray();
+        return true;
+    }
+
+    internal static void WriteEvidence(
         LineageBinaryWriter writer,
         ImmutableArray<LineageArtifactEvidence> evidence)
     {
@@ -221,12 +271,16 @@ internal static class LineageHeadCodec
         {
             writer.WriteString(item.Name);
             writer.WriteString(item.ObjectId);
+            writer.WriteString(item.ProducingRunIdentity);
+            writer.WriteInt64(item.ProducingRunAttempt);
             writer.WriteString(item.ArchiveSha256);
             writer.WriteString(item.EncryptedObjectSha256);
+            writer.WriteInt64(item.ExpiresAtUnixSeconds);
+            writer.WriteInt64(item.Size);
         }
     }
 
-    private static bool TryReadEvidence(
+    internal static bool TryReadEvidence(
         ref LineageBinaryReader reader,
         out ImmutableArray<LineageArtifactEvidence> evidence)
     {
@@ -247,8 +301,14 @@ internal static class LineageHeadCodec
                 !reader.TryReadString(
                     OpaqueStoreLimits.MaximumIdentityBytes,
                     out var objectId) ||
+                !reader.TryReadString(
+                    OpaqueStoreLimits.MaximumIdentityBytes,
+                    out var producingRunIdentity) ||
+                !reader.TryReadInt64(out var producingRunAttempt) ||
                 !reader.TryReadString(64, out var archiveSha256) ||
-                !reader.TryReadString(64, out var encryptedSha256))
+                !reader.TryReadString(64, out var encryptedSha256) ||
+                !reader.TryReadInt64(out var expiresAtUnixSeconds) ||
+                !reader.TryReadInt64(out var size))
             {
                 return false;
             }
@@ -256,8 +316,12 @@ internal static class LineageHeadCodec
             builder.Add(new LineageArtifactEvidence(
                 name,
                 objectId,
+                producingRunIdentity,
+                producingRunAttempt,
                 archiveSha256,
-                encryptedSha256));
+                encryptedSha256,
+                expiresAtUnixSeconds,
+                size));
         }
 
         evidence = builder.MoveToImmutable();
@@ -270,7 +334,15 @@ internal static class LineageHeadCodec
             "\0",
             item.ObjectId,
             "\0",
+            item.ProducingRunIdentity,
+            "\0",
+            item.ProducingRunAttempt,
+            "\0",
             item.ArchiveSha256,
             "\0",
-            item.EncryptedObjectSha256);
+            item.EncryptedObjectSha256,
+            "\0",
+            item.ExpiresAtUnixSeconds,
+            "\0",
+            item.Size);
 }

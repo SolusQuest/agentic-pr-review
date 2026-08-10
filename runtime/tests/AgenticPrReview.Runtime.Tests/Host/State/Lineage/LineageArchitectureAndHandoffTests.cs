@@ -74,6 +74,63 @@ public sealed class LineageArchitectureAndHandoffTests
     }
 
     [Fact]
+    public void ResetCapabilityBindsExactBaseScopeAndPriorHead()
+    {
+        using var lease = LineageTestData.Context();
+        var priorHead = new string('a', 64);
+        var reset = LineageTestData.Reset(
+            lease.Access,
+            priorHead,
+            new string('b', 64));
+        var scope = LineageTestData.Scope();
+        Assert.True(LineageBaseScopeCodec.TryDigest(
+            scope,
+            out var baseScopeDigest));
+
+        Assert.True(reset.Allows(
+            lease.Access,
+            scope,
+            baseScopeDigest,
+            "workflow-run-42",
+            producingRunAttempt: 1,
+            priorHead));
+        Assert.False(reset.Allows(
+            lease.Access,
+            scope,
+            baseScopeDigest,
+            "workflow-run-42",
+            producingRunAttempt: 1,
+            new string('c', 64)));
+
+        var changedScope = scope with
+        {
+            ConfigSha256 = new string('e', 64),
+        };
+        Assert.True(LineageBaseScopeCodec.TryDigest(
+            changedScope,
+            out var changedScopeDigest));
+        Assert.False(reset.Allows(
+            lease.Access,
+            changedScope,
+            changedScopeDigest,
+            "workflow-run-42",
+            producingRunAttempt: 1,
+            priorHead));
+
+        var missingPrior = LineageTestData.Reset(
+            lease.Access,
+            priorHeadIdentity: null,
+            new string('d', 64));
+        Assert.False(missingPrior.Allows(
+            lease.Access,
+            scope,
+            baseScopeDigest,
+            "workflow-run-42",
+            producingRunAttempt: 1,
+            priorHead));
+    }
+
+    [Fact]
     public void LineageProductionTreeStaysInsideFrozenDependencies()
     {
         var sourceRoot = FindRepositoryPath(

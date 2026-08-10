@@ -18,7 +18,15 @@ internal static class StateControlHeaderV1Codec
             return false;
         }
 
-        var semantic = EncodeSemantic(draft!);
+        if (!TryEncodeIdentityPayload(
+                draft!.ObjectClass,
+                payload,
+                out var identityPayload))
+        {
+            return false;
+        }
+
+        var semantic = EncodeSemantic(draft);
         try
         {
             header = new StateControlHeaderV1(
@@ -27,7 +35,9 @@ internal static class StateControlHeaderV1Codec
                 draft.SessionId,
                 draft.ObjectClass,
                 keyId,
-                LineageCryptography.ObjectIdentity(semantic, payload),
+                LineageCryptography.ObjectIdentity(
+                    semantic,
+                    identityPayload),
                 draft.PredecessorIdentity,
                 draft.SuccessorIdentity,
                 draft.ProducingRunIdentity,
@@ -40,6 +50,7 @@ internal static class StateControlHeaderV1Codec
         finally
         {
             CryptographicOperations.ZeroMemory(semantic);
+            CryptographicOperations.ZeroMemory(identityPayload);
         }
     }
 
@@ -150,12 +161,20 @@ internal static class StateControlHeaderV1Codec
             candidate.CreatedAtUnixSeconds,
             candidate.LogicalExpiresAtUnixSeconds,
             candidate.RequiredPlatformExpiresAtUnixSeconds);
+        if (!TryEncodeIdentityPayload(
+                candidate.ObjectClass,
+                payload,
+                out var identityPayload))
+        {
+            return false;
+        }
+
         var semantic = EncodeSemantic(draft);
         try
         {
             var expected = LineageCryptography.ObjectIdentity(
                 semantic,
-                payload);
+                identityPayload);
             if (!CryptographicOperations.FixedTimeEquals(
                     Convert.FromHexString(expected),
                     Convert.FromHexString(candidate.ObjectIdentity)))
@@ -166,6 +185,7 @@ internal static class StateControlHeaderV1Codec
         finally
         {
             CryptographicOperations.ZeroMemory(semantic);
+            CryptographicOperations.ZeroMemory(identityPayload);
         }
 
         header = candidate;
@@ -183,7 +203,27 @@ internal static class StateControlHeaderV1Codec
         writer.WriteString(StateObjectClasses.ToWireName(draft.ObjectClass));
         writer.WriteOptionalString(draft.PredecessorIdentity);
         writer.WriteOptionalString(draft.SuccessorIdentity);
-        writer.WriteInt64(draft.LogicalExpiresAtUnixSeconds);
+        if (draft.ObjectClass != StateObjectClass.LineageHead)
+        {
+            writer.WriteInt64(draft.LogicalExpiresAtUnixSeconds);
+        }
+
         return writer.ToArray();
+    }
+
+    private static bool TryEncodeIdentityPayload(
+        StateObjectClass objectClass,
+        ReadOnlySpan<byte> payload,
+        out byte[] identityPayload)
+    {
+        identityPayload = [];
+        if (objectClass != StateObjectClass.LineageHead)
+        {
+            identityPayload = payload.ToArray();
+            return true;
+        }
+
+        return LineageHeadCodec.TryDecode(payload, out var head) &&
+            LineageHeadCodec.TryEncodeIdentity(head, out identityPayload);
     }
 }

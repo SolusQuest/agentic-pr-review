@@ -27,7 +27,12 @@ internal static class LineageHeadSelector
 
         if (candidates.IsEmpty)
         {
-            return LineageSelectionResult.Fail(LineageCodes.KeyUnavailable);
+            return LineageSelectionResult.Fail(unknown.Any(item =>
+                    StringComparer.Ordinal.Equals(
+                        item.FailureCode,
+                        LineageCodes.RetentionFailed))
+                ? LineageCodes.RetentionFailed
+                : LineageCodes.KeyUnavailable);
         }
 
         if (candidates.Any(candidate =>
@@ -73,6 +78,8 @@ internal static class LineageHeadSelector
         var chainIdentities = ImmutableHashSet.CreateBuilder<string>(
             StringComparer.Ordinal);
         chainIdentities.Add(selected.Header.ObjectIdentity);
+        var chain = ImmutableArray.CreateBuilder<LineageHeadCandidate>();
+        chain.Add(selected);
         LineageHeadCandidate? immediatePredecessor = null;
         var cursor = selected;
         while (cursor.Head.PreviousHeadIdentity is not null)
@@ -101,6 +108,7 @@ internal static class LineageHeadSelector
             }
 
             immediatePredecessor ??= previous;
+            chain.Add(previous);
             cursor = previous;
         }
 
@@ -110,41 +118,40 @@ internal static class LineageHeadSelector
             return LineageSelectionResult.Fail(LineageCodes.Conflict);
         }
 
-        var authorizedEvidence = selected.Head.Superseded
+        if (groups.Keys.Any(identity => !chainIdentities.Contains(identity)))
+        {
+            // A later head cannot retroactively arbitrate a known,
+            // authenticated side branch by merely naming it as superseded.
+            return LineageSelectionResult.Fail(LineageCodes.Conflict);
+        }
+
+        var authorizedEvidence = chain
+            .SelectMany(candidate => candidate.Head.PhysicalSuperseded)
+            .Concat(selected.Head.Superseded)
             .Concat(selected.Head.CompletedCleanup)
             .ToImmutableArray();
-        var safe = ImmutableArray.CreateBuilder<OpaqueStoreObjectMetadata>();
+        var safeNonAnchors =
+            ImmutableArray.CreateBuilder<OpaqueStoreObjectMetadata>();
         foreach (var group in groups.Values)
         {
             var survivor = ChooseSurvivor(group, currentKeyId);
-            var groupIdentity = survivor.Header.ObjectIdentity;
             foreach (var duplicate in group.Where(duplicate =>
                 duplicate.Metadata != survivor.Metadata))
             {
-                safe.Add(duplicate.Metadata);
+                safeNonAnchors.Add(duplicate.Metadata);
             }
-
-            if (chainIdentities.Contains(groupIdentity))
-            {
-                if (groupIdentity != selected.Header.ObjectIdentity &&
-                    (immediatePredecessor is null ||
-                        groupIdentity !=
-                            immediatePredecessor.Header.ObjectIdentity))
-                {
-                    safe.Add(survivor.Metadata);
-                }
-
-                continue;
-            }
-
-            if (!authorizedEvidence.Any(evidence =>
-                    LineageHeadCodec.Matches(evidence, survivor.Metadata)))
-            {
-                return LineageSelectionResult.Fail(LineageCodes.Conflict);
-            }
-
-            safe.Add(survivor.Metadata);
         }
+
+        var safeChainAnchors = chain
+            .Where(candidate =>
+                candidate.Header.ObjectIdentity !=
+                    selected.Header.ObjectIdentity &&
+                (immediatePredecessor is null ||
+                    candidate.Header.ObjectIdentity !=
+                        immediatePredecessor.Header.ObjectIdentity))
+            .OrderBy(candidate => candidate.Head.Ordinal)
+            .Select(candidate => candidate.Metadata)
+            .ToImmutableArray();
 
         foreach (var item in unknown)
         {
@@ -164,19 +171,28 @@ internal static class LineageHeadSelector
                     LineageHeadCodec.Matches(evidence, item.Metadata)))
             {
                 return LineageSelectionResult.Fail(
-                    LineageCodes.KeyUnavailable);
+                    StringComparer.Ordinal.Equals(
+                        item.FailureCode,
+                        LineageCodes.RetentionFailed)
+                        ? LineageCodes.RetentionFailed
+                        : LineageCodes.KeyUnavailable);
             }
 
-            safe.Add(item.Metadata);
+            safeNonAnchors.Add(item.Metadata);
         }
 
         return LineageSelectionResult.Success(new LineageHeadSelection(
             selected,
             immediatePredecessor,
-            safe.Distinct().OrderBy(
+            selectedGroup.Select(candidate => candidate.Metadata)
+                .OrderBy(metadata => metadata.Reference.ObjectId.Value,
+                    StringComparer.Ordinal)
+                .ToImmutableArray(),
+            safeNonAnchors.Distinct().OrderBy(
                     metadata => metadata.Reference.ObjectId.Value,
                     StringComparer.Ordinal)
                 .ToImmutableArray(),
+            safeChainAnchors,
             physicalCount));
     }
 

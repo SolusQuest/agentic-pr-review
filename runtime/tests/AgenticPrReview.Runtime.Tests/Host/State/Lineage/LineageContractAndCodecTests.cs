@@ -89,13 +89,11 @@ public sealed class LineageContractAndCodecTests
             lease.Context,
             lease.Access,
             baseScopeDigest,
-            LineageTestData.Reviewed(),
             out var epoch));
         Assert.True(LineageCryptography.TryDeriveInitialEpoch(
             lease.Context,
             lease.Access,
             baseScopeDigest,
-            LineageTestData.Reviewed(),
             out var retry));
         Assert.Equal(epoch, retry);
         Assert.True(LineageCryptography.TryDeriveSessionId(
@@ -106,20 +104,30 @@ public sealed class LineageContractAndCodecTests
             out var session));
         Assert.Matches("^[a-f0-9]{64}$", session);
         Assert.Equal(
-            "1ce401d84f651397116530759c1c35eb5f84ccac6cab63b329e7a1fbded6ab4e",
+            "b07333646ae2dcb2dc805c6a2a409a7554e9cb9905b7d59f23327c4d48d46c4a",
             epoch);
         Assert.Equal(
-            "ac39b5e5d9e00790787c0eddb39b491934994e71ab24b728a742f8e707600ec7",
+            "5013a5c9374f190f539b92e302bfdcd0a73a9f50b8b9d48f11785430333400c6",
             session);
+
+        Assert.True(LineageBaseScopeCodec.TryDigest(
+            LineageTestData.Scope() with { ConfigSha256 = new string('e', 64) },
+            out var changedScopeDigest));
+        Assert.True(LineageCryptography.TryDeriveInitialEpoch(
+            lease.Context,
+            lease.Access,
+            changedScopeDigest,
+            out var changedScopeEpoch));
+        Assert.NotEqual(epoch, changedScopeEpoch);
 
         Assert.True(LineageCryptography.TryDeriveResetEpoch(
             lease.Context,
             lease.Access,
             baseScopeDigest,
-            epoch,
             new string('3', 64),
             new string('4', 64),
-            LineageTestData.Reviewed('5', '6'),
+            "workflow-run-42",
+            1,
             out var reset));
         Assert.NotEqual(epoch, reset);
     }
@@ -135,7 +143,6 @@ public sealed class LineageContractAndCodecTests
             lease.Context,
             lease.Access,
             baseScopeDigest,
-            LineageTestData.Reviewed(),
             out var epoch));
         Assert.True(LineageCryptography.TryDeriveSessionId(
             lease.Context,
@@ -233,8 +240,12 @@ public sealed class LineageContractAndCodecTests
         var evidence = new LineageArtifactEvidence(
             "apr-state-name",
             "object-1",
+            "transport-run",
+            1,
             new string('a', 64),
-            new string('b', 64));
+            new string('b', 64),
+            LineageTestData.SentinelExpiry,
+            Size: 128);
         var head = new LineageHeadV1(
             LineageTransitionKind.Reset,
             Ordinal: 1,
@@ -244,6 +255,7 @@ public sealed class LineageContractAndCodecTests
             new string('3', 64),
             ExpiryBoundaryUnixSeconds: null,
             [evidence],
+            [],
             [evidence with { ObjectId = "object-2" }],
             []);
         Assert.True(LineageHeadCodec.TryEncode(head, out var encoded));
@@ -257,6 +269,7 @@ public sealed class LineageContractAndCodecTests
             new string('5', 64),
             new string('6', 64),
             ExpiryBoundaryUnixSeconds: null,
+            LineageTestData.Reviewed(),
             LineageCryptography.InventoryDigest(targets),
             targets);
         Assert.True(LineageTransitionIntentCodec.TryEncode(

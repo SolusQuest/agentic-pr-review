@@ -95,6 +95,24 @@ public sealed class LineageServiceLifecycleTests
 
                 Assert.Equal(2, Directory.GetFiles(root, "*.aprobject").Length);
 
+                var replayedReset = await service.ResolveAsync(
+                    nextProcess.Context,
+                    LineageTestData.Request(
+                        nextProcess.Access,
+                        resetEvidence,
+                        LineageTestData.Reviewed('5', '6')),
+                    CancellationToken.None);
+                Assert.True(replayedReset.Succeeded, replayedReset.Code);
+                using (replayedReset.Context)
+                {
+                    Assert.True(replayedReset.Context!.TryGetSnapshot(
+                        nextProcess.Access,
+                        out var replayedSnapshot));
+                    Assert.Equal(resetSnapshot, replayedSnapshot);
+                }
+
+                Assert.Equal(2, Directory.GetFiles(root, "*.aprobject").Length);
+
                 await UploadExpiredAcceptanceAsync(
                     store,
                     nextProcess,
@@ -254,6 +272,99 @@ public sealed class LineageServiceLifecycleTests
     }
 
     [Fact]
+    public async Task FreshProcessCleansUnknownPreviousKeyRefreshSource()
+    {
+        await WithRootAsync(async root =>
+        {
+            SelectedLineageSnapshot initialSnapshot;
+            OpaqueStoreObjectMetadata oldPhysical;
+            using (var initialLease = LineageTestData.Context())
+            {
+                var store = new LocalRestrictedStateStore(
+                    root,
+                    timeProvider: initialLease.Time);
+                var initial = await new LineageService(store, initialLease.Time)
+                    .ResolveAsync(
+                        initialLease.Context,
+                        LineageTestData.Request(initialLease.Access),
+                        CancellationToken.None);
+                Assert.True(initial.Succeeded, initial.Code);
+                using (initial.Context)
+                {
+                    Assert.True(initial.Context!.TryGetSnapshot(
+                        initialLease.Access,
+                        out var snapshot));
+                    initialSnapshot = snapshot!;
+                }
+
+                var lineageName = ResolveName(
+                    initialLease,
+                    StateObjectClass.LineageHead);
+                var listed = await store.ListExactAsync(
+                    new OpaqueStoreListRequest(
+                        lineageName,
+                        LineageFormat.MaximumPhysicalPerClass),
+                    CancellationToken.None);
+                Assert.True(listed.Succeeded);
+                var reference = Assert.Single(listed.Objects);
+                var metadata = await store.ReadMetadataAsync(
+                    new OpaqueStoreMetadataRequest(reference),
+                    CancellationToken.None);
+                Assert.True(metadata.Succeeded);
+                oldPhysical = metadata.Metadata!;
+            }
+
+            var nextKey = Convert.ToBase64String(
+                Enumerable.Repeat((byte)0xc3, 32).ToArray());
+            using (var rotatedLease = LineageTestData.Context(
+                previousBase64: LocatorTestData.CurrentBase64,
+                currentBase64: nextKey))
+            {
+                var inner = new LocalRestrictedStateStore(
+                    root,
+                    timeProvider: rotatedLease.Time);
+                var interrupted = await new LineageService(
+                        new TargetDeleteOutcomeUnknownStore(
+                            inner,
+                            oldPhysical),
+                        rotatedLease.Time)
+                    .ResolveAsync(
+                        rotatedLease.Context,
+                        LineageTestData.Request(rotatedLease.Access),
+                        CancellationToken.None);
+                Assert.False(interrupted.Succeeded);
+                Assert.Equal(LineageCodes.CleanupFailed, interrupted.Code);
+                Assert.Null(interrupted.Context);
+                Assert.Equal(2, Directory.GetFiles(
+                    root,
+                    "*.aprobject").Length);
+            }
+
+            using var freshLease = LineageTestData.Context(
+                currentBase64: nextKey);
+            var recovered = await new LineageService(
+                    new LocalRestrictedStateStore(
+                        root,
+                        timeProvider: freshLease.Time),
+                    freshLease.Time)
+                .ResolveAsync(
+                    freshLease.Context,
+                    LineageTestData.Request(freshLease.Access),
+                    CancellationToken.None);
+            Assert.True(recovered.Succeeded, recovered.Code);
+            using (recovered.Context)
+            {
+                Assert.True(recovered.Context!.TryGetSnapshot(
+                    freshLease.Access,
+                    out var snapshot));
+                Assert.Equal(initialSnapshot, snapshot);
+            }
+
+            Assert.Single(Directory.GetFiles(root, "*.aprobject"));
+        });
+    }
+
+    [Fact]
     public async Task RetentionRefreshPreservesEpochSessionAndLogicalHead()
     {
         await WithRootAsync(async root =>
@@ -280,9 +391,15 @@ public sealed class LineageServiceLifecycleTests
             var before = Assert.Single(
                 Directory.GetFiles(root, "*.aprobject"));
             lease.Time.UnixSeconds += 24 * 60 * 60;
+            var extendedLogicalExpiry =
+                LineageTestData.LogicalExpiry + 24 * 60 * 60;
+            var refreshRequest = LineageTestData.Request(lease.Access) with
+            {
+                RequiredLogicalExpiresAtUnixSeconds = extendedLogicalExpiry,
+            };
             var refreshed = await service.ResolveAsync(
                 lease.Context,
-                LineageTestData.Request(lease.Access),
+                refreshRequest,
                 CancellationToken.None);
             Assert.True(refreshed.Succeeded, refreshed.Code);
             using (refreshed.Context)
@@ -296,6 +413,247 @@ public sealed class LineageServiceLifecycleTests
             var after = Assert.Single(
                 Directory.GetFiles(root, "*.aprobject"));
             Assert.NotEqual(before, after);
+
+            Assert.True(LineageBaseScopeCodec.TryDigest(
+                LineageTestData.Scope(),
+                out var baseScopeDigest));
+            var inventory = await new ScopedStateInventory(store).ReadAsync(
+                lease.Context,
+                lease.Access,
+                LineageTestData.Scope(),
+                baseScopeDigest,
+                CancellationToken.None);
+            Assert.True(inventory.Succeeded, inventory.Code);
+            try
+            {
+                var head = Assert.Single(inventory.Snapshot!.Authenticated
+                    .Where(item => item.Header.ObjectClass ==
+                        StateObjectClass.LineageHead));
+                Assert.Equal(
+                    extendedLogicalExpiry,
+                    head.Header.LogicalExpiresAtUnixSeconds);
+            }
+            finally
+            {
+                ScopedStateInventory.Clear(inventory.Snapshot);
+            }
+        });
+    }
+
+    [Fact]
+    public async Task ExpiryUsesTheUniqueCurrentAcceptance()
+    {
+        await WithRootAsync(async root =>
+        {
+            using var lease = LineageTestData.Context();
+            var store = new LocalRestrictedStateStore(
+                root,
+                timeProvider: lease.Time);
+            var service = new LineageService(store, lease.Time);
+            var initialized = await service.ResolveAsync(
+                lease.Context,
+                LineageTestData.Request(lease.Access),
+                CancellationToken.None);
+            Assert.True(initialized.Succeeded, initialized.Code);
+            SelectedLineageSnapshot selected;
+            using (initialized.Context)
+            {
+                Assert.True(initialized.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                selected = snapshot!;
+            }
+
+            var expiredPredecessor = await UploadAcceptanceAsync(
+                store,
+                lease,
+                selected,
+                predecessorIdentity: null,
+                logicalExpiry: LineageTestData.Now - 60,
+                payloadMarker: 1);
+            _ = await UploadAcceptanceAsync(
+                store,
+                lease,
+                selected,
+                expiredPredecessor.ObjectIdentity,
+                logicalExpiry: LineageTestData.Now + 60,
+                payloadMarker: 2);
+
+            var beforeBoundary = await service.ResolveAsync(
+                lease.Context,
+                LineageTestData.Request(lease.Access),
+                CancellationToken.None);
+            Assert.True(beforeBoundary.Succeeded, beforeBoundary.Code);
+            using (beforeBoundary.Context)
+            {
+                Assert.True(beforeBoundary.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                Assert.Equal(selected, snapshot);
+            }
+
+            lease.Time.UnixSeconds = LineageTestData.Now + 61;
+            var afterBoundary = await service.ResolveAsync(
+                lease.Context,
+                LineageTestData.Request(
+                    lease.Access,
+                    reviewed: LineageTestData.Reviewed('3', '4')),
+                CancellationToken.None);
+            Assert.True(afterBoundary.Succeeded, afterBoundary.Code);
+            using (afterBoundary.Context)
+            {
+                Assert.True(afterBoundary.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                Assert.Equal(LineageTransitionKind.Expiry, snapshot!.Transition);
+                Assert.NotEqual(selected.Epoch, snapshot.Epoch);
+            }
+        });
+    }
+
+    [Fact]
+    public async Task AuthenticatedHeadWithNonCanonicalEpochAndSessionIsRejected()
+    {
+        await WithRootAsync(async root =>
+        {
+            using var lease = LineageTestData.Context();
+            var store = new LocalRestrictedStateStore(
+                root,
+                timeProvider: lease.Time);
+            Assert.True(LineageBaseScopeCodec.TryDigest(
+                LineageTestData.Scope(),
+                out var baseScopeDigest));
+            Assert.True(LineageBaseScopeCodec.TryEncode(
+                LineageTestData.Scope(),
+                out var canonicalScope));
+            try
+            {
+                Assert.True(lease.Context.TryDeriveOpaqueName(
+                    lease.Access,
+                    StateObjectClasses.ToWireName(
+                        StateObjectClass.LineageHead),
+                    canonicalScope,
+                    out var name));
+                Assert.NotNull(name);
+                var head = new LineageHeadV1(
+                    LineageTransitionKind.Initial,
+                    Ordinal: 0,
+                    LineageTestData.Reviewed(),
+                    PreviousEpoch: null,
+                    PreviousHeadIdentity: null,
+                    TransitionEvidenceIdentity: null,
+                    ExpiryBoundaryUnixSeconds: null,
+                    PhysicalPredecessors: [],
+                    PhysicalSuperseded: [],
+                    Superseded: [],
+                    CompletedCleanup: []);
+                Assert.True(LineageHeadCodec.TryEncode(head, out var payload));
+                try
+                {
+                    var draft = new StateControlHeaderDraft(
+                        baseScopeDigest,
+                        new string('e', 64),
+                        new string('f', 64),
+                        StateObjectClass.LineageHead,
+                        PredecessorIdentity: null,
+                        SuccessorIdentity: null,
+                        "workflow-run-42",
+                        ProducingRunAttempt: 1,
+                        LineageTestData.Now,
+                        LineageTestData.LogicalExpiry,
+                        LineageTestData.Now + 8 * 24 * 60 * 60);
+                    Assert.True(StateControlEnvelopeV1Codec.TryEncrypt(
+                        lease.Context,
+                        lease.Access,
+                        name!,
+                        draft,
+                        payload,
+                        out var envelope,
+                        out _,
+                        out var code), code);
+                    try
+                    {
+                        var uploaded = await new ScopedStateUploadProtocol(
+                                store)
+                            .UploadAndReadBackAsync(
+                                name!,
+                                envelope,
+                                draft.RequiredPlatformExpiresAtUnixSeconds,
+                                CancellationToken.None);
+                        Assert.True(uploaded.Succeeded, uploaded.Code);
+                    }
+                    finally
+                    {
+                        CryptographicOperations.ZeroMemory(envelope);
+                    }
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(payload);
+                }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(canonicalScope);
+            }
+
+            var result = await new LineageService(store, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    LineageTestData.Request(lease.Access),
+                    CancellationToken.None);
+            Assert.False(result.Succeeded);
+            Assert.Equal(LineageCodes.AuthenticationFailed, result.Code);
+            Assert.Null(result.Context);
+        });
+    }
+
+    [Fact]
+    public async Task SiblingAcceptanceSuccessorsConflict()
+    {
+        await WithRootAsync(async root =>
+        {
+            using var lease = LineageTestData.Context();
+            var store = new LocalRestrictedStateStore(
+                root,
+                timeProvider: lease.Time);
+            var service = new LineageService(store, lease.Time);
+            var initialized = await service.ResolveAsync(
+                lease.Context,
+                LineageTestData.Request(lease.Access),
+                CancellationToken.None);
+            Assert.True(initialized.Succeeded, initialized.Code);
+            SelectedLineageSnapshot selected;
+            using (initialized.Context)
+            {
+                Assert.True(initialized.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                selected = snapshot!;
+            }
+
+            _ = await UploadAcceptanceAsync(
+                store,
+                lease,
+                selected,
+                predecessorIdentity: null,
+                logicalExpiry: LineageTestData.Now + 60,
+                payloadMarker: 1);
+            _ = await UploadAcceptanceAsync(
+                store,
+                lease,
+                selected,
+                predecessorIdentity: null,
+                logicalExpiry: LineageTestData.Now + 120,
+                payloadMarker: 2);
+
+            var result = await service.ResolveAsync(
+                lease.Context,
+                LineageTestData.Request(lease.Access),
+                CancellationToken.None);
+            Assert.False(result.Succeeded);
+            Assert.Equal(LineageCodes.Conflict, result.Code);
+            Assert.Null(result.Context);
         });
     }
 
@@ -303,6 +661,45 @@ public sealed class LineageServiceLifecycleTests
         IRestrictedStateStore store,
         LineageTestData.ContextLease lease,
         SelectedLineageSnapshot selected)
+    {
+        _ = await UploadAcceptanceAsync(
+            store,
+            lease,
+            selected,
+            predecessorIdentity: null,
+            logicalExpiry: LineageTestData.Now - 60,
+            payloadMarker: 9);
+    }
+
+    private static OpaqueStoreName ResolveName(
+        LineageTestData.ContextLease lease,
+        StateObjectClass objectClass)
+    {
+        Assert.True(LineageBaseScopeCodec.TryEncode(
+            LineageTestData.Scope(),
+            out var canonicalScope));
+        try
+        {
+            Assert.True(lease.Context.TryDeriveOpaqueName(
+                lease.Access,
+                StateObjectClasses.ToWireName(objectClass),
+                canonicalScope,
+                out var name));
+            return name!;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(canonicalScope);
+        }
+    }
+
+    private static async Task<StateControlHeaderV1> UploadAcceptanceAsync(
+        IRestrictedStateStore store,
+        LineageTestData.ContextLease lease,
+        SelectedLineageSnapshot selected,
+        string? predecessorIdentity,
+        long logicalExpiry,
+        byte payloadMarker)
     {
         Assert.True(LineageBaseScopeCodec.TryEncode(
             LineageTestData.Scope(),
@@ -320,21 +717,21 @@ public sealed class LineageServiceLifecycleTests
                 selected.Epoch,
                 selected.SessionId,
                 StateObjectClass.Acceptance,
-                PredecessorIdentity: selected.LineageHeadIdentity,
+                predecessorIdentity,
                 SuccessorIdentity: null,
                 "state-generation-run",
                 ProducingRunAttempt: 1,
                 LineageTestData.Now - 60,
-                LineageTestData.Now,
+                logicalExpiry,
                 LineageTestData.Now + 8 * 24 * 60 * 60);
             Assert.True(StateControlEnvelopeV1Codec.TryEncrypt(
                 lease.Context,
                 lease.Access,
                 name!,
                 draft,
-                [9, 8, 7, 6],
+                [payloadMarker],
                 out var envelope,
-                out _,
+                out var header,
                 out var code), code);
             try
             {
@@ -350,6 +747,8 @@ public sealed class LineageServiceLifecycleTests
             {
                 CryptographicOperations.ZeroMemory(envelope);
             }
+
+            return header!;
         }
         finally
         {
@@ -429,5 +828,44 @@ public sealed class LineageServiceLifecycleTests
         {
             Directory.Delete(root, recursive: true);
         }
+    }
+
+    private sealed class TargetDeleteOutcomeUnknownStore(
+        IRestrictedStateStore inner,
+        OpaqueStoreObjectMetadata target) : IRestrictedStateStore
+    {
+        public Task<OpaqueStoreListResult> ListExactAsync(
+            OpaqueStoreListRequest request,
+            CancellationToken cancellationToken) =>
+            inner.ListExactAsync(request, cancellationToken);
+
+        public Task<OpaqueStoreMetadataResult> ReadMetadataAsync(
+            OpaqueStoreMetadataRequest request,
+            CancellationToken cancellationToken) =>
+            inner.ReadMetadataAsync(request, cancellationToken);
+
+        public Task<OpaqueStoreDownloadResult> DownloadAsync(
+            OpaqueStoreDownloadRequest request,
+            CancellationToken cancellationToken) =>
+            inner.DownloadAsync(request, cancellationToken);
+
+        public Task<OpaqueStoreUploadResult> UploadImmutableAsync(
+            OpaqueStoreUploadRequest request,
+            CancellationToken cancellationToken) =>
+            inner.UploadImmutableAsync(request, cancellationToken);
+
+        public Task<OpaqueStoreReadBackResult> ReadBackExactAsync(
+            OpaqueStoreReadBackRequest request,
+            CancellationToken cancellationToken) =>
+            inner.ReadBackExactAsync(request, cancellationToken);
+
+        public Task<OpaqueStoreDeleteResult> DeleteExactAsync(
+            OpaqueStoreDeleteRequest request,
+            CancellationToken cancellationToken) =>
+            request.Expected == target
+                ? Task.FromResult(OpaqueStoreDeleteResult.Fail(
+                    OpaqueStoreFailure.OutcomeUnknown,
+                    OpaqueStoreMutationState.OutcomeUnknown))
+                : inner.DeleteExactAsync(request, cancellationToken);
     }
 }
