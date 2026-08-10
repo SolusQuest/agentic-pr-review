@@ -5,6 +5,11 @@ namespace AgenticPrReview.Runtime.Host.State.GitHubArtifacts;
 
 internal sealed class ArtifactBridgeStaging
 {
+    private const UnixFileMode PrivateDirectoryMode =
+        UnixFileMode.UserRead |
+        UnixFileMode.UserWrite |
+        UnixFileMode.UserExecute;
+
     private readonly string root;
     private readonly string csharpRoot;
 
@@ -27,9 +32,7 @@ internal sealed class ArtifactBridgeStaging
         {
             File.SetUnixFileMode(
                 csharpRoot,
-                UnixFileMode.UserRead |
-                UnixFileMode.UserWrite |
-                UnixFileMode.UserExecute);
+                PrivateDirectoryMode);
         }
         if (!IsSafeDirectory(csharpRoot))
         {
@@ -173,7 +176,14 @@ internal sealed class ArtifactBridgeStaging
             throw new IOException("artifact_bridge_staging_root_invalid");
         }
         var directory = Path.Join(csharpRoot, $"op-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(directory);
+        if (OperatingSystem.IsWindows())
+        {
+            Directory.CreateDirectory(directory);
+        }
+        else
+        {
+            Directory.CreateDirectory(directory, PrivateDirectoryMode);
+        }
         if (!IsSafeDirectory(directory))
         {
             throw new IOException("artifact_bridge_staging_invalid");

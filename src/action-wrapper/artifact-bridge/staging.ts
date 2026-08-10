@@ -1,5 +1,5 @@
 import { constants, type Stats } from 'node:fs';
-import { lstat, mkdir, open, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdir, open, realpath, rm, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -55,7 +55,7 @@ export class ArtifactBridgeStaging {
     await this.assertRoot();
     await this.assertOperationDirectory(operationDirectory);
     const archivePath = path.join(operationDirectory, 'artifact.zip');
-    const handle = await open(
+    const handle = await openStagedFile(
       archivePath,
       constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
       0o600,
@@ -84,7 +84,7 @@ export class ArtifactBridgeStaging {
   async readSource(relative: string): Promise<Buffer> {
     await this.assertRoot();
     const resolved = await this.resolveExistingFile(relative);
-    const handle = await open(resolved, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const handle = await openStagedFile(resolved, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     try {
       const before = await handle.stat();
       if (
@@ -124,7 +124,7 @@ export class ArtifactBridgeStaging {
     }
     await this.assertRoot();
     const destination = await this.resolveNewFile(relative);
-    const handle = await open(
+    const handle = await openStagedFile(
       destination,
       constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
       0o600,
@@ -289,4 +289,12 @@ function safePrivateDirectory(stat: Stats): boolean {
     if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) return false;
   }
   return true;
+}
+
+async function openStagedFile(filePath: string, flags: number, mode?: number): Promise<FileHandle> {
+  try {
+    return await open(filePath, flags, mode);
+  } catch {
+    throw new ArtifactBridgeStagingError();
+  }
 }
