@@ -1177,26 +1177,570 @@ public sealed class LineageRecoveryAndFailureTests
         });
     }
 
+    [Fact]
+    public async Task AuthorizedResetIncludesUnderRetainedLaterOwnedState()
+    {
+        await WithRootAsync(async root =>
+        {
+            using var lease = LineageTestData.Context();
+            var inner = new LocalRestrictedStateStore(
+                root,
+                timeProvider: lease.Time);
+            var initialized = await new LineageService(inner, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    LineageTestData.Request(lease.Access),
+                    CancellationToken.None);
+            Assert.True(initialized.Succeeded, initialized.Code);
+            SelectedLineageSnapshot selected;
+            using (initialized.Context)
+            {
+                Assert.True(initialized.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                selected = snapshot!;
+            }
+
+            _ = await UploadStateObjectAsync(
+                inner,
+                lease,
+                selected,
+                StateObjectClass.Candidate,
+                selected.LineageHeadIdentity,
+                LineageTestData.LogicalExpiry,
+                payloadMarker: 1,
+                underRetained: true);
+            var candidateName = await ResolveNameAsync(
+                lease,
+                StateObjectClass.Candidate);
+            var resetName = await ResolveNameAsync(
+                lease,
+                StateObjectClass.Reset);
+            var intentObservedBeforeTargetDelete = false;
+            var probe = new ProbedLineageStore(inner)
+            {
+                AfterUpload = async uploadCall =>
+                {
+                    if (uploadCall != 1)
+                    {
+                        return;
+                    }
+
+                    var candidates = await inner.ListExactAsync(
+                        new OpaqueStoreListRequest(
+                            candidateName,
+                            LineageFormat.MaximumPhysicalPerClass),
+                        CancellationToken.None);
+                    var intents = await inner.ListExactAsync(
+                        new OpaqueStoreListRequest(
+                            resetName,
+                            LineageFormat.MaximumPhysicalPerClass),
+                        CancellationToken.None);
+                    intentObservedBeforeTargetDelete =
+                        candidates.Succeeded &&
+                        candidates.Objects.Length == 1 &&
+                        intents.Succeeded &&
+                        intents.Objects.Length == 1;
+                },
+            };
+            var reset = LineageTestData.Reset(
+                lease.Access,
+                selected.LineageHeadIdentity,
+                new string('e', 64));
+            var result = await new LineageService(probe, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    LineageTestData.Request(lease.Access, reset),
+                    CancellationToken.None);
+
+            Assert.True(result.Succeeded, result.Code);
+            using (result.Context)
+            {
+                Assert.True(result.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                Assert.Equal(LineageTransitionKind.Reset,
+                    snapshot!.Transition);
+            }
+
+            Assert.True(intentObservedBeforeTargetDelete);
+            var remainingCandidates = await inner.ListExactAsync(
+                new OpaqueStoreListRequest(
+                    candidateName,
+                    LineageFormat.MaximumPhysicalPerClass),
+                CancellationToken.None);
+            Assert.True(remainingCandidates.Succeeded);
+            Assert.Empty(remainingCandidates.Objects);
+        });
+    }
+
+    [Fact]
+    public async Task ExpiryIncludesUnderRetainedCurrentAcceptance()
+    {
+        await WithRootAsync(async root =>
+        {
+            using var lease = LineageTestData.Context();
+            var inner = new LocalRestrictedStateStore(
+                root,
+                timeProvider: lease.Time);
+            var initialized = await new LineageService(inner, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    LineageTestData.Request(lease.Access),
+                    CancellationToken.None);
+            Assert.True(initialized.Succeeded, initialized.Code);
+            SelectedLineageSnapshot selected;
+            using (initialized.Context)
+            {
+                Assert.True(initialized.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                selected = snapshot!;
+            }
+
+            _ = await UploadStateObjectAsync(
+                inner,
+                lease,
+                selected,
+                StateObjectClass.Acceptance,
+                predecessorIdentity: null,
+                logicalExpiry: LineageTestData.Now,
+                payloadMarker: 1,
+                underRetained: true);
+            var acceptanceName = await ResolveNameAsync(
+                lease,
+                StateObjectClass.Acceptance);
+            var intentName = await ResolveNameAsync(
+                lease,
+                StateObjectClass.ExpiryTransition);
+            var intentObservedBeforeTargetDelete = false;
+            var probe = new ProbedLineageStore(inner)
+            {
+                AfterUpload = async uploadCall =>
+                {
+                    if (uploadCall != 1)
+                    {
+                        return;
+                    }
+
+                    var acceptances = await inner.ListExactAsync(
+                        new OpaqueStoreListRequest(
+                            acceptanceName,
+                            LineageFormat.MaximumPhysicalPerClass),
+                        CancellationToken.None);
+                    var intents = await inner.ListExactAsync(
+                        new OpaqueStoreListRequest(
+                            intentName,
+                            LineageFormat.MaximumPhysicalPerClass),
+                        CancellationToken.None);
+                    intentObservedBeforeTargetDelete =
+                        acceptances.Succeeded &&
+                        acceptances.Objects.Length == 1 &&
+                        intents.Succeeded &&
+                        intents.Objects.Length == 1;
+                },
+            };
+            var result = await new LineageService(probe, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    LineageTestData.Request(lease.Access),
+                    CancellationToken.None);
+
+            Assert.True(result.Succeeded, result.Code);
+            using (result.Context)
+            {
+                Assert.True(result.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                Assert.Equal(LineageTransitionKind.Expiry,
+                    snapshot!.Transition);
+            }
+
+            Assert.True(intentObservedBeforeTargetDelete);
+            var remainingAcceptances = await inner.ListExactAsync(
+                new OpaqueStoreListRequest(
+                    acceptanceName,
+                    LineageFormat.MaximumPhysicalPerClass),
+                CancellationToken.None);
+            Assert.True(remainingAcceptances.Succeeded);
+            Assert.Empty(remainingAcceptances.Objects);
+        });
+    }
+
+    [Theory]
+    [InlineData("reset")]
+    [InlineData("expiry")]
+    public async Task FreshProcessRecoversUnderRetainedTransitionIntent(
+        string transitionName)
+    {
+        await WithRootAsync(async root =>
+        {
+            using var lease = LineageTestData.Context();
+            var inner = new LocalRestrictedStateStore(
+                root,
+                timeProvider: lease.Time);
+            var initialized = await new LineageService(inner, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    LineageTestData.Request(lease.Access),
+                    CancellationToken.None);
+            Assert.True(initialized.Succeeded, initialized.Code);
+            SelectedLineageSnapshot selected;
+            using (initialized.Context)
+            {
+                Assert.True(initialized.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                selected = snapshot!;
+            }
+
+            LineageResolveRequest request;
+            StateObjectClass targetClass;
+            StateObjectClass intentClass;
+            LineageTransitionKind expectedTransition;
+            if (StringComparer.Ordinal.Equals(transitionName, "reset"))
+            {
+                await UploadActiveOpaqueStateAsync(
+                    inner,
+                    lease,
+                    selected,
+                    payloadMarker: 1);
+                var reset = LineageTestData.Reset(
+                    lease.Access,
+                    selected.LineageHeadIdentity,
+                    new string('e', 64));
+                request = LineageTestData.Request(lease.Access, reset);
+                targetClass = StateObjectClass.Candidate;
+                intentClass = StateObjectClass.Reset;
+                expectedTransition = LineageTransitionKind.Reset;
+            }
+            else
+            {
+                Assert.Equal("expiry", transitionName);
+                _ = await UploadStateObjectAsync(
+                    inner,
+                    lease,
+                    selected,
+                    StateObjectClass.Acceptance,
+                    predecessorIdentity: null,
+                    logicalExpiry: LineageTestData.Now,
+                    payloadMarker: 1,
+                    underRetained: false);
+                request = LineageTestData.Request(lease.Access);
+                targetClass = StateObjectClass.Acceptance;
+                intentClass = StateObjectClass.ExpiryTransition;
+                expectedTransition = LineageTransitionKind.Expiry;
+            }
+
+            var interruptedStore = new ProbedLineageStore(inner)
+            {
+                UploadRequiredExpiryTransform = required =>
+                    required - 3_601,
+                ReturnDeleteOutcomeUnknownAlways = true,
+            };
+            var interrupted = await new LineageService(
+                    interruptedStore,
+                    lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    request,
+                    CancellationToken.None);
+
+            Assert.False(interrupted.Succeeded);
+            Assert.Equal(LineageCodes.CleanupFailed, interrupted.Code);
+            Assert.Null(interrupted.Context);
+            Assert.Equal(1, interruptedStore.UploadCalls);
+            var intentName = await ResolveNameAsync(lease, intentClass);
+            var targetName = await ResolveNameAsync(lease, targetClass);
+            var persistedIntent = await inner.ListExactAsync(
+                new OpaqueStoreListRequest(
+                    intentName,
+                    LineageFormat.MaximumPhysicalPerClass),
+                CancellationToken.None);
+            var persistedTarget = await inner.ListExactAsync(
+                new OpaqueStoreListRequest(
+                    targetName,
+                    LineageFormat.MaximumPhysicalPerClass),
+                CancellationToken.None);
+            Assert.True(persistedIntent.Succeeded);
+            Assert.Single(persistedIntent.Objects);
+            Assert.True(persistedTarget.Succeeded);
+            Assert.Single(persistedTarget.Objects);
+
+            var refreshObservedBeforeTargetDelete = false;
+            var recoveredStore = new ProbedLineageStore(
+                new LocalRestrictedStateStore(root, timeProvider: lease.Time))
+            {
+                AfterUpload = async uploadCall =>
+                {
+                    if (uploadCall != 1)
+                    {
+                        return;
+                    }
+
+                    var intents = await inner.ListExactAsync(
+                        new OpaqueStoreListRequest(
+                            intentName,
+                            LineageFormat.MaximumPhysicalPerClass),
+                        CancellationToken.None);
+                    var targets = await inner.ListExactAsync(
+                        new OpaqueStoreListRequest(
+                            targetName,
+                            LineageFormat.MaximumPhysicalPerClass),
+                        CancellationToken.None);
+                    refreshObservedBeforeTargetDelete =
+                        intents.Succeeded &&
+                        intents.Objects.Length == 2 &&
+                        targets.Succeeded &&
+                        targets.Objects.Length == 1;
+                },
+            };
+            var recovered = await new LineageService(
+                    recoveredStore,
+                    lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    request,
+                    CancellationToken.None);
+
+            Assert.True(recovered.Succeeded, recovered.Code);
+            using (recovered.Context)
+            {
+                Assert.True(recovered.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                Assert.Equal(expectedTransition, snapshot!.Transition);
+            }
+
+            Assert.True(refreshObservedBeforeTargetDelete);
+            Assert.Equal(2, recoveredStore.UploadCalls);
+            var remainingIntents = await inner.ListExactAsync(
+                new OpaqueStoreListRequest(
+                    intentName,
+                    LineageFormat.MaximumPhysicalPerClass),
+                CancellationToken.None);
+            var remainingTargets = await inner.ListExactAsync(
+                new OpaqueStoreListRequest(
+                    targetName,
+                    LineageFormat.MaximumPhysicalPerClass),
+                CancellationToken.None);
+            Assert.True(remainingIntents.Succeeded);
+            Assert.Empty(remainingIntents.Objects);
+            Assert.True(remainingTargets.Succeeded);
+            Assert.Empty(remainingTargets.Objects);
+        });
+    }
+
+    [Fact]
+    public async Task CompetingUnderRetainedIntentsRemainConflict()
+    {
+        await WithRootAsync(async root =>
+        {
+            using var lease = LineageTestData.Context();
+            var inner = new LocalRestrictedStateStore(
+                root,
+                timeProvider: lease.Time);
+            var initialized = await new LineageService(inner, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    LineageTestData.Request(lease.Access),
+                    CancellationToken.None);
+            Assert.True(initialized.Succeeded, initialized.Code);
+            SelectedLineageSnapshot selected;
+            using (initialized.Context)
+            {
+                Assert.True(initialized.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                selected = snapshot!;
+            }
+
+            await UploadUnderRetainedResetIntentAsync(
+                inner,
+                lease,
+                selected,
+                new string('e', 64));
+            await UploadUnderRetainedResetIntentAsync(
+                inner,
+                lease,
+                selected,
+                new string('f', 64));
+            var resetName = await ResolveNameAsync(
+                lease,
+                StateObjectClass.Reset);
+            var before = await inner.ListExactAsync(
+                new OpaqueStoreListRequest(
+                    resetName,
+                    LineageFormat.MaximumPhysicalPerClass),
+                CancellationToken.None);
+            Assert.True(before.Succeeded);
+            Assert.Equal(2, before.Objects.Length);
+
+            var probe = new ProbedLineageStore(inner);
+            var result = await new LineageService(probe, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    LineageTestData.Request(lease.Access),
+                    CancellationToken.None);
+
+            Assert.False(result.Succeeded);
+            Assert.Equal(LineageCodes.Conflict, result.Code);
+            Assert.Null(result.Context);
+            Assert.Equal(0, probe.UploadCalls);
+            Assert.Equal(0, probe.DeleteCalls);
+            var after = await inner.ListExactAsync(
+                new OpaqueStoreListRequest(
+                    resetName,
+                    LineageFormat.MaximumPhysicalPerClass),
+                CancellationToken.None);
+            Assert.True(after.Succeeded);
+            Assert.Equal(before.Objects
+                    .OrderBy(item => item.ObjectId.Value,
+                        StringComparer.Ordinal),
+                after.Objects.OrderBy(item => item.ObjectId.Value,
+                    StringComparer.Ordinal));
+        });
+    }
+
     private static async Task UploadActiveOpaqueStateAsync(
         IRestrictedStateStore store,
         LineageTestData.ContextLease lease,
         SelectedLineageSnapshot selected,
         byte payloadMarker)
     {
-        var name = await ResolveNameAsync(lease, StateObjectClass.Candidate);
+        _ = await UploadStateObjectAsync(
+            store,
+            lease,
+            selected,
+            StateObjectClass.Candidate,
+            predecessorIdentity: null,
+            LineageTestData.LogicalExpiry,
+            payloadMarker,
+            underRetained: false);
+    }
+
+    private static async Task<(
+        StateControlHeaderV1 Header,
+        OpaqueStoreObjectMetadata Metadata)> UploadStateObjectAsync(
+        IRestrictedStateStore store,
+        LineageTestData.ContextLease lease,
+        SelectedLineageSnapshot selected,
+        StateObjectClass objectClass,
+        string? predecessorIdentity,
+        long logicalExpiry,
+        byte payloadMarker,
+        bool underRetained)
+    {
+        var name = await ResolveNameAsync(lease, objectClass);
         var draft = new StateControlHeaderDraft(
             selected.BaseScopeDigest,
             selected.Epoch,
             selected.SessionId,
-            StateObjectClass.Candidate,
-            PredecessorIdentity: null,
+            objectClass,
+            predecessorIdentity,
             SuccessorIdentity: null,
             "candidate-run",
             ProducingRunAttempt: payloadMarker,
             LineageTestData.Now,
-            LineageTestData.LogicalExpiry,
+            logicalExpiry,
             LineageTestData.Now + 8 * 24 * 60 * 60);
         byte[] payload = [payloadMarker];
+        try
+        {
+            Assert.True(StateControlEnvelopeV1Codec.TryEncrypt(
+                lease.Context,
+                lease.Access,
+                name,
+                draft,
+                payload,
+                out var envelope,
+                out var header,
+                out var code), code);
+            try
+            {
+                OpaqueStoreObjectMetadata metadata;
+                if (underRetained)
+                {
+                    var uploaded = await store.UploadImmutableAsync(
+                        new OpaqueStoreUploadRequest(
+                            name,
+                            new OpaqueStoreCorrelationId(
+                                LineageCryptography.CorrelationId(envelope)),
+                            envelope,
+                            new OpaqueStoreEncryptedObjectDigest(
+                                OpaqueStoreHash.Sha256(envelope)),
+                            draft.RequiredPlatformExpiresAtUnixSeconds -
+                                3_601),
+                        CancellationToken.None);
+                    Assert.True(uploaded.Succeeded);
+                    Assert.NotNull(uploaded.Metadata);
+                    Assert.True(uploaded.Metadata!.ExpiresAtUnixSeconds <
+                        draft.RequiredPlatformExpiresAtUnixSeconds);
+                    metadata = uploaded.Metadata;
+                }
+                else
+                {
+                    var uploaded = await new ScopedStateUploadProtocol(store)
+                        .UploadAndReadBackAsync(
+                            name,
+                            envelope,
+                            draft.RequiredPlatformExpiresAtUnixSeconds,
+                            CancellationToken.None);
+                    Assert.True(uploaded.Succeeded, uploaded.Code);
+                    Assert.NotNull(uploaded.Metadata);
+                    metadata = uploaded.Metadata!;
+                }
+
+                return (header!, metadata);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(envelope);
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(payload);
+        }
+    }
+
+    private static async Task UploadUnderRetainedResetIntentAsync(
+        IRestrictedStateStore store,
+        LineageTestData.ContextLease lease,
+        SelectedLineageSnapshot selected,
+        string transitionEvidenceIdentity)
+    {
+        var targets = System.Collections.Immutable.ImmutableArray<
+            LineageArtifactEvidence>.Empty;
+        var intent = new LineageTransitionIntentV1(
+            LineageTransitionIntentKind.Reset,
+            selected.LineageHeadIdentity,
+            selected.Epoch,
+            transitionEvidenceIdentity,
+            ExpiryBoundaryUnixSeconds: null,
+            LineageTestData.Reviewed(),
+            LineageCryptography.InventoryDigest(targets),
+            targets,
+            "workflow-run-42",
+            ResetAuthorityRunAttempt: 1);
+        Assert.True(LineageTransitionIntentCodec.TryEncode(
+            intent,
+            out var payload));
+        var name = await ResolveNameAsync(lease, StateObjectClass.Reset);
+        var requiredExpiry = LineageTestData.Now +
+            8 * 24 * 60 * 60;
+        var draft = new StateControlHeaderDraft(
+            selected.BaseScopeDigest,
+            selected.Epoch,
+            selected.SessionId,
+            StateObjectClass.Reset,
+            selected.LineageHeadIdentity,
+            SuccessorIdentity: null,
+            "workflow-run-42",
+            ProducingRunAttempt: 1,
+            LineageTestData.Now,
+            LineageTestData.LogicalExpiry,
+            requiredExpiry);
         try
         {
             Assert.True(StateControlEnvelopeV1Codec.TryEncrypt(
@@ -1210,13 +1754,20 @@ public sealed class LineageRecoveryAndFailureTests
                 out var code), code);
             try
             {
-                var uploaded = await new ScopedStateUploadProtocol(store)
-                    .UploadAndReadBackAsync(
+                var uploaded = await store.UploadImmutableAsync(
+                    new OpaqueStoreUploadRequest(
                         name,
+                        new OpaqueStoreCorrelationId(
+                            LineageCryptography.CorrelationId(envelope)),
                         envelope,
-                        draft.RequiredPlatformExpiresAtUnixSeconds,
-                        CancellationToken.None);
-                Assert.True(uploaded.Succeeded, uploaded.Code);
+                        new OpaqueStoreEncryptedObjectDigest(
+                            OpaqueStoreHash.Sha256(envelope)),
+                        requiredExpiry - 3_601),
+                    CancellationToken.None);
+                Assert.True(uploaded.Succeeded);
+                Assert.NotNull(uploaded.Metadata);
+                Assert.True(uploaded.Metadata!.ExpiresAtUnixSeconds <
+                    requiredExpiry);
             }
             finally
             {

@@ -186,6 +186,12 @@ internal sealed class LineageService
                         request.ProducingRunAttempt,
                         selection.Head))
                 {
+                    if (!observed.Snapshot!.UnderRetained.IsEmpty)
+                    {
+                        return LineageResolveResult.Fail(
+                            LineageCodes.RetentionFailed);
+                    }
+
                     return await RefreshOrFinalizeAsync(
                             context,
                             request,
@@ -249,6 +255,12 @@ internal sealed class LineageService
                         expiry.Acceptance.Header.LogicalExpiresAtUnixSeconds,
                         cancellationToken)
                     .ConfigureAwait(false);
+            }
+
+            if (!observed.Snapshot!.UnderRetained.IsEmpty)
+            {
+                return LineageResolveResult.Fail(
+                    LineageCodes.RetentionFailed);
             }
 
             return await RefreshOrFinalizeAsync(
@@ -458,6 +470,7 @@ internal sealed class LineageService
         }
 
         var targets = observed.Snapshot.Authenticated
+            .Concat(observed.Snapshot.UnderRetained)
             .Where(item =>
                 item.Header.ObjectClass != StateObjectClass.LineageHead &&
                 StringComparer.Ordinal.Equals(
@@ -534,7 +547,14 @@ internal sealed class LineageService
                 requiredPlatformExpiry,
                 cancellationToken)
             .ConfigureAwait(false);
-        if (written.Header is null)
+        if (written.Header is null ||
+            !written.Succeeded &&
+            (StringComparer.Ordinal.Equals(
+                    written.Code,
+                    LineageCodes.RetentionFailed) ||
+                StringComparer.Ordinal.Equals(
+                    written.Code,
+                    LineageCodes.CleanupFailed)))
         {
             return LineageResolveResult.Fail(written.Code);
         }
@@ -793,6 +813,7 @@ internal sealed class LineageService
         }
 
         var redundantIntents = observed.Snapshot!.Authenticated
+            .Concat(observed.Snapshot.UnderRetained)
             .Where(item =>
                 item.Header.ObjectClass is StateObjectClass.Reset or
                     StateObjectClass.ExpiryTransition &&
@@ -890,7 +911,9 @@ internal sealed class LineageService
                 return LineageResolveResult.Fail(LineageCodes.Conflict);
             }
 
-            var unexpectedPriorState = afterDelete.Snapshot.Authenticated.Any(
+            var unexpectedPriorState = afterDelete.Snapshot.Authenticated
+                .Concat(afterDelete.Snapshot.UnderRetained)
+                .Any(
                     item =>
                         item.Header.ObjectClass !=
                             StateObjectClass.LineageHead &&
@@ -1156,8 +1179,10 @@ internal sealed class LineageService
 
                 var residual = ImmutableArray.CreateBuilder<
                     OpaqueStoreObjectMetadata>();
-                foreach (var item in snapshot.Authenticated.Where(item =>
-                    item.Header.ObjectClass != StateObjectClass.LineageHead))
+                foreach (var item in snapshot.Authenticated
+                    .Concat(snapshot.UnderRetained)
+                    .Where(item => item.Header.ObjectClass !=
+                        StateObjectClass.LineageHead))
                 {
                     if (!authorizedHistorical.Any(evidence =>
                             LineageHeadCodec.Matches(
@@ -1301,6 +1326,7 @@ internal sealed class LineageService
             var snapshot = observed.Snapshot!;
             var name = snapshot.Names[objectClass];
             var authenticated = snapshot.Authenticated
+                .Concat(snapshot.UnderRetained)
                 .Where(item => item.Header.ObjectClass == objectClass)
                 .ToImmutableArray();
             var unknown = snapshot.Unknown
@@ -1423,8 +1449,9 @@ internal sealed class LineageService
                 return IntentHeadroomResult.Fail(code);
             }
 
-            var remaining = reread.Snapshot.Authenticated.Count(item =>
-                item.Header.ObjectClass == objectClass);
+            var remaining = reread.Snapshot.Authenticated
+                .Concat(reread.Snapshot.UnderRetained)
+                .Count(item => item.Header.ObjectClass == objectClass);
             if (remaining >= authenticated.Length)
             {
                 ClearObservation(reread);
@@ -1459,6 +1486,9 @@ internal sealed class LineageService
             var physical = observed.Snapshot.Authenticated
                 .Where(item => item.Header.ObjectClass == objectClass)
                 .Select(item => item.Metadata)
+                .Concat(observed.Snapshot.UnderRetained
+                    .Where(item => item.Header.ObjectClass == objectClass)
+                    .Select(item => item.Metadata))
                 .Concat(observed.Snapshot.Unknown
                     .Where(item => item.Metadata.Reference.Name == name)
                     .Select(item => item.Metadata))
@@ -1508,8 +1538,9 @@ internal sealed class LineageService
                 return false;
             }
 
-            var remaining = reread.Snapshot!.Authenticated.Count(item =>
-                    item.Header.ObjectClass == objectClass) +
+            var remaining = reread.Snapshot!.Authenticated
+                    .Concat(reread.Snapshot.UnderRetained)
+                    .Count(item => item.Header.ObjectClass == objectClass) +
                 reread.Snapshot.Unknown.Count(item =>
                     item.Metadata.Reference.Name ==
                         reread.Snapshot.Names[objectClass]);
@@ -1923,32 +1954,44 @@ internal sealed class LineageService
                     currentKeyId,
                     requiredLogicalExpiry,
                     requiredPlatformExpiry);
-                if (debt.Target is null ||
-                    cleanupAttempt == LineageFormat.MaximumScopedObjects)
+                if (debt.Target is null)
                 {
+                    if (!StringComparer.Ordinal.Equals(
+                            debt.Code,
+                            LineageCodes.Ready))
+                    {
+                        ScopedStateInventory.Clear(snapshot);
+                        return ObservationResult.Fail(debt.Code);
+                    }
+                }
+                else
+                {
+                    if (cleanupAttempt ==
+                        LineageFormat.MaximumScopedObjects)
+                    {
+                        ScopedStateInventory.Clear(snapshot);
+                        return ObservationResult.Fail(
+                            LineageCodes.CleanupFailed);
+                    }
+
+                    var target = debt.Target;
                     ScopedStateInventory.Clear(snapshot);
-                    return ObservationResult.Fail(debt.Target is null
-                        ? debt.Code
-                        : LineageCodes.CleanupFailed);
-                }
+                    cleanupStarted = true;
+                    try
+                    {
+                        _ = await store.DeleteExactAsync(
+                                new OpaqueStoreDeleteRequest(target),
+                                CancellationToken.None)
+                            .ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return ObservationResult.Fail(
+                            LineageCodes.CleanupFailed);
+                    }
 
-                var target = debt.Target;
-                ScopedStateInventory.Clear(snapshot);
-                cleanupStarted = true;
-                try
-                {
-                    _ = await store.DeleteExactAsync(
-                            new OpaqueStoreDeleteRequest(target),
-                            CancellationToken.None)
-                        .ConfigureAwait(false);
+                    continue;
                 }
-                catch (OperationCanceledException)
-                {
-                    return ObservationResult.Fail(
-                        LineageCodes.CleanupFailed);
-                }
-
-                continue;
             }
 
             var selection = LineageHeadSelector.Select(
@@ -1995,13 +2038,11 @@ internal sealed class LineageService
             {
                 return CleanupDebtResult.Success(item.Metadata);
             }
-
-            return CleanupDebtResult.Fail(LineageCodes.RetentionFailed);
         }
 
         if (underRetainedHeads.IsEmpty)
         {
-            return CleanupDebtResult.Fail(LineageCodes.RetentionFailed);
+            return CleanupDebtResult.Deferred();
         }
 
         if (CanReestablishInitialAbsence(
@@ -2142,12 +2183,14 @@ internal sealed class LineageService
         long requiredPlatformExpiry)
     {
         var parsed = ImmutableArray.CreateBuilder<SelectedIntent>();
-        foreach (var item in snapshot.Authenticated.Where(item =>
-            item.Header.ObjectClass is StateObjectClass.Reset or
-                StateObjectClass.ExpiryTransition &&
-            StringComparer.Ordinal.Equals(
-                item.Header.Epoch,
-                active.Header.Epoch)))
+        foreach (var item in snapshot.Authenticated
+            .Concat(snapshot.UnderRetained)
+            .Where(item =>
+                item.Header.ObjectClass is StateObjectClass.Reset or
+                    StateObjectClass.ExpiryTransition &&
+                StringComparer.Ordinal.Equals(
+                    item.Header.Epoch,
+                    active.Header.Epoch)))
         {
             if (!LineageTransitionIntentCodec.TryDecode(
                     item.Header.ObjectClass,
@@ -2224,6 +2267,7 @@ internal sealed class LineageService
         long now)
     {
         var activeAcceptances = snapshot.Authenticated
+            .Concat(snapshot.UnderRetained)
             .Where(item =>
                 item.Header.ObjectClass == StateObjectClass.Acceptance &&
                 StringComparer.Ordinal.Equals(
@@ -2315,6 +2359,7 @@ internal sealed class LineageService
         ScopedStateInventorySnapshot snapshot,
         LineageHeadCandidate active) =>
         snapshot.Authenticated
+            .Concat(snapshot.UnderRetained)
             .Where(item => item.Header.ObjectClass !=
                 StateObjectClass.LineageHead)
             .All(item =>
@@ -2334,11 +2379,13 @@ internal sealed class LineageService
             .Concat(selection.Head.Head.CompletedCleanup)
             .ToImmutableArray();
         var cleanup = ImmutableArray.CreateBuilder<OpaqueStoreObjectMetadata>();
-        foreach (var item in snapshot.Authenticated.Where(item =>
-            item.Header.ObjectClass != StateObjectClass.LineageHead &&
-            !StringComparer.Ordinal.Equals(
-                item.Header.Epoch,
-                selection.Head.Header.Epoch)))
+        foreach (var item in snapshot.Authenticated
+            .Concat(snapshot.UnderRetained)
+            .Where(item =>
+                item.Header.ObjectClass != StateObjectClass.LineageHead &&
+                !StringComparer.Ordinal.Equals(
+                    item.Header.Epoch,
+                    selection.Head.Header.Epoch)))
         {
             if (!evidence.Any(value =>
                     LineageHeadCodec.Matches(value, item.Metadata)))
@@ -2574,6 +2621,9 @@ internal sealed class LineageService
         internal static CleanupDebtResult Success(
             OpaqueStoreObjectMetadata target) =>
             new(LineageCodes.Ready, target);
+
+        internal static CleanupDebtResult Deferred() =>
+            new(LineageCodes.Ready, null);
 
         internal static CleanupDebtResult Fail(string code) =>
             new(code, null);
