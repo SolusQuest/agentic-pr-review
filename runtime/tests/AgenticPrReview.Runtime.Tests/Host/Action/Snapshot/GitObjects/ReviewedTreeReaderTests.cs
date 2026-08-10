@@ -6,6 +6,7 @@ using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHost.Snapshot;
 using AgenticPrReview.Runtime.ActionHost.Snapshot.GitObjects;
 using AgenticPrReview.Runtime.Tests.Host.Action.Authorization;
+using AgenticPrReview.Runtime.Tests.Host.Action.Snapshot;
 using Xunit;
 
 namespace AgenticPrReview.Runtime.Tests.Host.Action.Snapshot.GitObjects;
@@ -47,7 +48,9 @@ public sealed class ReviewedTreeReaderTests
                 [nestedSha] = nestedBytes,
             });
         var factory = new ScriptedFactory(transport);
-        var reader = new ReviewedTreeReader(factory, TimeProvider.System);
+        var reader = ReviewedSnapshotTestAccess.Reader(
+            factory,
+            TimeProvider.System);
         var parent = CreateTemporaryDirectory();
         try
         {
@@ -440,7 +443,7 @@ public sealed class ReviewedTreeReaderTests
         var parent = CreateTemporaryDirectory();
         try
         {
-            var reader = new ReviewedTreeReader(
+            var reader = ReviewedSnapshotTestAccess.Reader(
                 new ScriptedFactory(transport),
                 TimeProvider.System);
             var result = await reader.MaterializeAsync(
@@ -457,6 +460,33 @@ public sealed class ReviewedTreeReaderTests
         {
             Directory.Delete(parent, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task RelativeStagingParentFailsBeforeTransportCreation()
+    {
+        var transport = new ScriptedTransport(
+            ActionHostAuthorizationScenario.HeadSha,
+            new string('b', 40),
+            new Dictionary<
+                string,
+                IReadOnlyList<ReviewedGitTreeEntryFact>>(),
+            new Dictionary<string, byte[]>());
+        var factory = new ScriptedFactory(transport);
+        var reader = ReviewedSnapshotTestAccess.Reader(
+            factory,
+            TimeProvider.System);
+
+        var result = await reader.MaterializeAsync(
+            await AuthorizedInvocation(),
+            Token(),
+            "relative-staging-parent",
+            CancellationToken.None);
+
+        Assert.Equal(ReviewedTreeFailure.InternalFailure, result.Failure);
+        Assert.Null(result.Snapshot);
+        Assert.Equal(0, factory.CreateCalls);
+        Assert.Equal(0, transport.CommitCalls);
     }
 
     private static async Task<(ReviewedTreeSnapshot Snapshot, string Parent)>
@@ -484,7 +514,7 @@ public sealed class ReviewedTreeReaderTests
         string Parent)> Read(ScriptedTransport transport)
     {
         var parent = CreateTemporaryDirectory();
-        var reader = new ReviewedTreeReader(
+        var reader = ReviewedSnapshotTestAccess.Reader(
             new ScriptedFactory(transport),
             TimeProvider.System);
         var result = await reader.MaterializeAsync(
@@ -557,7 +587,7 @@ public sealed class ReviewedTreeReaderTests
 
     private static string CreateTemporaryDirectory()
     {
-        var path = Path.Combine(
+        var path = Path.Join(
             Path.GetTempPath(),
             "apr-h4-reader-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
@@ -573,11 +603,14 @@ public sealed class ReviewedTreeReaderTests
             _transport = transport;
         }
 
+        internal int CreateCalls { get; private set; }
+
         public IReviewedGitObjectTransport Create(
             ActionHostAuthorizer.AuthorizedInvocation invocation,
             ActionHostGitHubToken token,
             ReviewedContentBudget budget)
         {
+            CreateCalls++;
             Assert.Equal(ActionHostAuthorizationScenario.HeadSha,
                 invocation.PullRequest.HeadSha);
             Assert.Equal("[REDACTED]", token.ToString());

@@ -1,9 +1,11 @@
 using System.Buffers.Binary;
 using System.Collections.Immutable;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using AgenticPrReview.Runtime.ActionHost.Snapshot.GitObjects;
+using Microsoft.Win32.SafeHandles;
 
 namespace AgenticPrReview.Runtime.ActionHost.Snapshot;
 
@@ -93,7 +95,10 @@ internal sealed class ReviewedTreeMaterializationResult
 
 internal sealed class ReviewedTreePathRecord
 {
-    internal ReviewedTreePathRecord(
+    private readonly object _authority;
+
+    private ReviewedTreePathRecord(
+        object authority,
         string path,
         string mode,
         ReviewedTreeEntryKind kind,
@@ -101,19 +106,22 @@ internal sealed class ReviewedTreePathRecord
         long? size,
         ReviewedStagedBlob? stagedBlob)
     {
-        if (!ReviewedTreePath.IsValid(path) ||
+        if (!ReviewedTreeReader.HasMintAuthority(authority) ||
+            !ReviewedTreePath.IsValid(path) ||
             !ReviewedGitObjectValidation.IsSha(objectSha) ||
             !ModeMatches(kind, mode) ||
             kind == ReviewedTreeEntryKind.Regular != (stagedBlob is not null) ||
             kind == ReviewedTreeEntryKind.Regular != (size is not null) ||
             size is < 0 ||
             stagedBlob is not null &&
-            (!StringComparer.Ordinal.Equals(stagedBlob.Sha, objectSha) ||
+            (!stagedBlob.WasMintedBy(authority) ||
+                !StringComparer.Ordinal.Equals(stagedBlob.Sha, objectSha) ||
                 stagedBlob.Size != size))
         {
             throw new ArgumentException("Reviewed-tree record is invalid.");
         }
 
+        _authority = authority;
         Path = path;
         Mode = mode;
         Kind = kind;
@@ -133,6 +141,26 @@ internal sealed class ReviewedTreePathRecord
     internal long? Size { get; }
 
     internal ReviewedStagedBlob? StagedBlob { get; }
+
+    internal static ReviewedTreePathRecord Mint(
+        object authority,
+        string path,
+        string mode,
+        ReviewedTreeEntryKind kind,
+        string objectSha,
+        long? size,
+        ReviewedStagedBlob? stagedBlob) => new(
+            authority,
+            path,
+            mode,
+            kind,
+            objectSha,
+            size,
+            stagedBlob);
+
+    internal bool WasMintedBy(object authority) =>
+        ReferenceEquals(_authority, authority) &&
+        ReviewedTreeReader.HasMintAuthority(authority);
 
     private static bool ModeMatches(
         ReviewedTreeEntryKind kind,
@@ -154,7 +182,8 @@ internal sealed class ReviewedTreeSnapshot : IAsyncDisposable
     private readonly ReviewedBlobStagingLease _staging;
     private bool _disposed;
 
-    internal ReviewedTreeSnapshot(
+    private ReviewedTreeSnapshot(
+        object authority,
         long repositoryId,
         long pullRequestNumber,
         string headSha,
@@ -166,7 +195,8 @@ internal sealed class ReviewedTreeSnapshot : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(records);
         Budget = budget ?? throw new ArgumentNullException(nameof(budget));
         _staging = staging ?? throw new ArgumentNullException(nameof(staging));
-        if (repositoryId <= 0 || pullRequestNumber <= 0 ||
+        if (!ReviewedTreeReader.HasMintAuthority(authority) ||
+            repositoryId <= 0 || pullRequestNumber <= 0 ||
             !ReviewedGitObjectValidation.IsSha(headSha) ||
             !ReviewedGitObjectValidation.IsSha(rootTreeSha))
         {
@@ -174,7 +204,8 @@ internal sealed class ReviewedTreeSnapshot : IAsyncDisposable
         }
 
         var materialized = records.ToArray();
-        if (materialized.Any(static record => record is null))
+        if (materialized.Any(record =>
+                record is null || !record.WasMintedBy(authority)))
         {
             throw new ArgumentException("Reviewed-tree records are invalid.");
         }
@@ -193,7 +224,8 @@ internal sealed class ReviewedTreeSnapshot : IAsyncDisposable
         HeadSha = headSha;
         RootTreeSha = rootTreeSha;
         Records = ordered;
-        Identity = ReviewedTreeIdentityWriter.Create(
+        Identity = ReviewedTreeIdentityWriter.Mint(
+            authority,
             repositoryId,
             pullRequestNumber,
             headSha,
@@ -214,6 +246,24 @@ internal sealed class ReviewedTreeSnapshot : IAsyncDisposable
     internal ReviewedTreeIdentity Identity { get; }
 
     internal ReviewedContentBudget Budget { get; }
+
+    internal static ReviewedTreeSnapshot Mint(
+        object authority,
+        long repositoryId,
+        long pullRequestNumber,
+        string headSha,
+        string rootTreeSha,
+        IEnumerable<ReviewedTreePathRecord> records,
+        ReviewedContentBudget budget,
+        ReviewedBlobStagingLease staging) => new(
+            authority,
+            repositoryId,
+            pullRequestNumber,
+            headSha,
+            rootTreeSha,
+            records,
+            budget,
+            staging);
 
     public ValueTask DisposeAsync()
     {
@@ -320,13 +370,21 @@ internal static class ReviewedTreeIdentityWriter
     private static readonly byte[] Domain =
         "agentic-pr-review.reviewed-tree.v1"u8.ToArray();
 
-    internal static ReviewedTreeIdentity Create(
+    internal static ReviewedTreeIdentity Mint(
+        object authority,
         long repositoryId,
         long pullRequestNumber,
         string headSha,
         string rootTreeSha,
         ImmutableArray<ReviewedTreePathRecord> records)
     {
+        if (!ReviewedTreeReader.HasMintAuthority(authority) ||
+            records.Any(record => !record.WasMintedBy(authority)))
+        {
+            throw new InvalidOperationException(
+                "Only the reviewed-tree reader may mint tree identity.");
+        }
+
         using var stream = new MemoryStream();
         WriteFrame(stream, Domain);
         WriteInt64(stream, repositoryId);
@@ -375,20 +433,38 @@ internal static class ReviewedTreeIdentityWriter
     }
 }
 
+internal readonly record struct ReviewedStagedFileIdentity(
+    ulong Device,
+    ulong File);
+
 internal sealed class ReviewedStagedBlob
 {
+    private readonly object _authority;
+    private readonly ReviewedBlobStagingLease _owner;
     private readonly string _path;
+    private readonly ReviewedStagedFileIdentity _identity;
 
-    internal ReviewedStagedBlob(string path, string sha, long size)
+    private ReviewedStagedBlob(
+        object authority,
+        ReviewedBlobStagingLease owner,
+        string path,
+        string sha,
+        long size,
+        ReviewedStagedFileIdentity identity)
     {
-        if (!Path.IsPathFullyQualified(path) ||
+        if (!ReviewedTreeReader.HasMintAuthority(authority) ||
+            !owner.Owns(authority, path) ||
+            !Path.IsPathFullyQualified(path) ||
             !ReviewedGitObjectValidation.IsSha(sha) ||
             size is < 0 or > ReviewedContentLimits.HeadBlobBytes)
         {
             throw new ArgumentException("Reviewed staged blob is invalid.");
         }
 
+        _authority = authority;
+        _owner = owner;
         _path = path;
+        _identity = identity;
         Sha = sha;
         Size = size;
     }
@@ -397,6 +473,25 @@ internal sealed class ReviewedStagedBlob
 
     internal long Size { get; }
 
+    internal static ReviewedStagedBlob Mint(
+        object authority,
+        ReviewedBlobStagingLease owner,
+        string path,
+        string sha,
+        long size,
+        ReviewedStagedFileIdentity identity) => new(
+            authority,
+            owner,
+            path,
+            sha,
+            size,
+            identity);
+
+    internal bool WasMintedBy(object authority) =>
+        ReferenceEquals(_authority, authority) &&
+        ReviewedTreeReader.HasMintAuthority(authority) &&
+        _owner.Owns(authority, _path);
+
     internal async Task<bool> CopyVerifiedToAsync(
         Stream destination,
         CancellationToken cancellationToken)
@@ -404,27 +499,32 @@ internal sealed class ReviewedStagedBlob
         ArgumentNullException.ThrowIfNull(destination);
         try
         {
-            var info = new FileInfo(_path);
-            if (!info.Exists || info.LinkTarget is not null ||
-                (info.Attributes & (FileAttributes.Directory |
-                    FileAttributes.ReparsePoint | FileAttributes.Device)) != 0)
+            if (!ReviewedStagedFileAccess.TryOpen(
+                    _path,
+                    out var openedHandle))
             {
                 return false;
             }
 
-            await using var source = new FileStream(
-                _path,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.Read,
-                64 * 1024,
-                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            using var source = openedHandle!;
+            if (!ReviewedStagedFileAccess.TryInspectRegular(
+                    source,
+                    out var openedIdentity,
+                    out var openedLength) ||
+                openedIdentity != _identity ||
+                openedLength != Size)
+            {
+                return false;
+            }
+
             var bytes = GC.AllocateUninitializedArray<byte>(checked((int)Size));
             var actual = 0;
             while (actual < bytes.Length)
             {
-                var read = await source.ReadAsync(
+                var read = await RandomAccess.ReadAsync(
+                    source,
                     bytes.AsMemory(actual),
+                    actual,
                     cancellationToken);
                 if (read == 0)
                 {
@@ -435,8 +535,10 @@ internal sealed class ReviewedStagedBlob
             }
 
             var extra = new byte[1];
-            var extraRead = await source.ReadAsync(
+            var extraRead = await RandomAccess.ReadAsync(
+                source,
                 extra,
+                actual,
                 cancellationToken);
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA1);
             hash.AppendData(GitBlobHeader(Size));
@@ -467,20 +569,234 @@ internal sealed class ReviewedStagedBlob
         "blob " + size.ToString(CultureInfo.InvariantCulture) + "\0");
 }
 
+internal static partial class ReviewedStagedFileAccess
+{
+    private const int OpenReadOnly = 0;
+    private const int OpenNonBlocking = 0x800;
+    private const int OpenNoFollow = 0x20000;
+    private const int OpenCloseOnExec = 0x80000;
+    private const uint FileTypeMask = 0xf000;
+    private const uint RegularFile = 0x8000;
+    private const uint GenericRead = 0x80000000;
+    private const uint FileShareRead = 0x00000001;
+    private const uint FileShareWrite = 0x00000002;
+    private const uint FileShareDelete = 0x00000004;
+    private const uint OpenExisting = 3;
+    private const uint FileAttributeDirectory = 0x00000010;
+    private const uint FileAttributeDevice = 0x00000040;
+    private const uint FileAttributeReparsePoint = 0x00000400;
+    private const uint FileFlagOpenReparsePoint = 0x00200000;
+    private const uint FileFlagRandomAccess = 0x10000000;
+
+    internal static bool TryOpen(
+        string path,
+        out SafeFileHandle? handle)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            handle = CreateFile(
+                path,
+                GenericRead,
+                FileShareRead | FileShareWrite | FileShareDelete,
+                0,
+                OpenExisting,
+                FileFlagOpenReparsePoint | FileFlagRandomAccess,
+                0);
+            if (!handle.IsInvalid)
+            {
+                return true;
+            }
+
+            handle.Dispose();
+            handle = null;
+            return false;
+        }
+
+        if (OperatingSystem.IsLinux())
+        {
+            var descriptor = Open(
+                path,
+                OpenReadOnly |
+                    OpenNonBlocking |
+                    OpenNoFollow |
+                    OpenCloseOnExec);
+            if (descriptor >= 0)
+            {
+                handle = new SafeFileHandle(
+                    (nint)descriptor,
+                    ownsHandle: true);
+                return true;
+            }
+        }
+
+        handle = null;
+        return false;
+    }
+
+    internal static bool TryInspectRegular(
+        SafeFileHandle handle,
+        out ReviewedStagedFileIdentity identity,
+        out long length)
+    {
+        identity = default;
+        length = 0;
+        if (OperatingSystem.IsWindows())
+        {
+            if (!GetFileInformationByHandle(handle, out var info) ||
+                (info.FileAttributes &
+                    (FileAttributeDirectory |
+                        FileAttributeDevice |
+                        FileAttributeReparsePoint)) != 0)
+            {
+                return false;
+            }
+
+            identity = new ReviewedStagedFileIdentity(
+                info.VolumeSerialNumber,
+                ((ulong)info.FileIndexHigh << 32) | info.FileIndexLow);
+        }
+        else if (OperatingSystem.IsLinux())
+        {
+            var descriptor = checked((int)handle.DangerousGetHandle());
+            if (FStat(descriptor, out var info) != 0 ||
+                (info.Mode & FileTypeMask) != RegularFile)
+            {
+                return false;
+            }
+
+            identity = new ReviewedStagedFileIdentity(
+                info.Device,
+                info.Inode);
+        }
+        else
+        {
+            return false;
+        }
+
+        try
+        {
+            length = RandomAccess.GetLength(handle);
+            return length >= 0;
+        }
+        catch (Exception exception) when (exception is IOException or
+            UnauthorizedAccessException)
+        {
+            identity = default;
+            length = 0;
+            return false;
+        }
+    }
+
+    [LibraryImport(
+        "kernel32.dll",
+        EntryPoint = "CreateFileW",
+        SetLastError = true,
+        StringMarshalling = StringMarshalling.Utf16)]
+    private static partial SafeFileHandle CreateFile(
+        string fileName,
+        uint desiredAccess,
+        uint shareMode,
+        nint securityAttributes,
+        uint creationDisposition,
+        uint flagsAndAttributes,
+        nint templateFile);
+
+    [LibraryImport(
+        "kernel32.dll",
+        EntryPoint = "GetFileInformationByHandle",
+        SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetFileInformationByHandle(
+        SafeFileHandle handle,
+        out ByHandleFileInformation information);
+
+    [LibraryImport("libc", EntryPoint = "fstat", SetLastError = true)]
+    private static partial int FStat(
+        int fileDescriptor,
+        out LinuxFileInformation information);
+
+    [LibraryImport(
+        "libc",
+        EntryPoint = "open",
+        SetLastError = true,
+        StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int Open(string path, int flags);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ByHandleFileInformation
+    {
+        internal uint FileAttributes;
+        internal FileTime CreationTime;
+        internal FileTime LastAccessTime;
+        internal FileTime LastWriteTime;
+        internal uint VolumeSerialNumber;
+        internal uint FileSizeHigh;
+        internal uint FileSizeLow;
+        internal uint NumberOfLinks;
+        internal uint FileIndexHigh;
+        internal uint FileIndexLow;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileTime
+    {
+        internal uint Low;
+        internal uint High;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private unsafe struct LinuxFileInformation
+    {
+        internal ulong Device;
+        internal ulong Inode;
+        internal ulong HardLinkCount;
+        internal uint Mode;
+        internal uint UserId;
+        internal uint GroupId;
+        internal int Padding;
+        internal ulong DeviceId;
+        internal long Size;
+        internal long BlockSize;
+        internal long BlockCount;
+        internal LinuxTimestamp AccessTime;
+        internal LinuxTimestamp ModificationTime;
+        internal LinuxTimestamp ChangeTime;
+        internal fixed long Reserved[3];
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LinuxTimestamp
+    {
+        internal long Seconds;
+        internal long Nanoseconds;
+    }
+}
+
 internal sealed class ReviewedBlobStagingLease
 {
+    private readonly object _authority;
     private readonly string _root;
     private readonly HashSet<string> _ownedPaths =
         new(StringComparer.OrdinalIgnoreCase);
     private bool _cleaned;
 
-    private ReviewedBlobStagingLease(string root)
+    private ReviewedBlobStagingLease(object authority, string root)
     {
+        _authority = authority;
         _root = root;
     }
 
-    internal static ReviewedBlobStagingLease? TryCreate(string parent)
+    internal static ReviewedBlobStagingLease? TryCreate(
+        object authority,
+        string parent)
     {
+        if (!ReviewedTreeReader.HasMintAuthority(authority) ||
+            string.IsNullOrEmpty(parent) ||
+            !Path.IsPathFullyQualified(parent))
+        {
+            return null;
+        }
+
         try
         {
             var fullParent = Path.GetFullPath(parent);
@@ -495,7 +811,7 @@ internal sealed class ReviewedBlobStagingLease
 
             for (var attempt = 0; attempt < 8; attempt++)
             {
-                var root = Path.Combine(
+                var root = Path.Join(
                     fullParent,
                     "apr-reviewed-" + Guid.NewGuid().ToString("N"));
                 if (Directory.Exists(root) || File.Exists(root))
@@ -513,17 +829,18 @@ internal sealed class ReviewedBlobStagingLease
                         UnixFileMode.UserExecute);
                 }
 
-                return new ReviewedBlobStagingLease(root);
+                return new ReviewedBlobStagingLease(authority, root);
             }
+
+            return null;
         }
         catch (Exception exception) when (exception is IOException or
             UnauthorizedAccessException or
             ArgumentException or
             NotSupportedException)
         {
+            return null;
         }
-
-        return null;
     }
 
     internal ReviewedBlobStageWriter? TryCreateWriter(
@@ -536,8 +853,8 @@ internal sealed class ReviewedBlobStagingLease
             return null;
         }
 
-        var partial = Path.Combine(_root, sha + ".partial");
-        var final = Path.Combine(_root, sha + ".blob");
+        var partial = Path.Join(_root, sha + ".partial");
+        var final = Path.Join(_root, sha + ".blob");
         try
         {
             var stream = new FileStream(
@@ -568,6 +885,30 @@ internal sealed class ReviewedBlobStagingLease
         _ownedPaths.Remove(partial);
         _ownedPaths.Add(final);
     }
+
+    internal ReviewedStagedBlob? MintBlob(
+        string path,
+        string sha,
+        long size,
+        ReviewedStagedFileIdentity identity) => Owns(_authority, path)
+            ? ReviewedStagedBlob.Mint(
+                _authority,
+                this,
+                path,
+                sha,
+                size,
+                identity)
+            : null;
+
+    internal bool Owns(object authority, string path) =>
+        !_cleaned &&
+        ReferenceEquals(_authority, authority) &&
+        ReviewedTreeReader.HasMintAuthority(authority) &&
+        Path.IsPathFullyQualified(path) &&
+        StringComparer.Ordinal.Equals(
+            Path.GetDirectoryName(path),
+            _root) &&
+        _ownedPaths.Contains(path);
 
     internal bool Cleanup()
     {
@@ -676,6 +1017,7 @@ internal sealed class ReviewedBlobStageWriter : IAsyncDisposable
         await _stream.DisposeAsync();
         _stream = null;
         File.Move(_partialPath, _finalPath, overwrite: false);
+        _owner.Commit(_partialPath, _finalPath);
         if (OperatingSystem.IsLinux())
         {
             File.SetUnixFileMode(_finalPath, UnixFileMode.UserRead);
@@ -685,11 +1027,28 @@ internal sealed class ReviewedBlobStageWriter : IAsyncDisposable
             File.SetAttributes(_finalPath, FileAttributes.ReadOnly);
         }
 
-        _owner.Commit(_partialPath, _finalPath);
-        return new ReviewedStagedBlob(
+        if (!ReviewedStagedFileAccess.TryOpen(
+                _finalPath,
+                out var openedHandle))
+        {
+            return null;
+        }
+
+        using var handle = openedHandle!;
+        if (!ReviewedStagedFileAccess.TryInspectRegular(
+                handle,
+                out var identity,
+                out var length) ||
+            length != _declaredSize)
+        {
+            return null;
+        }
+
+        return _owner.MintBlob(
             _finalPath,
             _expectedSha,
-            _declaredSize);
+            _declaredSize,
+            identity);
     }
 
     public async ValueTask DisposeAsync()

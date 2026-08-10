@@ -12,28 +12,22 @@ namespace AgenticPrReview.Runtime.ActionHost.Snapshot.GitObjects;
 internal sealed class ReviewedGitObjectTransportFactory :
     IReviewedGitObjectTransportFactory
 {
+    private static readonly object FactoryAuthority = new();
+
     public IReviewedGitObjectTransport Create(
         ActionHostAuthorizer.AuthorizedInvocation invocation,
         ActionHostGitHubToken token,
         ReviewedContentBudget budget)
     {
-        ArgumentNullException.ThrowIfNull(invocation);
-        ArgumentNullException.ThrowIfNull(token);
-        ArgumentNullException.ThrowIfNull(budget);
-        if (!ReviewedGitObjectTransport.TryAuthorizedSource(
-                invocation,
-                out var repositoryName,
-                out var headSha))
-        {
-            throw new ReviewedGitObjectCredentialException();
-        }
-
-        return ReviewedGitObjectTransport.Create(
-            token.ExportForPrivateLaunch(),
-            repositoryName,
-            headSha,
+        return ReviewedGitObjectTransport.Mint(
+            FactoryAuthority,
+            invocation,
+            token,
             budget);
     }
+
+    internal static bool HasFactoryAuthority(object authority) =>
+        ReferenceEquals(authority, FactoryAuthority);
 }
 
 internal sealed class ReviewedGitObjectCredentialException : Exception
@@ -75,31 +69,17 @@ internal sealed class ReviewedGitObjectTransport :
         _client = client;
     }
 
-    internal static ReviewedGitObjectTransport Create(
-        string token,
-        string repositoryName,
-        string headSha,
-        ReviewedContentBudget budget)
-    {
-        ValidateCreation(token, repositoryName, headSha, budget);
-        return new ReviewedGitObjectTransport(
-            token,
-            repositoryName,
-            headSha,
-            budget,
-            CreateClient(CreateHandler(TimeSpan.FromSeconds(10))));
-    }
-
-    internal static ReviewedGitObjectTransport CreateForTesting(
+    internal static ReviewedGitObjectTransport Mint(
+        object authority,
         ActionHostAuthorizer.AuthorizedInvocation invocation,
         ActionHostGitHubToken token,
-        ReviewedContentBudget budget,
-        HttpMessageHandler handler)
+        ReviewedContentBudget budget)
     {
         ArgumentNullException.ThrowIfNull(invocation);
         ArgumentNullException.ThrowIfNull(token);
-        ArgumentNullException.ThrowIfNull(handler);
-        if (!TryAuthorizedSource(
+        ArgumentNullException.ThrowIfNull(budget);
+        if (!ReviewedGitObjectTransportFactory.HasFactoryAuthority(authority) ||
+            !TryAuthorizedSource(
                 invocation,
                 out var repositoryName,
                 out var headSha))
@@ -114,7 +94,7 @@ internal sealed class ReviewedGitObjectTransport :
             repositoryName,
             headSha,
             budget,
-            CreateClient(handler));
+            CreateClient(CreateHandler(TimeSpan.FromSeconds(10))));
     }
 
     internal static SocketsHttpHandler CreateHandler(TimeSpan connectTimeout)
@@ -231,6 +211,15 @@ internal sealed class ReviewedGitObjectTransport :
                 ReviewedGitObjectFailure.UnsupportedSize);
         }
 
+        if (!_budget.TryBeginOperation(
+                cancellationToken,
+                out var operationLease))
+        {
+            return ReviewedGitObjectResult<ReviewedStagedBlob>.Failed(
+                ReviewedGitObjectFailure.UnsupportedSize);
+        }
+
+        using var operation = operationLease!;
         try
         {
             using var request = CreateRequest(
@@ -239,7 +228,7 @@ internal sealed class ReviewedGitObjectTransport :
             using var response = await _client.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
+                operation.Token);
             if (response.StatusCode != HttpStatusCode.OK)
             {
                 return ReviewedGitObjectResult<ReviewedStagedBlob>.Failed(
@@ -272,7 +261,7 @@ internal sealed class ReviewedGitObjectTransport :
             }
 
             await using var stream =
-                await response.Content.ReadAsStreamAsync(cancellationToken);
+                await response.Content.ReadAsStreamAsync(operation.Token);
             var buffer = new byte[64 * 1024];
             long responseBytes = 0;
             while (responseBytes <= declaredSize)
@@ -282,7 +271,7 @@ internal sealed class ReviewedGitObjectTransport :
                     declaredSize + 1 - responseBytes));
                 var read = await stream.ReadAsync(
                     buffer.AsMemory(0, maximumRead),
-                    cancellationToken);
+                    operation.Token);
                 if (read == 0)
                 {
                     break;
@@ -291,7 +280,7 @@ internal sealed class ReviewedGitObjectTransport :
                 if (!_budget.TryConsumeResponseBytes(
                         ref responseBytes,
                         read,
-                        cancellationToken))
+                        operation.Token))
                 {
                     return ReviewedGitObjectResult<ReviewedStagedBlob>.Failed(
                         ReviewedGitObjectFailure.UnsupportedSize);
@@ -299,18 +288,23 @@ internal sealed class ReviewedGitObjectTransport :
 
                 if (!await writer.WriteAsync(
                         buffer.AsMemory(0, read),
-                        cancellationToken))
+                        operation.Token))
                 {
                     return ReviewedGitObjectResult<ReviewedStagedBlob>.Failed(
                         ReviewedGitObjectFailure.IdentityMismatch);
                 }
             }
 
-            var staged = await writer.CompleteAsync(cancellationToken);
+            var staged = await writer.CompleteAsync(operation.Token);
             return staged is null
                 ? ReviewedGitObjectResult<ReviewedStagedBlob>.Failed(
                     ReviewedGitObjectFailure.IdentityMismatch)
                 : ReviewedGitObjectResult<ReviewedStagedBlob>.Success(staged);
+        }
+        catch (OperationCanceledException) when (operation.DeadlineExpired)
+        {
+            return ReviewedGitObjectResult<ReviewedStagedBlob>.Failed(
+                ReviewedGitObjectFailure.UnsupportedSize);
         }
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
@@ -380,13 +374,22 @@ internal sealed class ReviewedGitObjectTransport :
                 ReviewedGitObjectFailure.UnsupportedSize);
         }
 
+        if (!_budget.TryBeginOperation(
+                cancellationToken,
+                out var operationLease))
+        {
+            return ReviewedGitObjectResult<T>.Failed(
+                ReviewedGitObjectFailure.UnsupportedSize);
+        }
+
+        using var operation = operationLease!;
         try
         {
             using var request = CreateRequest(path, JsonAccept);
             using var response = await _client.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
+                operation.Token);
             if (response.StatusCode != HttpStatusCode.OK)
             {
                 return ReviewedGitObjectResult<T>.Failed(
@@ -408,7 +411,7 @@ internal sealed class ReviewedGitObjectTransport :
 
             var body = await ReadJsonBodyAsync(
                 response.Content,
-                cancellationToken);
+                operation.Token);
             if (body.Bytes is null)
             {
                 return ReviewedGitObjectResult<T>.Failed(body.Failure);
@@ -419,6 +422,11 @@ internal sealed class ReviewedGitObjectTransport :
                 ? ReviewedGitObjectResult<T>.Failed(
                     ReviewedGitObjectFailure.InvalidResponse)
                 : ReviewedGitObjectResult<T>.Success(value);
+        }
+        catch (OperationCanceledException) when (operation.DeadlineExpired)
+        {
+            return ReviewedGitObjectResult<T>.Failed(
+                ReviewedGitObjectFailure.UnsupportedSize);
         }
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)

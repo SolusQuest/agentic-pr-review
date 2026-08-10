@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
@@ -8,11 +10,12 @@ using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHost.Snapshot;
 using AgenticPrReview.Runtime.ActionHost.Snapshot.GitObjects;
 using AgenticPrReview.Runtime.Tests.Host.Action.Authorization;
+using AgenticPrReview.Runtime.Tests.Host.Action.Snapshot;
 using Xunit;
 
 namespace AgenticPrReview.Runtime.Tests.Host.Action.Snapshot.GitObjects;
 
-public sealed class GitObjectTransportTests
+public sealed partial class GitObjectTransportTests
 {
     [Fact]
     public async Task ExactCommitAndNonRecursiveTreeRequestsUseFrozenAuthority()
@@ -40,7 +43,7 @@ public sealed class GitObjectTransportTests
                     }
                     """);
         });
-        using var transport = ReviewedGitObjectTransport.CreateForTesting(
+        using var transport = ReviewedSnapshotTestAccess.Transport(
             invocation,
             Token(),
             ProductionBudget(),
@@ -90,7 +93,7 @@ public sealed class GitObjectTransportTests
                 },
             },
         });
-        using var transport = ReviewedGitObjectTransport.CreateForTesting(
+        using var transport = ReviewedSnapshotTestAccess.Transport(
             invocation,
             Token(),
             ProductionBudget(),
@@ -98,8 +101,7 @@ public sealed class GitObjectTransportTests
         var parent = CreateTemporaryDirectory();
         try
         {
-            var staging = Assert.IsType<ReviewedBlobStagingLease>(
-                ReviewedBlobStagingLease.TryCreate(parent));
+            var staging = ReviewedSnapshotTestAccess.Staging(parent);
             var result = await transport.StageBlobAsync(
                 sha,
                 bytes.Length,
@@ -123,6 +125,96 @@ public sealed class GitObjectTransportTests
     }
 
     [Fact]
+    public async Task SameSizePostStageTamperProducesNoBytes()
+    {
+        var staged = await Stage("trusted"u8.ToArray());
+        try
+        {
+            var path = ReviewedSnapshotTestAccess.StagedPath(staged.Blob);
+            File.SetAttributes(path, FileAttributes.Normal);
+            await File.WriteAllBytesAsync(path, "altered"u8.ToArray());
+            using var destination = new MemoryStream();
+
+            Assert.False(await staged.Blob.CopyVerifiedToAsync(
+                destination,
+                CancellationToken.None));
+            Assert.Empty(destination.ToArray());
+            Assert.True(staged.Lease.Cleanup());
+        }
+        finally
+        {
+            Directory.Delete(staged.Parent, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task SymlinkReplacementProducesNoBytes()
+    {
+        var bytes = "trusted"u8.ToArray();
+        var staged = await Stage(bytes);
+        try
+        {
+            var path = ReviewedSnapshotTestAccess.StagedPath(staged.Blob);
+            var target = Path.Join(staged.Parent, "symlink-target");
+            await File.WriteAllBytesAsync(target, bytes);
+            File.SetAttributes(path, FileAttributes.Normal);
+            File.Delete(path);
+            try
+            {
+                File.CreateSymbolicLink(path, target);
+            }
+            catch (Exception exception) when (
+                OperatingSystem.IsWindows() &&
+                exception is IOException or UnauthorizedAccessException)
+            {
+                return;
+            }
+
+            using var destination = new MemoryStream();
+            Assert.False(await staged.Blob.CopyVerifiedToAsync(
+                destination,
+                CancellationToken.None));
+            Assert.Empty(destination.ToArray());
+        }
+        finally
+        {
+            staged.Lease.Cleanup();
+            Directory.Delete(staged.Parent, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task LinuxFifoReplacementDoesNotBlockOrProduceBytes()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var staged = await Stage("trusted"u8.ToArray());
+        try
+        {
+            var path = ReviewedSnapshotTestAccess.StagedPath(staged.Blob);
+            File.Delete(path);
+            Assert.Equal(0, MakeFifo(path, Convert.ToUInt32("600", 8)));
+            using var destination = new MemoryStream();
+
+            var copied = await staged.Blob.CopyVerifiedToAsync(
+                    destination,
+                    CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(2));
+
+            Assert.False(copied);
+            Assert.Empty(destination.ToArray());
+        }
+        finally
+        {
+            staged.Lease.Cleanup();
+            Directory.Delete(staged.Parent, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task MissingTruncatedAndDuplicatePropertiesFailClosed()
     {
         var invocation = await AuthorizedInvocation();
@@ -134,7 +226,7 @@ public sealed class GitObjectTransportTests
             $$"""{"sha":"{{sha}}","truncated":true,"tree":[]}""",
         })
         {
-            using var transport = ReviewedGitObjectTransport.CreateForTesting(
+        using var transport = ReviewedSnapshotTestAccess.Transport(
                 invocation,
                 Token(),
                 ProductionBudget(),
@@ -154,7 +246,7 @@ public sealed class GitObjectTransportTests
         var invocation = await AuthorizedInvocation();
         var treeSha = new string('4', 40);
         using (var commitTransport =
-               ReviewedGitObjectTransport.CreateForTesting(
+               ReviewedSnapshotTestAccess.Transport(
                    invocation,
                    Token(),
                    ProductionBudget(),
@@ -173,7 +265,7 @@ public sealed class GitObjectTransportTests
         }
 
         using var treeTransport =
-            ReviewedGitObjectTransport.CreateForTesting(
+            ReviewedSnapshotTestAccess.Transport(
                 invocation,
                 Token(),
                 ProductionBudget(),
@@ -203,7 +295,7 @@ public sealed class GitObjectTransportTests
         json.CopyTo(atCap, 0);
         Array.Fill(atCap, (byte)' ', json.Length,
             atCap.Length - json.Length);
-        using (var accepted = ReviewedGitObjectTransport.CreateForTesting(
+        using (var accepted = ReviewedSnapshotTestAccess.Transport(
                    invocation,
                    Token(),
                    ProductionBudget(),
@@ -215,7 +307,7 @@ public sealed class GitObjectTransportTests
         }
 
         var overCap = new byte[ReviewedContentLimits.GitObjectResponseBytes + 1];
-        using var rejected = ReviewedGitObjectTransport.CreateForTesting(
+        using var rejected = ReviewedSnapshotTestAccess.Transport(
             invocation,
             Token(),
             ProductionBudget(),
@@ -237,14 +329,13 @@ public sealed class GitObjectTransportTests
               "tree": { "sha": "{{treeSha}}" }
             }
             """));
-        var budget = ReviewedContentBudget.Create(
-            new ReviewedContentLimitProfile(
-                1,
-                ReviewedContentLimits.GitObjectResponseBytes,
-                ReviewedContentLimits.AggregateResponseBytes,
-                TimeSpan.FromMinutes(5)),
+        var budget = ReviewedSnapshotTestAccess.Budget(
+            1,
+            ReviewedContentLimits.GitObjectResponseBytes,
+            ReviewedContentLimits.AggregateResponseBytes,
+            TimeSpan.FromMinutes(5),
             TimeProvider.System);
-        using var transport = ReviewedGitObjectTransport.CreateForTesting(
+        using var transport = ReviewedSnapshotTestAccess.Transport(
             invocation,
             Token(),
             budget,
@@ -262,12 +353,48 @@ public sealed class GitObjectTransportTests
     }
 
     [Fact]
+    public async Task BudgetDeadlineCancelsStalledResponseHeaders()
+    {
+        var invocation = await AuthorizedInvocation();
+        using var transport = ReviewedSnapshotTestAccess.Transport(
+            invocation,
+            Token(),
+            ShortDeadlineBudget(),
+            new StallingHeadersHandler());
+        var stopwatch = Stopwatch.StartNew();
+
+        var result = await transport.GetCommitAsync(CancellationToken.None);
+
+        Assert.Equal(ReviewedGitObjectFailure.UnsupportedSize, result.Failure);
+        Assert.Null(result.Value);
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task BudgetDeadlineCancelsStalledResponseBody()
+    {
+        var invocation = await AuthorizedInvocation();
+        using var transport = ReviewedSnapshotTestAccess.Transport(
+            invocation,
+            Token(),
+            ShortDeadlineBudget(),
+            new CapturingHandler(_ => StallingJsonResponse()));
+        var stopwatch = Stopwatch.StartNew();
+
+        var result = await transport.GetCommitAsync(CancellationToken.None);
+
+        Assert.Equal(ReviewedGitObjectFailure.UnsupportedSize, result.Failure);
+        Assert.Null(result.Value);
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public async Task RateLimitIsNotRetriedAndReturnsNoValue()
     {
         var invocation = await AuthorizedInvocation();
         var handler = new CapturingHandler(_ => new HttpResponseMessage(
             (HttpStatusCode)429));
-        using var transport = ReviewedGitObjectTransport.CreateForTesting(
+        using var transport = ReviewedSnapshotTestAccess.Transport(
             invocation,
             Token(),
             ProductionBudget(),
@@ -314,9 +441,40 @@ public sealed class GitObjectTransportTests
     }
 
     private static ReviewedContentBudget ProductionBudget() =>
-        ReviewedContentBudget.Create(
-            ReviewedContentLimits.Production,
+        ReviewedSnapshotTestAccess.ProductionBudget();
+
+    private static ReviewedContentBudget ShortDeadlineBudget() =>
+        ReviewedSnapshotTestAccess.Budget(
+            ReviewedContentLimits.GitObjectRequests,
+            ReviewedContentLimits.GitObjectResponseBytes,
+            ReviewedContentLimits.AggregateResponseBytes,
+            TimeSpan.FromMilliseconds(50),
             TimeProvider.System);
+
+    private static async Task<(
+        ReviewedStagedBlob Blob,
+        ReviewedBlobStagingLease Lease,
+        string Parent)> Stage(byte[] bytes)
+    {
+        var invocation = await AuthorizedInvocation();
+        var parent = CreateTemporaryDirectory();
+        var lease = ReviewedSnapshotTestAccess.Staging(parent);
+        using var transport = ReviewedSnapshotTestAccess.Transport(
+            invocation,
+            Token(),
+            ProductionBudget(),
+            new CapturingHandler(_ => new HttpResponseMessage(
+                HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(bytes),
+            }));
+        var result = await transport.StageBlobAsync(
+            GitBlobSha(bytes),
+            bytes.Length,
+            lease,
+            CancellationToken.None);
+        return (Assert.IsType<ReviewedStagedBlob>(result.Value), lease, parent);
+    }
 
     private static HttpResponseMessage JsonResponse(string body) => new(
         HttpStatusCode.OK)
@@ -338,6 +496,17 @@ public sealed class GitObjectTransportTests
         };
     }
 
+    private static HttpResponseMessage StallingJsonResponse()
+    {
+        var content = new StreamContent(new StallingReadStream());
+        content.Headers.ContentType = new MediaTypeHeaderValue(
+            "application/json");
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = content,
+        };
+    }
+
     private static string GitBlobSha(byte[] bytes)
     {
         var header = Encoding.ASCII.GetBytes(
@@ -349,7 +518,7 @@ public sealed class GitObjectTransportTests
 
     private static string CreateTemporaryDirectory()
     {
-        var path = Path.Combine(
+        var path = Path.Join(
             Path.GetTempPath(),
             "apr-h4-transport-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
@@ -376,6 +545,74 @@ public sealed class GitObjectTransportTests
             return Task.FromResult(_response(request));
         }
     }
+
+    private sealed class StallingHeadersHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        }
+    }
+
+    private sealed class StallingReadStream : Stream
+    {
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+
+        public override async Task<int> ReadAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) =>
+            throw new NotSupportedException();
+
+        public override void SetLength(long value) =>
+            throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+    }
+
+    [LibraryImport(
+        "libc",
+        EntryPoint = "mkfifo",
+        StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int MakeFifo(string path, uint mode);
 
     private sealed record CapturedRequest(
         HttpMethod Method,

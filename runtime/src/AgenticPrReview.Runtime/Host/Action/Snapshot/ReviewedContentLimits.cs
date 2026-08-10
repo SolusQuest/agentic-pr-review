@@ -1,3 +1,5 @@
+using AgenticPrReview.Runtime.ActionHost.Snapshot.GitObjects;
+
 namespace AgenticPrReview.Runtime.ActionHost.Snapshot;
 
 internal static class ReviewedContentLimits
@@ -15,24 +17,6 @@ internal static class ReviewedContentLimits
     internal static readonly TimeSpan AcquisitionAndMaterializationTimeout =
         TimeSpan.FromSeconds(300);
 
-    internal static ReviewedContentLimitProfile Production { get; } = new(
-        GitObjectRequests,
-        GitObjectResponseBytes,
-        AggregateResponseBytes,
-        AcquisitionAndMaterializationTimeout);
-}
-
-internal sealed record ReviewedContentLimitProfile(
-    int MaximumRequests,
-    long MaximumResponseBytes,
-    long MaximumAggregateResponseBytes,
-    TimeSpan Timeout)
-{
-    internal bool IsValid =>
-        MaximumRequests > 0 &&
-        MaximumResponseBytes > 0 &&
-        MaximumAggregateResponseBytes >= MaximumResponseBytes &&
-        Timeout > TimeSpan.Zero;
 }
 
 internal sealed record ReviewedContentBudgetRemaining(
@@ -43,7 +27,10 @@ internal sealed record ReviewedContentBudgetRemaining(
 internal sealed class ReviewedContentBudget
 {
     private readonly object _gate = new();
-    private readonly ReviewedContentLimitProfile _limits;
+    private readonly int _maximumRequests;
+    private readonly long _maximumResponseBytes;
+    private readonly long _maximumAggregateResponseBytes;
+    private readonly TimeSpan _timeout;
     private readonly TimeProvider _timeProvider;
     private readonly long _startedTimestamp;
     private int _requestCount;
@@ -51,25 +38,47 @@ internal sealed class ReviewedContentBudget
     private bool _usable = true;
 
     private ReviewedContentBudget(
-        ReviewedContentLimitProfile limits,
+        int maximumRequests,
+        long maximumResponseBytes,
+        long maximumAggregateResponseBytes,
+        TimeSpan timeout,
         TimeProvider timeProvider)
     {
-        if (!limits.IsValid)
+        if (maximumRequests <= 0 ||
+            maximumResponseBytes <= 0 ||
+            maximumAggregateResponseBytes < maximumResponseBytes ||
+            timeout <= TimeSpan.Zero)
         {
             throw new ArgumentException(
-                "Reviewed-content limits are invalid.",
-                nameof(limits));
+                "Reviewed-content limits are invalid.");
         }
 
-        _limits = limits;
+        _maximumRequests = maximumRequests;
+        _maximumResponseBytes = maximumResponseBytes;
+        _maximumAggregateResponseBytes = maximumAggregateResponseBytes;
+        _timeout = timeout;
         _timeProvider = timeProvider ??
             throw new ArgumentNullException(nameof(timeProvider));
         _startedTimestamp = _timeProvider.GetTimestamp();
     }
 
-    internal static ReviewedContentBudget Create(
-        ReviewedContentLimitProfile limits,
-        TimeProvider timeProvider) => new(limits, timeProvider);
+    internal static ReviewedContentBudget Mint(
+        object authority,
+        TimeProvider timeProvider)
+    {
+        if (!ReviewedTreeReader.HasMintAuthority(authority))
+        {
+            throw new InvalidOperationException(
+                "Only the reviewed-tree reader may mint the shared budget.");
+        }
+
+        return new ReviewedContentBudget(
+            ReviewedContentLimits.GitObjectRequests,
+            ReviewedContentLimits.GitObjectResponseBytes,
+            ReviewedContentLimits.AggregateResponseBytes,
+            ReviewedContentLimits.AcquisitionAndMaterializationTimeout,
+            timeProvider);
+    }
 
     internal bool TryReserveRequest(
         CancellationToken cancellationToken)
@@ -78,7 +87,7 @@ internal sealed class ReviewedContentBudget
         lock (_gate)
         {
             if (!_usable || DeadlineExceededLocked() ||
-                _requestCount >= _limits.MaximumRequests)
+                _requestCount >= _maximumRequests)
             {
                 return false;
             }
@@ -102,9 +111,9 @@ internal sealed class ReviewedContentBudget
         lock (_gate)
         {
             if (!_usable || DeadlineExceededLocked() ||
-                responseBytes > _limits.MaximumResponseBytes - count ||
+                responseBytes > _maximumResponseBytes - count ||
                 _aggregateResponseBytes >
-                    _limits.MaximumAggregateResponseBytes - count)
+                    _maximumAggregateResponseBytes - count)
             {
                 return false;
             }
@@ -128,9 +137,30 @@ internal sealed class ReviewedContentBudget
         {
             return !_usable ||
                 DeadlineExceededLocked() ||
-                responseBytes > _limits.MaximumResponseBytes - contentLength ||
+                responseBytes > _maximumResponseBytes - contentLength ||
                 _aggregateResponseBytes >
-                    _limits.MaximumAggregateResponseBytes - contentLength;
+                    _maximumAggregateResponseBytes - contentLength;
+        }
+    }
+
+    internal bool TryBeginOperation(
+        CancellationToken cancellationToken,
+        out OperationLease? operation)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            if (!_usable || DeadlineExceededLocked())
+            {
+                operation = null;
+                return false;
+            }
+
+            operation = new OperationLease(
+                cancellationToken,
+                RemainingTimeLocked(),
+                _timeProvider);
+            return true;
         }
     }
 
@@ -146,8 +176,8 @@ internal sealed class ReviewedContentBudget
             }
 
             remaining = new ReviewedContentBudgetRemaining(
-                _limits.MaximumRequests - _requestCount,
-                _limits.MaximumAggregateResponseBytes -
+                _maximumRequests - _requestCount,
+                _maximumAggregateResponseBytes -
                     _aggregateResponseBytes,
                 RemainingTimeLocked());
             return true;
@@ -165,16 +195,47 @@ internal sealed class ReviewedContentBudget
     private bool DeadlineExceededLocked() =>
         _timeProvider.GetElapsedTime(
             _startedTimestamp,
-            _timeProvider.GetTimestamp()) >= _limits.Timeout;
+            _timeProvider.GetTimestamp()) >= _timeout;
 
     private TimeSpan RemainingTimeLocked()
     {
         var elapsed = _timeProvider.GetElapsedTime(
             _startedTimestamp,
             _timeProvider.GetTimestamp());
-        return elapsed >= _limits.Timeout
+        return elapsed >= _timeout
             ? TimeSpan.Zero
-            : _limits.Timeout - elapsed;
+            : _timeout - elapsed;
+    }
+
+    internal sealed class OperationLease : IDisposable
+    {
+        private readonly CancellationToken _callerToken;
+        private readonly CancellationTokenSource _deadline;
+        private readonly CancellationTokenSource _linked;
+
+        internal OperationLease(
+            CancellationToken callerToken,
+            TimeSpan remaining,
+            TimeProvider timeProvider)
+        {
+            _callerToken = callerToken;
+            _deadline = new CancellationTokenSource(remaining, timeProvider);
+            _linked = CancellationTokenSource.CreateLinkedTokenSource(
+                callerToken,
+                _deadline.Token);
+        }
+
+        internal CancellationToken Token => _linked.Token;
+
+        internal bool DeadlineExpired =>
+            !_callerToken.IsCancellationRequested &&
+            _deadline.IsCancellationRequested;
+
+        public void Dispose()
+        {
+            _linked.Dispose();
+            _deadline.Dispose();
+        }
     }
 }
 

@@ -6,6 +6,8 @@ namespace AgenticPrReview.Runtime.ActionHost.Snapshot.GitObjects;
 
 internal sealed class ReviewedTreeReader
 {
+    private static readonly object MintAuthority = new();
+
     private readonly IReviewedGitObjectTransportFactory _transportFactory;
     private readonly TimeProvider _timeProvider;
 
@@ -14,7 +16,7 @@ internal sealed class ReviewedTreeReader
     {
     }
 
-    internal ReviewedTreeReader(
+    private ReviewedTreeReader(
         IReviewedGitObjectTransportFactory transportFactory,
         TimeProvider timeProvider)
     {
@@ -23,6 +25,9 @@ internal sealed class ReviewedTreeReader
         _timeProvider = timeProvider ??
             throw new ArgumentNullException(nameof(timeProvider));
     }
+
+    internal static bool HasMintAuthority(object authority) =>
+        ReferenceEquals(authority, MintAuthority);
 
     internal async Task<ReviewedTreeMaterializationResult> MaterializeAsync(
         ActionHostAuthorizer.AuthorizedInvocation invocation,
@@ -47,10 +52,12 @@ internal sealed class ReviewedTreeReader
                 ReviewedTreeFailure.InvalidGraph);
         }
 
-        var budget = ReviewedContentBudget.Create(
-            ReviewedContentLimits.Production,
+        var budget = ReviewedContentBudget.Mint(
+            MintAuthority,
             _timeProvider);
-        var staging = ReviewedBlobStagingLease.TryCreate(stagingParent);
+        var staging = ReviewedBlobStagingLease.TryCreate(
+            MintAuthority,
+            stagingParent);
         if (staging is null)
         {
             budget.Invalidate();
@@ -372,7 +379,8 @@ internal sealed class ReviewedTreeReader
             return CoreResult.Failed(ReviewedTreeFailure.UnsupportedSize);
         }
 
-        var records = drafts.Select(draft => new ReviewedTreePathRecord(
+        var records = drafts.Select(draft => ReviewedTreePathRecord.Mint(
+            MintAuthority,
             draft.Path,
             draft.Mode,
             draft.Kind,
@@ -381,7 +389,8 @@ internal sealed class ReviewedTreeReader
             draft.Kind == ReviewedTreeEntryKind.Regular
                 ? stagedBySha[draft.Sha]
                 : null));
-        var snapshot = new ReviewedTreeSnapshot(
+        var snapshot = ReviewedTreeSnapshot.Mint(
+            MintAuthority,
             pullRequest.RepositoryId,
             pullRequest.Number,
             commit.Sha,
