@@ -366,6 +366,8 @@ internal sealed class LocatorRootService
         try
         {
             var digest = OpaqueStoreHash.Sha256(envelope);
+            var encryptedDigest = new OpaqueStoreEncryptedObjectDigest(
+                digest);
             var correlation = LocatorCryptography.CorrelationId(
                 Convert.FromHexString(digest));
             var upload = await store.UploadImmutableAsync(
@@ -373,7 +375,7 @@ internal sealed class LocatorRootService
                         SentinelName,
                         new OpaqueStoreCorrelationId(correlation),
                         envelope,
-                        new OpaqueStoreEncryptedObjectDigest(digest),
+                        encryptedDigest,
                         requiredExpiry),
                     cancellationToken)
                 .ConfigureAwait(false);
@@ -386,6 +388,14 @@ internal sealed class LocatorRootService
             }
 
             if (upload.Metadata is null)
+            {
+                return LocatorRootResult.Fail(LocatorCodes.Unavailable);
+            }
+
+            if (!OpaqueStoreValidation.IsValid(upload.Metadata) ||
+                upload.Metadata.Reference.Name != SentinelName ||
+                upload.Metadata.EncryptedObjectDigest != encryptedDigest ||
+                upload.Metadata.Size != envelope.Length)
             {
                 return LocatorRootResult.Fail(LocatorCodes.Unavailable);
             }

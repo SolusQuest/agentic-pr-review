@@ -32,6 +32,10 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
     internal int HideNewestObjectForNextLists { get; set; }
     internal System.Action? BeforeDelete { get; set; }
     internal System.Action? AfterDelete { get; set; }
+    internal System.Func<
+        OpaqueStoreObjectMetadata,
+        OpaqueStoreObjectMetadata>? NextUploadMetadataTransform
+    { get; set; }
     internal int ListCalls { get; private set; }
     internal int MetadataCalls { get; private set; }
     internal int DownloadCalls { get; private set; }
@@ -264,17 +268,20 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
             NextUploadMutationState =
                 OpaqueStoreMutationState.NotCommitted;
             PersistFailedUpload = false;
+            var returnedMetadata = NextUploadMetadataTransform?.Invoke(
+                metadata) ?? metadata;
+            NextUploadMetadataTransform = null;
             return Task.FromResult(failure == OpaqueStoreFailure.None
                 ? new OpaqueStoreUploadResult(
                     OpaqueStoreFailure.None,
                     OpaqueStoreMutationState.Committed,
-                    metadata)
+                    returnedMetadata)
                 : OpaqueStoreUploadResult.Fail(
                     failure,
                     mutationState,
                     mutationState == OpaqueStoreMutationState.NotCommitted
                         ? null
-                        : metadata));
+                        : returnedMetadata));
         }
     }
 

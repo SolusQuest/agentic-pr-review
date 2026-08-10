@@ -517,6 +517,77 @@ public sealed class LocatorRootServiceTests
             keys).Generation);
     }
 
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(1, false)]
+    [InlineData(2, false)]
+    [InlineData(3, false)]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    [InlineData(3, true)]
+    public async Task MismatchedUploadMetadataNeverDeletesOrReadsReferencedObject(
+        int mismatch,
+        bool outcomeUnknown)
+    {
+        using var access = LocatorTestData.Access();
+        using var oldKeys = LocatorTestData.KeyRing(
+            access,
+            currentBase64: LocatorTestData.PreviousBase64);
+        var store = new ScriptedLocatorStore();
+        var initialized = await Service(store, oldKeys).ResolveAsync(
+            access,
+            0,
+            CancellationToken.None);
+        Assert.True(initialized.Succeeded, initialized.Code);
+        initialized.Context!.Dispose();
+        var oldMetadata = store.Objects.Single();
+
+        using var rotated = LocatorTestData.KeyRing(
+            access,
+            previousBase64: LocatorTestData.PreviousBase64);
+        store.NextUploadMetadataTransform = actual => mismatch switch
+        {
+            0 => actual with
+            {
+                Reference = actual.Reference with
+                {
+                    Name = new OpaqueStoreName("mismatched-locator-name"),
+                },
+            },
+            1 => actual with
+            {
+                EncryptedObjectDigest =
+                    new OpaqueStoreEncryptedObjectDigest(
+                        new string('0', 64)),
+            },
+            2 => actual with { Size = checked(actual.Size + 1) },
+            _ => oldMetadata,
+        };
+        if (outcomeUnknown)
+        {
+            store.NextUploadFailure = OpaqueStoreFailure.OutcomeUnknown;
+            store.NextUploadMutationState =
+                OpaqueStoreMutationState.OutcomeUnknown;
+        }
+
+        store.ResetCounts();
+        var dependent = oldMetadata.ExpiresAtUnixSeconds -
+            StateRetentionRequirements.SentinelDependentMarginSeconds + 1;
+
+        var rejected = await Service(store, rotated).ResolveAsync(
+            access,
+            dependent,
+            CancellationToken.None);
+
+        Assert.Equal(LocatorCodes.Unavailable, rejected.Code);
+        Assert.Equal(1, store.UploadCalls);
+        Assert.Equal(0, store.ReadBackCalls);
+        Assert.Equal(0, store.DeleteCalls);
+        Assert.Contains(oldMetadata, store.Objects);
+        Assert.Equal(2, store.Objects.Length);
+    }
+
     [Fact]
     public async Task PersistentUnderRetainedInitializationRecoversFresh()
     {
