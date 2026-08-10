@@ -1,0 +1,25 @@
+{
+  "repository_id": "9007199254740992",
+  "run_id": "9007199254740993",
+  "run_attempt": "2",
+  "repository_name": "SolusQuest/agentic-pr-review",
+  "event_json_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "event_json_path": "D:\\runner\\évent.json",
+  "inputs": {
+    "state_mode": "reset",
+    "pr_number": "9007199254740993",
+    "config_path": ".github\/reviewer.yml",
+    "previous_state_key": null,
+    "state_key": "line1\u0000line2",
+    "provider_api_key": null,
+    "github_token": "::error::%0A"
+  },
+  "workflow_ref": "refs\/pull\/146\/merge",
+  "workflow_path": ".github\/workflows\/review.yml",
+  "workflow_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "action_source_sha": "cccccccccccccccccccccccccccccccccccccccc",
+  "payload_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "build_discriminator": "r4-h1",
+  "cancellation": "requested",
+  "artifact_bridge_endpoint": "D:\\runner\\bridge.sock"
+}
