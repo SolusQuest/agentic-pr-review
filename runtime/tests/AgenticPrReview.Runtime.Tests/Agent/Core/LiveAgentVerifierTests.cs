@@ -708,6 +708,7 @@ public sealed class LiveAgentVerifierContractTests
                 findings,
                 terminalSha256,
                 terminalBytes),
+            testCase.ReviewedIdentity,
             events.ToImmutable(),
             continuation: null);
 

@@ -161,24 +161,33 @@ internal sealed record AgentDiagnostic(
 internal sealed record AgentRunOutcome(
     bool Succeeded,
     AgentTerminalReview? Review,
+    ReviewedIdentity? ReviewedIdentity,
     AgentDiagnostic? Diagnostic,
     ImmutableArray<AgentLogicalEvent> Events,
     AgentContinuationCandidate? Continuation)
 {
-    internal bool CompletedSessionEligible => Succeeded && Review is not null;
+    internal bool CompletedSessionEligible =>
+        Succeeded && Review is not null && ReviewedIdentity is not null;
 
     internal static AgentRunOutcome Success(
         AgentTerminalReview review,
+        ReviewedIdentity reviewedIdentity,
         ImmutableArray<AgentLogicalEvent> events,
         AgentContinuationCandidate? continuation) =>
-        new(true, review, null, events, continuation);
+        new(true, review, reviewedIdentity, null, events, continuation);
 
     internal static AgentRunOutcome Failure(
         string code,
         int modelCalls,
         int toolCalls,
         ImmutableArray<AgentLogicalEvent> events) =>
-        new(false, null, new AgentDiagnostic(code, modelCalls, toolCalls), events, null);
+        new(
+            false,
+            null,
+            null,
+            new AgentDiagnostic(code, modelCalls, toolCalls),
+            events,
+            null);
 }
 
 internal sealed record AgentContinuationCandidate(

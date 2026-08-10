@@ -254,6 +254,7 @@ internal sealed class AgentLoop(
                 events.Add(new AgentTerminalEvent(review!.TerminalSha256));
                 return AgentRunOutcome.Success(
                     review,
+                    run.ReviewedIdentity,
                     events.ToImmutable(),
                     ToContinuationCandidate(continuation));
             }
