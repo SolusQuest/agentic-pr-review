@@ -268,11 +268,11 @@ internal static class ActionHostTrustedWorkflowPolicy
             return false;
         }
 
-        var references = new List<string>();
-        CollectActionReferences(job, references);
-        return references.Count(value => StringComparer.Ordinal.Equals(
-            value,
-            expectedActionReference)) == 1;
+        var steps = job.Value("steps");
+        return steps?.Sequence is { } sequence &&
+            sequence.Count(step =>
+                step.Map is not null &&
+                IsScalar(step.Value("uses"), expectedActionReference)) == 1;
     }
 
     private static void CollectActionReferences(

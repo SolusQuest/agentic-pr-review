@@ -112,7 +112,7 @@ public sealed class ActionHostAuthorizationFactTests
     }
 
     [Fact]
-    public async Task EmptyEventAndRunInlineArraysUseCompleteCommitAssociation()
+    public async Task EmptyEventInlineArrayCannotProveScheduledConcurrencyGroup()
     {
         var scenario = ActionHostAuthorizationScenario.Valid(
             ActionHostAuthorizationRoute.WorkflowRun);
@@ -165,8 +165,13 @@ public sealed class ActionHostAuthorizationFactTests
             launch,
             CancellationToken.None);
 
-        Assert.NotNull(result.Invocation);
-        Assert.Contains("associated:1", scenario.Transport.Calls);
+        Assert.Null(result.Invocation);
+        Assert.Equal(ActionHostStatus.AuthorizationFailed,
+            result.RejectionStatus);
+        Assert.Equal(ActionHostAuthorizationFailure.RouteInputInvalid,
+            result.Failure);
+        Assert.Equal(0, scenario.Factory.Calls);
+        Assert.Empty(scenario.Transport.Calls);
     }
 
     [Fact]

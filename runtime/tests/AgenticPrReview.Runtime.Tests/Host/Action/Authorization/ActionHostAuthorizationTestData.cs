@@ -57,7 +57,8 @@ internal sealed class ActionHostAuthorizationScenario
         ActionHostAuthorizationRoute route,
         bool includeToken = true,
         ActionHostCancellationState cancellation =
-            ActionHostCancellationState.Active)
+            ActionHostCancellationState.Active,
+        string tokenValue = "github-token-canary-value")
     {
         var repository = new ActionHostGitHubRepositoryFact(
             RepositoryId,
@@ -130,7 +131,8 @@ internal sealed class ActionHostAuthorizationScenario
             eventBytes,
             route,
             includeToken,
-            cancellation);
+            cancellation,
+            tokenValue: tokenValue);
         var transport = new FakeGitHubTransport
         {
             Repository = repository,
@@ -157,13 +159,14 @@ internal sealed class ActionHostAuthorizationScenario
         bool includeToken = true,
         ActionHostCancellationState cancellation =
             ActionHostCancellationState.Active,
-        long? pullRequestNumber = null)
+        long? pullRequestNumber = null,
+        string tokenValue = "github-token-canary-value")
     {
         ActionHostGitHubToken? token = null;
         if (includeToken)
         {
             Assert.True(ActionHostGitHubToken.TryCreate(
-                "github-token-canary-value",
+                tokenValue,
                 out token));
         }
 

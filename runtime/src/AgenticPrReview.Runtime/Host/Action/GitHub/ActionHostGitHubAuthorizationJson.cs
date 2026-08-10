@@ -56,10 +56,27 @@ internal sealed class ActionHostGitHubPullRequestDocument
     public string? State { get; set; }
 
     [JsonPropertyName("draft")]
+    [JsonRequired]
     public bool Draft { get; set; }
 
     [JsonPropertyName("merged_at")]
+    [JsonRequired]
     public DateTimeOffset? MergedAt { get; set; }
+
+    [JsonPropertyName("base")]
+    public ActionHostGitHubPullRequestSideDocument? Base { get; set; }
+
+    [JsonPropertyName("head")]
+    public ActionHostGitHubPullRequestSideDocument? Head { get; set; }
+}
+
+internal sealed class ActionHostGitHubPullRequestReferenceDocument
+{
+    [JsonPropertyName("id")]
+    public long Id { get; set; }
+
+    [JsonPropertyName("number")]
+    public long Number { get; set; }
 
     [JsonPropertyName("base")]
     public ActionHostGitHubPullRequestSideDocument? Base { get; set; }
@@ -110,7 +127,11 @@ internal sealed class ActionHostGitHubWorkflowRunDocument
     public ActionHostGitHubActorDocument? TriggeringActor { get; set; }
 
     [JsonPropertyName("pull_requests")]
-    public ActionHostGitHubPullRequestDocument[]? PullRequests { get; set; }
+    public ActionHostGitHubPullRequestReferenceDocument[]? PullRequests
+    {
+        get;
+        set;
+    }
 }
 
 internal sealed class ActionHostGitHubContentDocument
@@ -153,6 +174,8 @@ internal sealed class ActionHostGitHubPermissionDocument
 [JsonSerializable(typeof(ActionHostGitHubContentDocument))]
 [JsonSerializable(typeof(ActionHostGitHubPullRequestDocument))]
 [JsonSerializable(typeof(ActionHostGitHubPullRequestDocument[]))]
+[JsonSerializable(typeof(ActionHostGitHubPullRequestReferenceDocument))]
+[JsonSerializable(typeof(ActionHostGitHubPullRequestReferenceDocument[]))]
 [JsonSerializable(typeof(ActionHostGitHubPermissionDocument))]
 internal sealed partial class ActionHostGitHubJsonContext :
     JsonSerializerContext;
@@ -330,7 +353,7 @@ internal static class ActionHostGitHubDocumentMapper
     }
 
     private static bool TryMapReference(
-        ActionHostGitHubPullRequestDocument? document,
+        ActionHostGitHubPullRequestReferenceDocument? document,
         out ActionHostGitHubPullRequestReferenceFact? fact)
     {
         fact = null;

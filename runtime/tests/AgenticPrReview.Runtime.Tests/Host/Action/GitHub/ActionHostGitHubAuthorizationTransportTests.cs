@@ -341,6 +341,119 @@ public sealed class ActionHostGitHubAuthorizationTransportTests
             handler.Requests.Count);
     }
 
+    public static TheoryData<string> InvalidHeaderCredentialSuffixes => new()
+    {
+        "\rX-Injected:value",
+        "\nX-Injected:value",
+        "\0suffix",
+        "\tvalue",
+        " value",
+        "\u0085value",
+        "é",
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidHeaderCredentialSuffixes))]
+    public void InvalidHeaderCredentialsFailBeforeAnyRequest(string suffix)
+    {
+        const string canary = "github-token-canary";
+        var handler = new CapturingHandler(_ => JsonResponse("{}"));
+
+        var exception = Assert.Throws<ActionHostGitHubCredentialException>(() =>
+            ActionHostGitHubAuthorizationTransport.CreateForTesting(
+                canary + suffix,
+                handler));
+
+        Assert.Empty(handler.Requests);
+        Assert.DoesNotContain(canary, exception.ToString(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VisibleCommandShapedCredentialUsesTypedBearerHeader()
+    {
+        const string token = "github-token-$(whoami)";
+        var handler = new CapturingHandler(_ => JsonResponse("""
+            {
+              "id": 42,
+              "full_name": "SolusQuest/agentic-pr-review",
+              "default_branch": "main"
+            }
+            """));
+        using var transport =
+            ActionHostGitHubAuthorizationTransport.CreateForTesting(
+                token,
+                handler);
+
+        var result = await transport.GetRepositoryAsync(
+            "SolusQuest/agentic-pr-review",
+            CancellationToken.None);
+
+        Assert.NotNull(result.Value);
+        Assert.Equal("Bearer " + token,
+            Assert.Single(handler.Requests).Header("Authorization"));
+        Assert.DoesNotContain(token, transport.ToString(),
+            StringComparison.Ordinal);
+    }
+
+    public static TheoryData<string> IncompleteEligibilityMembers => new()
+    {
+        "\"merged_at\": null,",
+        "\"draft\": null,\n  \"merged_at\": null,",
+        "\"draft\": false,",
+        "\"draft\": false,\n  \"merged_at\": false,",
+    };
+
+    [Theory]
+    [MemberData(nameof(IncompleteEligibilityMembers))]
+    public async Task PullRequestEligibilityRequiresPresentTypedFields(
+        string eligibilityMembers)
+    {
+        var handler = new CapturingHandler(_ => JsonResponse(
+            PullRequestResponse(eligibilityMembers)));
+        using var transport =
+            ActionHostGitHubAuthorizationTransport.CreateForTesting(
+                "token-canary",
+                handler);
+
+        var result = await transport.GetPullRequestAsync(
+            "SolusQuest/agentic-pr-review",
+            147,
+            CancellationToken.None);
+
+        Assert.Null(result.Value);
+        Assert.Equal(ActionHostGitHubFailure.InvalidResponse, result.Failure);
+    }
+
+    public static TheoryData<string, bool> CompleteMergeStatusMembers => new()
+    {
+        { "null", false },
+        { "\"2026-08-10T00:00:00Z\"", true },
+    };
+
+    [Theory]
+    [MemberData(nameof(CompleteMergeStatusMembers))]
+    public async Task PullRequestEligibilityAcceptsExplicitMergeStatus(
+        string mergedAt,
+        bool isMerged)
+    {
+        var handler = new CapturingHandler(_ => JsonResponse(
+            PullRequestResponse(
+                "\"draft\": false,\n  \"merged_at\": " + mergedAt + ",")));
+        using var transport =
+            ActionHostGitHubAuthorizationTransport.CreateForTesting(
+                "token-canary",
+                handler);
+
+        var result = await transport.GetPullRequestAsync(
+            "SolusQuest/agentic-pr-review",
+            147,
+            CancellationToken.None);
+
+        Assert.NotNull(result.Value);
+        Assert.Equal(isMerged, result.Value!.MergedAt is not null);
+    }
+
     private static HttpResponseMessage JsonResponse(string body) => new(
         HttpStatusCode.OK)
     {
@@ -359,6 +472,29 @@ public sealed class ActionHostGitHubAuthorizationTransportTests
           "path": ".github/workflows/r4-trusted-proof.yml",
           "sha": "{{blobSha}}",
           "content": "{{content.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\r", "\\r", StringComparison.Ordinal).Replace("\n", "\\n", StringComparison.Ordinal).Replace("\t", "\\t", StringComparison.Ordinal)}}"
+        }
+        """;
+
+    private static string PullRequestResponse(string eligibilityMembers) => $$"""
+        {
+          "id": 1000,
+          "number": 147,
+          "state": "open",
+          {{eligibilityMembers}}
+          "base": {
+            "sha": "dddddddddddddddddddddddddddddddddddddddd",
+            "repo": {
+              "id": 42,
+              "full_name": "SolusQuest/agentic-pr-review"
+            }
+          },
+          "head": {
+            "sha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "repo": {
+              "id": 42,
+              "full_name": "SolusQuest/agentic-pr-review"
+            }
+          }
         }
         """;
 

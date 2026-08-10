@@ -31,6 +31,7 @@ internal enum ActionHostAuthorizationFailure
     PullRequestClosed,
     PullRequestInvalid,
     GitHubReadFailed,
+    GitHubCredentialInvalid,
     AuthorizationDeadline,
     Cancelled,
     InternalFailure,

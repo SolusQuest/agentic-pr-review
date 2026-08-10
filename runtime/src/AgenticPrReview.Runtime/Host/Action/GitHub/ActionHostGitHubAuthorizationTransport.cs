@@ -20,6 +20,15 @@ internal sealed class ActionHostGitHubAuthorizationTransportFactory :
     }
 }
 
+internal sealed class ActionHostGitHubCredentialException : Exception
+{
+    internal ActionHostGitHubCredentialException()
+        : base(
+            "The GitHub credential is invalid for an HTTP Authorization header.")
+    {
+    }
+}
+
 internal sealed class ActionHostGitHubAuthorizationTransport :
     IActionHostGitHubAuthorizationTransport
 {
@@ -42,9 +51,9 @@ internal sealed class ActionHostGitHubAuthorizationTransport :
 
     internal static ActionHostGitHubAuthorizationTransport Create(string token)
     {
-        if (string.IsNullOrEmpty(token))
+        if (!TryCreateAuthorizationHeader(token, out _))
         {
-            throw new ArgumentException("A GitHub token is required.", nameof(token));
+            throw new ActionHostGitHubCredentialException();
         }
 
         return new(
@@ -57,9 +66,9 @@ internal sealed class ActionHostGitHubAuthorizationTransport :
         string token,
         HttpMessageHandler handler)
     {
-        if (string.IsNullOrEmpty(token))
+        if (!TryCreateAuthorizationHeader(token, out _))
         {
-            throw new ArgumentException("A GitHub token is required.", nameof(token));
+            throw new ActionHostGitHubCredentialException();
         }
 
         ArgumentNullException.ThrowIfNull(handler);
@@ -325,9 +334,9 @@ internal sealed class ActionHostGitHubAuthorizationTransport :
                 new Uri(
                     ActionHostGitHubAuthorizationPolicy.Origin + pathAndQuery,
                     UriKind.Absolute));
-            if (!request.Headers.TryAddWithoutValidation(
-                    "Authorization",
-                    $"Bearer {_token}") ||
+            if (!TryCreateAuthorizationHeader(
+                    _token,
+                    out var authorization) ||
                 !request.Headers.TryAddWithoutValidation(
                     "User-Agent",
                     ActionHostGitHubAuthorizationPolicy.UserAgent) ||
@@ -341,6 +350,8 @@ internal sealed class ActionHostGitHubAuthorizationTransport :
                 return ActionHostGitHubResult<T>.Failed(
                     ActionHostGitHubFailure.TransportFailure);
             }
+
+            request.Headers.Authorization = authorization;
 
             using var response = await _client.SendAsync(
                 request,
@@ -439,6 +450,35 @@ internal sealed class ActionHostGitHubAuthorizationTransport :
         };
         client.DefaultRequestHeaders.Clear();
         return client;
+    }
+
+    private static bool TryCreateAuthorizationHeader(
+        string? token,
+        out AuthenticationHeaderValue? authorization)
+    {
+        authorization = null;
+        if (string.IsNullOrEmpty(token))
+        {
+            return false;
+        }
+
+        foreach (var character in token)
+        {
+            if (character is < '\u0021' or > '\u007e')
+            {
+                return false;
+            }
+        }
+
+        try
+        {
+            authorization = new AuthenticationHeaderValue("Bearer", token);
+            return true;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
     }
 
     private static async Task<byte[]?> ReadBoundedAsync(

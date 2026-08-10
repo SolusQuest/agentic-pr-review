@@ -149,6 +149,52 @@ public sealed class ActionHostAuthorizationPolicyTests
             out _));
     }
 
+    public static TheoryData<string> NonStepActionReferenceShapes
+    {
+        get
+        {
+            var reference = ActionHostAuthorizationPolicy.ActionPath +
+                ActionHostAuthorizationScenario.ActionSha;
+            return new()
+            {
+                "env:\n      uses: " + reference +
+                    "\n    steps:\n      - run: echo decoy",
+                "steps:\n      - run: echo decoy\n        with:\n" +
+                    "          uses: " + reference,
+                "outputs:\n      uses: " + reference +
+                    "\n    steps:\n      - run: echo decoy",
+                "uses: " + reference +
+                    "\n    steps:\n      - run: echo decoy",
+                "steps:\n      - run: echo decoy",
+                "steps:\n      - uses: " + reference +
+                    "\n      - uses: " + reference,
+            };
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(NonStepActionReferenceShapes))]
+    public void OnlyAnImmediateStepUsesCanBindTheActionSource(string replacement)
+    {
+        var reference = ActionHostAuthorizationPolicy.ActionPath +
+            ActionHostAuthorizationScenario.ActionSha;
+        var canonical = ActionHostAuthorizationScenario.ValidWorkflow(
+            ActionHostAuthorizationScenario.ActionSha);
+        var actualStep = "steps:\n      - uses: " + reference;
+        Assert.Contains(actualStep, canonical, StringComparison.Ordinal);
+        var mutated = canonical.Replace(
+            actualStep,
+            replacement,
+            StringComparison.Ordinal);
+
+        Assert.False(ActionHostTrustedWorkflowPolicy.TryValidate(
+            Encoding.UTF8.GetBytes(mutated),
+            ActionHostAuthorizationPolicy.TrustedProof,
+            ActionHostAuthorizationScenario.ActionSha,
+            out _,
+            out _));
+    }
+
     [Fact]
     public void CrLfCanonicalWorkflowIsAccepted()
     {

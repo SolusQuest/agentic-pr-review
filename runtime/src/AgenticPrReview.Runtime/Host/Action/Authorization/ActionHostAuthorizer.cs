@@ -278,6 +278,12 @@ internal sealed class ActionHostAuthorizer
                 ActionHostStatus.AuthorizationFailed,
                 ActionHostAuthorizationFailure.AuthorizationDeadline);
         }
+        catch (ActionHostGitHubCredentialException)
+        {
+            return Reject(
+                ActionHostStatus.AuthorizationFailed,
+                ActionHostAuthorizationFailure.GitHubCredentialInvalid);
+        }
         catch (Exception exception) when (IsNonFatal(exception))
         {
             return Reject(
@@ -298,6 +304,7 @@ internal sealed class ActionHostAuthorizer
                 StringComparer.Ordinal.Equals(
                     eventFact.WorkflowRun?.Conclusion,
                     "success") &&
+                eventFact.WorkflowRun?.PullRequests.Count == 1 &&
                 launch.Inputs.PullRequestNumber is null &&
                 launch.Inputs.StateMode == ActionHostStateMode.Auto;
         }
@@ -361,7 +368,7 @@ internal sealed class ActionHostAuthorizer
         var eventRun = eventFact.WorkflowRun!;
         if (eventRun.Id == currentRun.Id &&
                 eventRun.Attempt == currentRun.Attempt ||
-            eventRun.PullRequests.Count > 1)
+            eventRun.PullRequests.Count != 1)
         {
             return WorkflowRunSelection.Failed(
                 ActionHostAuthorizationFailure.TriggerRunMismatch);
@@ -381,11 +388,7 @@ internal sealed class ActionHostAuthorizer
                     : ActionHostAuthorizationFailure.GitHubReadFailed);
         }
 
-        var expected = eventRun.PullRequests.Count == 1
-            ? eventRun.PullRequests[0]
-            : trigger.PullRequests.Count == 1
-                ? trigger.PullRequests[0]
-                : null;
+        var expected = eventRun.PullRequests[0];
         var candidates = new List<ActionHostGitHubPullRequestFact>();
         var seen = new Dictionary<long, ActionHostGitHubPullRequestFact>();
         var total = 0;
@@ -437,8 +440,7 @@ internal sealed class ActionHostAuthorizer
                         repository.Id,
                         repository.FullName,
                         pullRequest.BaseRepository) &&
-                    (expected is null ||
-                        SamePullRequest(expected, pullRequest)))
+                    SamePullRequest(expected, pullRequest))
                 {
                     candidates.Add(pullRequest);
                 }
