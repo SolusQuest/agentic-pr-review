@@ -4,7 +4,10 @@ namespace AgenticPrReview.Runtime.ActionHost.Policy;
 
 internal sealed class ActionHostTrustedPolicySourceReader
 {
-    private const int MaximumRequests = 32;
+    private const int MaximumPolicyFiles = 2;
+    private const int MaximumRequests = 1 +
+        MaximumPolicyFiles *
+        (ActionHostTrustedPolicyPath.MaximumSegmentsByUtf8Limit + 1);
     private const int MaximumAggregateResponseBytes = 8 * 1024 * 1024;
     private const int MaximumTreeEntries = 10_000;
     private readonly ActionHostTrustedPolicyRequest _request;

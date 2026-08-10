@@ -121,6 +121,46 @@ public sealed class ActionHostTrustedPolicyTests
             result.Policy.PolicySha256);
     }
 
+    [Fact]
+    public async Task DeepContractValidPathsMaterializeBeyondPriorRequestLimit()
+    {
+        var configPath = DeepPath("policy", "config.json", 20);
+        var instructionsPath = DeepPath(
+            ".github/agentic-pr-review",
+            "instructions.md",
+            20);
+        var (_, scenario) = await Request();
+        var customLaunch = CloneLaunch(
+            scenario.Launch,
+            configPath: configPath);
+        var authorization = await scenario.CreateAuthorizer().AuthorizeAsync(
+            scenario.Launch,
+            CancellationToken.None);
+        Assert.True(ActionHostTrustedPolicyRequest.TryBind(
+            customLaunch,
+            authorization.Invocation,
+            out var request,
+            out var failure));
+        Assert.Equal(ActionHostTrustedPolicyFailure.None, failure);
+        var config = Config("sticky", null, instructionsPath);
+        var instructions = Encoding.UTF8.GetBytes("instructions");
+        var transport = ScriptedObjectTransport.ValidAtPaths(
+            configPath,
+            config,
+            instructionsPath,
+            instructions);
+
+        var result = await ActionHostTrustedPolicy.MaterializeAsync(
+            request!,
+            transport,
+            CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(configPath, result.Policy!.ConfigPath);
+        Assert.Equal(instructionsPath, result.Policy.InstructionsPath);
+        Assert.True(transport.Calls.Count > 32);
+    }
+
     [Theory]
     [InlineData("sticky", "high", "Sticky", "High")]
     [InlineData("sticky", "critical", "Sticky", "Critical")]
@@ -659,6 +699,23 @@ public sealed class ActionHostTrustedPolicyTests
             inline + "}}");
     }
 
+    private static string DeepPath(
+        string prefix,
+        string fileName,
+        int segmentCount)
+    {
+        var prefixSegments = prefix.Split('/');
+        Assert.True(segmentCount > prefixSegments.Length);
+        return string.Join('/',
+        [
+            .. prefixSegments,
+            .. Enumerable.Repeat(
+                "d",
+                segmentCount - prefixSegments.Length - 1),
+            fileName,
+        ]);
+    }
+
     private static ActionHostLaunchContract CloneLaunch(
         ActionHostLaunchContract launch,
         string? workflowSha = null,
@@ -741,6 +798,91 @@ public sealed class ActionHostTrustedPolicyTests
                 (byte[])instructions.Clone());
             return transport;
         }
+
+        internal static ScriptedObjectTransport ValidAtPaths(
+            string configPath,
+            byte[] config,
+            string instructionsPath,
+            byte[] instructions)
+        {
+            var transport = new ScriptedObjectTransport
+            {
+                Commit = new(
+                    ActionHostAuthorizationScenario.WorkflowSha,
+                    RootTree),
+            };
+            transport.Trees[RootTree] = new(RootTree, []);
+            transport.AddRegularBlobPath(
+                configPath,
+                ConfigBlob,
+                config);
+            transport.AddRegularBlobPath(
+                instructionsPath,
+                InstructionsBlob,
+                instructions);
+            return transport;
+        }
+
+        private void AddRegularBlobPath(
+            string path,
+            string blobSha,
+            byte[] bytes)
+        {
+            var segments = path.Split('/');
+            var treeSha = RootTree;
+            var prefix = string.Empty;
+            for (var index = 0; index < segments.Length - 1; index++)
+            {
+                prefix = prefix.Length == 0
+                    ? segments[index]
+                    : prefix + "/" + segments[index];
+                var childSha = ObjectSha("tree:" + prefix);
+                var tree = Trees[treeSha];
+                var existing = tree.Entries.SingleOrDefault(entry =>
+                    StringComparer.Ordinal.Equals(
+                        entry.Path,
+                        segments[index]));
+                if (existing is null)
+                {
+                    Trees[treeSha] = new(
+                        tree.Sha,
+                        [
+                            .. tree.Entries,
+                            new(
+                                segments[index],
+                                "040000",
+                                "tree",
+                                childSha),
+                        ]);
+                    Trees[childSha] = new(childSha, []);
+                }
+                else
+                {
+                    Assert.Equal("040000", existing.Mode);
+                    Assert.Equal("tree", existing.Type);
+                    childSha = existing.Sha;
+                }
+
+                treeSha = childSha;
+            }
+
+            var parent = Trees[treeSha];
+            Trees[treeSha] = new(
+                parent.Sha,
+                [
+                    .. parent.Entries,
+                    new(
+                        segments[^1],
+                        "100644",
+                        "blob",
+                        blobSha),
+                ]);
+            Blobs[blobSha] = new(blobSha, (byte[])bytes.Clone());
+        }
+
+        private static string ObjectSha(string value) =>
+            Convert.ToHexStringLower(
+                SHA1.HashData(Encoding.UTF8.GetBytes(value)));
 
         public Task<ActionHostGitObjectResult<ActionHostGitCommitObject>>
             GetCommitObjectAsync(

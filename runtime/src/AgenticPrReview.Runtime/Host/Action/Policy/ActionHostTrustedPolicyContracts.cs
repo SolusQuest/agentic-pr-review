@@ -42,8 +42,9 @@ internal enum ActionHostTrustedPolicyFailure
 
 internal sealed class ActionHostTrustedPolicyPath
 {
-    private const int MaximumUtf8Bytes = 1024;
-    private const int MaximumSegments = 12;
+    internal const int MaximumUtf8Bytes = 1024;
+    internal const int MaximumSegmentsByUtf8Limit =
+        (MaximumUtf8Bytes + 1) / 2;
     private const string InstructionsPrefix =
         ".github/agentic-pr-review/";
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
@@ -75,7 +76,7 @@ internal sealed class ActionHostTrustedPolicyPath
         }
 
         string[] segments = value.Split('/');
-        if (segments.Length is < 1 or > MaximumSegments ||
+        if (segments.Length < 1 ||
             segments.Any(static segment =>
                 segment.Length == 0 || segment is "." or ".."))
         {
