@@ -209,13 +209,14 @@ internal sealed class StickyCommentPublisher
     {
         var discovery = await DiscoverCoreAsync(transport, request,
             CancellationToken.None);
-        if (discovery.Kind != StickyDiscoveryKind.ExactTarget ||
-            expectedId is not null && discovery.CommentId != expectedId)
+        if (discovery is not
+                { Kind: StickyDiscoveryKind.ExactTarget, CommentId: long id } ||
+            expectedId is not null && id != expectedId)
             return null;
         var read = await transport.GetIssueCommentAsync(
-            discovery.CommentId!.Value, CancellationToken.None);
+            id, CancellationToken.None);
         return read.Value is not null &&
-            IsExact(read.Value, request, discovery.CommentId.Value)
+            IsExact(read.Value, request, id)
                 ? read.Value
                 : null;
     }

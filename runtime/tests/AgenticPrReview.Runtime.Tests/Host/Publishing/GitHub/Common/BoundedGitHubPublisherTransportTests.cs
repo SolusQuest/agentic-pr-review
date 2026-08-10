@@ -131,15 +131,8 @@ public sealed class BoundedGitHubPublisherTransportTests
             classified.Reason);
 
         using var invalid = Create(data, new DelegateHandler(_ =>
-        {
-            var response = new HttpResponseMessage(
-                HttpStatusCode.UnprocessableEntity)
-            {
-                Content = new StringContent("validation failed", Encoding.UTF8,
-                    "text/plain"),
-            };
-            return Task.FromResult(response);
-        }));
+            Task.FromResult(Text(HttpStatusCode.UnprocessableEntity,
+                "validation failed"))));
 
         var unknown = await invalid.CreateIssueCommentAsync(
             Encoding.UTF8.GetBytes("{\"body\":\"x\"}"),
@@ -342,6 +335,12 @@ public sealed class BoundedGitHubPublisherTransportTests
         {
             Content = new StringContent(body, Encoding.UTF8,
                 "application/json"),
+        };
+
+    private static HttpResponseMessage Text(HttpStatusCode status,
+        string body) => new(status)
+        {
+            Content = new StringContent(body, Encoding.UTF8, "text/plain"),
         };
 
     private sealed class DelegateHandler : HttpMessageHandler

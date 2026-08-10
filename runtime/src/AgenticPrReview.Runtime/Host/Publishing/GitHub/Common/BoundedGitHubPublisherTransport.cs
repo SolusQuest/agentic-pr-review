@@ -342,10 +342,10 @@ internal sealed class BoundedGitHubPublisherTransport :
     {
         next = null;
         var relations = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var value in values)
-        foreach (var raw in value.Split(','))
+        foreach (var part in values
+            .SelectMany(static value => value.Split(','))
+            .Select(static raw => raw.Trim()))
         {
-            var part = raw.Trim();
             var close = part.IndexOf('>');
             var relIndex = part.IndexOf("; rel=\"", StringComparison.Ordinal);
             if (!part.StartsWith('<') || close < 2 || relIndex != close + 1 ||
@@ -369,9 +369,9 @@ internal sealed class BoundedGitHubPublisherTransport :
         page = 0;
         var seenPage = false;
         var seenPerPage = false;
-        foreach (var pair in query.TrimStart('?').Split('&'))
+        foreach (var p in query.TrimStart('?').Split('&')
+            .Select(static pair => pair.Split('=', 2)))
         {
-            var p = pair.Split('=', 2);
             if (p.Length != 2) return false;
             if (p[0] == "page")
             {
