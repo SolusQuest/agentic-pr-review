@@ -101,8 +101,12 @@ public sealed class LineageConcurrencyTests
             TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource uploadGate = new(
             TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource loserDeletedGate = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
         private int initialEnumerations;
         private int initialUploads;
+        private OpaqueStoreObjectMetadata? firstUpload;
+        private OpaqueStoreObjectMetadata? loserUpload;
 
         public async Task<OpaqueStoreListResult> ListExactAsync(
             OpaqueStoreListRequest request,
@@ -150,8 +154,20 @@ public sealed class LineageConcurrencyTests
                 var count = Interlocked.Increment(ref initialUploads);
                 if (count <= 2)
                 {
+                    Assert.NotNull(result.Metadata);
+                    if (count == 1)
+                    {
+                        firstUpload = result.Metadata;
+                    }
+
                     if (count == 2)
                     {
+                        Assert.NotNull(firstUpload);
+                        loserUpload = StringComparer.Ordinal.Compare(
+                            firstUpload.Reference.ObjectId.Value,
+                            result.Metadata!.Reference.ObjectId.Value) > 0
+                            ? firstUpload
+                            : result.Metadata;
                         uploadGate.TrySetResult();
                     }
 
@@ -164,15 +180,34 @@ public sealed class LineageConcurrencyTests
             return result;
         }
 
-        public Task<OpaqueStoreReadBackResult> ReadBackExactAsync(
+        public async Task<OpaqueStoreReadBackResult> ReadBackExactAsync(
             OpaqueStoreReadBackRequest request,
-            CancellationToken cancellationToken) =>
-            inner.ReadBackExactAsync(request, cancellationToken);
+            CancellationToken cancellationToken)
+        {
+            if (request.Expected == loserUpload)
+            {
+                await loserDeletedGate.Task.WaitAsync(
+                    TimeSpan.FromSeconds(10),
+                    cancellationToken);
+            }
 
-        public Task<OpaqueStoreDeleteResult> DeleteExactAsync(
+            return await inner.ReadBackExactAsync(request, cancellationToken);
+        }
+
+        public async Task<OpaqueStoreDeleteResult> DeleteExactAsync(
             OpaqueStoreDeleteRequest request,
-            CancellationToken cancellationToken) =>
-            inner.DeleteExactAsync(request, cancellationToken);
+            CancellationToken cancellationToken)
+        {
+            var result = await inner.DeleteExactAsync(
+                request,
+                cancellationToken);
+            if (request.Expected == loserUpload)
+            {
+                loserDeletedGate.TrySetResult();
+            }
+
+            return result;
+        }
 
         public void Dispose()
         {

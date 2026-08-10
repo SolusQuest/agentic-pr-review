@@ -300,11 +300,16 @@ internal sealed class LineageService
                 requiredPlatformExpiry,
                 cancellationToken)
             .ConfigureAwait(false);
-        if (!written.Succeeded)
+        if (written.Header is null)
         {
             return LineageResolveResult.Fail(written.Code);
         }
 
+        // An equivalent concurrent initializer may select and prune this
+        // process's physical upload after it commits but before its exact
+        // readback. The intended authenticated identity is not authority by
+        // itself; a complete fresh observation below must discover and select
+        // that identity before any context is returned.
         return await ConvergeExpectedHeadAsync(
                 context,
                 request,
@@ -939,7 +944,7 @@ internal sealed class LineageService
                     ? WrittenObjectResult.Success(
                         uploaded.Metadata!,
                         header)
-                    : WrittenObjectResult.Fail(uploaded.Code);
+                    : WrittenObjectResult.Fail(uploaded.Code, header);
             }
             finally
             {
@@ -1395,8 +1400,10 @@ internal sealed class LineageService
             StateControlHeaderV1 header) =>
             new(LineageCodes.Ready, metadata, header);
 
-        internal static WrittenObjectResult Fail(string code) =>
-            new(code, null, null);
+        internal static WrittenObjectResult Fail(
+            string code,
+            StateControlHeaderV1? header = null) =>
+            new(code, null, header);
     }
 
     private sealed class ObservationResult
