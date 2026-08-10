@@ -608,6 +608,24 @@ internal sealed class ActionHostAuthorizer
         SameRepository(reference.HeadRepository, candidate.HeadRepository);
 
     private static bool SameRepository(
+        ActionHostGitHubRepositoryReference reference,
+        ActionHostGitHubRepositoryIdentity candidate)
+    {
+        var separator = candidate.FullName.IndexOf('/');
+        return candidate.Id == reference.Id &&
+            separator > 0 &&
+            StringComparer.Ordinal.Equals(
+                reference.Name,
+                candidate.FullName[(separator + 1)..]);
+    }
+
+    private static bool SameRepository(
+        ActionHostGitHubRepositoryReference left,
+        ActionHostGitHubRepositoryReference right) =>
+        left.Id == right.Id &&
+        StringComparer.Ordinal.Equals(left.Name, right.Name);
+
+    private static bool SameRepository(
         long id,
         string fullName,
         ActionHostGitHubRepositoryIdentity candidate) =>

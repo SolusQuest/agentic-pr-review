@@ -19,6 +19,7 @@ internal sealed class ActionHostAuthorizationScenario
     internal const int TriggerAttempt = 1;
     internal const long PullRequestId = 1000;
     internal const long PullRequestNumber = 147;
+    internal const string RepositoryShortName = "agentic-pr-review";
     internal static readonly string WorkflowSha = new('a', 40);
     internal static readonly string ActionSha = new('b', 40);
     internal static readonly string TriggerSha = new('c', 40);
@@ -67,14 +68,17 @@ internal sealed class ActionHostAuthorizationScenario
         var identity = new ActionHostGitHubRepositoryIdentity(
             RepositoryId,
             RepositoryName);
+        var repositoryReference = new ActionHostGitHubRepositoryReference(
+            RepositoryId,
+            RepositoryShortName);
         var actor = new ActionHostGitHubActorFact(7, "maintainer");
         var reference = new ActionHostGitHubPullRequestReferenceFact(
             PullRequestId,
             PullRequestNumber,
             BaseSha,
-            identity,
+            repositoryReference,
             HeadSha,
-            identity);
+            repositoryReference);
         var trigger = new ActionHostGitHubWorkflowRunFact(
             TriggerRunId,
             TriggerAttempt,
@@ -307,14 +311,16 @@ internal sealed class ActionHostAuthorizationScenario
                   "sha": "{{pullRequest.BaseSha}}",
                   "repo": {
                     "id": {{pullRequest.BaseRepository.Id}},
-                    "full_name": "{{pullRequest.BaseRepository.FullName}}"
+                    "url": "https://api.github.com/repos/{{RepositoryName}}",
+                    "name": "{{pullRequest.BaseRepository.Name}}"
                   }
                 },
                 "head": {
                   "sha": "{{pullRequest.HeadSha}}",
                   "repo": {
                     "id": {{pullRequest.HeadRepository.Id}},
-                    "full_name": "{{pullRequest.HeadRepository.FullName}}"
+                    "url": "https://api.github.com/repos/{{RepositoryName}}",
+                    "name": "{{pullRequest.HeadRepository.Name}}"
                   }
                 }
               }

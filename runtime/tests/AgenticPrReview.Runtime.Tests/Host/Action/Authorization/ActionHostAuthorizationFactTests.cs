@@ -94,6 +94,19 @@ public sealed class ActionHostAuthorizationFactTests
     }
 
     [Fact]
+    public async Task MatchingRealShapeEventAndApiInlineReferencesAuthorize()
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowRun);
+
+        var result = await Authorize(scenario);
+
+        Assert.NotNull(result.Invocation);
+        Assert.Contains("run:800:1", scenario.Transport.Calls);
+        Assert.Contains("associated:1", scenario.Transport.Calls);
+    }
+
+    [Fact]
     public async Task EmptyRunApiInlineArrayUsesCompleteCommitAssociation()
     {
         var scenario = ActionHostAuthorizationScenario.Valid(
@@ -109,6 +122,60 @@ public sealed class ActionHostAuthorizationFactTests
         Assert.Contains("associated:1", scenario.Transport.Calls);
         Assert.Equal(ActionHostAuthorizationScenario.HeadSha,
             result.Invocation!.PullRequest.HeadSha);
+    }
+
+    public static TheoryData<string> InlineReferenceMismatches => new()
+    {
+        "repository-id",
+        "repository-name",
+        "pull-request-id",
+        "pull-request-number",
+        "base-sha",
+        "head-sha",
+    };
+
+    [Theory]
+    [MemberData(nameof(InlineReferenceMismatches))]
+    public async Task InlineReferenceMismatchFailsBeforeAssociation(
+        string mismatch)
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowRun);
+        var reference = Assert.Single(
+            scenario.Transport.TriggerRun.PullRequests);
+        reference = mismatch switch
+        {
+            "repository-id" => reference with
+            {
+                BaseRepository = reference.BaseRepository with { Id = 43 },
+            },
+            "repository-name" => reference with
+            {
+                BaseRepository = reference.BaseRepository with
+                {
+                    Name = "different-repository",
+                },
+            },
+            "pull-request-id" => reference with { Id = 1001 },
+            "pull-request-number" => reference with { Number = 148 },
+            "base-sha" => reference with { BaseSha = new('1', 40) },
+            "head-sha" => reference with { HeadSha = new('2', 40) },
+            _ => throw new InvalidOperationException(
+                "Unknown inline-reference mismatch."),
+        };
+        scenario.Transport.TriggerRun = scenario.Transport.TriggerRun with
+        {
+            PullRequests = [reference],
+        };
+
+        var result = await Authorize(scenario);
+
+        AssertRejected(
+            result,
+            ActionHostStatus.AuthorizationFailed,
+            ActionHostAuthorizationFailure.TriggerRunMismatch);
+        Assert.DoesNotContain("associated:1", scenario.Transport.Calls);
+        Assert.DoesNotContain("pull-request", scenario.Transport.Calls);
     }
 
     [Fact]

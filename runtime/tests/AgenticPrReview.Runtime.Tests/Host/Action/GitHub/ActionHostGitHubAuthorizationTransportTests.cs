@@ -253,6 +253,72 @@ public sealed class ActionHostGitHubAuthorizationTransportTests
     }
 
     [Fact]
+    public async Task ExactAttemptReadAcceptsRealInlineRepositoryReferences()
+    {
+        var handler = new CapturingHandler(_ => JsonResponse("""
+            {
+              "id": 800,
+              "run_attempt": 1,
+              "workflow_id": 71,
+              "name": "CI",
+              "path": ".github/workflows/ci.yml",
+              "head_branch": "feature",
+              "head_sha": "cccccccccccccccccccccccccccccccccccccccc",
+              "event": "pull_request",
+              "conclusion": "success",
+              "repository": {
+                "id": 42,
+                "full_name": "SolusQuest/agentic-pr-review"
+              },
+              "head_repository": {
+                "id": 42,
+                "full_name": "SolusQuest/agentic-pr-review"
+              },
+              "actor": { "id": 7, "login": "maintainer" },
+              "triggering_actor": { "id": 7, "login": "maintainer" },
+              "pull_requests": [
+                {
+                  "id": 1000,
+                  "number": 147,
+                  "base": {
+                    "sha": "dddddddddddddddddddddddddddddddddddddddd",
+                    "repo": {
+                      "id": 42,
+                      "url": "https://api.github.com/repos/SolusQuest/agentic-pr-review",
+                      "name": "agentic-pr-review"
+                    }
+                  },
+                  "head": {
+                    "sha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                    "repo": {
+                      "id": 42,
+                      "url": "https://api.github.com/repos/SolusQuest/agentic-pr-review",
+                      "name": "agentic-pr-review"
+                    }
+                  }
+                }
+              ]
+            }
+            """));
+        using var transport =
+            ActionHostGitHubAuthorizationTransport.CreateForTesting(
+                "token-canary",
+                handler);
+
+        var result = await transport.GetWorkflowRunAttemptAsync(
+            "SolusQuest/agentic-pr-review",
+            800,
+            1,
+            CancellationToken.None);
+
+        var reference = Assert.Single(result.Value!.PullRequests);
+        Assert.Equal(42, reference.BaseRepository.Id);
+        Assert.Equal("agentic-pr-review", reference.BaseRepository.Name);
+        Assert.Equal(42, reference.HeadRepository.Id);
+        Assert.Equal("agentic-pr-review", reference.HeadRepository.Name);
+    }
+
+    [Fact]
     public async Task CollaboratorPermissionUsesOneFixedReadEndpoint()
     {
         var handler = new CapturingHandler(_ => JsonResponse(

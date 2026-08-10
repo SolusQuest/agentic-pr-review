@@ -44,6 +44,27 @@ internal sealed class ActionHostGitHubPullRequestSideDocument
     public ActionHostGitHubRepositoryIdentityDocument? Repository { get; set; }
 }
 
+internal sealed class ActionHostGitHubRepositoryReferenceDocument
+{
+    [JsonPropertyName("id")]
+    public long Id { get; set; }
+
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("url")]
+    public string? Url { get; set; }
+}
+
+internal sealed class ActionHostGitHubPullRequestReferenceSideDocument
+{
+    [JsonPropertyName("sha")]
+    public string? Sha { get; set; }
+
+    [JsonPropertyName("repo")]
+    public ActionHostGitHubRepositoryReferenceDocument? Repository { get; set; }
+}
+
 internal sealed class ActionHostGitHubPullRequestDocument
 {
     [JsonPropertyName("id")]
@@ -79,10 +100,10 @@ internal sealed class ActionHostGitHubPullRequestReferenceDocument
     public long Number { get; set; }
 
     [JsonPropertyName("base")]
-    public ActionHostGitHubPullRequestSideDocument? Base { get; set; }
+    public ActionHostGitHubPullRequestReferenceSideDocument? Base { get; set; }
 
     [JsonPropertyName("head")]
-    public ActionHostGitHubPullRequestSideDocument? Head { get; set; }
+    public ActionHostGitHubPullRequestReferenceSideDocument? Head { get; set; }
 }
 
 internal sealed class ActionHostGitHubWorkflowRunDocument
@@ -174,6 +195,8 @@ internal sealed class ActionHostGitHubPermissionDocument
 [JsonSerializable(typeof(ActionHostGitHubContentDocument))]
 [JsonSerializable(typeof(ActionHostGitHubPullRequestDocument))]
 [JsonSerializable(typeof(ActionHostGitHubPullRequestDocument[]))]
+[JsonSerializable(typeof(ActionHostGitHubRepositoryReferenceDocument))]
+[JsonSerializable(typeof(ActionHostGitHubPullRequestReferenceSideDocument))]
 [JsonSerializable(typeof(ActionHostGitHubPullRequestReferenceDocument))]
 [JsonSerializable(typeof(ActionHostGitHubPullRequestReferenceDocument[]))]
 [JsonSerializable(typeof(ActionHostGitHubPermissionDocument))]
@@ -383,6 +406,24 @@ internal static class ActionHostGitHubDocumentMapper
     }
 
     private static bool TryMapSide(
+        ActionHostGitHubPullRequestReferenceSideDocument? document,
+        out string? sha,
+        out ActionHostGitHubRepositoryReference? repository)
+    {
+        sha = null;
+        repository = null;
+        if (document is null ||
+            !IsCommitSha(document.Sha) ||
+            !TryMap(document.Repository, out repository))
+        {
+            return false;
+        }
+
+        sha = document.Sha;
+        return true;
+    }
+
+    private static bool TryMapSide(
         ActionHostGitHubPullRequestSideDocument? document,
         out string? sha,
         out ActionHostGitHubRepositoryIdentity? repository)
@@ -397,6 +438,23 @@ internal static class ActionHostGitHubDocumentMapper
         }
 
         sha = document.Sha;
+        return true;
+    }
+
+    private static bool TryMap(
+        ActionHostGitHubRepositoryReferenceDocument? document,
+        out ActionHostGitHubRepositoryReference? reference)
+    {
+        reference = null;
+        if (document is null ||
+            document.Id <= 0 ||
+            !IsName(document.Name, 255) ||
+            !IsName(document.Url, 2048))
+        {
+            return false;
+        }
+
+        reference = new(document.Id, document.Name!);
         return true;
     }
 

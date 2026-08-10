@@ -57,6 +57,10 @@ internal sealed record ActionHostGitHubRepositoryIdentity(
     long Id,
     string FullName);
 
+internal sealed record ActionHostGitHubRepositoryReference(
+    long Id,
+    string Name);
+
 internal sealed record ActionHostGitHubActorFact(
     long Id,
     string Login);
@@ -65,9 +69,9 @@ internal sealed record ActionHostGitHubPullRequestReferenceFact(
     long Id,
     long Number,
     string BaseSha,
-    ActionHostGitHubRepositoryIdentity BaseRepository,
+    ActionHostGitHubRepositoryReference BaseRepository,
     string HeadSha,
-    ActionHostGitHubRepositoryIdentity HeadRepository);
+    ActionHostGitHubRepositoryReference HeadRepository);
 
 internal sealed record ActionHostGitHubWorkflowRunFact(
     long Id,
