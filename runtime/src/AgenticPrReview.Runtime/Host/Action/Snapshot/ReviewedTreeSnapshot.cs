@@ -735,7 +735,7 @@ internal static partial class ReviewedStagedFileAccess
                     handle,
                     FileAccess.ReadWrite,
                     64 * 1024,
-                    isAsync: true);
+                    isAsync: false);
                 return true;
             }
 

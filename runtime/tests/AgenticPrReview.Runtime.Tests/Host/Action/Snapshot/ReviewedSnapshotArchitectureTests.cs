@@ -1,7 +1,7 @@
 using System.Reflection;
 using System.Reflection.Emit;
 using AgenticPrReview.Runtime;
-using AgenticPrReview.Runtime.ActionHost.Contracts;
+using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.ActionHost.Snapshot;
 using AgenticPrReview.Runtime.ActionHost.Snapshot.GitObjects;
 using Xunit;
@@ -176,6 +176,25 @@ public sealed class ReviewedSnapshotArchitectureTests
     }
 
     [Fact]
+    public void ProductionAdapterConsumesOnlyTheSharedExactObjectTransport()
+    {
+        var constructor = Assert.Single(
+            typeof(ReviewedGitObjectTransportFactory).GetConstructors(
+                BindingFlags.Instance | BindingFlags.NonPublic));
+        Assert.Equal(
+            [typeof(IActionHostGitObjectTransportFactory)],
+            constructor.GetParameters()
+                .Select(static parameter => parameter.ParameterType));
+
+        var fields = typeof(ReviewedGitObjectTransport).GetFields(
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.Contains(fields, static field =>
+            field.FieldType == typeof(IActionHostGitObjectTransport));
+        Assert.DoesNotContain(fields, static field =>
+            field.FieldType == typeof(HttpClient));
+    }
+
+    [Fact]
     public void AuthorityMintsHaveOnlyTheirExpectedProductionCallers()
     {
         AssertOnlyCalledBy(
@@ -199,13 +218,6 @@ public sealed class ReviewedSnapshotArchitectureTests
         AssertOnlyCalledBy(
             Method(typeof(ReviewedGitObjectTransport), "Mint"),
             typeof(ReviewedGitObjectTransportFactory));
-
-        var export = typeof(ActionHostGitHubToken).GetMethod(
-            "ExportForPrivateLaunch",
-            BindingFlags.Instance | BindingFlags.NonPublic) ??
-            throw new Xunit.Sdk.XunitException(
-                "The private-launch token export was not found.");
-        AssertOnlyCalledBy(export, typeof(ReviewedGitObjectTransport));
     }
 
     private static void AssertPrivateConstructors(Type type)

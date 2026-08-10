@@ -77,7 +77,8 @@ internal sealed record ActionHostGitTreeEntryObject(
     string Path,
     string Mode,
     string Type,
-    string Sha);
+    string Sha,
+    long? Size = null);
 
 internal sealed record ActionHostGitTreeObject(
     string Sha,

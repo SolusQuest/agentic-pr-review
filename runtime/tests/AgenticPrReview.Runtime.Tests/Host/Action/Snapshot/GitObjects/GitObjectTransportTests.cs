@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
+using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.ActionHost.Snapshot;
 using AgenticPrReview.Runtime.ActionHost.Snapshot.GitObjects;
 using AgenticPrReview.Runtime.Tests.Host.Action.Authorization;
@@ -75,25 +76,13 @@ public sealed partial class GitObjectTransportTests
     }
 
     [Fact]
-    public async Task RawBlobStreamsToStageAndAcceptsVariableContentType()
+    public async Task SharedBlobEnvelopeStagesExactDecodedBytes()
     {
         var invocation = await AuthorizedInvocation();
         var bytes = "text\0and-binary"u8.ToArray();
         var sha = GitBlobSha(bytes);
-        var handler = new CapturingHandler(_ => new HttpResponseMessage(
-            HttpStatusCode.OK)
-        {
-            Content = new ByteArrayContent(bytes)
-            {
-                Headers =
-                {
-                    ContentType = new MediaTypeHeaderValue("text/plain")
-                    {
-                        CharSet = "utf-8",
-                    },
-                },
-            },
-        });
+        var handler = new CapturingHandler(_ => JsonResponse(
+            BlobResponse(bytes)));
         var budget = ProductionBudget();
         using var transport = ReviewedSnapshotTestAccess.Transport(
             invocation,
@@ -116,7 +105,7 @@ public sealed partial class GitObjectTransportTests
                 copied,
                 CancellationToken.None));
             Assert.Equal(bytes, copied.ToArray());
-            Assert.Equal("application/vnd.github.raw+json",
+            Assert.Equal(ActionHostGitHubAuthorizationPolicy.Accept,
                 Assert.Single(handler.Requests).Header("Accept"));
             Assert.True(staging.Cleanup());
         }
@@ -443,13 +432,13 @@ public sealed partial class GitObjectTransportTests
     [Fact]
     public void SourceGeneratedJsonRootsExistWithoutReflectionFallback()
     {
-        Assert.NotNull(ReviewedGitObjectJsonContext.Default
-            .ReviewedGitCommitDocument);
-        Assert.NotNull(ReviewedGitObjectJsonContext.Default
-            .ReviewedGitTreeDocument);
-        Assert.False(ReviewedGitObjectJsonContext.Default.Options
+        Assert.NotNull(ActionHostGitObjectJsonContext.Default
+            .ActionHostGitCommitDocument);
+        Assert.NotNull(ActionHostGitObjectJsonContext.Default
+            .ActionHostGitTreeDocument);
+        Assert.False(ActionHostGitObjectJsonContext.Default.Options
             .PropertyNameCaseInsensitive);
-        Assert.False(ReviewedGitObjectJsonContext.Default.Options
+        Assert.False(ActionHostGitObjectJsonContext.Default.Options
             .AllowDuplicateProperties);
     }
 
@@ -499,11 +488,7 @@ public sealed partial class GitObjectTransportTests
             invocation,
             Token(),
             budget,
-            new CapturingHandler(_ => new HttpResponseMessage(
-                HttpStatusCode.OK)
-            {
-                Content = new ByteArrayContent(bytes),
-            }));
+            new CapturingHandler(_ => JsonResponse(BlobResponse(bytes))));
         var result = await transport.StageBlobAsync(
             GitBlobSha(bytes),
             bytes.Length,
@@ -551,6 +536,10 @@ public sealed partial class GitObjectTransportTests
         return Convert.ToHexString(SHA1.HashData([.. header, .. bytes]))
             .ToLowerInvariant();
     }
+
+    private static string BlobResponse(byte[] bytes) => $$"""
+        {"sha":"{{GitBlobSha(bytes)}}","size":{{bytes.Length}},"encoding":"base64","content":"{{Convert.ToBase64String(bytes)}}"}
+        """;
 
     private static string CreateTemporaryDirectory()
     {

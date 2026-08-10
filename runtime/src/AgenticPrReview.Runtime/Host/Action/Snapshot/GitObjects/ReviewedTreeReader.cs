@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
+using AgenticPrReview.Runtime.ActionHost.GitHub;
 
 namespace AgenticPrReview.Runtime.ActionHost.Snapshot.GitObjects;
 
@@ -12,7 +13,10 @@ internal sealed class ReviewedTreeReader
     private readonly TimeProvider _timeProvider;
 
     internal ReviewedTreeReader()
-        : this(new ReviewedGitObjectTransportFactory(), TimeProvider.System)
+        : this(
+            new ReviewedGitObjectTransportFactory(
+                new ActionHostGitHubAuthorizationTransportFactory()),
+            TimeProvider.System)
     {
     }
 

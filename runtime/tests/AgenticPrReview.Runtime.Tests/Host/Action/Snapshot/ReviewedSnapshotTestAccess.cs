@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
+using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.ActionHost.Snapshot;
 using AgenticPrReview.Runtime.ActionHost.Snapshot.GitObjects;
 
@@ -49,17 +50,14 @@ internal static class ReviewedSnapshotTestAccess
                 "The test invocation is not an authorized source.");
         }
 
-        var client = new HttpClient(handler, disposeHandler: true)
-        {
-            Timeout = Timeout.InfiniteTimeSpan,
-        };
-        client.DefaultRequestHeaders.Clear();
-        return CreateTransport(
+        var shared = ActionHostGitObjectTransport.CreateForTesting(
             token.ExportForPrivateLaunch(),
+            handler);
+        return CreateTransport(
             repositoryName,
             headSha,
             budget,
-            client);
+            shared);
     }
 
     internal static ReviewedBlobStagingLease Staging(
@@ -110,9 +108,8 @@ internal static class ReviewedSnapshotTestAccess
 
     [UnsafeAccessor(UnsafeAccessorKind.Constructor)]
     private static extern ReviewedGitObjectTransport CreateTransport(
-        string token,
         string repositoryName,
         string headSha,
         ReviewedContentBudget budget,
-        HttpClient client);
+        IActionHostGitObjectTransport sharedTransport);
 }
