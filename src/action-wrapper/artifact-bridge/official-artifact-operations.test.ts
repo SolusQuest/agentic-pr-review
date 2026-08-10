@@ -529,8 +529,9 @@ describe('official artifact lifecycle', () => {
       },
       signal,
     );
-    expect(expiredMetadata.failure).toBe('expired');
-    expect(downloadCalls).toBe(downloadsBeforeDelete);
+    expect(expiredMetadata.failure).toBe('none');
+    expect(downloadCalls).toBe(downloadsBeforeDelete + 1);
+    const downloadsAfterMetadata = downloadCalls;
     const deletedResult = await operations.execute(
       {
         operation: 'delete_exact',
@@ -541,7 +542,7 @@ describe('official artifact lifecycle', () => {
     );
     expect(deletedResult).toMatchObject({ failure: 'none', mutation_state: 'committed' });
     expect(deleteCalls).toBe(1);
-    expect(downloadCalls).toBe(downloadsBeforeDelete);
+    expect(downloadCalls).toBe(downloadsAfterMetadata);
     expect((await readdir(root)).filter((entry) => entry.startsWith('op-'))).toEqual([]);
 
     expired = false;

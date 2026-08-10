@@ -251,7 +251,6 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       signal,
       startedAt,
     );
-    this.assertNotExpired(platform);
     const record = await this.readRecord(platform, signal, startedAt);
     return successWithMetadata(command, record.metadata);
   }
@@ -268,7 +267,6 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
       startedAt,
     );
     this.assertExpectedPlatform(command.expected, platform);
-    this.assertNotExpired(platform);
     const record = await this.readRecord(platform, signal, startedAt);
     assertMetadata(command.expected, record.metadata);
     if (record.bytes.length > Number(command.maximum_bytes)) {

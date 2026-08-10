@@ -141,13 +141,18 @@ public sealed class GitHubArtifactBridgeConformanceTests
         {
             StartInfo = new ProcessStartInfo
             {
-                FileName = "node",
+                FileName = OperatingSystem.IsWindows()
+                    ? "node"
+                    : esbuild,
                 RedirectStandardError = true,
                 RedirectStandardOutput = true,
                 UseShellExecute = false,
             },
         };
-        process.StartInfo.ArgumentList.Add(esbuild);
+        if (OperatingSystem.IsWindows())
+        {
+            process.StartInfo.ArgumentList.Add(esbuild);
+        }
         process.StartInfo.ArgumentList.Add(entry);
         process.StartInfo.ArgumentList.Add("--bundle");
         process.StartInfo.ArgumentList.Add("--platform=node");
