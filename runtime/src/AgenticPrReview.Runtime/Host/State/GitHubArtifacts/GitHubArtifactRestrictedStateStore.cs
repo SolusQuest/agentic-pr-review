@@ -1,5 +1,7 @@
 using System.Collections.Immutable;
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json.Serialization.Metadata;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
@@ -278,7 +280,7 @@ internal sealed class GitHubArtifactRestrictedStateStore
                 .ConfigureAwait(false);
             var command = new ArtifactBridgeUploadCommandDocument(
                 "upload_immutable",
-                request.CorrelationId.Value,
+                UploadCorrelation(request),
                 request.Name.Value,
                 scope.RelativePath,
                 request.EncryptedObjectDigest.Sha256,
@@ -705,6 +707,27 @@ internal sealed class GitHubArtifactRestrictedStateStore
         parsed <= 9_007_199_254_740_991;
 
     private static string Correlation() => Guid.NewGuid().ToString("N");
+
+    private static string UploadCorrelation(
+        OpaqueStoreUploadRequest request)
+    {
+        var preimage = string.Concat(
+            "apr.private-artifact-upload-correlation.s1\0",
+            request.CorrelationId.Value.Length.ToString(
+                CultureInfo.InvariantCulture),
+            ":",
+            request.CorrelationId.Value,
+            request.Name.Value.Length.ToString(
+                CultureInfo.InvariantCulture),
+            ":",
+            request.Name.Value,
+            request.EncryptedObjectDigest.Sha256.Length.ToString(
+                CultureInfo.InvariantCulture),
+            ":",
+            request.EncryptedObjectDigest.Sha256);
+        return Convert.ToHexStringLower(
+            SHA256.HashData(Encoding.UTF8.GetBytes(preimage)));
+    }
 
     private static string Decimal(long value) =>
         value.ToString(CultureInfo.InvariantCulture);

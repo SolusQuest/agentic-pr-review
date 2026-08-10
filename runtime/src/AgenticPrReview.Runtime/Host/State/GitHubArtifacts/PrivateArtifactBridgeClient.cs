@@ -126,9 +126,9 @@ internal sealed class PrivateArtifactBridgeClient(
                         await stream.WriteAsync(frame, token)
                             .ConfigureAwait(false);
                         await stream.FlushAsync(token).ConfigureAwait(false);
+                        dispatched = true;
                         await stream.WriteAsync(requestTerminator, token)
                             .ConfigureAwait(false);
-                        dispatched = true;
                         await stream.FlushAsync(token).ConfigureAwait(false);
                     },
                     logicalCancellationToken)

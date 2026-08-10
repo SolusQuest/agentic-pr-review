@@ -52,6 +52,7 @@ public sealed class GitHubArtifactBridgeConformanceTests
                 endpoint,
                 build,
                 stagingRoot);
+            await VerifyPerObjectUploadCorrelationsAsync(store);
             await RestrictedStateStoreConformanceHarness.VerifyAsync(
                 async action =>
                 {
@@ -205,6 +206,55 @@ public sealed class GitHubArtifactBridgeConformanceTests
 
     private static void SetFlag(string controlRoot, string name) =>
         File.WriteAllBytes(Path.Join(controlRoot, name), []);
+
+    private static async Task VerifyPerObjectUploadCorrelationsAsync(
+        IRestrictedStateStore store)
+    {
+        var correlation = new OpaqueStoreCorrelationId(
+            "shared-logical-operation");
+        var first = UploadRequest(
+            "correlation-name-a",
+            correlation,
+            [1]);
+        var sameNameDifferentObject = UploadRequest(
+            "correlation-name-a",
+            correlation,
+            [2]);
+        var differentNameSameObject = UploadRequest(
+            "correlation-name-b",
+            correlation,
+            [1]);
+
+        Assert.True((await store.UploadImmutableAsync(
+            first,
+            CancellationToken.None)).Succeeded);
+        Assert.True((await store.UploadImmutableAsync(
+            sameNameDifferentObject,
+            CancellationToken.None)).Succeeded);
+        Assert.True((await store.UploadImmutableAsync(
+            differentNameSameObject,
+            CancellationToken.None)).Succeeded);
+
+        var retry = await store.UploadImmutableAsync(
+            first,
+            CancellationToken.None);
+        Assert.Equal(OpaqueStoreFailure.OutcomeUnknown, retry.Failure);
+        Assert.Equal(
+            OpaqueStoreMutationState.OutcomeUnknown,
+            retry.MutationState);
+    }
+
+    private static OpaqueStoreUploadRequest UploadRequest(
+        string name,
+        OpaqueStoreCorrelationId correlation,
+        byte[] bytes) =>
+        new(
+            new OpaqueStoreName(name),
+            correlation,
+            bytes,
+            new OpaqueStoreEncryptedObjectDigest(
+                OpaqueStoreHash.Sha256(bytes)),
+            MinimumExpiresAtUnixSeconds: 1);
 
     private static string FindRepositoryRoot()
     {

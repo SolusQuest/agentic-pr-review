@@ -415,6 +415,36 @@ public sealed class ArtifactBridgeContractTests
     }
 
     [Fact]
+    public async Task UploadTerminatorWriteFailureIsUnknownAndCleans()
+    {
+        var root = CreatePrivateTemporaryDirectory(
+            "apr-artifact-upload-terminator-failure");
+        try
+        {
+            var store = new GitHubArtifactRestrictedStateStore(
+                "synthetic-endpoint",
+                "build-152",
+                root,
+                new SingleStreamConnectionFactory(
+                    new FailingTerminatorWriteStream()));
+
+            var result = await store.UploadImmutableAsync(
+                UploadRequest(),
+                CancellationToken.None);
+
+            Assert.Equal(OpaqueStoreFailure.OutcomeUnknown, result.Failure);
+            Assert.Equal(
+                OpaqueStoreMutationState.OutcomeUnknown,
+                result.MutationState);
+            Assert.Empty(OperationDirectories(root));
+        }
+        finally
+        {
+            await DeleteEventuallyAsync(root);
+        }
+    }
+
+    [Fact]
     public async Task LogicalDeadlineStartsBeforeUploadStaging()
     {
         var root = CreatePrivateTemporaryDirectory("apr-artifact-deadline");
@@ -460,6 +490,35 @@ public sealed class ArtifactBridgeContractTests
             var result = await store.DeleteExactAsync(
                 new OpaqueStoreDeleteRequest(ExpectedMetadata()),
                 cancellation.Token);
+
+            Assert.Equal(OpaqueStoreFailure.OutcomeUnknown, result.Failure);
+            Assert.Equal(
+                OpaqueStoreMutationState.OutcomeUnknown,
+                result.MutationState);
+        }
+        finally
+        {
+            await DeleteEventuallyAsync(root);
+        }
+    }
+
+    [Fact]
+    public async Task DeleteTerminatorWriteFailureIsUnknown()
+    {
+        var root = CreatePrivateTemporaryDirectory(
+            "apr-artifact-delete-terminator-failure");
+        try
+        {
+            var store = new GitHubArtifactRestrictedStateStore(
+                "synthetic-endpoint",
+                "build-152",
+                root,
+                new SingleStreamConnectionFactory(
+                    new FailingTerminatorWriteStream()));
+
+            var result = await store.DeleteExactAsync(
+                new OpaqueStoreDeleteRequest(ExpectedMetadata()),
+                CancellationToken.None);
 
             Assert.Equal(OpaqueStoreFailure.OutcomeUnknown, result.Failure);
             Assert.Equal(
@@ -632,6 +691,65 @@ public sealed class ArtifactBridgeContractTests
                 cancellation.Cancel();
             }
             return ValueTask.CompletedTask;
+        }
+
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromException<int>(
+                new InvalidOperationException("unexpected_read"));
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) =>
+            throw new NotSupportedException();
+
+        public override void SetLength(long value) =>
+            throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class FailingTerminatorWriteStream : Stream
+    {
+        private int writes;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => true;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override Task FlushAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        }
+
+        public override ValueTask WriteAsync(
+            ReadOnlyMemory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            writes += 1;
+            return writes == 2
+                ? ValueTask.FromException(
+                    new IOException("terminator_write_ambiguous"))
+                : ValueTask.CompletedTask;
         }
 
         public override ValueTask<int> ReadAsync(
