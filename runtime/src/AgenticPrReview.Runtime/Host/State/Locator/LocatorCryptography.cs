@@ -80,6 +80,50 @@ internal static class LocatorCryptography
         }
     }
 
+    internal static bool TryDeriveRootKeyed(
+        ReadOnlySpan<byte> root,
+        string domain,
+        ReadOnlySpan<byte> canonicalInput,
+        Span<byte> destination)
+    {
+        if (root.Length != LocatorRootFormat.RootBytes ||
+            destination.Length != LocatorRootFormat.DigestBytes ||
+            string.IsNullOrWhiteSpace(domain) ||
+            canonicalInput.Length is < 1 or >
+                LocatorRootFormat.MaximumCanonicalNameInputBytes)
+        {
+            return false;
+        }
+
+        byte[] domainBytes;
+        try
+        {
+            domainBytes = StrictUtf8.GetBytes(domain);
+        }
+        catch (EncoderFallbackException)
+        {
+            return false;
+        }
+
+        if (domainBytes.Length is < 1 or > 128)
+        {
+            CryptographicOperations.ZeroMemory(domainBytes);
+            return false;
+        }
+
+        var framed = Frame(domain, canonicalInput);
+        try
+        {
+            return HMACSHA256.TryHashData(root, framed, destination, out var written) &&
+                written == LocatorRootFormat.DigestBytes;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(domainBytes);
+            CryptographicOperations.ZeroMemory(framed);
+        }
+    }
+
     private static byte[] Frame(
         string domain,
         ReadOnlySpan<byte> value)

@@ -14,6 +14,7 @@ internal sealed class LocatorContext : IDisposable
     private readonly object retirementEvidenceIssuer = new();
     private byte[]? root;
     private readonly bool currentSingletonProven;
+    private readonly long selectedRequiredExpiresAtUnixSeconds;
 
     private LocatorContext(
         AuthorizedLocatorAccess authority,
@@ -21,6 +22,7 @@ internal sealed class LocatorContext : IDisposable
         string repositoryId,
         ReadOnlySpan<byte> root,
         bool currentSingletonProven,
+        long selectedRequiredExpiresAtUnixSeconds,
         TimeProvider timeProvider)
     {
         this.authority = authority;
@@ -28,6 +30,8 @@ internal sealed class LocatorContext : IDisposable
         this.repositoryId = repositoryId;
         this.root = root.ToArray();
         this.currentSingletonProven = currentSingletonProven;
+        this.selectedRequiredExpiresAtUnixSeconds =
+            selectedRequiredExpiresAtUnixSeconds;
         this.timeProvider = timeProvider;
     }
 
@@ -36,12 +40,15 @@ internal sealed class LocatorContext : IDisposable
         LocatorStateKeyRing keys,
         ReadOnlySpan<byte> root,
         bool currentSingletonProven,
+        long selectedRequiredExpiresAtUnixSeconds,
         TimeProvider timeProvider,
         out LocatorContext? context)
     {
         context = null;
         if (access is null ||
             root.Length != LocatorRootFormat.RootBytes ||
+            selectedRequiredExpiresAtUnixSeconds is <= 0 or >
+                RestrictedStateFormat.MaximumUnixSeconds ||
             !access.TryGetRepositoryId(access, out var repositoryId) ||
             !keys.TryClone(access, out var ownedKeys) ||
             ownedKeys is null)
@@ -57,6 +64,7 @@ internal sealed class LocatorContext : IDisposable
                 repositoryId,
                 root,
                 currentSingletonProven,
+                selectedRequiredExpiresAtUnixSeconds,
                 timeProvider);
             return true;
         }
@@ -64,6 +72,52 @@ internal sealed class LocatorContext : IDisposable
         {
             ownedKeys.Dispose();
             throw;
+        }
+    }
+
+    internal bool TryDeriveRootKeyed(
+        AuthorizedLocatorAccess? access,
+        string domain,
+        ReadOnlySpan<byte> canonicalInput,
+        Span<byte> destination)
+    {
+        var currentRoot = Volatile.Read(ref root);
+        var currentKeys = Volatile.Read(ref keys);
+        return ReferenceEquals(authority, access) &&
+            currentRoot is not null &&
+            currentKeys is not null &&
+            currentKeys.Allows(access) &&
+            LocatorCryptography.TryDeriveRootKeyed(
+                currentRoot,
+                domain,
+                canonicalInput,
+                destination);
+    }
+
+    internal bool CoversDependentExpiry(
+        AuthorizedLocatorAccess? access,
+        long dependentExpiresAtUnixSeconds)
+    {
+        var currentKeys = Volatile.Read(ref keys);
+        if (!ReferenceEquals(authority, access) ||
+            Volatile.Read(ref root) is null ||
+            currentKeys is null ||
+            !currentKeys.Allows(access) ||
+            dependentExpiresAtUnixSeconds is <= 0 or >
+                RestrictedStateFormat.MaximumUnixSeconds)
+        {
+            return false;
+        }
+
+        try
+        {
+            return selectedRequiredExpiresAtUnixSeconds >= checked(
+                dependentExpiresAtUnixSeconds +
+                StateRetentionRequirements.SentinelDependentMarginSeconds);
+        }
+        catch (OverflowException)
+        {
+            return false;
         }
     }
 

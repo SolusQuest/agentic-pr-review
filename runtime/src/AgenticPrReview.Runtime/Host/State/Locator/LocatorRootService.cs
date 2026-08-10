@@ -851,6 +851,7 @@ internal sealed class LocatorRootService
                 keys,
                 candidate.Sentinel.Root,
                 currentSingletonProven: true,
+                candidate.Sentinel.RequiredExpiresAtUnixSeconds,
                 timeProvider,
                 out var context) ||
             context is null)

@@ -136,6 +136,8 @@ public sealed class LocatorKeyAndRetentionTests
                 keys,
                 root,
                 currentSingletonProven: true,
+                LocatorTestData.Now +
+                    StateRetentionRequirements.SentinelRequestSeconds,
                 new FrozenLocatorTimeProvider(LocatorTestData.Now),
                 out var created));
             using var context = Assert.IsType<LocatorContext>(created);
@@ -210,6 +212,8 @@ public sealed class LocatorKeyAndRetentionTests
             keys,
             root,
             currentSingletonProven: true,
+            LocatorTestData.Now +
+                StateRetentionRequirements.SentinelRequestSeconds,
             time,
             out var created));
         using var context = Assert.IsType<LocatorContext>(created);
@@ -263,6 +267,8 @@ public sealed class LocatorKeyAndRetentionTests
             otherKeys,
             otherRoot,
             currentSingletonProven: true,
+            LocatorTestData.Now +
+                StateRetentionRequirements.SentinelRequestSeconds,
             time,
             out var otherCreated));
         using var otherContext = Assert.IsType<LocatorContext>(otherCreated);
@@ -289,6 +295,8 @@ public sealed class LocatorKeyAndRetentionTests
             otherRepositoryKeys,
             otherRepositoryRoot,
             currentSingletonProven: true,
+            LocatorTestData.Now +
+                StateRetentionRequirements.SentinelRequestSeconds,
             time,
             out var otherRepositoryCreated));
         using var otherRepositoryContext = Assert.IsType<LocatorContext>(
