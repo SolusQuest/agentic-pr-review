@@ -195,6 +195,37 @@ public sealed class ActionHostAuthorizationPolicyTests
             out _));
     }
 
+    public static TheoryData<string> ExtraPrivilegedStepShapes => new()
+    {
+        "\n      - run: echo unexpected",
+        "\n      - uses: actions/checkout@" + new string('1', 40),
+        "\n        with:\n          github-token: ${{ secrets.GITHUB_TOKEN }}",
+        "\n        env:\n          PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}",
+    };
+
+    [Theory]
+    [MemberData(nameof(ExtraPrivilegedStepShapes))]
+    public void PrivilegedJobStepSequenceIsClosed(string extraStepShape)
+    {
+        var reference = ActionHostAuthorizationPolicy.ActionPath +
+            ActionHostAuthorizationScenario.ActionSha;
+        var canonical = ActionHostAuthorizationScenario.ValidWorkflow(
+            ActionHostAuthorizationScenario.ActionSha);
+        var actualStep = "steps:\n      - uses: " + reference;
+        var index = canonical.IndexOf(actualStep, StringComparison.Ordinal);
+        Assert.True(index >= 0);
+        var mutated = canonical[..index] + actualStep + extraStepShape +
+            canonical[(index + actualStep.Length)..];
+
+        Assert.False(ActionHostTrustedWorkflowPolicy.TryValidate(
+            Encoding.UTF8.GetBytes(mutated),
+            ActionHostAuthorizationPolicy.TrustedProof,
+            ActionHostAuthorizationScenario.ActionSha,
+            out _,
+            out var failure));
+        Assert.Equal(ActionHostTrustedWorkflowFailure.JobInvalid, failure);
+    }
+
     [Fact]
     public void CrLfCanonicalWorkflowIsAccepted()
     {

@@ -269,10 +269,10 @@ internal static class ActionHostTrustedWorkflowPolicy
         }
 
         var steps = job.Value("steps");
-        return steps?.Sequence is { } sequence &&
-            sequence.Count(step =>
-                step.Map is not null &&
-                IsScalar(step.Value("uses"), expectedActionReference)) == 1;
+        return steps?.Sequence is [var step] &&
+            step.Map is not null &&
+            step.HasOnly("uses") &&
+            IsScalar(step.Value("uses"), expectedActionReference);
     }
 
     private static void CollectActionReferences(

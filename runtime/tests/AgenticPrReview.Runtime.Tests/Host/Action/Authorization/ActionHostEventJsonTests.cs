@@ -7,6 +7,43 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action.Authorization;
 public sealed class ActionHostEventJsonTests
 {
     [Fact]
+    public void WorkflowDispatchParsesCanonicalStringPullRequestNumber()
+    {
+        var bytes = DispatchEvent("\"147\"");
+
+        Assert.True(ActionHostEventParser.TryParse(
+            bytes,
+            out var fact,
+            out var unsupported));
+        Assert.False(unsupported);
+        Assert.Equal(ActionHostAuthorizationRoute.WorkflowDispatch,
+            fact!.Route);
+        Assert.Equal(147, fact.DispatchPullRequestNumber);
+    }
+
+    public static TheoryData<string> InvalidDispatchPullRequestNumbers => new()
+    {
+        "147",
+        "\"\"",
+        "\"0\"",
+        "\"-1\"",
+        "\"+147\"",
+        "\"0147\"",
+        "\"9223372036854775808\"",
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidDispatchPullRequestNumbers))]
+    public void WorkflowDispatchRejectsNonStringOrNonCanonicalNumber(
+        string jsonValue)
+    {
+        Assert.False(ActionHostEventParser.TryParse(
+            DispatchEvent(jsonValue),
+            out _,
+            out _));
+    }
+
+    [Fact]
     public async Task ExactPathReaderCapturesOneBoundedSnapshot()
     {
         var path = Path.GetTempFileName();
@@ -88,4 +125,13 @@ public sealed class ActionHostEventJsonTests
             out _,
             out _));
     }
+
+    private static byte[] DispatchEvent(string pullRequestNumber) =>
+        Encoding.UTF8.GetBytes($$"""
+        {
+          "inputs": { "pr-number": {{pullRequestNumber}} },
+          "repository": { "id": 42, "full_name": "owner/repo" },
+          "sender": { "id": 7, "login": "maintainer" }
+        }
+        """);
 }

@@ -261,7 +261,7 @@ internal sealed class ActionHostAuthorizationScenario
     private static byte[] WorkflowDispatchEventJson(
         ActionHostGitHubActorFact actor) => Encoding.UTF8.GetBytes($$"""
         {
-          "inputs": { "pr-number": {{PullRequestNumber}} },
+          "inputs": { "pr-number": "{{PullRequestNumber}}" },
           "repository": {
             "id": {{RepositoryId}},
             "full_name": "{{RepositoryName}}"

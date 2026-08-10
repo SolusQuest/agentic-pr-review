@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
 
 namespace AgenticPrReview.Runtime.ActionHost.Authorization;
@@ -8,7 +9,7 @@ namespace AgenticPrReview.Runtime.ActionHost.Authorization;
 internal sealed class ActionHostWorkflowDispatchInputsDocument
 {
     [JsonPropertyName("pr-number")]
-    public long? PullRequestNumber { get; set; }
+    public string? PullRequestNumber { get; set; }
 }
 
 internal sealed class ActionHostEventDocument
@@ -170,13 +171,26 @@ internal static class ActionHostEventParser
 
             if (document.Inputs is not null)
             {
+                long? pullRequestNumber = null;
+                if (document.Inputs.PullRequestNumber is { } rawNumber)
+                {
+                    if (!ActionHostContractValidation.TryParsePositiveInt64(
+                            rawNumber,
+                            out var parsedNumber))
+                    {
+                        return false;
+                    }
+
+                    pullRequestNumber = parsedNumber;
+                }
+
                 fact = new(
                     ActionHostAuthorizationRoute.WorkflowDispatch,
                     repository!,
                     sender!,
                     document.Action,
                     null,
-                    document.Inputs.PullRequestNumber);
+                    pullRequestNumber);
                 return true;
             }
 
