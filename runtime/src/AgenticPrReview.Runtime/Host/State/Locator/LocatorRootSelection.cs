@@ -129,16 +129,35 @@ internal static class LocatorRootSelection
                 ClassifyUnknown(unauthorizedUnknown));
         }
 
-        var safeToDelete = authenticated
+        var reachableObjectIds = reachable
+            .Select(candidate =>
+                candidate.Metadata.Reference.ObjectId.Value)
+            .ToHashSet(StringComparer.Ordinal);
+        var nonAnchorStages = authenticated
+            .Where(candidate => !reachableObjectIds.Contains(
+                candidate.Metadata.Reference.ObjectId.Value))
             .Select(candidate => candidate.Metadata)
             .Concat(unknown.Select(item => item.Metadata))
-            .Where(metadata => metadata != head.Metadata)
             .OrderBy(
                 metadata => metadata.Reference.ObjectId.Value,
                 StringComparer.Ordinal)
+            .Select(metadata => new LocatorCleanupStage(
+                metadata,
+                LocatorCleanupStageKind.NonAnchor));
+        var chainAnchorStages = reachable
+            .Where(candidate => candidate.Metadata != head.Metadata)
+            .OrderBy(candidate => candidate.Sentinel.Generation)
+            .ThenBy(
+                candidate => candidate.Metadata.Reference.ObjectId.Value,
+                StringComparer.Ordinal)
+            .Select(candidate => new LocatorCleanupStage(
+                candidate.Metadata,
+                LocatorCleanupStageKind.ChainAnchor));
+        var cleanupStages = nonAnchorStages
+            .Concat(chainAnchorStages)
             .ToImmutableArray();
         return LocatorSelectionResult.Success(
-            new LocatorSelection(head, safeToDelete, physicalCount));
+            new LocatorSelection(head, cleanupStages, physicalCount));
     }
 
     internal static bool Equivalent(

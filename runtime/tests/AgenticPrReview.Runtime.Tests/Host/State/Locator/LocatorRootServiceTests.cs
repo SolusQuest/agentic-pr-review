@@ -987,6 +987,10 @@ public sealed class LocatorRootServiceTests
             LocatorRootFormat.MaximumPhysicalSentinels,
             store.Objects.Length);
 
+        store.NextDeleteFailure = OpaqueStoreFailure.None;
+        store.NextDeleteMutationState =
+            OpaqueStoreMutationState.NotCommitted;
+        store.DeleteFailuresRemaining = 0;
         store.ResetCounts();
         var recovered = await Service(store, keys).ResolveAsync(
             access,
@@ -1264,6 +1268,135 @@ public sealed class LocatorRootServiceTests
             store,
             access,
             rotated).WriterKeyId);
+    }
+
+    [Fact]
+    public async Task InterruptedDuplicatePruningRetainsImmediatePredecessor()
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var store = new ScriptedLocatorStore();
+        var initialized = await Service(store, keys).ResolveAsync(
+            access,
+            0,
+            CancellationToken.None);
+        Assert.True(initialized.Succeeded, initialized.Code);
+        initialized.Context!.Dispose();
+        var predecessor = store.Objects.Single();
+        var sentinel = Decrypt(store, predecessor, access, keys);
+        var duplicate = store.Add(
+            Encrypt(access, keys, sentinel),
+            predecessor.ExpiresAtUnixSeconds,
+            "zz-later-equivalent-copy");
+        store.NextDeleteFailure = OpaqueStoreFailure.OutcomeUnknown;
+        store.NextDeleteMutationState =
+            OpaqueStoreMutationState.OutcomeUnknown;
+        store.ResetCounts();
+        var dependent = sentinel.RequiredExpiresAtUnixSeconds -
+            StateRetentionRequirements.SentinelDependentMarginSeconds + 1;
+
+        var interrupted = await Service(store, keys).ResolveAsync(
+            access,
+            dependent,
+            CancellationToken.None);
+
+        Assert.Equal(LocatorCodes.CleanupFailed, interrupted.Code);
+        Assert.Equal(1, store.DeleteCalls);
+        Assert.Equal(1, store.UploadCalls);
+        Assert.Contains(predecessor, store.Objects);
+        Assert.Contains(duplicate, store.Objects);
+        Assert.Equal(3, store.Objects.Length);
+
+        store.ResetCounts();
+        var recovered = await Service(store, keys).ResolveAsync(
+            access,
+            dependent,
+            CancellationToken.None);
+
+        Assert.True(recovered.Succeeded, recovered.Code);
+        recovered.Context!.Dispose();
+        Assert.Equal(0, store.UploadCalls);
+        Assert.Single(store.Objects);
+        Assert.Equal<ulong>(1, DecryptSingle(
+            store,
+            access,
+            keys).Generation);
+    }
+
+    [Fact]
+    public async Task InterruptedChainPruningDeletesOldestAnchorFirst()
+    {
+        using var access = LocatorTestData.Access();
+        using var keys = LocatorTestData.KeyRing(access);
+        var store = new ScriptedLocatorStore();
+        var root = Enumerable.Repeat((byte)0x6a, 32).ToArray();
+        var requiredExpiry = LocatorTestData.Now +
+            StateRetentionRequirements.SentinelRequestSeconds;
+        var oldest = LocatorTestData.Sentinel(
+            keys,
+            root: root.ToArray(),
+            requiredExpiry: requiredExpiry);
+        var oldestMetadata = store.Add(
+            Encrypt(access, keys, oldest),
+            requiredExpiry + 3_600,
+            "chain-generation-0");
+        var predecessor = LocatorTestData.Sentinel(
+            keys,
+            root: root.ToArray(),
+            generation: 1,
+            requiredExpiry: requiredExpiry,
+            predecessors:
+            [
+                LocatorRootSentinelCodec.Identity(oldestMetadata),
+            ]);
+        var predecessorMetadata = store.Add(
+            Encrypt(access, keys, predecessor),
+            requiredExpiry + 3_600,
+            "chain-generation-1");
+        var head = LocatorTestData.Sentinel(
+            keys,
+            root: root.ToArray(),
+            generation: 2,
+            requiredExpiry: requiredExpiry,
+            predecessors:
+            [
+                LocatorRootSentinelCodec.Identity(predecessorMetadata),
+            ]);
+        var headMetadata = store.Add(
+            Encrypt(access, keys, head),
+            requiredExpiry + 3_600,
+            "chain-generation-2");
+        store.AfterDelete = () =>
+        {
+            store.NextDeleteFailure = OpaqueStoreFailure.OutcomeUnknown;
+            store.NextDeleteMutationState =
+                OpaqueStoreMutationState.OutcomeUnknown;
+        };
+
+        var interrupted = await Service(store, keys).ResolveAsync(
+            access,
+            0,
+            CancellationToken.None);
+
+        Assert.Equal(LocatorCodes.CleanupFailed, interrupted.Code);
+        Assert.Equal(2, store.DeleteCalls);
+        Assert.DoesNotContain(oldestMetadata, store.Objects);
+        Assert.Contains(predecessorMetadata, store.Objects);
+        Assert.Contains(headMetadata, store.Objects);
+
+        store.ResetCounts();
+        var recovered = await Service(store, keys).ResolveAsync(
+            access,
+            0,
+            CancellationToken.None);
+
+        Assert.True(recovered.Succeeded, recovered.Code);
+        recovered.Context!.Dispose();
+        Assert.Equal(0, store.UploadCalls);
+        Assert.Equal(
+            headMetadata,
+            Assert.Single(store.Objects));
+        CryptographicOperations.ZeroMemory(root);
     }
 
     [Fact]

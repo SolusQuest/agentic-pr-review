@@ -57,10 +57,24 @@ internal sealed record LocatorUnknownArtifact(
     OpaqueStoreObjectMetadata Metadata,
     string FailureCode);
 
+internal enum LocatorCleanupStageKind
+{
+    NonAnchor,
+    ChainAnchor,
+}
+
+internal sealed record LocatorCleanupStage(
+    OpaqueStoreObjectMetadata Target,
+    LocatorCleanupStageKind Kind);
+
 internal sealed record LocatorSelection(
     LocatorPhysicalCandidate Head,
-    ImmutableArray<OpaqueStoreObjectMetadata> SafeToDelete,
-    int PhysicalCount);
+    ImmutableArray<LocatorCleanupStage> CleanupStages,
+    int PhysicalCount)
+{
+    internal ImmutableArray<OpaqueStoreObjectMetadata> SafeToDelete { get; } =
+        CleanupStages.Select(stage => stage.Target).ToImmutableArray();
+}
 
 internal enum LocatorCleanupMode
 {

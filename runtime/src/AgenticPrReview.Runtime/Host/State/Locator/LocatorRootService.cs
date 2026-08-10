@@ -523,18 +523,81 @@ internal sealed class LocatorRootService
         AuthorizedLocatorAccess access,
         LocatorSelection selection)
     {
-        foreach (var metadata in selection.SafeToDelete)
+        LocatorSelectionResult? ownedRead = null;
+        var current = selection;
+        var pruningChainAnchors = false;
+        try
         {
-            _ = await store.DeleteExactAsync(
-                    new OpaqueStoreDeleteRequest(metadata),
-                    CancellationToken.None)
-                .ConfigureAwait(false);
-        }
+            foreach (var stage in selection.CleanupStages)
+            {
+                if (stage.Kind == LocatorCleanupStageKind.ChainAnchor)
+                {
+                    pruningChainAnchors = true;
+                }
+                else if (pruningChainAnchors)
+                {
+                    ClearSelection(ownedRead);
+                    return LocatorSelectionResult.Fail(LocatorCodes.Conflict);
+                }
 
-        return await ReadSelectionWithRetriesAsync(
-                access,
-                CancellationToken.None)
-            .ConfigureAwait(false);
+                if (current.Head.Metadata == stage.Target)
+                {
+                    ClearSelection(ownedRead);
+                    return LocatorSelectionResult.Fail(LocatorCodes.Conflict);
+                }
+
+                if (!current.SafeToDelete.Contains(stage.Target))
+                {
+                    continue;
+                }
+
+                if (stage.Kind == LocatorCleanupStageKind.ChainAnchor &&
+                    current.CleanupStages.Any(candidate =>
+                        candidate.Kind == LocatorCleanupStageKind.NonAnchor))
+                {
+                    ClearSelection(ownedRead);
+                    return LocatorSelectionResult.Fail(
+                        LocatorCodes.CleanupFailed);
+                }
+
+                _ = await store.DeleteExactAsync(
+                        new OpaqueStoreDeleteRequest(stage.Target),
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+
+                var observed = await ReadSelectionWithRetriesAsync(
+                        access,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+                ClearSelection(ownedRead);
+                ownedRead = null;
+                if (!observed.Succeeded ||
+                    observed.IsAbsent ||
+                    observed.RequiresCleanup ||
+                    observed.Selection is null)
+                {
+                    return observed;
+                }
+
+                if (observed.Selection.Head.Metadata == stage.Target ||
+                    observed.Selection.SafeToDelete.Contains(stage.Target))
+                {
+                    ClearSelection(observed);
+                    return LocatorSelectionResult.Fail(
+                        LocatorCodes.CleanupFailed);
+                }
+
+                ownedRead = observed;
+                current = observed.Selection;
+            }
+
+            return ownedRead ?? LocatorSelectionResult.Success(selection);
+        }
+        catch
+        {
+            ClearSelection(ownedRead);
+            throw;
+        }
     }
 
     private async Task<LocatorSelectionResult> CleanupDebtAndReadAsync(
