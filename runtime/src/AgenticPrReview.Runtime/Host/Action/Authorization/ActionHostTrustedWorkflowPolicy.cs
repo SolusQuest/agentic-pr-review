@@ -263,7 +263,10 @@ internal static class ActionHostTrustedWorkflowPolicy
             !IsScalar(permissions.Value("actions"), "write") ||
             !IsScalar(permissions.Value("contents"), "read") ||
             !IsScalar(permissions.Value("pull-requests"), "write") ||
-            job.Value("concurrency") is not null)
+            job.Value("concurrency") is not null ||
+            job.Value("strategy") is not null ||
+            job.Value("container") is not null ||
+            job.Value("services") is not null)
         {
             return false;
         }

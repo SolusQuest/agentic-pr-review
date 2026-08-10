@@ -226,6 +226,45 @@ public sealed class ActionHostAuthorizationPolicyTests
         Assert.Equal(ActionHostTrustedWorkflowFailure.JobInvalid, failure);
     }
 
+    public static TheoryData<string> PrivilegedJobExecutionShapes => new()
+    {
+        "strategy:\n      matrix:\n        shard:\n          - first\n          - second",
+        "container: ghcr.io/example/job@sha256:" + new string('1', 64),
+        "services:\n      helper:\n        image: ghcr.io/example/helper@sha256:" +
+            new string('2', 64),
+        "services:\n      credential-consumer:\n" +
+            "        image: ghcr.io/example/credential-consumer@sha256:" +
+            new string('3', 64) +
+            "\n        credentials:\n" +
+            "          username: ${{ github.actor }}\n" +
+            "          password: ${{ secrets.GITHUB_TOKEN }}\n" +
+            "        env:\n" +
+            "          PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}",
+    };
+
+    [Theory]
+    [MemberData(nameof(PrivilegedJobExecutionShapes))]
+    public void PrivilegedJobExecutionTopologyIsClosed(string executionShape)
+    {
+        var reference = ActionHostAuthorizationPolicy.ActionPath +
+            ActionHostAuthorizationScenario.ActionSha;
+        var canonical = ActionHostAuthorizationScenario.ValidWorkflow(
+            ActionHostAuthorizationScenario.ActionSha);
+        var actualStep = "steps:\n      - uses: " + reference;
+        var index = canonical.IndexOf(actualStep, StringComparison.Ordinal);
+        Assert.True(index >= 0);
+        var mutated = canonical[..index] + executionShape + "\n    " +
+            canonical[index..];
+
+        Assert.False(ActionHostTrustedWorkflowPolicy.TryValidate(
+            Encoding.UTF8.GetBytes(mutated),
+            ActionHostAuthorizationPolicy.TrustedProof,
+            ActionHostAuthorizationScenario.ActionSha,
+            out _,
+            out var failure));
+        Assert.Equal(ActionHostTrustedWorkflowFailure.JobInvalid, failure);
+    }
+
     [Fact]
     public void CrLfCanonicalWorkflowIsAccepted()
     {
