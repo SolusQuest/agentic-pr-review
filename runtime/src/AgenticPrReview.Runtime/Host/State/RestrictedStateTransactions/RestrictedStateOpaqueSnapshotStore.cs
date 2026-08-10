@@ -281,7 +281,6 @@ internal class RestrictedStateOpaqueSnapshotStore
                     }
 
                     var cleanupFailure = await CleanupSupersededAsync(
-                            names,
                             observed,
                             cancellationToken: CancellationToken.None)
                         .ConfigureAwait(false);
@@ -727,14 +726,10 @@ internal class RestrictedStateOpaqueSnapshotStore
     }
 
     private async Task<RestrictedStateStoreFailure> CleanupSupersededAsync(
-        RestrictedStateStoreNames names,
         RestrictedStateSnapshotReadCore selected,
         CancellationToken cancellationToken)
     {
-        var keep = new HashSet<string>(StringComparer.Ordinal)
-        {
-            selected.IndexMetadata!.Reference.ObjectId.Value,
-        };
+        var keep = new HashSet<string>(StringComparer.Ordinal);
         foreach (var candidate in selected.Index!.Accepted)
         {
             keep.Add(candidate.Transport.Reference.ObjectId.Value);
@@ -761,42 +756,28 @@ internal class RestrictedStateOpaqueSnapshotStore
             }
         }
 
-        var candidates = await store.ListExactAsync(
-                new OpaqueStoreListRequest(
-                    names.Candidate,
-                    MaximumCandidateObjects),
-                cancellationToken)
-            .ConfigureAwait(false);
-        if (!candidates.Succeeded ||
-            candidates.Objects.Any(item => item.Name != names.Candidate))
+        var predecessor = selected.Index.PredecessorIndex is null
+            ? null
+            : selected.Nodes.FirstOrDefault(node =>
+                node.Metadata == selected.Index.PredecessorIndex);
+        if (predecessor is null)
         {
-            return failure == RestrictedStateStoreFailure.None
-                ? candidates.Succeeded
-                    ? RestrictedStateStoreFailure.Invalid
-                    : MapFailure(candidates.Failure)
-                : failure;
+            return failure;
         }
 
-        foreach (var reference in candidates.Objects)
+        foreach (var metadata in predecessor.Index.Accepted
+            .Append(predecessor.Index.Staging)
+            .Where(candidate => candidate is not null)
+            .Select(candidate => candidate!.Transport)
+            .Distinct())
         {
-            if (keep.Contains(reference.ObjectId.Value))
+            if (keep.Contains(metadata.Reference.ObjectId.Value))
             {
-                continue;
-            }
-
-            var metadata = await store.ReadMetadataAsync(
-                    new OpaqueStoreMetadataRequest(reference),
-                    cancellationToken)
-                .ConfigureAwait(false);
-            if (!metadata.Succeeded ||
-                metadata.Metadata!.Reference != reference)
-            {
-                failure = RestrictedStateStoreFailure.Cleanup;
                 continue;
             }
 
             var deleted = await store.DeleteExactAsync(
-                    new OpaqueStoreDeleteRequest(metadata.Metadata!),
+                    new OpaqueStoreDeleteRequest(metadata),
                     cancellationToken)
                 .ConfigureAwait(false);
             if (!deleted.Succeeded)
@@ -900,9 +881,10 @@ internal class RestrictedStateOpaqueSnapshotStore
 
         var firstMutation = true;
         var failure = RestrictedStateStoreFailure.None;
+        var names = Names(access.Scope);
         foreach (var metadata in raw.Metadata
-            .OrderBy(item => item.Reference.Name.Value, StringComparer.Ordinal)
-            .ThenBy(
+            .Where(item => item.Reference.Name == names.Index)
+            .OrderBy(
                 item => item.Reference.ObjectId.Value,
                 StringComparer.Ordinal))
         {
@@ -920,6 +902,49 @@ internal class RestrictedStateOpaqueSnapshotStore
             }
 
             firstMutation = false;
+        }
+
+        if (failure == RestrictedStateStoreFailure.None)
+        {
+            foreach (var metadata in raw.Metadata
+                .Where(item => item.Reference.Name == names.Candidate)
+                .OrderBy(
+                    item => item.Reference.ObjectId.Value,
+                    StringComparer.Ordinal))
+            {
+                var token = firstMutation
+                    ? cancellationToken
+                    : CancellationToken.None;
+                var current = await ReadCoreAsync(access, token)
+                    .ConfigureAwait(false);
+                if (!current.Succeeded)
+                {
+                    failure = current.Failure;
+                    break;
+                }
+
+                var reachable = current.Index?.Accepted
+                    .Append(current.Index.Staging)
+                    .Where(candidate => candidate is not null)
+                    .Any(candidate =>
+                        candidate!.Transport == metadata) == true;
+                if (reachable)
+                {
+                    continue;
+                }
+
+                var deleted = await store.DeleteExactAsync(
+                        new OpaqueStoreDeleteRequest(metadata),
+                        token)
+                    .ConfigureAwait(false);
+                if (!deleted.Succeeded)
+                {
+                    failure = MapFailure(deleted.Failure);
+                    break;
+                }
+
+                firstMutation = false;
+            }
         }
 
         var observed = await ReadRawCoreAsync(

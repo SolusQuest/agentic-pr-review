@@ -328,6 +328,161 @@ public sealed class RestrictedStateStoreConformanceTests
     }
 
     [Fact]
+    public async Task CleanupPreservesAConcurrentSuccessorCandidate()
+    {
+        var store = new SyntheticRestrictedStateStore();
+        var access = RestrictedStateTestData.Access();
+        var keys = new TestKeyResolver();
+        var coordinator = new RestrictedStateOpaqueSnapshotStore(store, keys);
+        var first = RestrictedStateTestData.Candidate(access, keys);
+        var staging = RestrictedStateTestData.Candidate(
+            access,
+            keys,
+            generation: 1,
+            predecessor: first.EnvelopeSha256,
+            plaintext: [4, 5, 6]);
+        var successorStaging = RestrictedStateTestData.Candidate(
+            access,
+            keys,
+            generation: 2,
+            predecessor: staging.EnvelopeSha256,
+            plaintext: [7, 8, 9]);
+        var initial = new RestrictedStateSnapshot([first], null);
+        var selected = new RestrictedStateSnapshot([first], staging);
+        var successor = new RestrictedStateSnapshot(
+            [staging, first],
+            successorStaging);
+        var created = await coordinator.CompareExchangeAsync(
+            access,
+            RestrictedStateSnapshotVersion.Absent,
+            initial,
+            CancellationToken.None);
+        Assert.True(created.Committed);
+
+        store.BeforeDelete = metadata =>
+        {
+            if (metadata.Reference.Name != RawName(access, index: true))
+            {
+                return;
+            }
+
+            store.BeforeDelete = null;
+            var selectedIndex = ReadIndex(
+                store,
+                access,
+                keys,
+                SnapshotVersion(selected));
+            var successorStagingMetadata = UploadCandidate(
+                store,
+                access,
+                successorStaging,
+                "concurrent-successor-candidate");
+            UploadIndex(
+                store,
+                access,
+                keys,
+                selectedIndex.Metadata,
+                selectedIndex.Index.LogicalVersion,
+                successor,
+                [
+                    selectedIndex.Index.Staging!,
+                    selectedIndex.Index.Accepted[0],
+                ],
+                Indexed(successorStaging, successorStagingMetadata),
+                "concurrent-successor-index");
+        };
+
+        var advanced = await coordinator.CompareExchangeAsync(
+            access,
+            created.Version!,
+            selected,
+            CancellationToken.None);
+        var observed = await coordinator.ReadAsync(
+            access,
+            CancellationToken.None);
+
+        Assert.True(advanced.Committed);
+        Assert.True(observed.Succeeded);
+        Assert.Equal(SnapshotVersion(successor), observed.Version);
+        Assert.Equal(
+            successorStaging.ObjectIdentity,
+            observed.Snapshot!.Staging!.ObjectIdentity);
+    }
+
+    [Fact]
+    public async Task RawDeletionPreservesCandidatesOfAConcurrentSuccessor()
+    {
+        var store = new SyntheticRestrictedStateStore();
+        var access = RestrictedStateTestData.Access();
+        var keys = new TestKeyResolver();
+        var coordinator = new RestrictedStateOpaqueSnapshotStore(store, keys);
+        var first = RestrictedStateTestData.Candidate(access, keys);
+        var staging = RestrictedStateTestData.Candidate(
+            access,
+            keys,
+            generation: 1,
+            predecessor: first.EnvelopeSha256,
+            plaintext: [4, 5, 6]);
+        var initial = new RestrictedStateSnapshot([first], null);
+        var successor = new RestrictedStateSnapshot([first], staging);
+        var created = await coordinator.CompareExchangeAsync(
+            access,
+            RestrictedStateSnapshotVersion.Absent,
+            initial,
+            CancellationToken.None);
+        var raw = await coordinator.ReadRawVersionAsync(
+            access,
+            CancellationToken.None);
+        Assert.True(created.Committed);
+        Assert.True(raw.Succeeded);
+
+        store.BeforeDelete = metadata =>
+        {
+            if (metadata.Reference.Name != RawName(access, index: true))
+            {
+                return;
+            }
+
+            store.BeforeDelete = null;
+            var current = ReadIndex(
+                store,
+                access,
+                keys,
+                SnapshotVersion(initial));
+            var stagingMetadata = UploadCandidate(
+                store,
+                access,
+                staging,
+                "reset-successor-candidate");
+            UploadIndex(
+                store,
+                access,
+                keys,
+                current.Metadata,
+                current.Index.LogicalVersion,
+                successor,
+                current.Index.Accepted,
+                Indexed(staging, stagingMetadata),
+                "reset-successor-index");
+        };
+
+        var deleted = await coordinator.CompareDeleteRawAsync(
+            access,
+            raw.Version!,
+            CancellationToken.None);
+        var observed = await coordinator.ReadAsync(
+            access,
+            CancellationToken.None);
+
+        Assert.False(deleted.Committed);
+        Assert.Equal(RestrictedStateStoreFailure.Cleanup, deleted.Failure);
+        Assert.True(observed.Succeeded);
+        Assert.Equal(SnapshotVersion(successor), observed.Version);
+        Assert.Equal(first.ObjectIdentity, observed.Snapshot!.Accepted[0].ObjectIdentity);
+        Assert.Equal(staging.ObjectIdentity, observed.Snapshot.Staging!.ObjectIdentity);
+    }
+
+    [Fact]
     public async Task RawVersionUsesInjectiveNominalFieldFraming()
     {
         var store = new SyntheticRestrictedStateStore();
@@ -415,6 +570,117 @@ public sealed class RestrictedStateStoreConformanceTests
             new OpaqueStoreEncryptedObjectDigest(OpaqueStoreHash.Sha256(bytes)),
             RestrictedStateTestData.Expires,
             bytes.Length);
+
+    private static RestrictedStateSnapshotVersion SnapshotVersion(
+        RestrictedStateSnapshot snapshot)
+    {
+        Assert.True(RestrictedStateSnapshotCodec.TryWrite(snapshot, out var bytes));
+        return new RestrictedStateSnapshotVersion(
+            AgentCanonical.HashDomain("apr.state-snapshot.r2", bytes),
+            Exists: true);
+    }
+
+    private static RestrictedStateIndexedCandidate Indexed(
+        RestrictedStateCandidate candidate,
+        OpaqueStoreObjectMetadata metadata) =>
+        new(
+            candidate.Binding,
+            candidate.SessionSha256,
+            candidate.EnvelopeSha256,
+            candidate.ObjectIdentity,
+            metadata);
+
+    private static OpaqueStoreObjectMetadata UploadCandidate(
+        SyntheticRestrictedStateStore store,
+        AuthorizedStateAccess access,
+        RestrictedStateCandidate candidate,
+        string correlation)
+    {
+        var uploaded = store.UploadImmutableAsync(
+                new OpaqueStoreUploadRequest(
+                    RawName(access, index: false),
+                    new OpaqueStoreCorrelationId(correlation),
+                    candidate.Envelope,
+                    new OpaqueStoreEncryptedObjectDigest(
+                        OpaqueStoreHash.Sha256(candidate.Envelope)),
+                    candidate.Binding.ExpiresAtUnixSeconds),
+                CancellationToken.None)
+            .GetAwaiter()
+            .GetResult();
+        Assert.True(uploaded.Succeeded);
+        return uploaded.Metadata!;
+    }
+
+    private static void UploadIndex(
+        SyntheticRestrictedStateStore store,
+        AuthorizedStateAccess access,
+        TestKeyResolver keys,
+        OpaqueStoreObjectMetadata predecessor,
+        RestrictedStateSnapshotVersion predecessorVersion,
+        RestrictedStateSnapshot snapshot,
+        ImmutableArray<RestrictedStateIndexedCandidate> accepted,
+        RestrictedStateIndexedCandidate? staging,
+        string correlation)
+    {
+        var index = new RestrictedStateTransactionIndex(
+            SnapshotVersion(snapshot),
+            predecessorVersion,
+            predecessor,
+            correlation,
+            RestrictedStateTransactionCommitState.ReadyForSelection,
+            accepted,
+            staging);
+        Assert.True(RestrictedStateTransactionIndexCodec.TryWrite(
+            index,
+            out var plaintext));
+        Assert.True(RestrictedStateTransactionIndexEnvelope.TryEncrypt(
+            access,
+            plaintext,
+            RestrictedStateTestData.Expires,
+            keys,
+            out var envelope,
+            out var failure), failure.ToString());
+        var uploaded = store.UploadImmutableAsync(
+                new OpaqueStoreUploadRequest(
+                    RawName(access, index: true),
+                    new OpaqueStoreCorrelationId(correlation),
+                    envelope!,
+                    new OpaqueStoreEncryptedObjectDigest(
+                        OpaqueStoreHash.Sha256(envelope!)),
+                    RestrictedStateTestData.Expires),
+                CancellationToken.None)
+            .GetAwaiter()
+            .GetResult();
+        Assert.True(uploaded.Succeeded);
+    }
+
+    private static RestrictedStateIndexNode ReadIndex(
+        SyntheticRestrictedStateStore store,
+        AuthorizedStateAccess access,
+        TestKeyResolver keys,
+        RestrictedStateSnapshotVersion version)
+    {
+        foreach (var metadata in store.MetadataFor(
+            RawName(access, index: true)))
+        {
+            Assert.True(RestrictedStateTransactionIndexEnvelope.TryDecrypt(
+                access,
+                store.BytesFor(metadata),
+                keys,
+                out var plaintext,
+                out _,
+                out var failure), failure.ToString());
+            Assert.True(RestrictedStateTransactionIndexCodec.TryRead(
+                plaintext!,
+                out var index));
+            if (index!.LogicalVersion == version)
+            {
+                return new RestrictedStateIndexNode(metadata, index);
+            }
+        }
+
+        throw new InvalidOperationException("Expected transaction index not found.");
+    }
 
     private static OpaqueStoreName RawName(
         AuthorizedStateAccess access,
@@ -693,6 +959,12 @@ public sealed class RestrictedStateStoreConformanceTests
             set;
         }
 
+        internal Action<OpaqueStoreObjectMetadata>? BeforeDelete
+        {
+            get;
+            set;
+        }
+
         public Task<OpaqueStoreListResult> ListExactAsync(
             OpaqueStoreListRequest request,
             CancellationToken cancellationToken)
@@ -866,6 +1138,7 @@ public sealed class RestrictedStateStoreConformanceTests
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            BeforeDelete?.Invoke(request.Expected);
             if (!TryGet(request.Expected.Reference, out var value))
             {
                 return Task.FromResult(OpaqueStoreDeleteResult.Fail(
@@ -908,6 +1181,16 @@ public sealed class RestrictedStateStoreConformanceTests
                 (metadata, bytes.ToArray()));
 
         internal void Clear() => objects.Clear();
+
+        internal ImmutableArray<OpaqueStoreObjectMetadata> MetadataFor(
+            OpaqueStoreName name) =>
+            objects.Values
+                .Select(item => item.Item1)
+                .Where(item => item.Reference.Name == name)
+                .ToImmutableArray();
+
+        internal byte[] BytesFor(OpaqueStoreObjectMetadata metadata) =>
+            objects[metadata.Reference.ObjectId.Value].Item2.ToArray();
 
         private bool TryGet(
             OpaqueStoreObjectReference reference,
