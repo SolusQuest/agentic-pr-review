@@ -52,6 +52,12 @@ internal static class R4Markdown
                 continue;
             }
 
+            if (rune.Value == '@')
+            {
+                AppendVisibleScalarNotation(builder, rune.Value);
+                continue;
+            }
+
             if (rune.IsAscii && UnsafeAscii.Contains((char)rune.Value))
             {
                 AppendScalarEntity(builder, rune.Value);

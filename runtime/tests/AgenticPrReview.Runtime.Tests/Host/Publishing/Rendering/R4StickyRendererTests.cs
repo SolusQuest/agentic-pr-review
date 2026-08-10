@@ -68,7 +68,7 @@ public sealed class R4StickyRendererTests
         string field)
     {
         const string canary =
-            "line\n<!--script-->\n::warning::boom\n# heading\n" +
+            "line\n@octocat @org/team\n<!--script-->\n::warning::boom\n# heading\n" +
             "[link](url)\n```code```\n\0\t\r\u0085\u202e";
         var summary = field == "summary" ? canary : "Summary";
         var title = field == "title" ? canary : "Title";
@@ -88,6 +88,7 @@ public sealed class R4StickyRendererTests
         Assert.Contains("U+000D", rendered.Body);
         Assert.Contains("U+0085", rendered.Body);
         Assert.Contains("U+202E", rendered.Body);
+        Assert.Contains("U+0040octocat U+0040org/team", rendered.Body);
         Assert.DoesNotContain("&#x0;", rendered.Body);
         Assert.DoesNotContain("&#x9;", rendered.Body);
         Assert.DoesNotContain("&#xD;", rendered.Body);
@@ -98,7 +99,7 @@ public sealed class R4StickyRendererTests
     [Fact]
     public void EvidencePathsStayInertInRepeatedListPositions()
     {
-        const string path = "src/`[link](target)!_name.md";
+        const string path = "src/@octocat/`[link](target)!_name.md";
         var finding = R4PublicationTestData.Finding(
             evidence:
             [
@@ -110,7 +111,11 @@ public sealed class R4StickyRendererTests
 
         AssertInert(rendered);
         Assert.DoesNotContain(path, rendered.Body, StringComparison.Ordinal);
-        Assert.Equal(2, Count(rendered.Body, "src/&#x60;&#x5B;link&#x5D;"));
+        Assert.Equal(
+            2,
+            Count(
+                rendered.Body,
+                "src/U+0040octocat/&#x60;&#x5B;link&#x5D;"));
     }
 
     [Fact]
@@ -324,6 +329,8 @@ public sealed class R4StickyRendererTests
         Assert.DoesNotContain("# heading", rendered.Body);
         Assert.DoesNotContain("[link](url)", rendered.Body);
         Assert.DoesNotContain("```code```", rendered.Body);
+        Assert.DoesNotContain("@octocat", rendered.Body);
+        Assert.DoesNotContain("@org/team", rendered.Body);
         Assert.DoesNotContain('\0', rendered.Body);
         Assert.DoesNotContain('\t', rendered.Body);
         Assert.DoesNotContain('\r', rendered.Body);
