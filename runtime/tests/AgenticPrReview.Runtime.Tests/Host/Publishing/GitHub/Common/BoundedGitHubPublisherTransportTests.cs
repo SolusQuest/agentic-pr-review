@@ -41,6 +41,7 @@ public sealed class BoundedGitHubPublisherTransportTests
             CancellationToken.None);
 
         Assert.NotNull(result.Value);
+        Assert.Equal(BoundedGitHubHttpOutcome.Success, result.Outcome);
         Assert.Equal(100, result.Value.Comments.Count);
         Assert.Null(result.Value.NextPage);
         Assert.Equal(1, calls);
@@ -62,7 +63,7 @@ public sealed class BoundedGitHubPublisherTransportTests
             CancellationToken.None);
 
         Assert.Null(result.Value);
-        Assert.Equal(BoundedGitHubPublisherOutcome.KnownNotWritten,
+        Assert.Equal(BoundedGitHubHttpOutcome.KnownNotSent,
             result.Outcome);
         Assert.Equal(BoundedGitHubPublisherReason.InvalidPagination,
             result.Reason);
@@ -157,7 +158,7 @@ public sealed class BoundedGitHubPublisherTransportTests
             CancellationToken.None);
 
         Assert.Equal(
-            BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure,
+            BoundedGitHubHttpOutcome.AuthorizationOrValidationFailure,
             classified.Outcome);
         Assert.Equal(BoundedGitHubPublisherReason.ValidationRejected,
             classified.Reason);
@@ -174,7 +175,7 @@ public sealed class BoundedGitHubPublisherTransportTests
         var unknown = await invalid.MutateStickyCommentAsync(
             CancellationToken.None);
 
-        Assert.Equal(BoundedGitHubPublisherOutcome.OutcomeUnknown,
+        Assert.Equal(BoundedGitHubHttpOutcome.OutcomeUnknown,
             unknown.Outcome);
         Assert.Equal(BoundedGitHubPublisherReason.InvalidResponse,
             unknown.Reason);
@@ -214,7 +215,7 @@ public sealed class BoundedGitHubPublisherTransportTests
         var result = await transport.MutateStickyCommentAsync(
             CancellationToken.None);
 
-        Assert.Equal(BoundedGitHubPublisherOutcome.OutcomeUnknown,
+        Assert.Equal(BoundedGitHubHttpOutcome.OutcomeUnknown,
             result.Outcome);
         Assert.Equal(BoundedGitHubPublisherReason.Deadline, result.Reason);
         Assert.Equal(1, mutationCalls);
@@ -238,7 +239,7 @@ public sealed class BoundedGitHubPublisherTransportTests
         var result = await transport.MutateStickyCommentAsync(
             CancellationToken.None);
 
-        Assert.Equal(BoundedGitHubPublisherOutcome.OutcomeUnknown,
+        Assert.Equal(BoundedGitHubHttpOutcome.OutcomeUnknown,
             result.Outcome);
         Assert.Equal(BoundedGitHubPublisherReason.InvalidResponse,
             result.Reason);
@@ -301,12 +302,7 @@ public sealed class BoundedGitHubPublisherTransportTests
             calls++;
             if (calls <= 64)
                 return Task.FromResult(Json(HttpStatusCode.OK, atResponseCap));
-            var response = new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StreamContent(overflow),
-            };
-            response.Content.Headers.ContentType =
-                new("application/json") { CharSet = "utf-8" };
+            var response = JsonContent(new StreamContent(overflow));
             response.Content.Headers.ContentLength = 1;
             return Task.FromResult(response);
         }));
@@ -335,10 +331,7 @@ public sealed class BoundedGitHubPublisherTransportTests
         var stream = new CountingStream(new byte[
             BoundedGitHubPublisherPolicy.MaximumResponseBytes + 2]);
         using var transport = Create(data, new DelegateHandler(_ =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new UnknownLengthContent(stream),
-            })));
+            Task.FromResult(JsonContent(new UnknownLengthContent(stream)))));
 
         var result = await transport.ListIssueCommentsAsync(1,
             CancellationToken.None);
@@ -365,7 +358,7 @@ public sealed class BoundedGitHubPublisherTransportTests
         var deadline = await expired.ListIssueCommentsAsync(1,
             CancellationToken.None);
 
-        Assert.Equal(BoundedGitHubPublisherOutcome.KnownNotWritten,
+        Assert.Equal(BoundedGitHubHttpOutcome.KnownNotSent,
             deadline.Outcome);
         Assert.Equal(BoundedGitHubPublisherReason.Deadline, deadline.Reason);
         Assert.Equal(0, calls);
@@ -379,8 +372,129 @@ public sealed class BoundedGitHubPublisherTransportTests
         var cancellation = await cancelled.MutateStickyCommentAsync(
             source.Token);
 
-        Assert.Equal(BoundedGitHubPublisherOutcome.CancelledBeforeSend,
+        Assert.Equal(BoundedGitHubHttpOutcome.CancelledBeforeSend,
             cancellation.Outcome);
+    }
+
+    [Fact]
+    public async Task CrossPageLastEvidenceCannotBeDiscardedBeforeMutation()
+    {
+        var data = await StickyPublicationTestData.CreateAsync();
+        var mutationCalls = 0;
+        using var transport = Create(data, new DelegateHandler(request =>
+        {
+            if (request.Method != HttpMethod.Get)
+            {
+                mutationCalls++;
+                return Task.FromResult(Json(HttpStatusCode.Created,
+                    JsonSerializer.Serialize(CommentDocument(9))));
+            }
+            var first = request.RequestUri!.Query.EndsWith("page=1",
+                StringComparison.Ordinal);
+            var response = Json(HttpStatusCode.OK, "[]");
+            if (first)
+                response.Headers.TryAddWithoutValidation("Link",
+                    PageLink(2, "next") + ", " + PageLink(50, "last"));
+            return Task.FromResult(response);
+        }));
+
+        Assert.NotNull((await transport.ListIssueCommentsAsync(1,
+            CancellationToken.None)).Value);
+        Assert.NotNull((await transport.ListIssueCommentsAsync(2,
+            CancellationToken.None)).Value);
+        var mutation = await transport.MutateStickyCommentAsync(
+            CancellationToken.None);
+
+        Assert.Equal(BoundedGitHubHttpOutcome.KnownNotSent, mutation.Outcome);
+        Assert.Equal(0, mutationCalls);
+    }
+
+    [Fact]
+    public async Task ChangingLastAndDuplicateIdsBlockDirectMutation()
+    {
+        var data = await StickyPublicationTestData.CreateAsync();
+        foreach (var duplicate in new[] { false, true })
+        {
+            var mutationCalls = 0;
+            using var transport = Create(data, new DelegateHandler(request =>
+            {
+                if (request.Method != HttpMethod.Get)
+                {
+                    mutationCalls++;
+                    return Task.FromResult(Json(HttpStatusCode.Created,
+                        JsonSerializer.Serialize(CommentDocument(9))));
+                }
+                var first = request.RequestUri!.Query.EndsWith("page=1",
+                    StringComparison.Ordinal);
+                var body = duplicate
+                    ? JsonSerializer.Serialize(new[] { CommentDocument(7) })
+                    : "[]";
+                var response = Json(HttpStatusCode.OK, body);
+                response.Headers.TryAddWithoutValidation("Link", first
+                    ? PageLink(2, "next") + ", " +
+                        PageLink(duplicate ? 2 : 3, "last")
+                    : PageLink(duplicate ? 2 : 4, "last"));
+                return Task.FromResult(response);
+            }));
+
+            Assert.NotNull((await transport.ListIssueCommentsAsync(1,
+                CancellationToken.None)).Value);
+            var second = await transport.ListIssueCommentsAsync(2,
+                CancellationToken.None);
+            if (duplicate) Assert.NotNull(second.Value);
+            else Assert.Null(second.Value);
+            var mutation = await transport.MutateStickyCommentAsync(
+                CancellationToken.None);
+
+            Assert.Equal(BoundedGitHubHttpOutcome.KnownNotSent,
+                mutation.Outcome);
+            Assert.Equal(0, mutationCalls);
+        }
+    }
+
+    [Fact]
+    public async Task OverallDeadlineIncludesResponseProcessing()
+    {
+        var data = await StickyPublicationTestData.CreateAsync();
+        var clock = new ManualClock();
+        var content = new UnknownLengthContent(
+            new DeadlineAdvancingStream(Encoding.UTF8.GetBytes("[]"), clock,
+                TimeSpan.FromSeconds(181)));
+        using var transport = Create(data, new DelegateHandler(_ =>
+            Task.FromResult(JsonContent(content))),
+            overallTimeout: TimeSpan.FromSeconds(180), operation: clock);
+
+        var result = await transport.ListIssueCommentsAsync(1,
+            CancellationToken.None);
+
+        Assert.Null(result.Value);
+        Assert.Equal(BoundedGitHubHttpOutcome.KnownNotSent, result.Outcome);
+        Assert.Equal(BoundedGitHubPublisherReason.Deadline, result.Reason);
+    }
+
+    [Fact]
+    public async Task SuccessfulResponsesAreOnlyHttpSuccessEvidence()
+    {
+        var data = await StickyPublicationTestData.CreateAsync();
+        using var transport = Create(data, new DelegateHandler(request =>
+            Task.FromResult(request.RequestUri!.AbsolutePath.EndsWith(
+                    "/comments", StringComparison.Ordinal)
+                ? request.Method == HttpMethod.Get
+                    ? Json(HttpStatusCode.OK, "[]")
+                    : Json(HttpStatusCode.Created,
+                        JsonSerializer.Serialize(CommentDocument(7)))
+                : Json(HttpStatusCode.OK,
+                    JsonSerializer.Serialize(CommentDocument(7))))));
+        var listed = await transport.ListIssueCommentsAsync(1,
+            CancellationToken.None);
+        var mutation = await transport.MutateStickyCommentAsync(
+            CancellationToken.None);
+        var read = await transport.GetIssueCommentAsync(7,
+            CancellationToken.None);
+
+        Assert.All(new[] { listed.Outcome, mutation.Outcome, read.Outcome },
+            outcome => Assert.Equal(BoundedGitHubHttpOutcome.Success,
+                outcome));
     }
 
     private static BoundedGitHubPublisherTransport Create(
@@ -390,10 +504,11 @@ public sealed class BoundedGitHubPublisherTransportTests
             AgenticPrReview.Runtime.Host.Publishing.Rendering
                 .R4RenderedStickyComment Rendered) data,
         HttpMessageHandler handler, TimeSpan? requestTimeout = null,
-        TimeSpan? overallTimeout = null) =>
+        TimeSpan? overallTimeout = null,
+        IBoundedGitHubOperationClock? operation = null) =>
         BoundedGitHubPublisherTransport.CreateForTesting(
             data.Token.ExportForPrivateLaunch(), data.Request,
-            handler, requestTimeout, overallTimeout);
+            handler, requestTimeout, overallTimeout, operation);
 
     private static async Task AuthorizeAbsentAsync(
         BoundedGitHubPublisherTransport transport)
@@ -415,6 +530,12 @@ public sealed class BoundedGitHubPublisherTransportTests
             $"#issuecomment-{id}",
         body = "body",
     };
+
+    private static string PageLink(int page, string relation) =>
+        $"<https://api.github.com/repos/" +
+        $"{ActionHostAuthorizationScenario.RepositoryName}/issues/" +
+        $"{ActionHostAuthorizationScenario.PullRequestNumber}/comments" +
+        $"?per_page=100&page={page}>; rel=\"{relation}\"";
 
     private static string AtResponseCapCommentJson(int id)
     {
@@ -440,6 +561,17 @@ public sealed class BoundedGitHubPublisherTransportTests
             Content = new StringContent(body, Encoding.UTF8, "text/plain"),
         };
 
+    private static HttpResponseMessage JsonContent(HttpContent content)
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = content,
+        };
+        response.Content.Headers.ContentType =
+            new("application/json") { CharSet = "utf-8" };
+        return response;
+    }
+
     private sealed class DelegateHandler : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, CancellationToken,
@@ -458,7 +590,7 @@ public sealed class BoundedGitHubPublisherTransportTests
             _send(request, cancellationToken);
     }
 
-    private sealed class UnknownLengthContent(CountingStream stream) :
+    private sealed class UnknownLengthContent(Stream stream) :
         HttpContent
     {
         protected override Task SerializeToStreamAsync(Stream target,
@@ -484,6 +616,23 @@ public sealed class BoundedGitHubPublisherTransportTests
         {
             var read = await base.ReadAsync(buffer, cancellationToken);
             BytesRead += read;
+            return read;
+        }
+    }
+
+    private sealed class ManualClock : IBoundedGitHubOperationClock
+    {
+        public TimeSpan Elapsed { get; set; }
+    }
+
+    private sealed class DeadlineAdvancingStream(byte[] bytes,
+        ManualClock clock, TimeSpan elapsed) : MemoryStream(bytes)
+    {
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            var read = await base.ReadAsync(buffer, cancellationToken);
+            if (read == 0) clock.Elapsed = elapsed;
             return read;
         }
     }

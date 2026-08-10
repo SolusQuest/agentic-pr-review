@@ -35,12 +35,13 @@ internal static class StickyPublicationTestData
             ActionHostAuthorizationScenario.PullRequestNumber,
             ActionHostAuthorizationScenario.BaseSha,
             ActionHostAuthorizationScenario.HeadSha);
-        var rendered = R4PublicationTestData.Render(
+        var validated = R4PublicationTestData.Validated(
             findings: empty ? [] : [R4PublicationTestData.Finding()],
             identity: identity,
             scope: scope);
+        var rendered = R4StickyRenderer.Render(validated);
         Assert.True(AuthorizedStickyPublicationRequest.TryCreate(
-            invocation, scope, rendered, out var request));
+            invocation, validated, out var request));
         return (scenario.Launch.Inputs.GitHubToken!, request!, rendered);
     }
 
@@ -71,20 +72,20 @@ internal sealed class FakePublisherTransportFactory :
 internal sealed class FakePublisherTransport : IStickyGitHubPublisherTransport
 {
     internal AuthorizedStickyPublicationRequest? Request { get; set; }
-    internal Queue<BoundedGitHubPublisherResult<BoundedGitHubIssueCommentPage>>
+    internal Queue<BoundedGitHubHttpResult<BoundedGitHubIssueCommentPage>>
         Pages
     { get; } = new();
-    internal BoundedGitHubPublisherResult<BoundedGitHubIssueComment> Mutation
+    internal BoundedGitHubHttpResult<BoundedGitHubIssueComment> Mutation
     {
         get; set;
-    } = BoundedGitHubPublisherResult<BoundedGitHubIssueComment>.Failed(
-        BoundedGitHubPublisherOutcome.OutcomeUnknown,
+    } = BoundedGitHubHttpResult<BoundedGitHubIssueComment>.Failed(
+        BoundedGitHubHttpOutcome.OutcomeUnknown,
         BoundedGitHubPublisherReason.TransportFailure);
-    internal BoundedGitHubPublisherResult<BoundedGitHubIssueComment> Read
+    internal BoundedGitHubHttpResult<BoundedGitHubIssueComment> Read
     {
         get; set;
-    } = BoundedGitHubPublisherResult<BoundedGitHubIssueComment>.Failed(
-        BoundedGitHubPublisherOutcome.KnownNotWritten,
+    } = BoundedGitHubHttpResult<BoundedGitHubIssueComment>.Failed(
+        BoundedGitHubHttpOutcome.KnownNotSent,
         BoundedGitHubPublisherReason.TransportFailure);
     internal int Creates { get; private set; }
     internal int Updates { get; private set; }
@@ -94,45 +95,51 @@ internal sealed class FakePublisherTransport : IStickyGitHubPublisherTransport
     internal List<CancellationToken> ListCancellationTokens { get; } = [];
     internal List<CancellationToken> ReadCancellationTokens { get; } = [];
     internal System.Action? OnMutation { get; set; }
+    internal System.Action? OnList { get; set; }
+    internal Func<bool>? DeadlineProbe { get; set; }
     private long? _targetId;
+
+    public bool IsWithinOverallDeadline => DeadlineProbe?.Invoke() ?? true;
 
     internal void Enqueue(params BoundedGitHubIssueComment[] comments) =>
         EnqueuePage(null, comments);
 
     internal void EnqueuePage(int? nextPage,
         params BoundedGitHubIssueComment[] comments) =>
-        Pages.Enqueue(BoundedGitHubPublisherResult<BoundedGitHubIssueCommentPage>
-            .Success(new(comments, nextPage)));
+        Pages.Enqueue(BoundedGitHubHttpResult<BoundedGitHubIssueCommentPage>
+            .Success(new(comments, nextPage, null)));
 
-    public Task<BoundedGitHubPublisherResult<BoundedGitHubIssueCommentPage>>
+    internal void EnqueuePageWithLast(int? nextPage, int? lastPage,
+        params BoundedGitHubIssueComment[] comments) =>
+        Pages.Enqueue(BoundedGitHubHttpResult<BoundedGitHubIssueCommentPage>
+            .Success(new(comments, nextPage, lastPage)));
+
+    public Task<BoundedGitHubHttpResult<BoundedGitHubIssueCommentPage>>
         ListIssueCommentsAsync(int page, CancellationToken cancellationToken)
     {
         Lists++;
         ListCancellationTokens.Add(cancellationToken);
         var result = Pages.Count > 0 ? Pages.Dequeue() :
-            BoundedGitHubPublisherResult<BoundedGitHubIssueCommentPage>.Failed(
-                BoundedGitHubPublisherOutcome.KnownNotWritten,
+            BoundedGitHubHttpResult<BoundedGitHubIssueCommentPage>.Failed(
+                BoundedGitHubHttpOutcome.KnownNotSent,
                 BoundedGitHubPublisherReason.InvalidPagination);
         if (result.Value is not null && Request is not null)
         {
             foreach (var comment in result.Value.Comments)
             {
-                try
-                {
-                    var inspection = R4StickyMarker.Inspect(comment.Body);
-                    if (inspection.Kind == R4StickyInspectionKind.ValidR4 &&
-                        StringComparer.Ordinal.Equals(
-                            inspection.Identity!.ScopeSha256,
-                            Request.Rendered.Identity.ScopeSha256))
-                        _targetId = comment.Id;
-                }
-                catch (R4PublicationException) { }
+                if (TryInspect(comment.Body, out var inspection) &&
+                    inspection.Kind == R4StickyInspectionKind.ValidR4 &&
+                    StringComparer.Ordinal.Equals(
+                        inspection.Identity!.ScopeSha256,
+                        Request.Rendered.Identity.ScopeSha256))
+                    _targetId = comment.Id;
             }
         }
+        OnList?.Invoke();
         return Task.FromResult(result);
     }
 
-    public Task<BoundedGitHubPublisherResult<BoundedGitHubIssueComment>>
+    public Task<BoundedGitHubHttpResult<BoundedGitHubIssueComment>>
         MutateStickyCommentAsync(CancellationToken cancellationToken)
     {
         if (_targetId is null) Creates++;
@@ -145,7 +152,7 @@ internal sealed class FakePublisherTransport : IStickyGitHubPublisherTransport
         return Task.FromResult(Mutation);
     }
 
-    public Task<BoundedGitHubPublisherResult<BoundedGitHubIssueComment>>
+    public Task<BoundedGitHubHttpResult<BoundedGitHubIssueComment>>
         GetIssueCommentAsync(long commentId,
             CancellationToken cancellationToken)
     {
@@ -155,4 +162,20 @@ internal sealed class FakePublisherTransport : IStickyGitHubPublisherTransport
     }
 
     public void Dispose() { }
+
+    private static bool TryInspect(string body,
+        out R4StickyInspection inspection)
+    {
+        try
+        {
+            inspection = R4StickyMarker.Inspect(body);
+            return true;
+        }
+        catch (R4PublicationException)
+        {
+            inspection = R4StickyInspection.Invalid(
+                R4StickyInvalidReason.BodyDigestMismatch);
+            return false;
+        }
+    }
 }

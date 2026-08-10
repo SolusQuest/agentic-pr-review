@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 
 internal static class BoundedGitHubPublisherPolicy
@@ -24,6 +26,15 @@ internal enum BoundedGitHubPublisherOutcome
     CancelledBeforeSend = 1,
     KnownNotWritten,
     WrittenAndReadBack,
+    OutcomeUnknown,
+    AuthorizationOrValidationFailure,
+}
+
+internal enum BoundedGitHubHttpOutcome
+{
+    Success = 1,
+    CancelledBeforeSend,
+    KnownNotSent,
     OutcomeUnknown,
     AuthorizationOrValidationFailure,
 }
@@ -65,29 +76,29 @@ internal sealed class BoundedGitHubValidationEvidence
     internal IReadOnlyList<BoundedGitHubErrorItemEvidence> Errors { get; }
 }
 
-internal sealed class BoundedGitHubPublisherResult<T> where T : class
+internal sealed class BoundedGitHubHttpResult<T> where T : class
 {
-    private BoundedGitHubPublisherResult(T? value,
-        BoundedGitHubPublisherOutcome outcome,
+    private BoundedGitHubHttpResult(T? value,
+        BoundedGitHubHttpOutcome outcome,
         BoundedGitHubPublisherReason reason,
         BoundedGitHubValidationEvidence? validationEvidence) =>
         (Value, Outcome, Reason, ValidationEvidence) =
         (value, outcome, reason, validationEvidence);
 
     internal T? Value { get; }
-    internal BoundedGitHubPublisherOutcome Outcome { get; }
+    internal BoundedGitHubHttpOutcome Outcome { get; }
     internal BoundedGitHubPublisherReason Reason { get; }
     internal BoundedGitHubValidationEvidence? ValidationEvidence { get; }
 
-    internal static BoundedGitHubPublisherResult<T> Success(T value)
+    internal static BoundedGitHubHttpResult<T> Success(T value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        return new(value, BoundedGitHubPublisherOutcome.WrittenAndReadBack,
+        return new(value, BoundedGitHubHttpOutcome.Success,
             BoundedGitHubPublisherReason.None, null);
     }
 
-    internal static BoundedGitHubPublisherResult<T> Failed(
-        BoundedGitHubPublisherOutcome outcome,
+    internal static BoundedGitHubHttpResult<T> Failed(
+        BoundedGitHubHttpOutcome outcome,
         BoundedGitHubPublisherReason reason,
         BoundedGitHubValidationEvidence? validationEvidence = null)
     {
@@ -96,13 +107,13 @@ internal sealed class BoundedGitHubPublisherResult<T> where T : class
         return new(null, outcome, reason, validationEvidence);
     }
 
-    private static bool IsValidFailure(BoundedGitHubPublisherOutcome outcome,
+    private static bool IsValidFailure(BoundedGitHubHttpOutcome outcome,
         BoundedGitHubPublisherReason reason,
         BoundedGitHubValidationEvidence? evidence) => outcome switch
     {
-        BoundedGitHubPublisherOutcome.CancelledBeforeSend =>
+        BoundedGitHubHttpOutcome.CancelledBeforeSend =>
             reason == BoundedGitHubPublisherReason.Deadline && evidence is null,
-        BoundedGitHubPublisherOutcome.KnownNotWritten =>
+        BoundedGitHubHttpOutcome.KnownNotSent =>
             (reason is BoundedGitHubPublisherReason.InvalidRequest or
                 BoundedGitHubPublisherReason.CredentialInvalid or
                 BoundedGitHubPublisherReason.RequestLimit or
@@ -114,13 +125,13 @@ internal sealed class BoundedGitHubPublisherResult<T> where T : class
                 BoundedGitHubPublisherReason.InvalidPagination or
                 BoundedGitHubPublisherReason.BatchValidationRejected) &&
             evidence is null,
-        BoundedGitHubPublisherOutcome.OutcomeUnknown =>
+        BoundedGitHubHttpOutcome.OutcomeUnknown =>
             (reason is BoundedGitHubPublisherReason.ResponseLimit or
                 BoundedGitHubPublisherReason.AggregateResponseLimit or
                 BoundedGitHubPublisherReason.Deadline or
                 BoundedGitHubPublisherReason.TransportFailure or
                 BoundedGitHubPublisherReason.InvalidResponse) && evidence is null,
-        BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure =>
+        BoundedGitHubHttpOutcome.AuthorizationOrValidationFailure =>
             (reason is BoundedGitHubPublisherReason.AuthorizationDenied or
                 BoundedGitHubPublisherReason.ValidationRejected or
                 BoundedGitHubPublisherReason.RateLimited) && evidence is not null,
@@ -132,13 +143,28 @@ internal sealed record BoundedGitHubIssueComment(
     long Id, string ApiUrl, string HtmlUrl, string Body);
 
 internal sealed record BoundedGitHubIssueCommentPage(
-    IReadOnlyList<BoundedGitHubIssueComment> Comments, int? NextPage);
+    IReadOnlyList<BoundedGitHubIssueComment> Comments, int? NextPage,
+    int? LastPage);
+
+internal interface IBoundedGitHubOperationClock
+{
+    TimeSpan Elapsed { get; }
+}
+
+internal sealed class StopwatchBoundedGitHubOperationClock :
+    IBoundedGitHubOperationClock
+{
+    private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
+
+    public TimeSpan Elapsed => _stopwatch.Elapsed;
+}
 
 internal interface IBoundedGitHubPublisherTransport : IDisposable
 {
-    Task<BoundedGitHubPublisherResult<BoundedGitHubIssueCommentPage>>
+    bool IsWithinOverallDeadline { get; }
+    Task<BoundedGitHubHttpResult<BoundedGitHubIssueCommentPage>>
         ListIssueCommentsAsync(int page, CancellationToken cancellationToken);
-    Task<BoundedGitHubPublisherResult<BoundedGitHubIssueComment>>
+    Task<BoundedGitHubHttpResult<BoundedGitHubIssueComment>>
         GetIssueCommentAsync(long commentId,
             CancellationToken cancellationToken);
 }

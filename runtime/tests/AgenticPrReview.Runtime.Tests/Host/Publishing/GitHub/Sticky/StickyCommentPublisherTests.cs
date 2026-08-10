@@ -349,6 +349,89 @@ public sealed class StickyCommentPublisherTests
     }
 
     [Fact]
+    public async Task CrossPageLastEvidenceIsRequiredForCompleteDiscovery()
+    {
+        var (token, request, _) = await StickyPublicationTestData.CreateAsync();
+        var factory = new FakePublisherTransportFactory();
+        factory.Transport.EnqueuePageWithLast(2, 50);
+        factory.Transport.EnqueuePageWithLast(null, null);
+
+        var result = await new StickyCommentPublisher(factory).DiscoverAsync(
+            token, request, CancellationToken.None);
+
+        Assert.Equal(StickyDiscoveryKind.InvalidOrIncomplete, result.Kind);
+        Assert.Equal(StickyPublicationReason.DiscoveryIncomplete,
+            result.Reason);
+    }
+
+    [Fact]
+    public async Task DeadlineBeforeWriteIsKnownNotWritten()
+    {
+        var (token, request, _) = await StickyPublicationTestData.CreateAsync();
+        var within = true;
+        var factory = new FakePublisherTransportFactory();
+        factory.Transport.Enqueue();
+        factory.Transport.DeadlineProbe = () => within;
+        factory.Transport.OnList = () => within = false;
+
+        var result = await new StickyCommentPublisher(factory).PublishAsync(
+            token, request, CancellationToken.None);
+
+        Assert.Equal(BoundedGitHubPublisherOutcome.KnownNotWritten,
+            result.Outcome);
+        Assert.Equal(StickyPublicationReason.Deadline, result.Reason);
+        Assert.Equal(0, factory.Transport.Creates + factory.Transport.Updates);
+    }
+
+    [Fact]
+    public async Task DeadlineAfterMutationIsOutcomeUnknownWithoutReceipt()
+    {
+        var (token, request, rendered) =
+            await StickyPublicationTestData.CreateAsync();
+        var within = true;
+        var comment = StickyPublicationTestData.Comment(17, rendered.Comment);
+        var factory = new FakePublisherTransportFactory();
+        factory.Transport.Enqueue();
+        factory.Transport.Mutation = Success(comment);
+        factory.Transport.DeadlineProbe = () => within;
+        factory.Transport.OnMutation = () => within = false;
+
+        var result = await new StickyCommentPublisher(factory).PublishAsync(
+            token, request, CancellationToken.None);
+
+        Assert.Equal(BoundedGitHubPublisherOutcome.OutcomeUnknown,
+            result.Outcome);
+        Assert.Equal(StickyPublicationReason.Deadline, result.Reason);
+        Assert.Null(result.Receipt);
+        Assert.Equal(1, factory.Transport.Creates);
+    }
+
+    [Fact]
+    public async Task LiveReceiptCanBeRehydratedWithoutMintingAnotherResult()
+    {
+        var (token, request, rendered) =
+            await StickyPublicationTestData.CreateAsync();
+        var comment = StickyPublicationTestData.Comment(18, rendered.Comment);
+        var factory = new FakePublisherTransportFactory();
+        factory.Transport.Enqueue();
+        factory.Transport.Mutation = Success(comment);
+        factory.Transport.Read = Success(comment);
+        factory.Transport.Enqueue(comment);
+        var result = await new StickyCommentPublisher(factory).PublishAsync(
+            token, request, CancellationToken.None);
+        var live = Assert.IsType<StickyCommentPublisher
+            .StickyPublicationReceipt>(result.Receipt);
+
+        Assert.True(StickyCommentPublisher.StickyPublicationReceipt
+            .TryRehydrate(live.Operation, live.RepositoryId,
+                live.PullRequestNumber, live.CommentId, live.CommentUrl,
+                live.ScopeSha256, live.BodySha256, live.HeadSha,
+                out var rehydrated));
+        Assert.Equal(live.CommentUrl, rehydrated!.CommentUrl);
+        Assert.Equal(live.BodySha256, rehydrated.BodySha256);
+    }
+
+    [Fact]
     public async Task CancellationBeforeDiscoveryCreatesNoTransport()
     {
         var (token, request, _) = await StickyPublicationTestData.CreateAsync();
@@ -363,28 +446,28 @@ public sealed class StickyCommentPublisherTests
     }
 
     [Theory]
-    [InlineData((int)BoundedGitHubPublisherOutcome.KnownNotWritten,
+    [InlineData((int)BoundedGitHubHttpOutcome.KnownNotSent,
         (int)BoundedGitHubPublisherOutcome.KnownNotWritten)]
-    [InlineData((int)BoundedGitHubPublisherOutcome.CancelledBeforeSend,
+    [InlineData((int)BoundedGitHubHttpOutcome.CancelledBeforeSend,
         (int)BoundedGitHubPublisherOutcome.CancelledBeforeSend)]
     [InlineData((int)
-        BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure,
+        BoundedGitHubHttpOutcome.AuthorizationOrValidationFailure,
         (int)BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure)]
     public async Task PreSendMutationFailuresStayInTheirClosedOutcomePhase(
         int failureValue, int expectedValue)
     {
-        var failure = (BoundedGitHubPublisherOutcome)failureValue;
+        var failure = (BoundedGitHubHttpOutcome)failureValue;
         var expected = (BoundedGitHubPublisherOutcome)expectedValue;
         var (token, request, _) = await StickyPublicationTestData.CreateAsync();
         var factory = new FakePublisherTransportFactory();
         factory.Transport.Enqueue();
         factory.Transport.Mutation =
-            BoundedGitHubPublisherResult<BoundedGitHubIssueComment>.Failed(
+            BoundedGitHubHttpResult<BoundedGitHubIssueComment>.Failed(
                 failure, failure ==
-                    BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure
+                    BoundedGitHubHttpOutcome.AuthorizationOrValidationFailure
                         ? BoundedGitHubPublisherReason.ValidationRejected
                         : BoundedGitHubPublisherReason.Deadline,
-                failure == BoundedGitHubPublisherOutcome
+                failure == BoundedGitHubHttpOutcome
                     .AuthorizationOrValidationFailure
                         ? new BoundedGitHubValidationEvidence(422, false,
                             "validation failed", null, [])
@@ -398,9 +481,9 @@ public sealed class StickyCommentPublisherTests
         Assert.Equal(1, factory.Transport.Creates);
     }
 
-    private static BoundedGitHubPublisherResult<BoundedGitHubIssueComment>
+    private static BoundedGitHubHttpResult<BoundedGitHubIssueComment>
         Success(BoundedGitHubIssueComment comment) =>
-        BoundedGitHubPublisherResult<BoundedGitHubIssueComment>.Success(comment);
+        BoundedGitHubHttpResult<BoundedGitHubIssueComment>.Success(comment);
 
     private static string JsonBody(byte[] bytes)
     {

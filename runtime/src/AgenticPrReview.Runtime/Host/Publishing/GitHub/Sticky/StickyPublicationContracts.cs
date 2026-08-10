@@ -19,15 +19,16 @@ internal sealed class AuthorizedStickyPublicationRequest
 
     internal static bool TryCreate(
         ActionHostAuthorizer.AuthorizedInvocation? authorization,
-        R4PublicationScopeV1? scope,
-        R4RenderedStickyComment? rendered,
+        R4ValidatedPublicationReview? validatedReview,
         out AuthorizedStickyPublicationRequest? request)
     {
         request = null;
         try
         {
-            if (authorization is null || scope is null || rendered is null ||
-                !R4PublicationIdentityV1.IsValidScope(scope) ||
+            if (authorization is null || validatedReview is null)
+                return false;
+            var scope = validatedReview.Scope;
+            if (!R4PublicationIdentityV1.IsValidScope(scope) ||
                 scope.RepositoryId > long.MaxValue ||
                 (long)scope.RepositoryId !=
                     authorization.PullRequest.RepositoryId ||
@@ -38,7 +39,11 @@ internal sealed class AuthorizedStickyPublicationRequest
                 (long)scope.PullRequestNumber !=
                     authorization.PullRequest.Number ||
                 !StringComparer.Ordinal.Equals(scope.WorkflowPath,
-                    authorization.WorkflowPath) ||
+                    authorization.WorkflowPath)) return false;
+            var rendered = R4StickyRenderer.Render(validatedReview);
+            if (!R4PublicationBudget.Fits(rendered.Comment,
+                    R4PublicationBudget.MaximumScalars,
+                    R4PublicationBudget.MaximumUtf8Bytes) ||
                 !StringComparer.Ordinal.Equals(
                     R4PublicationIdentityV1.ComputeScopeSha256(scope),
                     rendered.Identity.ScopeSha256) ||
@@ -68,7 +73,7 @@ internal interface IStickyGitHubPublisherTransportFactory
 internal interface IStickyGitHubPublisherTransport :
     IBoundedGitHubPublisherTransport
 {
-    Task<BoundedGitHubPublisherResult<BoundedGitHubIssueComment>>
+    Task<BoundedGitHubHttpResult<BoundedGitHubIssueComment>>
         MutateStickyCommentAsync(CancellationToken cancellationToken);
 }
 
@@ -84,6 +89,7 @@ internal enum StickyPublicationReason
     RequestInvalid,
     AuthorizationDenied,
     ReconciliationIncomplete,
+    Deadline,
 }
 
 internal enum StickyPublicationOperation { Create = 1, Update, Observed }
@@ -94,5 +100,6 @@ internal enum StickyDiscoveryKind
     StaleTarget,
     ExactTarget,
     Cancelled,
+    Deadline,
     InvalidOrIncomplete,
 }

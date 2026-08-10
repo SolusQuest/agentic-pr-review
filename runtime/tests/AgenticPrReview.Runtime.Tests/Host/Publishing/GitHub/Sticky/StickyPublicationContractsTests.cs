@@ -1,6 +1,7 @@
 using System.Reflection;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
+using AgenticPrReview.Runtime.Tests.Host.Publishing.Rendering;
 using Xunit;
 
 namespace AgenticPrReview.Runtime.Tests.Host.Publishing.GitHub.Sticky;
@@ -8,30 +9,67 @@ namespace AgenticPrReview.Runtime.Tests.Host.Publishing.GitHub.Sticky;
 public sealed class StickyPublicationContractsTests
 {
     [Fact]
-    public async Task InvalidOrMismatchedP1ScopeCannotMintBoundRequest()
+    public async Task OnlyValidatedP1CapabilityCanMintBoundRequest()
     {
         var data = await StickyPublicationTestData.CreateAsync();
-        var invalid = data.Request.Scope with { RepositoryId = 0 };
         var mismatched = data.Request.Scope with
         {
             PullRequestNumber = data.Request.Scope.PullRequestNumber + 1,
         };
+        var pullRequest = data.Request.Authorization.PullRequest;
+        var mismatchedIdentity = new AgenticPrReview.Runtime.Agent.Core
+            .ReviewedIdentity(
+                pullRequest.RepositoryId.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture),
+                checked((long)mismatched.PullRequestNumber),
+                pullRequest.BaseSha, pullRequest.HeadSha);
+        var mismatchedReview = R4PublicationTestData.Validated(
+            identity: mismatchedIdentity, scope: mismatched);
 
         Assert.False(AuthorizedStickyPublicationRequest.TryCreate(
-            data.Request.Authorization, invalid, data.Rendered, out _));
+            data.Request.Authorization, null, out _));
         Assert.False(AuthorizedStickyPublicationRequest.TryCreate(
-            data.Request.Authorization, mismatched, data.Rendered, out _));
+            data.Request.Authorization, mismatchedReview, out _));
 
+        var forgedBody = "## forged\n\nself-consistent output";
+        var forgedIdentity = data.Rendered.Identity with
+        {
+            BodySha256 = R4PublicationIdentityV1.ComputeBodySha256(
+                forgedBody),
+        };
+        var forged = data.Rendered with
+        {
+            Body = forgedBody,
+            Comment = forgedBody + "\n\n" +
+                R4StickyMarker.Create(forgedIdentity),
+            Identity = forgedIdentity,
+        };
         var oversizedBody = new string('x',
             R4PublicationBudget.MaximumUtf8Bytes + 1);
-        var forged = data.Rendered with
+        var oversizedIdentity = data.Rendered.Identity with
+        {
+            BodySha256 = R4PublicationIdentityV1.ComputeBodySha256(
+                oversizedBody),
+        };
+        var oversized = data.Rendered with
         {
             Body = oversizedBody,
             Comment = oversizedBody + "\n\n" +
-                R4StickyMarker.Create(data.Rendered.Identity),
+                R4StickyMarker.Create(oversizedIdentity),
+            Identity = oversizedIdentity,
         };
-        Assert.False(AuthorizedStickyPublicationRequest.TryCreate(
-            data.Request.Authorization, data.Request.Scope, forged, out _));
+
+        Assert.Equal(R4StickyInspectionKind.ValidR4,
+            R4StickyMarker.Inspect(forged.Comment).Kind);
+        Assert.Equal(R4StickyInspectionKind.ValidR4,
+            R4StickyMarker.Inspect(oversized.Comment).Kind);
+        var factory = Assert.Single(typeof(AuthorizedStickyPublicationRequest)
+            .GetMethods(BindingFlags.Static | BindingFlags.NonPublic),
+            method => method.Name == "TryCreate");
+        Assert.Contains(typeof(R4ValidatedPublicationReview),
+            factory.GetParameters().Select(parameter => parameter.ParameterType));
+        Assert.DoesNotContain(typeof(R4RenderedStickyComment),
+            factory.GetParameters().Select(parameter => parameter.ParameterType));
     }
 
     [Fact]
@@ -66,6 +104,32 @@ public sealed class StickyPublicationContractsTests
             StickyCommentPublisher.StickyPublicationResult.FromFailure(fake));
         Assert.Throws<InvalidOperationException>(() =>
             StickyCommentPublisher.StickyDiscoveryResult.FromEvidence(fake));
+    }
+
+    [Fact]
+    public void ReceiptRehydrationIsBoundedAndCannotMintLiveSuccess()
+    {
+        const string scope =
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        const string body =
+            "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+        const string head = "0123456789abcdef0123456789abcdef01234567";
+        const string url =
+            "https://github.com/SolusQuest/agentic-pr-review/pull/42#issuecomment-7";
+
+        Assert.True(StickyCommentPublisher.StickyPublicationReceipt
+            .TryRehydrate(StickyPublicationOperation.Update, 123, 42, 7,
+                url, scope, body, head, out var receipt));
+        Assert.Equal(url, receipt!.CommentUrl);
+        Assert.False(StickyCommentPublisher.StickyPublicationReceipt
+            .TryRehydrate(StickyPublicationOperation.Update, 123, 42, 7,
+                url + "?unexpected=1", scope, body, head, out _));
+        Assert.False(StickyCommentPublisher.StickyPublicationReceipt
+            .TryRehydrate(StickyPublicationOperation.Update, 123, 42, 7,
+                url, scope.ToUpperInvariant(), body, head, out _));
+        Assert.Throws<InvalidOperationException>(() =>
+            StickyCommentPublisher.StickyPublicationResult.FromReadback(
+                receipt, new FakeIssuerEvidence()));
     }
 
     private sealed class FakeIssuerEvidence :

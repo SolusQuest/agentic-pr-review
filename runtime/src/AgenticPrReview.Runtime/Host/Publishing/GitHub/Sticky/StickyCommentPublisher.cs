@@ -44,6 +44,9 @@ internal sealed class StickyCommentPublisher
                     BoundedGitHubPublisherOutcome
                         .AuthorizationOrValidationFailure,
                     discovery.Reason);
+            if (discovery.Kind == StickyDiscoveryKind.Deadline)
+                return Failure(BoundedGitHubPublisherOutcome.KnownNotWritten,
+                    StickyPublicationReason.Deadline);
             if (cancellationToken.IsCancellationRequested)
                 return Failure(
                     BoundedGitHubPublisherOutcome.CancelledBeforeSend,
@@ -54,21 +57,22 @@ internal sealed class StickyCommentPublisher
                 : StickyPublicationOperation.Update;
             var mutation = await transport.MutateStickyCommentAsync(
                 cancellationToken);
-            if (mutation.Outcome == BoundedGitHubPublisherOutcome
+            if (mutation.Outcome == BoundedGitHubHttpOutcome
                 .AuthorizationOrValidationFailure)
                 return Failure(
                     BoundedGitHubPublisherOutcome
                         .AuthorizationOrValidationFailure,
                     StickyPublicationReason.AuthorizationDenied);
             if (mutation.Outcome ==
-                BoundedGitHubPublisherOutcome.CancelledBeforeSend)
+                BoundedGitHubHttpOutcome.CancelledBeforeSend)
                 return Failure(
                     BoundedGitHubPublisherOutcome.CancelledBeforeSend,
                     StickyPublicationReason.Cancelled);
-            if (mutation.Outcome ==
-                BoundedGitHubPublisherOutcome.KnownNotWritten)
+            if (mutation.Outcome == BoundedGitHubHttpOutcome.KnownNotSent)
                 return Failure(BoundedGitHubPublisherOutcome.KnownNotWritten,
-                    StickyPublicationReason.RequestInvalid);
+                    mutation.Reason == BoundedGitHubPublisherReason.Deadline
+                        ? StickyPublicationReason.Deadline
+                        : StickyPublicationReason.RequestInvalid);
 
             var expectedId = operation == StickyPublicationOperation.Update
                 ? discovery.CommentId : mutation.Value?.Id;
@@ -77,7 +81,8 @@ internal sealed class StickyCommentPublisher
             {
                 var verified = await VerifyAsync(transport, request,
                     expectedId!.Value);
-                if (verified is not null)
+                if (verified is not null &&
+                    transport.IsWithinOverallDeadline)
                     return Written(request, operation, verified);
             }
 
@@ -85,8 +90,13 @@ internal sealed class StickyCommentPublisher
                 expectedId);
             return reconciled is null
                 ? Failure(BoundedGitHubPublisherOutcome.OutcomeUnknown,
-                    StickyPublicationReason.ReconciliationIncomplete)
-                : Written(request, operation, reconciled);
+                    transport.IsWithinOverallDeadline
+                        ? StickyPublicationReason.ReconciliationIncomplete
+                        : StickyPublicationReason.Deadline)
+                : transport.IsWithinOverallDeadline
+                    ? Written(request, operation, reconciled)
+                    : Failure(BoundedGitHubPublisherOutcome.OutcomeUnknown,
+                        StickyPublicationReason.Deadline);
         }
     }
 
@@ -105,10 +115,13 @@ internal sealed class StickyCommentPublisher
             if (result.Kind != StickyDiscoveryKind.ExactTarget) return result;
             var verified = await VerifyAsync(transport, request,
                 result.CommentId!.Value);
-            return verified is null
-                ? Discovery(StickyDiscoveryKind.InvalidOrIncomplete, null,
-                    null, null,
-                    StickyPublicationReason.DiscoveryIncomplete)
+            return verified is null || !transport.IsWithinOverallDeadline
+                ? transport.IsWithinOverallDeadline
+                    ? Discovery(StickyDiscoveryKind.InvalidOrIncomplete, null,
+                        null, null,
+                        StickyPublicationReason.DiscoveryIncomplete)
+                    : Discovery(StickyDiscoveryKind.Deadline, null, null, null,
+                        StickyPublicationReason.Deadline)
                 : Discovery(StickyDiscoveryKind.ExactTarget,
                     result.CommentId, result.CommentUrl,
                     Receipt(request, StickyPublicationOperation.Observed,
@@ -128,9 +141,13 @@ internal sealed class StickyCommentPublisher
         AuthorizedStickyPublicationRequest request,
         CancellationToken cancellationToken)
     {
+        if (!transport.IsWithinOverallDeadline)
+            return Discovery(StickyDiscoveryKind.Deadline, null, null, null,
+                StickyPublicationReason.Deadline);
         var seen = new HashSet<long>();
         BoundedGitHubIssueComment? target = null;
         var total = 0;
+        int? expectedLastPage = null;
         for (var page = 1; page <= BoundedGitHubPublisherPolicy.MaximumPages;
             page++)
         {
@@ -138,14 +155,32 @@ internal sealed class StickyCommentPublisher
                 cancellationToken);
             if (result.Value is null)
                 return Discovery(result.Outcome ==
-                        BoundedGitHubPublisherOutcome.CancelledBeforeSend
+                        BoundedGitHubHttpOutcome.CancelledBeforeSend
                             ? StickyDiscoveryKind.Cancelled
+                            : result.Reason ==
+                                BoundedGitHubPublisherReason.Deadline
+                                ? StickyDiscoveryKind.Deadline
                             : StickyDiscoveryKind.InvalidOrIncomplete,
                     null, null, null,
                     result.Outcome ==
-                        BoundedGitHubPublisherOutcome.CancelledBeforeSend
+                        BoundedGitHubHttpOutcome.CancelledBeforeSend
                             ? StickyPublicationReason.Cancelled
+                            : result.Reason ==
+                                BoundedGitHubPublisherReason.Deadline
+                                ? StickyPublicationReason.Deadline
                             : StickyPublicationReason.DiscoveryIncomplete);
+            if (!transport.IsWithinOverallDeadline)
+                return Discovery(StickyDiscoveryKind.Deadline, null, null,
+                    null, StickyPublicationReason.Deadline);
+            if (result.Value.LastPage is int lastPage)
+            {
+                if (expectedLastPage is int expected &&
+                        expected != lastPage ||
+                    result.Value.NextPage is int next && next > lastPage)
+                    return Invalid(
+                        StickyPublicationReason.DiscoveryIncomplete);
+                expectedLastPage = lastPage;
+            }
             total = checked(total + result.Value.Comments.Count);
             if (total > BoundedGitHubPublisherPolicy.MaximumRecords)
                 return Invalid(StickyPublicationReason.DiscoveryIncomplete);
@@ -165,9 +200,15 @@ internal sealed class StickyCommentPublisher
                         return Invalid(StickyPublicationReason.TargetConflict);
                     target = comment;
                 }
+                if (!transport.IsWithinOverallDeadline)
+                    return Discovery(StickyDiscoveryKind.Deadline, null, null,
+                        null, StickyPublicationReason.Deadline);
             }
             if (result.Value.NextPage is null)
             {
+                if (expectedLastPage is int expected && expected != page)
+                    return Invalid(
+                        StickyPublicationReason.DiscoveryIncomplete);
                 if (target is null)
                     return Discovery(StickyDiscoveryKind.Absent, null, null,
                         null, StickyPublicationReason.None);
@@ -178,6 +219,7 @@ internal sealed class StickyCommentPublisher
                     StickyPublicationReason.None);
             }
             if (result.Value.NextPage != page + 1 ||
+                expectedLastPage is int last && page + 1 > last ||
                 page == BoundedGitHubPublisherPolicy.MaximumPages ||
                 total == BoundedGitHubPublisherPolicy.MaximumRecords)
                 return Invalid(StickyPublicationReason.DiscoveryIncomplete);
@@ -192,10 +234,12 @@ internal sealed class StickyCommentPublisher
     {
         var read = await transport.GetIssueCommentAsync(id,
             CancellationToken.None);
-        if (read.Value is null || !IsExact(read.Value, request, id)) return null;
+        if (read.Value is null || !transport.IsWithinOverallDeadline ||
+            !IsExact(read.Value, request, id)) return null;
         var discovery = await DiscoverCoreAsync(transport, request,
             CancellationToken.None);
-        return discovery.Kind == StickyDiscoveryKind.ExactTarget &&
+        return transport.IsWithinOverallDeadline &&
+            discovery.Kind == StickyDiscoveryKind.ExactTarget &&
             discovery.CommentId == id ? new(read.Value) : null;
     }
 
@@ -212,7 +256,8 @@ internal sealed class StickyCommentPublisher
             return null;
         var read = await transport.GetIssueCommentAsync(id,
             CancellationToken.None);
-        return read.Value is not null && IsExact(read.Value, request, id)
+        return read.Value is not null && transport.IsWithinOverallDeadline &&
+            IsExact(read.Value, request, id)
             ? new(read.Value)
             : null;
     }
@@ -268,9 +313,11 @@ internal sealed class StickyCommentPublisher
             BoundedGitHubPublisherOutcome.CancelledBeforeSend =>
                 reason == StickyPublicationReason.Cancelled,
             BoundedGitHubPublisherOutcome.KnownNotWritten =>
-                reason == StickyPublicationReason.RequestInvalid,
+                reason is StickyPublicationReason.RequestInvalid or
+                    StickyPublicationReason.Deadline,
             BoundedGitHubPublisherOutcome.OutcomeUnknown =>
-                reason == StickyPublicationReason.ReconciliationIncomplete,
+                reason is StickyPublicationReason.ReconciliationIncomplete or
+                    StickyPublicationReason.Deadline,
             BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure =>
                 reason is StickyPublicationReason.AdmissionInvalid or
                     StickyPublicationReason.DiscoveryIncomplete or
@@ -349,6 +396,63 @@ internal sealed class StickyCommentPublisher
                 request.Rendered.Identity.BodySha256,
                 request.Rendered.Identity.HeadSha);
         }
+
+        internal static bool TryRehydrate(
+            StickyPublicationOperation operation,
+            long repositoryId,
+            long pullRequestNumber,
+            long commentId,
+            string? commentUrl,
+            string? scopeSha256,
+            string? bodySha256,
+            string? headSha,
+            out StickyPublicationReceipt? receipt)
+        {
+            receipt = null;
+            if (!Enum.IsDefined(operation) || repositoryId <= 0 ||
+                pullRequestNumber <= 0 || commentId <= 0 ||
+                !IsLowerHex(scopeSha256, 64) ||
+                !IsLowerHex(bodySha256, 64) ||
+                !IsLowerHex(headSha, 40) ||
+                !IsCanonicalCommentUrl(commentUrl, pullRequestNumber,
+                    commentId)) return false;
+            receipt = new(operation, repositoryId, pullRequestNumber,
+                commentId, commentUrl!, scopeSha256!, bodySha256!, headSha!);
+            return true;
+        }
+
+        private static bool IsCanonicalCommentUrl(string? value,
+            long pullRequestNumber, long commentId)
+        {
+            if (value is null ||
+                !Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
+                uri.Scheme != Uri.UriSchemeHttps ||
+                !StringComparer.OrdinalIgnoreCase.Equals(uri.Host,
+                    "github.com") ||
+                !uri.IsDefaultPort || !string.IsNullOrEmpty(uri.Query))
+                return false;
+            var segments = uri.AbsolutePath.Split('/',
+                StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length != 4 || segments[2] != "pull" ||
+                segments[3] != pullRequestNumber.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture) ||
+                !IsRepositorySegment(segments[0]) ||
+                !IsRepositorySegment(segments[1])) return false;
+            var canonical = $"https://github.com/{segments[0]}/" +
+                $"{segments[1]}/pull/{pullRequestNumber}" +
+                $"#issuecomment-{commentId}";
+            return StringComparer.Ordinal.Equals(value, canonical);
+        }
+
+        private static bool IsRepositorySegment(string value) =>
+            value.Length is > 0 and <= 100 &&
+            value.All(static character => char.IsAsciiLetterOrDigit(character)
+                || character is '-' or '_' or '.');
+
+        private static bool IsLowerHex(string? value, int length) =>
+            value is not null && value.Length == length &&
+            value.All(static character => character is >= '0' and <= '9' or
+                >= 'a' and <= 'f');
 
         public override string ToString() => "[PRIVATE]";
     }
