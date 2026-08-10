@@ -704,6 +704,23 @@ internal sealed class LineageService
                 request.RequiredLogicalExpiresAtUnixSeconds,
                 requiredPlatformExpiry))
         {
+            var headroom = await EstablishIntentRefreshHeadroomAsync(
+                    context,
+                    request,
+                    baseScopeDigest,
+                    currentKeyId,
+                    observed,
+                    pending,
+                    requiredPlatformExpiry,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (!headroom.Succeeded)
+            {
+                return LineageResolveResult.Fail(headroom.Code);
+            }
+
+            pending = headroom.Intent!;
+            active = observed.Selection!.Selection!.Head;
             var refreshed = await WriteIntentAsync(
                     context,
                     request,
@@ -1260,6 +1277,166 @@ internal sealed class LineageService
         }
 
         return false;
+    }
+
+    private async Task<IntentHeadroomResult>
+        EstablishIntentRefreshHeadroomAsync(
+            LocatorContext context,
+            LineageResolveRequest request,
+            string baseScopeDigest,
+            string currentKeyId,
+            ObservationResult observed,
+            SelectedIntent pending,
+            long requiredPlatformExpiry,
+            CancellationToken cancellationToken)
+    {
+        var expectedHeadIdentity = observed.Selection!.Selection!
+            .Head.Header.ObjectIdentity;
+        var expectedIntentIdentity = pending.Object.Header.ObjectIdentity;
+        var objectClass = pending.Object.Header.ObjectClass;
+        for (var attempt = 0;
+            attempt < LineageFormat.MaximumPhysicalPerClass;
+            attempt++)
+        {
+            var snapshot = observed.Snapshot!;
+            var name = snapshot.Names[objectClass];
+            var authenticated = snapshot.Authenticated
+                .Where(item => item.Header.ObjectClass == objectClass)
+                .ToImmutableArray();
+            var unknown = snapshot.Unknown
+                .Where(item => item.Metadata.Reference.Name == name)
+                .ToImmutableArray();
+            if (!unknown.IsEmpty)
+            {
+                return IntentHeadroomResult.Fail(LineageCodes.Conflict);
+            }
+
+            var active = observed.Selection.Selection!.Head;
+            var selected = SelectPendingIntent(
+                snapshot,
+                active,
+                currentKeyId,
+                request.RequiredLogicalExpiresAtUnixSeconds,
+                requiredPlatformExpiry);
+            if (!selected.Succeeded)
+            {
+                return IntentHeadroomResult.Fail(selected.Code);
+            }
+
+            if (selected.Intent is null ||
+                selected.Intent.Object.Header.ObjectClass != objectClass ||
+                !StringComparer.Ordinal.Equals(
+                    selected.Intent.Object.Header.ObjectIdentity,
+                    expectedIntentIdentity))
+            {
+                return IntentHeadroomResult.Fail(LineageCodes.Conflict);
+            }
+
+            pending = selected.Intent;
+            if (authenticated.Length <= 7)
+            {
+                return IntentHeadroomResult.Success(pending);
+            }
+
+            var authorizedEvidence = active.Head.Superseded
+                .Concat(active.Head.CompletedCleanup)
+                .ToImmutableArray();
+            var target = authenticated
+                .Where(item => item.Metadata != pending.Object.Metadata)
+                .OrderByDescending(item =>
+                    StringComparer.Ordinal.Equals(
+                        item.Header.Epoch,
+                        active.Header.Epoch) &&
+                    StringComparer.Ordinal.Equals(
+                        item.Header.ObjectIdentity,
+                        expectedIntentIdentity))
+                .ThenBy(item => item.Metadata.Reference.ObjectId.Value,
+                    StringComparer.Ordinal)
+                .FirstOrDefault(item =>
+                    (StringComparer.Ordinal.Equals(
+                            item.Header.Epoch,
+                            active.Header.Epoch) &&
+                        StringComparer.Ordinal.Equals(
+                            item.Header.ObjectIdentity,
+                            expectedIntentIdentity)) ||
+                    authorizedEvidence.Any(evidence =>
+                        LineageHeadCodec.Matches(evidence, item.Metadata)));
+            if (target is null)
+            {
+                return IntentHeadroomResult.Fail(LineageCodes.CleanupFailed);
+            }
+
+            _ = await store.DeleteExactAsync(
+                    new OpaqueStoreDeleteRequest(target.Metadata),
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+
+            ClearObservation(observed);
+            var reread = await ReadObservationAsync(
+                    context,
+                    request.Access,
+                    request.BaseScope,
+                    baseScopeDigest,
+                    currentKeyId,
+                    request.RequiredLogicalExpiresAtUnixSeconds,
+                    requiredPlatformExpiry,
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            if (!reread.Succeeded || reread.Selection!.IsAbsent ||
+                !StringComparer.Ordinal.Equals(
+                    reread.Selection.Selection!.Head.Header.ObjectIdentity,
+                    expectedHeadIdentity))
+            {
+                var code = reread.Succeeded
+                    ? LineageCodes.Conflict
+                    : reread.Code;
+                ClearObservation(reread);
+                return IntentHeadroomResult.Fail(code);
+            }
+
+            var remainingUnknown = reread.Snapshot!.Unknown.Where(item =>
+                    item.Metadata.Reference.Name ==
+                        reread.Snapshot.Names[objectClass])
+                .ToImmutableArray();
+            if (!remainingUnknown.IsEmpty)
+            {
+                ClearObservation(reread);
+                return IntentHeadroomResult.Fail(LineageCodes.Conflict);
+            }
+
+            var reselected = SelectPendingIntent(
+                reread.Snapshot,
+                reread.Selection.Selection.Head,
+                currentKeyId,
+                request.RequiredLogicalExpiresAtUnixSeconds,
+                requiredPlatformExpiry);
+            if (!reselected.Succeeded || reselected.Intent is null ||
+                reselected.Intent.Object.Header.ObjectClass != objectClass ||
+                !StringComparer.Ordinal.Equals(
+                    reselected.Intent.Object.Header.ObjectIdentity,
+                    expectedIntentIdentity))
+            {
+                var code = reselected.Succeeded
+                    ? LineageCodes.Conflict
+                    : reselected.Code;
+                ClearObservation(reread);
+                return IntentHeadroomResult.Fail(code);
+            }
+
+            var remaining = reread.Snapshot.Authenticated.Count(item =>
+                item.Header.ObjectClass == objectClass);
+            if (remaining >= authenticated.Length)
+            {
+                ClearObservation(reread);
+                return IntentHeadroomResult.Fail(LineageCodes.CleanupFailed);
+            }
+
+            observed.Snapshot = reread.Snapshot;
+            observed.Selection = reread.Selection;
+            pending = reselected.Intent;
+        }
+
+        return IntentHeadroomResult.Fail(LineageCodes.CleanupFailed);
     }
 
     private async Task<bool> EstablishTransitionHeadroomAsync(
@@ -1833,6 +2010,19 @@ internal sealed class LineageService
             return CleanupDebtResult.Fail(LineageCodes.RetentionFailed);
         }
 
+        if (CanReestablishInitialAbsence(
+                snapshot,
+                authenticatedHeads,
+                underRetainedHeads))
+        {
+            return CleanupDebtResult.Success(underRetainedHeads
+                .OrderBy(candidate =>
+                    candidate.Metadata.Reference.ObjectId.Value,
+                    StringComparer.Ordinal)
+                .First()
+                .Metadata);
+        }
+
         var allHeads = authenticatedHeads.AddRange(underRetainedHeads);
         var topology = LineageHeadSelector.Select(
             allHeads,
@@ -1846,20 +2036,18 @@ internal sealed class LineageService
             return CleanupDebtResult.Fail(topology.Code);
         }
 
-        foreach (var debt in underRetainedHeads.OrderBy(candidate =>
-            candidate.Metadata.Reference.ObjectId.Value,
-            StringComparer.Ordinal))
+        var equivalentDebt = underRetainedHeads
+            .Where(debt => authenticatedHeads.Any(candidate =>
+                StringComparer.Ordinal.Equals(
+                    candidate.Header.ObjectIdentity,
+                    debt.Header.ObjectIdentity) &&
+                LineageHeadCodec.Equivalent(candidate.Head, debt.Head)))
+            .OrderBy(candidate => candidate.Metadata.Reference.ObjectId.Value,
+                StringComparer.Ordinal)
+            .FirstOrDefault();
+        if (equivalentDebt is not null)
         {
-            if (authenticatedHeads.Any(candidate =>
-                    StringComparer.Ordinal.Equals(
-                        candidate.Header.ObjectIdentity,
-                        debt.Header.ObjectIdentity) &&
-                    LineageHeadCodec.Equivalent(
-                        candidate.Head,
-                        debt.Head)))
-            {
-                return CleanupDebtResult.Success(debt.Metadata);
-            }
+            return CleanupDebtResult.Success(equivalentDebt.Metadata);
         }
 
         var selected = topology.Selection!.Head;
@@ -1887,6 +2075,37 @@ internal sealed class LineageService
         }
 
         return CleanupDebtResult.Fail(LineageCodes.RetentionFailed);
+    }
+
+    private static bool CanReestablishInitialAbsence(
+        ScopedStateInventorySnapshot snapshot,
+        ImmutableArray<LineageHeadCandidate> authenticatedHeads,
+        ImmutableArray<LineageHeadCandidate> underRetainedHeads)
+    {
+        if (!authenticatedHeads.IsEmpty ||
+            !snapshot.Authenticated.IsEmpty ||
+            !snapshot.Unknown.IsEmpty ||
+            snapshot.UnderRetained.Length != underRetainedHeads.Length)
+        {
+            return false;
+        }
+
+        var root = underRetainedHeads[0];
+        return root.Head.Transition == LineageTransitionKind.Initial &&
+            root.Head.Ordinal == 0 &&
+            underRetainedHeads.All(candidate =>
+                candidate.Head.Transition == LineageTransitionKind.Initial &&
+                candidate.Head.Ordinal == 0 &&
+                StringComparer.Ordinal.Equals(
+                    candidate.Header.Epoch,
+                    root.Header.Epoch) &&
+                StringComparer.Ordinal.Equals(
+                    candidate.Header.SessionId,
+                    root.Header.SessionId) &&
+                StringComparer.Ordinal.Equals(
+                    candidate.Header.ObjectIdentity,
+                    root.Header.ObjectIdentity) &&
+                LineageHeadCodec.Equivalent(candidate.Head, root.Head));
     }
 
     private static bool SatisfiesExpectedPhysical(
@@ -2398,6 +2617,21 @@ internal sealed class LineageService
     private sealed record SelectedIntent(
         AuthenticatedStateObject Object,
         LineageTransitionIntentV1 Intent);
+
+    private sealed record IntentHeadroomResult(
+        string Code,
+        SelectedIntent? Intent)
+    {
+        internal bool Succeeded =>
+            StringComparer.Ordinal.Equals(Code, LineageCodes.Ready) &&
+            Intent is not null;
+
+        internal static IntentHeadroomResult Success(SelectedIntent intent) =>
+            new(LineageCodes.Ready, intent);
+
+        internal static IntentHeadroomResult Fail(string code) =>
+            new(code, null);
+    }
 
     private sealed record IntentConvergenceResult(
         string Code,

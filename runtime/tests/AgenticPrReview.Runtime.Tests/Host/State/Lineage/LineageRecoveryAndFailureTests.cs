@@ -370,6 +370,217 @@ public sealed class LineageRecoveryAndFailureTests
     }
 
     [Fact]
+    public async Task EightEquivalentStaleIntentsPruneBeforeRefresh()
+    {
+        await WithRootAsync(async root =>
+        {
+            using var lease = LineageTestData.Context();
+            var inner = new LocalRestrictedStateStore(
+                root,
+                timeProvider: lease.Time);
+            var initialized = await new LineageService(inner, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    LineageTestData.Request(lease.Access),
+                    CancellationToken.None);
+            Assert.True(initialized.Succeeded, initialized.Code);
+            SelectedLineageSnapshot selected;
+            using (initialized.Context)
+            {
+                Assert.True(initialized.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                selected = snapshot!;
+            }
+
+            var priorRequiredExpiry = LineageTestData.Now +
+                StateRetentionRequirements.ScopedPlatformRequestSeconds;
+            for (var copy = 0;
+                copy < LineageFormat.MaximumPhysicalPerClass;
+                copy++)
+            {
+                await UploadResetIntentAsync(
+                    inner,
+                    lease,
+                    selected,
+                    selected.LineageHeadIdentity,
+                    LineageTestData.LogicalExpiry,
+                    priorRequiredExpiry);
+            }
+
+            var resetName = await ResolveNameAsync(
+                lease,
+                StateObjectClass.Reset);
+            var atCap = await inner.ListExactAsync(
+                new OpaqueStoreListRequest(
+                    resetName,
+                    LineageFormat.MaximumPhysicalPerClass),
+                CancellationToken.None);
+            Assert.True(atCap.Succeeded);
+            Assert.Equal(LineageFormat.MaximumPhysicalPerClass,
+                atCap.Objects.Length);
+
+            var maximumPhysicalCount = Directory.GetFiles(
+                root,
+                "*.aprobject").Length;
+            var deletesBeforeFirstUpload = -1;
+            var resetFamilyCompleteAfterRefresh = false;
+            var resetFamilyCountAfterRefresh = -1;
+            ProbedLineageStore? probe = null;
+            probe = new ProbedLineageStore(inner)
+            {
+                AfterUpload = async uploadCall =>
+                {
+                    if (uploadCall == 1)
+                    {
+                        deletesBeforeFirstUpload = probe!.DeleteCalls;
+                        var family = await inner.ListExactAsync(
+                            new OpaqueStoreListRequest(
+                                resetName,
+                                LineageFormat.MaximumPhysicalPerClass),
+                            CancellationToken.None);
+                        resetFamilyCompleteAfterRefresh = family.Succeeded;
+                        resetFamilyCountAfterRefresh = family.Objects.Length;
+                    }
+
+                    maximumPhysicalCount = Math.Max(
+                        maximumPhysicalCount,
+                        Directory.GetFiles(root, "*.aprobject").Length);
+                },
+            };
+            var reset = LineageTestData.Reset(
+                lease.Access,
+                selected.LineageHeadIdentity,
+                new string('e', 64));
+            var request = LineageTestData.Request(lease.Access, reset) with
+            {
+                RequiredLogicalExpiresAtUnixSeconds =
+                    LineageTestData.LogicalExpiry + 60,
+            };
+            var result = await new LineageService(probe, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    request,
+                    CancellationToken.None);
+
+            Assert.True(result.Succeeded, result.Code);
+            result.Context!.Dispose();
+            Assert.Equal(1, deletesBeforeFirstUpload);
+            Assert.True(resetFamilyCompleteAfterRefresh);
+            Assert.Equal(LineageFormat.MaximumPhysicalPerClass,
+                resetFamilyCountAfterRefresh);
+            Assert.True(maximumPhysicalCount <= 9);
+            Assert.Equal(2, probe.UploadCalls);
+            Assert.Single(probe.UploadedNames, name => name == resetName);
+
+            var afterRecovery = await inner.ListExactAsync(
+                new OpaqueStoreListRequest(
+                    resetName,
+                    LineageFormat.MaximumPhysicalPerClass),
+                CancellationToken.None);
+            Assert.True(afterRecovery.Succeeded);
+            Assert.Empty(afterRecovery.Objects);
+        });
+    }
+
+    [Fact]
+    public async Task FreshProcessRetriesAmbiguousStaleIntentPrePrune()
+    {
+        await WithRootAsync(async root =>
+        {
+            using var lease = LineageTestData.Context();
+            var seedStore = new LocalRestrictedStateStore(
+                root,
+                timeProvider: lease.Time);
+            var initialized = await new LineageService(seedStore, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    LineageTestData.Request(lease.Access),
+                    CancellationToken.None);
+            Assert.True(initialized.Succeeded, initialized.Code);
+            SelectedLineageSnapshot selected;
+            using (initialized.Context)
+            {
+                Assert.True(initialized.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                selected = snapshot!;
+            }
+
+            var priorRequiredExpiry = LineageTestData.Now +
+                StateRetentionRequirements.ScopedPlatformRequestSeconds;
+            for (var copy = 0;
+                copy < LineageFormat.MaximumPhysicalPerClass;
+                copy++)
+            {
+                await UploadResetIntentAsync(
+                    seedStore,
+                    lease,
+                    selected,
+                    selected.LineageHeadIdentity,
+                    LineageTestData.LogicalExpiry,
+                    priorRequiredExpiry);
+            }
+
+            var reset = LineageTestData.Reset(
+                lease.Access,
+                selected.LineageHeadIdentity,
+                new string('e', 64));
+            var request = LineageTestData.Request(lease.Access, reset) with
+            {
+                RequiredLogicalExpiresAtUnixSeconds =
+                    LineageTestData.LogicalExpiry + 60,
+            };
+            var interruptedStore = new ProbedLineageStore(
+                new LocalRestrictedStateStore(root, timeProvider: lease.Time))
+            {
+                ReturnDeleteOutcomeUnknownAlways = true,
+            };
+            var interrupted = await new LineageService(
+                    interruptedStore,
+                    lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    request,
+                    CancellationToken.None);
+
+            Assert.False(interrupted.Succeeded);
+            Assert.Equal(LineageCodes.CleanupFailed, interrupted.Code);
+            Assert.Null(interrupted.Context);
+            Assert.Equal(1, interruptedStore.DeleteCalls);
+            Assert.Equal(0, interruptedStore.UploadCalls);
+
+            var resetName = await ResolveNameAsync(
+                lease,
+                StateObjectClass.Reset);
+            var stillAtCap = await seedStore.ListExactAsync(
+                new OpaqueStoreListRequest(
+                    resetName,
+                    LineageFormat.MaximumPhysicalPerClass),
+                CancellationToken.None);
+            Assert.True(stillAtCap.Succeeded);
+            Assert.Equal(LineageFormat.MaximumPhysicalPerClass,
+                stillAtCap.Objects.Length);
+
+            var recoveredStore = new ProbedLineageStore(
+                new LocalRestrictedStateStore(root, timeProvider: lease.Time));
+            var recovered = await new LineageService(
+                    recoveredStore,
+                    lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    request,
+                    CancellationToken.None);
+
+            Assert.True(recovered.Succeeded, recovered.Code);
+            recovered.Context!.Dispose();
+            Assert.Equal(2, recoveredStore.UploadCalls);
+            Assert.Single(recoveredStore.UploadedNames,
+                name => name == resetName);
+        });
+    }
+
+    [Fact]
     public async Task EightUnknownTransitionRecordsBlockIntentAppend()
     {
         await WithRootAsync(async root =>
@@ -835,7 +1046,7 @@ public sealed class LineageRecoveryAndFailureTests
                 LineageTestData.Request(lease.Access),
                 CancellationToken.None);
             Assert.False(rejected.Succeeded);
-            Assert.Equal(LineageCodes.RetentionFailed, rejected.Code);
+            Assert.Equal(LineageCodes.CleanupFailed, rejected.Code);
 
             var lowerRequest = LineageTestData.Request(lease.Access) with
             {
@@ -846,7 +1057,7 @@ public sealed class LineageRecoveryAndFailureTests
                 lowerRequest,
                 CancellationToken.None);
             Assert.False(retried.Succeeded);
-            Assert.Equal(LineageCodes.RetentionFailed, retried.Code);
+            Assert.Equal(LineageCodes.CleanupFailed, retried.Code);
             Assert.Equal(0, probe.UploadCalls);
         });
     }
@@ -876,6 +1087,93 @@ public sealed class LineageRecoveryAndFailureTests
             Assert.Equal(LineageCodes.RetentionFailed, result.Code);
             Assert.Equal(2, probe.DeleteCalls);
             Assert.Empty(Directory.GetFiles(root, "*.aprobject"));
+        });
+    }
+
+    [Fact]
+    public async Task FreshProcessReinitializesAfterUnderRetainedInitialClaim()
+    {
+        await WithRootAsync(async root =>
+        {
+            using var lease = LineageTestData.Context();
+            var interruptedStore = new ProbedLineageStore(
+                new LocalRestrictedStateStore(root, timeProvider: lease.Time))
+            {
+                UploadRequiredExpiryTransform = required => required - 3_601,
+                ReturnDeleteOutcomeUnknownAlways = true,
+            };
+            var interrupted = await new LineageService(
+                    interruptedStore,
+                    lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    LineageTestData.Request(lease.Access),
+                    CancellationToken.None);
+
+            Assert.False(interrupted.Succeeded);
+            Assert.Equal(LineageCodes.CleanupFailed, interrupted.Code);
+            Assert.Null(interrupted.Context);
+            Assert.Equal(1, interruptedStore.UploadCalls);
+            Assert.True(interruptedStore.DeleteCalls >=
+                LineageFormat.MaximumScopedObjects);
+
+            var lineageName = await ResolveNameAsync(
+                lease,
+                StateObjectClass.LineageHead);
+            var persisted = await new LocalRestrictedStateStore(
+                    root,
+                    timeProvider: lease.Time)
+                .ListExactAsync(
+                    new OpaqueStoreListRequest(
+                        lineageName,
+                        LineageFormat.MaximumPhysicalPerClass),
+                    CancellationToken.None);
+            Assert.True(persisted.Succeeded);
+            Assert.Single(persisted.Objects);
+
+            var absenceObserved = false;
+            var recoveredStore = new ProbedLineageStore(
+                new LocalRestrictedStateStore(root, timeProvider: lease.Time))
+            {
+                AfterFirstSuccessfulDelete = () =>
+                {
+                    absenceObserved = Directory.GetFiles(
+                        root,
+                        "*.aprobject").Length == 0;
+                    return Task.CompletedTask;
+                },
+            };
+            var recovered = await new LineageService(
+                    recoveredStore,
+                    lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    LineageTestData.Request(lease.Access),
+                    CancellationToken.None);
+
+            Assert.True(recovered.Succeeded, recovered.Code);
+            using (recovered.Context)
+            {
+                Assert.True(recovered.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                Assert.Equal(LineageTransitionKind.Initial,
+                    snapshot!.Transition);
+            }
+
+            Assert.True(absenceObserved);
+            Assert.Equal(1, recoveredStore.DeleteCalls);
+            Assert.Equal(1, recoveredStore.UploadCalls);
+            var reinitialized = await new LocalRestrictedStateStore(
+                    root,
+                    timeProvider: lease.Time)
+                .ListExactAsync(
+                    new OpaqueStoreListRequest(
+                        lineageName,
+                        LineageFormat.MaximumPhysicalPerClass),
+                    CancellationToken.None);
+            Assert.True(reinitialized.Succeeded);
+            Assert.Single(reinitialized.Objects);
         });
     }
 
@@ -1194,6 +1492,7 @@ public sealed class LineageRecoveryAndFailureTests
         internal int ReadBackCalls { get; private set; }
         internal int DeleteCalls { get; private set; }
         internal bool StaleLineageListInjected { get; private set; }
+        internal List<OpaqueStoreName> UploadedNames { get; } = [];
 
         public async Task<OpaqueStoreListResult> ListExactAsync(
             OpaqueStoreListRequest request,
@@ -1272,6 +1571,7 @@ public sealed class LineageRecoveryAndFailureTests
             CancellationToken cancellationToken)
         {
             UploadCalls++;
+            UploadedNames.Add(request.Name);
             var transformed = UploadRequiredExpiryTransform is null
                 ? request
                 : request with
