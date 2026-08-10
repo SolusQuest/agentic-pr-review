@@ -15,12 +15,13 @@ import {
   OfficialCallTimeoutError,
   runContainedOfficialCall,
 } from './official-output.js';
+import { ArtifactBridgeDeadlineError, ArtifactBridgeOperationBudget } from './operation-budget.js';
 import { ArtifactBridgeStaging, ArtifactBridgeStagingError } from './staging.js';
 import {
   ArtifactTransportEnvelopeError,
   digestBytes,
+  encodeArtifactTransportEnvelope,
   readArtifactArchive,
-  writeArtifactTransportEnvelope,
 } from './transport-envelope.js';
 
 export interface ArtifactBridgeExecutor {
@@ -118,6 +119,8 @@ interface PlatformArtifact {
   readonly producingRunId: string;
 }
 
+type MutationPhase = 'not_dispatched' | 'dispatched' | 'committed';
+
 class BridgeOperationFailure extends Error {
   constructor(
     readonly failure: ArtifactBridgeFailure,
@@ -150,31 +153,32 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
     command: ArtifactBridgeCommand,
     signal: AbortSignal,
   ): Promise<ArtifactBridgeResult> {
-    const startedAt = this.now();
+    const budget = new ArtifactBridgeOperationBudget(signal, this.now, this.now());
     try {
       switch (command.operation) {
         case 'list_exact':
-          return await this.listExact(command, signal, startedAt);
+          return await this.listExact(command, budget);
         case 'metadata':
-          return await this.metadata(command, signal, startedAt);
+          return await this.metadata(command, budget);
         case 'download':
-          return await this.download(command, signal, startedAt);
+          return await this.download(command, budget);
         case 'upload_immutable':
-          return await this.upload(command, signal, startedAt);
+          return await this.upload(command, budget);
         case 'readback_exact':
-          return await this.readBack(command, signal, startedAt);
+          return await this.readBack(command, budget);
         case 'delete_exact':
-          return await this.delete(command, signal, startedAt);
+          return await this.delete(command, budget);
       }
     } catch (error) {
       return this.failureResult(command, error);
+    } finally {
+      budget.dispose();
     }
   }
 
   private async listExact(
     command: Extract<ArtifactBridgeCommand, { operation: 'list_exact' }>,
-    signal: AbortSignal,
-    startedAt: number,
+    budget: ArtifactBridgeOperationBudget,
   ): Promise<ArtifactBridgeResult> {
     const maximum = Number(command.maximum_objects);
     let expectedTotal: number | undefined;
@@ -193,9 +197,9 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
             },
             requestSignal,
           ),
-        signal,
-        startedAt,
+        budget,
       );
+      budget.throwIfExpired();
       if (response.status !== 200 || !responseFits(response.data)) {
         throw new BridgeOperationFailure('incomplete');
       }
@@ -247,91 +251,94 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
 
   private async metadata(
     command: Extract<ArtifactBridgeCommand, { operation: 'metadata' }>,
-    signal: AbortSignal,
-    startedAt: number,
+    budget: ArtifactBridgeOperationBudget,
   ): Promise<ArtifactBridgeResult> {
-    const platform = await this.loadPlatformArtifact(
-      command.name,
-      command.object_id,
-      signal,
-      startedAt,
-    );
-    const record = await this.readRecord(platform, signal, startedAt);
+    const platform = await this.loadPlatformArtifact(command.name, command.object_id, budget);
+    const record = await this.readRecord(platform, budget);
     return successWithMetadata(command, record.metadata);
   }
 
   private async download(
     command: Extract<ArtifactBridgeCommand, { operation: 'download' }>,
-    signal: AbortSignal,
-    startedAt: number,
+    budget: ArtifactBridgeOperationBudget,
   ): Promise<ArtifactBridgeResult> {
     const platform = await this.loadPlatformArtifact(
       command.expected.name,
       command.expected.object_id,
-      signal,
-      startedAt,
+      budget,
     );
     this.assertExpectedPlatform(command.expected, platform);
-    const record = await this.readRecord(platform, signal, startedAt);
+    this.assertNotExpired(platform);
+    const record = await this.readRecord(platform, budget);
     assertMetadata(command.expected, record.metadata);
     if (record.bytes.length > Number(command.maximum_bytes)) {
       throw new BridgeOperationFailure('digest_mismatch');
     }
-    await this.context.staging.writeDestination(command.destination_relative_path, record.bytes);
+    await this.context.staging.writeDestination(
+      command.destination_relative_path,
+      record.bytes,
+      budget,
+    );
     return successWithMetadata(command, record.metadata);
   }
 
   private async upload(
     command: Extract<ArtifactBridgeCommand, { operation: 'upload_immutable' }>,
-    signal: AbortSignal,
-    startedAt: number,
+    budget: ArtifactBridgeOperationBudget,
   ): Promise<ArtifactBridgeResult> {
-    const source = await this.context.staging.readSource(command.source_relative_path);
-    if (digestBytes(source) !== command.encrypted_object_digest) {
-      throw new BridgeOperationFailure('invalid', 'not_committed');
-    }
-    const operationDirectory = await this.context.staging.createOperationDirectory();
-    let lateSettlement: Promise<void> | undefined;
-    let cleanupMutationState: ArtifactBridgeMutationState = 'not_committed';
-    let cleanupMetadata: ArtifactMetadataWire | undefined;
+    let phase: MutationPhase = 'not_dispatched';
+    let metadata: ArtifactMetadataWire | undefined;
     try {
-      const envelopePath = await writeArtifactTransportEnvelope(
-        operationDirectory,
+      const source = await this.context.staging.readSource(command.source_relative_path, budget);
+      if (digestBytes(source) !== command.encrypted_object_digest) {
+        throw new BridgeOperationFailure('invalid', 'not_committed');
+      }
+      const envelope = encodeArtifactTransportEnvelope(
         this.context.currentRunId,
         this.context.currentRunAttempt,
         source,
         command.encrypted_object_digest,
+        budget,
+      );
+      const { envelopePath, operationDirectory } = await this.context.staging.writeUploadEnvelope(
+        command.source_relative_path,
+        envelope,
+        budget,
       );
       const minimumExpiry = Number(command.minimum_expires_at_unix_seconds);
       const retentionDays = Math.max(
         1,
         Math.ceil((minimumExpiry * 1000 - this.now()) / 86_400_000),
       );
-      const response = await this.callOfficial(
-        () =>
-          this.artifactClient.uploadArtifact(command.name, [envelopePath], operationDirectory, {
+      const response = await this.callOfficial(() => {
+        const pending = this.artifactClient.uploadArtifact(
+          command.name,
+          [envelopePath],
+          operationDirectory,
+          {
             retentionDays,
             compressionLevel: 0,
-          }),
-        signal,
-        startedAt,
-      );
-      cleanupMutationState = 'outcome_unknown';
+          },
+        );
+        phase = 'dispatched';
+        return pending;
+      }, budget);
+      budget.throwIfExpired();
       const objectId = platformId(response.id);
       const archiveDigest = parseUploadResponseDigest(response.digest);
       if (!objectId || !archiveDigest) {
         throw new BridgeOperationFailure('outcome_unknown', 'outcome_unknown');
       }
-      cleanupMutationState = 'committed';
-      const platform = await this.loadPlatformArtifact(command.name, objectId, signal, startedAt);
+      phase = 'committed';
+      const platform = await this.loadPlatformArtifact(command.name, objectId, budget);
       if (
         platform.archiveDigest !== archiveDigest ||
         platform.producingRunId !== this.context.currentRunId
       ) {
         throw new BridgeOperationFailure('conflict', 'committed');
       }
-      const record = await this.readRecord(platform, signal, startedAt);
-      cleanupMetadata = record.metadata;
+      const record = await this.readRecord(platform, budget);
+      metadata = record.metadata;
       if (
         record.metadata.encrypted_object_digest !== command.encrypted_object_digest ||
         Number(record.metadata.expires_at_unix_seconds) < minimumExpiry
@@ -343,143 +350,138 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
         mutation_state: 'committed',
       };
     } catch (error) {
-      if (error instanceof OfficialCallTimeoutError) {
-        lateSettlement = error.settled;
-      }
-      let propagatedError: BridgeOperationFailure;
       if (error instanceof BridgeOperationFailure) {
-        cleanupMutationState = error.mutationState ?? cleanupMutationState;
-        cleanupMetadata = error.metadata ?? cleanupMetadata;
-        propagatedError = new BridgeOperationFailure(
+        throw new BridgeOperationFailure(
           error.failure,
-          cleanupMutationState,
-          cleanupMetadata,
+          error.mutationState ?? mutationStateForPhase(phase),
+          error.metadata ?? metadata,
         );
-      } else if (
-        cleanupMutationState === 'not_committed' &&
+      }
+      if (
+        phase !== 'committed' &&
         error instanceof OfficialCallError &&
         provenConflict(error.causeValue)
       ) {
-        propagatedError = new BridgeOperationFailure('conflict', 'not_committed');
-      } else if (
-        cleanupMutationState === 'not_committed' &&
-        (error instanceof OfficialCallError || error instanceof OfficialCallTimeoutError)
-      ) {
-        cleanupMutationState = 'outcome_unknown';
-        propagatedError = new BridgeOperationFailure('outcome_unknown', cleanupMutationState);
-      } else if (error instanceof OfficialCallTimeoutError) {
-        propagatedError = new BridgeOperationFailure(
-          'cancelled',
-          cleanupMutationState,
-          cleanupMetadata,
-        );
-      } else if (error instanceof OfficialCallError) {
-        propagatedError = new BridgeOperationFailure(
-          structuredStatus(error.causeValue) === 404 ? 'not_found' : 'io',
-          cleanupMutationState,
-          cleanupMetadata,
-        );
-      } else if (
+        throw new BridgeOperationFailure('conflict', 'not_committed');
+      }
+      if (
         error instanceof ArtifactBridgeStagingError ||
         error instanceof ArtifactTransportEnvelopeError
       ) {
-        propagatedError = new BridgeOperationFailure(
-          'invalid',
-          cleanupMutationState,
-          cleanupMetadata,
+        throw new BridgeOperationFailure('invalid', mutationStateForPhase(phase), metadata);
+      }
+      if (phase !== 'not_dispatched') {
+        throw new BridgeOperationFailure(
+          'outcome_unknown',
+          phase === 'committed' ? 'committed' : 'outcome_unknown',
+          metadata,
         );
-      } else {
-        propagatedError = new BridgeOperationFailure('io', cleanupMutationState, cleanupMetadata);
       }
-      throw propagatedError;
-    } finally {
-      if (lateSettlement) {
-        scheduleLateCleanup(lateSettlement, this.context.staging, operationDirectory);
-      } else {
-        try {
-          await this.context.staging.cleanupOperationDirectory(operationDirectory);
-        } catch {
-          throw new BridgeOperationFailure('cleanup', cleanupMutationState, cleanupMetadata);
-        }
+      if (
+        error instanceof ArtifactBridgeDeadlineError ||
+        error instanceof OfficialCallTimeoutError
+      ) {
+        throw new BridgeOperationFailure('cancelled', 'not_committed');
       }
+      if (error instanceof OfficialCallError) {
+        throw new BridgeOperationFailure(
+          structuredStatus(error.causeValue) === 404 ? 'not_found' : 'io',
+          'not_committed',
+        );
+      }
+      throw new BridgeOperationFailure('io', 'not_committed');
     }
   }
 
   private async readBack(
     command: Extract<ArtifactBridgeCommand, { operation: 'readback_exact' }>,
-    signal: AbortSignal,
-    startedAt: number,
+    budget: ArtifactBridgeOperationBudget,
   ): Promise<ArtifactBridgeResult> {
     const platform = await this.loadPlatformArtifact(
       command.expected.name,
       command.expected.object_id,
-      signal,
-      startedAt,
+      budget,
     );
     this.assertExpectedPlatform(command.expected, platform);
-    this.assertNotExpired(platform);
-    const record = await this.readRecord(platform, signal, startedAt);
+    const record = await this.readRecord(platform, budget);
     assertMetadata(command.expected, record.metadata);
     return successWithMetadata(command, record.metadata);
   }
 
   private async delete(
     command: Extract<ArtifactBridgeCommand, { operation: 'delete_exact' }>,
-    signal: AbortSignal,
-    startedAt: number,
+    budget: ArtifactBridgeOperationBudget,
   ): Promise<ArtifactBridgeResult> {
-    const platform = await this.loadPlatformArtifact(
-      command.expected.name,
-      command.expected.object_id,
-      signal,
-      startedAt,
-    );
-    this.assertExpectedPlatform(command.expected, platform);
-    const response = await this.callOfficial(
-      (requestSignal) =>
-        this.context.actions.deleteArtifact(
+    let phase: MutationPhase = 'not_dispatched';
+    try {
+      const platform = await this.loadPlatformArtifact(
+        command.expected.name,
+        command.expected.object_id,
+        budget,
+      );
+      this.assertExpectedPlatform(command.expected, platform);
+      const response = await this.callOfficial((requestSignal) => {
+        const pending = this.context.actions.deleteArtifact(
           {
             owner: this.context.owner,
             repo: this.context.repository,
             artifact_id: Number(command.expected.object_id),
           },
           requestSignal,
-        ),
-      signal,
-      startedAt,
-    );
-    if (response.status !== 204) {
-      throw new BridgeOperationFailure('outcome_unknown', 'outcome_unknown');
-    }
-    try {
-      await this.loadPlatformArtifact(
-        command.expected.name,
-        command.expected.object_id,
-        signal,
-        startedAt,
-      );
-    } catch (error) {
-      if (
-        (error instanceof BridgeOperationFailure && error.failure === 'not_found') ||
-        (error instanceof OfficialCallError && structuredStatus(error.causeValue) === 404)
-      ) {
-        return {
-          operation: command.operation,
-          correlation_id: command.correlation_id,
-          failure: 'none',
-          mutation_state: 'committed',
-        };
+        );
+        phase = 'dispatched';
+        return pending;
+      }, budget);
+      budget.throwIfExpired();
+      if (response.status !== 204) {
+        throw new BridgeOperationFailure('outcome_unknown', 'outcome_unknown');
+      }
+      try {
+        await this.loadPlatformArtifact(command.expected.name, command.expected.object_id, budget);
+      } catch (error) {
+        if (isNotFound(error)) {
+          phase = 'committed';
+          return {
+            operation: command.operation,
+            correlation_id: command.correlation_id,
+            failure: 'none',
+            mutation_state: 'committed',
+          };
+        }
+        throw new BridgeOperationFailure('outcome_unknown', 'outcome_unknown');
       }
       throw new BridgeOperationFailure('outcome_unknown', 'outcome_unknown');
+    } catch (error) {
+      if (error instanceof BridgeOperationFailure) {
+        throw new BridgeOperationFailure(
+          error.failure,
+          error.mutationState ?? mutationStateForPhase(phase),
+          error.metadata,
+        );
+      }
+      if (phase !== 'not_dispatched') {
+        throw new BridgeOperationFailure('outcome_unknown', 'outcome_unknown');
+      }
+      if (isNotFound(error)) {
+        throw new BridgeOperationFailure('not_found', 'not_committed');
+      }
+      if (
+        error instanceof ArtifactBridgeDeadlineError ||
+        error instanceof OfficialCallTimeoutError
+      ) {
+        throw new BridgeOperationFailure('cancelled', 'not_committed');
+      }
+      if (error instanceof OfficialCallError) {
+        throw new BridgeOperationFailure('io', 'not_committed');
+      }
+      throw new BridgeOperationFailure('io', 'not_committed');
     }
-    throw new BridgeOperationFailure('outcome_unknown', 'outcome_unknown');
   }
 
   private async loadPlatformArtifact(
     expectedName: string,
     objectId: string,
-    signal: AbortSignal,
-    startedAt: number,
+    budget: ArtifactBridgeOperationBudget,
   ): Promise<PlatformArtifact> {
     const response = await this.callOfficial(
       (requestSignal) =>
@@ -491,9 +493,12 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
           },
           requestSignal,
         ),
-      signal,
-      startedAt,
+      budget,
     );
+    budget.throwIfExpired();
+    if (response.status === 404) {
+      throw new BridgeOperationFailure('not_found');
+    }
     if (response.status !== 200 || !responseFits(response.data)) {
       throw new BridgeOperationFailure('invalid');
     }
@@ -528,85 +533,58 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
 
   private async readRecord(
     platform: PlatformArtifact,
-    signal: AbortSignal,
-    startedAt: number,
+    budget: ArtifactBridgeOperationBudget,
   ): Promise<{ readonly metadata: ArtifactMetadataWire; readonly bytes: Buffer }> {
-    const operationDirectory = await this.context.staging.createOperationDirectory();
-    let lateSettlement: Promise<void> | undefined;
-    try {
-      const response = await this.callOfficial(
-        (requestSignal) =>
-          this.context.actions.downloadArtifactArchive(
-            {
-              owner: this.context.owner,
-              repo: this.context.repository,
-              artifact_id: Number(platform.id),
-              maximum_bytes: ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes,
-            },
-            requestSignal,
-          ),
-        signal,
-        startedAt,
-      );
-      if (response.status !== 200) {
-        throw new BridgeOperationFailure('io');
-      }
-      const archive = Buffer.from(response.data);
-      if (
-        archive.length < 1 ||
-        archive.length !== platform.archiveSize ||
-        archive.length > ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes ||
-        digestBytes(archive) !== platform.archiveDigest
-      ) {
-        throw new BridgeOperationFailure('digest_mismatch');
-      }
-      const archivePath = await this.context.staging.writeArchive(operationDirectory, archive);
-      const envelope = await readArtifactArchive(archivePath, platform.archiveDigest);
-      if (envelope.producingRunId !== platform.producingRunId) {
-        throw new BridgeOperationFailure('conflict');
-      }
-      await this.verifyRunAttempt(
-        envelope.producingRunId,
-        envelope.producingRunAttempt,
-        signal,
-        startedAt,
-      );
-      return {
-        metadata: {
-          name: platform.name,
-          object_id: platform.id,
-          producing_run_id: envelope.producingRunId,
-          producing_run_attempt: envelope.producingRunAttempt,
-          archive_digest: platform.archiveDigest,
-          encrypted_object_digest: envelope.encryptedObjectDigest,
-          expires_at_unix_seconds: platform.expiresAtUnixSeconds,
-          size: String(envelope.encryptedObjectSize),
-        },
-        bytes: envelope.encryptedBytes,
-      };
-    } catch (error) {
-      if (error instanceof OfficialCallTimeoutError) {
-        lateSettlement = error.settled;
-      }
-      throw error;
-    } finally {
-      if (lateSettlement) {
-        scheduleLateCleanup(lateSettlement, this.context.staging, operationDirectory);
-      } else {
-        try {
-          await this.context.staging.cleanupOperationDirectory(operationDirectory);
-        } catch {
-          throw new BridgeOperationFailure('cleanup');
-        }
-      }
+    const response = await this.callOfficial(
+      (requestSignal) =>
+        this.context.actions.downloadArtifactArchive(
+          {
+            owner: this.context.owner,
+            repo: this.context.repository,
+            artifact_id: Number(platform.id),
+            maximum_bytes: ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes,
+          },
+          requestSignal,
+        ),
+      budget,
+    );
+    if (response.status !== 200) {
+      throw new BridgeOperationFailure('io');
     }
+    budget.throwIfExpired();
+    const archive = Buffer.from(response.data);
+    if (
+      archive.length < 1 ||
+      archive.length !== platform.archiveSize ||
+      archive.length > ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes ||
+      digestBytes(archive) !== platform.archiveDigest
+    ) {
+      throw new BridgeOperationFailure('digest_mismatch');
+    }
+    const envelope = await readArtifactArchive(archive, platform.archiveDigest, budget);
+    if (envelope.producingRunId !== platform.producingRunId) {
+      throw new BridgeOperationFailure('conflict');
+    }
+    await this.verifyRunAttempt(envelope.producingRunId, envelope.producingRunAttempt, budget);
+    return {
+      metadata: {
+        name: platform.name,
+        object_id: platform.id,
+        producing_run_id: envelope.producingRunId,
+        producing_run_attempt: envelope.producingRunAttempt,
+        archive_digest: platform.archiveDigest,
+        encrypted_object_digest: envelope.encryptedObjectDigest,
+        expires_at_unix_seconds: platform.expiresAtUnixSeconds,
+        size: String(envelope.encryptedObjectSize),
+      },
+      bytes: envelope.encryptedBytes,
+    };
   }
 
   private async verifyRunAttempt(
     runId: string,
     runAttempt: string,
-    signal: AbortSignal,
-    startedAt: number,
+    budget: ArtifactBridgeOperationBudget,
   ): Promise<void> {
     const response = await this.callOfficial(
       (requestSignal) =>
@@ -619,9 +597,9 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
           },
           requestSignal,
         ),
-      signal,
-      startedAt,
+      budget,
     );
+    budget.throwIfExpired();
     if (
       response.status !== 200 ||
       platformId(response.data.id) !== runId ||
@@ -654,18 +632,9 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
 
   private async callOfficial<T>(
     call: (signal: AbortSignal) => Promise<T>,
-    signal: AbortSignal,
-    startedAt: number,
+    budget: ArtifactBridgeOperationBudget,
   ): Promise<T> {
-    const remaining = ARTIFACT_BRIDGE_LIMITS.logicalOperationTimeoutMs - (this.now() - startedAt);
-    if (remaining <= 0) {
-      throw new BridgeOperationFailure('cancelled');
-    }
-    const result = await runContainedOfficialCall(call, remaining, signal);
-    if (this.now() - startedAt >= ARTIFACT_BRIDGE_LIMITS.logicalOperationTimeoutMs) {
-      throw new BridgeOperationFailure('cancelled');
-    }
-    return result;
+    return await runContainedOfficialCall(call, budget.remainingMs(), budget.signal);
   }
 
   private failureResult(command: ArtifactBridgeCommand, error: unknown): ArtifactBridgeResult {
@@ -689,6 +658,8 @@ export class OfficialArtifactOperations implements ArtifactBridgeExecutor {
         mutationState = 'not_committed';
       }
     } else if (error instanceof OfficialCallTimeoutError) {
+      failure = 'cancelled';
+    } else if (error instanceof ArtifactBridgeDeadlineError) {
       failure = 'cancelled';
     }
     if (
@@ -774,19 +745,22 @@ function structuredStatus(error: unknown): number | undefined {
 }
 
 function provenConflict(error: unknown): boolean {
-  if (structuredStatus(error) === 409) return true;
   if (typeof error !== 'object' || error === null) return false;
   const record = error as Record<string, unknown>;
   return record.code === 6 || record.code === 'already_exists';
 }
 
-function scheduleLateCleanup(
-  settled: Promise<void>,
-  staging: ArtifactBridgeStaging,
-  operationDirectory: string,
-): void {
-  const cleanup = async (): Promise<void> => {
-    await staging.cleanupOperationDirectory(operationDirectory);
-  };
-  void settled.then(cleanup, cleanup).catch(() => undefined);
+function mutationStateForPhase(phase: MutationPhase): ArtifactBridgeMutationState {
+  return phase === 'not_dispatched'
+    ? 'not_committed'
+    : phase === 'committed'
+      ? 'committed'
+      : 'outcome_unknown';
+}
+
+function isNotFound(error: unknown): boolean {
+  return (
+    (error instanceof BridgeOperationFailure && error.failure === 'not_found') ||
+    (error instanceof OfficialCallError && structuredStatus(error.causeValue) === 404)
+  );
 }

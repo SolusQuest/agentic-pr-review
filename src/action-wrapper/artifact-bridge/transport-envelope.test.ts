@@ -1,75 +1,64 @@
 import { deflateRawSync } from 'node:zlib';
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   ArtifactTransportEnvelopeError,
   digestBytes,
+  encodeArtifactTransportEnvelope,
   readArtifactArchive,
-  writeArtifactTransportEnvelope,
 } from './transport-envelope.js';
 import { ARTIFACT_BRIDGE_LIMITS, ARTIFACT_ENVELOPE_ENTRY } from './limits.js';
-
-const roots: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true })));
-});
+import { ArtifactBridgeDeadlineError, ArtifactBridgeOperationBudget } from './operation-budget.js';
 
 describe('private artifact transport envelope', () => {
   it('round-trips one fixed envelope through a bounded raw ZIP', async () => {
-    const root = await temporaryRoot();
     const encrypted = Buffer.from([0, 7, 255, 0, 9]);
-    const envelopePath = await writeArtifactTransportEnvelope(
-      root,
+    const envelope = encodeArtifactTransportEnvelope(
       '7001',
       '2',
       encrypted,
       digestBytes(encrypted),
+      testBudget(),
     );
     const archive = zip([
       {
         name: ARTIFACT_ENVELOPE_ENTRY,
-        data: await readFile(envelopePath),
+        data: envelope,
       },
     ]);
-    const archivePath = path.join(root, 'artifact.zip');
-    await writeFile(archivePath, archive);
 
-    await expect(readArtifactArchive(archivePath, digestBytes(archive))).resolves.toEqual({
-      producingRunId: '7001',
-      producingRunAttempt: '2',
-      encryptedObjectDigest: digestBytes(encrypted),
-      encryptedObjectSize: encrypted.length,
-      encryptedBytes: encrypted,
-    });
+    await expect(readArtifactArchive(archive, digestBytes(archive), testBudget())).resolves.toEqual(
+      {
+        producingRunId: '7001',
+        producingRunAttempt: '2',
+        encryptedObjectDigest: digestBytes(encrypted),
+        encryptedObjectSize: encrypted.length,
+        encryptedBytes: encrypted,
+      },
+    );
     expect(digestBytes(archive)).not.toBe(digestBytes(encrypted));
   });
 
   it('accepts the streamed ASCII ZIP shape emitted by the official upload binding', async () => {
-    const root = await temporaryRoot();
     const encrypted = Buffer.from('official-shape');
-    const envelopePath = await writeArtifactTransportEnvelope(
-      root,
+    const envelope = encodeArtifactTransportEnvelope(
       '7001',
       '2',
       encrypted,
       digestBytes(encrypted),
+      testBudget(),
     );
     const archive = zip([
       {
         name: ARTIFACT_ENVELOPE_ENTRY,
-        data: await readFile(envelopePath),
+        data: envelope,
         streamed: true,
         utf8: false,
       },
     ]);
-    const archivePath = path.join(root, 'official-shape.zip');
-    await writeFile(archivePath, archive);
-
-    await expect(readArtifactArchive(archivePath, digestBytes(archive))).resolves.toMatchObject({
+    await expect(
+      readArtifactArchive(archive, digestBytes(archive), testBudget()),
+    ).resolves.toMatchObject({
       producingRunId: '7001',
       producingRunAttempt: '2',
       encryptedObjectDigest: digestBytes(encrypted),
@@ -78,15 +67,19 @@ describe('private artifact transport envelope', () => {
   });
 
   it('accepts the 2 MiB encrypted-object boundary and rejects cap plus one', async () => {
-    const root = await temporaryRoot();
     const atCap = Buffer.alloc(ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes, 0xa5);
-    await expect(
-      writeArtifactTransportEnvelope(root, '1', '1', atCap, digestBytes(atCap)),
-    ).resolves.toContain(ARTIFACT_ENVELOPE_ENTRY);
+    const encoded = encodeArtifactTransportEnvelope(
+      '1',
+      '1',
+      atCap,
+      digestBytes(atCap),
+      testBudget(),
+    );
+    expect(encoded.length).toBeLessThanOrEqual(ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes);
     const aboveCap = Buffer.alloc(ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes + 1);
-    await expect(
-      writeArtifactTransportEnvelope(root, '1', '1', aboveCap, digestBytes(aboveCap)),
-    ).rejects.toBeInstanceOf(ArtifactTransportEnvelopeError);
+    expect(() =>
+      encodeArtifactTransportEnvelope('1', '1', aboveCap, digestBytes(aboveCap), testBudget()),
+    ).toThrow(ArtifactTransportEnvelopeError);
   });
 
   it.each([
@@ -130,51 +123,30 @@ describe('private artifact transport envelope', () => {
       ],
     ],
   ] as const)('rejects %s', async (_label, entries) => {
-    const root = await temporaryRoot();
     const archive = zip(entries);
-    const archivePath = path.join(root, 'invalid.zip');
-    await writeFile(archivePath, archive);
-    await expect(readArtifactArchive(archivePath, digestBytes(archive))).rejects.toBeInstanceOf(
-      ArtifactTransportEnvelopeError,
-    );
+    await expect(
+      readArtifactArchive(archive, digestBytes(archive), testBudget()),
+    ).rejects.toBeInstanceOf(ArtifactTransportEnvelopeError);
   });
 
   it('rejects compressed expansion beyond 4 MiB before accepting output', async () => {
-    const root = await temporaryRoot();
     const expanded = Buffer.alloc(ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes + 1, 0);
     const archive = zip([{ name: ARTIFACT_ENVELOPE_ENTRY, data: expanded }]);
     expect(archive.length).toBeLessThan(ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes);
-    const archivePath = path.join(root, 'expansion.zip');
-    await writeFile(archivePath, archive);
-    await expect(readArtifactArchive(archivePath, digestBytes(archive))).rejects.toBeInstanceOf(
-      ArtifactTransportEnvelopeError,
-    );
+    await expect(
+      readArtifactArchive(archive, digestBytes(archive), testBudget()),
+    ).rejects.toBeInstanceOf(ArtifactTransportEnvelopeError);
   });
 
-  it('rejects a raw archive symlink where the platform permits links', async () => {
-    const root = await temporaryRoot();
-    const outside = await temporaryRoot();
-    const encrypted = Buffer.from('symlink-canary');
-    const envelopePath = await writeArtifactTransportEnvelope(
-      root,
-      '1',
-      '1',
-      encrypted,
-      digestBytes(encrypted),
+  it('observes the shared operation deadline before archive processing', async () => {
+    const controller = new AbortController();
+    const budget = new ArtifactBridgeOperationBudget(controller.signal, () => 0, 0);
+    controller.abort();
+    const archive = zip([{ name: ARTIFACT_ENVELOPE_ENTRY, data: Buffer.from('{}') }]);
+    await expect(readArtifactArchive(archive, digestBytes(archive), budget)).rejects.toBeInstanceOf(
+      ArtifactBridgeDeadlineError,
     );
-    const archive = zip([{ name: ARTIFACT_ENVELOPE_ENTRY, data: await readFile(envelopePath) }]);
-    const outsideArchive = path.join(outside, 'outside.zip');
-    await writeFile(outsideArchive, archive);
-    const linkedArchive = path.join(root, 'linked.zip');
-    try {
-      await symlink(outsideArchive, linkedArchive, 'file');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EPERM') return;
-      throw error;
-    }
-    await expect(readArtifactArchive(linkedArchive, digestBytes(archive))).rejects.toBeInstanceOf(
-      ArtifactTransportEnvelopeError,
-    );
+    budget.dispose();
   });
 });
 
@@ -259,8 +231,6 @@ function crc32(bytes: Uint8Array): number {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-async function temporaryRoot(): Promise<string> {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'apr-envelope-test-'));
-  roots.push(root);
-  return root;
+function testBudget(now: () => number = () => 0): ArtifactBridgeOperationBudget {
+  return new ArtifactBridgeOperationBudget(new AbortController().signal, now, now());
 }

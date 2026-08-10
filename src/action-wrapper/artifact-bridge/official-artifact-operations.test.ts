@@ -1,14 +1,15 @@
 import type { ArtifactClient } from '@actions/artifact';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ArtifactActionsRestClient } from './official-artifact-operations.js';
 import { OfficialArtifactOperations } from './official-artifact-operations.js';
 import { ArtifactBridgeStaging } from './staging.js';
-import { digestBytes, writeArtifactTransportEnvelope } from './transport-envelope.js';
+import { digestBytes, encodeArtifactTransportEnvelope } from './transport-envelope.js';
 import { ARTIFACT_ENVELOPE_ENTRY } from './limits.js';
+import { ArtifactBridgeOperationBudget } from './operation-budget.js';
 import { createTestZip } from './zip-test-helper.js';
 
 const roots: string[] = [];
@@ -276,22 +277,20 @@ describe('artifact-specific producing attempt authority', () => {
       [41, '1'],
       [42, '2'],
     ] as const) {
-      const envelopeRoot = path.join(root, `envelope-${id}`);
-      await mkdir(envelopeRoot);
       const encrypted = Buffer.from(`ciphertext-${attempt}`);
-      const envelopePath = await writeArtifactTransportEnvelope(
-        envelopeRoot,
+      const envelope = encodeArtifactTransportEnvelope(
         '7001',
         attempt,
         encrypted,
         digestBytes(encrypted),
+        testBudget(),
       );
       archives.set(
         id,
         createTestZip([
           {
             name: ARTIFACT_ENVELOPE_ENTRY,
-            data: await readFile(envelopePath),
+            data: envelope,
           },
         ]),
       );
@@ -397,22 +396,19 @@ describe('post-dispatch upload mutation truthfulness', () => {
       roots.push(root);
       const staging = await ArtifactBridgeStaging.create(root);
       const sourceDirectory = path.join(root, 'source');
-      const envelopeDirectory = path.join(root, 'envelope');
-      await mkdir(sourceDirectory);
-      await mkdir(envelopeDirectory);
+      await mkdir(sourceDirectory, { mode: 0o700 });
       const encrypted = Buffer.from('opaque-encrypted-state');
       const encryptedDigest = digestBytes(encrypted);
       await writeFile(path.join(sourceDirectory, 'object.bin'), encrypted);
-      const envelopePath = await writeArtifactTransportEnvelope(
-        envelopeDirectory,
+      await writeFile(path.join(sourceDirectory, ARTIFACT_ENVELOPE_ENTRY), Buffer.alloc(0));
+      const envelope = encodeArtifactTransportEnvelope(
         '7001',
         '2',
         encrypted,
         encryptedDigest,
+        testBudget(),
       );
-      const validArchive = createTestZip([
-        { name: ARTIFACT_ENVELOPE_ENTRY, data: await readFile(envelopePath) },
-      ]);
+      const validArchive = createTestZip([{ name: ARTIFACT_ENVELOPE_ENTRY, data: envelope }]);
       const downloadedArchive = failureCase === 'zip' ? Buffer.from('not-a-zip') : validArchive;
       const platformDigest =
         failureCase === 'digest' ? 'f'.repeat(64) : digestBytes(downloadedArchive);
@@ -487,6 +483,163 @@ describe('post-dispatch upload mutation truthfulness', () => {
   );
 });
 
+describe('upload mutation phase matrix', () => {
+  it.each([
+    ['pre-dispatch validation', 'invalid_source', 'invalid', 'not_committed'],
+    ['synchronous local rejection', 'sync_error', 'io', 'not_committed'],
+    ['proven create conflict', 'create_conflict', 'conflict', 'not_committed'],
+    ['ambiguous HTTP conflict', 'dispatch_409', 'outcome_unknown', 'outcome_unknown'],
+    ['post-dispatch failure', 'dispatch_error', 'outcome_unknown', 'outcome_unknown'],
+    ['post-success deadline', 'response_deadline', 'outcome_unknown', 'outcome_unknown'],
+  ] as const)(
+    '%s maps to %s / %s',
+    async (_description, scenario, expectedFailure, expectedMutation) => {
+      const root = await mkdtemp(path.join(os.tmpdir(), 'apr-upload-phase-test-'));
+      roots.push(root);
+      const sourceDirectory = path.join(root, 'source');
+      await mkdir(sourceDirectory, { mode: 0o700 });
+      const encrypted = Buffer.from('phase-matrix-ciphertext');
+      const encryptedDigest = digestBytes(encrypted);
+      await writeFile(path.join(sourceDirectory, 'object.bin'), encrypted);
+      await writeFile(path.join(sourceDirectory, ARTIFACT_ENVELOPE_ENTRY), Buffer.alloc(0));
+      const staging = await ArtifactBridgeStaging.create(root);
+      let elapsed = 0;
+      let uploadCalls = 0;
+      const unsupported = async (): Promise<never> => {
+        throw new Error('unexpected official call');
+      };
+      const artifactClient: ArtifactClient = {
+        uploadArtifact: () => {
+          uploadCalls += 1;
+          if (scenario === 'sync_error') {
+            throw new Error('synthetic local rejection');
+          }
+          if (scenario === 'create_conflict') {
+            return Promise.reject(
+              Object.assign(new Error('synthetic conflict'), {
+                code: 'already_exists',
+              }),
+            );
+          }
+          if (scenario === 'dispatch_409') {
+            return Promise.reject(
+              Object.assign(new Error('synthetic ambiguous conflict'), {
+                status: 409,
+              }),
+            );
+          }
+          if (scenario === 'dispatch_error') {
+            return Promise.reject(Object.assign(new Error('synthetic failure'), { status: 503 }));
+          }
+          elapsed = 120_000;
+          return Promise.resolve({ id: 42, size: 1, digest: 'a'.repeat(64) });
+        },
+        downloadArtifact: unsupported,
+        listArtifacts: unsupported,
+        getArtifact: unsupported,
+        deleteArtifact: unsupported,
+      };
+      const actions: ArtifactActionsRestClient = {
+        listArtifactsForRepo: unsupported,
+        getArtifact: unsupported,
+        downloadArtifactArchive: unsupported,
+        getWorkflowRunAttempt: unsupported,
+        deleteArtifact: unsupported,
+      };
+      const operations = new OfficialArtifactOperations({
+        owner: 'owner',
+        repository: 'repository',
+        currentRunId: '7001',
+        currentRunAttempt: '2',
+        artifactClient,
+        actions,
+        staging,
+        now: () => elapsed,
+      });
+
+      const result = await operations.execute(
+        {
+          operation: 'upload_immutable',
+          correlation_id: `upload-${scenario}`,
+          name: 'opaque-state',
+          source_relative_path: 'source/object.bin',
+          encrypted_object_digest: scenario === 'invalid_source' ? '0'.repeat(64) : encryptedDigest,
+          minimum_expires_at_unix_seconds: '1',
+        },
+        new AbortController().signal,
+      );
+
+      expect(result).toMatchObject({
+        failure: expectedFailure,
+        mutation_state: expectedMutation,
+      });
+      expect(uploadCalls).toBe(scenario === 'invalid_source' ? 0 : 1);
+    },
+  );
+});
+
+describe('delete mutation phase matrix', () => {
+  it.each([
+    ['preflight absence', 'preflight_404', 'not_found', 'not_committed'],
+    ['synchronous local rejection', 'sync_error', 'io', 'not_committed'],
+    ['delete-call absence', 'delete_404', 'outcome_unknown', 'outcome_unknown'],
+    ['delete-call cancellation', 'delete_cancelled', 'outcome_unknown', 'outcome_unknown'],
+    ['verified absence', 'verified_absent', 'none', 'committed'],
+    ['ambiguous observation', 'still_present', 'outcome_unknown', 'outcome_unknown'],
+  ] as const)(
+    '%s maps to %s / %s',
+    async (_description, scenario, expectedFailure, expectedMutation) => {
+      const expected = metadataFixture();
+      let getCalls = 0;
+      let deleteCalls = 0;
+      const controller = new AbortController();
+      const operations = await createOperations({
+        getArtifact: async () => {
+          getCalls += 1;
+          if (scenario === 'preflight_404' || (scenario === 'verified_absent' && getCalls === 2)) {
+            throw Object.assign(new Error('synthetic absence'), { status: 404 });
+          }
+          return { status: 200, data: platformRecord(expected) };
+        },
+        deleteArtifact: (_input, requestSignal) => {
+          deleteCalls += 1;
+          if (scenario === 'sync_error') throw new Error('synthetic local rejection');
+          if (scenario === 'delete_404') return Promise.resolve({ status: 404 });
+          if (scenario === 'delete_cancelled') {
+            controller.abort();
+            if (requestSignal.aborted) {
+              return Promise.reject(new Error('synthetic cancellation'));
+            }
+            return new Promise<never>((_resolve, reject) => {
+              requestSignal.addEventListener(
+                'abort',
+                () => reject(new Error('synthetic cancellation')),
+                { once: true },
+              );
+            });
+          }
+          return Promise.resolve({ status: 204 });
+        },
+      });
+
+      const result = await operations.execute(
+        {
+          operation: 'delete_exact',
+          correlation_id: `delete-${scenario}`,
+          expected,
+        },
+        controller.signal,
+      );
+
+      expect(result).toMatchObject({
+        failure: expectedFailure,
+        mutation_state: expectedMutation,
+      });
+      expect(deleteCalls).toBe(scenario === 'preflight_404' ? 0 : 1);
+    },
+  );
+});
+
 describe('official artifact lifecycle', () => {
   it('uploads, verifies, downloads, reads back, and authorizes exact deletion', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'apr-lifecycle-test-'));
@@ -494,10 +647,12 @@ describe('official artifact lifecycle', () => {
     const staging = await ArtifactBridgeStaging.create(root);
     const sourceDirectory = path.join(root, 'source');
     const destinationDirectory = path.join(root, 'destination');
-    await mkdir(sourceDirectory);
-    await mkdir(destinationDirectory);
+    await mkdir(sourceDirectory, { mode: 0o700 });
+    await mkdir(destinationDirectory, { mode: 0o700 });
     const encrypted = Buffer.from('opaque-encrypted-state');
     await writeFile(path.join(sourceDirectory, 'object.bin'), encrypted);
+    await writeFile(path.join(sourceDirectory, ARTIFACT_ENVELOPE_ENTRY), Buffer.alloc(0));
+    await writeFile(path.join(destinationDirectory, 'object.bin'), Buffer.alloc(0));
 
     const now = Date.parse('2029-01-01T00:00:00Z');
     const minimumExpiry = Math.floor(now / 1000) + 3600;
@@ -518,7 +673,7 @@ describe('official artifact lifecycle', () => {
 
     const artifactClient: ArtifactClient = {
       uploadArtifact: async (name, files, operationRoot, options) => {
-        expect(operationRoot).toMatch(new RegExp(`${escapeRegExp(root)}[/\\\\]op-`, 'u'));
+        expect(operationRoot).toBe(sourceDirectory);
         expect(files).toHaveLength(1);
         expect(options?.compressionLevel).toBe(0);
         expect(options?.retentionDays).toBe(1);
@@ -675,7 +830,29 @@ describe('official artifact lifecycle', () => {
     );
     expect(expiredMetadata.failure).toBe('none');
     expect(downloadCalls).toBe(downloadsBeforeDelete + 1);
-    const downloadsAfterMetadata = downloadCalls;
+    const expiredReadBack = await operations.execute(
+      {
+        operation: 'readback_exact',
+        correlation_id: 'readback-expired',
+        expected: uploaded.metadata!,
+      },
+      signal,
+    );
+    expect(expiredReadBack.failure).toBe('none');
+    expect(downloadCalls).toBe(downloadsBeforeDelete + 2);
+    const downloadsBeforeExpiredDownload = downloadCalls;
+    const expiredDownload = await operations.execute(
+      {
+        operation: 'download',
+        correlation_id: 'download-expired',
+        expected: uploaded.metadata!,
+        destination_relative_path: 'destination/object.bin',
+        maximum_bytes: String(encrypted.length),
+      },
+      signal,
+    );
+    expect(expiredDownload.failure).toBe('expired');
+    expect(downloadCalls).toBe(downloadsBeforeExpiredDownload);
     const deletedResult = await operations.execute(
       {
         operation: 'delete_exact',
@@ -686,22 +863,7 @@ describe('official artifact lifecycle', () => {
     );
     expect(deletedResult).toMatchObject({ failure: 'none', mutation_state: 'committed' });
     expect(deleteCalls).toBe(1);
-    expect(downloadCalls).toBe(downloadsAfterMetadata);
-    expect((await readdir(root)).filter((entry) => entry.startsWith('op-'))).toEqual([]);
-
-    expired = false;
-    const cleanupFailure = vi
-      .spyOn(staging, 'cleanupOperationDirectory')
-      .mockRejectedValueOnce(new Error('synthetic cleanup failure'));
-    const cleanupResult = await operations.execute(
-      { ...uploadCommand, correlation_id: 'upload-cleanup' },
-      signal,
-    );
-    expect(cleanupResult).toMatchObject({
-      failure: 'cleanup',
-      mutation_state: 'committed',
-    });
-    cleanupFailure.mockRestore();
+    expect(downloadCalls).toBe(downloadsBeforeExpiredDownload);
   });
 });
 
@@ -742,6 +904,31 @@ async function createOperations(
   });
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+function metadataFixture() {
+  return {
+    name: 'opaque-state',
+    object_id: '42',
+    producing_run_id: '7001',
+    producing_run_attempt: '2',
+    archive_digest: 'a'.repeat(64),
+    encrypted_object_digest: 'b'.repeat(64),
+    expires_at_unix_seconds: '1893456000',
+    size: '1',
+  };
+}
+
+function platformRecord(expected: ReturnType<typeof metadataFixture>) {
+  return {
+    id: Number(expected.object_id),
+    name: expected.name,
+    size_in_bytes: 1,
+    expired: false,
+    expires_at: new Date(Number(expected.expires_at_unix_seconds) * 1000).toISOString(),
+    digest: `sha256:${expected.archive_digest}`,
+    workflow_run: { id: Number(expected.producing_run_id) },
+  };
+}
+
+function testBudget(): ArtifactBridgeOperationBudget {
+  return new ArtifactBridgeOperationBudget(new AbortController().signal, () => 0, 0);
 }

@@ -1,10 +1,10 @@
 import { constants, type Stats } from 'node:fs';
-import { lstat, mkdir, open, realpath, rm, type FileHandle } from 'node:fs/promises';
+import { lstat, open, realpath, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
 
 import { relativePath } from './contracts.js';
-import { ARTIFACT_BRIDGE_LIMITS } from './limits.js';
+import { ARTIFACT_BRIDGE_LIMITS, ARTIFACT_ENVELOPE_ENTRY } from './limits.js';
+import type { ArtifactBridgeOperationBudget } from './operation-budget.js';
 
 export class ArtifactBridgeStagingError extends Error {
   constructor() {
@@ -14,8 +14,6 @@ export class ArtifactBridgeStagingError extends Error {
 }
 
 export class ArtifactBridgeStaging {
-  private readonly operationIdentities = new Map<string, FileIdentity>();
-
   private constructor(
     private readonly canonicalRoot: string,
     private readonly rootIdentity: FileIdentity,
@@ -26,10 +24,9 @@ export class ArtifactBridgeStaging {
     try {
       const configuredStat = await lstat(configured);
       if (configuredStat.isSymbolicLink()) throw new ArtifactBridgeStagingError();
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    } catch {
+      throw new ArtifactBridgeStagingError();
     }
-    await mkdir(configured, { recursive: true, mode: 0o700 });
     const canonicalRoot = await realpath(configured);
     const rootStat = await lstat(canonicalRoot);
     if (path.relative(configured, canonicalRoot) !== '' || !safePrivateDirectory(rootStat)) {
@@ -38,50 +35,8 @@ export class ArtifactBridgeStaging {
     return new ArtifactBridgeStaging(canonicalRoot, identity(rootStat));
   }
 
-  async createOperationDirectory(): Promise<string> {
-    await this.assertRoot();
-    const operation = path.join(this.canonicalRoot, `op-${randomUUID()}`);
-    await mkdir(operation, { recursive: false, mode: 0o700 });
-    const operationStat = await lstat(operation);
-    if (!safePrivateDirectory(operationStat)) throw new ArtifactBridgeStagingError();
-    this.operationIdentities.set(operation, identity(operationStat));
-    return operation;
-  }
-
-  async writeArchive(operationDirectory: string, bytes: Buffer): Promise<string> {
-    if (bytes.length < 1 || bytes.length > ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes) {
-      throw new ArtifactBridgeStagingError();
-    }
-    await this.assertRoot();
-    await this.assertOperationDirectory(operationDirectory);
-    const archivePath = path.join(operationDirectory, 'artifact.zip');
-    const handle = await openStagedFile(
-      archivePath,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
-      0o600,
-    );
-    try {
-      const before = await handle.stat();
-      await this.assertOpenedPath(archivePath, before);
-      let offset = 0;
-      while (offset < bytes.length) {
-        const written = await handle.write(bytes, offset, bytes.length - offset, offset);
-        if (written.bytesWritten === 0) throw new ArtifactBridgeStagingError();
-        offset += written.bytesWritten;
-      }
-      await handle.sync();
-      const after = await handle.stat();
-      await this.assertOpenedPath(archivePath, after);
-      if (!after.isFile() || after.size !== bytes.length) {
-        throw new ArtifactBridgeStagingError();
-      }
-      return archivePath;
-    } finally {
-      await handle.close();
-    }
-  }
-
-  async readSource(relative: string): Promise<Buffer> {
+  async readSource(relative: string, budget?: ArtifactBridgeOperationBudget): Promise<Buffer> {
+    budget?.throwIfExpired();
     await this.assertRoot();
     const resolved = await this.resolveExistingFile(relative);
     const handle = await openStagedFile(resolved, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
@@ -96,86 +51,92 @@ export class ArtifactBridgeStaging {
         throw new ArtifactBridgeStagingError();
       }
       await this.assertOpenedPath(resolved, before);
-      const bytes = Buffer.allocUnsafe(before.size);
-      let offset = 0;
-      while (offset < bytes.length) {
-        const read = await handle.read(bytes, offset, bytes.length - offset, offset);
-        if (read.bytesRead === 0) throw new ArtifactBridgeStagingError();
-        offset += read.bytesRead;
-      }
+      budget?.throwIfExpired();
+      const bytes = await handle.readFile(budget ? { signal: budget.signal } : undefined);
+      budget?.throwIfExpired();
       const after = await handle.stat();
       await this.assertOpenedPath(resolved, after);
       if (
+        bytes.length !== before.size ||
         after.size !== before.size ||
         after.mtimeMs !== before.mtimeMs ||
-        after.ino !== before.ino
+        !sameIdentity(after, identity(before))
       ) {
         throw new ArtifactBridgeStagingError();
       }
       return bytes;
+    } catch (error) {
+      if (budget?.signal.aborted) budget.throwIfExpired();
+      if (error instanceof ArtifactBridgeStagingError) throw error;
+      throw new ArtifactBridgeStagingError();
     } finally {
       await handle.close();
     }
   }
 
-  async writeDestination(relative: string, bytes: Buffer): Promise<void> {
+  async writeUploadEnvelope(
+    sourceRelative: string,
+    bytes: Buffer,
+    budget: ArtifactBridgeOperationBudget,
+  ): Promise<{ readonly envelopePath: string; readonly operationDirectory: string }> {
+    if (bytes.length < 1 || bytes.length > ARTIFACT_BRIDGE_LIMITS.maximumStagingFileBytes) {
+      throw new ArtifactBridgeStagingError();
+    }
+    budget.throwIfExpired();
+    await this.assertRoot();
+    const source = await this.resolveExistingFile(sourceRelative);
+    const operationDirectory = path.dirname(source);
+    const envelopePath = path.join(operationDirectory, ARTIFACT_ENVELOPE_ENTRY);
+    await this.writeExistingEmptyFile(envelopePath, bytes, budget);
+    return { envelopePath, operationDirectory };
+  }
+
+  async writeDestination(
+    relative: string,
+    bytes: Buffer,
+    budget?: ArtifactBridgeOperationBudget,
+  ): Promise<void> {
     if (bytes.length < 1 || bytes.length > ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes) {
       throw new ArtifactBridgeStagingError();
     }
+    budget?.throwIfExpired();
     await this.assertRoot();
-    const destination = await this.resolveNewFile(relative);
+    const destination = await this.resolveExistingFile(relative);
+    await this.writeExistingEmptyFile(destination, bytes, budget);
+  }
+
+  private async writeExistingEmptyFile(
+    destination: string,
+    bytes: Buffer,
+    budget?: ArtifactBridgeOperationBudget,
+  ): Promise<void> {
     const handle = await openStagedFile(
       destination,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
-      0o600,
+      constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0),
     );
     try {
       const before = await handle.stat();
       await this.assertOpenedPath(destination, before);
-      let offset = 0;
-      while (offset < bytes.length) {
-        const written = await handle.write(bytes, offset, bytes.length - offset, offset);
-        if (written.bytesWritten === 0) throw new ArtifactBridgeStagingError();
-        offset += written.bytesWritten;
-      }
-      await handle.sync();
-      const stat = await handle.stat();
-      await this.assertOpenedPath(destination, stat);
-      if (!stat.isFile() || stat.size !== bytes.length) {
-        throw new ArtifactBridgeStagingError();
-      }
-    } finally {
-      await handle.close();
-    }
-  }
-
-  async cleanupOperationDirectory(operationDirectory: string): Promise<void> {
-    await this.assertRoot();
-    const canonical = path.resolve(operationDirectory);
-    if (
-      path.dirname(canonical) !== this.canonicalRoot ||
-      !path.basename(canonical).startsWith('op-')
-    ) {
-      throw new ArtifactBridgeStagingError();
-    }
-    const expectedIdentity = this.operationIdentities.get(canonical);
-    if (!expectedIdentity) {
-      throw new ArtifactBridgeStagingError();
-    }
-    try {
-      const operationStat = await lstat(canonical);
-      if (!safePrivateDirectory(operationStat) || !sameIdentity(operationStat, expectedIdentity)) {
+      if (!before.isFile() || before.size !== 0) throw new ArtifactBridgeStagingError();
+      budget?.throwIfExpired();
+      await handle.writeFile(bytes, budget ? { signal: budget.signal } : undefined);
+      budget?.throwIfExpired();
+      const after = await handle.stat();
+      await this.assertOpenedPath(destination, after);
+      if (
+        !after.isFile() ||
+        after.size !== bytes.length ||
+        !sameIdentity(after, identity(before))
+      ) {
         throw new ArtifactBridgeStagingError();
       }
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        this.operationIdentities.delete(canonical);
-        return;
-      }
-      throw error;
+      if (budget?.signal.aborted) budget.throwIfExpired();
+      if (error instanceof ArtifactBridgeStagingError) throw error;
+      throw new ArtifactBridgeStagingError();
+    } finally {
+      await handle.close();
     }
-    await rm(canonical, { recursive: true, force: true });
-    this.operationIdentities.delete(canonical);
   }
 
   private async resolveExistingFile(relative: string): Promise<string> {
@@ -189,18 +150,6 @@ export class ArtifactBridgeStaging {
     return resolved;
   }
 
-  private async resolveNewFile(relative: string): Promise<string> {
-    const resolved = await this.resolve(relative);
-    const parent = path.dirname(resolved);
-    const canonicalParent = await realpath(parent);
-    this.assertInside(canonicalParent);
-    const parentStat = await lstat(canonicalParent);
-    if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
-      throw new ArtifactBridgeStagingError();
-    }
-    return path.join(canonicalParent, path.basename(resolved));
-  }
-
   private async resolve(relative: string): Promise<string> {
     if (!relativePath(relative)) throw new ArtifactBridgeStagingError();
     const segments = relative.split('/');
@@ -208,7 +157,7 @@ export class ArtifactBridgeStaging {
     for (const segment of segments.slice(0, -1)) {
       current = path.join(current, segment);
       const stat = await lstat(current);
-      if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      if (!safePrivateDirectory(stat)) {
         throw new ArtifactBridgeStagingError();
       }
     }
@@ -232,22 +181,6 @@ export class ArtifactBridgeStaging {
   private async assertRoot(): Promise<void> {
     const rootStat = await lstat(this.canonicalRoot);
     if (!safePrivateDirectory(rootStat) || !sameIdentity(rootStat, this.rootIdentity)) {
-      throw new ArtifactBridgeStagingError();
-    }
-  }
-
-  private async assertOperationDirectory(operationDirectory: string): Promise<void> {
-    const canonical = path.resolve(operationDirectory);
-    const expected = this.operationIdentities.get(canonical);
-    if (
-      !expected ||
-      path.dirname(canonical) !== this.canonicalRoot ||
-      !path.basename(canonical).startsWith('op-')
-    ) {
-      throw new ArtifactBridgeStagingError();
-    }
-    const stat = await lstat(canonical);
-    if (!safePrivateDirectory(stat) || !sameIdentity(stat, expected)) {
       throw new ArtifactBridgeStagingError();
     }
   }
@@ -291,9 +224,9 @@ function safePrivateDirectory(stat: Stats): boolean {
   return true;
 }
 
-async function openStagedFile(filePath: string, flags: number, mode?: number): Promise<FileHandle> {
+async function openStagedFile(filePath: string, flags: number): Promise<FileHandle> {
   try {
-    return await open(filePath, flags, mode);
+    return await open(filePath, flags);
   } catch {
     throw new ArtifactBridgeStagingError();
   }

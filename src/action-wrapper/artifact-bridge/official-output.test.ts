@@ -122,9 +122,10 @@ describe('official artifact output containment', () => {
   it('contains output at the actual DefaultArtifactClient production binding', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'apr-output-binding-'));
     const sourceParent = path.join(root, 'csharp', 'op');
-    await mkdir(sourceParent, { recursive: true });
+    await mkdir(sourceParent, { recursive: true, mode: 0o700 });
     const bytes = Buffer.from('ciphertext');
     await writeFile(path.join(sourceParent, 'object.bin'), bytes);
+    await writeFile(path.join(sourceParent, 'artifact-envelope.json'), Buffer.alloc(0));
     const artifactClient = new DefaultArtifactClient();
     artifactClient.uploadArtifact = async () => {
       process.stdout.write('::warning::TOKEN_CANARY https://blob/?sig=SIGNED_URL PATH_CANARY');

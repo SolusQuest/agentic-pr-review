@@ -179,7 +179,54 @@ public sealed class ArtifactBridgeContractTests
         }
         finally
         {
-            Directory.Delete(root, recursive: true);
+            await DeleteEventuallyAsync(root);
+        }
+    }
+
+    [Fact]
+    public async Task CSharpStagingRejectsAReparseCSharpRootWithoutTouchingTarget()
+    {
+        var root = CreatePrivateTemporaryDirectory("apr-artifact-root-link");
+        var outside = CreatePrivateTemporaryDirectory(
+            "apr-artifact-root-link-outside");
+        var marker = Path.Join(outside, "keep");
+        await File.WriteAllTextAsync(marker, "keep");
+        try
+        {
+            try
+            {
+                Directory.CreateSymbolicLink(
+                    Path.Join(root, "csharp"),
+                    outside);
+            }
+            catch (Exception exception) when (exception is IOException or
+                UnauthorizedAccessException or
+                PlatformNotSupportedException)
+            {
+                return;
+            }
+
+            Assert.Throws<IOException>(() =>
+                new ArtifactBridgeStaging(root));
+            Assert.Equal("keep", await File.ReadAllTextAsync(marker));
+        }
+        finally
+        {
+            var linked = Path.Join(root, "csharp");
+            if (Directory.Exists(linked) &&
+                (File.GetAttributes(linked) &
+                    FileAttributes.ReparsePoint) != 0)
+            {
+                Directory.Delete(linked);
+            }
+            if (Directory.Exists(root))
+            {
+                await DeleteEventuallyAsync(root);
+            }
+            if (Directory.Exists(outside))
+            {
+                await DeleteEventuallyAsync(outside);
+            }
         }
     }
 
@@ -201,23 +248,33 @@ public sealed class ArtifactBridgeContractTests
                 new byte[] { 1 },
                 CancellationToken.None);
             operation = Path.GetDirectoryName(scope.FullPath)!;
-            File.Delete(scope.FullPath);
-            Directory.Delete(operation);
+            var substitutionBlocked = false;
             try
             {
+                if (!OperatingSystem.IsWindows())
+                {
+                    File.SetUnixFileMode(
+                        operation,
+                        UnixFileMode.UserRead |
+                        UnixFileMode.UserWrite |
+                        UnixFileMode.UserExecute);
+                }
+                File.Delete(scope.FullPath);
+                File.Delete(Path.Join(
+                    operation,
+                    "artifact-envelope.json"));
+                Directory.Delete(operation);
                 Directory.CreateSymbolicLink(operation, outside);
             }
             catch (Exception exception) when (exception is IOException or
-                UnauthorizedAccessException or
-                PlatformNotSupportedException)
+                UnauthorizedAccessException)
             {
-                await scope.DisposeAsync();
-                return;
+                substitutionBlocked = true;
             }
 
             await scope.DisposeAsync();
 
-            Assert.False(scope.CleanupSucceeded);
+            Assert.Equal(substitutionBlocked, scope.CleanupSucceeded);
             Assert.Equal("keep", await File.ReadAllTextAsync(marker));
         }
         finally
@@ -231,7 +288,7 @@ public sealed class ArtifactBridgeContractTests
             }
             if (Directory.Exists(root))
             {
-                Directory.Delete(root, recursive: true);
+                await DeleteEventuallyAsync(root);
             }
             if (Directory.Exists(outside))
             {
@@ -254,32 +311,44 @@ public sealed class ArtifactBridgeContractTests
         {
             var staging = new ArtifactBridgeStaging(root);
             var scope = staging.PrepareDownload();
+            var substitutionBlocked = false;
             try
             {
+                if (!OperatingSystem.IsWindows())
+                {
+                    File.SetUnixFileMode(
+                        Path.GetDirectoryName(scope.FullPath)!,
+                        UnixFileMode.UserRead |
+                        UnixFileMode.UserWrite |
+                        UnixFileMode.UserExecute);
+                }
+                File.Delete(scope.FullPath);
                 File.CreateSymbolicLink(scope.FullPath, marker);
             }
             catch (Exception exception) when (exception is IOException or
-                UnauthorizedAccessException or
-                PlatformNotSupportedException)
+                UnauthorizedAccessException)
             {
-                await scope.DisposeAsync();
-                return;
+                substitutionBlocked = true;
             }
 
-            await Assert.ThrowsAsync<IOException>(() =>
-                staging.ReadDownloadAsync(
-                    scope,
-                    maximumBytes: 16,
-                    CancellationToken.None));
+            if (!substitutionBlocked)
+            {
+                await Assert.ThrowsAsync<IOException>(() =>
+                    staging.ReadDownloadAsync(
+                        scope,
+                        maximumBytes: 16,
+                        CancellationToken.None));
+            }
             Assert.Equal("keep", await File.ReadAllTextAsync(marker));
             await scope.DisposeAsync();
+            Assert.Equal(substitutionBlocked, scope.CleanupSucceeded);
             Assert.Equal("keep", await File.ReadAllTextAsync(marker));
         }
         finally
         {
             if (Directory.Exists(root))
             {
-                Directory.Delete(root, recursive: true);
+                await DeleteEventuallyAsync(root);
             }
             if (Directory.Exists(outside))
             {
@@ -311,7 +380,7 @@ public sealed class ArtifactBridgeContractTests
         }
         finally
         {
-            Directory.Delete(root, recursive: true);
+            await DeleteEventuallyAsync(root);
         }
     }
 
@@ -341,7 +410,7 @@ public sealed class ArtifactBridgeContractTests
         }
         finally
         {
-            Directory.Delete(root, recursive: true);
+            await DeleteEventuallyAsync(root);
         }
     }
 
@@ -370,7 +439,7 @@ public sealed class ArtifactBridgeContractTests
         }
         finally
         {
-            Directory.Delete(root, recursive: true);
+            await DeleteEventuallyAsync(root);
         }
     }
 
@@ -399,7 +468,7 @@ public sealed class ArtifactBridgeContractTests
         }
         finally
         {
-            Directory.Delete(root, recursive: true);
+            await DeleteEventuallyAsync(root);
         }
     }
 
@@ -474,6 +543,24 @@ public sealed class ArtifactBridgeContractTests
                 UnixFileMode.UserExecute);
         }
         return root;
+    }
+
+    private static async Task DeleteEventuallyAsync(string path)
+    {
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            try
+            {
+                Directory.Delete(path, recursive: true);
+                return;
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException)
+            {
+                await Task.Delay(10);
+            }
+        }
+        Directory.Delete(path, recursive: true);
     }
 
     private static string[] OperationDirectories(string root) =>
