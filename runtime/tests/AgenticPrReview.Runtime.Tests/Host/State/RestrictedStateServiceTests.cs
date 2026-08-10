@@ -8,7 +8,7 @@ public sealed class RestrictedStateServiceTests
     [InlineData(false, true, false)]
     [InlineData(true, false, false)]
     [InlineData(true, true, true)]
-    public void UntrustedPrincipalsAreDeniedWithoutIssuingCapability(
+    public async Task UntrustedPrincipalsAreDeniedWithoutIssuingCapability(
         bool trustedWorkflow,
         bool sameRepository,
         bool forkOrigin)
@@ -30,7 +30,7 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void WrongScopeIsDeniedBeforeAnyStoreOrKeyBoundaryExists()
+    public async Task WrongScopeIsDeniedBeforeAnyStoreOrKeyBoundaryExists()
     {
         var requested = RestrictedStateTestData.Scope();
         var authorized = requested with
@@ -56,7 +56,7 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void MalformedTypedAuthorizationAndRestoreEnumsReturnStableCodes()
+    public async Task MalformedTypedAuthorizationAndRestoreEnumsReturnStableCodes()
     {
         var malformedScope = RestrictedStateTestData.Scope() with
         {
@@ -82,7 +82,7 @@ public sealed class RestrictedStateServiceTests
             new MemoryRestrictedStateStore(),
             new TestKeyResolver(),
             new TestSessionAdmission());
-        foreach (var restore in new[]
+        foreach (var restore in await Task.WhenAll(new[]
         {
             new RestrictedStateRestoreRequest(
                 (RestrictedStateLocatorFamily)int.MaxValue,
@@ -94,10 +94,10 @@ public sealed class RestrictedStateServiceTests
                 (RestrictedStateRestoreIntent)int.MaxValue,
                 null,
                 RestrictedStateTestData.SessionContext()),
-        }.Select(request => service.Restore(
+        }.Select(request => service.RestoreAsync(
             access,
             request,
-            CancellationToken.None)))
+            CancellationToken.None))))
         {
             Assert.Equal(StateAction.Failed, restore.Result.Action);
             Assert.Equal(
@@ -107,7 +107,7 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void PrepareAcceptRestoreAndHandoffUseIndependentLineage()
+    public async Task PrepareAcceptRestoreAndHandoffUseIndependentLineage()
     {
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
@@ -116,7 +116,7 @@ public sealed class RestrictedStateServiceTests
         var access = RestrictedStateTestData.Access();
         var plaintext = new byte[] { 1, 2, 3 };
 
-        var prepared = service.Prepare(
+        var prepared = await service.PrepareAsync(
             access,
             new RestrictedStatePrepareRequest(
                 Lineage: null,
@@ -130,7 +130,7 @@ public sealed class RestrictedStateServiceTests
         Assert.Empty(store.Snapshot.Accepted);
         Assert.NotNull(store.Snapshot.Staging);
 
-        var accepted = service.Accept(
+        var accepted = await service.AcceptAsync(
             access,
             lineage: null,
             prepared.Receipt!,
@@ -143,7 +143,7 @@ public sealed class RestrictedStateServiceTests
         Assert.Null(store.Snapshot.Staging);
         var lineage = Lineage(store.Snapshot.Accepted[0]);
 
-        var restored = service.Restore(
+        var restored = await service.RestoreAsync(
             access,
             new RestrictedStateRestoreRequest(
                 RestrictedStateLocatorFamily.Current,
@@ -156,7 +156,7 @@ public sealed class RestrictedStateServiceTests
         Assert.Equal(RestrictedStateCodes.Restored, restored.Result.Code);
         Assert.Equal(plaintext, restored.Session!.Plaintext);
 
-        var handoff = service.PrepareHandoff(
+        var handoff = await service.PrepareHandoffAsync(
             access,
             lineage,
             RestrictedStateTestData.SessionContext(),
@@ -172,14 +172,14 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void NextGenerationRetainsOnlyCurrentAndImmediatePredecessor()
+    public async Task NextGenerationRetainsOnlyCurrentAndImmediatePredecessor()
     {
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
         var sessions = new TestSessionAdmission();
         var service = Service(store, keys, sessions);
         var access = RestrictedStateTestData.Access();
-        var first = PrepareAndAccept(
+        var first = await PrepareAndAccept(
             service,
             store,
             access,
@@ -188,7 +188,7 @@ public sealed class RestrictedStateServiceTests
             predecessor: null);
         var firstLineage = Lineage(first);
 
-        var prepared = service.Prepare(
+        var prepared = await service.PrepareAsync(
             access,
             new RestrictedStatePrepareRequest(
                 firstLineage,
@@ -199,7 +199,7 @@ public sealed class RestrictedStateServiceTests
             CancellationToken.None);
         Assert.Equal(StateAction.Prepared, prepared.Result.Action);
 
-        var accepted = service.Accept(
+        var accepted = await service.AcceptAsync(
             access,
             firstLineage,
             prepared.Receipt!,
@@ -218,7 +218,7 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void StagingNeverRestoresAndMissingCurrentNeverFallsBack()
+    public async Task StagingNeverRestoresAndMissingCurrentNeverFallsBack()
     {
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
@@ -230,7 +230,7 @@ public sealed class RestrictedStateServiceTests
             keys);
         store.Snapshot = new RestrictedStateSnapshot([], staged);
 
-        var absent = service.Restore(
+        var absent = await service.RestoreAsync(
             access,
             new RestrictedStateRestoreRequest(
                 RestrictedStateLocatorFamily.Current,
@@ -246,7 +246,7 @@ public sealed class RestrictedStateServiceTests
         {
             EnvelopeSha256 = new string('a', 64),
         };
-        var missing = service.Restore(
+        var missing = await service.RestoreAsync(
             access,
             new RestrictedStateRestoreRequest(
                 RestrictedStateLocatorFamily.Current,
@@ -262,7 +262,7 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void ExpiryWinsBeforeKeyLookupAndRemovesTheWholeScope()
+    public async Task ExpiryWinsBeforeKeyLookupAndRemovesTheWholeScope()
     {
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
@@ -276,7 +276,7 @@ public sealed class RestrictedStateServiceTests
         var current = RestrictedStateTestData.Candidate(access, keys);
         store.Snapshot = new RestrictedStateSnapshot([current], null);
 
-        var result = service.Restore(
+        var result = await service.RestoreAsync(
             access,
             new RestrictedStateRestoreRequest(
                 RestrictedStateLocatorFamily.Current,
@@ -293,7 +293,7 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void AuthenticatedInvalidPlaintextFailsBeforeAdmission()
+    public async Task AuthenticatedInvalidPlaintextFailsBeforeAdmission()
     {
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
@@ -306,7 +306,7 @@ public sealed class RestrictedStateServiceTests
         var current = RestrictedStateTestData.Candidate(access, keys);
         store.Snapshot = new RestrictedStateSnapshot([current], null);
 
-        var result = service.Restore(
+        var result = await service.RestoreAsync(
             access,
             new RestrictedStateRestoreRequest(
                 RestrictedStateLocatorFamily.Current,
@@ -323,7 +323,7 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void ReplayLineageAndSameGenerationConflictAreDistinct()
+    public async Task ReplayLineageAndSameGenerationConflictAreDistinct()
     {
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
@@ -353,14 +353,14 @@ public sealed class RestrictedStateServiceTests
             new string('3', 64));
         Assert.Equal(
             RestrictedStateCodes.ReplayRejected,
-            service.Accept(
+            (await service.AcceptAsync(
                 access,
                 lineage,
                 replayReceipt,
                 RestrictedStateTestData.SessionContext(
                     1,
                     new string('a', 64)),
-                CancellationToken.None).Code);
+                CancellationToken.None)).Code);
 
         var conflictReceipt = new PreparedStateReceipt(
             2,
@@ -369,25 +369,25 @@ public sealed class RestrictedStateServiceTests
             new string('3', 64));
         Assert.Equal(
             RestrictedStateCodes.Conflict,
-            service.Accept(
+            (await service.AcceptAsync(
                 access,
                 lineage,
                 conflictReceipt,
                 RestrictedStateTestData.SessionContext(
                     1,
                     new string('a', 64)),
-                CancellationToken.None).Code);
+                CancellationToken.None)).Code);
     }
 
     [Fact]
-    public void ExactReceiptReconciliationDoesNotReencrypt()
+    public async Task ExactReceiptReconciliationDoesNotReencrypt()
     {
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
         var sessions = new TestSessionAdmission();
         var service = Service(store, keys, sessions);
         var access = RestrictedStateTestData.Access();
-        var prepared = service.Prepare(
+        var prepared = await service.PrepareAsync(
             access,
             new RestrictedStatePrepareRequest(
                 null,
@@ -396,7 +396,7 @@ public sealed class RestrictedStateServiceTests
             CancellationToken.None);
         var writes = keys.WriteCalls;
 
-        var reconciled = service.Reconcile(
+        var reconciled = await service.ReconcileAsync(
             access,
             lineage: null,
             prepared.Receipt!,
@@ -411,7 +411,7 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void CancellationAndCleanupFailuresDoNotAdvanceState()
+    public async Task CancellationAndCleanupFailuresDoNotAdvanceState()
     {
         var store = new MemoryRestrictedStateStore();
         var service = Service(
@@ -422,7 +422,7 @@ public sealed class RestrictedStateServiceTests
         using var cancelled = new CancellationTokenSource();
         cancelled.Cancel();
 
-        var result = service.Prepare(
+        var result = await service.PrepareAsync(
             access,
             new RestrictedStatePrepareRequest(
                 null,
@@ -433,7 +433,7 @@ public sealed class RestrictedStateServiceTests
         Assert.Equal(0, store.ReadCalls);
 
         store.WriteFailure = RestrictedStateStoreFailure.Cleanup;
-        var reset = service.Reset(access, CancellationToken.None);
+        var reset = await service.ResetAsync(access, CancellationToken.None);
         Assert.Equal(
             RestrictedStateCodes.CleanupFailed,
             reset.Code);
@@ -441,7 +441,7 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void PrepareUsesOneTrustedClockReadAndExactMaximumRetention()
+    public async Task PrepareUsesOneTrustedClockReadAndExactMaximumRetention()
     {
         var clockReads = 0;
         var now = RestrictedStateTestData.Now + 123;
@@ -456,7 +456,7 @@ public sealed class RestrictedStateServiceTests
                 return now;
             });
 
-        var result = service.Prepare(
+        var result = await service.PrepareAsync(
             RestrictedStateTestData.Access(),
             new RestrictedStatePrepareRequest(
                 null,
@@ -475,14 +475,14 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void AcceptAuthenticatesStagingBeforeTransition()
+    public async Task AcceptAuthenticatesStagingBeforeTransition()
     {
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
         var sessions = new TestSessionAdmission();
         var service = Service(store, keys, sessions);
         var access = RestrictedStateTestData.Access();
-        var prepared = service.Prepare(
+        var prepared = await service.PrepareAsync(
             access,
             new RestrictedStatePrepareRequest(
                 null,
@@ -491,7 +491,7 @@ public sealed class RestrictedStateServiceTests
             CancellationToken.None);
         sessions.Reject = true;
 
-        var result = service.Accept(
+        var result = await service.AcceptAsync(
             access,
             null,
             prepared.Receipt!,
@@ -505,17 +505,17 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void PreparePreservesReceiptAcrossOutcomeUnknownAndHonorsCommitted()
+    public async Task PreparePreservesReceiptAcrossOutcomeUnknownAndHonorsCommitted()
     {
         var access = RestrictedStateTestData.Access();
         var unknownStore = new MemoryRestrictedStateStore
         {
             WriteFailure = RestrictedStateStoreFailure.Io,
         };
-        var unknown = Service(
+        var unknown = await Service(
             unknownStore,
             new TestKeyResolver(),
-            new TestSessionAdmission()).Prepare(
+            new TestSessionAdmission()).PrepareAsync(
                 access,
                 new RestrictedStatePrepareRequest(
                     null,
@@ -530,10 +530,10 @@ public sealed class RestrictedStateServiceTests
             WriteFailure = RestrictedStateStoreFailure.Io,
             CommitOnWriteFailure = true,
         };
-        var committed = Service(
+        var committed = await Service(
             committedStore,
             new TestKeyResolver(),
-            new TestSessionAdmission()).Prepare(
+            new TestSessionAdmission()).PrepareAsync(
                 access,
                 new RestrictedStatePrepareRequest(
                     null,
@@ -546,7 +546,7 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void ForgedExpiredLineageCannotDeleteLiveState()
+    public async Task ForgedExpiredLineageCannotDeleteLiveState()
     {
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
@@ -563,7 +563,7 @@ public sealed class RestrictedStateServiceTests
             SessionSha256 = new string('a', 64),
         };
 
-        var result = service.CleanupExpired(
+        var result = await service.CleanupExpiredAsync(
             access,
             forged,
             CancellationToken.None);
@@ -575,7 +575,7 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void ExpiredPredecessorCleanupRetainsLiveCurrent()
+    public async Task ExpiredPredecessorCleanupRetainsLiveCurrent()
     {
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
@@ -601,7 +601,7 @@ public sealed class RestrictedStateServiceTests
             keys,
             new TestSessionAdmission());
 
-        var result = service.CleanupExpired(
+        var result = await service.CleanupExpiredAsync(
             access,
             Lineage(predecessor),
             CancellationToken.None);
@@ -611,7 +611,7 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void ExpiredLineageIsRejectedBeforePrepareAdmissionAndHandoff()
+    public async Task ExpiredLineageIsRejectedBeforePrepareAdmissionAndHandoff()
     {
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
@@ -626,7 +626,7 @@ public sealed class RestrictedStateServiceTests
             () => RestrictedStateTestData.Expires);
         var expired = Lineage(current);
 
-        var prepared = service.Prepare(
+        var prepared = await service.PrepareAsync(
             access,
             new RestrictedStatePrepareRequest(
                 expired,
@@ -635,7 +635,7 @@ public sealed class RestrictedStateServiceTests
                     1,
                     current.EnvelopeSha256)),
             CancellationToken.None);
-        var handoff = service.PrepareHandoff(
+        var handoff = await service.PrepareHandoffAsync(
             access,
             expired,
             RestrictedStateTestData.SessionContext(),
@@ -651,7 +651,7 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void MissingCurrentWinsOverMalformedOlderEnvelope()
+    public async Task MissingCurrentWinsOverMalformedOlderEnvelope()
     {
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
@@ -685,7 +685,7 @@ public sealed class RestrictedStateServiceTests
             RestrictedStateTestData.Expires,
             TransitionAuthorized: true);
 
-        var result = service.Restore(
+        var result = await service.RestoreAsync(
             access,
             new RestrictedStateRestoreRequest(
                 RestrictedStateLocatorFamily.Current,
@@ -703,7 +703,7 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void OlderReplayIsRejectedWhileNewerCurrentExists()
+    public async Task OlderReplayIsRejectedWhileNewerCurrentExists()
     {
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
@@ -723,7 +723,7 @@ public sealed class RestrictedStateServiceTests
             keys,
             new TestSessionAdmission());
 
-        var result = service.Restore(
+        var result = await service.RestoreAsync(
             access,
             new RestrictedStateRestoreRequest(
                 RestrictedStateLocatorFamily.Current,
@@ -739,7 +739,7 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void CandidateSelfDeclaredLineageCannotReplaceHostCurrent()
+    public async Task CandidateSelfDeclaredLineageCannotReplaceHostCurrent()
     {
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
@@ -756,7 +756,7 @@ public sealed class RestrictedStateServiceTests
             EnvelopeSha256 = new string('a', 64),
         };
 
-        var result = service.Prepare(
+        var result = await service.PrepareAsync(
             access,
             new RestrictedStatePrepareRequest(
                 forged,
@@ -773,7 +773,7 @@ public sealed class RestrictedStateServiceTests
         Assert.Null(store.Snapshot.Staging);
 
         sessions.Reject = false;
-        var lineageResult = service.Prepare(
+        var lineageResult = await service.PrepareAsync(
             access,
             new RestrictedStatePrepareRequest(
                 forged,
@@ -791,7 +791,7 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void OutcomeUnknownReconcileUsesExactPersistedEnvelope()
+    public async Task OutcomeUnknownReconcileUsesExactPersistedEnvelope()
     {
         var store = new MemoryRestrictedStateStore
         {
@@ -804,7 +804,7 @@ public sealed class RestrictedStateServiceTests
             keys,
             new TestSessionAdmission());
         var access = RestrictedStateTestData.Access();
-        var prepared = service.Prepare(
+        var prepared = await service.PrepareAsync(
             access,
             new RestrictedStatePrepareRequest(
                 null,
@@ -815,7 +815,7 @@ public sealed class RestrictedStateServiceTests
         var writeCalls = keys.WriteCalls;
         store.WriteFailure = RestrictedStateStoreFailure.None;
 
-        var reconciled = service.Reconcile(
+        var reconciled = await service.ReconcileAsync(
             access,
             null,
             prepared.Receipt!,
@@ -828,14 +828,14 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void SameSemanticDifferentEnvelopeReceiptConflicts()
+    public async Task SameSemanticDifferentEnvelopeReceiptConflicts()
     {
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
         var sessions = new TestSessionAdmission();
         var service = Service(store, keys, sessions);
         var access = RestrictedStateTestData.Access();
-        var prepared = service.Prepare(
+        var prepared = await service.PrepareAsync(
             access,
             new RestrictedStatePrepareRequest(
                 null,
@@ -852,7 +852,7 @@ public sealed class RestrictedStateServiceTests
             other.EnvelopeSha256,
             other.ObjectIdentity);
 
-        var result = service.Accept(
+        var result = await service.AcceptAsync(
             access,
             null,
             otherReceipt,
@@ -867,7 +867,7 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void AcceptExpiryBoundaryIsExact()
+    public async Task AcceptExpiryBoundaryIsExact()
     {
         var now = RestrictedStateTestData.Now;
         var store = new MemoryRestrictedStateStore();
@@ -878,7 +878,7 @@ public sealed class RestrictedStateServiceTests
             new TestSessionAdmission(),
             () => now);
         var access = RestrictedStateTestData.Access();
-        var prepared = service.Prepare(
+        var prepared = await service.PrepareAsync(
             access,
             new RestrictedStatePrepareRequest(
                 null,
@@ -887,7 +887,7 @@ public sealed class RestrictedStateServiceTests
             CancellationToken.None);
         now = RestrictedStateTestData.Expires;
 
-        var exact = service.Accept(
+        var exact = await service.AcceptAsync(
             access,
             null,
             prepared.Receipt!,
@@ -912,7 +912,7 @@ public sealed class RestrictedStateServiceTests
     [InlineData(
         (int)RestrictedStateStoreFailure.Io,
         RestrictedStateCodes.IoFailed)]
-    public void EnumerationStoreFailuresHaveExactStableCodes(
+    public async Task EnumerationStoreFailuresHaveExactStableCodes(
         int failureValue,
         string expectedCode)
     {
@@ -926,7 +926,7 @@ public sealed class RestrictedStateServiceTests
             new TestKeyResolver(),
             new TestSessionAdmission());
 
-        var result = service.Enumerate(
+        var result = await service.EnumerateAsync(
             RestrictedStateTestData.Access(),
             CancellationToken.None);
 
@@ -936,7 +936,7 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void EnumerationValidatesStagingFramingBeforeReturningAccepted()
+    public async Task EnumerationValidatesStagingFramingBeforeReturningAccepted()
     {
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
@@ -956,7 +956,7 @@ public sealed class RestrictedStateServiceTests
             keys,
             new TestSessionAdmission());
 
-        var valid = service.Enumerate(
+        var valid = await service.EnumerateAsync(
             access,
             CancellationToken.None);
 
@@ -986,7 +986,7 @@ public sealed class RestrictedStateServiceTests
             RestrictedStateValidation.IsValidSnapshot(
                 store.Snapshot));
 
-        var malformed = service.Enumerate(
+        var malformed = await service.EnumerateAsync(
             access,
             CancellationToken.None);
 
@@ -1015,7 +1015,7 @@ public sealed class RestrictedStateServiceTests
     [InlineData(
         (int)RestrictedStateStoreFailure.Io,
         RestrictedStateCodes.IoFailed)]
-    public void PrepareWriteFailuresPreserveExactReceiptAndCode(
+    public async Task PrepareWriteFailuresPreserveExactReceiptAndCode(
         int failureValue,
         string expectedCode)
     {
@@ -1029,7 +1029,7 @@ public sealed class RestrictedStateServiceTests
             new TestKeyResolver(),
             new TestSessionAdmission());
 
-        var result = service.Prepare(
+        var result = await service.PrepareAsync(
             RestrictedStateTestData.Access(),
             new RestrictedStatePrepareRequest(
                 null,
@@ -1060,7 +1060,7 @@ public sealed class RestrictedStateServiceTests
     [InlineData(
         (int)RestrictedStateStoreFailure.Io,
         RestrictedStateCodes.IoFailed)]
-    public void ResetDeleteFailuresHaveExactStableCodes(
+    public async Task ResetDeleteFailuresHaveExactStableCodes(
         int failureValue,
         string expectedCode)
     {
@@ -1074,7 +1074,7 @@ public sealed class RestrictedStateServiceTests
             new TestKeyResolver(),
             new TestSessionAdmission());
 
-        var result = service.Reset(
+        var result = await service.ResetAsync(
             RestrictedStateTestData.Access(),
             CancellationToken.None);
 
@@ -1083,17 +1083,17 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void KeyAndSessionBoundaryExceptionsBecomeStableFailures()
+    public async Task KeyAndSessionBoundaryExceptionsBecomeStableFailures()
     {
         var access = RestrictedStateTestData.Access();
         var sessionFailure = new TestSessionAdmission
         {
             Throw = true,
         };
-        var sessionResult = Service(
+        var sessionResult = await Service(
             new MemoryRestrictedStateStore(),
             new TestKeyResolver(),
-            sessionFailure).Prepare(
+            sessionFailure).PrepareAsync(
                 access,
                 new RestrictedStatePrepareRequest(
                     null,
@@ -1108,10 +1108,10 @@ public sealed class RestrictedStateServiceTests
         {
             ThrowOnWrite = true,
         };
-        var keyResult = Service(
+        var keyResult = await Service(
             new MemoryRestrictedStateStore(),
             writeKeys,
-            new TestSessionAdmission()).Prepare(
+            new TestSessionAdmission()).PrepareAsync(
                 access,
                 new RestrictedStatePrepareRequest(
                     null,
@@ -1127,7 +1127,7 @@ public sealed class RestrictedStateServiceTests
     [InlineData(-1, (int)StateAction.HandoffReady)]
     [InlineData(0, (int)StateAction.Failed)]
     [InlineData(1, (int)StateAction.Failed)]
-    public void HandoffExpiryBoundaryIsExact(
+    public async Task HandoffExpiryBoundaryIsExact(
         int offset,
         int expectedActionValue)
     {
@@ -1143,7 +1143,7 @@ public sealed class RestrictedStateServiceTests
             new TestSessionAdmission(),
             () => RestrictedStateTestData.Expires + offset);
 
-        var result = service.PrepareHandoff(
+        var result = await service.PrepareHandoffAsync(
             access,
             Lineage(current),
             RestrictedStateTestData.SessionContext(),
@@ -1158,7 +1158,7 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void RestoreIgnoresLegalNextStagingAndReturnsCurrent()
+    public async Task RestoreIgnoresLegalNextStagingAndReturnsCurrent()
     {
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
@@ -1178,7 +1178,7 @@ public sealed class RestrictedStateServiceTests
             keys,
             new TestSessionAdmission());
 
-        var result = service.Restore(
+        var result = await service.RestoreAsync(
             access,
             new RestrictedStateRestoreRequest(
                 RestrictedStateLocatorFamily.Current,
@@ -1197,7 +1197,7 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void AcceptedNextGenerationRetryStillRequiresExactPredecessor()
+    public async Task AcceptedNextGenerationRetryStillRequiresExactPredecessor()
     {
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
@@ -1207,7 +1207,7 @@ public sealed class RestrictedStateServiceTests
             keys,
             sessions);
         var access = RestrictedStateTestData.Access();
-        var first = PrepareAndAccept(
+        var first = await PrepareAndAccept(
             service,
             store,
             access,
@@ -1215,7 +1215,7 @@ public sealed class RestrictedStateServiceTests
             0,
             null);
         var lineage = Lineage(first);
-        var prepared = service.Prepare(
+        var prepared = await service.PrepareAsync(
             access,
             new RestrictedStatePrepareRequest(
                 lineage,
@@ -1226,16 +1226,16 @@ public sealed class RestrictedStateServiceTests
             CancellationToken.None);
         Assert.Equal(
             StateAction.Accepted,
-            service.Accept(
+            (await service.AcceptAsync(
                 access,
                 lineage,
                 prepared.Receipt!,
                 RestrictedStateTestData.SessionContext(
                     1,
                     first.EnvelopeSha256),
-                CancellationToken.None).Action);
+                CancellationToken.None)).Action);
 
-        var acceptRetry = service.Accept(
+        var acceptRetry = await service.AcceptAsync(
             access,
             lineage,
             prepared.Receipt!,
@@ -1243,7 +1243,7 @@ public sealed class RestrictedStateServiceTests
                 1,
                 first.EnvelopeSha256),
             CancellationToken.None);
-        var reconcileRetry = service.Reconcile(
+        var reconcileRetry = await service.ReconcileAsync(
             access,
             lineage,
             prepared.Receipt!,
@@ -1257,7 +1257,7 @@ public sealed class RestrictedStateServiceTests
         };
         sessions.Reject = true;
         var callsBeforeForged = sessions.Calls;
-        var forged = service.Accept(
+        var forged = await service.AcceptAsync(
             access,
             forgedLineage,
             prepared.Receipt!,
@@ -1275,14 +1275,14 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void PresentCandidatesAuthenticateBeforeReceiptAndLineageDefects()
+    public async Task PresentCandidatesAuthenticateBeforeReceiptAndLineageDefects()
     {
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
         var sessions = new TestSessionAdmission();
         var service = Service(store, keys, sessions);
         var access = RestrictedStateTestData.Access();
-        var first = PrepareAndAccept(
+        var first = await PrepareAndAccept(
             service,
             store,
             access,
@@ -1290,7 +1290,7 @@ public sealed class RestrictedStateServiceTests
             0,
             null);
         var lineage = Lineage(first);
-        var prepared = service.Prepare(
+        var prepared = await service.PrepareAsync(
             access,
             new RestrictedStatePrepareRequest(
                 lineage,
@@ -1306,7 +1306,7 @@ public sealed class RestrictedStateServiceTests
         };
         var callsBeforeReceipt = sessions.Calls;
 
-        var receiptResult = service.Accept(
+        var receiptResult = await service.AcceptAsync(
             access,
             lineage,
             malformedReceipt,
@@ -1350,7 +1350,7 @@ public sealed class RestrictedStateServiceTests
             SessionSha256 = new string('a', 64),
         };
 
-        var aeadBeforeLineage = service.Accept(
+        var aeadBeforeLineage = await service.AcceptAsync(
             access,
             wrongLineage,
             exactMalformedReceipt,
@@ -1358,7 +1358,7 @@ public sealed class RestrictedStateServiceTests
                 1,
                 first.EnvelopeSha256),
             CancellationToken.None);
-        var reconcileBeforeLineage = service.Reconcile(
+        var reconcileBeforeLineage = await service.ReconcileAsync(
             access,
             wrongLineage,
             exactMalformedReceipt,
@@ -1380,7 +1380,7 @@ public sealed class RestrictedStateServiceTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void ProducerBindingTamperCannotInfluenceLineageSelectedOperations(
+    public async Task ProducerBindingTamperCannotInfluenceLineageSelectedOperations(
         bool mutateHead)
     {
         var access = RestrictedStateTestData.Access();
@@ -1403,7 +1403,7 @@ public sealed class RestrictedStateServiceTests
         {
             Snapshot = new RestrictedStateSnapshot([tampered], null),
         };
-        var prepare = Service(prepareStore, keys, sessions).Prepare(
+        var prepare = await Service(prepareStore, keys, sessions).PrepareAsync(
             access,
             new RestrictedStatePrepareRequest(
                 lineage,
@@ -1425,7 +1425,7 @@ public sealed class RestrictedStateServiceTests
                 [tampered],
                 staging),
         };
-        var accept = Service(acceptStore, keys, sessions).Accept(
+        var accept = await Service(acceptStore, keys, sessions).AcceptAsync(
             access,
             lineage,
             Receipt(staging),
@@ -1438,7 +1438,7 @@ public sealed class RestrictedStateServiceTests
         {
             Snapshot = new RestrictedStateSnapshot([tampered], null),
         };
-        var handoff = Service(handoffStore, keys, sessions).PrepareHandoff(
+        var handoff = await Service(handoffStore, keys, sessions).PrepareHandoffAsync(
             access,
             lineage,
             RestrictedStateTestData.SessionContext(),
@@ -1465,7 +1465,7 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void LineageSelectedCandidatesRequireSessionReadmission()
+    public async Task LineageSelectedCandidatesRequireSessionReadmission()
     {
         var access = RestrictedStateTestData.Access();
         var current = RestrictedStateTestData.Candidate(
@@ -1481,10 +1481,10 @@ public sealed class RestrictedStateServiceTests
         {
             RejectOnCall = 2,
         };
-        var prepare = Service(
+        var prepare = await Service(
             prepareStore,
             new TestKeyResolver(),
-            prepareSessions).Prepare(
+            prepareSessions).PrepareAsync(
                 access,
                 new RestrictedStatePrepareRequest(
                     lineage,
@@ -1514,10 +1514,10 @@ public sealed class RestrictedStateServiceTests
         {
             RejectOnCall = 2,
         };
-        var accept = Service(
+        var accept = await Service(
             acceptStore,
             acceptKeys,
-            acceptSessions).Accept(
+            acceptSessions).AcceptAsync(
                 access,
                 Lineage(acceptedCurrent),
                 Receipt(staging),
@@ -1540,10 +1540,10 @@ public sealed class RestrictedStateServiceTests
         {
             RejectOnCall = 1,
         };
-        var handoff = Service(
+        var handoff = await Service(
             handoffStore,
             handoffKeys,
-            handoffSessions).PrepareHandoff(
+            handoffSessions).PrepareHandoffAsync(
                 access,
                 Lineage(handoffCurrent),
                 RestrictedStateTestData.SessionContext(),
@@ -1570,14 +1570,14 @@ public sealed class RestrictedStateServiceTests
     }
 
     [Fact]
-    public void RetryAndReconcileAuthenticateLineagePredecessor()
+    public async Task RetryAndReconcileAuthenticateLineagePredecessor()
     {
         var store = new MemoryRestrictedStateStore();
         var keys = new TestKeyResolver();
         var sessions = new TestSessionAdmission();
         var service = Service(store, keys, sessions);
         var access = RestrictedStateTestData.Access();
-        var first = PrepareAndAccept(
+        var first = await PrepareAndAccept(
             service,
             store,
             access,
@@ -1585,7 +1585,7 @@ public sealed class RestrictedStateServiceTests
             0,
             null);
         var lineage = Lineage(first);
-        var prepared = service.Prepare(
+        var prepared = await service.PrepareAsync(
             access,
             new RestrictedStatePrepareRequest(
                 lineage,
@@ -1596,14 +1596,14 @@ public sealed class RestrictedStateServiceTests
             CancellationToken.None);
         Assert.Equal(
             StateAction.Accepted,
-            service.Accept(
+            (await service.AcceptAsync(
                 access,
                 lineage,
                 prepared.Receipt!,
                 RestrictedStateTestData.SessionContext(
                     1,
                     first.EnvelopeSha256),
-                CancellationToken.None).Action);
+                CancellationToken.None)).Action);
 
         var current = store.Snapshot.Accepted[0];
         var tamperedPredecessor = Rebind(
@@ -1616,7 +1616,7 @@ public sealed class RestrictedStateServiceTests
             [current, tamperedPredecessor],
             null);
 
-        var accept = service.Accept(
+        var accept = await service.AcceptAsync(
             access,
             lineage,
             prepared.Receipt!,
@@ -1624,7 +1624,7 @@ public sealed class RestrictedStateServiceTests
                 1,
                 first.EnvelopeSha256),
             CancellationToken.None);
-        var reconcile = service.Reconcile(
+        var reconcile = await service.ReconcileAsync(
             access,
             lineage,
             prepared.Receipt!,
@@ -1655,7 +1655,7 @@ public sealed class RestrictedStateServiceTests
             sessions,
             () => RestrictedStateTestData.Now);
 
-    private static RestrictedStateCandidate PrepareAndAccept(
+    private static async Task<RestrictedStateCandidate> PrepareAndAccept(
         RestrictedStateService service,
         MemoryRestrictedStateStore store,
         AuthorizedStateAccess access,
@@ -1663,7 +1663,7 @@ public sealed class RestrictedStateServiceTests
         long generation,
         string? predecessor)
     {
-        var prepared = service.Prepare(
+        var prepared = await service.PrepareAsync(
             access,
             new RestrictedStatePrepareRequest(
                 lineage,
@@ -1673,7 +1673,7 @@ public sealed class RestrictedStateServiceTests
                     predecessor)),
             CancellationToken.None);
         Assert.Equal(StateAction.Prepared, prepared.Result.Action);
-        var accepted = service.Accept(
+        var accepted = await service.AcceptAsync(
             access,
             lineage,
             prepared.Receipt!,

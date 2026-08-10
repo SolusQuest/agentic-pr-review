@@ -246,17 +246,18 @@ internal sealed class R3LiveAgentApplication
 
                 diagnosticCode = R3LiveAgentDiagnosticCodes.StateRestoreFailed;
                 dependencies.DiagnosticStageObserver?.Enter(diagnosticCode);
-                var restore = dependencies.StateRestorer.Restore(
-                    request.StateRoot,
-                    keyResolver!,
-                    access,
-                    new RestrictedStateRestoreRequest(
-                        request.StateLocatorFamily,
-                        request.StateRestoreIntent,
-                        request.AcceptedLineage,
-                        stateContext),
-                    dependencies.TimeProvider,
-                    cancellationToken);
+                var restore = await dependencies.StateRestorer.RestoreAsync(
+                        request.StateRoot,
+                        keyResolver!,
+                        access,
+                        new RestrictedStateRestoreRequest(
+                            request.StateLocatorFamily,
+                            request.StateRestoreIntent,
+                            request.AcceptedLineage,
+                            stateContext),
+                        dependencies.TimeProvider,
+                        cancellationToken)
+                    .ConfigureAwait(false);
                 admittedSession = restore.Session;
 
                 AgentRunRequest run;
@@ -363,14 +364,16 @@ internal sealed class R3LiveAgentApplication
                     stateContext.SessionContext.Transition,
                     predecessor,
                     stateContext);
-                var commit = dependencies.StateCommitCoordinator.Commit(
-                    candidate,
-                    access,
-                    request.AcceptedLineage,
-                    authorizedTransition,
-                    request.StateRoot,
-                    keyResolver!,
-                    cancellationToken);
+                var commit = await dependencies.StateCommitCoordinator
+                    .CommitAsync(
+                        candidate,
+                        access,
+                        request.AcceptedLineage,
+                        authorizedTransition,
+                        request.StateRoot,
+                        keyResolver!,
+                        cancellationToken)
+                    .ConfigureAwait(false);
                 diagnosticCode = R3LiveAgentDiagnosticCodes.ResultFailed;
                 dependencies.DiagnosticStageObserver?.Enter(diagnosticCode);
                 return new R3LiveAgentExecution(

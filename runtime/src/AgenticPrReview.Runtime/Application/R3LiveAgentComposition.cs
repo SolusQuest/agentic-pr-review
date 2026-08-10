@@ -70,7 +70,7 @@ internal sealed class R3LiveAgentEnvironmentSecretSource
 
 internal interface IR3LiveAgentStateRestorer
 {
-    RestrictedStateRestoreResult Restore(
+    Task<RestrictedStateRestoreResult> RestoreAsync(
         string stateRoot,
         IRestrictedStateKeyResolver keyResolver,
         AuthorizedStateAccess access,
@@ -81,7 +81,7 @@ internal interface IR3LiveAgentStateRestorer
 
 internal sealed class R3LiveAgentStateRestorer : IR3LiveAgentStateRestorer
 {
-    public RestrictedStateRestoreResult Restore(
+    public async Task<RestrictedStateRestoreResult> RestoreAsync(
         string stateRoot,
         IRestrictedStateKeyResolver keyResolver,
         AuthorizedStateAccess access,
@@ -95,7 +95,11 @@ internal sealed class R3LiveAgentStateRestorer : IR3LiveAgentStateRestorer
             keyResolver,
             new AgentSessionRestrictedStateAdmission(),
             () => timeProvider.GetUtcNow().ToUnixTimeSeconds());
-        return service.Restore(access, request, cancellationToken);
+        return await service.RestoreAsync(
+                access,
+                request,
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 }
 

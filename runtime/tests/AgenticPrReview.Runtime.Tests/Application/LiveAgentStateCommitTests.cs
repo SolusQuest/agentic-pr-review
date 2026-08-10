@@ -138,7 +138,7 @@ public sealed partial class R3LiveAgentApplicationTests
         var sink = new CapturingLineageSink(
             LiveAgentLineagePublicationOutcome.Ready);
 
-        var result = Commit(captured, transaction, sink);
+        var result = await CommitAsync(captured, transaction, sink);
 
         Assert.Equal(R3LiveAgentCodes.Completed, result.Code);
         Assert.True(result.HandoffReady);
@@ -176,7 +176,7 @@ public sealed partial class R3LiveAgentApplicationTests
         transaction.AcceptOutcomes.Enqueue(
             ScriptedStateOutcome.Accepted);
 
-        var result = Commit(
+        var result = await CommitAsync(
             captured,
             transaction,
             new CapturingLineageSink(
@@ -206,7 +206,7 @@ public sealed partial class R3LiveAgentApplicationTests
         var sink = new CapturingLineageSink(
             LiveAgentLineagePublicationOutcome.Ready);
 
-        var result = Commit(captured, transaction, sink);
+        var result = await CommitAsync(captured, transaction, sink);
 
         Assert.Equal(expectedCode, result.Code);
         Assert.Null(result.AcceptedGeneration);
@@ -229,7 +229,7 @@ public sealed partial class R3LiveAgentApplicationTests
         transaction.AcceptOutcomes.Enqueue(
             ScriptedStateOutcome.Idempotent);
 
-        var result = Commit(
+        var result = await CommitAsync(
             captured,
             transaction,
             new CapturingLineageSink(
@@ -257,7 +257,7 @@ public sealed partial class R3LiveAgentApplicationTests
         var sink = new CapturingLineageSink(
             LiveAgentLineagePublicationOutcome.Ready);
 
-        var result = Commit(captured, transaction, sink);
+        var result = await CommitAsync(captured, transaction, sink);
 
         Assert.Equal(RestrictedStateCodes.IoFailed, result.Code);
         Assert.Null(result.AcceptedGeneration);
@@ -279,7 +279,7 @@ public sealed partial class R3LiveAgentApplicationTests
         var sink = new CapturingLineageSink(
             LiveAgentLineagePublicationOutcome.Ready);
 
-        var result = Commit(captured, transaction, sink);
+        var result = await CommitAsync(captured, transaction, sink);
 
         Assert.Equal(RestrictedStateCodes.Cancelled, result.Code);
         Assert.Null(result.AcceptedGeneration);
@@ -301,7 +301,7 @@ public sealed partial class R3LiveAgentApplicationTests
         var sink = new CapturingLineageSink(
             LiveAgentLineagePublicationOutcome.Ready);
 
-        var result = Commit(
+        var result = await CommitAsync(
             captured,
             transaction,
             sink,
@@ -328,7 +328,7 @@ public sealed partial class R3LiveAgentApplicationTests
         var sink = new CapturingLineageSink(
             LiveAgentLineagePublicationOutcome.Unavailable);
 
-        var result = Commit(
+        var result = await CommitAsync(
             captured,
             transaction,
             sink,
@@ -358,7 +358,7 @@ public sealed partial class R3LiveAgentApplicationTests
         var sink = new CapturingLineageSink(
             LiveAgentLineagePublicationOutcome.Ready);
 
-        var result = Commit(captured, transaction, sink);
+        var result = await CommitAsync(captured, transaction, sink);
 
         Assert.Equal(R3LiveAgentCodes.CompositionFailed, result.Code);
         Assert.Null(result.AcceptedGeneration);
@@ -384,7 +384,7 @@ public sealed partial class R3LiveAgentApplicationTests
         transaction.AcceptOutcomes.Enqueue(
             ScriptedStateOutcome.Accepted);
 
-        var result = Commit(
+        var result = await CommitAsync(
             captured,
             transaction,
             new CapturingLineageSink(publication));
@@ -407,7 +407,7 @@ public sealed partial class R3LiveAgentApplicationTests
         transaction.AcceptOutcomes.Enqueue(
             ScriptedStateOutcome.Accepted);
 
-        var result = Commit(
+        var result = await CommitAsync(
             captured,
             transaction,
             new CapturingLineageSink(
@@ -435,7 +435,7 @@ public sealed partial class R3LiveAgentApplicationTests
         var sink = new CapturingLineageSink(
             LiveAgentLineagePublicationOutcome.Ready);
 
-        var result = Commit(captured, transaction, sink);
+        var result = await CommitAsync(captured, transaction, sink);
 
         Assert.Equal(R3LiveAgentCodes.CompositionFailed, result.Code);
         Assert.Null(result.AcceptedGeneration);
@@ -471,7 +471,7 @@ public sealed partial class R3LiveAgentApplicationTests
 
         using (stateKeys)
         {
-            var result = coordinator.Commit(
+            var result = await coordinator.CommitAsync(
                 captured.Candidate,
                 captured.Access,
                 forgedPrior,
@@ -503,7 +503,7 @@ public sealed partial class R3LiveAgentApplicationTests
 
         using (stateKeys)
         {
-            var result = coordinator.Commit(
+            var result = await coordinator.CommitAsync(
                 captured.Candidate,
                 captured.Access,
                 priorLineage: null,
@@ -525,7 +525,7 @@ public sealed partial class R3LiveAgentApplicationTests
             value => Assert.Equal(0, value));
     }
 
-    private static LiveAgentStateCommitResult Commit(
+    private static async Task<LiveAgentStateCommitResult> CommitAsync(
         CapturedLiveAgent captured,
         ScriptedStateTransaction transaction,
         CapturingLineageSink sink,
@@ -540,7 +540,7 @@ public sealed partial class R3LiveAgentApplicationTests
             out var stateKeys));
         using (stateKeys)
         {
-            return coordinator.Commit(
+            return await coordinator.CommitAsync(
                 captured.Candidate,
                 captured.Access,
                 priorLineage: null,
@@ -642,7 +642,7 @@ public sealed partial class R3LiveAgentApplicationTests
 
         internal ReadOnlyMemory<byte> PreparedPlaintext { get; private set; }
 
-        public LiveAgentStatePrepareObservation Prepare(
+        public Task<LiveAgentStatePrepareObservation> PrepareAsync(
             AuthorizedStateAccess access,
             RestrictedStatePrepareRequest request,
             CancellationToken cancellationToken)
@@ -651,14 +651,14 @@ public sealed partial class R3LiveAgentApplicationTests
             PreparedPlaintext = request.Plaintext;
             if (EarlyPrepareCancellation)
             {
-                return new LiveAgentStatePrepareObservation(
+                return Task.FromResult(new LiveAgentStatePrepareObservation(
                     new RestrictedStatePrepareResult(
                         StateResult.Create(
                             StateAction.Failed,
                             RestrictedStateCodes.Cancelled),
                         null),
                     clockReads: 0,
-                    preparedAtUnixSeconds: null);
+                    preparedAtUnixSeconds: null));
             }
 
             Assert.True(AgentSessionCodec.TryParse(
@@ -696,13 +696,13 @@ public sealed partial class R3LiveAgentApplicationTests
                     Receipt.SessionSha256,
                     Receipt.EnvelopeSha256);
             AfterPrepare?.Invoke();
-            return new LiveAgentStatePrepareObservation(
+            return Task.FromResult(new LiveAgentStatePrepareObservation(
                 new RestrictedStatePrepareResult(result, Receipt),
                 PrepareClockReads,
-                PrepareTimestamp);
+                PrepareTimestamp));
         }
 
-        public StateResult Reconcile(
+        public Task<StateResult> ReconcileAsync(
             AuthorizedStateAccess access,
             AcceptedLineage? lineage,
             PreparedStateReceipt receipt,
@@ -711,10 +711,11 @@ public sealed partial class R3LiveAgentApplicationTests
         {
             ReconcileCalls++;
             ReconcileTokens.Add(cancellationToken);
-            return Result(ReconcileOutcomes.Dequeue(), receipt);
+            return Task.FromResult(
+                Result(ReconcileOutcomes.Dequeue(), receipt));
         }
 
-        public StateResult Accept(
+        public Task<StateResult> AcceptAsync(
             AuthorizedStateAccess access,
             AcceptedLineage? lineage,
             PreparedStateReceipt receipt,
@@ -726,7 +727,7 @@ public sealed partial class R3LiveAgentApplicationTests
             AcceptReceipts.Add(receipt);
             var result = Result(AcceptOutcomes.Dequeue(), receipt);
             AfterAccept?.Invoke();
-            return result;
+            return Task.FromResult(result);
         }
 
         private static StateResult Result(
@@ -790,7 +791,8 @@ public sealed partial class R3LiveAgentApplicationTests
 
         internal ReadOnlyMemory<byte> BuiltPlaintext { get; private set; }
 
-        internal RestrictedStateAdmittedSession? AdmittedSession {
+        internal RestrictedStateAdmittedSession? AdmittedSession
+        {
             get;
             private set;
         }

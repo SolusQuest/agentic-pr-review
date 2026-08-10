@@ -1,6 +1,9 @@
 using System.Security.Cryptography;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State;
+using AgenticPrReview.Runtime.Host.State.OpaqueStore;
+using OpaqueStateStore =
+    AgenticPrReview.Runtime.Host.State.OpaqueStore.IRestrictedStateStore;
 
 namespace AgenticPrReview.Runtime;
 
@@ -36,19 +39,19 @@ internal sealed class LiveAgentStatePrepareObservation(
 
 internal interface ILiveAgentStateTransaction
 {
-    LiveAgentStatePrepareObservation Prepare(
+    Task<LiveAgentStatePrepareObservation> PrepareAsync(
         AuthorizedStateAccess access,
         RestrictedStatePrepareRequest request,
         CancellationToken cancellationToken);
 
-    StateResult Reconcile(
+    Task<StateResult> ReconcileAsync(
         AuthorizedStateAccess access,
         AcceptedLineage? lineage,
         PreparedStateReceipt receipt,
         RestrictedStateSessionAdmissionContext sessionContext,
         CancellationToken cancellationToken);
 
-    StateResult Accept(
+    Task<StateResult> AcceptAsync(
         AuthorizedStateAccess access,
         AcceptedLineage? lineage,
         PreparedStateReceipt receipt,
@@ -76,11 +79,11 @@ internal sealed class LiveAgentStateTransactionFactory(
 }
 
 internal sealed class LiveAgentStateTransaction(
-    IRestrictedStateStore store,
+    OpaqueStateStore store,
     IRestrictedStateKeyResolver keyResolver,
     TimeProvider timeProvider) : ILiveAgentStateTransaction
 {
-    public LiveAgentStatePrepareObservation Prepare(
+    public async Task<LiveAgentStatePrepareObservation> PrepareAsync(
         AuthorizedStateAccess access,
         RestrictedStatePrepareRequest request,
         CancellationToken cancellationToken)
@@ -100,36 +103,37 @@ internal sealed class LiveAgentStateTransaction(
         }
 
         var service = Service(ReadPrepareClock);
-        var outcome = service.Prepare(
-            access,
-            request,
-            cancellationToken);
+        var outcome = await service.PrepareAsync(
+                access,
+                request,
+                cancellationToken)
+            .ConfigureAwait(false);
         return new LiveAgentStatePrepareObservation(
             outcome,
             clockReads,
             preparedAt);
     }
 
-    public StateResult Reconcile(
+    public Task<StateResult> ReconcileAsync(
         AuthorizedStateAccess access,
         AcceptedLineage? lineage,
         PreparedStateReceipt receipt,
         RestrictedStateSessionAdmissionContext sessionContext,
         CancellationToken cancellationToken) =>
-        Service(ReadCurrentClock).Reconcile(
+        Service(ReadCurrentClock).ReconcileAsync(
             access,
             lineage,
             receipt,
             sessionContext,
             cancellationToken);
 
-    public StateResult Accept(
+    public Task<StateResult> AcceptAsync(
         AuthorizedStateAccess access,
         AcceptedLineage? lineage,
         PreparedStateReceipt receipt,
         RestrictedStateSessionAdmissionContext sessionContext,
         CancellationToken cancellationToken) =>
-        Service(ReadCurrentClock).Accept(
+        Service(ReadCurrentClock).AcceptAsync(
             access,
             lineage,
             receipt,
@@ -185,7 +189,7 @@ internal sealed class LiveAgentStateCommitResult(
 
 internal interface ILiveAgentStateCommitCoordinator
 {
-    LiveAgentStateCommitResult Commit(
+    Task<LiveAgentStateCommitResult> CommitAsync(
         LiveAgentCandidate candidate,
         AuthorizedStateAccess access,
         AcceptedLineage? priorLineage,
@@ -201,7 +205,7 @@ internal sealed class LiveAgentStateCommitCoordinator(
     ILiveAgentAcceptedLineageSink lineageSink)
     : ILiveAgentStateCommitCoordinator
 {
-    public LiveAgentStateCommitResult Commit(
+    public async Task<LiveAgentStateCommitResult> CommitAsync(
         LiveAgentCandidate candidate,
         AuthorizedStateAccess access,
         AcceptedLineage? priorLineage,
@@ -271,13 +275,14 @@ internal sealed class LiveAgentStateCommitCoordinator(
                 var transaction = transactionFactory.Create(
                     stateRoot,
                     keyResolver);
-                var prepare = transaction.Prepare(
-                    access,
-                    new RestrictedStatePrepareRequest(
-                        priorLineage,
-                        builtArtifact.Plaintext,
-                        candidate.StateAdmissionContext),
-                    cancellationToken);
+                var prepare = await transaction.PrepareAsync(
+                        access,
+                        new RestrictedStatePrepareRequest(
+                            priorLineage,
+                            builtArtifact.Plaintext,
+                            candidate.StateAdmissionContext),
+                        cancellationToken)
+                    .ConfigureAwait(false);
                 Zero(builtArtifact.Plaintext);
 
                 if (IsEarlyCancellation(prepare))
@@ -315,12 +320,13 @@ internal sealed class LiveAgentStateCommitCoordinator(
 
                 if (IsIoFailure(prepare.Outcome.Result))
                 {
-                    var reconciled = transaction.Reconcile(
-                        access,
-                        priorLineage,
-                        receipt!,
-                        candidate.StateAdmissionContext,
-                        CancellationToken.None);
+                    var reconciled = await transaction.ReconcileAsync(
+                            access,
+                            priorLineage,
+                            receipt!,
+                            candidate.StateAdmissionContext,
+                            CancellationToken.None)
+                        .ConfigureAwait(false);
                     if (!IsExactIdentity(
                             reconciled,
                             StateAction.Idempotent,
@@ -338,12 +344,13 @@ internal sealed class LiveAgentStateCommitCoordinator(
                         RestrictedStateCodes.Cancelled);
                 }
 
-                var accepted = transaction.Accept(
-                    access,
-                    priorLineage,
-                    receipt!,
-                    candidate.StateAdmissionContext,
-                    cancellationToken);
+                var accepted = await transaction.AcceptAsync(
+                        access,
+                        priorLineage,
+                        receipt!,
+                        candidate.StateAdmissionContext,
+                        cancellationToken)
+                    .ConfigureAwait(false);
                 if (!IsCommitted(accepted, receipt!))
                 {
                     if (!IsIoFailure(accepted))
@@ -352,12 +359,13 @@ internal sealed class LiveAgentStateCommitCoordinator(
                             BoundedFailureCode(accepted));
                     }
 
-                    var reconciled = transaction.Reconcile(
-                        access,
-                        priorLineage,
-                        receipt!,
-                        candidate.StateAdmissionContext,
-                        CancellationToken.None);
+                    var reconciled = await transaction.ReconcileAsync(
+                            access,
+                            priorLineage,
+                            receipt!,
+                            candidate.StateAdmissionContext,
+                            CancellationToken.None)
+                        .ConfigureAwait(false);
                     if (!IsExactIdentity(
                             reconciled,
                             StateAction.Idempotent,
@@ -368,12 +376,13 @@ internal sealed class LiveAgentStateCommitCoordinator(
                             BoundedFailureCode(reconciled));
                     }
 
-                    accepted = transaction.Accept(
-                        access,
-                        priorLineage,
-                        receipt!,
-                        candidate.StateAdmissionContext,
-                        CancellationToken.None);
+                    accepted = await transaction.AcceptAsync(
+                            access,
+                            priorLineage,
+                            receipt!,
+                            candidate.StateAdmissionContext,
+                            CancellationToken.None)
+                        .ConfigureAwait(false);
                     if (!IsCommitted(accepted, receipt!))
                     {
                         return LiveAgentStateCommitResult.Failure(
