@@ -55,6 +55,9 @@ internal sealed class ActionHostGitTreeEntryDocument
     [JsonRequired]
     [JsonPropertyName("sha")]
     public string? Sha { get; set; }
+
+    [JsonPropertyName("size")]
+    public long? Size { get; set; }
 }
 
 internal sealed class ActionHostGitBlobDocument
@@ -146,7 +149,8 @@ internal static class ActionHostGitObjectMapper
                 entry.Path!,
                 entry.Mode!,
                 entry.Type!,
-                entry.Sha!));
+                entry.Sha!,
+                entry.Size));
         }
 
         value = new(document.Sha!, entries);

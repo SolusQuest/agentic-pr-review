@@ -23,7 +23,8 @@ public sealed class ActionHostGitObjectTransportTests
             JsonResponse(
                 $"{{\"sha\":\"{treeSha}\",\"truncated\":false,\"tree\":[" +
                 $"{{\"path\":\"config.json\",\"mode\":\"100644\"," +
-                $"\"type\":\"blob\",\"sha\":\"{blobSha}\"}}]}}"),
+                $"\"type\":\"blob\",\"sha\":\"{blobSha}\"," +
+                $"\"size\":{blobBytes.Length}}}]}}"),
             JsonResponse(BlobResponse(blobBytes, blobSha)),
         ]);
         var handler = new CapturingHandler(_ => responses.Dequeue());
@@ -47,6 +48,8 @@ public sealed class ActionHostGitObjectTransportTests
 
         Assert.NotNull(commit.Value);
         Assert.NotNull(tree.Value);
+        Assert.Equal(blobBytes.Length,
+            Assert.Single(tree.Value!.Entries).Size);
         Assert.Equal(blobBytes, blob.Value!.Bytes);
         Assert.Equal(3, handler.Requests.Count);
         Assert.All(handler.Requests, request =>
