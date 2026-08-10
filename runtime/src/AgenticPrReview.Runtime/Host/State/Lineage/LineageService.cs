@@ -1991,13 +1991,14 @@ internal sealed class LineageService
                 StringComparer.Ordinal.Equals(
                     candidate.Header.ObjectIdentity,
                     item.Header.ObjectIdentity));
-            var hasRetainedPredecessor =
+            var mayDiscardToRetainedPredecessor =
+                item.Header.ObjectClass != StateObjectClass.Acceptance &&
                 item.Header.PredecessorIdentity is not null &&
                 snapshot.Authenticated.Any(candidate =>
                     StringComparer.Ordinal.Equals(
                         candidate.Header.ObjectIdentity,
                         item.Header.PredecessorIdentity));
-            if (hasEquivalent || hasRetainedPredecessor)
+            if (hasEquivalent || mayDiscardToRetainedPredecessor)
             {
                 return CleanupDebtResult.Success(item.Metadata);
             }

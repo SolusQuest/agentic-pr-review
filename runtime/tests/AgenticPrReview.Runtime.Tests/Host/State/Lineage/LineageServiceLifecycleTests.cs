@@ -782,6 +782,79 @@ public sealed class LineageServiceLifecycleTests
         });
     }
 
+    [Fact]
+    public async Task UnderRetainedAcceptanceSuccessorDoesNotRollBack()
+    {
+        await WithRootAsync(async root =>
+        {
+            using var lease = LineageTestData.Context();
+            var store = new LocalRestrictedStateStore(
+                root,
+                timeProvider: lease.Time);
+            var service = new LineageService(store, lease.Time);
+            var initialized = await service.ResolveAsync(
+                lease.Context,
+                LineageTestData.Request(lease.Access),
+                CancellationToken.None);
+            Assert.True(initialized.Succeeded, initialized.Code);
+            SelectedLineageSnapshot selected;
+            using (initialized.Context)
+            {
+                Assert.True(initialized.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                selected = snapshot!;
+            }
+
+            var predecessor = await UploadAcceptanceAsync(
+                store,
+                lease,
+                selected,
+                predecessorIdentity: null,
+                logicalExpiry: LineageTestData.LogicalExpiry,
+                payloadMarker: 1);
+            _ = await UploadAcceptanceAsync(
+                store,
+                lease,
+                selected,
+                predecessor.ObjectIdentity,
+                logicalExpiry: LineageTestData.LogicalExpiry,
+                payloadMarker: 2,
+                underRetained: true);
+
+            var acceptanceName = ResolveName(
+                lease,
+                StateObjectClass.Acceptance);
+            var before = await store.ListExactAsync(
+                new OpaqueStoreListRequest(
+                    acceptanceName,
+                    LineageFormat.MaximumPhysicalPerClass),
+                CancellationToken.None);
+            Assert.True(before.Succeeded);
+            Assert.Equal(2, before.Objects.Length);
+
+            var result = await service.ResolveAsync(
+                lease.Context,
+                LineageTestData.Request(lease.Access),
+                CancellationToken.None);
+
+            Assert.False(result.Succeeded);
+            Assert.Equal(LineageCodes.RetentionFailed, result.Code);
+            Assert.Null(result.Context);
+            var after = await store.ListExactAsync(
+                new OpaqueStoreListRequest(
+                    acceptanceName,
+                    LineageFormat.MaximumPhysicalPerClass),
+                CancellationToken.None);
+            Assert.True(after.Succeeded);
+            Assert.Equal(before.Objects
+                    .OrderBy(item => item.ObjectId.Value,
+                        StringComparer.Ordinal),
+                after.Objects.OrderBy(item => item.ObjectId.Value,
+                    StringComparer.Ordinal));
+        });
+    }
+
     private static async Task UploadExpiredAcceptanceAsync(
         IRestrictedStateStore store,
         LineageTestData.ContextLease lease,
@@ -824,7 +897,8 @@ public sealed class LineageServiceLifecycleTests
         SelectedLineageSnapshot selected,
         string? predecessorIdentity,
         long logicalExpiry,
-        byte payloadMarker)
+        byte payloadMarker,
+        bool underRetained = false)
     {
         Assert.True(LineageBaseScopeCodec.TryEncode(
             LineageTestData.Scope(),
@@ -860,13 +934,34 @@ public sealed class LineageServiceLifecycleTests
                 out var code), code);
             try
             {
-                var uploaded = await new ScopedStateUploadProtocol(store)
-                    .UploadAndReadBackAsync(
-                        name!,
-                        envelope,
-                        draft.RequiredPlatformExpiresAtUnixSeconds,
+                if (underRetained)
+                {
+                    var uploaded = await store.UploadImmutableAsync(
+                        new OpaqueStoreUploadRequest(
+                            name!,
+                            new OpaqueStoreCorrelationId(
+                                LineageCryptography.CorrelationId(envelope)),
+                            envelope,
+                            new OpaqueStoreEncryptedObjectDigest(
+                                OpaqueStoreHash.Sha256(envelope)),
+                            draft.RequiredPlatformExpiresAtUnixSeconds -
+                                3_601),
                         CancellationToken.None);
-                Assert.True(uploaded.Succeeded, uploaded.Code);
+                    Assert.True(uploaded.Succeeded);
+                    Assert.NotNull(uploaded.Metadata);
+                    Assert.True(uploaded.Metadata!.ExpiresAtUnixSeconds <
+                        draft.RequiredPlatformExpiresAtUnixSeconds);
+                }
+                else
+                {
+                    var uploaded = await new ScopedStateUploadProtocol(store)
+                        .UploadAndReadBackAsync(
+                            name!,
+                            envelope,
+                            draft.RequiredPlatformExpiresAtUnixSeconds,
+                            CancellationToken.None);
+                    Assert.True(uploaded.Succeeded, uploaded.Code);
+                }
             }
             finally
             {
