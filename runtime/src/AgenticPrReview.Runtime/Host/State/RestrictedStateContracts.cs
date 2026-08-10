@@ -202,6 +202,8 @@ internal enum RestrictedStateStoreFailure
     Invalid,
     Conflict,
     Cleanup,
+    KeyUnavailable,
+    Authentication,
     Io,
 }
 
@@ -243,33 +245,6 @@ internal sealed record RestrictedStateStoreRawRead(
     internal bool Succeeded =>
         Failure == RestrictedStateStoreFailure.None &&
         Version is not null;
-}
-
-internal interface IRestrictedStateStore
-{
-    RestrictedStateStoreRead Read(
-        AuthorizedStateAccess access,
-        CancellationToken cancellationToken);
-
-    RestrictedStateStoreRawRead ReadRawVersion(
-        AuthorizedStateAccess access,
-        CancellationToken cancellationToken);
-
-    RestrictedStateStoreWrite CompareExchange(
-        AuthorizedStateAccess access,
-        RestrictedStateSnapshotVersion expected,
-        RestrictedStateSnapshot replacement,
-        CancellationToken cancellationToken);
-
-    RestrictedStateStoreWrite CompareDelete(
-        AuthorizedStateAccess access,
-        RestrictedStateSnapshotVersion expected,
-        CancellationToken cancellationToken);
-
-    RestrictedStateStoreWrite CompareDeleteRaw(
-        AuthorizedStateAccess access,
-        RestrictedStateRawVersion expected,
-        CancellationToken cancellationToken);
 }
 
 internal sealed class RestrictedStateKey : IDisposable

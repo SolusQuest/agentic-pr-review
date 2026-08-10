@@ -7,6 +7,8 @@ using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Host.State;
+using AgenticPrReview.Runtime.Host.State.OpaqueStore;
+using AgenticPrReview.Runtime.Host.State.RestrictedStateTransactions;
 
 namespace AgenticPrReview.Runtime.AgentLoopAotFixture;
 
@@ -209,58 +211,89 @@ internal sealed class SyntheticStateKeyResolver(string scenario)
     }
 }
 
-internal sealed class CountingStateStore(IRestrictedStateStore inner)
-    : IRestrictedStateStore
+internal sealed class CountingStateStore(LocalRestrictedStateStore adapter)
+    : RestrictedStateOpaqueSnapshotStore
 {
+    private readonly RestrictedStateOpaqueSnapshotStore inner =
+        ProofOpaqueState.Coordinator(adapter);
+
     internal int Calls { get; private set; }
 
-    public RestrictedStateStoreRead Read(
+    internal override Task<RestrictedStateStoreRead> ReadAsync(
         AuthorizedStateAccess access,
         CancellationToken cancellationToken)
     {
         Calls++;
-        return inner.Read(access, cancellationToken);
+        return inner.ReadAsync(access, cancellationToken);
     }
 
-    public RestrictedStateStoreRawRead ReadRawVersion(
+    internal override Task<RestrictedStateStoreRawRead> ReadRawVersionAsync(
         AuthorizedStateAccess access,
         CancellationToken cancellationToken)
     {
         Calls++;
-        return inner.ReadRawVersion(access, cancellationToken);
+        return inner.ReadRawVersionAsync(access, cancellationToken);
     }
 
-    public RestrictedStateStoreWrite CompareExchange(
+    internal override Task<RestrictedStateStoreWrite> CompareExchangeAsync(
         AuthorizedStateAccess access,
         RestrictedStateSnapshotVersion expected,
         RestrictedStateSnapshot replacement,
         CancellationToken cancellationToken)
     {
         Calls++;
-        return inner.CompareExchange(
+        return inner.CompareExchangeAsync(
             access,
             expected,
             replacement,
             cancellationToken);
     }
 
-    public RestrictedStateStoreWrite CompareDelete(
+    internal override Task<RestrictedStateStoreWrite> CompareDeleteAsync(
         AuthorizedStateAccess access,
         RestrictedStateSnapshotVersion expected,
         CancellationToken cancellationToken)
     {
         Calls++;
-        return inner.CompareDelete(access, expected, cancellationToken);
+        return inner.CompareDeleteAsync(access, expected, cancellationToken);
     }
 
-    public RestrictedStateStoreWrite CompareDeleteRaw(
+    internal override Task<RestrictedStateStoreWrite> CompareDeleteRawAsync(
         AuthorizedStateAccess access,
         RestrictedStateRawVersion expected,
         CancellationToken cancellationToken)
     {
         Calls++;
-        return inner.CompareDeleteRaw(access, expected, cancellationToken);
+        return inner.CompareDeleteRawAsync(
+            access,
+            expected,
+            cancellationToken);
     }
+}
+
+internal static class ProofOpaqueState
+{
+    internal static RestrictedStateOpaqueSnapshotStore Coordinator(
+        LocalRestrictedStateStore store) =>
+        new(store, new SyntheticStateKeyResolver("issue88-proof"));
+
+    internal static Task<RestrictedStateStoreRead> ReadAsync(
+        LocalRestrictedStateStore store,
+        AuthorizedStateAccess access,
+        CancellationToken cancellationToken) =>
+        Coordinator(store).ReadAsync(access, cancellationToken);
+
+    internal static Task<RestrictedStateStoreWrite> CompareExchangeAsync(
+        LocalRestrictedStateStore store,
+        AuthorizedStateAccess access,
+        RestrictedStateSnapshotVersion expected,
+        RestrictedStateSnapshot replacement,
+        CancellationToken cancellationToken) =>
+        Coordinator(store).CompareExchangeAsync(
+            access,
+            expected,
+            replacement,
+            cancellationToken);
 }
 
 internal sealed class CountingSessionAdmission(

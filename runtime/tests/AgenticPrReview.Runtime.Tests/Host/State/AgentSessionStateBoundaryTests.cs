@@ -64,7 +64,7 @@ public sealed class AgentSessionStateBoundaryTests
             keys,
             adapter,
             () => RestrictedStateTestData.Now);
-        var prepared = service.Prepare(
+        var prepared = await service.PrepareAsync(
             access,
             new RestrictedStatePrepareRequest(
                 null,
@@ -72,7 +72,7 @@ public sealed class AgentSessionStateBoundaryTests
                 stateContext),
             CancellationToken.None);
         Assert.Equal(StateAction.Prepared, prepared.Result.Action);
-        var accepted = service.Accept(
+        var accepted = await service.AcceptAsync(
             access,
             null,
             prepared.Receipt!,
@@ -90,7 +90,7 @@ public sealed class AgentSessionStateBoundaryTests
             current.Binding.ExpiresAtUnixSeconds,
             TransitionAuthorized: true);
 
-        var restored = service.Restore(
+        var restored = await service.RestoreAsync(
             access,
             new RestrictedStateRestoreRequest(
                 RestrictedStateLocatorFamily.Current,
@@ -259,7 +259,7 @@ public sealed class AgentSessionStateBoundaryTests
             out var mutatedArtifact,
             out var writeFailure),
             writeFailure);
-        AssertAuthenticatedEnvelopeInvalid(
+        await AssertAuthenticatedEnvelopeInvalid(
             fixture with { Artifact = mutatedArtifact! });
     }
 
@@ -289,11 +289,11 @@ public sealed class AgentSessionStateBoundaryTests
                 plaintext),
             fixture.Artifact.Document);
 
-        AssertAuthenticatedEnvelopeInvalid(
+        await AssertAuthenticatedEnvelopeInvalid(
             fixture with { Artifact = artifact });
     }
 
-    private static void AssertAuthenticatedEnvelopeInvalid(
+    private static async Task AssertAuthenticatedEnvelopeInvalid(
         SessionFixture fixture)
     {
         var document = fixture.Artifact.Document;
@@ -345,7 +345,7 @@ public sealed class AgentSessionStateBoundaryTests
             binding.ExpiresAtUnixSeconds,
             TransitionAuthorized: true);
 
-        var restored = service.Restore(
+        var restored = await service.RestoreAsync(
             access,
             new RestrictedStateRestoreRequest(
                 RestrictedStateLocatorFamily.Current,
@@ -471,7 +471,7 @@ public sealed class AgentSessionStateBoundaryTests
                 binding.ExpiresAtUnixSeconds,
                 TransitionAuthorized: true);
 
-            var restored = service.Restore(
+            var restored = await service.RestoreAsync(
                 access,
                 new RestrictedStateRestoreRequest(
                     RestrictedStateLocatorFamily.Current,

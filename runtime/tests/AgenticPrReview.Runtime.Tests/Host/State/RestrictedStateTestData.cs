@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Session;
+using AgenticPrReview.Runtime.Host.State.RestrictedStateTransactions;
 using AgenticPrReview.Runtime.Host.State;
 
 namespace AgenticPrReview.Runtime.Tests.Host.State;
@@ -213,7 +214,8 @@ internal sealed class TestSessionAdmission
     }
 }
 
-internal sealed class MemoryRestrictedStateStore : IRestrictedStateStore
+internal sealed class MemoryRestrictedStateStore
+    : RestrictedStateOpaqueSnapshotStore
 {
     private RestrictedStateSnapshot snapshot =
         RestrictedStateSnapshot.Empty;
@@ -239,21 +241,21 @@ internal sealed class MemoryRestrictedStateStore : IRestrictedStateStore
         }
     }
 
-    public RestrictedStateStoreRead Read(
+    internal override Task<RestrictedStateStoreRead> ReadAsync(
         AuthorizedStateAccess access,
         CancellationToken cancellationToken)
     {
         ReadCalls++;
         cancellationToken.ThrowIfCancellationRequested();
-        return ReadFailure == RestrictedStateStoreFailure.None
+        return Task.FromResult(ReadFailure == RestrictedStateStoreFailure.None
             ? new RestrictedStateStoreRead(
                 RestrictedStateStoreFailure.None,
                 snapshot,
                 version)
-            : new RestrictedStateStoreRead(ReadFailure, null, null);
+            : new RestrictedStateStoreRead(ReadFailure, null, null));
     }
 
-    public RestrictedStateStoreRawRead ReadRawVersion(
+    internal override Task<RestrictedStateStoreRawRead> ReadRawVersionAsync(
         AuthorizedStateAccess access,
         CancellationToken cancellationToken)
     {
@@ -261,22 +263,22 @@ internal sealed class MemoryRestrictedStateStore : IRestrictedStateStore
         cancellationToken.ThrowIfCancellationRequested();
         if (ReadFailure != RestrictedStateStoreFailure.None)
         {
-            return new RestrictedStateStoreRawRead(
+            return Task.FromResult(new RestrictedStateStoreRawRead(
                 ReadFailure,
-                null);
+                null));
         }
 
-        return new RestrictedStateStoreRawRead(
+        return Task.FromResult(new RestrictedStateStoreRawRead(
             RestrictedStateStoreFailure.None,
             version.Exists
                 ? new RestrictedStateRawVersion(
                     version.Sha256,
                     0,
                     Exists: true)
-                : RestrictedStateRawVersion.Absent);
+                : RestrictedStateRawVersion.Absent));
     }
 
-    public RestrictedStateStoreWrite CompareExchange(
+    internal override Task<RestrictedStateStoreWrite> CompareExchangeAsync(
         AuthorizedStateAccess access,
         RestrictedStateSnapshotVersion expected,
         RestrictedStateSnapshot replacement,
@@ -294,31 +296,31 @@ internal sealed class MemoryRestrictedStateStore : IRestrictedStateStore
                     true);
             }
 
-            return new RestrictedStateStoreWrite(
+            return Task.FromResult(new RestrictedStateStoreWrite(
                 WriteFailure,
                 CommitOnWriteFailure ? version : null,
-                CommitOnWriteFailure);
+                CommitOnWriteFailure));
         }
 
         if (expected != version)
         {
-            return new RestrictedStateStoreWrite(
+            return Task.FromResult(new RestrictedStateStoreWrite(
                 RestrictedStateStoreFailure.Conflict,
                 null,
-                false);
+                false));
         }
 
         snapshot = replacement;
         version = new RestrictedStateSnapshotVersion(
             Guid.NewGuid().ToString("N"),
             true);
-        return new RestrictedStateStoreWrite(
+        return Task.FromResult(new RestrictedStateStoreWrite(
             RestrictedStateStoreFailure.None,
             version,
-            true);
+            true));
     }
 
-    public RestrictedStateStoreWrite CompareDelete(
+    internal override Task<RestrictedStateStoreWrite> CompareDeleteAsync(
         AuthorizedStateAccess access,
         RestrictedStateSnapshotVersion expected,
         CancellationToken cancellationToken)
@@ -333,29 +335,29 @@ internal sealed class MemoryRestrictedStateStore : IRestrictedStateStore
                 version = RestrictedStateSnapshotVersion.Absent;
             }
 
-            return new RestrictedStateStoreWrite(
+            return Task.FromResult(new RestrictedStateStoreWrite(
                 WriteFailure,
                 CommitOnWriteFailure ? version : null,
-                CommitOnWriteFailure);
+                CommitOnWriteFailure));
         }
 
         if (expected != version)
         {
-            return new RestrictedStateStoreWrite(
+            return Task.FromResult(new RestrictedStateStoreWrite(
                 RestrictedStateStoreFailure.Conflict,
                 null,
-                false);
+                false));
         }
 
         snapshot = RestrictedStateSnapshot.Empty;
         version = RestrictedStateSnapshotVersion.Absent;
-        return new RestrictedStateStoreWrite(
+        return Task.FromResult(new RestrictedStateStoreWrite(
             RestrictedStateStoreFailure.None,
             version,
-            true);
+            true));
     }
 
-    public RestrictedStateStoreWrite CompareDeleteRaw(
+    internal override Task<RestrictedStateStoreWrite> CompareDeleteRawAsync(
         AuthorizedStateAccess access,
         RestrictedStateRawVersion expected,
         CancellationToken cancellationToken)
@@ -369,13 +371,13 @@ internal sealed class MemoryRestrictedStateStore : IRestrictedStateStore
         if (expected != current)
         {
             WriteCalls++;
-            return new RestrictedStateStoreWrite(
+            return Task.FromResult(new RestrictedStateStoreWrite(
                 RestrictedStateStoreFailure.Conflict,
                 null,
-                false);
+                false));
         }
 
-        return CompareDelete(
+        return CompareDeleteAsync(
             access,
             version,
             cancellationToken);

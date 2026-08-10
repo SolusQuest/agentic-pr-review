@@ -89,14 +89,14 @@ internal static class NegativeProofRunner
                 trusted: true,
                 sameRepository: false,
                 fork: false),
-            "missing-state-automatic" => MissingState(
+            "missing-state-automatic" => await MissingStateAsync(
                 command,
                 RestrictedStateLocatorFamily.Absent,
                 RestrictedStateRestoreIntent.Automatic,
                 StateAction.Bootstrap,
                 RestrictedStateCodes.Absent),
-            "bootstrap-non-current" => BootstrapNonCurrent(command),
-            "explicit-incompatible" => ExplicitIncompatible(command),
+            "bootstrap-non-current" => await BootstrapNonCurrentAsync(command),
+            "explicit-incompatible" => await ExplicitIncompatibleAsync(command),
             "caller-cancellation" => await CallerCancellationAsync(),
             "deadline-before-model" => await DeadlineBeforeModelAsync(),
             "deadline-after-tool" => await DeadlineAfterToolAsync(command),
@@ -251,23 +251,23 @@ internal static class NegativeProofRunner
             !Directory.Exists(ProofPaths.StateRoot(command));
     }
 
-    private static bool BootstrapNonCurrent(ProofCommand command) =>
-        MissingState(
+    private static Task<bool> BootstrapNonCurrentAsync(ProofCommand command) =>
+        MissingStateAsync(
             command,
             RestrictedStateLocatorFamily.NonCurrent,
             RestrictedStateRestoreIntent.Automatic,
             StateAction.Bootstrap,
             RestrictedStateCodes.Absent);
 
-    private static bool ExplicitIncompatible(ProofCommand command) =>
-        MissingState(
+    private static Task<bool> ExplicitIncompatibleAsync(ProofCommand command) =>
+        MissingStateAsync(
             command,
             RestrictedStateLocatorFamily.NonCurrent,
             RestrictedStateRestoreIntent.Explicit,
             StateAction.Failed,
             RestrictedStateCodes.ExplicitMissing);
 
-    private static bool MissingState(
+    private static async Task<bool> MissingStateAsync(
         ProofCommand command,
         RestrictedStateLocatorFamily family,
         RestrictedStateRestoreIntent intent,
@@ -295,7 +295,7 @@ internal static class NegativeProofRunner
             keys,
             admission,
             () => ProofScenario.Now);
-        var result = service.Restore(
+        var result = await service.RestoreAsync(
             access,
             new RestrictedStateRestoreRequest(
                 family,

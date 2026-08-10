@@ -1,28 +1,46 @@
 using System.Collections.Immutable;
 using System.Security.Cryptography;
+using AgenticPrReview.Runtime.Host.State.OpaqueStore;
+using AgenticPrReview.Runtime.Host.State.RestrictedStateTransactions;
+using OpaqueStateStore =
+    AgenticPrReview.Runtime.Host.State.OpaqueStore.IRestrictedStateStore;
 
 namespace AgenticPrReview.Runtime.Host.State;
 
 internal sealed class RestrictedStateService
 {
-    private readonly IRestrictedStateStore store;
+    private readonly RestrictedStateOpaqueSnapshotStore snapshotStore;
     private readonly IRestrictedStateKeyResolver keyResolver;
     private readonly IRestrictedStateSessionAdmission sessionAdmission;
     private readonly Func<long> unixTimeSeconds;
 
     internal RestrictedStateService(
-        IRestrictedStateStore store,
+        OpaqueStateStore store,
         IRestrictedStateKeyResolver keyResolver,
         IRestrictedStateSessionAdmission sessionAdmission,
         Func<long> unixTimeSeconds)
     {
-        this.store = store;
+        this.keyResolver = keyResolver;
+        snapshotStore = new RestrictedStateOpaqueSnapshotStore(
+            store,
+            keyResolver);
+        this.sessionAdmission = sessionAdmission;
+        this.unixTimeSeconds = unixTimeSeconds;
+    }
+
+    internal RestrictedStateService(
+        RestrictedStateOpaqueSnapshotStore snapshotStore,
+        IRestrictedStateKeyResolver keyResolver,
+        IRestrictedStateSessionAdmission sessionAdmission,
+        Func<long> unixTimeSeconds)
+    {
+        this.snapshotStore = snapshotStore;
         this.keyResolver = keyResolver;
         this.sessionAdmission = sessionAdmission;
         this.unixTimeSeconds = unixTimeSeconds;
     }
 
-    internal RestrictedStateEnumerationResult Enumerate(
+    internal async Task<RestrictedStateEnumerationResult> EnumerateAsync(
         AuthorizedStateAccess access,
         CancellationToken cancellationToken)
     {
@@ -31,7 +49,8 @@ internal sealed class RestrictedStateService
             return EnumerationFailure(RestrictedStateCodes.Cancelled);
         }
 
-        var read = Read(access, cancellationToken);
+        var read = await ReadAsync(access, cancellationToken)
+            .ConfigureAwait(false);
         if (!read.Succeeded)
         {
             return EnumerationFailure(MapReadFailure(read.Failure));
@@ -59,7 +78,7 @@ internal sealed class RestrictedStateService
             snapshot.Accepted);
     }
 
-    internal RestrictedStatePrepareResult Prepare(
+    internal async Task<RestrictedStatePrepareResult> PrepareAsync(
         AuthorizedStateAccess access,
         RestrictedStatePrepareRequest request,
         CancellationToken cancellationToken)
@@ -84,7 +103,8 @@ internal sealed class RestrictedStateService
             return PrepareFailure(RestrictedStateCodes.LineageMismatch);
         }
 
-        var read = Read(access, cancellationToken);
+        var read = await ReadAsync(access, cancellationToken)
+            .ConfigureAwait(false);
         if (!read.Succeeded)
         {
             return PrepareFailure(MapReadFailure(read.Failure));
@@ -229,11 +249,11 @@ internal sealed class RestrictedStateService
                 session.SessionSha256,
                 envelopeSha,
                 objectIdentity);
-            var write = Write(
+            var write = await WriteAsync(
                 access,
                 read.Version!,
                 replacement,
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
             if (!write.Committed)
             {
                 return PrepareFailure(
@@ -256,7 +276,7 @@ internal sealed class RestrictedStateService
         }
     }
 
-    internal RestrictedStateRestoreResult Restore(
+    internal async Task<RestrictedStateRestoreResult> RestoreAsync(
         AuthorizedStateAccess access,
         RestrictedStateRestoreRequest request,
         CancellationToken cancellationToken)
@@ -281,7 +301,8 @@ internal sealed class RestrictedStateService
             return MissingRestore(request.Intent, RestrictedStateCodes.Absent);
         }
 
-        var read = Read(access, cancellationToken);
+        var read = await ReadAsync(access, cancellationToken)
+            .ConfigureAwait(false);
         if (!read.Succeeded)
         {
             return RestoreFailure(MapReadFailure(read.Failure));
@@ -337,10 +358,10 @@ internal sealed class RestrictedStateService
                         : RestrictedStateCodes.LineageMismatch);
             }
 
-            var cleanup = Delete(
+            var cleanup = await DeleteAsync(
                 access,
                 read.Version!,
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
             if (!cleanup.Committed)
             {
                 return RestoreFailure(
@@ -436,7 +457,7 @@ internal sealed class RestrictedStateService
         }
     }
 
-    internal StateResult Accept(
+    internal async Task<StateResult> AcceptAsync(
         AuthorizedStateAccess access,
         AcceptedLineage? lineage,
         PreparedStateReceipt receipt,
@@ -455,7 +476,8 @@ internal sealed class RestrictedStateService
             return Failure(RestrictedStateCodes.LineageMismatch);
         }
 
-        var read = Read(access, cancellationToken);
+        var read = await ReadAsync(access, cancellationToken)
+            .ConfigureAwait(false);
         if (!read.Succeeded)
         {
             return Failure(MapReadFailure(read.Failure));
@@ -642,11 +664,11 @@ internal sealed class RestrictedStateService
             return Failure(RestrictedStateCodes.EnumerationInvalid);
         }
 
-        var write = Write(
+        var write = await WriteAsync(
             access,
             read.Version!,
             replacement,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
         if (!write.Committed)
         {
             return Failure(MapWriteFailure(write.Failure));
@@ -658,7 +680,7 @@ internal sealed class RestrictedStateService
             staging);
     }
 
-    internal StateResult Reconcile(
+    internal async Task<StateResult> ReconcileAsync(
         AuthorizedStateAccess access,
         AcceptedLineage? lineage,
         PreparedStateReceipt receipt,
@@ -677,7 +699,8 @@ internal sealed class RestrictedStateService
             return Failure(RestrictedStateCodes.Conflict);
         }
 
-        var read = Read(access, cancellationToken);
+        var read = await ReadAsync(access, cancellationToken)
+            .ConfigureAwait(false);
         if (!read.Succeeded)
         {
             return Failure(MapReadFailure(read.Failure));
@@ -769,7 +792,7 @@ internal sealed class RestrictedStateService
             candidate);
     }
 
-    internal StateResult Reset(
+    internal async Task<StateResult> ResetAsync(
         AuthorizedStateAccess access,
         CancellationToken cancellationToken)
     {
@@ -778,17 +801,19 @@ internal sealed class RestrictedStateService
             return Failure(RestrictedStateCodes.Cancelled);
         }
 
-        var read = ReadRawVersion(access, cancellationToken);
+        var read = await ReadRawVersionAsync(access, cancellationToken)
+            .ConfigureAwait(false);
         if (!read.Succeeded)
         {
             return Failure(MapReadFailure(read.Failure));
         }
 
-        var write = DeleteRaw(
+        var write = await DeleteRawAsync(
             access,
             read.Version!,
-            cancellationToken);
-        if (!write.Committed)
+            cancellationToken).ConfigureAwait(false);
+        if (!write.Committed ||
+            write.Failure != RestrictedStateStoreFailure.None)
         {
             return Failure(MapWriteFailure(write.Failure));
         }
@@ -798,7 +823,7 @@ internal sealed class RestrictedStateService
             RestrictedStateCodes.Reset);
     }
 
-    internal StateResult CleanupExpired(
+    internal async Task<StateResult> CleanupExpiredAsync(
         AuthorizedStateAccess access,
         AcceptedLineage lineage,
         CancellationToken cancellationToken)
@@ -815,7 +840,8 @@ internal sealed class RestrictedStateService
             return Failure(RestrictedStateCodes.LineageMismatch);
         }
 
-        var read = Read(access, cancellationToken);
+        var read = await ReadAsync(access, cancellationToken)
+            .ConfigureAwait(false);
         if (!read.Succeeded)
         {
             return Failure(MapReadFailure(read.Failure));
@@ -842,26 +868,31 @@ internal sealed class RestrictedStateService
         }
 
         RestrictedStateStoreWrite write;
-        if (ReferenceEquals(current, read.Snapshot.Accepted[0]))
+        var deletingWholeScope = ReferenceEquals(
+            current,
+            read.Snapshot.Accepted[0]);
+        if (deletingWholeScope)
         {
-            write = Delete(
+            write = await DeleteAsync(
                 access,
                 read.Version!,
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
         }
         else
         {
             var replacement = new RestrictedStateSnapshot(
                 [read.Snapshot.Accepted[0]],
                 read.Snapshot.Staging);
-            write = Write(
+            write = await WriteAsync(
                 access,
                 read.Version!,
                 replacement,
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
         }
 
-        if (!write.Committed)
+        if (!write.Committed ||
+            (deletingWholeScope &&
+                write.Failure != RestrictedStateStoreFailure.None))
         {
             return Failure(MapWriteFailure(write.Failure));
         }
@@ -871,7 +902,7 @@ internal sealed class RestrictedStateService
             RestrictedStateCodes.Expired);
     }
 
-    internal RestrictedStateHandoffResult PrepareHandoff(
+    internal async Task<RestrictedStateHandoffResult> PrepareHandoffAsync(
         AuthorizedStateAccess access,
         AcceptedLineage lineage,
         RestrictedStateSessionAdmissionContext sessionContext,
@@ -892,7 +923,8 @@ internal sealed class RestrictedStateService
                 RestrictedStateCodes.LineageMismatch);
         }
 
-        var read = Read(access, cancellationToken);
+        var read = await ReadAsync(access, cancellationToken)
+            .ConfigureAwait(false);
         if (!read.Succeeded)
         {
             return HandoffFailure(MapReadFailure(read.Failure));
@@ -944,13 +976,14 @@ internal sealed class RestrictedStateService
             receipt);
     }
 
-    private RestrictedStateStoreRead Read(
+    private async Task<RestrictedStateStoreRead> ReadAsync(
         AuthorizedStateAccess access,
         CancellationToken cancellationToken)
     {
         try
         {
-            return store.Read(access, cancellationToken);
+            return await snapshotStore.ReadAsync(access, cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -969,7 +1002,7 @@ internal sealed class RestrictedStateService
         }
     }
 
-    private RestrictedStateStoreWrite Write(
+    private async Task<RestrictedStateStoreWrite> WriteAsync(
         AuthorizedStateAccess access,
         RestrictedStateSnapshotVersion expected,
         RestrictedStateSnapshot replacement,
@@ -977,11 +1010,12 @@ internal sealed class RestrictedStateService
     {
         try
         {
-            return store.CompareExchange(
-                access,
-                expected,
-                replacement,
-                cancellationToken);
+            return await snapshotStore.CompareExchangeAsync(
+                    access,
+                    expected,
+                    replacement,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -1000,17 +1034,18 @@ internal sealed class RestrictedStateService
         }
     }
 
-    private RestrictedStateStoreWrite Delete(
+    private async Task<RestrictedStateStoreWrite> DeleteAsync(
         AuthorizedStateAccess access,
         RestrictedStateSnapshotVersion expected,
         CancellationToken cancellationToken)
     {
         try
         {
-            return store.CompareDelete(
-                access,
-                expected,
-                cancellationToken);
+            return await snapshotStore.CompareDeleteAsync(
+                    access,
+                    expected,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -1029,13 +1064,16 @@ internal sealed class RestrictedStateService
         }
     }
 
-    private RestrictedStateStoreRawRead ReadRawVersion(
+    private async Task<RestrictedStateStoreRawRead> ReadRawVersionAsync(
         AuthorizedStateAccess access,
         CancellationToken cancellationToken)
     {
         try
         {
-            return store.ReadRawVersion(access, cancellationToken);
+            return await snapshotStore.ReadRawVersionAsync(
+                    access,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -1052,17 +1090,18 @@ internal sealed class RestrictedStateService
         }
     }
 
-    private RestrictedStateStoreWrite DeleteRaw(
+    private async Task<RestrictedStateStoreWrite> DeleteRawAsync(
         AuthorizedStateAccess access,
         RestrictedStateRawVersion expected,
         CancellationToken cancellationToken)
     {
         try
         {
-            return store.CompareDeleteRaw(
-                access,
-                expected,
-                cancellationToken);
+            return await snapshotStore.CompareDeleteRawAsync(
+                    access,
+                    expected,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -1427,6 +1466,10 @@ internal sealed class RestrictedStateService
                 RestrictedStateCodes.EnumerationInvalid,
             RestrictedStateStoreFailure.Cleanup =>
                 RestrictedStateCodes.CleanupFailed,
+            RestrictedStateStoreFailure.KeyUnavailable =>
+                RestrictedStateCodes.KeyUnavailable,
+            RestrictedStateStoreFailure.Authentication =>
+                RestrictedStateCodes.AuthenticationFailed,
             _ => RestrictedStateCodes.IoFailed,
         };
 
@@ -1442,6 +1485,10 @@ internal sealed class RestrictedStateService
                 RestrictedStateCodes.CleanupFailed,
             RestrictedStateStoreFailure.Invalid =>
                 RestrictedStateCodes.EnumerationInvalid,
+            RestrictedStateStoreFailure.KeyUnavailable =>
+                RestrictedStateCodes.KeyUnavailable,
+            RestrictedStateStoreFailure.Authentication =>
+                RestrictedStateCodes.AuthenticationFailed,
             _ => RestrictedStateCodes.IoFailed,
         };
 
