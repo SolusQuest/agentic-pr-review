@@ -203,7 +203,8 @@ internal static class StateControlHeaderV1Codec
         writer.WriteString(StateObjectClasses.ToWireName(draft.ObjectClass));
         writer.WriteOptionalString(draft.PredecessorIdentity);
         writer.WriteOptionalString(draft.SuccessorIdentity);
-        if (draft.ObjectClass != StateObjectClass.LineageHead)
+        if (draft.ObjectClass is not StateObjectClass.LineageHead and not
+            StateObjectClass.Reset and not StateObjectClass.ExpiryTransition)
         {
             writer.WriteInt64(draft.LogicalExpiresAtUnixSeconds);
         }

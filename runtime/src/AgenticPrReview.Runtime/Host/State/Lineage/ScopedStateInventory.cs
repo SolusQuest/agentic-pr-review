@@ -120,6 +120,8 @@ internal sealed class ScopedStateInventory
             // physical inventory is known.
             var authenticated = ImmutableArray.CreateBuilder<
                 AuthenticatedStateObject>(references.Count);
+            var underRetained = ImmutableArray.CreateBuilder<
+                AuthenticatedStateObject>();
             var unknown = ImmutableArray.CreateBuilder<UnknownStateObject>();
             foreach (var item in references)
             {
@@ -180,10 +182,10 @@ internal sealed class ScopedStateInventory
                 if (item.Metadata.ExpiresAtUnixSeconds <
                     header.RequiredPlatformExpiresAtUnixSeconds)
                 {
-                    CryptographicOperations.ZeroMemory(payload);
-                    unknown.Add(new UnknownStateObject(
+                    underRetained.Add(new AuthenticatedStateObject(
                         item.Metadata,
-                        LineageCodes.RetentionFailed));
+                        header,
+                        payload));
                     continue;
                 }
 
@@ -197,6 +199,7 @@ internal sealed class ScopedStateInventory
                 new ScopedStateInventorySnapshot(
                     names.ToImmutable(),
                     authenticated.ToImmutable(),
+                    underRetained.ToImmutable(),
                     unknown.ToImmutable(),
                     references.Count));
         }
@@ -218,6 +221,11 @@ internal sealed class ScopedStateInventory
         }
 
         foreach (var item in snapshot.Authenticated)
+        {
+            CryptographicOperations.ZeroMemory(item.Payload);
+        }
+
+        foreach (var item in snapshot.UnderRetained)
         {
             CryptographicOperations.ZeroMemory(item.Payload);
         }

@@ -81,7 +81,9 @@ public sealed class LineageSelectionTests
             [LineageHeadCodec.Evidence(predecessor.Metadata)],
             [],
             [],
-            []);
+            [],
+            ResetAuthorityRunIdentity: "test-run",
+            ResetAuthorityRunAttempt: 1);
         var successor = Candidate(
             "successor",
             new string('1', 64),
@@ -203,6 +205,54 @@ public sealed class LineageSelectionTests
     }
 
     [Fact]
+    public void EquivalentIntermediateCopiesMergePhysicalPredecessorEvidence()
+    {
+        var initial = Candidate(
+            "initial",
+            new string('1', 64),
+            new string('a', 64),
+            InitialHead());
+        var firstHead = Successor(initial, new string('2', 64));
+        var firstA = Candidate(
+            "first-a",
+            new string('1', 64),
+            new string('b', 64),
+            firstHead);
+        var firstB = Candidate(
+            "first-b",
+            new string('1', 64),
+            new string('b', 64),
+            firstHead with
+            {
+                PhysicalPredecessors =
+                [LineageHeadCodec.Evidence(Metadata(
+                    "missing-initial-copy",
+                    new string('e', 64),
+                    new string('f', 64)))],
+            });
+        var newest = Candidate(
+            "newest",
+            new string('1', 64),
+            new string('c', 64),
+            Successor(firstA, new string('3', 64)) with
+            {
+                PhysicalPredecessors =
+                [LineageHeadCodec.Evidence(firstB.Metadata)],
+            });
+
+        var result = LineageHeadSelector.Select(
+            [initial, firstA, firstB, newest],
+            [],
+            physicalCount: 4,
+            currentKeyId: new string('1', 64));
+
+        Assert.True(result.Succeeded, result.Code);
+        Assert.Equal(newest.Metadata, result.Selection!.Head.Metadata);
+        Assert.Equal(firstB.Metadata,
+            result.Selection.ImmediatePredecessor!.Metadata);
+    }
+
+    [Fact]
     public void AuthenticatedSideBranchCannotBeRetroactivelySuperseded()
     {
         var predecessor = Candidate(
@@ -304,7 +354,9 @@ public sealed class LineageSelectionTests
             [LineageHeadCodec.Evidence(predecessor.Metadata)],
             [],
             [],
-            []);
+            [],
+            "test-run",
+            ResetAuthorityRunAttempt: 1);
 
     private static LineageHeadCandidate Candidate(
         string objectId,

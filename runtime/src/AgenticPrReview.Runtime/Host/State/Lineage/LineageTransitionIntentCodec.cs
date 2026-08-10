@@ -34,6 +34,14 @@ internal static class LineageTransitionIntentCodec
         writer.WriteString(intent.PriorHeadIdentity);
         writer.WriteString(intent.PriorEpoch);
         writer.WriteString(intent.TransitionEvidenceIdentity);
+        writer.WriteOptionalString(intent.ResetAuthorityRunIdentity);
+        writer.WriteByte(intent.ResetAuthorityRunAttempt is null ?
+            (byte)0 : (byte)1);
+        if (intent.ResetAuthorityRunAttempt is not null)
+        {
+            writer.WriteInt64(intent.ResetAuthorityRunAttempt.Value);
+        }
+
         writer.WriteByte(intent.ExpiryBoundaryUnixSeconds is null ?
             (byte)0 : (byte)1);
         if (intent.ExpiryBoundaryUnixSeconds is not null)
@@ -76,6 +84,27 @@ internal static class LineageTransitionIntentCodec
             !reader.TryReadString(64, out var priorHeadIdentity) ||
             !reader.TryReadString(64, out var priorEpoch) ||
             !reader.TryReadString(64, out var transitionEvidenceIdentity) ||
+            !reader.TryReadOptionalString(
+                LineageFormat.MaximumRunIdentityBytes,
+                out var resetAuthorityRunIdentity) ||
+            !reader.TryReadByte(out var hasResetAuthorityAttempt) ||
+            hasResetAuthorityAttempt > 1)
+        {
+            return false;
+        }
+
+        long? resetAuthorityRunAttempt = null;
+        if (hasResetAuthorityAttempt == 1)
+        {
+            if (!reader.TryReadInt64(out var parsedResetAuthorityRunAttempt))
+            {
+                return false;
+            }
+
+            resetAuthorityRunAttempt = parsedResetAuthorityRunAttempt;
+        }
+
+        if (
             !reader.TryReadByte(out var hasExpiry) ||
             hasExpiry > 1)
         {
@@ -110,7 +139,9 @@ internal static class LineageTransitionIntentCodec
             expiryBoundary,
             new ReviewedTransitionFacts(baseSha, headSha),
             inventorySha256,
-            targets);
+            targets,
+            resetAuthorityRunIdentity,
+            resetAuthorityRunAttempt);
         if (!IsValid(candidate))
         {
             return false;
@@ -126,6 +157,14 @@ internal static class LineageTransitionIntentCodec
         LineageValidation.IsSha256(intent.PriorHeadIdentity) &&
         LineageValidation.IsSha256(intent.PriorEpoch) &&
         LineageValidation.IsSha256(intent.TransitionEvidenceIdentity) &&
+        ((intent.ResetAuthorityRunIdentity is null) ==
+            (intent.ResetAuthorityRunAttempt is null)) &&
+        (intent.ResetAuthorityRunIdentity is null ||
+            LineageValidation.IsText(
+                intent.ResetAuthorityRunIdentity,
+                LineageFormat.MaximumRunIdentityBytes)) &&
+        (intent.ResetAuthorityRunAttempt is null ||
+            intent.ResetAuthorityRunAttempt >= 0) &&
         LineageValidation.IsValid(intent.Reviewed) &&
         LineageValidation.IsSha256(intent.InventorySha256) &&
         !intent.Targets.IsDefault &&
@@ -136,11 +175,15 @@ internal static class LineageTransitionIntentCodec
         intent.Kind switch
         {
             LineageTransitionIntentKind.Reset =>
-                intent.ExpiryBoundaryUnixSeconds is null,
+                intent.ExpiryBoundaryUnixSeconds is null &&
+                intent.ResetAuthorityRunIdentity is not null &&
+                intent.ResetAuthorityRunAttempt is not null,
             LineageTransitionIntentKind.Expiry =>
                 intent.ExpiryBoundaryUnixSeconds is not null &&
                 LineageValidation.IsTime(
-                    intent.ExpiryBoundaryUnixSeconds.Value),
+                    intent.ExpiryBoundaryUnixSeconds.Value) &&
+                intent.ResetAuthorityRunIdentity is null &&
+                intent.ResetAuthorityRunAttempt is null,
             _ => false,
         };
 }

@@ -9,7 +9,9 @@ internal static class LineageHeadSelector
         ImmutableArray<LineageHeadCandidate> candidates,
         ImmutableArray<UnknownStateObject> unknown,
         int physicalCount,
-        string currentKeyId)
+        string currentKeyId,
+        long requiredLogicalExpiry = 0,
+        long requiredPlatformExpiry = 0)
     {
         if (candidates.IsDefault ||
             unknown.IsDefault ||
@@ -74,14 +76,27 @@ internal static class LineageHeadSelector
         }
 
         var selectedGroup = maximal[0];
-        var selected = ChooseSurvivor(selectedGroup, currentKeyId);
+        var selected = ChooseSurvivor(
+            selectedGroup,
+            currentKeyId,
+            requiredLogicalExpiry,
+            requiredPlatformExpiry);
         var chainIdentities = ImmutableHashSet.CreateBuilder<string>(
             StringComparer.Ordinal);
         chainIdentities.Add(selected.Header.ObjectIdentity);
         var chain = ImmutableArray.CreateBuilder<LineageHeadCandidate>();
         chain.Add(selected);
+        var chainGroups = ImmutableArray.CreateBuilder<
+            ImmutableArray<LineageHeadCandidate>>();
+        chainGroups.Add(selectedGroup);
+        var survivors = new Dictionary<string, LineageHeadCandidate>(
+            StringComparer.Ordinal)
+        {
+            [selected.Header.ObjectIdentity] = selected,
+        };
         LineageHeadCandidate? immediatePredecessor = null;
         var cursor = selected;
+        var cursorGroup = selectedGroup;
         while (cursor.Head.PreviousHeadIdentity is not null)
         {
             if (!groups.TryGetValue(
@@ -91,7 +106,23 @@ internal static class LineageHeadSelector
                 break;
             }
 
-            var previous = ChooseSurvivor(previousGroup, currentKeyId);
+            var cursorPredecessorEvidence = cursorGroup
+                .SelectMany(candidate => candidate.Head.PhysicalPredecessors)
+                .ToImmutableArray();
+            var evidencedPrevious = previousGroup
+                .Where(candidate => cursorPredecessorEvidence.Any(evidence =>
+                    LineageHeadCodec.Matches(evidence, candidate.Metadata)))
+                .ToImmutableArray();
+            if (evidencedPrevious.IsEmpty)
+            {
+                return LineageSelectionResult.Fail(LineageCodes.Conflict);
+            }
+
+            var previous = ChooseSurvivor(
+                evidencedPrevious,
+                currentKeyId,
+                requiredLogicalExpiry,
+                requiredPlatformExpiry);
             if (previous.Head.Ordinal == ulong.MaxValue ||
                 previous.Head.Ordinal + 1 != cursor.Head.Ordinal ||
                 !StringComparer.Ordinal.Equals(
@@ -100,8 +131,6 @@ internal static class LineageHeadSelector
                 !StringComparer.Ordinal.Equals(
                     cursor.Header.PredecessorIdentity,
                     previous.Header.ObjectIdentity) ||
-                !cursor.Head.PhysicalPredecessors.Any(evidence =>
-                    LineageHeadCodec.Matches(evidence, previous.Metadata)) ||
                 !chainIdentities.Add(previous.Header.ObjectIdentity))
             {
                 return LineageSelectionResult.Fail(LineageCodes.Conflict);
@@ -109,7 +138,10 @@ internal static class LineageHeadSelector
 
             immediatePredecessor ??= previous;
             chain.Add(previous);
+            chainGroups.Add(previousGroup);
+            survivors[previous.Header.ObjectIdentity] = previous;
             cursor = previous;
+            cursorGroup = previousGroup;
         }
 
         if (cursor.Head.PreviousHeadIdentity is null &&
@@ -125,16 +157,26 @@ internal static class LineageHeadSelector
             return LineageSelectionResult.Fail(LineageCodes.Conflict);
         }
 
-        var authorizedEvidence = chain
+        var authorizedEvidence = chainGroups
+            .SelectMany(group => group)
             .SelectMany(candidate => candidate.Head.PhysicalSuperseded)
-            .Concat(selected.Head.Superseded)
-            .Concat(selected.Head.CompletedCleanup)
+            .Concat(selectedGroup.SelectMany(candidate =>
+                candidate.Head.Superseded))
+            .Concat(selectedGroup.SelectMany(candidate =>
+                candidate.Head.CompletedCleanup))
+            .ToImmutableArray();
+        var predecessorEvidence = chainGroups
+            .SelectMany(group => group)
+            .SelectMany(candidate => candidate.Head.PhysicalPredecessors)
+            .ToImmutableArray();
+        var selectedPredecessorEvidence = selectedGroup
+            .SelectMany(candidate => candidate.Head.PhysicalPredecessors)
             .ToImmutableArray();
         var safeNonAnchors =
             ImmutableArray.CreateBuilder<OpaqueStoreObjectMetadata>();
         foreach (var group in groups.Values)
         {
-            var survivor = ChooseSurvivor(group, currentKeyId);
+            var survivor = survivors[group[0].Header.ObjectIdentity];
             foreach (var duplicate in group.Where(duplicate =>
                 duplicate.Metadata != survivor.Metadata))
             {
@@ -142,7 +184,9 @@ internal static class LineageHeadSelector
             }
         }
 
-        var safeChainAnchors = chain
+        var safeChainAnchors = ImmutableArray.CreateBuilder<
+            OpaqueStoreObjectMetadata>();
+        safeChainAnchors.AddRange(chain
             .Where(candidate =>
                 candidate.Header.ObjectIdentity !=
                     selected.Header.ObjectIdentity &&
@@ -150,8 +194,7 @@ internal static class LineageHeadSelector
                     candidate.Header.ObjectIdentity !=
                         immediatePredecessor.Header.ObjectIdentity))
             .OrderBy(candidate => candidate.Head.Ordinal)
-            .Select(candidate => candidate.Metadata)
-            .ToImmutableArray();
+            .Select(candidate => candidate.Metadata));
 
         foreach (var item in unknown)
         {
@@ -161,9 +204,18 @@ internal static class LineageHeadSelector
                     LineageCodes.KeyUnavailable);
             }
 
-            if (selected.Head.PhysicalPredecessors.Any(evidence =>
+            if (predecessorEvidence.Any(evidence =>
                     LineageHeadCodec.Matches(evidence, item.Metadata)))
             {
+                if (immediatePredecessor is not null ||
+                    !selectedPredecessorEvidence.Any(evidence =>
+                        LineageHeadCodec.Matches(
+                            evidence,
+                            item.Metadata)))
+                {
+                    safeChainAnchors.Insert(0, item.Metadata);
+                }
+
                 continue;
             }
 
@@ -192,7 +244,7 @@ internal static class LineageHeadSelector
                     metadata => metadata.Reference.ObjectId.Value,
                     StringComparer.Ordinal)
                 .ToImmutableArray(),
-            safeChainAnchors,
+            safeChainAnchors.Distinct().ToImmutableArray(),
             physicalCount));
     }
 
@@ -209,11 +261,17 @@ internal static class LineageHeadSelector
 
     private static LineageHeadCandidate ChooseSurvivor(
         ImmutableArray<LineageHeadCandidate> group,
-        string currentKeyId) =>
-        group.OrderByDescending(candidate =>
+        string currentKeyId,
+        long requiredLogicalExpiry,
+        long requiredPlatformExpiry) =>
+        group.OrderByDescending(candidate => SatisfiesCurrentRequirement(
+                candidate,
+                requiredLogicalExpiry,
+                requiredPlatformExpiry))
+            .ThenByDescending(candidate =>
                 StringComparer.Ordinal.Equals(
-                    candidate.Header.KeyId,
-                    currentKeyId))
+                candidate.Header.KeyId,
+                currentKeyId))
             .ThenByDescending(candidate =>
                 candidate.Header.RequiredPlatformExpiresAtUnixSeconds)
             .ThenByDescending(candidate => candidate.Header.CreatedAtUnixSeconds)
@@ -221,4 +279,16 @@ internal static class LineageHeadSelector
                 candidate.Metadata.Reference.ObjectId.Value,
                 StringComparer.Ordinal)
             .First();
+
+    private static bool SatisfiesCurrentRequirement(
+        LineageHeadCandidate candidate,
+        long requiredLogicalExpiry,
+        long requiredPlatformExpiry) =>
+        candidate.Header.LogicalExpiresAtUnixSeconds >=
+            requiredLogicalExpiry &&
+        candidate.Header.RequiredPlatformExpiresAtUnixSeconds >=
+            requiredPlatformExpiry &&
+        candidate.Metadata.ExpiresAtUnixSeconds >=
+            candidate.Header.RequiredPlatformExpiresAtUnixSeconds &&
+        candidate.Metadata.ExpiresAtUnixSeconds >= requiredPlatformExpiry;
 }

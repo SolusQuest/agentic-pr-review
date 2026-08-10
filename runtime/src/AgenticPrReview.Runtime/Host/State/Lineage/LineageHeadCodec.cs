@@ -24,6 +24,14 @@ internal static class LineageHeadCodec
         writer.WriteOptionalString(head.PreviousEpoch);
         writer.WriteOptionalString(head.PreviousHeadIdentity);
         writer.WriteOptionalString(head.TransitionEvidenceIdentity);
+        writer.WriteOptionalString(head.ResetAuthorityRunIdentity);
+        writer.WriteByte(head.ResetAuthorityRunAttempt is null ?
+            (byte)0 : (byte)1);
+        if (head.ResetAuthorityRunAttempt is not null)
+        {
+            writer.WriteInt64(head.ResetAuthorityRunAttempt.Value);
+        }
+
         writer.WriteByte(head.ExpiryBoundaryUnixSeconds is null ? (byte)0 : (byte)1);
         if (head.ExpiryBoundaryUnixSeconds is not null)
         {
@@ -68,6 +76,27 @@ internal static class LineageHeadCodec
             !reader.TryReadOptionalString(64, out var previousEpoch) ||
             !reader.TryReadOptionalString(64, out var previousHeadIdentity) ||
             !reader.TryReadOptionalString(64, out var transitionEvidenceIdentity) ||
+            !reader.TryReadOptionalString(
+                LineageFormat.MaximumRunIdentityBytes,
+                out var resetAuthorityRunIdentity) ||
+            !reader.TryReadByte(out var hasResetAuthorityAttempt) ||
+            hasResetAuthorityAttempt > 1)
+        {
+            return false;
+        }
+
+        long? resetAuthorityRunAttempt = null;
+        if (hasResetAuthorityAttempt == 1)
+        {
+            if (!reader.TryReadInt64(out var parsedResetAuthorityRunAttempt))
+            {
+                return false;
+            }
+
+            resetAuthorityRunAttempt = parsedResetAuthorityRunAttempt;
+        }
+
+        if (
             !reader.TryReadByte(out var hasExpiry) ||
             hasExpiry > 1)
         {
@@ -105,7 +134,9 @@ internal static class LineageHeadCodec
             predecessors,
             physicalSuperseded,
             superseded,
-            completedCleanup);
+            completedCleanup,
+            resetAuthorityRunIdentity,
+            resetAuthorityRunAttempt);
         if (!IsValid(candidate))
         {
             return false;
@@ -183,6 +214,14 @@ internal static class LineageHeadCodec
             !LineageValidation.IsOptionalSha256(head.PreviousHeadIdentity) ||
             !LineageValidation.IsOptionalSha256(
                 head.TransitionEvidenceIdentity) ||
+            ((head.ResetAuthorityRunIdentity is null) !=
+                (head.ResetAuthorityRunAttempt is null)) ||
+            (head.ResetAuthorityRunIdentity is not null &&
+                !LineageValidation.IsText(
+                    head.ResetAuthorityRunIdentity,
+                    LineageFormat.MaximumRunIdentityBytes)) ||
+            (head.ResetAuthorityRunAttempt is not null &&
+                head.ResetAuthorityRunAttempt < 0) ||
             (head.ExpiryBoundaryUnixSeconds is not null &&
                 !LineageValidation.IsTime(
                     head.ExpiryBoundaryUnixSeconds.Value)) ||
@@ -204,13 +243,17 @@ internal static class LineageHeadCodec
                 head.ExpiryBoundaryUnixSeconds is null &&
                 head.PhysicalPredecessors.IsEmpty &&
                 head.Superseded.IsEmpty &&
-                head.CompletedCleanup.IsEmpty,
+                head.CompletedCleanup.IsEmpty &&
+                head.ResetAuthorityRunIdentity is null &&
+                head.ResetAuthorityRunAttempt is null,
             LineageTransitionKind.Reset =>
                 head.Ordinal > 0 &&
                 head.PreviousEpoch is not null &&
                 head.PreviousHeadIdentity is not null &&
                 head.TransitionEvidenceIdentity is not null &&
                 head.ExpiryBoundaryUnixSeconds is null &&
+                head.ResetAuthorityRunIdentity is not null &&
+                head.ResetAuthorityRunAttempt is not null &&
                 !head.PhysicalPredecessors.IsEmpty,
             LineageTransitionKind.Expiry =>
                 head.Ordinal > 0 &&
@@ -218,6 +261,8 @@ internal static class LineageHeadCodec
                 head.PreviousHeadIdentity is not null &&
                 head.TransitionEvidenceIdentity is not null &&
                 head.ExpiryBoundaryUnixSeconds is not null &&
+                head.ResetAuthorityRunIdentity is null &&
+                head.ResetAuthorityRunAttempt is null &&
                 !head.PhysicalPredecessors.IsEmpty,
             _ => false,
         };
@@ -251,6 +296,14 @@ internal static class LineageHeadCodec
         writer.WriteOptionalString(head.PreviousEpoch);
         writer.WriteOptionalString(head.PreviousHeadIdentity);
         writer.WriteOptionalString(head.TransitionEvidenceIdentity);
+        writer.WriteOptionalString(head.ResetAuthorityRunIdentity);
+        writer.WriteByte(head.ResetAuthorityRunAttempt is null ?
+            (byte)0 : (byte)1);
+        if (head.ResetAuthorityRunAttempt is not null)
+        {
+            writer.WriteInt64(head.ResetAuthorityRunAttempt.Value);
+        }
+
         writer.WriteByte(head.ExpiryBoundaryUnixSeconds is null ?
             (byte)0 : (byte)1);
         if (head.ExpiryBoundaryUnixSeconds is not null)

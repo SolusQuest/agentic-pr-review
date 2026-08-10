@@ -257,7 +257,9 @@ public sealed class LineageContractAndCodecTests
             [evidence],
             [],
             [evidence with { ObjectId = "object-2" }],
-            []);
+            [],
+            ResetAuthorityRunIdentity: "reset-run",
+            ResetAuthorityRunAttempt: 2);
         Assert.True(LineageHeadCodec.TryEncode(head, out var encoded));
         Assert.True(LineageHeadCodec.TryDecode(encoded, out var decoded));
         Assert.True(LineageHeadCodec.Equivalent(head, decoded!));
@@ -271,7 +273,9 @@ public sealed class LineageContractAndCodecTests
             ExpiryBoundaryUnixSeconds: null,
             LineageTestData.Reviewed(),
             LineageCryptography.InventoryDigest(targets),
-            targets);
+            targets,
+            ResetAuthorityRunIdentity: "reset-run",
+            ResetAuthorityRunAttempt: 2);
         Assert.True(LineageTransitionIntentCodec.TryEncode(
             intent,
             out var intentBytes));

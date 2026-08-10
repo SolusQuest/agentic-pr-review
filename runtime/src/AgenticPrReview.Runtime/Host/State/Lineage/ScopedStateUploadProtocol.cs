@@ -96,12 +96,8 @@ internal sealed class ScopedStateUploadProtocol
         if (metadata.ExpiresAtUnixSeconds < requiredExpiresAtUnixSeconds)
         {
             // Exact binding and readback above are prerequisites for cleanup.
-            _ = await store.DeleteExactAsync(
-                    new OpaqueStoreDeleteRequest(metadata),
-                    CancellationToken.None)
-                .ConfigureAwait(false);
             return ScopedStateUploadResult.Fail(
-                await VerifyAbsentAsync(metadata).ConfigureAwait(false)
+                await DeleteAndVerifyAbsentAsync(metadata).ConfigureAwait(false)
                     ? LineageCodes.RetentionFailed
                     : LineageCodes.CleanupFailed);
         }
@@ -109,18 +105,22 @@ internal sealed class ScopedStateUploadProtocol
         return ScopedStateUploadResult.Success(metadata);
     }
 
-    private async Task<bool> VerifyAbsentAsync(
+    private async Task<bool> DeleteAndVerifyAbsentAsync(
         OpaqueStoreObjectMetadata target)
     {
         for (var attempt = 0; attempt < ReconciliationAttempts; attempt++)
         {
+            _ = await store.DeleteExactAsync(
+                    new OpaqueStoreDeleteRequest(target),
+                    CancellationToken.None)
+                .ConfigureAwait(false);
             var listed = await store.ListExactAsync(
                     new OpaqueStoreListRequest(
                         target.Reference.Name,
                         LineageFormat.MaximumPhysicalPerClass),
                     CancellationToken.None)
                 .ConfigureAwait(false);
-            if (!listed.Succeeded)
+            if (!listed.Succeeded || !listed.Complete)
             {
                 continue;
             }

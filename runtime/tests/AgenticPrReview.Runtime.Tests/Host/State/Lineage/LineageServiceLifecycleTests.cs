@@ -441,6 +441,131 @@ public sealed class LineageServiceLifecycleTests
     }
 
     [Fact]
+    public async Task RepeatedRefreshCompactsAbsentPhysicalEvidence()
+    {
+        await WithRootAsync(async root =>
+        {
+            using var lease = LineageTestData.Context();
+            var store = new LocalRestrictedStateStore(
+                root,
+                timeProvider: lease.Time);
+            var initialized = await new LineageService(store, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    LineageTestData.Request(lease.Access),
+                    CancellationToken.None);
+            Assert.True(initialized.Succeeded, initialized.Code);
+            initialized.Context!.Dispose();
+
+            for (var refresh = 1; refresh <= 12; refresh++)
+            {
+                var request = LineageTestData.Request(lease.Access) with
+                {
+                    RequiredLogicalExpiresAtUnixSeconds =
+                        LineageTestData.LogicalExpiry + refresh * 60,
+                };
+                var result = await new LineageService(store, lease.Time)
+                    .ResolveAsync(
+                        lease.Context,
+                        request,
+                        CancellationToken.None);
+                Assert.True(result.Succeeded, result.Code);
+                result.Context!.Dispose();
+            }
+
+            Assert.True(LineageBaseScopeCodec.TryDigest(
+                LineageTestData.Scope(),
+                out var baseScopeDigest));
+            var inventory = await new ScopedStateInventory(store).ReadAsync(
+                lease.Context,
+                lease.Access,
+                LineageTestData.Scope(),
+                baseScopeDigest,
+                CancellationToken.None);
+            try
+            {
+                Assert.True(inventory.Succeeded, inventory.Code);
+                var physicalHead = Assert.Single(
+                    inventory.Snapshot!.Authenticated.Where(item =>
+                        item.Header.ObjectClass ==
+                            StateObjectClass.LineageHead));
+                Assert.True(LineageHeadCodec.TryDecode(
+                    physicalHead.Payload,
+                    out var head));
+                Assert.NotNull(head);
+                Assert.Single(head!.PhysicalSuperseded);
+                Assert.Empty(head.Superseded);
+                Assert.Empty(head.CompletedCleanup);
+            }
+            finally
+            {
+                ScopedStateInventory.Clear(inventory.Snapshot);
+            }
+        });
+    }
+
+    [Fact]
+    public async Task ResetHeadRefreshPreservesTheProducingRunAuthority()
+    {
+        await WithRootAsync(async root =>
+        {
+            using var lease = LineageTestData.Context();
+            var store = new LocalRestrictedStateStore(
+                root,
+                timeProvider: lease.Time);
+            var service = new LineageService(store, lease.Time);
+            var initialized = await service.ResolveAsync(
+                lease.Context,
+                LineageTestData.Request(lease.Access),
+                CancellationToken.None);
+            Assert.True(initialized.Succeeded, initialized.Code);
+            Assert.True(initialized.Context!.TryGetSnapshot(
+                lease.Access,
+                out var initialSnapshot));
+            initialized.Context.Dispose();
+
+            var resetEvidence = LineageTestData.Reset(
+                lease.Access,
+                initialSnapshot!.LineageHeadIdentity,
+                new string('e', 64));
+            var reset = await service.ResolveAsync(
+                lease.Context,
+                LineageTestData.Request(
+                    lease.Access,
+                    resetEvidence,
+                    LineageTestData.Reviewed('3', '4')),
+                CancellationToken.None);
+            Assert.True(reset.Succeeded, reset.Code);
+            Assert.True(reset.Context!.TryGetSnapshot(
+                lease.Access,
+                out var resetSnapshot));
+            reset.Context.Dispose();
+
+            var nextRun = LineageTestData.Request(
+                lease.Access,
+                reviewed: LineageTestData.Reviewed('5', '6')) with
+            {
+                ProducingRunIdentity = "run-two",
+                ProducingRunAttempt = 2,
+                RequiredLogicalExpiresAtUnixSeconds =
+                    LineageTestData.LogicalExpiry + 3_600,
+            };
+            var refreshed = await new LineageService(store, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    nextRun,
+                    CancellationToken.None);
+
+            Assert.True(refreshed.Succeeded, refreshed.Code);
+            Assert.True(refreshed.Context!.TryGetSnapshot(
+                lease.Access,
+                out var refreshedSnapshot));
+            Assert.Equal(resetSnapshot, refreshedSnapshot);
+            refreshed.Context.Dispose();
+        });
+    }
+
+    [Fact]
     public async Task ExpiryUsesTheUniqueCurrentAcceptance()
     {
         await WithRootAsync(async root =>

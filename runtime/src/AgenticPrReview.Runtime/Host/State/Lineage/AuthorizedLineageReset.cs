@@ -78,9 +78,9 @@ internal sealed class AuthorizedLineageReset
             selected.Head.TransitionEvidenceIdentity,
             RequestIdentity) &&
         StringComparer.Ordinal.Equals(
-            selected.Header.ProducingRunIdentity,
+            selected.Head.ResetAuthorityRunIdentity,
             ProducingRunIdentity) &&
-        selected.Header.ProducingRunAttempt == ProducingRunAttempt;
+        selected.Head.ResetAuthorityRunAttempt == ProducingRunAttempt;
 
     private bool AllowsScope(
         AuthorizedLocatorAccess? access,

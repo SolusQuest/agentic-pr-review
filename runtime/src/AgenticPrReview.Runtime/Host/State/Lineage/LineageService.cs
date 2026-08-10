@@ -75,6 +75,8 @@ internal sealed class LineageService
                     request.BaseScope,
                     baseScopeDigest,
                     currentKeyId,
+                    request.RequiredLogicalExpiresAtUnixSeconds,
+                    requiredPlatformExpiry,
                     cancellationToken)
                 .ConfigureAwait(false);
             if (!observed.Succeeded)
@@ -131,6 +133,8 @@ internal sealed class LineageService
                         request.BaseScope,
                         baseScopeDigest,
                         currentKeyId,
+                        request.RequiredLogicalExpiresAtUnixSeconds,
+                        requiredPlatformExpiry,
                         CancellationToken.None)
                     .ConfigureAwait(false);
                 if (!observed.Succeeded || observed.Selection!.IsAbsent)
@@ -148,7 +152,10 @@ internal sealed class LineageService
 
             var pending = SelectPendingIntent(
                 observed.Snapshot!,
-                selection.Head);
+                selection.Head,
+                currentKeyId,
+                request.RequiredLogicalExpiresAtUnixSeconds,
+                requiredPlatformExpiry);
             if (!pending.Succeeded)
             {
                 return LineageResolveResult.Fail(pending.Code);
@@ -376,12 +383,14 @@ internal sealed class LineageService
                 .ConfigureAwait(false);
         }
 
-        if (!await EstablishHeadroomAsync(
+        if (!CanEncodeHead(BuildRefreshedHead(selection)) ||
+            !await EstablishHeadroomAsync(
                 context,
                 request,
                 baseScopeDigest,
                 currentKeyId,
                 observed,
+                requiredPlatformExpiry,
                 cancellationToken)
             .ConfigureAwait(false))
         {
@@ -390,14 +399,7 @@ internal sealed class LineageService
 
         selection = observed.Selection!.Selection!;
         head = selection.Head;
-        var refreshedHead = head.Head with
-        {
-            PhysicalSuperseded = head.Head.PhysicalSuperseded
-                .AddRange(selection.EquivalentPhysical
-                    .Select(LineageHeadCodec.Evidence))
-                .Distinct()
-                .ToImmutableArray(),
-        };
+        var refreshedHead = BuildRefreshedHead(selection);
         var written = await WriteHeadAsync(
                 context,
                 request,
@@ -447,29 +449,15 @@ internal sealed class LineageService
         CancellationToken cancellationToken)
     {
         var objectClass = LineageTransitionIntentCodec.ObjectClass(kind);
-        if (!await EstablishHeadroomAsync(
-                context,
-                request,
-                baseScopeDigest,
-                currentKeyId,
-                observed,
-                cancellationToken)
-            .ConfigureAwait(false) ||
-            !await EstablishTransitionHeadroomAsync(
-                context,
-                request,
-                baseScopeDigest,
-                currentKeyId,
-                observed,
-                objectClass,
-                cancellationToken)
-            .ConfigureAwait(false))
+        var active = observed.Selection!.Selection!.Head;
+        if (observed.Snapshot!.Unknown.Any(item =>
+                item.Metadata.Reference.Name != observed.Snapshot.Names[
+                    StateObjectClass.LineageHead]))
         {
-            return LineageResolveResult.Fail(LineageCodes.CleanupFailed);
+            return LineageResolveResult.Fail(LineageCodes.Conflict);
         }
 
-        var active = observed.Selection!.Selection!.Head;
-        var targets = observed.Snapshot!.Authenticated
+        var targets = observed.Snapshot.Authenticated
             .Where(item =>
                 item.Header.ObjectClass != StateObjectClass.LineageHead &&
                 StringComparer.Ordinal.Equals(
@@ -487,7 +475,55 @@ internal sealed class LineageService
             expiryBoundaryUnixSeconds,
             request.Reviewed,
             LineageCryptography.InventoryDigest(targets),
-            targets);
+            targets,
+            kind == LineageTransitionIntentKind.Reset
+                ? request.ProducingRunIdentity
+                : null,
+            kind == LineageTransitionIntentKind.Reset
+                ? request.ProducingRunAttempt
+                : null);
+        if (!TryBuildSuccessor(
+                context,
+                request,
+                baseScopeDigest,
+                observed.Selection.Selection,
+                intent,
+                LineageHeadCodec.Evidence(active.Metadata),
+                out _,
+                out _,
+                out _) ||
+            !await EstablishHeadroomAsync(
+                context,
+                request,
+                baseScopeDigest,
+                currentKeyId,
+                observed,
+                requiredPlatformExpiry,
+                cancellationToken)
+            .ConfigureAwait(false) ||
+            !await EstablishTransitionHeadroomAsync(
+                context,
+                request,
+                baseScopeDigest,
+                currentKeyId,
+                observed,
+                objectClass,
+                requiredPlatformExpiry,
+                cancellationToken)
+            .ConfigureAwait(false))
+        {
+            return LineageResolveResult.Fail(LineageCodes.CleanupFailed);
+        }
+
+        active = observed.Selection!.Selection!.Head;
+        if (!StringComparer.Ordinal.Equals(
+                active.Header.ObjectIdentity,
+                intent.PriorHeadIdentity) ||
+            ResolveTargets(observed.Snapshot!, intent.Targets) is null)
+        {
+            return LineageResolveResult.Fail(LineageCodes.Conflict);
+        }
+
         var written = await WriteIntentAsync(
                 context,
                 request,
@@ -504,55 +540,18 @@ internal sealed class LineageService
         }
 
         ClearObservation(observed);
-        ObservationResult? converged = null;
-        SelectedIntent? expectedIntent = null;
-        for (var attempt = 0; attempt < 3; attempt++)
+        var convergence = await ConvergeExpectedIntentAsync(
+                context,
+                request,
+                baseScopeDigest,
+                currentKeyId,
+                written.Header,
+                requiredPlatformExpiry,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+        if (!convergence.Succeeded)
         {
-            var candidate = await ReadObservationAsync(
-                    context,
-                    request.Access,
-                    request.BaseScope,
-                    baseScopeDigest,
-                    currentKeyId,
-                    CancellationToken.None)
-                .ConfigureAwait(false);
-            if (!candidate.Succeeded || candidate.Selection!.IsAbsent)
-            {
-                ClearObservation(candidate);
-                continue;
-            }
-
-            var selectedIntent = SelectPendingIntent(
-                candidate.Snapshot!,
-                candidate.Selection.Selection!.Head);
-            if (!selectedIntent.Succeeded)
-            {
-                ClearObservation(candidate);
-                return LineageResolveResult.Fail(selectedIntent.Code);
-            }
-
-            if (selectedIntent.Intent is not null &&
-                StringComparer.Ordinal.Equals(
-                    selectedIntent.Intent.Object.Header.ObjectIdentity,
-                    written.Header!.ObjectIdentity))
-            {
-                converged = candidate;
-                expectedIntent = selectedIntent.Intent;
-                break;
-            }
-
-            if (selectedIntent.Intent is not null)
-            {
-                ClearObservation(candidate);
-                return LineageResolveResult.Fail(LineageCodes.Conflict);
-            }
-
-            ClearObservation(candidate);
-        }
-
-        if (converged is null || expectedIntent is null)
-        {
-            return LineageResolveResult.Fail(LineageCodes.Unavailable);
+            return LineageResolveResult.Fail(convergence.Code);
         }
 
         try
@@ -564,15 +563,85 @@ internal sealed class LineageService
                     currentKeyId,
                     now,
                     requiredPlatformExpiry,
-                    converged,
-                    expectedIntent,
+                    convergence.Observation!,
+                    convergence.Intent!,
                     CancellationToken.None)
                 .ConfigureAwait(false);
         }
         finally
         {
-            ClearObservation(converged);
+            ClearObservation(convergence.Observation);
         }
+    }
+
+    private async Task<IntentConvergenceResult> ConvergeExpectedIntentAsync(
+        LocatorContext context,
+        LineageResolveRequest request,
+        string baseScopeDigest,
+        string currentKeyId,
+        StateControlHeaderV1 expected,
+        long requiredPlatformExpiry,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var candidate = await ReadObservationAsync(
+                    context,
+                    request.Access,
+                    request.BaseScope,
+                    baseScopeDigest,
+                    currentKeyId,
+                    request.RequiredLogicalExpiresAtUnixSeconds,
+                    requiredPlatformExpiry,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (!candidate.Succeeded || candidate.Selection!.IsAbsent)
+            {
+                ClearObservation(candidate);
+                continue;
+            }
+
+            var selectedIntent = SelectPendingIntent(
+                candidate.Snapshot!,
+                candidate.Selection.Selection!.Head,
+                currentKeyId,
+                request.RequiredLogicalExpiresAtUnixSeconds,
+                requiredPlatformExpiry);
+            if (!selectedIntent.Succeeded)
+            {
+                ClearObservation(candidate);
+                return IntentConvergenceResult.Fail(selectedIntent.Code);
+            }
+
+            if (selectedIntent.Intent is null)
+            {
+                ClearObservation(candidate);
+                continue;
+            }
+
+            if (!StringComparer.Ordinal.Equals(
+                    selectedIntent.Intent.Object.Header.ObjectIdentity,
+                    expected.ObjectIdentity))
+            {
+                ClearObservation(candidate);
+                return IntentConvergenceResult.Fail(LineageCodes.Conflict);
+            }
+
+            if (!SatisfiesExpectedPhysical(
+                    selectedIntent.Intent.Object,
+                    expected,
+                    requiredPlatformExpiry))
+            {
+                ClearObservation(candidate);
+                continue;
+            }
+
+            return IntentConvergenceResult.Success(
+                candidate,
+                selectedIntent.Intent);
+        }
+
+        return IntentConvergenceResult.Fail(LineageCodes.Unavailable);
     }
 
     private async Task<LineageResolveResult> ResumeTransitionAsync(
@@ -598,9 +667,90 @@ internal sealed class LineageService
                     active.Header.ObjectIdentity) ||
                 !StringComparer.Ordinal.Equals(
                     request.Reset.RequestIdentity,
-                    pending.Intent.TransitionEvidenceIdentity)))
+                    pending.Intent.TransitionEvidenceIdentity) ||
+                !StringComparer.Ordinal.Equals(
+                    request.Reset.ProducingRunIdentity,
+                    pending.Intent.ResetAuthorityRunIdentity) ||
+                request.Reset.ProducingRunAttempt !=
+                    pending.Intent.ResetAuthorityRunAttempt ||
+                !StringComparer.Ordinal.Equals(
+                    pending.Object.Header.ProducingRunIdentity,
+                    pending.Intent.ResetAuthorityRunIdentity) ||
+                pending.Object.Header.ProducingRunAttempt !=
+                    pending.Intent.ResetAuthorityRunAttempt))
         {
             return LineageResolveResult.Fail(LineageCodes.AccessDenied);
+        }
+
+        if (!StringComparer.Ordinal.Equals(
+                active.Header.ObjectIdentity,
+                pending.Intent.PriorHeadIdentity) ||
+            !TryBuildSuccessor(
+                context,
+                request,
+                baseScopeDigest,
+                observed.Selection.Selection,
+                pending,
+                out _,
+                out _,
+                out _))
+        {
+            return LineageResolveResult.Fail(LineageCodes.Conflict);
+        }
+
+        if (!SatisfiesCurrentRequirement(
+                pending.Object,
+                currentKeyId,
+                request.RequiredLogicalExpiresAtUnixSeconds,
+                requiredPlatformExpiry))
+        {
+            var refreshed = await WriteIntentAsync(
+                    context,
+                    request,
+                    baseScopeDigest,
+                    active,
+                    pending.Intent,
+                    now,
+                    requiredPlatformExpiry,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (refreshed.Header is null)
+            {
+                return LineageResolveResult.Fail(refreshed.Code);
+            }
+
+            var convergence = await ConvergeExpectedIntentAsync(
+                    context,
+                    request,
+                    baseScopeDigest,
+                    currentKeyId,
+                    refreshed.Header,
+                    requiredPlatformExpiry,
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            if (!convergence.Succeeded)
+            {
+                return LineageResolveResult.Fail(convergence.Code);
+            }
+
+            try
+            {
+                return await ResumeTransitionAsync(
+                        context,
+                        request,
+                        baseScopeDigest,
+                        currentKeyId,
+                        now,
+                        requiredPlatformExpiry,
+                        convergence.Observation!,
+                        convergence.Intent!,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                ClearObservation(convergence.Observation);
+            }
         }
 
         // An already-selected intent may validly be the eighth transition
@@ -612,6 +762,7 @@ internal sealed class LineageService
                 baseScopeDigest,
                 currentKeyId,
                 observed,
+                requiredPlatformExpiry,
                 cancellationToken)
             .ConfigureAwait(false))
         {
@@ -624,7 +775,43 @@ internal sealed class LineageService
             return LineageResolveResult.Fail(LineageCodes.Conflict);
         }
 
+        var redundantIntents = observed.Snapshot!.Authenticated
+            .Where(item =>
+                item.Header.ObjectClass is StateObjectClass.Reset or
+                    StateObjectClass.ExpiryTransition &&
+                StringComparer.Ordinal.Equals(
+                    item.Header.ObjectIdentity,
+                    pending.Object.Header.ObjectIdentity) &&
+                item.Metadata != pending.Object.Metadata)
+            .Select(item => item.Metadata)
+            .ToImmutableArray();
+
+        active = observed.Selection.Selection!.Head;
+        if (!StringComparer.Ordinal.Equals(
+                active.Header.ObjectIdentity,
+                pending.Intent.PriorHeadIdentity) ||
+            !TryBuildSuccessor(
+                context,
+                request,
+                baseScopeDigest,
+                observed.Selection.Selection,
+                pending,
+                out _,
+                out _,
+                out _))
+        {
+            return LineageResolveResult.Fail(LineageCodes.Conflict);
+        }
+
         foreach (var target in targets.Value)
+        {
+            _ = await store.DeleteExactAsync(
+                    new OpaqueStoreDeleteRequest(target),
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+
+        foreach (var target in redundantIntents)
         {
             _ = await store.DeleteExactAsync(
                     new OpaqueStoreDeleteRequest(target),
@@ -639,6 +826,8 @@ internal sealed class LineageService
                 request.BaseScope,
                 baseScopeDigest,
                 currentKeyId,
+                request.RequiredLogicalExpiresAtUnixSeconds,
+                requiredPlatformExpiry,
                 CancellationToken.None)
             .ConfigureAwait(false);
         if (!afterDelete.Succeeded || afterDelete.Selection!.IsAbsent)
@@ -653,7 +842,9 @@ internal sealed class LineageService
                     ContainsEvidence(afterDelete.Snapshot!, target)) ||
                 afterDelete.Snapshot!.Unknown.Any(item =>
                     pending.Intent.Targets.Any(target =>
-                        LineageHeadCodec.Matches(target, item.Metadata))))
+                        LineageHeadCodec.Matches(target, item.Metadata))) ||
+                redundantIntents.Any(target =>
+                    ContainsMetadata(afterDelete.Snapshot, target)))
             {
                 return LineageResolveResult.Fail(
                     LineageCodes.CleanupFailed);
@@ -668,64 +859,43 @@ internal sealed class LineageService
                 return LineageResolveResult.Fail(LineageCodes.Conflict);
             }
 
-            var epoch = string.Empty;
-            var derived = pending.Intent.Kind switch
+            var selectedIntent = SelectPendingIntent(
+                afterDelete.Snapshot,
+                active,
+                currentKeyId,
+                request.RequiredLogicalExpiresAtUnixSeconds,
+                requiredPlatformExpiry);
+            if (!selectedIntent.Succeeded ||
+                selectedIntent.Intent is null ||
+                selectedIntent.Intent.Object.Metadata !=
+                    pending.Object.Metadata)
             {
-                LineageTransitionIntentKind.Reset =>
-                    LineageCryptography.TryDeriveResetEpoch(
-                        context,
-                        request.Access,
-                        baseScopeDigest,
-                        active.Header.ObjectIdentity,
-                        pending.Intent.TransitionEvidenceIdentity,
-                        pending.Object.Header.ProducingRunIdentity,
-                        pending.Object.Header.ProducingRunAttempt,
-                        out epoch),
-                LineageTransitionIntentKind.Expiry =>
-                    LineageCryptography.TryDeriveExpiryEpoch(
-                        context,
-                        request.Access,
-                        baseScopeDigest,
-                        active.Header.ObjectIdentity,
-                        pending.Intent.TransitionEvidenceIdentity,
-                        pending.Intent.ExpiryBoundaryUnixSeconds!.Value,
-                        out epoch),
-                _ => false,
-            };
-            if (!derived ||
-                !LineageCryptography.TryDeriveSessionId(
-                    context,
-                    request.Access,
-                    baseScopeDigest,
-                    epoch,
-                    out var sessionId))
-            {
-                return LineageResolveResult.Fail(
-                    LineageCodes.KeyUnavailable);
+                return LineageResolveResult.Fail(LineageCodes.Conflict);
             }
 
-            var successor = new LineageHeadV1(
-                pending.Intent.Kind == LineageTransitionIntentKind.Reset
-                    ? LineageTransitionKind.Reset
-                    : LineageTransitionKind.Expiry,
-                checked(active.Head.Ordinal + 1),
-                pending.Intent.Reviewed,
-                active.Header.Epoch,
-                active.Header.ObjectIdentity,
-                pending.Intent.TransitionEvidenceIdentity,
-                pending.Intent.ExpiryBoundaryUnixSeconds,
-                afterDelete.Selection.Selection!.EquivalentPhysical
-                    .Select(LineageHeadCodec.Evidence)
-                    .ToImmutableArray(),
-                [],
-                active.Head.Superseded
-                    .Add(LineageHeadCodec.Evidence(pending.Object.Metadata))
-                    .Distinct()
-                    .ToImmutableArray(),
-                active.Head.CompletedCleanup
-                    .AddRange(pending.Intent.Targets)
-                    .Distinct()
-                    .ToImmutableArray());
+            var unexpectedPriorState = afterDelete.Snapshot.Authenticated.Any(
+                    item =>
+                        item.Header.ObjectClass !=
+                            StateObjectClass.LineageHead &&
+                        item.Metadata != pending.Object.Metadata) ||
+                afterDelete.Snapshot.Unknown.Any(item =>
+                    item.Metadata.Reference.Name !=
+                        afterDelete.Snapshot.Names[
+                            StateObjectClass.LineageHead]);
+            if (unexpectedPriorState ||
+                !TryBuildSuccessor(
+                    context,
+                    request,
+                    baseScopeDigest,
+                    afterDelete.Selection.Selection,
+                    pending,
+                    out var epoch,
+                    out var sessionId,
+                    out var successor))
+            {
+                return LineageResolveResult.Fail(LineageCodes.Conflict);
+            }
+
             var written = await WriteHeadAsync(
                     context,
                     request,
@@ -736,9 +906,9 @@ internal sealed class LineageService
                     now,
                     request.RequiredLogicalExpiresAtUnixSeconds,
                     requiredPlatformExpiry,
-                    pending.Object.Header.ProducingRunIdentity,
-                    pending.Object.Header.ProducingRunAttempt,
-                    CancellationToken.None)
+                    frozenProducingRunIdentity: null,
+                    frozenProducingRunAttempt: null,
+                    cancellationToken: CancellationToken.None)
                 .ConfigureAwait(false);
             if (written.Header is null)
             {
@@ -777,6 +947,134 @@ internal sealed class LineageService
         }
     }
 
+    private static LineageHeadV1 BuildRefreshedHead(
+        LineageHeadSelection selection) =>
+        selection.Head.Head with
+        {
+            PhysicalSuperseded = selection.EquivalentPhysical
+                .AddRange(selection.SafeNonAnchors)
+                .Select(LineageHeadCodec.Evidence)
+                .Distinct()
+                .ToImmutableArray(),
+        };
+
+    private static bool CanEncodeHead(LineageHeadV1 head)
+    {
+        if (!LineageHeadCodec.TryEncode(head, out var payload))
+        {
+            return false;
+        }
+
+        CryptographicOperations.ZeroMemory(payload);
+        return true;
+    }
+
+    private static bool TryBuildSuccessor(
+        LocatorContext context,
+        LineageResolveRequest request,
+        string baseScopeDigest,
+        LineageHeadSelection selection,
+        SelectedIntent pending,
+        out string epoch,
+        out string sessionId,
+        out LineageHeadV1 successor) =>
+        TryBuildSuccessor(
+            context,
+            request,
+            baseScopeDigest,
+            selection,
+            pending.Intent,
+            LineageHeadCodec.Evidence(pending.Object.Metadata),
+            out epoch,
+            out sessionId,
+            out successor);
+
+    private static bool TryBuildSuccessor(
+        LocatorContext context,
+        LineageResolveRequest request,
+        string baseScopeDigest,
+        LineageHeadSelection selection,
+        LineageTransitionIntentV1 intent,
+        LineageArtifactEvidence intentEvidence,
+        out string epoch,
+        out string sessionId,
+        out LineageHeadV1 successor)
+    {
+        epoch = string.Empty;
+        sessionId = string.Empty;
+        successor = null!;
+        var active = selection.Head;
+        if (active.Head.Ordinal == ulong.MaxValue)
+        {
+            return false;
+        }
+
+        var derived = intent.Kind switch
+        {
+            LineageTransitionIntentKind.Reset =>
+                LineageCryptography.TryDeriveResetEpoch(
+                    context,
+                    request.Access,
+                    baseScopeDigest,
+                    active.Header.ObjectIdentity,
+                    intent.TransitionEvidenceIdentity,
+                    intent.ResetAuthorityRunIdentity!,
+                    intent.ResetAuthorityRunAttempt!.Value,
+                    out epoch),
+            LineageTransitionIntentKind.Expiry =>
+                LineageCryptography.TryDeriveExpiryEpoch(
+                    context,
+                    request.Access,
+                    baseScopeDigest,
+                    active.Header.ObjectIdentity,
+                    intent.TransitionEvidenceIdentity,
+                    intent.ExpiryBoundaryUnixSeconds!.Value,
+                    out epoch),
+            _ => false,
+        };
+        if (!derived ||
+            !LineageCryptography.TryDeriveSessionId(
+                context,
+                request.Access,
+                baseScopeDigest,
+                epoch,
+                out sessionId))
+        {
+            return false;
+        }
+
+        successor = new LineageHeadV1(
+            intent.Kind == LineageTransitionIntentKind.Reset
+                ? LineageTransitionKind.Reset
+                : LineageTransitionKind.Expiry,
+            checked(active.Head.Ordinal + 1),
+            intent.Reviewed,
+            active.Header.Epoch,
+            active.Header.ObjectIdentity,
+            intent.TransitionEvidenceIdentity,
+            intent.ExpiryBoundaryUnixSeconds,
+            selection.EquivalentPhysical
+                .Select(LineageHeadCodec.Evidence)
+                .Distinct()
+                .ToImmutableArray(),
+            PhysicalSuperseded: [],
+            Superseded: [intentEvidence],
+            CompletedCleanup: intent.Targets
+                .Distinct()
+                .ToImmutableArray(),
+            ResetAuthorityRunIdentity:
+                intent.ResetAuthorityRunIdentity,
+            ResetAuthorityRunAttempt:
+                intent.ResetAuthorityRunAttempt);
+        if (!LineageHeadCodec.TryEncode(successor, out var encoded))
+        {
+            return false;
+        }
+
+        CryptographicOperations.ZeroMemory(encoded);
+        return true;
+    }
+
     private async Task<LineageResolveResult> CompleteTransitionAsync(
         LocatorContext context,
         LineageResolveRequest request,
@@ -789,20 +1087,17 @@ internal sealed class LineageService
         var intentEvidence = LineageHeadCodec.Evidence(
             pending.Object.Metadata);
         for (var attempt = 0;
-            attempt < LineageFormat.MaximumPhysicalPerClass;
+            attempt <= LineageFormat.MaximumScopedObjects;
             attempt++)
         {
-            _ = await store.DeleteExactAsync(
-                    new OpaqueStoreDeleteRequest(pending.Object.Metadata),
-                    CancellationToken.None)
-                .ConfigureAwait(false);
-
             var observed = await ReadObservationAsync(
                     context,
                     request.Access,
                     request.BaseScope,
                     baseScopeDigest,
                     currentKeyId,
+                    request.RequiredLogicalExpiresAtUnixSeconds,
+                    requiredPlatformExpiry,
                     CancellationToken.None)
                 .ConfigureAwait(false);
             try
@@ -829,65 +1124,68 @@ internal sealed class LineageService
                 }
 
                 var snapshot = observed.Snapshot!;
-                var targetResidual = ResolveTargets(
-                    snapshot,
-                    pending.Intent.Targets);
-                var intentResidual = ResolveTargets(
-                    snapshot,
-                    [intentEvidence]);
-                if (targetResidual is null || intentResidual is null)
-                {
-                    return LineageResolveResult.Fail(LineageCodes.Conflict);
-                }
-
-                var unexpectedFormerEpoch = snapshot.Authenticated
-                    .Where(item =>
-                        item.Header.ObjectClass !=
-                            StateObjectClass.LineageHead &&
-                        StringComparer.Ordinal.Equals(
-                            item.Header.Epoch,
-                            pending.Intent.PriorEpoch))
-                    .Select(item => item.Metadata)
-                    .Except(targetResidual.Value)
-                    .Except(intentResidual.Value)
-                    .Any();
                 var selected = observed.Selection.Selection.Head;
                 var authorizedHistorical = selected.Head.Superseded
                     .Concat(selected.Head.CompletedCleanup)
                     .ToImmutableArray();
-                var unexpectedUnknown = snapshot.Unknown.Any(item =>
-                    item.Metadata.Reference.Name !=
-                        snapshot.Names[
-                            StateObjectClass.LineageHead] &&
-                    !pending.Intent.Targets.Any(target =>
-                        LineageHeadCodec.Matches(target, item.Metadata)) &&
-                    !LineageHeadCodec.Matches(
-                        intentEvidence,
-                        item.Metadata) &&
-                    !authorizedHistorical.Any(evidence =>
-                        LineageHeadCodec.Matches(evidence, item.Metadata)));
-                if (unexpectedFormerEpoch || unexpectedUnknown)
+                if (!authorizedHistorical.Any(evidence =>
+                        EvidenceEquals(evidence, intentEvidence)) ||
+                    pending.Intent.Targets.Any(target =>
+                        !authorizedHistorical.Any(evidence =>
+                            EvidenceEquals(evidence, target))))
                 {
                     return LineageResolveResult.Fail(LineageCodes.Conflict);
                 }
 
-                var residual = targetResidual.Value
-                    .AddRange(intentResidual.Value)
-                    .Distinct()
-                    .ToImmutableArray();
-                if (residual.IsEmpty)
+                var residual = ImmutableArray.CreateBuilder<
+                    OpaqueStoreObjectMetadata>();
+                foreach (var item in snapshot.Authenticated.Where(item =>
+                    item.Header.ObjectClass != StateObjectClass.LineageHead))
                 {
+                    if (!authorizedHistorical.Any(evidence =>
+                            LineageHeadCodec.Matches(
+                                evidence,
+                                item.Metadata)))
+                    {
+                        return LineageResolveResult.Fail(
+                            LineageCodes.Conflict);
+                    }
+
+                    residual.Add(item.Metadata);
+                }
+
+                foreach (var item in snapshot.Unknown.Where(item =>
+                    item.Metadata.Reference.Name != snapshot.Names[
+                        StateObjectClass.LineageHead]))
+                {
+                    if (!authorizedHistorical.Any(evidence =>
+                            LineageHeadCodec.Matches(
+                                evidence,
+                                item.Metadata)))
+                    {
+                        return LineageResolveResult.Fail(
+                            LineageCodes.Conflict);
+                    }
+
+                    residual.Add(item.Metadata);
+                }
+
+                if (residual.Count == 0)
+                {
+                    if (!ValidateActiveState(snapshot, selected))
+                    {
+                        return LineageResolveResult.Fail(
+                            LineageCodes.Conflict);
+                    }
+
                     return await FinalizeAsync(request, selected)
                         .ConfigureAwait(false);
                 }
 
-                foreach (var target in residual)
-                {
-                    _ = await store.DeleteExactAsync(
-                            new OpaqueStoreDeleteRequest(target),
-                            CancellationToken.None)
-                        .ConfigureAwait(false);
-                }
+                _ = await store.DeleteExactAsync(
+                        new OpaqueStoreDeleteRequest(residual[0]),
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
             }
             finally
             {
@@ -904,6 +1202,7 @@ internal sealed class LineageService
         string baseScopeDigest,
         string currentKeyId,
         ObservationResult observed,
+        long requiredPlatformExpiry,
         CancellationToken cancellationToken)
     {
         var expectedIdentity = observed.Selection!.Selection!
@@ -940,6 +1239,8 @@ internal sealed class LineageService
                     request.BaseScope,
                     baseScopeDigest,
                     currentKeyId,
+                    request.RequiredLogicalExpiresAtUnixSeconds,
+                    requiredPlatformExpiry,
                     CancellationToken.None)
                 .ConfigureAwait(false);
             if (!reread.Succeeded ||
@@ -968,6 +1269,7 @@ internal sealed class LineageService
         string currentKeyId,
         ObservationResult observed,
         StateObjectClass objectClass,
+        long requiredPlatformExpiry,
         CancellationToken cancellationToken)
     {
         var expectedHeadIdentity = observed.Selection!.Selection!
@@ -1015,6 +1317,8 @@ internal sealed class LineageService
                     request.BaseScope,
                     baseScopeDigest,
                     currentKeyId,
+                    request.RequiredLogicalExpiresAtUnixSeconds,
+                    requiredPlatformExpiry,
                     cancellationToken)
                 .ConfigureAwait(false);
             if (!reread.Succeeded ||
@@ -1065,6 +1369,8 @@ internal sealed class LineageService
                     request.BaseScope,
                     baseScopeDigest,
                     currentKeyId,
+                    request.RequiredLogicalExpiresAtUnixSeconds,
+                    requiredPlatformExpiry,
                     cancellationToken)
                 .ConfigureAwait(false);
             try
@@ -1103,11 +1409,20 @@ internal sealed class LineageService
                     return LineageResolveResult.Fail(LineageCodes.Conflict);
                 }
 
-                if (observed.Selection.Selection.Head.Metadata
-                    .ExpiresAtUnixSeconds < requiredPlatformExpiry)
+                var selectedHead = observed.Selection.Selection.Head;
+                if (!StringComparer.Ordinal.Equals(
+                        selectedHead.Header.KeyId,
+                        expected.KeyId) ||
+                    selectedHead.Header.LogicalExpiresAtUnixSeconds <
+                        expected.LogicalExpiresAtUnixSeconds ||
+                    selectedHead.Header.RequiredPlatformExpiresAtUnixSeconds <
+                        expected.RequiredPlatformExpiresAtUnixSeconds ||
+                    selectedHead.Header.RequiredPlatformExpiresAtUnixSeconds <
+                        requiredPlatformExpiry ||
+                    selectedHead.Metadata.ExpiresAtUnixSeconds <
+                        selectedHead.Header.RequiredPlatformExpiresAtUnixSeconds)
                 {
-                    return LineageResolveResult.Fail(
-                        LineageCodes.RetentionFailed);
+                    continue;
                 }
 
                 var selection = observed.Selection.Selection;
@@ -1356,67 +1671,262 @@ internal sealed class LineageService
         LineageBaseScope scope,
         string baseScopeDigest,
         string currentKeyId,
+        long requiredLogicalExpiry,
+        long requiredPlatformExpiry,
         CancellationToken cancellationToken)
     {
-        var read = await inventory.ReadAsync(
-                context,
-                access,
-                scope,
-                baseScopeDigest,
-                cancellationToken)
-            .ConfigureAwait(false);
-        if (!read.Succeeded)
+        var cleanupStarted = false;
+        for (var cleanupAttempt = 0;
+            cleanupAttempt <= LineageFormat.MaximumScopedObjects;
+            cleanupAttempt++)
         {
-            return ObservationResult.Fail(read.Code);
-        }
-
-        var snapshot = read.Snapshot!;
-        var lineageName = snapshot.Names[StateObjectClass.LineageHead];
-        var heads = ImmutableArray.CreateBuilder<LineageHeadCandidate>();
-        foreach (var item in snapshot.Authenticated.Where(item =>
-            item.Header.ObjectClass == StateObjectClass.LineageHead))
-        {
-            if (!LineageHeadCodec.TryDecode(item.Payload, out var head) ||
-                head is null ||
-                !ValidateDerivedHead(
+            var read = await inventory.ReadAsync(
                     context,
                     access,
+                    scope,
                     baseScopeDigest,
-                    item.Header,
-                    head))
+                    cleanupStarted ? CancellationToken.None : cancellationToken)
+                .ConfigureAwait(false);
+            if (!read.Succeeded)
             {
-                ScopedStateInventory.Clear(snapshot);
-                return ObservationResult.Fail(
-                    LineageCodes.AuthenticationFailed);
+                return ObservationResult.Fail(cleanupStarted
+                    ? LineageCodes.CleanupFailed
+                    : read.Code);
             }
 
-            heads.Add(new LineageHeadCandidate(
-                item.Metadata,
-                item.Header,
-                head));
+            var snapshot = read.Snapshot!;
+            var lineageName = snapshot.Names[StateObjectClass.LineageHead];
+            var heads = ImmutableArray.CreateBuilder<LineageHeadCandidate>();
+            var underRetainedHeads = ImmutableArray.CreateBuilder<
+                LineageHeadCandidate>();
+            foreach (var item in snapshot.Authenticated
+                .Concat(snapshot.UnderRetained)
+                .Where(item => item.Header.ObjectClass ==
+                    StateObjectClass.LineageHead))
+            {
+                if (!LineageHeadCodec.TryDecode(item.Payload, out var head) ||
+                    head is null ||
+                    !ValidateDerivedHead(
+                        context,
+                        access,
+                        baseScopeDigest,
+                        item.Header,
+                        head))
+                {
+                    ScopedStateInventory.Clear(snapshot);
+                    return ObservationResult.Fail(
+                        LineageCodes.AuthenticationFailed);
+                }
+
+                var candidate = new LineageHeadCandidate(
+                    item.Metadata,
+                    item.Header,
+                    head);
+                if (snapshot.UnderRetained.Contains(item))
+                {
+                    underRetainedHeads.Add(candidate);
+                }
+                else
+                {
+                    heads.Add(candidate);
+                }
+            }
+
+            var unknownHeads = snapshot.Unknown.Where(item =>
+                    item.Metadata.Reference.Name == lineageName)
+                .ToImmutableArray();
+            var authenticatedHeads = heads.ToImmutable();
+            if (!snapshot.UnderRetained.IsEmpty)
+            {
+                var debt = SelectUnderRetainedCleanup(
+                    snapshot,
+                    authenticatedHeads,
+                    underRetainedHeads.ToImmutable(),
+                    unknownHeads,
+                    currentKeyId,
+                    requiredLogicalExpiry,
+                    requiredPlatformExpiry);
+                if (debt.Target is null ||
+                    cleanupAttempt == LineageFormat.MaximumScopedObjects)
+                {
+                    ScopedStateInventory.Clear(snapshot);
+                    return ObservationResult.Fail(debt.Target is null
+                        ? debt.Code
+                        : LineageCodes.CleanupFailed);
+                }
+
+                var target = debt.Target;
+                ScopedStateInventory.Clear(snapshot);
+                cleanupStarted = true;
+                try
+                {
+                    _ = await store.DeleteExactAsync(
+                            new OpaqueStoreDeleteRequest(target),
+                            CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return ObservationResult.Fail(
+                        LineageCodes.CleanupFailed);
+                }
+
+                continue;
+            }
+
+            var selection = LineageHeadSelector.Select(
+                authenticatedHeads,
+                unknownHeads,
+                authenticatedHeads.Length + unknownHeads.Length,
+                currentKeyId,
+                requiredLogicalExpiry,
+                requiredPlatformExpiry);
+            if (!selection.Succeeded)
+            {
+                ScopedStateInventory.Clear(snapshot);
+                return ObservationResult.Fail(selection.Code);
+            }
+
+            return ObservationResult.Success(snapshot, selection);
         }
 
-        var unknownHeads = snapshot.Unknown.Where(item =>
-                item.Metadata.Reference.Name == lineageName)
-            .ToImmutableArray();
-        var authenticatedHeads = heads.ToImmutable();
-        var selection = LineageHeadSelector.Select(
-            authenticatedHeads,
-            unknownHeads,
-            authenticatedHeads.Length + unknownHeads.Length,
-            currentKeyId);
-        if (!selection.Succeeded)
-        {
-            ScopedStateInventory.Clear(snapshot);
-            return ObservationResult.Fail(selection.Code);
-        }
-
-        return ObservationResult.Success(snapshot, selection);
+        return ObservationResult.Fail(LineageCodes.CleanupFailed);
     }
+
+    private static CleanupDebtResult SelectUnderRetainedCleanup(
+        ScopedStateInventorySnapshot snapshot,
+        ImmutableArray<LineageHeadCandidate> authenticatedHeads,
+        ImmutableArray<LineageHeadCandidate> underRetainedHeads,
+        ImmutableArray<UnknownStateObject> unknownHeads,
+        string currentKeyId,
+        long requiredLogicalExpiry,
+        long requiredPlatformExpiry)
+    {
+        foreach (var item in snapshot.UnderRetained
+            .Where(item => item.Header.ObjectClass !=
+                StateObjectClass.LineageHead)
+            .OrderBy(item => item.Header.ObjectClass)
+            .ThenBy(item => item.Metadata.Reference.ObjectId.Value,
+                StringComparer.Ordinal))
+        {
+            var hasEquivalent = snapshot.Authenticated.Any(candidate =>
+                candidate.Header.ObjectClass == item.Header.ObjectClass &&
+                StringComparer.Ordinal.Equals(
+                    candidate.Header.ObjectIdentity,
+                    item.Header.ObjectIdentity));
+            var hasRetainedPredecessor =
+                item.Header.PredecessorIdentity is not null &&
+                snapshot.Authenticated.Any(candidate =>
+                    StringComparer.Ordinal.Equals(
+                        candidate.Header.ObjectIdentity,
+                        item.Header.PredecessorIdentity));
+            if (hasEquivalent || hasRetainedPredecessor)
+            {
+                return CleanupDebtResult.Success(item.Metadata);
+            }
+
+            return CleanupDebtResult.Fail(LineageCodes.RetentionFailed);
+        }
+
+        if (underRetainedHeads.IsEmpty)
+        {
+            return CleanupDebtResult.Fail(LineageCodes.RetentionFailed);
+        }
+
+        var allHeads = authenticatedHeads.AddRange(underRetainedHeads);
+        var topology = LineageHeadSelector.Select(
+            allHeads,
+            unknownHeads,
+            allHeads.Length + unknownHeads.Length,
+            currentKeyId,
+            requiredLogicalExpiry,
+            requiredPlatformExpiry);
+        if (!topology.Succeeded || topology.IsAbsent)
+        {
+            return CleanupDebtResult.Fail(topology.Code);
+        }
+
+        foreach (var debt in underRetainedHeads.OrderBy(candidate =>
+            candidate.Metadata.Reference.ObjectId.Value,
+            StringComparer.Ordinal))
+        {
+            if (authenticatedHeads.Any(candidate =>
+                    StringComparer.Ordinal.Equals(
+                        candidate.Header.ObjectIdentity,
+                        debt.Header.ObjectIdentity) &&
+                    LineageHeadCodec.Equivalent(
+                        candidate.Head,
+                        debt.Head)))
+            {
+                return CleanupDebtResult.Success(debt.Metadata);
+            }
+        }
+
+        var selected = topology.Selection!.Head;
+        var selectedIsUnderRetained = underRetainedHeads.Any(candidate =>
+            candidate.Metadata == selected.Metadata);
+        if (!selectedIsUnderRetained)
+        {
+            return CleanupDebtResult.Fail(LineageCodes.RetentionFailed);
+        }
+
+        var predecessor = topology.Selection.ImmediatePredecessor;
+        if (predecessor is not null &&
+            authenticatedHeads.Any(candidate =>
+                candidate.Metadata == predecessor.Metadata) &&
+            underRetainedHeads
+                .Where(candidate => StringComparer.Ordinal.Equals(
+                    candidate.Header.ObjectIdentity,
+                    selected.Header.ObjectIdentity))
+                .SelectMany(candidate => candidate.Head.PhysicalPredecessors)
+                .Any(evidence => LineageHeadCodec.Matches(
+                    evidence,
+                    predecessor.Metadata)))
+        {
+            return CleanupDebtResult.Success(selected.Metadata);
+        }
+
+        return CleanupDebtResult.Fail(LineageCodes.RetentionFailed);
+    }
+
+    private static bool SatisfiesExpectedPhysical(
+        AuthenticatedStateObject selected,
+        StateControlHeaderV1 expected,
+        long requiredPlatformExpiry) =>
+        StringComparer.Ordinal.Equals(
+            selected.Header.KeyId,
+            expected.KeyId) &&
+        selected.Header.LogicalExpiresAtUnixSeconds >=
+            expected.LogicalExpiresAtUnixSeconds &&
+        selected.Header.RequiredPlatformExpiresAtUnixSeconds >=
+            expected.RequiredPlatformExpiresAtUnixSeconds &&
+        selected.Header.RequiredPlatformExpiresAtUnixSeconds >=
+            requiredPlatformExpiry &&
+        selected.Metadata.ExpiresAtUnixSeconds >=
+            selected.Header.RequiredPlatformExpiresAtUnixSeconds;
+
+    private static bool SatisfiesCurrentRequirement(
+        AuthenticatedStateObject selected,
+        string currentKeyId,
+        long requiredLogicalExpiry,
+        long requiredPlatformExpiry) =>
+        StringComparer.Ordinal.Equals(
+            selected.Header.KeyId,
+            currentKeyId) &&
+        selected.Header.LogicalExpiresAtUnixSeconds >=
+            requiredLogicalExpiry &&
+        selected.Header.RequiredPlatformExpiresAtUnixSeconds >=
+            requiredPlatformExpiry &&
+        selected.Metadata.ExpiresAtUnixSeconds >=
+            selected.Header.RequiredPlatformExpiresAtUnixSeconds &&
+        selected.Metadata.ExpiresAtUnixSeconds >= requiredPlatformExpiry;
 
     private static PendingIntentResult SelectPendingIntent(
         ScopedStateInventorySnapshot snapshot,
-        LineageHeadCandidate active)
+        LineageHeadCandidate active,
+        string currentKeyId,
+        long requiredLogicalExpiry,
+        long requiredPlatformExpiry)
     {
         var parsed = ImmutableArray.CreateBuilder<SelectedIntent>();
         foreach (var item in snapshot.Authenticated.Where(item =>
@@ -1436,28 +1946,30 @@ internal sealed class LineageService
                     LineageCodes.AuthenticationFailed);
             }
 
-            if (StringComparer.Ordinal.Equals(
+            if (!StringComparer.Ordinal.Equals(
                     intent.PriorHeadIdentity,
-                    active.Header.ObjectIdentity) &&
+                    active.Header.ObjectIdentity) ||
+                !StringComparer.Ordinal.Equals(
+                    intent.PriorEpoch,
+                    active.Header.Epoch) ||
                 !StringComparer.Ordinal.Equals(
                     item.Header.PredecessorIdentity,
-                    intent.PriorHeadIdentity))
+                    active.Header.ObjectIdentity))
             {
                 return PendingIntentResult.Fail(LineageCodes.Conflict);
             }
 
-            if (StringComparer.Ordinal.Equals(
-                    intent.PriorHeadIdentity,
-                    active.Header.ObjectIdentity) &&
-                StringComparer.Ordinal.Equals(
-                    intent.PriorEpoch,
-                    active.Header.Epoch) &&
-                StringComparer.Ordinal.Equals(
-                    item.Header.PredecessorIdentity,
-                    active.Header.ObjectIdentity))
+            if (intent.Kind == LineageTransitionIntentKind.Reset &&
+                (!StringComparer.Ordinal.Equals(
+                    item.Header.ProducingRunIdentity,
+                    intent.ResetAuthorityRunIdentity) ||
+                    item.Header.ProducingRunAttempt !=
+                        intent.ResetAuthorityRunAttempt))
             {
-                parsed.Add(new SelectedIntent(item, intent));
+                return PendingIntentResult.Fail(LineageCodes.AccessDenied);
             }
+
+            parsed.Add(new SelectedIntent(item, intent));
         }
 
         if (parsed.Count == 0)
@@ -1475,7 +1987,17 @@ internal sealed class LineageService
         }
 
         return PendingIntentResult.Success(parsed
-            .OrderByDescending(value =>
+            .OrderByDescending(value => SatisfiesCurrentRequirement(
+                value.Object,
+                currentKeyId,
+                requiredLogicalExpiry,
+                requiredPlatformExpiry))
+            .ThenByDescending(value => StringComparer.Ordinal.Equals(
+                value.Object.Header.KeyId,
+                currentKeyId))
+            .ThenByDescending(value =>
+                value.Object.Header.LogicalExpiresAtUnixSeconds)
+            .ThenByDescending(value =>
                 value.Object.Header.RequiredPlatformExpiresAtUnixSeconds)
             .ThenBy(value =>
                 value.Object.Metadata.Reference.ObjectId.Value,
@@ -1659,6 +2181,8 @@ internal sealed class LineageService
                 targets.All(target =>
                     !reread.Snapshot!.Authenticated.Any(item =>
                         item.Metadata == target) &&
+                    !reread.Snapshot.UnderRetained.Any(item =>
+                        item.Metadata == target) &&
                     !reread.Snapshot.Unknown.Any(item =>
                         item.Metadata == target));
         }
@@ -1676,6 +2200,7 @@ internal sealed class LineageService
         foreach (var matches in evidence.Select(item =>
             snapshot.Authenticated
                 .Select(value => value.Metadata)
+                .Concat(snapshot.UnderRetained.Select(value => value.Metadata))
                 .Concat(snapshot.Unknown.Select(value => value.Metadata))
                 .Where(metadata => LineageHeadCodec.Matches(item, metadata))
                 .ToImmutableArray()))
@@ -1698,7 +2223,20 @@ internal sealed class LineageService
         ScopedStateInventorySnapshot snapshot,
         LineageArtifactEvidence evidence) =>
         snapshot.Authenticated.Any(item =>
+            LineageHeadCodec.Matches(evidence, item.Metadata)) ||
+        snapshot.UnderRetained.Any(item =>
             LineageHeadCodec.Matches(evidence, item.Metadata));
+
+    private static bool ContainsMetadata(
+        ScopedStateInventorySnapshot snapshot,
+        OpaqueStoreObjectMetadata metadata) =>
+        snapshot.Authenticated.Any(item => item.Metadata == metadata) ||
+        snapshot.UnderRetained.Any(item => item.Metadata == metadata) ||
+        snapshot.Unknown.Any(item => item.Metadata == metadata);
+
+    private static bool EvidenceEquals(
+        LineageArtifactEvidence left,
+        LineageArtifactEvidence right) => left == right;
 
     private static bool TryGetCurrentKeyId(
         LocatorContext context,
@@ -1739,8 +2277,8 @@ internal sealed class LineageService
                     baseScopeDigest,
                     head.PreviousHeadIdentity!,
                     head.TransitionEvidenceIdentity!,
-                    header.ProducingRunIdentity,
-                    header.ProducingRunAttempt,
+                    head.ResetAuthorityRunIdentity!,
+                    head.ResetAuthorityRunAttempt!.Value,
                     out epoch),
             LineageTransitionKind.Expiry =>
                 LineageCryptography.TryDeriveExpiryEpoch(
@@ -1816,6 +2354,18 @@ internal sealed class LineageService
             new(code, null, header);
     }
 
+    private sealed record CleanupDebtResult(
+        string Code,
+        OpaqueStoreObjectMetadata? Target)
+    {
+        internal static CleanupDebtResult Success(
+            OpaqueStoreObjectMetadata target) =>
+            new(LineageCodes.Ready, target);
+
+        internal static CleanupDebtResult Fail(string code) =>
+            new(code, null);
+    }
+
     private sealed class ObservationResult
     {
         private ObservationResult(
@@ -1848,6 +2398,25 @@ internal sealed class LineageService
     private sealed record SelectedIntent(
         AuthenticatedStateObject Object,
         LineageTransitionIntentV1 Intent);
+
+    private sealed record IntentConvergenceResult(
+        string Code,
+        ObservationResult? Observation,
+        SelectedIntent? Intent)
+    {
+        internal bool Succeeded =>
+            StringComparer.Ordinal.Equals(Code, LineageCodes.Ready) &&
+            Observation is not null &&
+            Intent is not null;
+
+        internal static IntentConvergenceResult Success(
+            ObservationResult observation,
+            SelectedIntent intent) =>
+            new(LineageCodes.Ready, observation, intent);
+
+        internal static IntentConvergenceResult Fail(string code) =>
+            new(code, null, null);
+    }
 
     private sealed record PendingIntentResult(
         string Code,
