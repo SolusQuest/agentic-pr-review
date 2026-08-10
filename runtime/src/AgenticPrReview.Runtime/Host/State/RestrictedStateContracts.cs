@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Security.Cryptography;
 using AgenticPrReview.Runtime.Agent.Session;
+using AgenticPrReview.Runtime.Host.State.Locator;
 
 namespace AgenticPrReview.Runtime.Host.State;
 
@@ -20,7 +21,8 @@ internal static class RestrictedStateFormat
     internal const long MaximumReviewTarget = long.MaxValue;
     internal const long MaximumGeneration = long.MaxValue;
     internal const long MaximumUnixSeconds = 253_402_300_799;
-    internal const long MaximumRetentionSeconds = 7 * 24 * 60 * 60;
+    internal const long MaximumRetentionSeconds =
+        StateRetentionRequirements.LogicalWindowSeconds;
 }
 
 internal enum StateAction
