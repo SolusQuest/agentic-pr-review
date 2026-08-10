@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
+using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using Xunit;
 
 namespace AgenticPrReview.Runtime.Tests.Host.Action.Authorization;
@@ -100,7 +101,7 @@ public sealed class ActionHostAuthorizationArchitectureTests
     }
 
     [Fact]
-    public void OnlyGitHubTransportFactoryExportsTheH1Token()
+    public void OnlyFocusedGitHubTransportFactoriesExportTheH1Token()
     {
         var export = typeof(ActionHostOpaqueSecret).GetMethod(
             "ExportForPrivateLaunch",
@@ -108,7 +109,8 @@ public sealed class ActionHostAuthorizationArchitectureTests
         var callers = typeof(ActionHostAuthorizer).Assembly.GetTypes()
             .Where(type => type.Namespace is
                 "AgenticPrReview.Runtime.ActionHost.Authorization" or
-                "AgenticPrReview.Runtime.ActionHost.GitHub")
+                "AgenticPrReview.Runtime.ActionHost.GitHub" or
+                "AgenticPrReview.Runtime.Host.Publishing.GitHub.Common")
             .SelectMany(static type => type.GetMethods(
                 BindingFlags.Instance |
                 BindingFlags.Static |
@@ -120,8 +122,11 @@ public sealed class ActionHostAuthorizationArchitectureTests
             .ToArray();
 
         Assert.Equal(
-            [typeof(ActionHostGitHubAuthorizationTransportFactory)],
-            callers);
+            [
+                typeof(ActionHostGitHubAuthorizationTransportFactory),
+                typeof(BoundedGitHubPublisherTransportFactory),
+            ],
+            callers.OrderBy(type => type!.FullName, StringComparer.Ordinal));
     }
 
     [Fact]
