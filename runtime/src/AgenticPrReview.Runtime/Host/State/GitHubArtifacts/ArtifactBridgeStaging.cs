@@ -331,6 +331,7 @@ internal sealed class ArtifactBridgeStaging
         catch (Exception exception) when (exception is IOException or
             UnauthorizedAccessException)
         {
+            return;
         }
     }
 
@@ -676,6 +677,7 @@ internal sealed class ArtifactBridgeStagingScope(
             UnauthorizedAccessException or
             ObjectDisposedException)
         {
+            return;
         }
     }
 
