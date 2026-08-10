@@ -3,13 +3,15 @@ using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State.RestrictedStateTransactions;
 using AgenticPrReview.Runtime.Host.State;
+using AgenticPrReview.Runtime.Host.State.Locator;
 
 namespace AgenticPrReview.Runtime.Tests.Host.State;
 
 internal static class RestrictedStateTestData
 {
     internal const long Now = 1_700_000_000;
-    internal const long Expires = Now + 604_800;
+    internal const long Expires =
+        Now + StateRetentionRequirements.LogicalWindowSeconds;
     internal static readonly byte[] Key =
         Enumerable.Range(0, 32).Select(value => (byte)value).ToArray();
 
