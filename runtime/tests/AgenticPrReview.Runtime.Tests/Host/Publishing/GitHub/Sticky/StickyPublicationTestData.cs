@@ -54,32 +54,37 @@ internal static class StickyPublicationTestData
 }
 
 internal sealed class FakePublisherTransportFactory :
-    IBoundedGitHubPublisherTransportFactory
+    IStickyGitHubPublisherTransportFactory
 {
     internal FakePublisherTransport Transport { get; } = new();
     internal int Creates { get; private set; }
 
-    public IBoundedGitHubPublisherTransport Create(ActionHostGitHubToken token,
-        ActionHostAuthorizer.AuthorizedInvocation authorization)
+    public IStickyGitHubPublisherTransport Create(ActionHostGitHubToken token,
+        AuthorizedStickyPublicationRequest request)
     {
         Creates++;
+        Transport.Request = request;
         return Transport;
     }
 }
 
-internal sealed class FakePublisherTransport : IBoundedGitHubPublisherTransport
+internal sealed class FakePublisherTransport : IStickyGitHubPublisherTransport
 {
+    internal AuthorizedStickyPublicationRequest? Request { get; set; }
     internal Queue<BoundedGitHubPublisherResult<BoundedGitHubIssueCommentPage>>
-        Pages { get; } = new();
-    internal BoundedGitHubPublisherResult<BoundedGitHubIssueComment> Mutation {
+        Pages
+    { get; } = new();
+    internal BoundedGitHubPublisherResult<BoundedGitHubIssueComment> Mutation
+    {
         get; set;
     } = BoundedGitHubPublisherResult<BoundedGitHubIssueComment>.Failed(
-        BoundedGitHubPublisherFailure.OutcomeUnknown,
+        BoundedGitHubPublisherOutcome.OutcomeUnknown,
         BoundedGitHubPublisherReason.TransportFailure);
-    internal BoundedGitHubPublisherResult<BoundedGitHubIssueComment> Read {
+    internal BoundedGitHubPublisherResult<BoundedGitHubIssueComment> Read
+    {
         get; set;
     } = BoundedGitHubPublisherResult<BoundedGitHubIssueComment>.Failed(
-        BoundedGitHubPublisherFailure.Unavailable,
+        BoundedGitHubPublisherOutcome.KnownNotWritten,
         BoundedGitHubPublisherReason.TransportFailure);
     internal int Creates { get; private set; }
     internal int Updates { get; private set; }
@@ -89,6 +94,7 @@ internal sealed class FakePublisherTransport : IBoundedGitHubPublisherTransport
     internal List<CancellationToken> ListCancellationTokens { get; } = [];
     internal List<CancellationToken> ReadCancellationTokens { get; } = [];
     internal System.Action? OnMutation { get; set; }
+    private long? _targetId;
 
     internal void Enqueue(params BoundedGitHubIssueComment[] comments) =>
         EnqueuePage(null, comments);
@@ -103,28 +109,38 @@ internal sealed class FakePublisherTransport : IBoundedGitHubPublisherTransport
     {
         Lists++;
         ListCancellationTokens.Add(cancellationToken);
-        return Task.FromResult(Pages.Count > 0 ? Pages.Dequeue() :
+        var result = Pages.Count > 0 ? Pages.Dequeue() :
             BoundedGitHubPublisherResult<BoundedGitHubIssueCommentPage>.Failed(
-                BoundedGitHubPublisherFailure.Unavailable,
-                BoundedGitHubPublisherReason.InvalidPagination));
+                BoundedGitHubPublisherOutcome.KnownNotWritten,
+                BoundedGitHubPublisherReason.InvalidPagination);
+        if (result.Value is not null && Request is not null)
+        {
+            foreach (var comment in result.Value.Comments)
+            {
+                try
+                {
+                    var inspection = R4StickyMarker.Inspect(comment.Body);
+                    if (inspection.Kind == R4StickyInspectionKind.ValidR4 &&
+                        StringComparer.Ordinal.Equals(
+                            inspection.Identity!.ScopeSha256,
+                            Request.Rendered.Identity.ScopeSha256))
+                        _targetId = comment.Id;
+                }
+                catch (R4PublicationException) { }
+            }
+        }
+        return Task.FromResult(result);
     }
 
     public Task<BoundedGitHubPublisherResult<BoundedGitHubIssueComment>>
-        CreateIssueCommentAsync(ReadOnlyMemory<byte> requestBody,
-            CancellationToken cancellationToken)
+        MutateStickyCommentAsync(CancellationToken cancellationToken)
     {
-        Creates++;
-        Bodies.Add(requestBody.ToArray());
-        OnMutation?.Invoke();
-        return Task.FromResult(Mutation);
-    }
-
-    public Task<BoundedGitHubPublisherResult<BoundedGitHubIssueComment>>
-        UpdateIssueCommentAsync(long commentId, ReadOnlyMemory<byte> requestBody,
-            CancellationToken cancellationToken)
-    {
-        Updates++;
-        Bodies.Add(requestBody.ToArray());
+        if (_targetId is null) Creates++;
+        else Updates++;
+        Assert.NotNull(Request);
+        Assert.True(StickyCommentSerializer.TrySerialize(
+            Request.Rendered.Comment, out var body));
+        Bodies.Add(body!);
         OnMutation?.Invoke();
         return Task.FromResult(Mutation);
     }

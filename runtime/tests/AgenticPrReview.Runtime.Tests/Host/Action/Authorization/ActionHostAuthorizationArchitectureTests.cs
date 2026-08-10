@@ -5,6 +5,7 @@ using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
+using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using Xunit;
 
 namespace AgenticPrReview.Runtime.Tests.Host.Action.Authorization;
@@ -127,6 +128,36 @@ public sealed class ActionHostAuthorizationArchitectureTests
                 typeof(BoundedGitHubPublisherTransportFactory),
             ],
             callers.OrderBy(type => type!.FullName, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void PublisherMutationSurfaceRequiresTheBoundP2Capability()
+    {
+        var factoryMethod = Assert.Single(
+            typeof(IStickyGitHubPublisherTransportFactory).GetMethods());
+        Assert.Equal(
+            [typeof(ActionHostGitHubToken),
+                typeof(AuthorizedStickyPublicationRequest)],
+            factoryMethod.GetParameters()
+                .Select(static parameter => parameter.ParameterType));
+
+        var commonMethods = typeof(IBoundedGitHubPublisherTransport)
+            .GetMethods();
+        Assert.DoesNotContain(commonMethods, method => method.Name.Contains(
+            "Create", StringComparison.Ordinal) || method.Name.Contains(
+            "Update", StringComparison.Ordinal) ||
+            method.GetParameters().Any(parameter => parameter.ParameterType ==
+                typeof(ReadOnlyMemory<byte>)));
+
+        var mutation = Assert.Single(
+            typeof(IStickyGitHubPublisherTransport).GetMethods(),
+            method => method.Name == "MutateStickyCommentAsync");
+        Assert.Equal([typeof(CancellationToken)], mutation.GetParameters()
+            .Select(static parameter => parameter.ParameterType));
+        Assert.All(typeof(BoundedGitHubPublisherTransport).GetConstructors(
+            BindingFlags.Instance | BindingFlags.Public |
+            BindingFlags.NonPublic), constructor =>
+            Assert.True(constructor.IsPrivate));
     }
 
     [Fact]

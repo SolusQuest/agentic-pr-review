@@ -1,4 +1,6 @@
 using AgenticPrReview.Runtime.ActionHost.Authorization;
+using AgenticPrReview.Runtime.ActionHost.Contracts;
+using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 
 namespace AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
@@ -22,39 +24,55 @@ internal sealed class AuthorizedStickyPublicationRequest
         out AuthorizedStickyPublicationRequest? request)
     {
         request = null;
-        if (authorization is null || scope is null || rendered is null ||
-            !R4PublicationIdentityV1.IsValidScope(scope) ||
-            scope.RepositoryId > long.MaxValue ||
-            (long)scope.RepositoryId != authorization.PullRequest.RepositoryId ||
-            scope.WorkflowSourceRepositoryId > long.MaxValue ||
-            (long)scope.WorkflowSourceRepositoryId !=
-                authorization.PullRequest.RepositoryId ||
-            scope.PullRequestNumber > long.MaxValue ||
-            (long)scope.PullRequestNumber != authorization.PullRequest.Number ||
-            !StringComparer.Ordinal.Equals(scope.WorkflowPath,
-                authorization.WorkflowPath) ||
-            !StringComparer.Ordinal.Equals(
-                R4PublicationIdentityV1.ComputeScopeSha256(scope),
-                rendered.Identity.ScopeSha256) ||
-            !StringComparer.Ordinal.Equals(rendered.Identity.HeadSha,
-                authorization.PullRequest.HeadSha)) return false;
-        var inspected = R4StickyMarker.Inspect(rendered.Comment);
-        if (inspected.Kind != R4StickyInspectionKind.ValidR4 ||
-            !StringComparer.Ordinal.Equals(inspected.Body, rendered.Body) ||
-            !Equals(inspected.Identity, rendered.Identity)) return false;
-        request = new(authorization, scope, rendered);
-        return true;
+        try
+        {
+            if (authorization is null || scope is null || rendered is null ||
+                !R4PublicationIdentityV1.IsValidScope(scope) ||
+                scope.RepositoryId > long.MaxValue ||
+                (long)scope.RepositoryId !=
+                    authorization.PullRequest.RepositoryId ||
+                scope.WorkflowSourceRepositoryId > long.MaxValue ||
+                (long)scope.WorkflowSourceRepositoryId !=
+                    authorization.PullRequest.RepositoryId ||
+                scope.PullRequestNumber > long.MaxValue ||
+                (long)scope.PullRequestNumber !=
+                    authorization.PullRequest.Number ||
+                !StringComparer.Ordinal.Equals(scope.WorkflowPath,
+                    authorization.WorkflowPath) ||
+                !StringComparer.Ordinal.Equals(
+                    R4PublicationIdentityV1.ComputeScopeSha256(scope),
+                    rendered.Identity.ScopeSha256) ||
+                !StringComparer.Ordinal.Equals(rendered.Identity.HeadSha,
+                    authorization.PullRequest.HeadSha)) return false;
+            var inspected = R4StickyMarker.Inspect(rendered.Comment);
+            if (inspected.Kind != R4StickyInspectionKind.ValidR4 ||
+                !StringComparer.Ordinal.Equals(inspected.Body, rendered.Body) ||
+                !Equals(inspected.Identity, rendered.Identity)) return false;
+            request = new(authorization, scope, rendered);
+            return true;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException
+            and not StackOverflowException and not AccessViolationException)
+        {
+            return false;
+        }
     }
 }
 
-internal enum StickyPublicationOutcome
+internal interface IStickyGitHubPublisherTransportFactory
 {
-    CancelledBeforeSend = 1,
-    KnownNotWritten,
-    WrittenAndReadBack,
-    OutcomeUnknown,
-    AuthorizationOrValidationFailure,
+    IStickyGitHubPublisherTransport Create(ActionHostGitHubToken token,
+        AuthorizedStickyPublicationRequest request);
 }
+
+internal interface IStickyGitHubPublisherTransport :
+    IBoundedGitHubPublisherTransport
+{
+    Task<BoundedGitHubPublisherResult<BoundedGitHubIssueComment>>
+        MutateStickyCommentAsync(CancellationToken cancellationToken);
+}
+
+internal interface IStickyPublicationIssuerEvidence { }
 
 internal enum StickyPublicationReason
 {
@@ -70,46 +88,6 @@ internal enum StickyPublicationReason
 
 internal enum StickyPublicationOperation { Create = 1, Update, Observed }
 
-internal sealed record StickyPublicationReceipt(
-    StickyPublicationOperation Operation,
-    long RepositoryId,
-    long PullRequestNumber,
-    long CommentId,
-    string CommentUrl,
-    string ScopeSha256,
-    string BodySha256,
-    string HeadSha)
-{
-    public override string ToString() => "[PRIVATE]";
-}
-
-internal sealed class StickyPublicationResult
-{
-    private StickyPublicationResult(StickyPublicationOutcome outcome,
-        StickyPublicationReason reason, StickyPublicationReceipt? receipt) =>
-        (Outcome, Reason, Receipt) = (outcome, reason, receipt);
-
-    internal StickyPublicationOutcome Outcome { get; }
-    internal StickyPublicationReason Reason { get; }
-    internal StickyPublicationReceipt? Receipt { get; }
-
-    internal static StickyPublicationResult Written(
-        StickyPublicationReceipt receipt)
-    {
-        ArgumentNullException.ThrowIfNull(receipt);
-        return new(StickyPublicationOutcome.WrittenAndReadBack,
-            StickyPublicationReason.None, receipt);
-    }
-    internal static StickyPublicationResult Failed(
-        StickyPublicationOutcome outcome, StickyPublicationReason reason)
-    {
-        if (outcome == StickyPublicationOutcome.WrittenAndReadBack ||
-            reason == StickyPublicationReason.None)
-            throw new ArgumentOutOfRangeException(nameof(outcome));
-        return new(outcome, reason, null);
-    }
-}
-
 internal enum StickyDiscoveryKind
 {
     Absent = 1,
@@ -118,10 +96,3 @@ internal enum StickyDiscoveryKind
     Cancelled,
     InvalidOrIncomplete,
 }
-
-internal sealed record StickyDiscoveryResult(
-    StickyDiscoveryKind Kind,
-    long? CommentId,
-    string? CommentUrl,
-    StickyPublicationReceipt? Receipt,
-    StickyPublicationReason Reason);

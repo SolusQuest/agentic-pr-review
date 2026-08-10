@@ -21,10 +21,21 @@ public sealed class StickyPublicationContractsTests
             data.Request.Authorization, invalid, data.Rendered, out _));
         Assert.False(AuthorizedStickyPublicationRequest.TryCreate(
             data.Request.Authorization, mismatched, data.Rendered, out _));
+
+        var oversizedBody = new string('x',
+            R4PublicationBudget.MaximumUtf8Bytes + 1);
+        var forged = data.Rendered with
+        {
+            Body = oversizedBody,
+            Comment = oversizedBody + "\n\n" +
+                R4StickyMarker.Create(data.Rendered.Identity),
+        };
+        Assert.False(AuthorizedStickyPublicationRequest.TryCreate(
+            data.Request.Authorization, data.Request.Scope, forged, out _));
     }
 
     [Fact]
-    public void BoundRequestAndReceiptArePrivateCapabilityShapes()
+    public void BoundRequestReceiptAndLiveResultsCannotBeConstructed()
     {
         var requestType = typeof(AuthorizedStickyPublicationRequest);
         Assert.False(requestType.IsPublic);
@@ -34,19 +45,29 @@ public sealed class StickyPublicationContractsTests
         Assert.All(requestType.GetProperties(BindingFlags.Instance |
             BindingFlags.Public | BindingFlags.NonPublic), property =>
             Assert.Null(property.SetMethod));
-        Assert.False(typeof(StickyPublicationReceipt).IsPublic);
+        foreach (var type in new[]
+        {
+            typeof(StickyCommentPublisher.StickyPublicationReceipt),
+            typeof(StickyCommentPublisher.StickyPublicationResult),
+            typeof(StickyCommentPublisher.StickyDiscoveryResult),
+        })
+        {
+            Assert.False(type.IsPublic);
+            Assert.All(type.GetConstructors(BindingFlags.Instance |
+                BindingFlags.Public | BindingFlags.NonPublic), constructor =>
+                Assert.True(constructor.IsPrivate));
+        }
 
-        var receipt = new StickyPublicationReceipt(
-            StickyPublicationOperation.Create, 1, 2, 3,
-            "https://github.com/example/repo/pull/2#issuecomment-3",
-            new string('a', 64), new string('b', 64), new string('c', 40));
-        var written = StickyPublicationResult.Written(receipt);
-        var failed = StickyPublicationResult.Failed(
-            StickyPublicationOutcome.OutcomeUnknown,
-            StickyPublicationReason.ReconciliationIncomplete);
-
-        Assert.Same(receipt, written.Receipt);
-        Assert.Null(failed.Receipt);
-        Assert.Equal("[PRIVATE]", receipt.ToString());
+        var fake = new FakeIssuerEvidence();
+        Assert.Throws<InvalidOperationException>(() =>
+            StickyCommentPublisher.StickyPublicationReceipt.FromReadback(
+                null!, StickyPublicationOperation.Create, fake));
+        Assert.Throws<InvalidOperationException>(() =>
+            StickyCommentPublisher.StickyPublicationResult.FromFailure(fake));
+        Assert.Throws<InvalidOperationException>(() =>
+            StickyCommentPublisher.StickyDiscoveryResult.FromEvidence(fake));
     }
+
+    private sealed class FakeIssuerEvidence :
+        IStickyPublicationIssuerEvidence;
 }

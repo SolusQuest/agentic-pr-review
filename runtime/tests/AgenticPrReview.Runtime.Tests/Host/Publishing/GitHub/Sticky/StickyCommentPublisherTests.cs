@@ -24,7 +24,7 @@ public sealed class StickyCommentPublisherTests
         factory.Transport.Enqueue(comment);
         var result = await new StickyCommentPublisher(factory).PublishAsync(
             token, request, CancellationToken.None);
-        Assert.Equal(StickyPublicationOutcome.WrittenAndReadBack,
+        Assert.Equal(BoundedGitHubPublisherOutcome.WrittenAndReadBack,
             result.Outcome);
         Assert.Equal(1, factory.Transport.Creates);
         Assert.Equal(0, factory.Transport.Updates);
@@ -47,7 +47,7 @@ public sealed class StickyCommentPublisherTests
         factory.Transport.Enqueue(comment);
         var result = await new StickyCommentPublisher(factory).PublishAsync(
             token, request, CancellationToken.None);
-        Assert.Equal(StickyPublicationOutcome.WrittenAndReadBack,
+        Assert.Equal(BoundedGitHubPublisherOutcome.WrittenAndReadBack,
             result.Outcome);
         Assert.Equal(0, factory.Transport.Creates);
         Assert.Equal(1, factory.Transport.Updates);
@@ -81,7 +81,7 @@ public sealed class StickyCommentPublisherTests
             StickyPublicationTestData.Comment(2, foreign), created);
         var result = await new StickyCommentPublisher(factory).PublishAsync(
             token, request, CancellationToken.None);
-        Assert.Equal(StickyPublicationOutcome.WrittenAndReadBack,
+        Assert.Equal(BoundedGitHubPublisherOutcome.WrittenAndReadBack,
             result.Outcome);
         Assert.Equal(1, factory.Transport.Creates);
     }
@@ -104,12 +104,39 @@ public sealed class StickyCommentPublisherTests
             var result = await new StickyCommentPublisher(factory).PublishAsync(
                 token, request, CancellationToken.None);
             Assert.Equal(
-                StickyPublicationOutcome.AuthorizationOrValidationFailure,
+                BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure,
                 result.Outcome);
             Assert.Null(result.Receipt);
             Assert.Equal(0, factory.Transport.Creates +
                 factory.Transport.Updates);
         }
+    }
+
+    [Fact]
+    public async Task OversizedR4LookingCommentIsTotalAndFailsBeforeWrite()
+    {
+        var (token, request, rendered) =
+            await StickyPublicationTestData.CreateAsync();
+        var oversizedBody = new string('x',
+            R4PublicationBudget.MaximumUtf8Bytes + 1);
+        var oversized = oversizedBody + "\n\n" +
+            R4StickyMarker.Create(rendered.Identity);
+        Assert.InRange(Encoding.UTF8.GetByteCount(oversized),
+            R4PublicationBudget.MaximumUtf8Bytes + 1,
+            BoundedGitHubPublisherPolicy.MaximumResponseBytes);
+        var factory = new FakePublisherTransportFactory();
+        factory.Transport.Enqueue(
+            StickyPublicationTestData.Comment(15, oversized));
+
+        var result = await new StickyCommentPublisher(factory).PublishAsync(
+            token, request, CancellationToken.None);
+
+        Assert.Equal(
+            BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure,
+            result.Outcome);
+        Assert.Equal(StickyPublicationReason.TargetConflict, result.Reason);
+        Assert.Equal(0, factory.Transport.Creates +
+            factory.Transport.Updates);
     }
 
     [Fact]
@@ -125,7 +152,7 @@ public sealed class StickyCommentPublisherTests
         factory.Transport.Enqueue(comment);
         var result = await new StickyCommentPublisher(factory).PublishAsync(
             token, request, CancellationToken.None);
-        Assert.Equal(StickyPublicationOutcome.WrittenAndReadBack,
+        Assert.Equal(BoundedGitHubPublisherOutcome.WrittenAndReadBack,
             result.Outcome);
         Assert.Equal(1, factory.Transport.Creates);
         Assert.Equal(1, factory.Transport.Reads);
@@ -140,7 +167,8 @@ public sealed class StickyCommentPublisherTests
         factory.Transport.Enqueue();
         var result = await new StickyCommentPublisher(factory).PublishAsync(
             token, request, CancellationToken.None);
-        Assert.Equal(StickyPublicationOutcome.OutcomeUnknown, result.Outcome);
+        Assert.Equal(BoundedGitHubPublisherOutcome.OutcomeUnknown,
+            result.Outcome);
         Assert.Null(result.Receipt);
         Assert.Equal(1, factory.Transport.Creates);
     }
@@ -159,7 +187,8 @@ public sealed class StickyCommentPublisherTests
         var result = await new StickyCommentPublisher(factory).PublishAsync(
             token, request, CancellationToken.None);
 
-        Assert.Equal(StickyPublicationOutcome.OutcomeUnknown, result.Outcome);
+        Assert.Equal(BoundedGitHubPublisherOutcome.OutcomeUnknown,
+            result.Outcome);
         Assert.Null(result.Receipt);
         Assert.Equal(1, factory.Transport.Creates);
         Assert.Equal(0, factory.Transport.Updates);
@@ -183,7 +212,7 @@ public sealed class StickyCommentPublisherTests
             token, request, cancellation.Token);
 
         Assert.True(cancellation.IsCancellationRequested);
-        Assert.Equal(StickyPublicationOutcome.WrittenAndReadBack,
+        Assert.Equal(BoundedGitHubPublisherOutcome.WrittenAndReadBack,
             result.Outcome);
         Assert.All(factory.Transport.ReadCancellationTokens,
             tokenUsed => Assert.False(tokenUsed.CanBeCanceled));
@@ -226,7 +255,7 @@ public sealed class StickyCommentPublisherTests
             var result = await new StickyCommentPublisher(factory).PublishAsync(
                 token, request, CancellationToken.None);
 
-            Assert.Equal(StickyPublicationOutcome.WrittenAndReadBack,
+            Assert.Equal(BoundedGitHubPublisherOutcome.WrittenAndReadBack,
                 result.Outcome);
             Assert.Equal(0, factory.Transport.Creates);
             Assert.Equal(1, factory.Transport.Updates);
@@ -328,33 +357,38 @@ public sealed class StickyCommentPublisherTests
         cancelled.Cancel();
         var result = await new StickyCommentPublisher(factory).PublishAsync(
             token, request, cancelled.Token);
-        Assert.Equal(StickyPublicationOutcome.CancelledBeforeSend,
+        Assert.Equal(BoundedGitHubPublisherOutcome.CancelledBeforeSend,
             result.Outcome);
         Assert.Equal(0, factory.Creates);
     }
 
     [Theory]
-    [InlineData((int)BoundedGitHubPublisherFailure.Unavailable,
-        (int)StickyPublicationOutcome.KnownNotWritten)]
-    [InlineData((int)BoundedGitHubPublisherFailure.CancelledBeforeSend,
-        (int)StickyPublicationOutcome.CancelledBeforeSend)]
+    [InlineData((int)BoundedGitHubPublisherOutcome.KnownNotWritten,
+        (int)BoundedGitHubPublisherOutcome.KnownNotWritten)]
+    [InlineData((int)BoundedGitHubPublisherOutcome.CancelledBeforeSend,
+        (int)BoundedGitHubPublisherOutcome.CancelledBeforeSend)]
     [InlineData((int)
-        BoundedGitHubPublisherFailure.AuthorizationOrValidationFailure,
-        (int)StickyPublicationOutcome.AuthorizationOrValidationFailure)]
+        BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure,
+        (int)BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure)]
     public async Task PreSendMutationFailuresStayInTheirClosedOutcomePhase(
         int failureValue, int expectedValue)
     {
-        var failure = (BoundedGitHubPublisherFailure)failureValue;
-        var expected = (StickyPublicationOutcome)expectedValue;
+        var failure = (BoundedGitHubPublisherOutcome)failureValue;
+        var expected = (BoundedGitHubPublisherOutcome)expectedValue;
         var (token, request, _) = await StickyPublicationTestData.CreateAsync();
         var factory = new FakePublisherTransportFactory();
         factory.Transport.Enqueue();
         factory.Transport.Mutation =
             BoundedGitHubPublisherResult<BoundedGitHubIssueComment>.Failed(
                 failure, failure ==
-                    BoundedGitHubPublisherFailure.AuthorizationOrValidationFailure
+                    BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure
                         ? BoundedGitHubPublisherReason.ValidationRejected
-                        : BoundedGitHubPublisherReason.Deadline);
+                        : BoundedGitHubPublisherReason.Deadline,
+                failure == BoundedGitHubPublisherOutcome
+                    .AuthorizationOrValidationFailure
+                        ? new BoundedGitHubValidationEvidence(422, false,
+                            "validation failed", null, [])
+                        : null);
 
         var result = await new StickyCommentPublisher(factory).PublishAsync(
             token, request, CancellationToken.None);

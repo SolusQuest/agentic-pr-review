@@ -1,22 +1,26 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
+using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
+using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 
 namespace AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 
 internal sealed class BoundedGitHubPublisherTransportFactory :
-    IBoundedGitHubPublisherTransportFactory
+    IStickyGitHubPublisherTransportFactory
 {
-    public IBoundedGitHubPublisherTransport Create(ActionHostGitHubToken token,
-        ActionHostAuthorizer.AuthorizedInvocation authorization)
+    public IStickyGitHubPublisherTransport Create(ActionHostGitHubToken token,
+        AuthorizedStickyPublicationRequest request)
     {
         ArgumentNullException.ThrowIfNull(token);
+        ArgumentNullException.ThrowIfNull(request);
         return BoundedGitHubPublisherTransport.Create(
-            token.ExportForPrivateLaunch(), authorization);
+            token.ExportForPrivateLaunch(), request);
     }
 }
 
@@ -27,7 +31,7 @@ internal sealed class BoundedGitHubPublisherCredentialException : Exception
 }
 
 internal sealed class BoundedGitHubPublisherTransport :
-    IBoundedGitHubPublisherTransport
+    IStickyGitHubPublisherTransport
 {
     private readonly string _token;
     private readonly string _repositoryName;
@@ -37,20 +41,28 @@ internal sealed class BoundedGitHubPublisherTransport :
     private readonly TimeSpan _requestTimeout;
     private readonly TimeSpan _overallTimeout;
     private readonly Stopwatch _operation = Stopwatch.StartNew();
+    private readonly SemaphoreSlim _responseReadGate = new(1, 1);
+    private readonly AuthorizedStickyPublicationRequest _stickyRequest;
     private int _requestCount;
     private long _aggregateBytes;
+    private int _nextStickyPage = 1;
+    private long? _stickyTargetId;
+    private bool _stickyDiscoveryComplete;
+    private bool _stickyDiscoveryInvalid;
+    private int _mutationDispatched;
     private bool _disposed;
 
     private BoundedGitHubPublisherTransport(string token,
-        ActionHostAuthorizer.AuthorizedInvocation authorization,
+        AuthorizedStickyPublicationRequest request,
         HttpMessageHandler handler, TimeSpan requestTimeout,
         TimeSpan overallTimeout)
     {
-        Validate(token, authorization);
+        Validate(token, request.Authorization);
+        _stickyRequest = request;
         _token = token;
-        _repositoryName = authorization.PullRequest.BaseRepositoryName;
+        _repositoryName = request.Authorization.PullRequest.BaseRepositoryName;
         _repositoryPath = RepositoryPath(_repositoryName);
-        _pullRequestNumber = authorization.PullRequest.Number;
+        _pullRequestNumber = request.Authorization.PullRequest.Number;
         _requestTimeout = requestTimeout;
         _overallTimeout = overallTimeout;
         _client = new HttpClient(handler, true)
@@ -61,17 +73,16 @@ internal sealed class BoundedGitHubPublisherTransport :
     }
 
     internal static BoundedGitHubPublisherTransport Create(string token,
-        ActionHostAuthorizer.AuthorizedInvocation authorization) => new(
-            token, authorization,
+        AuthorizedStickyPublicationRequest request) => new(token, request,
             ActionHostGitHubAuthorizationTransport.CreateHandler(
                 TimeSpan.FromSeconds(10)),
             BoundedGitHubPublisherPolicy.RequestTimeout,
             BoundedGitHubPublisherPolicy.OverallTimeout);
 
     internal static BoundedGitHubPublisherTransport CreateForTesting(
-        string token, ActionHostAuthorizer.AuthorizedInvocation authorization,
+        string token, AuthorizedStickyPublicationRequest request,
         HttpMessageHandler handler, TimeSpan? requestTimeout = null,
-        TimeSpan? overallTimeout = null) => new(token, authorization, handler,
+        TimeSpan? overallTimeout = null) => new(token, request, handler,
             requestTimeout ?? BoundedGitHubPublisherPolicy.RequestTimeout,
             overallTimeout ?? BoundedGitHubPublisherPolicy.OverallTimeout);
 
@@ -80,59 +91,66 @@ internal sealed class BoundedGitHubPublisherTransport :
     {
         if (page is < 1 or > BoundedGitHubPublisherPolicy.MaximumPages)
             return Fail<BoundedGitHubIssueCommentPage>(
-                BoundedGitHubPublisherFailure.Unavailable,
+                BoundedGitHubPublisherOutcome.KnownNotWritten,
                 BoundedGitHubPublisherReason.InvalidRequest);
         var captured = await SendAsync(HttpMethod.Get,
             $"/repos/{_repositoryPath}/issues/{_pullRequestNumber}/comments" +
             $"?per_page={BoundedGitHubPublisherPolicy.PerPage}&page={page}",
             null, HttpStatusCode.OK, false, cancellationToken);
         if (captured.Value is null)
-            return Fail<BoundedGitHubIssueCommentPage>(captured.Failure,
-                captured.Reason);
+            return Fail<BoundedGitHubIssueCommentPage>(captured.Outcome,
+                captured.Reason, captured.ValidationEvidence);
         try
         {
             var docs = JsonSerializer.Deserialize(captured.Value.Body,
                 BoundedGitHubPublisherJsonContext.Default
                     .BoundedGitHubIssueCommentDocumentArray);
-            if (docs is null || docs.Length > BoundedGitHubPublisherPolicy.PerPage ||
+            if (docs is null ||
+                docs.Length > BoundedGitHubPublisherPolicy.PerPage ||
                 !TryNextPage(captured.Value.Links, page, out var next))
                 return Fail<BoundedGitHubIssueCommentPage>(
-                    BoundedGitHubPublisherFailure.Unavailable,
+                    BoundedGitHubPublisherOutcome.KnownNotWritten,
                     BoundedGitHubPublisherReason.InvalidPagination);
             var comments = new List<BoundedGitHubIssueComment>(docs.Length);
             foreach (var doc in docs)
             {
                 if (!TryMap(doc, out var comment))
                     return Fail<BoundedGitHubIssueCommentPage>(
-                        BoundedGitHubPublisherFailure.Unavailable,
+                        BoundedGitHubPublisherOutcome.KnownNotWritten,
                         BoundedGitHubPublisherReason.InvalidResponse);
                 comments.Add(comment!);
             }
+            var result = new BoundedGitHubIssueCommentPage(comments, next);
+            ObserveStickyPage(page, result);
             return BoundedGitHubPublisherResult<BoundedGitHubIssueCommentPage>
-                .Success(new(comments, next));
+                .Success(result);
         }
         catch (JsonException)
         {
             return Fail<BoundedGitHubIssueCommentPage>(
-                BoundedGitHubPublisherFailure.Unavailable,
+                BoundedGitHubPublisherOutcome.KnownNotWritten,
                 BoundedGitHubPublisherReason.InvalidResponse);
         }
     }
 
-    public Task<BoundedGitHubPublisherResult<BoundedGitHubIssueComment>>
-        CreateIssueCommentAsync(ReadOnlyMemory<byte> requestBody,
-            CancellationToken cancellationToken) => SendCommentAsync(
-                HttpMethod.Post,
+    public async Task<BoundedGitHubPublisherResult<BoundedGitHubIssueComment>>
+        MutateStickyCommentAsync(CancellationToken cancellationToken)
+    {
+        if (!_stickyDiscoveryComplete || _stickyDiscoveryInvalid ||
+            Interlocked.Exchange(ref _mutationDispatched, 1) != 0 ||
+            !StickyCommentSerializer.TrySerialize(
+                _stickyRequest.Rendered.Comment, out var body))
+            return Fail<BoundedGitHubIssueComment>(
+                BoundedGitHubPublisherOutcome.KnownNotWritten,
+                BoundedGitHubPublisherReason.InvalidRequest);
+        return _stickyTargetId is long targetId
+            ? await SendCommentAsync(HttpMethod.Patch,
+                $"/repos/{_repositoryPath}/issues/comments/{targetId}",
+                body!, HttpStatusCode.OK, cancellationToken)
+            : await SendCommentAsync(HttpMethod.Post,
                 $"/repos/{_repositoryPath}/issues/{_pullRequestNumber}/comments",
-                requestBody, HttpStatusCode.Created, cancellationToken);
-
-    public Task<BoundedGitHubPublisherResult<BoundedGitHubIssueComment>>
-        UpdateIssueCommentAsync(long commentId,
-            ReadOnlyMemory<byte> requestBody,
-            CancellationToken cancellationToken) => SendCommentAsync(
-                HttpMethod.Patch,
-                $"/repos/{_repositoryPath}/issues/comments/{commentId}",
-                requestBody, HttpStatusCode.OK, cancellationToken);
+                body!, HttpStatusCode.Created, cancellationToken);
+    }
 
     public async Task<BoundedGitHubPublisherResult<BoundedGitHubIssueComment>>
         GetIssueCommentAsync(long commentId,
@@ -140,7 +158,7 @@ internal sealed class BoundedGitHubPublisherTransport :
     {
         if (commentId <= 0)
             return Fail<BoundedGitHubIssueComment>(
-                BoundedGitHubPublisherFailure.Unavailable,
+                BoundedGitHubPublisherOutcome.KnownNotWritten,
                 BoundedGitHubPublisherReason.InvalidRequest);
         var captured = await SendAsync(HttpMethod.Get,
             $"/repos/{_repositoryPath}/issues/comments/{commentId}", null,
@@ -153,6 +171,45 @@ internal sealed class BoundedGitHubPublisherTransport :
         if (_disposed) return;
         _disposed = true;
         _client.Dispose();
+        _responseReadGate.Dispose();
+    }
+
+    private void ObserveStickyPage(int page,
+        BoundedGitHubIssueCommentPage result)
+    {
+        if (_stickyDiscoveryComplete || _stickyDiscoveryInvalid) return;
+        if (page != _nextStickyPage)
+        {
+            _stickyDiscoveryInvalid = true;
+            return;
+        }
+        foreach (var comment in result.Comments)
+        {
+            if (!TryInspect(comment.Body, out var inspection) ||
+                inspection.Kind == R4StickyInspectionKind.InvalidR4)
+            {
+                _stickyDiscoveryInvalid = true;
+                return;
+            }
+            if (inspection.Kind == R4StickyInspectionKind.ValidR4 &&
+                StringComparer.Ordinal.Equals(
+                    inspection.Identity!.ScopeSha256,
+                    _stickyRequest.Rendered.Identity.ScopeSha256))
+            {
+                if (_stickyTargetId is not null)
+                {
+                    _stickyDiscoveryInvalid = true;
+                    return;
+                }
+                _stickyTargetId = comment.Id;
+            }
+        }
+        if (result.NextPage is null)
+            _stickyDiscoveryComplete = true;
+        else if (result.NextPage == page + 1)
+            _nextStickyPage = result.NextPage.Value;
+        else
+            _stickyDiscoveryInvalid = true;
     }
 
     private async Task<BoundedGitHubPublisherResult<BoundedGitHubIssueComment>>
@@ -163,7 +220,7 @@ internal sealed class BoundedGitHubPublisherTransport :
         if (body.IsEmpty || body.Length >
             BoundedGitHubPublisherPolicy.MaximumStickyRequestBytes)
             return Fail<BoundedGitHubIssueComment>(
-                BoundedGitHubPublisherFailure.Unavailable,
+                BoundedGitHubPublisherOutcome.KnownNotWritten,
                 BoundedGitHubPublisherReason.InvalidRequest);
         var captured = await SendAsync(method, path, body, expected, true,
             cancellationToken);
@@ -174,8 +231,8 @@ internal sealed class BoundedGitHubPublisherTransport :
         BoundedGitHubPublisherResult<CapturedResponse> captured, bool mutation)
     {
         if (captured.Value is null)
-            return Fail<BoundedGitHubIssueComment>(captured.Failure,
-                captured.Reason);
+            return Fail<BoundedGitHubIssueComment>(captured.Outcome,
+                captured.Reason, captured.ValidationEvidence);
         try
         {
             var doc = JsonSerializer.Deserialize(captured.Value.Body,
@@ -183,8 +240,8 @@ internal sealed class BoundedGitHubPublisherTransport :
                     .BoundedGitHubIssueCommentDocument);
             if (doc is null || !TryMap(doc, out var comment))
                 return Fail<BoundedGitHubIssueComment>(mutation
-                        ? BoundedGitHubPublisherFailure.OutcomeUnknown
-                        : BoundedGitHubPublisherFailure.Unavailable,
+                        ? BoundedGitHubPublisherOutcome.OutcomeUnknown
+                        : BoundedGitHubPublisherOutcome.KnownNotWritten,
                     BoundedGitHubPublisherReason.InvalidResponse);
             return BoundedGitHubPublisherResult<BoundedGitHubIssueComment>
                 .Success(comment!);
@@ -192,8 +249,8 @@ internal sealed class BoundedGitHubPublisherTransport :
         catch (JsonException)
         {
             return Fail<BoundedGitHubIssueComment>(mutation
-                    ? BoundedGitHubPublisherFailure.OutcomeUnknown
-                    : BoundedGitHubPublisherFailure.Unavailable,
+                    ? BoundedGitHubPublisherOutcome.OutcomeUnknown
+                    : BoundedGitHubPublisherOutcome.KnownNotWritten,
                 BoundedGitHubPublisherReason.InvalidResponse);
         }
     }
@@ -205,18 +262,18 @@ internal sealed class BoundedGitHubPublisherTransport :
     {
         if (callerCancellation.IsCancellationRequested)
             return Fail<CapturedResponse>(
-                BoundedGitHubPublisherFailure.CancelledBeforeSend,
+                BoundedGitHubPublisherOutcome.CancelledBeforeSend,
                 BoundedGitHubPublisherReason.Deadline);
         if (_disposed || Interlocked.Increment(ref _requestCount) >
             BoundedGitHubPublisherPolicy.MaximumRequests)
             return Fail<CapturedResponse>(
-                BoundedGitHubPublisherFailure.Unavailable,
+                BoundedGitHubPublisherOutcome.KnownNotWritten,
                 _disposed ? BoundedGitHubPublisherReason.TransportFailure :
                     BoundedGitHubPublisherReason.RequestLimit);
         var remaining = _overallTimeout - _operation.Elapsed;
         if (remaining <= TimeSpan.Zero)
             return Fail<CapturedResponse>(
-                BoundedGitHubPublisherFailure.Unavailable,
+                BoundedGitHubPublisherOutcome.KnownNotWritten,
                 BoundedGitHubPublisherReason.Deadline);
         using var deadline = new CancellationTokenSource(
             remaining < _requestTimeout ? remaining : _requestTimeout);
@@ -248,29 +305,36 @@ internal sealed class BoundedGitHubPublisherTransport :
             var read = await ReadBoundedAsync(response.Content, token);
             if (read.Body is null)
                 return Fail<CapturedResponse>(mutation
-                        ? BoundedGitHubPublisherFailure.OutcomeUnknown
-                        : BoundedGitHubPublisherFailure.Unavailable,
+                        ? BoundedGitHubPublisherOutcome.OutcomeUnknown
+                        : BoundedGitHubPublisherOutcome.KnownNotWritten,
                     read.Reason);
             if (response.StatusCode != expected)
             {
                 if (IsRecognized4xx(response.StatusCode) &&
                     HasJsonContentType(response.Content.Headers.ContentType) &&
-                    IsValidError(read.Body))
+                    TryErrorEvidence(response.StatusCode, read.Body,
+                        out var evidence))
                     return Fail<CapturedResponse>(
-                        BoundedGitHubPublisherFailure
+                        BoundedGitHubPublisherOutcome
                             .AuthorizationOrValidationFailure,
                         response.StatusCode == (HttpStatusCode)429
                             ? BoundedGitHubPublisherReason.RateLimited
-                            : BoundedGitHubPublisherReason.ValidationRejected);
+                            : response.StatusCode ==
+                                HttpStatusCode.UnprocessableEntity
+                                ? BoundedGitHubPublisherReason
+                                    .ValidationRejected
+                                : BoundedGitHubPublisherReason
+                                    .AuthorizationDenied,
+                        evidence);
                 return Fail<CapturedResponse>(mutation
-                        ? BoundedGitHubPublisherFailure.OutcomeUnknown
-                        : BoundedGitHubPublisherFailure.Unavailable,
+                        ? BoundedGitHubPublisherOutcome.OutcomeUnknown
+                        : BoundedGitHubPublisherOutcome.KnownNotWritten,
                     BoundedGitHubPublisherReason.InvalidResponse);
             }
             if (!HasJsonContentType(response.Content.Headers.ContentType))
                 return Fail<CapturedResponse>(mutation
-                        ? BoundedGitHubPublisherFailure.OutcomeUnknown
-                        : BoundedGitHubPublisherFailure.Unavailable,
+                        ? BoundedGitHubPublisherOutcome.OutcomeUnknown
+                        : BoundedGitHubPublisherOutcome.KnownNotWritten,
                     BoundedGitHubPublisherReason.InvalidResponse);
             return BoundedGitHubPublisherResult<CapturedResponse>.Success(new(
                 read.Body, response.Headers.TryGetValues("Link", out var links)
@@ -279,18 +343,18 @@ internal sealed class BoundedGitHubPublisherTransport :
         catch (OperationCanceledException)
         {
             return Fail<CapturedResponse>(mutation
-                    ? BoundedGitHubPublisherFailure.OutcomeUnknown
+                    ? BoundedGitHubPublisherOutcome.OutcomeUnknown
                     : callerCancellation.IsCancellationRequested
-                        ? BoundedGitHubPublisherFailure.CancelledBeforeSend
-                        : BoundedGitHubPublisherFailure.Unavailable,
+                        ? BoundedGitHubPublisherOutcome.CancelledBeforeSend
+                        : BoundedGitHubPublisherOutcome.KnownNotWritten,
                 BoundedGitHubPublisherReason.Deadline);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException
             and not StackOverflowException and not AccessViolationException)
         {
             return Fail<CapturedResponse>(mutation
-                    ? BoundedGitHubPublisherFailure.OutcomeUnknown
-                    : BoundedGitHubPublisherFailure.Unavailable,
+                    ? BoundedGitHubPublisherOutcome.OutcomeUnknown
+                    : BoundedGitHubPublisherOutcome.KnownNotWritten,
                 BoundedGitHubPublisherReason.TransportFailure);
         }
     }
@@ -298,28 +362,60 @@ internal sealed class BoundedGitHubPublisherTransport :
     private async Task<(byte[]? Body, BoundedGitHubPublisherReason Reason)>
         ReadBoundedAsync(HttpContent content, CancellationToken cancellationToken)
     {
-        if (content.Headers.ContentLength is >
-            BoundedGitHubPublisherPolicy.MaximumResponseBytes)
-            return (null, BoundedGitHubPublisherReason.ResponseLimit);
-        await using var stream = await content.ReadAsStreamAsync(cancellationToken);
-        using var output = new MemoryStream();
-        var buffer = new byte[16 * 1024];
-        while (output.Length <= BoundedGitHubPublisherPolicy.MaximumResponseBytes)
+        await _responseReadGate.WaitAsync(cancellationToken);
+        try
         {
-            var remaining = BoundedGitHubPublisherPolicy.MaximumResponseBytes + 1 -
-                (int)output.Length;
-            var read = await stream.ReadAsync(
-                buffer.AsMemory(0, Math.Min(buffer.Length, remaining)),
+            var aggregateRemaining =
+                BoundedGitHubPublisherPolicy.MaximumAggregateResponseBytes -
+                _aggregateBytes;
+            if (content.Headers.ContentLength is long length)
+            {
+                if (length > BoundedGitHubPublisherPolicy.MaximumResponseBytes)
+                    return (null, BoundedGitHubPublisherReason.ResponseLimit);
+                if (length > aggregateRemaining)
+                    return (null,
+                        BoundedGitHubPublisherReason.AggregateResponseLimit);
+            }
+            if (aggregateRemaining <= 0)
+                return (null,
+                    BoundedGitHubPublisherReason.AggregateResponseLimit);
+
+            await using var stream = await content.ReadAsStreamAsync(
                 cancellationToken);
-            if (read == 0) break;
-            output.Write(buffer, 0, read);
+            using var output = new MemoryStream();
+            var buffer = new byte[16 * 1024];
+            while (true)
+            {
+                var responseRemaining =
+                    BoundedGitHubPublisherPolicy.MaximumResponseBytes -
+                    output.Length;
+                aggregateRemaining =
+                    BoundedGitHubPublisherPolicy.MaximumAggregateResponseBytes -
+                    _aggregateBytes;
+                if (responseRemaining == 0 || aggregateRemaining == 0)
+                {
+                    var sentinel = await stream.ReadAsync(
+                        buffer.AsMemory(0, 1), cancellationToken);
+                    if (sentinel == 0) break;
+                    _aggregateBytes = checked(_aggregateBytes + sentinel);
+                    return (null, responseRemaining == 0
+                        ? BoundedGitHubPublisherReason.ResponseLimit
+                        : BoundedGitHubPublisherReason.AggregateResponseLimit);
+                }
+                var count = (int)Math.Min(buffer.Length,
+                    Math.Min(responseRemaining, aggregateRemaining));
+                var read = await stream.ReadAsync(buffer.AsMemory(0, count),
+                    cancellationToken);
+                if (read == 0) break;
+                output.Write(buffer, 0, read);
+                _aggregateBytes = checked(_aggregateBytes + read);
+            }
+            return (output.ToArray(), BoundedGitHubPublisherReason.None);
         }
-        if (output.Length > BoundedGitHubPublisherPolicy.MaximumResponseBytes)
-            return (null, BoundedGitHubPublisherReason.ResponseLimit);
-        if (Interlocked.Add(ref _aggregateBytes, output.Length) >
-            BoundedGitHubPublisherPolicy.MaximumAggregateResponseBytes)
-            return (null, BoundedGitHubPublisherReason.AggregateResponseLimit);
-        return (output.ToArray(), BoundedGitHubPublisherReason.None);
+        finally
+        {
+            _responseReadGate.Release();
+        }
     }
 
     private bool TryMap(BoundedGitHubIssueCommentDocument doc,
@@ -341,7 +437,7 @@ internal sealed class BoundedGitHubPublisherTransport :
         out int? next)
     {
         next = null;
-        var relations = new HashSet<string>(StringComparer.Ordinal);
+        var pages = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var part in values
             .SelectMany(static value => value.Split(','))
             .Select(static raw => raw.Trim()))
@@ -352,16 +448,28 @@ internal sealed class BoundedGitHubPublisherTransport :
                 !part.EndsWith('"')) return false;
             var relation = part[(relIndex + 7)..^1];
             if (relation is not ("next" or "prev" or "first" or "last") ||
-                !relations.Add(relation) ||
+                pages.ContainsKey(relation) ||
                 !Uri.TryCreate(part[1..close], UriKind.Absolute, out var uri) ||
-                !StringComparer.Ordinal.Equals(uri.GetLeftPart(UriPartial.Authority),
+                !StringComparer.Ordinal.Equals(
+                    uri.GetLeftPart(UriPartial.Authority),
                     BoundedGitHubPublisherPolicy.Origin) ||
                 !StringComparer.Ordinal.Equals(uri.AbsolutePath,
-                    $"/repos/{_repositoryPath}/issues/{_pullRequestNumber}/comments") ||
+                    $"/repos/{_repositoryPath}/issues/" +
+                    $"{_pullRequestNumber}/comments") ||
                 !TryPageQuery(uri.Query, out var linked)) return false;
-            if (relation == "next") next = linked;
+            pages.Add(relation, linked);
         }
-        return next is null || next == current + 1;
+        if (pages.TryGetValue("first", out var first) && first != 1 ||
+            pages.TryGetValue("prev", out var previous) &&
+                previous != current - 1 ||
+            pages.TryGetValue("next", out var following) &&
+                (following != current + 1 ||
+                    following > BoundedGitHubPublisherPolicy.MaximumPages) ||
+            pages.TryGetValue("last", out var last) &&
+                (last < current || following != 0 && last < following ||
+                    following == 0 && last != current)) return false;
+        next = following == 0 ? null : following;
+        return true;
     }
 
     private static bool TryPageQuery(string query, out int page)
@@ -369,19 +477,21 @@ internal sealed class BoundedGitHubPublisherTransport :
         page = 0;
         var seenPage = false;
         var seenPerPage = false;
-        foreach (var p in query.TrimStart('?').Split('&')
-            .Select(static pair => pair.Split('=', 2)))
+        foreach (var pair in query.TrimStart('?').Split('&'))
         {
-            if (p.Length != 2) return false;
-            if (p[0] == "page")
+            var parts = pair.Split('=', 2);
+            if (parts.Length != 2) return false;
+            if (parts[0] == "page")
             {
-                if (seenPage || !int.TryParse(p[1], out page) || page < 1)
+                if (seenPage || !IsCanonicalUnsignedDecimal(parts[1]) ||
+                    !int.TryParse(parts[1], NumberStyles.None,
+                        CultureInfo.InvariantCulture, out page) || page < 1)
                     return false;
                 seenPage = true;
             }
-            else if (p[0] == "per_page")
+            else if (parts[0] == "per_page")
             {
-                if (seenPerPage || p[1] != "100") return false;
+                if (seenPerPage || parts[1] != "100") return false;
                 seenPerPage = true;
             }
             else return false;
@@ -389,16 +499,56 @@ internal sealed class BoundedGitHubPublisherTransport :
         return seenPage && seenPerPage;
     }
 
-    private static bool IsValidError(byte[] body)
+    private static bool IsCanonicalUnsignedDecimal(string value) =>
+        value.Length > 0 && (value.Length == 1 || value[0] != '0') &&
+        value.All(static c => c is >= '0' and <= '9');
+
+    private static bool TryErrorEvidence(HttpStatusCode status, byte[] body,
+        out BoundedGitHubValidationEvidence? evidence)
     {
+        evidence = null;
         try
         {
             var error = JsonSerializer.Deserialize(body,
                 BoundedGitHubPublisherJsonContext.Default
                     .BoundedGitHubErrorDocument);
-            return error?.Message is { Length: > 0 and <= 4096 };
+            if (error?.Message is not { Length: > 0 and <= 4096 } message ||
+                error.Id is <= 0 ||
+                error.DocumentationUrl is { Length: > 2048 } ||
+                error.Errors is { Length: > 100 }) return false;
+            var items = new List<BoundedGitHubErrorItemEvidence>(
+                error.Errors?.Length ?? 0);
+            foreach (var item in error.Errors ?? [])
+            {
+                if (!IsBounded(item.Resource) || !IsBounded(item.Field) ||
+                    !IsBounded(item.Code)) return false;
+                items.Add(new(item.Resource, item.Field, item.Code));
+            }
+            evidence = new((int)status, error.Id is > 0, message,
+                error.DocumentationUrl, items);
+            return true;
         }
         catch (JsonException) { return false; }
+    }
+
+    private static bool IsBounded(string? value) => value is null or
+        { Length: <= 256 };
+
+    private static bool TryInspect(string body,
+        out R4StickyInspection inspection)
+    {
+        try
+        {
+            inspection = R4StickyMarker.Inspect(body);
+            return true;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException
+            and not StackOverflowException and not AccessViolationException)
+        {
+            inspection = new(R4StickyInspectionKind.InvalidR4, null, null,
+                R4StickyInvalidReason.BodyDigestMismatch);
+            return false;
+        }
     }
 
     private static bool IsRecognized4xx(HttpStatusCode status) =>
@@ -429,16 +579,18 @@ internal sealed class BoundedGitHubPublisherTransport :
 
     private static string RepositoryPath(string name)
     {
-        var p = name.Split('/');
-        if (p.Length != 2 || p.Any(string.IsNullOrWhiteSpace))
+        var parts = name.Split('/');
+        if (parts.Length != 2 || parts.Any(string.IsNullOrWhiteSpace))
             throw new BoundedGitHubPublisherCredentialException();
-        return $"{Uri.EscapeDataString(p[0])}/{Uri.EscapeDataString(p[1])}";
+        return $"{Uri.EscapeDataString(parts[0])}/" +
+            Uri.EscapeDataString(parts[1]);
     }
 
     private static BoundedGitHubPublisherResult<T> Fail<T>(
-        BoundedGitHubPublisherFailure failure,
-        BoundedGitHubPublisherReason reason) where T : class =>
-        BoundedGitHubPublisherResult<T>.Failed(failure, reason);
+        BoundedGitHubPublisherOutcome outcome,
+        BoundedGitHubPublisherReason reason,
+        BoundedGitHubValidationEvidence? evidence = null) where T : class =>
+        BoundedGitHubPublisherResult<T>.Failed(outcome, reason, evidence);
 
     private sealed record CapturedResponse(byte[] Body,
         IReadOnlyList<string> Links);

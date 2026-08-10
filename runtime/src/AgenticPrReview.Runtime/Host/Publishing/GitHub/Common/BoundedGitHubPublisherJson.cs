@@ -12,9 +12,19 @@ internal sealed record BoundedGitHubIssueCommentDocument
 
 internal sealed record BoundedGitHubErrorDocument
 {
+    [JsonPropertyName("id")] public long? Id { get; init; }
     [JsonPropertyName("message")] public string? Message { get; init; }
     [JsonPropertyName("documentation_url")]
     public string? DocumentationUrl { get; init; }
+    [JsonPropertyName("errors")]
+    public BoundedGitHubErrorItemDocument[]? Errors { get; init; }
+}
+
+internal sealed record BoundedGitHubErrorItemDocument
+{
+    [JsonPropertyName("resource")] public string? Resource { get; init; }
+    [JsonPropertyName("field")] public string? Field { get; init; }
+    [JsonPropertyName("code")] public string? Code { get; init; }
 }
 
 [JsonSourceGenerationOptions(PropertyNameCaseInsensitive = false,
@@ -24,5 +34,6 @@ internal sealed record BoundedGitHubErrorDocument
 [JsonSerializable(typeof(BoundedGitHubIssueCommentDocument))]
 [JsonSerializable(typeof(BoundedGitHubIssueCommentDocument[]))]
 [JsonSerializable(typeof(BoundedGitHubErrorDocument))]
+[JsonSerializable(typeof(BoundedGitHubErrorItemDocument))]
 internal sealed partial class BoundedGitHubPublisherJsonContext :
     JsonSerializerContext;

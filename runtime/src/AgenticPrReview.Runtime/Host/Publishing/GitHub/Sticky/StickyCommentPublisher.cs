@@ -6,10 +6,10 @@ namespace AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 
 internal sealed class StickyCommentPublisher
 {
-    private readonly IBoundedGitHubPublisherTransportFactory _factory;
+    private readonly IStickyGitHubPublisherTransportFactory _factory;
 
     internal StickyCommentPublisher(
-        IBoundedGitHubPublisherTransportFactory factory) =>
+        IStickyGitHubPublisherTransportFactory factory) =>
         _factory = factory ?? throw new ArgumentNullException(nameof(factory));
 
     internal async Task<StickyPublicationResult> PublishAsync(
@@ -20,15 +20,15 @@ internal sealed class StickyCommentPublisher
         ArgumentNullException.ThrowIfNull(token);
         ArgumentNullException.ThrowIfNull(request);
         if (cancellationToken.IsCancellationRequested)
-            return Failure(StickyPublicationOutcome.CancelledBeforeSend,
+            return Failure(BoundedGitHubPublisherOutcome.CancelledBeforeSend,
                 StickyPublicationReason.Cancelled);
-        IBoundedGitHubPublisherTransport transport;
-        try { transport = _factory.Create(token, request.Authorization); }
+        IStickyGitHubPublisherTransport transport;
+        try { transport = _factory.Create(token, request); }
         catch (Exception exception) when (exception is not OutOfMemoryException
             and not StackOverflowException and not AccessViolationException)
         {
             return Failure(
-                StickyPublicationOutcome.AuthorizationOrValidationFailure,
+                BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure,
                 StickyPublicationReason.AdmissionInvalid);
         }
         using (transport)
@@ -36,40 +36,38 @@ internal sealed class StickyCommentPublisher
             var discovery = await DiscoverCoreAsync(transport, request,
                 cancellationToken);
             if (discovery.Kind == StickyDiscoveryKind.Cancelled)
-                return Failure(StickyPublicationOutcome.CancelledBeforeSend,
+                return Failure(
+                    BoundedGitHubPublisherOutcome.CancelledBeforeSend,
                     StickyPublicationReason.Cancelled);
             if (discovery.Kind == StickyDiscoveryKind.InvalidOrIncomplete)
                 return Failure(
-                    StickyPublicationOutcome.AuthorizationOrValidationFailure,
+                    BoundedGitHubPublisherOutcome
+                        .AuthorizationOrValidationFailure,
                     discovery.Reason);
-            if (!StickyCommentSerializer.TrySerialize(
-                    request.Rendered.Comment, out var body))
-                return Failure(StickyPublicationOutcome.KnownNotWritten,
-                    StickyPublicationReason.RequestInvalid);
             if (cancellationToken.IsCancellationRequested)
-                return Failure(StickyPublicationOutcome.CancelledBeforeSend,
+                return Failure(
+                    BoundedGitHubPublisherOutcome.CancelledBeforeSend,
                     StickyPublicationReason.Cancelled);
 
             var operation = discovery.Kind == StickyDiscoveryKind.Absent
                 ? StickyPublicationOperation.Create
                 : StickyPublicationOperation.Update;
-            var mutation = operation == StickyPublicationOperation.Create
-                ? await transport.CreateIssueCommentAsync(body!,
-                    cancellationToken)
-                : await transport.UpdateIssueCommentAsync(
-                    discovery.CommentId!.Value, body!, cancellationToken);
-            if (mutation.Failure ==
-                BoundedGitHubPublisherFailure.AuthorizationOrValidationFailure)
+            var mutation = await transport.MutateStickyCommentAsync(
+                cancellationToken);
+            if (mutation.Outcome == BoundedGitHubPublisherOutcome
+                .AuthorizationOrValidationFailure)
                 return Failure(
-                    StickyPublicationOutcome.AuthorizationOrValidationFailure,
+                    BoundedGitHubPublisherOutcome
+                        .AuthorizationOrValidationFailure,
                     StickyPublicationReason.AuthorizationDenied);
-            if (mutation.Failure ==
-                BoundedGitHubPublisherFailure.CancelledBeforeSend)
-                return Failure(StickyPublicationOutcome.CancelledBeforeSend,
+            if (mutation.Outcome ==
+                BoundedGitHubPublisherOutcome.CancelledBeforeSend)
+                return Failure(
+                    BoundedGitHubPublisherOutcome.CancelledBeforeSend,
                     StickyPublicationReason.Cancelled);
-            if (mutation.Failure ==
-                BoundedGitHubPublisherFailure.Unavailable)
-                return Failure(StickyPublicationOutcome.KnownNotWritten,
+            if (mutation.Outcome ==
+                BoundedGitHubPublisherOutcome.KnownNotWritten)
+                return Failure(BoundedGitHubPublisherOutcome.KnownNotWritten,
                     StickyPublicationReason.RequestInvalid);
 
             var expectedId = operation == StickyPublicationOperation.Update
@@ -80,17 +78,15 @@ internal sealed class StickyCommentPublisher
                 var verified = await VerifyAsync(transport, request,
                     expectedId!.Value);
                 if (verified is not null)
-                    return StickyPublicationResult.Written(
-                        Receipt(request, operation, verified));
+                    return Written(request, operation, verified);
             }
 
             var reconciled = await ReconcileAsync(transport, request,
                 expectedId);
             return reconciled is null
-                ? Failure(StickyPublicationOutcome.OutcomeUnknown,
+                ? Failure(BoundedGitHubPublisherOutcome.OutcomeUnknown,
                     StickyPublicationReason.ReconciliationIncomplete)
-                : StickyPublicationResult.Written(
-                    Receipt(request, operation, reconciled));
+                : Written(request, operation, reconciled);
         }
     }
 
@@ -103,26 +99,27 @@ internal sealed class StickyCommentPublisher
         ArgumentNullException.ThrowIfNull(request);
         try
         {
-            using var transport = _factory.Create(token, request.Authorization);
+            using var transport = _factory.Create(token, request);
             var result = await DiscoverCoreAsync(transport, request,
                 cancellationToken);
             if (result.Kind != StickyDiscoveryKind.ExactTarget) return result;
             var verified = await VerifyAsync(transport, request,
                 result.CommentId!.Value);
             return verified is null
-                ? new(StickyDiscoveryKind.InvalidOrIncomplete, null, null, null,
+                ? Discovery(StickyDiscoveryKind.InvalidOrIncomplete, null,
+                    null, null,
                     StickyPublicationReason.DiscoveryIncomplete)
-                : result with
-                {
-                    Receipt = Receipt(request,
-                        StickyPublicationOperation.Observed, verified),
-                };
+                : Discovery(StickyDiscoveryKind.ExactTarget,
+                    result.CommentId, result.CommentUrl,
+                    Receipt(request, StickyPublicationOperation.Observed,
+                        verified),
+                    StickyPublicationReason.None);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException
             and not StackOverflowException and not AccessViolationException)
         {
-            return new(StickyDiscoveryKind.InvalidOrIncomplete, null, null,
-                null, StickyPublicationReason.AdmissionInvalid);
+            return Discovery(StickyDiscoveryKind.InvalidOrIncomplete, null,
+                null, null, StickyPublicationReason.AdmissionInvalid);
         }
     }
 
@@ -140,13 +137,13 @@ internal sealed class StickyCommentPublisher
             var result = await transport.ListIssueCommentsAsync(page,
                 cancellationToken);
             if (result.Value is null)
-                return new(result.Failure ==
-                        BoundedGitHubPublisherFailure.CancelledBeforeSend
+                return Discovery(result.Outcome ==
+                        BoundedGitHubPublisherOutcome.CancelledBeforeSend
                             ? StickyDiscoveryKind.Cancelled
                             : StickyDiscoveryKind.InvalidOrIncomplete,
                     null, null, null,
-                    result.Failure ==
-                        BoundedGitHubPublisherFailure.CancelledBeforeSend
+                    result.Outcome ==
+                        BoundedGitHubPublisherOutcome.CancelledBeforeSend
                             ? StickyPublicationReason.Cancelled
                             : StickyPublicationReason.DiscoveryIncomplete);
             total = checked(total + result.Value.Comments.Count);
@@ -156,8 +153,8 @@ internal sealed class StickyCommentPublisher
             {
                 if (!seen.Add(comment.Id))
                     return Invalid(StickyPublicationReason.TargetConflict);
-                var inspection = R4StickyMarker.Inspect(comment.Body);
-                if (inspection.Kind == R4StickyInspectionKind.InvalidR4)
+                if (!TryInspect(comment.Body, out var inspection) ||
+                    inspection.Kind == R4StickyInspectionKind.InvalidR4)
                     return Invalid(StickyPublicationReason.TargetConflict);
                 if (inspection.Kind == R4StickyInspectionKind.ValidR4 &&
                     StringComparer.Ordinal.Equals(
@@ -172,9 +169,9 @@ internal sealed class StickyCommentPublisher
             if (result.Value.NextPage is null)
             {
                 if (target is null)
-                    return new(StickyDiscoveryKind.Absent, null, null, null,
-                        StickyPublicationReason.None);
-                return new(IsExact(target, request, target.Id)
+                    return Discovery(StickyDiscoveryKind.Absent, null, null,
+                        null, StickyPublicationReason.None);
+                return Discovery(IsExact(target, request, target.Id)
                         ? StickyDiscoveryKind.ExactTarget
                         : StickyDiscoveryKind.StaleTarget,
                     target.Id, target.HtmlUrl, null,
@@ -188,7 +185,7 @@ internal sealed class StickyCommentPublisher
         return Invalid(StickyPublicationReason.DiscoveryIncomplete);
     }
 
-    private static async Task<BoundedGitHubIssueComment?> VerifyAsync(
+    private static async Task<ReadbackEvidence?> VerifyAsync(
         IBoundedGitHubPublisherTransport transport,
         AuthorizedStickyPublicationRequest request,
         long id)
@@ -199,10 +196,10 @@ internal sealed class StickyCommentPublisher
         var discovery = await DiscoverCoreAsync(transport, request,
             CancellationToken.None);
         return discovery.Kind == StickyDiscoveryKind.ExactTarget &&
-            discovery.CommentId == id ? read.Value : null;
+            discovery.CommentId == id ? new(read.Value) : null;
     }
 
-    private static async Task<BoundedGitHubIssueComment?> ReconcileAsync(
+    private static async Task<ReadbackEvidence?> ReconcileAsync(
         IBoundedGitHubPublisherTransport transport,
         AuthorizedStickyPublicationRequest request,
         long? expectedId)
@@ -213,12 +210,11 @@ internal sealed class StickyCommentPublisher
                 { Kind: StickyDiscoveryKind.ExactTarget, CommentId: long id } ||
             expectedId is not null && id != expectedId)
             return null;
-        var read = await transport.GetIssueCommentAsync(
-            id, CancellationToken.None);
-        return read.Value is not null &&
-            IsExact(read.Value, request, id)
-                ? read.Value
-                : null;
+        var read = await transport.GetIssueCommentAsync(id,
+            CancellationToken.None);
+        return read.Value is not null && IsExact(read.Value, request, id)
+            ? new(read.Value)
+            : null;
     }
 
     private static bool IsExact(BoundedGitHubIssueComment comment,
@@ -226,30 +222,186 @@ internal sealed class StickyCommentPublisher
     {
         if (expectedId is not null && comment.Id != expectedId ||
             !StringComparer.Ordinal.Equals(comment.Body,
-                request.Rendered.Comment)) return false;
-        var inspected = R4StickyMarker.Inspect(comment.Body);
+                request.Rendered.Comment) ||
+            !TryInspect(comment.Body, out var inspected)) return false;
         return inspected.Kind == R4StickyInspectionKind.ValidR4 &&
             Equals(inspected.Identity, request.Rendered.Identity) &&
             StringComparer.Ordinal.Equals(inspected.Body,
                 request.Rendered.Body);
     }
 
+    private static bool TryInspect(string body,
+        out R4StickyInspection inspection)
+    {
+        try
+        {
+            inspection = R4StickyMarker.Inspect(body);
+            return true;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException
+            and not StackOverflowException and not AccessViolationException)
+        {
+            inspection = new(R4StickyInspectionKind.InvalidR4, null, null,
+                R4StickyInvalidReason.BodyDigestMismatch);
+            return false;
+        }
+    }
+
     private static StickyPublicationReceipt Receipt(
         AuthorizedStickyPublicationRequest request,
         StickyPublicationOperation operation,
-        BoundedGitHubIssueComment comment) => new(operation,
-            request.Authorization.PullRequest.RepositoryId,
-            request.Authorization.PullRequest.Number,
-            comment.Id, comment.HtmlUrl,
-            request.Rendered.Identity.ScopeSha256,
-            request.Rendered.Identity.BodySha256,
-            request.Rendered.Identity.HeadSha);
+        ReadbackEvidence evidence) =>
+        StickyPublicationReceipt.FromReadback(request, operation, evidence);
 
-    private static StickyDiscoveryResult Invalid(
-        StickyPublicationReason reason) => new(
-            StickyDiscoveryKind.InvalidOrIncomplete, null, null, null, reason);
+    private static StickyPublicationResult Written(
+        AuthorizedStickyPublicationRequest request,
+        StickyPublicationOperation operation,
+        ReadbackEvidence evidence) => StickyPublicationResult.FromReadback(
+            Receipt(request, operation, evidence), evidence);
 
     private static StickyPublicationResult Failure(
-        StickyPublicationOutcome outcome, StickyPublicationReason reason) =>
-        StickyPublicationResult.Failed(outcome, reason);
+        BoundedGitHubPublisherOutcome outcome,
+        StickyPublicationReason reason)
+    {
+        var valid = outcome switch
+        {
+            BoundedGitHubPublisherOutcome.CancelledBeforeSend =>
+                reason == StickyPublicationReason.Cancelled,
+            BoundedGitHubPublisherOutcome.KnownNotWritten =>
+                reason == StickyPublicationReason.RequestInvalid,
+            BoundedGitHubPublisherOutcome.OutcomeUnknown =>
+                reason == StickyPublicationReason.ReconciliationIncomplete,
+            BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure =>
+                reason is StickyPublicationReason.AdmissionInvalid or
+                    StickyPublicationReason.DiscoveryIncomplete or
+                    StickyPublicationReason.TargetConflict or
+                    StickyPublicationReason.AuthorizationDenied,
+            _ => false,
+        };
+        if (!valid) throw new InvalidOperationException(
+            "Invalid sticky publication outcome and reason pairing.");
+        return StickyPublicationResult.FromFailure(
+            new FailureEvidence(outcome, reason));
+    }
+
+    private static StickyDiscoveryResult Invalid(
+        StickyPublicationReason reason) => Discovery(
+            StickyDiscoveryKind.InvalidOrIncomplete, null, null, null, reason);
+
+    private static StickyDiscoveryResult Discovery(StickyDiscoveryKind kind,
+        long? commentId, string? commentUrl,
+        StickyPublicationReceipt? receipt,
+        StickyPublicationReason reason) => StickyDiscoveryResult.FromEvidence(
+            new DiscoveryEvidence(kind, commentId, commentUrl, receipt,
+                reason));
+
+    private static T RequireIssuer<T>(
+        IStickyPublicationIssuerEvidence evidence)
+        where T : class, IStickyPublicationIssuerEvidence
+    {
+        ArgumentNullException.ThrowIfNull(evidence);
+        if (evidence.GetType() != typeof(T))
+            throw new InvalidOperationException(
+                "The sticky publication issuer evidence is invalid.");
+        return (T)evidence;
+    }
+
+    private sealed record ReadbackEvidence(BoundedGitHubIssueComment Comment) :
+        IStickyPublicationIssuerEvidence;
+    private sealed record FailureEvidence(BoundedGitHubPublisherOutcome Outcome,
+        StickyPublicationReason Reason) : IStickyPublicationIssuerEvidence;
+    private sealed record DiscoveryEvidence(StickyDiscoveryKind Kind,
+        long? CommentId, string? CommentUrl,
+        StickyPublicationReceipt? Receipt, StickyPublicationReason Reason) :
+        IStickyPublicationIssuerEvidence;
+
+    internal sealed class StickyPublicationReceipt
+    {
+        private StickyPublicationReceipt(StickyPublicationOperation operation,
+            long repositoryId, long pullRequestNumber, long commentId,
+            string commentUrl, string scopeSha256, string bodySha256,
+            string headSha) =>
+            (Operation, RepositoryId, PullRequestNumber, CommentId, CommentUrl,
+                ScopeSha256, BodySha256, HeadSha) =
+            (operation, repositoryId, pullRequestNumber, commentId, commentUrl,
+                scopeSha256, bodySha256, headSha);
+
+        internal StickyPublicationOperation Operation { get; }
+        internal long RepositoryId { get; }
+        internal long PullRequestNumber { get; }
+        internal long CommentId { get; }
+        internal string CommentUrl { get; }
+        internal string ScopeSha256 { get; }
+        internal string BodySha256 { get; }
+        internal string HeadSha { get; }
+
+        internal static StickyPublicationReceipt FromReadback(
+            AuthorizedStickyPublicationRequest request,
+            StickyPublicationOperation operation,
+            IStickyPublicationIssuerEvidence issuer)
+        {
+            var evidence = RequireIssuer<ReadbackEvidence>(issuer);
+            return new(operation,
+                request.Authorization.PullRequest.RepositoryId,
+                request.Authorization.PullRequest.Number,
+                evidence.Comment.Id, evidence.Comment.HtmlUrl,
+                request.Rendered.Identity.ScopeSha256,
+                request.Rendered.Identity.BodySha256,
+                request.Rendered.Identity.HeadSha);
+        }
+
+        public override string ToString() => "[PRIVATE]";
+    }
+
+    internal sealed class StickyPublicationResult
+    {
+        private StickyPublicationResult(BoundedGitHubPublisherOutcome outcome,
+            StickyPublicationReason reason,
+            StickyPublicationReceipt? receipt) =>
+            (Outcome, Reason, Receipt) = (outcome, reason, receipt);
+
+        internal BoundedGitHubPublisherOutcome Outcome { get; }
+        internal StickyPublicationReason Reason { get; }
+        internal StickyPublicationReceipt? Receipt { get; }
+
+        internal static StickyPublicationResult FromReadback(
+            StickyPublicationReceipt receipt,
+            IStickyPublicationIssuerEvidence issuer)
+        {
+            _ = RequireIssuer<ReadbackEvidence>(issuer);
+            return new(BoundedGitHubPublisherOutcome.WrittenAndReadBack,
+                StickyPublicationReason.None, receipt);
+        }
+
+        internal static StickyPublicationResult FromFailure(
+            IStickyPublicationIssuerEvidence issuer)
+        {
+            var evidence = RequireIssuer<FailureEvidence>(issuer);
+            return new(evidence.Outcome, evidence.Reason, null);
+        }
+    }
+
+    internal sealed class StickyDiscoveryResult
+    {
+        private StickyDiscoveryResult(StickyDiscoveryKind kind,
+            long? commentId, string? commentUrl,
+            StickyPublicationReceipt? receipt,
+            StickyPublicationReason reason) =>
+            (Kind, CommentId, CommentUrl, Receipt, Reason) =
+            (kind, commentId, commentUrl, receipt, reason);
+
+        internal StickyDiscoveryKind Kind { get; }
+        internal long? CommentId { get; }
+        internal string? CommentUrl { get; }
+        internal StickyPublicationReceipt? Receipt { get; }
+        internal StickyPublicationReason Reason { get; }
+
+        internal static StickyDiscoveryResult FromEvidence(
+            IStickyPublicationIssuerEvidence issuer)
+        {
+            var evidence = RequireIssuer<DiscoveryEvidence>(issuer);
+            return new(evidence.Kind, evidence.CommentId, evidence.CommentUrl,
+                evidence.Receipt, evidence.Reason);
+        }
+    }
 }
