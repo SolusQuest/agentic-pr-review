@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { artifactProvenanceVectors } from './artifact-provenance-vectors.js';
 
-describe('retired artifact provenance vectors', () => {
+describe('R4 S2 artifact provenance vectors', () => {
   it('preserves the complete stable provider-independent vector set', () => {
     const expectedIds = Array.from(
       { length: 32 },
@@ -13,23 +13,62 @@ describe('retired artifact provenance vectors', () => {
     expect(new Set(actualIds).size).toBe(actualIds.length);
   });
 
-  it('owns every port and obsolete disposition through an explicit lifecycle gate', () => {
+  it('owns every vector as permanent S2 conformance evidence', () => {
     for (const vector of artifactProvenanceVectors) {
       expect(vector.inputMetadata.length).toBeGreaterThan(0);
       expect(vector.selectionContext).not.toBe('');
       expect(vector.expectedOutcome).not.toBe('');
       expect(vector.securityInvariant).not.toBe('');
 
-      if (vector.disposition === 'port') {
-        expect(vector.futureConsumer).toBe('R4 artifact bridge');
-        expect(vector.deletionGate).toContain('R4 artifact-bridge conformance');
-        expect(vector.deletionRationale).toBeUndefined();
-      } else {
+      expect(vector.owner).toBe('R4 S2 private artifact bridge');
+      expect(vector.evidenceClass).toBe('permanent-negative-conformance');
+      if (vector.disposition === 'obsolete-absent') {
         expect(vector.deletionRationale).not.toBe('');
-        expect(vector.futureConsumer).toBeUndefined();
-        expect(vector.deletionGate).toBeUndefined();
+      } else {
+        expect(vector.deletionRationale).toBeUndefined();
       }
     }
+  });
+
+  it('records the vector-by-vector S2 ownership boundary', () => {
+    const group = (disposition: string) =>
+      artifactProvenanceVectors
+        .filter((vector) => vector.disposition === disposition)
+        .map((vector) => vector.id);
+
+    expect(group('direct-transport')).toEqual([
+      'APV-001',
+      'APV-002',
+      'APV-003',
+      'APV-004',
+      'APV-005',
+      'APV-006',
+      'APV-007',
+      'APV-008',
+      'APV-026',
+      'APV-027',
+      'APV-028',
+      'APV-030',
+    ]);
+    expect(group('later-policy')).toEqual(['APV-023', 'APV-024', 'APV-025']);
+    expect(group('obsolete-absent')).toEqual(['APV-031', 'APV-032']);
+    expect(group('negative-ownership')).toEqual([
+      'APV-009',
+      'APV-010',
+      'APV-011',
+      'APV-012',
+      'APV-013',
+      'APV-014',
+      'APV-015',
+      'APV-016',
+      'APV-017',
+      'APV-018',
+      'APV-019',
+      'APV-020',
+      'APV-021',
+      'APV-022',
+      'APV-029',
+    ]);
   });
 
   it('preserves the retired producer-id precedence cases in APV-004', () => {

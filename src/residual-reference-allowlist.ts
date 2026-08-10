@@ -14,7 +14,7 @@ export interface TemporaryResidualReferenceRule extends ResidualReferenceRuleBas
 }
 
 export interface PermanentResidualReferenceRule extends ResidualReferenceRuleBase {
-  readonly lifecycleClass: 'governing' | 'historical';
+  readonly lifecycleClass: 'governing' | 'historical' | 'conformance';
   readonly status: string;
   readonly supersessionRule: string;
 }
@@ -139,17 +139,15 @@ export const residualReferenceRules = [
     deletionGate: 'replace retained M4 TypeScript DTO surfaces',
     milestone: 'R4',
   },
-  {
-    id: 'RR-009',
-    term: stateOrMarkerLegacy,
-    path: /^src\/artifact-provenance-vectors\.ts$/u,
-    lifecycleClass: 'state-migration',
-    currentConsumer: 'provider-independent APV-031 deletion record',
-    owner: 'R4 artifact bridge',
-    interpretation: 'obsolete adapter evidence, not executable code',
-    deletionGate: 'replace APV manifest with R4 artifact-bridge conformance coverage',
-    milestone: 'R4',
-  },
+  permanent(
+    'RR-009',
+    /^src\/artifact-provenance-vectors\.ts$/u,
+    'conformance',
+    'R4 S2 private artifact bridge',
+    'permanent executable artifact provenance and ownership evidence',
+    'direct vectors constrain the private bridge; selection and policy vectors prove that Node cannot choose state; APV-031 and APV-032 keep obsolete paths absent',
+    'an accepted replacement must preserve the same S2 negative and transport evidence',
+  ),
   {
     id: 'RR-010',
     term: stateOrMarkerLegacy,
