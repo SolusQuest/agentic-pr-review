@@ -9,13 +9,22 @@ using AgenticPrReview.Runtime.ActionHost.Contracts;
 namespace AgenticPrReview.Runtime.ActionHost.GitHub;
 
 internal sealed class ActionHostGitHubAuthorizationTransportFactory :
-    IActionHostGitHubAuthorizationTransportFactory
+    IActionHostGitHubAuthorizationTransportFactory,
+    IActionHostGitObjectTransportFactory
 {
     public IActionHostGitHubAuthorizationTransport Create(
         ActionHostGitHubToken token)
     {
         ArgumentNullException.ThrowIfNull(token);
         return ActionHostGitHubAuthorizationTransport.Create(
+            token.ExportForPrivateLaunch());
+    }
+
+    public IActionHostGitObjectTransport CreateExactObjectTransport(
+        ActionHostGitHubToken token)
+    {
+        ArgumentNullException.ThrowIfNull(token);
+        return ActionHostGitObjectTransport.Create(
             token.ExportForPrivateLaunch());
     }
 }
