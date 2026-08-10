@@ -39,6 +39,16 @@ public sealed class ReviewedTreeSnapshotTests
             ReviewedContentLimits.AggregateResponseBytes);
         Assert.Equal(TimeSpan.FromSeconds(300),
             ReviewedContentLimits.AcquisitionAndMaterializationTimeout);
+        Assert.Equal(100, ReviewedContentLimits.ChangedFilesPerPage);
+        Assert.Equal(200, ReviewedContentLimits.ChangedFiles);
+        Assert.Equal(1L * 1024 * 1024,
+            ReviewedContentLimits.BaseBlobBytes);
+        Assert.Equal(64L * 1024 * 1024,
+            ReviewedContentLimits.AggregateBaseBlobBytes);
+        Assert.Equal(256L * 1024 * 1024,
+            ReviewedContentLimits.MaterializedRootBytes);
+        Assert.Equal(64 * 1024,
+            ReviewedContentLimits.StreamBufferBytes);
         Assert.Equal(AgentLimits.TrackedFiles,
             ReviewedContentLimits.TrackedPaths);
         Assert.Equal(AgentLimits.TrackedFilesMetadataBytes,

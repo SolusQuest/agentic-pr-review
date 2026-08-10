@@ -559,20 +559,26 @@ internal sealed class ReviewedStagedBlob
                 return false;
             }
 
-            var bytes = GC.AllocateUninitializedArray<byte>(checked((int)Size));
-            var actual = 0;
-            while (actual < bytes.Length)
+            var buffer = new byte[ReviewedContentLimits.StreamBufferBytes];
+            long actual = 0;
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA1);
+            hash.AppendData(GitBlobHeader(Size));
+            while (actual < Size)
             {
+                var requested = checked((int)Math.Min(
+                    buffer.Length,
+                    Size - actual));
                 var read = await RandomAccess.ReadAsync(
                     _source.SafeFileHandle,
-                    bytes.AsMemory(actual),
+                    buffer.AsMemory(0, requested),
                     actual,
                     operation.Token);
                 if (read == 0)
                 {
-                    break;
+                    return false;
                 }
 
+                hash.AppendData(buffer.AsSpan(0, read));
                 actual += read;
             }
 
@@ -582,18 +588,61 @@ internal sealed class ReviewedStagedBlob
                 extra,
                 actual,
                 operation.Token);
-            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA1);
-            hash.AppendData(GitBlobHeader(Size));
-            hash.AppendData(bytes);
             var actualSha = Convert.ToHexString(hash.GetHashAndReset())
                 .ToLowerInvariant();
-            if (actual != bytes.Length || extraRead != 0 ||
+            if (actual != Size || extraRead != 0 ||
                 !StringComparer.Ordinal.Equals(actualSha, Sha))
             {
                 return false;
             }
 
-            await destination.WriteAsync(bytes, operation.Token);
+            if (!ReviewedStagedFileAccess.TryInspectRegular(
+                    _source.SafeFileHandle,
+                    out openedIdentity,
+                    out openedLength) ||
+                openedIdentity != _identity ||
+                openedLength != Size)
+            {
+                return false;
+            }
+
+            actual = 0;
+            hash.AppendData(GitBlobHeader(Size));
+            while (actual < Size)
+            {
+                var requested = checked((int)Math.Min(
+                    buffer.Length,
+                    Size - actual));
+                var read = await RandomAccess.ReadAsync(
+                    _source.SafeFileHandle,
+                    buffer.AsMemory(0, requested),
+                    actual,
+                    operation.Token);
+                if (read == 0)
+                {
+                    return false;
+                }
+
+                hash.AppendData(buffer.AsSpan(0, read));
+                await destination.WriteAsync(
+                    buffer.AsMemory(0, read),
+                    operation.Token);
+                actual += read;
+            }
+
+            actualSha = Convert.ToHexString(hash.GetHashAndReset())
+                .ToLowerInvariant();
+            if (!StringComparer.Ordinal.Equals(actualSha, Sha) ||
+                !ReviewedStagedFileAccess.TryInspectRegular(
+                    _source.SafeFileHandle,
+                    out openedIdentity,
+                    out openedLength) ||
+                openedIdentity != _identity ||
+                openedLength != Size)
+            {
+                return false;
+            }
+
             return true;
         }
         catch (OperationCanceledException) when (operation.DeadlineExpired)
@@ -753,6 +802,150 @@ internal static partial class ReviewedStagedFileAccess
                         Options = FileOptions.Asynchronous |
                             FileOptions.SequentialScan |
                             FileOptions.DeleteOnClose,
+                    });
+                if (!DirectoryMatches(parentPath, parentIdentity))
+                {
+                    candidate.Dispose();
+                    return false;
+                }
+
+                stream = candidate;
+                return true;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or
+            UnauthorizedAccessException)
+        {
+            stream?.Dispose();
+            stream = null;
+        }
+
+        return false;
+    }
+
+    internal static bool TryOpenOrCreateChildDirectory(
+        SafeFileHandle parent,
+        string parentPath,
+        ReviewedStagedFileIdentity parentIdentity,
+        string name,
+        out SafeFileHandle? handle,
+        out ReviewedStagedFileIdentity identity,
+        out string childPath)
+    {
+        handle = null;
+        identity = default;
+        childPath = Path.Join(parentPath, name);
+        try
+        {
+            if (OperatingSystem.IsLinux())
+            {
+                var parentDescriptor = checked(
+                    (int)parent.DangerousGetHandle());
+                _ = MakeDirectoryAt(parentDescriptor, name, 0x1c0);
+                var descriptor = OpenAt(
+                    parentDescriptor,
+                    name,
+                    OpenReadOnly |
+                        OpenDirectory |
+                        OpenNoFollow |
+                        OpenCloseOnExec,
+                    0);
+                if (descriptor < 0)
+                {
+                    return false;
+                }
+
+                handle = new SafeFileHandle(
+                    (nint)descriptor,
+                    ownsHandle: true);
+                if (TryInspectDirectory(handle, out identity))
+                {
+                    return true;
+                }
+
+                handle.Dispose();
+                handle = null;
+                return false;
+            }
+
+            if (OperatingSystem.IsWindows() &&
+                DirectoryMatches(parentPath, parentIdentity))
+            {
+                Directory.CreateDirectory(childPath);
+                if (!DirectoryMatches(parentPath, parentIdentity) ||
+                    !TryOpenDirectory(childPath, out handle, out identity))
+                {
+                    handle?.Dispose();
+                    handle = null;
+                    identity = default;
+                    return false;
+                }
+
+                return true;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or
+            UnauthorizedAccessException or
+            ArgumentException or
+            NotSupportedException)
+        {
+            handle?.Dispose();
+            handle = null;
+            identity = default;
+        }
+
+        return false;
+    }
+
+    internal static bool TryCreateVisibleFile(
+        SafeFileHandle parent,
+        string parentPath,
+        ReviewedStagedFileIdentity parentIdentity,
+        string name,
+        out FileStream? stream)
+    {
+        stream = null;
+        try
+        {
+            if (OperatingSystem.IsLinux())
+            {
+                var parentDescriptor = checked(
+                    (int)parent.DangerousGetHandle());
+                var descriptor = OpenAt(
+                    parentDescriptor,
+                    name,
+                    OpenReadWrite |
+                        OpenCreate |
+                        OpenExclusive |
+                        OpenNoFollow |
+                        OpenCloseOnExec,
+                    0x180);
+                if (descriptor < 0)
+                {
+                    return false;
+                }
+
+                stream = new FileStream(
+                    new SafeFileHandle((nint)descriptor, ownsHandle: true),
+                    FileAccess.ReadWrite,
+                    ReviewedContentLimits.StreamBufferBytes,
+                    isAsync: true);
+                return true;
+            }
+
+            if (OperatingSystem.IsWindows() &&
+                DirectoryMatches(parentPath, parentIdentity))
+            {
+                var candidate = new FileStream(
+                    Path.Join(parentPath, name),
+                    new FileStreamOptions
+                    {
+                        Mode = FileMode.CreateNew,
+                        Access = FileAccess.ReadWrite,
+                        Share = FileShare.Read,
+                        BufferSize = ReviewedContentLimits.StreamBufferBytes,
+                        Options = FileOptions.Asynchronous |
+                            FileOptions.SequentialScan,
                     });
                 if (!DirectoryMatches(parentPath, parentIdentity))
                 {
@@ -941,6 +1134,16 @@ internal static partial class ReviewedStagedFileAccess
         int directory,
         string path,
         int flags);
+
+    [LibraryImport(
+        "libc",
+        EntryPoint = "mkdirat",
+        SetLastError = true,
+        StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int MakeDirectoryAt(
+        int directory,
+        string path,
+        uint mode);
 
     [LibraryImport("libc", EntryPoint = "fchmod", SetLastError = true)]
     private static partial int FChmod(int descriptor, uint mode);

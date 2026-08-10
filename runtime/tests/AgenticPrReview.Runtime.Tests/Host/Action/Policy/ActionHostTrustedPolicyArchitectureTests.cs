@@ -66,6 +66,8 @@ public sealed class ActionHostTrustedPolicyArchitectureTests
             new ActionHostGitHubAuthorizationTransportFactory());
         Assert.IsAssignableFrom<IActionHostGitObjectTransportFactory>(
             new ActionHostGitHubAuthorizationTransportFactory());
+        Assert.IsAssignableFrom<IActionHostReviewedSnapshotTransportFactory>(
+            new ActionHostGitHubAuthorizationTransportFactory());
     }
 
     [Fact]
@@ -92,6 +94,24 @@ public sealed class ActionHostTrustedPolicyArchitectureTests
             .GetMethods()
             .Select(method => method.Name)
             .Order(StringComparer.Ordinal));
+        Assert.Equal(new[]
+        {
+            "CopyBlobObjectAsync",
+            "GetCommitObjectAsync",
+            "GetCurrentPullRequestAsync",
+            "GetPullRequestFilesAsync",
+            "GetTreeObjectAsync",
+        }, typeof(IActionHostReviewedSnapshotTransport)
+            .GetMethods()
+            .Select(method => method.Name)
+            .Order(StringComparer.Ordinal));
+        Assert.All(
+            typeof(IActionHostReviewedSnapshotTransport).GetMethods(),
+            static method => Assert.DoesNotContain(
+                new[] { "Create", "Delete", "Patch", "Post", "Put", "Update" },
+                prefix => method.Name.Contains(
+                    prefix,
+                    StringComparison.OrdinalIgnoreCase)));
     }
 
     [Fact]
@@ -135,6 +155,10 @@ public sealed class ActionHostTrustedPolicyArchitectureTests
             .ActionHostGitTreeEntryDocumentArray);
         Assert.NotNull(ActionHostGitObjectJsonContext.Default
             .ActionHostGitBlobDocument);
+        Assert.NotNull(ActionHostReviewedSnapshotJsonContext.Default
+            .ActionHostPullRequestFileDocument);
+        Assert.NotNull(ActionHostReviewedSnapshotJsonContext.Default
+            .ActionHostPullRequestFileDocumentArray);
         Assert.Null(ActionHostTrustedPolicyJsonContext.Default.GetTypeInfo(
             typeof(ActionHostTrustedPolicy)));
     }
