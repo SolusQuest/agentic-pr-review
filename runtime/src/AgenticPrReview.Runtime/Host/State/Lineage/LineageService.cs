@@ -103,9 +103,21 @@ internal sealed class LineageService
             }
 
             var selection = observed.Selection.Selection!;
+            var pendingBeforeCleanup = SelectPendingIntent(
+                observed.Snapshot!,
+                selection.Head,
+                currentKeyId,
+                request.RequiredLogicalExpiresAtUnixSeconds,
+                requiredPlatformExpiry);
+            if (!pendingBeforeCleanup.Succeeded)
+            {
+                return LineageResolveResult.Fail(pendingBeforeCleanup.Code);
+            }
+
             var staleCleanup = FindAuthorizedStaleCleanup(
                 observed.Snapshot!,
-                selection);
+                selection,
+                pendingBeforeCleanup.Intent);
             if (staleCleanup is null)
             {
                 return LineageResolveResult.Fail(LineageCodes.Conflict);
@@ -2317,6 +2329,9 @@ internal sealed class LineageService
                     intent.PriorEpoch,
                     active.Header.Epoch) ||
                 !StringComparer.Ordinal.Equals(
+                    item.Header.SessionId,
+                    active.Header.SessionId) ||
+                !StringComparer.Ordinal.Equals(
                     item.Header.PredecessorIdentity,
                     active.Header.ObjectIdentity))
             {
@@ -2481,11 +2496,13 @@ internal sealed class LineageService
     private static ImmutableArray<OpaqueStoreObjectMetadata>?
         FindAuthorizedStaleCleanup(
             ScopedStateInventorySnapshot snapshot,
-            LineageHeadSelection selection)
+            LineageHeadSelection selection,
+            SelectedIntent? pending)
     {
         var evidence = selection.Head.Head.Superseded
             .Concat(selection.Head.Head.CompletedCleanup)
             .ToImmutableArray();
+        var pendingTargets = pending?.Intent.Targets ?? [];
         var cleanup = ImmutableArray.CreateBuilder<OpaqueStoreObjectMetadata>();
         foreach (var item in snapshot.Authenticated
             .Concat(snapshot.UnderRetained)
@@ -2495,6 +2512,12 @@ internal sealed class LineageService
                     item.Header.Epoch,
                     selection.Head.Header.Epoch)))
         {
+            if (pendingTargets.Any(value =>
+                    LineageHeadCodec.Matches(value, item.Metadata)))
+            {
+                continue;
+            }
+
             if (!evidence.Any(value =>
                     LineageHeadCodec.Matches(value, item.Metadata)))
             {
@@ -2508,6 +2531,12 @@ internal sealed class LineageService
             item.Metadata.Reference.Name !=
                 snapshot.Names[StateObjectClass.LineageHead]))
         {
+            if (pendingTargets.Any(value =>
+                    LineageHeadCodec.Matches(value, item.Metadata)))
+            {
+                continue;
+            }
+
             if (!evidence.Any(value =>
                     LineageHeadCodec.Matches(value, item.Metadata)))
             {
