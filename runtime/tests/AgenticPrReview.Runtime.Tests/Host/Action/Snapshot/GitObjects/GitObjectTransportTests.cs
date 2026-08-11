@@ -76,6 +76,29 @@ public sealed partial class GitObjectTransportTests
     }
 
     [Fact]
+    public async Task MalformedJsonConsumesItsExactCapturedAggregateBytes()
+    {
+        const string body = "{\"malformed\":";
+        var invocation = await AuthorizedInvocation();
+        var budget = ProductionBudget();
+        Assert.True(budget.TryGetRemaining(out var before));
+        using var transport = ReviewedSnapshotTestAccess.Transport(
+            invocation,
+            Token(),
+            budget,
+            new CapturingHandler(_ => JsonResponse(body)));
+
+        var result = await transport.GetCommitAsync(CancellationToken.None);
+
+        Assert.Null(result.Value);
+        Assert.Equal(ReviewedGitObjectFailure.InvalidResponse, result.Failure);
+        Assert.True(budget.TryGetRemaining(out var after));
+        Assert.Equal(
+            Encoding.UTF8.GetByteCount(body),
+            before!.ResponseBytes - after!.ResponseBytes);
+    }
+
+    [Fact]
     public async Task SharedBlobEnvelopeStagesExactDecodedBytes()
     {
         var invocation = await AuthorizedInvocation();

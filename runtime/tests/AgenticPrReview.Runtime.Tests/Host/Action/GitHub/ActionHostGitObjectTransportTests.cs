@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
@@ -425,6 +426,79 @@ public sealed class ActionHostGitObjectTransportTests
             result.Failure);
     }
 
+    [Fact]
+    public async Task MalformedJsonPreservesEveryCapturedResponseByte()
+    {
+        const string body = "{\"malformed\":";
+        var sha = new string('a', 40);
+        var handler = new CapturingHandler(_ => JsonResponse(body));
+        using var transport = ActionHostGitObjectTransport.CreateForTesting(
+            "token-canary",
+            handler);
+
+        var result = await transport.GetCommitObjectAsync(
+            "SolusQuest/agentic-pr-review",
+            sha,
+            CancellationToken.None);
+
+        Assert.Null(result.Value);
+        Assert.Equal(ActionHostGitObjectFailure.InvalidResponse, result.Failure);
+        Assert.Equal(
+            Encoding.UTF8.GetByteCount(body),
+            result.CapturedResponseBytes);
+    }
+
+    [Fact]
+    public async Task UnknownLengthJsonCapPlusOneReportsConsumedBytes()
+    {
+        var maximumBytes = ActionHostGitBlobReadBudget.TrustedConfig
+            .MaximumResponseBytes;
+        var body = new byte[maximumBytes + 1];
+        Array.Fill<byte>(body, 0x20);
+        var handler = new CapturingHandler(_ => new HttpResponseMessage(
+            HttpStatusCode.OK)
+        {
+            Content = new UnknownLengthJsonContent(body),
+        });
+        using var transport = ActionHostGitObjectTransport.CreateForTesting(
+            "token-canary",
+            handler);
+
+        var result = await transport.GetBlobObjectAsync(
+            "SolusQuest/agentic-pr-review",
+            new string('a', 40),
+            ActionHostGitBlobReadBudget.TrustedConfig,
+            CancellationToken.None);
+
+        Assert.Null(result.Value);
+        Assert.Equal(ActionHostGitObjectFailure.ResponseTooLarge, result.Failure);
+        Assert.Equal(body.Length, result.CapturedResponseBytes);
+    }
+
+    [Fact]
+    public async Task MapperRejectionKeepsCapturedBodyChargedOnce()
+    {
+        var requestedSha = new string('a', 40);
+        var returnedSha = new string('b', 40);
+        var body =
+            $"{{\"sha\":\"{returnedSha}\",\"tree\":{{\"sha\":\"{returnedSha}\"}}}}";
+        var handler = new CapturingHandler(_ => JsonResponse(body));
+        using var transport = ActionHostGitObjectTransport.CreateForTesting(
+            "token-canary",
+            handler);
+
+        var result = await transport.GetCommitObjectAsync(
+            "SolusQuest/agentic-pr-review",
+            requestedSha,
+            CancellationToken.None);
+
+        Assert.Null(result.Value);
+        Assert.Equal(ActionHostGitObjectFailure.InvalidResponse, result.Failure);
+        Assert.Equal(
+            Encoding.UTF8.GetByteCount(body),
+            result.CapturedResponseBytes);
+    }
+
     private static HttpResponseMessage JsonResponse(string body) => new(
         HttpStatusCode.OK)
     {
@@ -491,6 +565,31 @@ public sealed class ActionHostGitObjectTransportTests
             Requests.Add(CapturedRequest.From(request));
             return Task.FromResult(_reply(request));
         }
+    }
+
+    private sealed class UnknownLengthJsonContent : HttpContent
+    {
+        private readonly byte[] _bytes;
+
+        internal UnknownLengthJsonContent(byte[] bytes)
+        {
+            _bytes = bytes;
+            Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        }
+
+        protected override Task SerializeToStreamAsync(
+            Stream stream,
+            TransportContext? context) =>
+            stream.WriteAsync(_bytes).AsTask();
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
+
+        protected override Task<Stream> CreateContentReadStreamAsync() =>
+            Task.FromResult<Stream>(new MemoryStream(_bytes, writable: false));
     }
 
     private sealed record CapturedRequest(

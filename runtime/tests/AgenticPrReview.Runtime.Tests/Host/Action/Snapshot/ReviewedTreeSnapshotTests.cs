@@ -1,4 +1,5 @@
 using AgenticPrReview.Runtime.ActionHost.Snapshot;
+using AgenticPrReview.Runtime.ActionHost.Snapshot.Diff;
 using AgenticPrReview.Runtime.Agent;
 using Xunit;
 
@@ -39,6 +40,16 @@ public sealed class ReviewedTreeSnapshotTests
             ReviewedContentLimits.AggregateResponseBytes);
         Assert.Equal(TimeSpan.FromSeconds(300),
             ReviewedContentLimits.AcquisitionAndMaterializationTimeout);
+        Assert.Equal(100, ReviewedContentLimits.ChangedFilesPerPage);
+        Assert.Equal(200, ReviewedContentLimits.ChangedFiles);
+        Assert.Equal(1L * 1024 * 1024,
+            ReviewedContentLimits.BaseBlobBytes);
+        Assert.Equal(64L * 1024 * 1024,
+            ReviewedContentLimits.AggregateBaseBlobBytes);
+        Assert.Equal(256L * 1024 * 1024,
+            ReviewedContentLimits.MaterializedRootBytes);
+        Assert.Equal(64 * 1024,
+            ReviewedContentLimits.StreamBufferBytes);
         Assert.Equal(AgentLimits.TrackedFiles,
             ReviewedContentLimits.TrackedPaths);
         Assert.Equal(AgentLimits.TrackedFilesMetadataBytes,
@@ -206,6 +217,64 @@ public sealed class ReviewedTreeSnapshotTests
             new string('a', ReviewedContentLimits.PathBytes)));
         Assert.False(ReviewedTreePath.IsValid(
             new string('a', ReviewedContentLimits.PathBytes + 1)));
+    }
+
+    [Fact]
+    public async Task ExpiredStagedReadsRemainDistinctFromIdentityMismatch()
+    {
+        var invocation = await H5SnapshotTestSupport.AuthorizedInvocation();
+        var parent = H5SnapshotTestSupport.TemporaryDirectory();
+        var bytes = "content"u8.ToArray();
+        var tree = await H5SnapshotTestSupport.TreeAsync(
+            invocation,
+            parent,
+            new H5HeadEntry(
+                "file.txt",
+                "100644",
+                ReviewedTreeEntryKind.Regular,
+                bytes));
+        try
+        {
+            tree.Budget.Invalidate();
+            using var destination = new MemoryStream();
+            Assert.Equal(
+                ReviewedStagedBlobCopyFailure.UnsupportedSize,
+                await Assert.Single(tree.Records).StagedBlob!
+                    .CopyVerifiedDetailedAsync(
+                        destination,
+                        CancellationToken.None));
+        }
+        finally
+        {
+            await tree.DisposeAsync();
+        }
+
+        var budget = ReviewedSnapshotTestAccess.ProductionBudget();
+        using var staging = ReviewedBaseBlobStagingLease.TryCreate(
+            parent,
+            budget);
+        Assert.NotNull(staging);
+        await using (var writer = staging!.TryCreateWriter(
+                         H5SnapshotTestSupport.BlobSha(bytes),
+                         bytes.LongLength))
+        {
+            Assert.NotNull(writer);
+            await writer!.WriteAsync(bytes, CancellationToken.None);
+            var blob = Assert.IsType<ReviewedBaseStagedBlob>(
+                await writer.CompleteAsync(CancellationToken.None));
+            budget.Invalidate();
+
+            var read = await blob.ReadVerifiedDetailedAsync(
+                CancellationToken.None);
+
+            Assert.Null(read.Bytes);
+            Assert.Equal(
+                ReviewedStagedBlobCopyFailure.UnsupportedSize,
+                read.Failure);
+        }
+
+        staging.Dispose();
+        Directory.Delete(parent, recursive: true);
     }
 
     public static TheoryData<string> InvalidPaths => new()

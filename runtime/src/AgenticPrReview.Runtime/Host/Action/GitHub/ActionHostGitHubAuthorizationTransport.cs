@@ -10,7 +10,8 @@ namespace AgenticPrReview.Runtime.ActionHost.GitHub;
 
 internal sealed class ActionHostGitHubAuthorizationTransportFactory :
     IActionHostGitHubAuthorizationTransportFactory,
-    IActionHostGitObjectTransportFactory
+    IActionHostGitObjectTransportFactory,
+    IActionHostReviewedSnapshotTransportFactory
 {
     public IActionHostGitHubAuthorizationTransport Create(
         ActionHostGitHubToken token)
@@ -25,6 +26,14 @@ internal sealed class ActionHostGitHubAuthorizationTransportFactory :
     {
         ArgumentNullException.ThrowIfNull(token);
         return ActionHostGitObjectTransport.Create(
+            token.ExportForPrivateLaunch());
+    }
+
+    public IActionHostReviewedSnapshotTransport
+        CreateReviewedSnapshotTransport(ActionHostGitHubToken token)
+    {
+        ArgumentNullException.ThrowIfNull(token);
+        return ActionHostReviewedSnapshotTransport.Create(
             token.ExportForPrivateLaunch());
     }
 }

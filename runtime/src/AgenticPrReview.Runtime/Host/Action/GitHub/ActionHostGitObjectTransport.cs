@@ -188,6 +188,7 @@ internal sealed class ActionHostGitObjectTransport :
                 ActionHostGitObjectFailure.TransportFailure);
         }
 
+        var capturedResponseBytes = 0;
         try
         {
             using var request = new HttpRequestMessage(
@@ -229,22 +230,24 @@ internal sealed class ActionHostGitObjectTransport :
                     ActionHostGitObjectFailure.InvalidResponse);
             }
 
-            var body = await ReadBoundedAsync(
+            var read = await ReadBoundedAsync(
                 response.Content,
                 maximumResponseBytes,
                 cancellationToken);
-            if (body is null)
+            capturedResponseBytes = read.CapturedResponseBytes;
+            if (read.Body is null)
             {
                 return DocumentResult<T>.Failed(
-                    ActionHostGitObjectFailure.ResponseTooLarge);
+                    ActionHostGitObjectFailure.ResponseTooLarge,
+                    capturedResponseBytes);
             }
 
-            var value = JsonSerializer.Deserialize(body, typeInfo);
+            var value = JsonSerializer.Deserialize(read.Body, typeInfo);
             return value is null
                 ? DocumentResult<T>.Failed(
                     ActionHostGitObjectFailure.InvalidResponse,
-                    body.Length)
-                : DocumentResult<T>.Success(value, body.Length);
+                    capturedResponseBytes)
+                : DocumentResult<T>.Success(value, capturedResponseBytes);
         }
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
@@ -255,7 +258,8 @@ internal sealed class ActionHostGitObjectTransport :
             NotSupportedException or DecoderFallbackException)
         {
             return DocumentResult<T>.Failed(
-                ActionHostGitObjectFailure.InvalidResponse);
+                ActionHostGitObjectFailure.InvalidResponse,
+                capturedResponseBytes);
         }
         catch (Exception exception) when (IsNonFatal(exception))
         {
@@ -342,7 +346,7 @@ internal sealed class ActionHostGitObjectTransport :
             "application/json") ||
         mediaType.EndsWith("+json", StringComparison.OrdinalIgnoreCase));
 
-    private static async Task<byte[]?> ReadBoundedAsync(
+    private static async Task<BoundedResponse> ReadBoundedAsync(
         HttpContent content,
         int maximumBytes,
         CancellationToken cancellationToken)
@@ -350,7 +354,7 @@ internal sealed class ActionHostGitObjectTransport :
         if (content.Headers.ContentLength is > 0 &&
             content.Headers.ContentLength > maximumBytes)
         {
-            return null;
+            return new(null, 0);
         }
 
         await using var stream =
@@ -367,7 +371,8 @@ internal sealed class ActionHostGitObjectTransport :
                 cancellationToken);
             if (read == 0)
             {
-                return captured.ToArray();
+                var body = captured.ToArray();
+                return new(body, body.Length);
             }
 
             await captured.WriteAsync(
@@ -375,8 +380,12 @@ internal sealed class ActionHostGitObjectTransport :
                 cancellationToken);
         }
 
-        return null;
+        return new(null, checked((int)captured.Length));
     }
+
+    private readonly record struct BoundedResponse(
+        byte[]? Body,
+        int CapturedResponseBytes);
 
     private static bool IsNonFatal(Exception exception) =>
         exception is HttpRequestException or IOException or

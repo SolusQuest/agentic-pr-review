@@ -9,6 +9,7 @@ namespace AgenticPrReview.Runtime.Agent.Tools;
 internal sealed class ReviewedSnapshot
 {
     private readonly ImmutableHashSet<string> _trackedFiles;
+    private readonly ImmutableHashSet<string> _reviewedHeadPaths;
     private readonly ImmutableHashSet<string> _changedFiles;
 
     internal ReviewedSnapshot(
@@ -23,6 +24,23 @@ internal sealed class ReviewedSnapshot
         ReviewedIdentity identity,
         string absoluteRoot,
         IEnumerable<string> trackedFiles,
+        IEnumerable<ReviewedChangedFile> changedFiles,
+        IEnumerable<ReviewedDiffSource> diffSources)
+        : this(
+            identity,
+            absoluteRoot,
+            trackedFiles,
+            null,
+            changedFiles,
+            diffSources)
+    {
+    }
+
+    internal ReviewedSnapshot(
+        ReviewedIdentity identity,
+        string absoluteRoot,
+        IEnumerable<string> trackedFiles,
+        IEnumerable<string>? reviewedHeadPaths,
         IEnumerable<ReviewedChangedFile> changedFiles,
         IEnumerable<ReviewedDiffSource> diffSources)
     {
@@ -72,6 +90,45 @@ internal sealed class ReviewedSnapshot
         }
 
         var trackedSet = builder.ToImmutable();
+        var reviewedHeadSet = trackedSet;
+        if (reviewedHeadPaths is not null)
+        {
+            builder.Clear();
+            var reviewedHeadPathCount = 0;
+            long reviewedHeadMetadataBytes = 0;
+            foreach (var reviewedHeadPath in reviewedHeadPaths)
+            {
+                reviewedHeadPathCount = checked(reviewedHeadPathCount + 1);
+                if (reviewedHeadPathCount > AgentLimits.TrackedFiles ||
+                    !RepositoryPath.IsValid(reviewedHeadPath))
+                {
+                    throw new ArgumentException(
+                        "Reviewed-head path set is invalid.",
+                        nameof(reviewedHeadPaths));
+                }
+
+                reviewedHeadMetadataBytes = checked(
+                    reviewedHeadMetadataBytes +
+                    strictUtf8.GetByteCount(reviewedHeadPath));
+                if (reviewedHeadMetadataBytes >
+                    AgentLimits.TrackedFilesMetadataBytes ||
+                    !builder.Add(reviewedHeadPath))
+                {
+                    throw new ArgumentException(
+                        "Reviewed-head path set is invalid.",
+                        nameof(reviewedHeadPaths));
+                }
+            }
+
+            reviewedHeadSet = builder.ToImmutable();
+            if (!trackedSet.IsSubsetOf(reviewedHeadSet))
+            {
+                throw new ArgumentException(
+                    "Tracked files must be reviewed-head paths.",
+                    nameof(reviewedHeadPaths));
+            }
+        }
+
         var changedByPath = new Dictionary<string, ReviewedChangedFile>(
             StringComparer.Ordinal);
         var changedFileCount = 0;
@@ -89,7 +146,7 @@ internal sealed class ReviewedSnapshot
             if (!ReviewedChangedFileValidation.IsShapeValid(changedFile) ||
                 !ReviewedChangedFileValidation.MembershipIsValid(
                     changedFile,
-                    trackedSet) ||
+                    reviewedHeadSet) ||
                 !changedByPath.TryAdd(changedFile.Path, changedFile))
             {
                 throw new ArgumentException(
@@ -179,7 +236,11 @@ internal sealed class ReviewedSnapshot
         Identity = identity;
         AbsoluteRoot = Path.TrimEndingDirectorySeparator(root);
         _trackedFiles = trackedSet;
+        _reviewedHeadPaths = reviewedHeadSet;
         OrderedTrackedFiles = _trackedFiles.Order(StringComparer.Ordinal).ToImmutableArray();
+        OrderedReviewedHeadPaths = _reviewedHeadPaths
+            .Order(StringComparer.Ordinal)
+            .ToImmutableArray();
         OrderedChangedFiles = changedByPath.Values
             .OrderBy(change => change.Path, StringComparer.Ordinal)
             .ToImmutableArray();
@@ -194,6 +255,8 @@ internal sealed class ReviewedSnapshot
     internal string AbsoluteRoot { get; }
 
     internal ImmutableArray<string> OrderedTrackedFiles { get; }
+
+    internal ImmutableArray<string> OrderedReviewedHeadPaths { get; }
 
     internal ImmutableArray<ReviewedChangedFile> OrderedChangedFiles { get; }
 

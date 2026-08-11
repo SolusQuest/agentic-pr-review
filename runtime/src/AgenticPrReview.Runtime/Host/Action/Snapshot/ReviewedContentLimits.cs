@@ -10,8 +10,14 @@ internal static class ReviewedContentLimits
     internal const int TreeDepth = 64;
     internal const int UniqueTreeAndBlobObjects = 4_000;
     internal const int GitObjectRequests = 4_096;
+    internal const int ChangedFilesPerPage = 100;
+    internal const int ChangedFiles = 200;
     internal const long HeadBlobBytes = 1024L * 1024;
     internal const long AggregateHeadBlobBytes = 256L * 1024 * 1024;
+    internal const long BaseBlobBytes = 1024L * 1024;
+    internal const long AggregateBaseBlobBytes = 64L * 1024 * 1024;
+    internal const long MaterializedRootBytes = 256L * 1024 * 1024;
+    internal const int StreamBufferBytes = 64 * 1024;
     internal const long GitObjectResponseBytes = 2L * 1024 * 1024;
     internal const long AggregateResponseBytes = 512L * 1024 * 1024;
     internal static readonly TimeSpan AcquisitionAndMaterializationTimeout =
