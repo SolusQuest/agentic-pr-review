@@ -1065,8 +1065,7 @@ internal sealed class ReviewedExactDiffBuilder
         CancellationToken cancellationToken)
     {
         if (file.Patch is null ||
-            file.PatchIncomplete ||
-            !file.Patch.EndsWith('\n'))
+            file.PatchIncomplete)
         {
             return PatchEvidence.NotAvailableOrIncomplete;
         }

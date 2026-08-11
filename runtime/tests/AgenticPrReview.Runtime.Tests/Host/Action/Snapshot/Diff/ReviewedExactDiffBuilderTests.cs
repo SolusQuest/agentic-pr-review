@@ -443,7 +443,7 @@ public sealed class ReviewedExactDiffBuilderTests
             invocation,
             parent,
             Regular("truncated.txt", actual),
-            Regular("terminal-truncated.txt", partial),
+            Regular("transport-consistent.txt", partial),
             Regular("malformed.txt", actual),
             Regular("overflow.txt", actual),
             Regular("consistent.txt", actual),
@@ -480,11 +480,11 @@ public sealed class ReviewedExactDiffBuilderTests
                     additions: 1,
                     patch: "@@ -0,0 +1,2 @@\n+actual"),
                 Fact(
-                    "terminal-truncated.txt",
+                    "transport-consistent.txt",
                     partial,
                     "added",
                     additions: 1,
-                    patch: "@@ -0,0 +1 @@\n+part"),
+                    patch: "@@ -0,0 +1 @@\n+partial"),
                 Fact(
                     "malformed.txt",
                     actual,
@@ -532,7 +532,7 @@ public sealed class ReviewedExactDiffBuilderTests
                     actual,
                     "added",
                     additions: 1,
-                    patch: "@@ -0,0 +1 @@\n+different\n\\ No newline at end of file\n"),
+                    patch: "@@ -0,0 +1 @@\n+different\n\\ No newline at end of file"),
                 Fact(
                     "true-no-newline.txt",
                     unterminated,
@@ -544,13 +544,13 @@ public sealed class ReviewedExactDiffBuilderTests
                     removed,
                     "removed",
                     deletions: 1,
-                    patch: "@@ -1 +0,0 @@\n-different\n\\ No newline at end of file\n"),
+                    patch: "@@ -1 +0,0 @@\n-different\n\\ No newline at end of file"),
                 Fact(
                     "contradictory.txt",
                     actual,
                     "added",
                     additions: 1,
-                    patch: "@@ -0,0 +1 @@\n+different\n"),
+                    patch: "@@ -0,0 +1 @@\n+different"),
             }.ToImmutableArray();
 
             var result = await new ReviewedExactDiffBuilder(tree.Budget)
@@ -571,7 +571,7 @@ public sealed class ReviewedExactDiffBuilderTests
             Assert.Equal(
                 "available",
                 built.Changes.Single(change =>
-                    change.Change.Path == "terminal-truncated.txt")
+                    change.Change.Path == "transport-consistent.txt")
                     .Change.PatchStatus);
             Assert.Equal(
                 "available",
