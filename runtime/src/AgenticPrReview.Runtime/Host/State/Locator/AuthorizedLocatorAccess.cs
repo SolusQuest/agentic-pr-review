@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using AgenticPrReview.Runtime.Host.State.Restore;
 
 namespace AgenticPrReview.Runtime.Host.State.Locator;
 
@@ -20,6 +21,13 @@ internal sealed class AuthorizedLocatorAccess : IDisposable
         this.repositoryId = repositoryId;
         identity = RandomNumberGenerator.GetBytes(LocatorRootFormat.KeyBytes);
     }
+
+    internal static AuthorizedLocatorAccess? Issue(
+        AcceptedStateProductionAuthorization authorization,
+        string repositoryId) =>
+        authorization is not null && authorization.AllowsLocator(repositoryId)
+            ? new AuthorizedLocatorAccess(repositoryId)
+            : null;
 
     internal bool Allows(
         AuthorizedLocatorAccess? candidate,

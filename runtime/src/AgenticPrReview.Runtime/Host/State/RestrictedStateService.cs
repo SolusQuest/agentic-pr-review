@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Security.Cryptography;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
+using AgenticPrReview.Runtime.Host.State.Restore;
 using AgenticPrReview.Runtime.Host.State.RestrictedStateTransactions;
 using OpaqueStateStore =
     AgenticPrReview.Runtime.Host.State.OpaqueStore.IRestrictedStateStore;
@@ -27,6 +28,14 @@ internal sealed class RestrictedStateService
         this.sessionAdmission = sessionAdmission;
         this.unixTimeSeconds = unixTimeSeconds;
     }
+
+    internal static Task<AuthorizedAcceptedStateRestoreResult>
+        RestoreAuthorizedArtifactStateAsync(
+            ArtifactStateRestoreRequest request,
+            CancellationToken cancellationToken) =>
+        new AuthorizedAcceptedStateComposer().RestoreAsync(
+            request,
+            cancellationToken);
 
     internal RestrictedStateService(
         RestrictedStateOpaqueSnapshotStore snapshotStore,

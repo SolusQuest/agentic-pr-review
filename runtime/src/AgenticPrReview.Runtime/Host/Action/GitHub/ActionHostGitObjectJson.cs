@@ -14,6 +14,9 @@ internal sealed class ActionHostGitCommitDocument
     [JsonRequired]
     [JsonPropertyName("tree")]
     public ActionHostGitObjectIdentityDocument? Tree { get; set; }
+
+    [JsonPropertyName("parents")]
+    public ActionHostGitObjectIdentityDocument[]? Parents { get; set; }
 }
 
 internal sealed class ActionHostGitObjectIdentityDocument
@@ -86,6 +89,7 @@ internal sealed class ActionHostGitBlobDocument
     MaxDepth = 32)]
 [JsonSerializable(typeof(ActionHostGitCommitDocument))]
 [JsonSerializable(typeof(ActionHostGitObjectIdentityDocument))]
+[JsonSerializable(typeof(ActionHostGitObjectIdentityDocument[]))]
 [JsonSerializable(typeof(ActionHostGitTreeDocument))]
 [JsonSerializable(typeof(ActionHostGitTreeEntryDocument))]
 [JsonSerializable(typeof(ActionHostGitTreeEntryDocument[]))]
@@ -96,6 +100,7 @@ internal sealed partial class ActionHostGitObjectJsonContext :
 internal static class ActionHostGitObjectMapper
 {
     private const int MaximumSharedTreeEntries = 20_000;
+    private const int MaximumCommitParents = 64;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
     internal static bool TryMap(
@@ -112,7 +117,33 @@ internal static class ActionHostGitObjectMapper
             return false;
         }
 
-        value = new(document.Sha!, document.Tree.Sha!);
+        IReadOnlyList<string>? parents = null;
+        if (document.Parents is not null)
+        {
+            if (document.Parents.Length > MaximumCommitParents)
+            {
+                return false;
+            }
+
+            var parentShas = new List<string>(document.Parents.Length);
+            var unique = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var parent in document.Parents)
+            {
+                if (parent is null ||
+                    !IsSha(parent.Sha) ||
+                    StringComparer.Ordinal.Equals(parent.Sha, document.Sha) ||
+                    !unique.Add(parent.Sha!))
+                {
+                    return false;
+                }
+
+                parentShas.Add(parent.Sha!);
+            }
+
+            parents = parentShas;
+        }
+
+        value = new(document.Sha!, document.Tree.Sha!, parents);
         return true;
     }
 

@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Security.Cryptography;
 using AgenticPrReview.Runtime.Host.State.Locator;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
+using AgenticPrReview.Runtime.Host.State.Restore;
 
 namespace AgenticPrReview.Runtime.Host.State.Lineage;
 
@@ -20,6 +21,258 @@ internal sealed class LineageService
         inventory = new ScopedStateInventory(store);
         uploads = new ScopedStateUploadProtocol(store);
         this.timeProvider = timeProvider ?? TimeProvider.System;
+    }
+
+    internal async Task<LineageReadOnlyObservationResult> ObserveReadOnlyAsync(
+        LocatorContext context,
+        LineageResolveRequest? request,
+        CancellationToken cancellationToken)
+    {
+        if (context is null ||
+            request is null ||
+            !LineageValidation.IsValid(request.BaseScope) ||
+            !LineageValidation.IsValid(request.Reviewed) ||
+            !LineageValidation.IsText(
+                request.ProducingRunIdentity,
+                LineageFormat.MaximumRunIdentityBytes) ||
+            request.ProducingRunAttempt < 0 ||
+            !request.Access.TryGetRepositoryId(
+                request.Access,
+                out var repositoryId) ||
+            !StringComparer.Ordinal.Equals(
+                repositoryId,
+                request.BaseScope.RepositoryId))
+        {
+            return LineageReadOnlyObservationResult.Fail(
+                LineageCodes.AccessDenied);
+        }
+
+        var now = timeProvider.GetUtcNow().ToUnixTimeSeconds();
+        if (!LineageValidation.IsTime(now) ||
+            request.RequiredLogicalExpiresAtUnixSeconds < now ||
+            !TryRequiredPlatformExpiry(
+                now,
+                request.RequiredLogicalExpiresAtUnixSeconds,
+                out var requiredPlatformExpiry) ||
+            !context.CoversDependentExpiry(
+                request.Access,
+                requiredPlatformExpiry) ||
+            !LineageBaseScopeCodec.TryDigest(
+                request.BaseScope,
+                out var baseScopeDigest) ||
+            !TryGetCurrentKeyId(
+                context,
+                request.Access,
+                out var currentKeyId))
+        {
+            return LineageReadOnlyObservationResult.Fail(
+                LineageCodes.RetentionFailed);
+        }
+
+        ScopedStateInventorySnapshot? snapshot = null;
+        try
+        {
+            var read = await inventory.ReadAsync(
+                    context,
+                    request.Access,
+                    request.BaseScope,
+                    baseScopeDigest,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (!read.Succeeded)
+            {
+                return LineageReadOnlyObservationResult.Fail(read.Code);
+            }
+
+            snapshot = read.Snapshot!;
+            var lineageName = snapshot.Names[StateObjectClass.LineageHead];
+            var heads = ImmutableArray.CreateBuilder<LineageHeadCandidate>();
+            foreach (var item in snapshot.Authenticated.Where(item =>
+                item.Header.ObjectClass == StateObjectClass.LineageHead))
+            {
+                if (!LineageHeadCodec.TryDecode(item.Payload, out var head) ||
+                    head is null ||
+                    !ValidateDerivedHead(
+                        context,
+                        request.Access,
+                        baseScopeDigest,
+                        item.Header,
+                        head))
+                {
+                    return LineageReadOnlyObservationResult.Fail(
+                        LineageCodes.AuthenticationFailed);
+                }
+
+                heads.Add(new LineageHeadCandidate(
+                    item.Metadata,
+                    item.Header,
+                    head));
+            }
+
+            if (snapshot.UnderRetained.Any(item =>
+                item.Header.ObjectClass == StateObjectClass.LineageHead))
+            {
+                return LineageReadOnlyObservationResult.Fail(
+                    LineageCodes.RetentionFailed);
+            }
+
+            var unknownHeads = snapshot.Unknown.Where(item =>
+                    item.Metadata.Reference.Name == lineageName)
+                .ToImmutableArray();
+            var authenticatedHeads = heads.ToImmutable();
+            var selection = LineageHeadSelector.Select(
+                authenticatedHeads,
+                unknownHeads,
+                authenticatedHeads.Length + unknownHeads.Length,
+                currentKeyId,
+                request.RequiredLogicalExpiresAtUnixSeconds,
+                requiredPlatformExpiry);
+            if (!selection.Succeeded)
+            {
+                return LineageReadOnlyObservationResult.Fail(selection.Code);
+            }
+
+            var evidence = snapshot.Authenticated
+                .Concat(snapshot.UnderRetained)
+                .Select(item => LineageHeadCodec.Evidence(item.Metadata))
+                .Concat(snapshot.Unknown.Select(item =>
+                    LineageHeadCodec.Evidence(item.Metadata)))
+                .ToImmutableArray();
+            var contextResult = new LineageReadOnlyObservationContext(
+                snapshot,
+                selection,
+                baseScopeDigest,
+                currentKeyId,
+                LineageCryptography.InventoryDigest(evidence),
+                requiredPlatformExpiry);
+            snapshot = null;
+            return LineageReadOnlyObservationResult.Success(contextResult);
+        }
+        catch (OperationCanceledException)
+        {
+            return LineageReadOnlyObservationResult.Fail(
+                LineageCodes.Unavailable);
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or
+                InvalidOperationException or
+                OverflowException or
+                CryptographicException)
+        {
+            return LineageReadOnlyObservationResult.Fail(
+                LineageCodes.Unavailable);
+        }
+        finally
+        {
+            ScopedStateInventory.Clear(snapshot);
+        }
+    }
+
+    internal async Task<LineageResolveResult> InitializeAuthorizedAsync(
+        LocatorContext context,
+        LineageResolveRequest request,
+        AcceptedStateSelector.AuthorizedInitialLineageAbsence authority,
+        CancellationToken cancellationToken)
+    {
+        if (authority is null)
+        {
+            return LineageResolveResult.Fail(LineageCodes.AccessDenied);
+        }
+
+        var read = await ObserveReadOnlyAsync(
+                context,
+                request,
+                cancellationToken)
+            .ConfigureAwait(false);
+        using var observation = read.Context;
+        if (!read.Succeeded ||
+            observation is null ||
+            !authority.Allows(request.Access, request, observation))
+        {
+            return LineageResolveResult.Fail(
+                read.Succeeded ? LineageCodes.Conflict : read.Code);
+        }
+
+        var now = timeProvider.GetUtcNow().ToUnixTimeSeconds();
+        if (!LineageValidation.IsTime(now) ||
+            now > request.RequiredLogicalExpiresAtUnixSeconds)
+        {
+            return LineageResolveResult.Fail(LineageCodes.RetentionFailed);
+        }
+
+        return await InitializeAsync(
+                context,
+                request,
+                observation.BaseScopeDigest,
+                observation.CurrentKeyId,
+                now,
+                observation.RequiredPlatformExpiresAtUnixSeconds,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    internal async Task<LineageResolveResult> ExpireAuthorizedAsync(
+        LocatorContext context,
+        LineageResolveRequest request,
+        AcceptedStateSelector.AuthorizedAcceptedStateExpiry authority,
+        CancellationToken cancellationToken)
+    {
+        if (authority is null)
+        {
+            return LineageResolveResult.Fail(LineageCodes.AccessDenied);
+        }
+
+        var read = await ObserveReadOnlyAsync(
+                context,
+                request,
+                cancellationToken)
+            .ConfigureAwait(false);
+        using var observation = read.Context;
+        if (!read.Succeeded ||
+            observation is null ||
+            !authority.Allows(request.Access, request, observation) ||
+            observation.Selection.Selection is not { } selection)
+        {
+            return LineageResolveResult.Fail(
+                read.Succeeded ? LineageCodes.Conflict : read.Code);
+        }
+
+        var now = timeProvider.GetUtcNow().ToUnixTimeSeconds();
+        if (!LineageValidation.IsTime(now) ||
+            authority.LogicalExpiresAtUnixSeconds > now)
+        {
+            return LineageResolveResult.Fail(LineageCodes.Conflict);
+        }
+
+        var snapshot = observation.DetachSnapshot();
+        if (snapshot is null)
+        {
+            return LineageResolveResult.Fail(LineageCodes.Conflict);
+        }
+
+        var owned = ObservationResult.Success(
+            snapshot,
+            observation.Selection);
+        try
+        {
+            return await StartTransitionAsync(
+                    context,
+                    request,
+                    observation.BaseScopeDigest,
+                    observation.CurrentKeyId,
+                    now,
+                    observation.RequiredPlatformExpiresAtUnixSeconds,
+                    owned,
+                    LineageTransitionIntentKind.Expiry,
+                    authority.TerminalReceiptIdentity,
+                    authority.LogicalExpiresAtUnixSeconds,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            ClearObservation(owned);
+        }
     }
 
     internal async Task<LineageResolveResult> ResolveAsync(

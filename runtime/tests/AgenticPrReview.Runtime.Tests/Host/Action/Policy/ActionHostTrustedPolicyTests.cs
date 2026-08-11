@@ -681,7 +681,7 @@ public sealed class ActionHostTrustedPolicyTests
         return (request!, scenario);
     }
 
-    private static byte[] Config(
+    internal static byte[] Config(
         string mode,
         string? inlineSeverity,
         string instructionsPath =
@@ -752,7 +752,7 @@ public sealed class ActionHostTrustedPolicyTests
         return clone!;
     }
 
-    private sealed class ScriptedObjectTransport :
+    internal sealed class ScriptedObjectTransport :
         IActionHostGitObjectTransport
     {
         internal static readonly string RootTree = new('1', 40);

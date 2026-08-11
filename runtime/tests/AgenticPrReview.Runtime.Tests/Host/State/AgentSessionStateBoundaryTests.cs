@@ -486,11 +486,14 @@ public sealed class AgentSessionStateBoundaryTests
         }
     }
 
-    private static async Task<SessionFixture> BuildSessionAsync()
+    internal static async Task<SessionFixture> BuildSessionAsync(
+        string repositoryId = "repo",
+        long reviewTarget = 1,
+        string sessionId = "session_0")
     {
         var trusted = new AgentSessionTrustedRequest(
-            "repo",
-            1,
+            repositoryId,
+            reviewTarget,
             "workflow",
             "trusted policy"u8.ToArray(),
             "build",
@@ -502,18 +505,18 @@ public sealed class AgentSessionStateBoundaryTests
             priorSessionSha256: null,
             out var materialized));
         var identity = new ReviewedIdentity(
-            "repo",
-            1,
+            repositoryId,
+            reviewTarget,
             new string('4', 40),
             new string('5', 40));
         var user = User("synthetic review context");
         var run = new AgentRunRequest(
             identity,
             materialized!.StablePlan,
-            "session_0",
+            sessionId,
             [.. materialized.ControlMessages, user]);
         var loop = new AgentLoop(
-            new TerminalChatClient(),
+            new TerminalChatClient(sessionId),
             new NeverToolExecutor());
         var outcome = await loop.RunAsync(
             run,
@@ -591,12 +594,13 @@ public sealed class AgentSessionStateBoundaryTests
             ],
         };
 
-    private sealed record SessionFixture(
+    internal sealed record SessionFixture(
         AgentSessionArtifact Artifact,
         AgentSessionTrustedRequest Trusted,
         ReviewedIdentity Identity);
 
-    private sealed class TerminalChatClient : IProjectChatClient
+    private sealed class TerminalChatClient(string sessionId)
+        : IProjectChatClient
     {
         public Task<ProjectChatResponse> GetResponseAsync(
             ProjectChatRequest request,
@@ -624,7 +628,7 @@ public sealed class AgentSessionStateBoundaryTests
                         DeepSeekAdapterContext.Provider,
                         DeepSeekAdapterContext.Model,
                         DeepSeekAdapterContext.Adapter,
-                        "session_0",
+                        sessionId,
                         [
                             new ProjectContinuationItem(
                                 "state reasoning",

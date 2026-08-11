@@ -21,7 +21,9 @@ internal static class StateControlEnvelopeV1Codec
         code = LineageCodes.Invalid;
         if (!OpaqueStoreValidation.IsValid(name) ||
             !LineageValidation.IsValid(draft) ||
-            payload.Length > LineageFormat.MaximumPayloadBytes)
+            !LineageFormat.IsPayloadLengthAllowed(
+                draft.ObjectClass,
+                payload.Length))
         {
             return false;
         }
@@ -171,7 +173,7 @@ internal static class StateControlEnvelopeV1Codec
                     LineageFormat.MaximumHeaderBytes,
                     out var headerBytes) ||
                 !plaintextReader.TryReadBytes(
-                    LineageFormat.MaximumPayloadBytes,
+                    LineageFormat.MaximumReaderPayloadBytes,
                     out payload) ||
                 !plaintextReader.IsComplete)
             {
