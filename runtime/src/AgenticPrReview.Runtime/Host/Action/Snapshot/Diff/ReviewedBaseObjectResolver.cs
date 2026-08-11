@@ -9,6 +9,7 @@ internal enum ReviewedBaseOperandKind
     Symlink,
     Submodule,
     Missing,
+    OverBound,
 }
 
 internal sealed record ReviewedBaseOperand(
@@ -107,6 +108,19 @@ internal sealed class ReviewedBaseObjectResolver
                 new(path, ReviewedBaseOperandKind.Missing, null, 0, null));
         }
 
+        if (selected.Mode is "100644" or "100755" &&
+            selected.Type == "blob" &&
+            selected.Size is > ReviewedContentLimits.BaseBlobBytes)
+        {
+            return ReviewedSnapshotReadResult<ReviewedBaseOperand>.Success(
+                new(
+                    path,
+                    ReviewedBaseOperandKind.OverBound,
+                    selected.Sha,
+                    selected.Size.Value,
+                    null));
+        }
+
         var size = selected.Size ?? 0;
         if (!_logicalMeter.TryAdd(size))
         {
@@ -143,12 +157,6 @@ internal sealed class ReviewedBaseObjectResolver
         {
             return ReviewedSnapshotReadResult<ReviewedBaseOperand>.Failed(
                 ReviewedSnapshotReadFailure.InvalidResponse);
-        }
-
-        if (selected.Size > ReviewedContentLimits.BaseBlobBytes)
-        {
-            return ReviewedSnapshotReadResult<ReviewedBaseOperand>.Failed(
-                ReviewedSnapshotReadFailure.UnsupportedSize);
         }
 
         if (!_blobs.TryGetValue(selected.Sha, out var blob))

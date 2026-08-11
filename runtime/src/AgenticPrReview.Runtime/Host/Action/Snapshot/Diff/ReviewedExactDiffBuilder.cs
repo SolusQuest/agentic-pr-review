@@ -17,6 +17,7 @@ internal enum ReviewedUnavailableReason
     NonText,
     NonRegular,
     Missing,
+    OverBound,
     LineTooLong,
     PatchContradiction,
 }
@@ -332,6 +333,12 @@ internal sealed class ReviewedExactDiffBuilder
                 ReviewedBaseOperandKind.Missing)
         {
             return ReviewedUnavailableReason.Missing;
+        }
+
+        if (file.Status != "added" && historical?.Kind is
+                ReviewedBaseOperandKind.OverBound)
+        {
+            return ReviewedUnavailableReason.OverBound;
         }
 
         return ReviewedUnavailableReason.None;

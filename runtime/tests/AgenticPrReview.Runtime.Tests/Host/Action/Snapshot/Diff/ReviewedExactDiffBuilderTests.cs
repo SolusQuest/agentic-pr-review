@@ -1026,7 +1026,7 @@ public sealed class ReviewedExactDiffBuilderTests
     }
 
     [Fact]
-    public async Task BaseBlobCapPlusOneIsRejectedBeforeTransportRead()
+    public async Task BaseBlobCapPlusOneIsClassifiedBeforeTransportRead()
     {
         var parent = H5SnapshotTestSupport.TemporaryDirectory();
         var baseRoot = new string('f', 40);
@@ -1060,16 +1060,90 @@ public sealed class ReviewedExactDiffBuilderTests
                 "oversized.bin",
                 CancellationToken.None);
 
-            Assert.Null(result.Value);
-            Assert.Equal(
-                ReviewedSnapshotReadFailure.UnsupportedSize,
-                result.Failure);
+            var operand = Assert.IsType<ReviewedBaseOperand>(result.Value);
+            Assert.Equal(ReviewedSnapshotReadFailure.None, result.Failure);
+            Assert.Equal(ReviewedBaseOperandKind.OverBound, operand.Kind);
+            Assert.Equal(ReviewedContentLimits.BaseBlobBytes + 1, operand.Size);
+            Assert.Null(operand.Blob);
             Assert.Equal(0, transport.StageCalls);
+            Assert.Equal(0, resolver.LogicalBytes);
         }
         finally
         {
             budget.Invalidate();
             staging?.Dispose();
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task OversizedRemovedBaseDoesNotBlockOtherChanges()
+    {
+        var invocation = await H5SnapshotTestSupport.AuthorizedInvocation();
+        var parent = H5SnapshotTestSupport.TemporaryDirectory();
+        var oversized = new byte[
+            checked((int)ReviewedContentLimits.BaseBlobBytes + 1)];
+        var regularBase = "old\n"u8.ToArray();
+        var regularHead = "new\n"u8.ToArray();
+        var tree = await H5SnapshotTestSupport.TreeAsync(
+            invocation,
+            parent,
+            Regular("regular.txt", regularHead));
+        var transport = new ScriptedTransport(
+            invocation.PullRequest.BaseSha,
+            new string('e', 40),
+            [
+                BaseEntry("oversized.bin", oversized),
+                BaseEntry("regular.txt", regularBase),
+            ],
+            [regularBase]);
+        using var staging = ReviewedBaseBlobStagingLease.TryCreate(
+            parent,
+            tree.Budget);
+        Assert.NotNull(staging);
+        try
+        {
+            var resolver = new ReviewedBaseObjectResolver(transport, staging!);
+            Assert.Equal(
+                ReviewedSnapshotReadFailure.None,
+                await resolver.InitializeAsync(CancellationToken.None));
+            var facts = new[]
+            {
+                Fact("oversized.bin", oversized, "removed", deletions: 1),
+                Fact("regular.txt", regularHead, "modified", additions: 1),
+            }.ToImmutableArray();
+
+            var result = await new ReviewedExactDiffBuilder(tree.Budget)
+                .BuildAsync(
+                    Identity(invocation),
+                    new ReviewedChangedFileSet(
+                        facts,
+                        ReviewedChangedFileIdentityWriter.Write(facts)),
+                    tree,
+                    resolver,
+                    CancellationToken.None);
+
+            var built = Assert.IsType<ReviewedDiffBuildSet>(result.Value);
+            Assert.Equal(ReviewedSnapshotReadFailure.None, result.Failure);
+            var oversizedChange = built.Changes.Single(
+                static item => item.Change.Path == "oversized.bin");
+            Assert.Equal("unavailable", oversizedChange.Change.PatchStatus);
+            Assert.Equal(
+                ReviewedUnavailableReason.OverBound,
+                oversizedChange.UnavailableReason);
+            Assert.Null(oversizedChange.Source);
+            Assert.Equal(
+                "available",
+                built.Changes.Single(
+                    static item => item.Change.Path == "regular.txt")
+                    .Change.PatchStatus);
+            Assert.Equal(1, transport.StageCalls);
+            Assert.Equal(regularBase.LongLength, resolver.LogicalBytes);
+        }
+        finally
+        {
+            staging?.Dispose();
+            await tree.DisposeAsync();
             Directory.Delete(parent, recursive: true);
         }
     }
