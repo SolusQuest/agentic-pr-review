@@ -352,7 +352,7 @@ internal sealed class LineageService
         // readback. The intended authenticated identity is not authority by
         // itself; a complete fresh observation below must discover and select
         // that identity before any context is returned.
-        return await ConvergeExpectedHeadAsync(
+        return await ConvergeOrdinaryExpectedHeadAsync(
                 context,
                 request,
                 baseScopeDigest,
@@ -384,7 +384,7 @@ internal sealed class LineageService
                 requiredPlatformExpiry &&
             head.Metadata.ExpiresAtUnixSeconds >= requiredPlatformExpiry)
         {
-            return await ConvergeExpectedHeadAsync(
+            return await ConvergeOrdinaryExpectedHeadAsync(
                     context,
                     request,
                     baseScopeDigest,
@@ -436,7 +436,7 @@ internal sealed class LineageService
             return LineageResolveResult.Fail(written.Code);
         }
 
-        return await ConvergeExpectedHeadAsync(
+        return await ConvergeOrdinaryExpectedHeadAsync(
                 context,
                 request,
                 baseScopeDigest,
@@ -962,15 +962,14 @@ internal sealed class LineageService
                     currentKeyId,
                     written.Header!,
                     requiredPlatformExpiry,
+                    ExpectedHeadConvergenceMode.TransitionSuccessor,
                     CancellationToken.None)
                 .ConfigureAwait(false);
             if (!result.Succeeded)
             {
-                result.Context?.Dispose();
-                return result;
+                return LineageResolveResult.Fail(result.Code);
             }
 
-            result.Context!.Dispose();
             return await CompleteTransitionAsync(
                     context,
                     request,
@@ -1557,13 +1556,39 @@ internal sealed class LineageService
         return false;
     }
 
-    private async Task<LineageResolveResult> ConvergeExpectedHeadAsync(
+    private async Task<LineageResolveResult>
+        ConvergeOrdinaryExpectedHeadAsync(
+            LocatorContext context,
+            LineageResolveRequest request,
+            string baseScopeDigest,
+            string currentKeyId,
+            StateControlHeaderV1 expected,
+            long requiredPlatformExpiry,
+            CancellationToken cancellationToken)
+    {
+        var converged = await ConvergeExpectedHeadAsync(
+                context,
+                request,
+                baseScopeDigest,
+                currentKeyId,
+                expected,
+                requiredPlatformExpiry,
+                ExpectedHeadConvergenceMode.Ordinary,
+                cancellationToken)
+            .ConfigureAwait(false);
+        return converged.Succeeded
+            ? FinalizeSelected(request, converged.Head!)
+            : LineageResolveResult.Fail(converged.Code);
+    }
+
+    private async Task<HeadConvergenceResult> ConvergeExpectedHeadAsync(
         LocatorContext context,
         LineageResolveRequest request,
         string baseScopeDigest,
         string currentKeyId,
         StateControlHeaderV1 expected,
         long requiredPlatformExpiry,
+        ExpectedHeadConvergenceMode mode,
         CancellationToken cancellationToken)
     {
         var cleanupPending = false;
@@ -1592,7 +1617,7 @@ internal sealed class LineageService
                         continue;
                     }
 
-                    return LineageResolveResult.Fail(observed.Code);
+                    return HeadConvergenceResult.Fail(observed.Code);
                 }
 
                 if (observed.Selection!.IsAbsent)
@@ -1614,7 +1639,7 @@ internal sealed class LineageService
                         continue;
                     }
 
-                    return LineageResolveResult.Fail(LineageCodes.Conflict);
+                    return HeadConvergenceResult.Fail(LineageCodes.Conflict);
                 }
 
                 var selectedHead = observed.Selection.Selection.Head;
@@ -1636,16 +1661,31 @@ internal sealed class LineageService
                 var selection = observed.Selection.Selection;
                 if (selection.SafeToDelete.IsEmpty)
                 {
-                    var finalized = await FinalizeAsync(
-                            request,
-                            selection.Head)
-                        .ConfigureAwait(false);
-                    if (finalized.Succeeded ||
-                        !StringComparer.Ordinal.Equals(
-                            finalized.Code,
-                            LineageCodes.Unavailable))
+                    if (mode == ExpectedHeadConvergenceMode.Ordinary)
                     {
-                        return finalized;
+                        if (!observed.Snapshot!.UnderRetained.IsEmpty)
+                        {
+                            return HeadConvergenceResult.Fail(
+                                LineageCodes.RetentionFailed);
+                        }
+
+                        if (!ValidateActiveState(
+                                observed.Snapshot,
+                                selection.Head) ||
+                            observed.Snapshot.Unknown.Any(item =>
+                                item.Metadata.Reference.Name !=
+                                    observed.Snapshot.Names[
+                                        StateObjectClass.LineageHead]))
+                        {
+                            return HeadConvergenceResult.Fail(
+                                LineageCodes.Conflict);
+                        }
+                    }
+
+                    if (await ReadBackHeadAsync(selection.Head)
+                        .ConfigureAwait(false))
+                    {
+                        return HeadConvergenceResult.Success(selection.Head);
                     }
 
                     continue;
@@ -1673,7 +1713,7 @@ internal sealed class LineageService
             }
         }
 
-        return LineageResolveResult.Fail(cleanupPending
+        return HeadConvergenceResult.Fail(cleanupPending
             ? LineageCodes.CleanupFailed
             : LineageCodes.Unavailable);
     }
@@ -1682,16 +1722,27 @@ internal sealed class LineageService
         LineageResolveRequest request,
         LineageHeadCandidate head)
     {
-        var readBack = await store.ReadBackExactAsync(
-                new OpaqueStoreReadBackRequest(head.Metadata),
-                CancellationToken.None)
-            .ConfigureAwait(false);
-        if (!readBack.Succeeded || readBack.Metadata != head.Metadata)
+        if (!await ReadBackHeadAsync(head).ConfigureAwait(false))
         {
             return LineageResolveResult.Fail(LineageCodes.Unavailable);
         }
 
-        return LineageResolveResult.Success(new SelectedLineageContext(
+        return FinalizeSelected(request, head);
+    }
+
+    private async Task<bool> ReadBackHeadAsync(LineageHeadCandidate head)
+    {
+        var readBack = await store.ReadBackExactAsync(
+                new OpaqueStoreReadBackRequest(head.Metadata),
+                CancellationToken.None)
+            .ConfigureAwait(false);
+        return readBack.Succeeded && readBack.Metadata == head.Metadata;
+    }
+
+    private static LineageResolveResult FinalizeSelected(
+        LineageResolveRequest request,
+        LineageHeadCandidate head) =>
+        LineageResolveResult.Success(new SelectedLineageContext(
             request.Access,
             request.BaseScope.RepositoryId,
             new SelectedLineageSnapshot(
@@ -1700,7 +1751,6 @@ internal sealed class LineageService
                 head.Header.SessionId,
                 head.Header.ObjectIdentity,
                 head.Head.Transition)));
-    }
 
     private async Task<WrittenObjectResult> WriteHeadAsync(
         LocatorContext context,
@@ -2591,6 +2641,28 @@ internal sealed class LineageService
             observed.Snapshot = null;
             observed.Selection = null;
         }
+    }
+
+    private enum ExpectedHeadConvergenceMode
+    {
+        Ordinary,
+        TransitionSuccessor,
+    }
+
+    private sealed record HeadConvergenceResult(
+        string Code,
+        LineageHeadCandidate? Head)
+    {
+        internal bool Succeeded =>
+            StringComparer.Ordinal.Equals(Code, LineageCodes.Ready) &&
+            Head is not null;
+
+        internal static HeadConvergenceResult Success(
+            LineageHeadCandidate head) =>
+            new(LineageCodes.Ready, head);
+
+        internal static HeadConvergenceResult Fail(string code) =>
+            new(code, null);
     }
 
     private sealed record WrittenObjectResult(
