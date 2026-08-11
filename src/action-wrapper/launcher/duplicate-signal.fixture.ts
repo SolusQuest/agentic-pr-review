@@ -1,0 +1,43 @@
+import { chmod, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
+import { createTerminationSignal } from '../index.js';
+import { runHostProcess } from './host-process.js';
+
+const root = path.resolve(process.argv[2]!);
+const executable = path.join(root, 'host');
+const ready = path.join(root, 'host-ready');
+const signalCount = path.join(root, 'host-signals');
+const source = `#!${process.execPath}
+const { appendFileSync, writeFileSync } = require('node:fs');
+process.stdin.resume();
+let cancelling = false;
+process.on('SIGTERM', () => {
+  appendFileSync(${JSON.stringify(signalCount)}, 'x');
+  if (cancelling) return;
+  cancelling = true;
+  setTimeout(() => {
+    const body = Buffer.from('{"reconciled":true}');
+    const output = Buffer.alloc(4 + body.length);
+    output.writeUInt32BE(body.length, 0);
+    body.copy(output, 4);
+    process.stdout.write(output, () => process.exit(0));
+  }, 500);
+});
+writeFileSync(${JSON.stringify(ready)}, 'ready');
+setInterval(() => {}, 1000);
+`;
+await writeFile(executable, source);
+await chmod(executable, 0o700);
+const termination = createTerminationSignal();
+try {
+  const result = await runHostProcess({
+    executablePath: executable,
+    launchBytes: Buffer.from('{}'),
+    tempRoot: root,
+    signal: termination.signal,
+  });
+  if (result.exitCode !== 0 || (await readFile(signalCount, 'utf8')) !== 'x') process.exit(97);
+} finally {
+  termination.dispose();
+}

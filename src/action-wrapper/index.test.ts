@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { access, chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -281,6 +281,28 @@ describe('W1 production composition', () => {
     },
     10_000,
   );
+
+  it.runIf(process.platform === 'linux')(
+    'keeps duplicate parent signals inside the controlled cancellation lifecycle',
+    async () => {
+      const root = await mkdtemp(path.join(tmpdir(), 'apr-w1-duplicate-signal-parent-'));
+      roots.push(root);
+      const fixture = path.resolve('src/action-wrapper/launcher/duplicate-signal.fixture.ts');
+      const viteNode = path.resolve('node_modules/vite-node/vite-node.mjs');
+      const child = spawn(process.execPath, [viteNode, fixture, root], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+      const result = childCapture(child);
+      await waitForFile(path.join(root, 'host-ready'));
+      expect(child.kill('SIGTERM')).toBe(true);
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+      expect(child.kill('SIGTERM')).toBe(true);
+      await expect(result).resolves.toEqual({ code: 0, signal: null, stdout: '', stderr: '' });
+      expect(await readFile(path.join(root, 'host-signals'), 'utf8')).toBe('x');
+    },
+    10_000,
+  );
 });
 
 async function fakeBridge(_input: {
@@ -366,17 +388,35 @@ function validCompletion(): Buffer {
 }
 
 function childResult(command: string, args: string[]) {
+  const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  return childCapture(child);
+}
+
+function childCapture(child: ReturnType<typeof spawn>) {
   return new Promise<{
     readonly code: number | null;
+    readonly signal: NodeJS.Signals | null;
     readonly stdout: string;
     readonly stderr: string;
   }>((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let stdout = '';
     let stderr = '';
-    child.stdout.setEncoding('utf8').on('data', (chunk: string) => (stdout += chunk));
-    child.stderr.setEncoding('utf8').on('data', (chunk: string) => (stderr += chunk));
+    child.stdout!.setEncoding('utf8').on('data', (chunk: string) => (stdout += chunk));
+    child.stderr!.setEncoding('utf8').on('data', (chunk: string) => (stderr += chunk));
     child.once('error', reject);
-    child.once('close', (code) => resolve({ code, stdout, stderr }));
+    child.once('close', (code, signal) => resolve({ code, signal, stdout, stderr }));
   });
+}
+
+async function waitForFile(filePath: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    try {
+      await access(filePath);
+      return;
+    } catch {
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+  }
+  throw new Error('fixture_not_ready');
 }

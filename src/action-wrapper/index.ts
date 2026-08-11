@@ -71,7 +71,7 @@ export interface ProductionArtifactExecutorContext {
 export async function runPrivateActionWrapper(
   preparedPayload: PreparedPayloadProof,
 ): Promise<number> {
-  const termination = terminationSignal();
+  const termination = createTerminationSignal();
   try {
     return await runPrivateActionWrapperWithSeams({
       toolkit: createActionsToolkit(),
@@ -246,11 +246,14 @@ function required(value: string | undefined): string {
   return value;
 }
 
-function terminationSignal(): { readonly signal: AbortSignal; readonly dispose: () => void } {
+export function createTerminationSignal(): {
+  readonly signal: AbortSignal;
+  readonly dispose: () => void;
+} {
   const controller = new AbortController();
   const abort = (): void => controller.abort();
-  process.once('SIGTERM', abort);
-  process.once('SIGINT', abort);
+  process.on('SIGTERM', abort);
+  process.on('SIGINT', abort);
   return {
     signal: controller.signal,
     dispose: () => {
