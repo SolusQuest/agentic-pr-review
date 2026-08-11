@@ -15,7 +15,6 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "@actions/github": "^9.1.1",
     "@types/node": "^25.9.3",
     "ajv": "^8.20.0",
     "esbuild": "^0.28.1",
@@ -25,6 +24,8 @@
     "yaml": "^2.9.0"
   },
   "dependencies": {
-    "@actions/artifact": "6.2.1"
+    "@actions/artifact": "6.2.1",
+    "@actions/core": "3.0.1",
+    "@actions/github": "9.1.1"
   }
 }
