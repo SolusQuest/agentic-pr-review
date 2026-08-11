@@ -18,7 +18,11 @@ import {
   type ActionRuntimeFacts,
   validateRuntimeFacts,
 } from './launcher/contracts.js';
-import { runHostProcess, type HostProcessRunner } from './launcher/host-process.js';
+import {
+  HostProcessTerminationUnconfirmedError,
+  runHostProcess,
+  type HostProcessRunner,
+} from './launcher/host-process.js';
 import { readAndMaskActionInputs } from './launcher/inputs.js';
 import { OfficialCallTracker } from './launcher/official-calls.js';
 import {
@@ -92,6 +96,7 @@ export async function runPrivateActionWrapperWithSeams(
   let tracker: OfficialCallTracker | undefined;
   let completion: ActionHostCompletionDocument | undefined;
   let failed = false;
+  let hostTerminationUnconfirmed = false;
   const inputs = (() => {
     try {
       return readAndMaskActionInputs(seams.toolkit);
@@ -133,6 +138,7 @@ export async function runPrivateActionWrapperWithSeams(
       artifactBridgeEndpoint: bridge.endpoint,
       cancellation: 'active',
     });
+    if (seams.signal.aborted) fail('wrapper_cancelled_before_spawn');
     const host = await seams.hostProcessRunner({
       executablePath: prepared.executablePath,
       launchBytes: serializeLaunchDocument(launch),
@@ -144,8 +150,17 @@ export async function runPrivateActionWrapperWithSeams(
       prepared.buildDiscriminator,
       host.exitCode,
     );
-  } catch {
-    failed = true;
+  } catch (error) {
+    if (error instanceof HostProcessTerminationUnconfirmedError) {
+      hostTerminationUnconfirmed = true;
+    } else {
+      failed = true;
+    }
+  }
+
+  if (hostTerminationUnconfirmed) {
+    seams.fatalExit(1);
+    return 1;
   }
 
   if (bridge && tracker) {

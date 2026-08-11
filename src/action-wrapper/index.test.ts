@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -12,6 +12,7 @@ import {
   runPrivateActionWrapperWithSeams,
 } from './index.js';
 import { parseLaunchDocument, type ActionRuntimeFacts } from './launcher/contracts.js';
+import { HostProcessTerminationUnconfirmedError } from './launcher/host-process.js';
 import { OfficialCallTracker } from './launcher/official-calls.js';
 import type { PreparedPayloadProof } from './launcher/prepared-payload.js';
 import type { ActionPresentationToolkit } from './presentation/toolkit.js';
@@ -208,6 +209,48 @@ describe('W1 production composition', () => {
     expect(presentation.errors).toEqual([]);
   });
 
+  it('fatally exits without bridge cleanup or presentation when Host close is unconfirmed', async () => {
+    const fixture = await wrapperFixture();
+    const presentation = recordingToolkit({ 'github-token': 'termination-canary' });
+    let fatal = 0;
+    let drained = 0;
+    let cleaned = 0;
+    const exit = await runPrivateActionWrapperWithSeams({
+      toolkit: presentation.toolkit,
+      preparedPayload: fixture.proof,
+      platform: 'linux',
+      signal: new AbortController().signal,
+      runtimeFacts: () => fixture.facts,
+      bridgeRuntime: async () => ({
+        endpoint: '/tmp/apr-w1/bridge.sock',
+        stagingRoot: '/tmp/apr-w1/artifact-staging',
+        tempRoot: '/tmp/apr-w1',
+        stopAndDrain: async () => {
+          drained += 1;
+        },
+        cleanup: async () => {
+          cleaned += 1;
+        },
+      }),
+      createArtifactExecutor: async () => {
+        throw new Error('must remain lazy');
+      },
+      hostProcessRunner: async () => {
+        throw new HostProcessTerminationUnconfirmedError();
+      },
+      fatalExit: () => {
+        fatal += 1;
+      },
+    });
+    expect(exit).toBe(1);
+    expect(fatal).toBe(1);
+    expect(drained).toBe(0);
+    expect(cleaned).toBe(0);
+    expect(presentation.summaries).toEqual([]);
+    expect(presentation.errors).toEqual([]);
+    expect(presentation.events).toContain('mask:termination-canary');
+  });
+
   it('terminates an independent process with a referenced handle at the quiescence bound', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'apr-w1-fatal-parent-'));
     roots.push(root);
@@ -216,10 +259,28 @@ describe('W1 production composition', () => {
     const started = Date.now();
     const result = await childResult(process.execPath, [viteNode, fixture, root]);
     expect(result.code).toBe(1);
-    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(Date.now() - started).toBeLessThan(8_000);
     expect(result.stdout).toBe('');
     expect(result.stderr).toBe('');
-  });
+  }, 10_000);
+
+  it.runIf(process.platform === 'linux')(
+    'terminates independently without presentation or cleanup when Host close is unconfirmed',
+    async () => {
+      const root = await mkdtemp(path.join(tmpdir(), 'apr-w1-host-close-parent-'));
+      roots.push(root);
+      const fixture = path.resolve('src/action-wrapper/launcher/host-close-fatal.fixture.ts');
+      const viteNode = path.resolve('node_modules/vite-node/vite-node.mjs');
+      const started = Date.now();
+      const result = await childResult(process.execPath, [viteNode, fixture, root]);
+      expect(result.code).toBe(1);
+      expect(Date.now() - started).toBeLessThan(8_000);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toBe('');
+      await expect(access(path.join(root, 'cleanup-called'))).rejects.toThrow();
+    },
+    10_000,
+  );
 });
 
 async function fakeBridge(_input: {

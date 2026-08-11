@@ -60,7 +60,7 @@ await runPrivateActionWrapperWithSeams({
           void interval;
         }),
     });
-    await runContainedOfficialCall(() => client.call(), 5, new AbortController().signal).catch(
+    await runContainedOfficialCall(() => client.call(), 1_000, new AbortController().signal).catch(
       () => undefined,
     );
     return { execute: async () => Promise.reject(new Error('unused')) };

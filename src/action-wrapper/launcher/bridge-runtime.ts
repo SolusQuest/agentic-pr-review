@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, rm } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Server, Socket } from 'node:net';
@@ -33,6 +33,13 @@ export async function startArtifactBridgeRuntime(input: {
     fail('wrapper_bridge_invalid');
   }
   const stagingRoot = path.join(tempRoot, 'artifact-staging');
+  try {
+    await mkdir(stagingRoot, { mode: 0o700 });
+    await chmod(stagingRoot, 0o700);
+  } catch {
+    await rm(tempRoot, { recursive: true, force: true });
+    fail('wrapper_bridge_invalid');
+  }
   let executorPromise: Promise<ArtifactBridgeExecutor> | undefined;
   const lazyExecutor: ArtifactBridgeExecutor = {
     execute: async (command, signal) => {
