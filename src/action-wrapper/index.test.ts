@@ -296,8 +296,9 @@ describe('W1 production composition', () => {
       const result = childCapture(child);
       await waitForFile(path.join(root, 'host-ready'));
       expect(child.kill('SIGTERM')).toBe(true);
-      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+      await waitForFile(path.join(root, 'host-signals'));
       expect(child.kill('SIGTERM')).toBe(true);
+      await writeFile(path.join(root, 'host-release'), 'release');
       await expect(result).resolves.toEqual({ code: 0, signal: null, stdout: '', stderr: '' });
       expect(await readFile(path.join(root, 'host-signals'), 'utf8')).toBe('x');
     },
