@@ -1193,6 +1193,239 @@ public sealed class LineageRecoveryAndFailureTests
         });
     }
 
+    [Theory]
+    [InlineData("reset")]
+    [InlineData("expiry")]
+    public async Task PendingTransitionInjectedAfterRefreshDoesNotReturnContext(
+        string transitionName)
+    {
+        await WithRootAsync(async root =>
+        {
+            using var lease = LineageTestData.Context();
+            var inner = new LocalRestrictedStateStore(
+                root,
+                timeProvider: lease.Time);
+            var initialized = await new LineageService(inner, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    LineageTestData.Request(lease.Access),
+                    CancellationToken.None);
+            Assert.True(initialized.Succeeded, initialized.Code);
+            SelectedLineageSnapshot selected;
+            using (initialized.Context)
+            {
+                Assert.True(initialized.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                selected = snapshot!;
+            }
+
+            var requiredLogicalExpiry = LineageTestData.LogicalExpiry + 60;
+            var requiredPlatformExpiry = LineageTestData.Now +
+                8 * 24 * 60 * 60;
+            var probe = new ProbedLineageStore(inner)
+            {
+                AfterUpload = async uploadCall =>
+                {
+                    if (uploadCall != 1)
+                    {
+                        return;
+                    }
+
+                    if (StringComparer.Ordinal.Equals(
+                            transitionName,
+                            "reset"))
+                    {
+                        await UploadTransitionIntentAsync(
+                            inner,
+                            lease,
+                            selected,
+                            LineageTransitionIntentKind.Reset,
+                            selected.LineageHeadIdentity,
+                            new string('e', 64),
+                            expiryBoundaryUnixSeconds: null,
+                            [],
+                            requiredLogicalExpiry,
+                            requiredPlatformExpiry);
+                        return;
+                    }
+
+                    Assert.Equal("expiry", transitionName);
+                    var acceptance = await UploadStateObjectAsync(
+                        inner,
+                        lease,
+                        selected,
+                        StateObjectClass.Acceptance,
+                        predecessorIdentity: null,
+                        logicalExpiry: LineageTestData.Now,
+                        payloadMarker: 1,
+                        underRetained: false);
+                    await UploadTransitionIntentAsync(
+                        inner,
+                        lease,
+                        selected,
+                        LineageTransitionIntentKind.Expiry,
+                        selected.LineageHeadIdentity,
+                        acceptance.Header.ObjectIdentity,
+                        LineageTestData.Now,
+                        [LineageHeadCodec.Evidence(acceptance.Metadata)],
+                        requiredLogicalExpiry,
+                        requiredPlatformExpiry);
+                },
+            };
+            var request = LineageTestData.Request(lease.Access) with
+            {
+                RequiredLogicalExpiresAtUnixSeconds = requiredLogicalExpiry,
+            };
+            var result = await new LineageService(probe, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    request,
+                    CancellationToken.None);
+
+            Assert.False(result.Succeeded);
+            Assert.Null(result.Context);
+            Assert.Equal(LineageCodes.Unavailable, result.Code);
+
+            var recoveryRequest = request;
+            var expectedTransition = LineageTransitionKind.Expiry;
+            if (StringComparer.Ordinal.Equals(transitionName, "reset"))
+            {
+                recoveryRequest = request with
+                {
+                    Reset = LineageTestData.Reset(
+                        lease.Access,
+                        selected.LineageHeadIdentity,
+                        new string('e', 64)),
+                };
+                expectedTransition = LineageTransitionKind.Reset;
+            }
+
+            var recovered = await new LineageService(inner, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    recoveryRequest,
+                    CancellationToken.None);
+            Assert.True(recovered.Succeeded, recovered.Code);
+            using (recovered.Context)
+            {
+                Assert.True(recovered.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                Assert.Equal(expectedTransition, snapshot!.Transition);
+            }
+        });
+    }
+
+    [Theory]
+    [InlineData("expired")]
+    [InlineData("siblings")]
+    public async Task AcceptanceInjectedAfterRefreshDoesNotReturnContext(
+        string acceptanceState)
+    {
+        await WithRootAsync(async root =>
+        {
+            using var lease = LineageTestData.Context();
+            var inner = new LocalRestrictedStateStore(
+                root,
+                timeProvider: lease.Time);
+            var initialized = await new LineageService(inner, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    LineageTestData.Request(lease.Access),
+                    CancellationToken.None);
+            Assert.True(initialized.Succeeded, initialized.Code);
+            SelectedLineageSnapshot selected;
+            using (initialized.Context)
+            {
+                Assert.True(initialized.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                selected = snapshot!;
+            }
+
+            var probe = new ProbedLineageStore(inner)
+            {
+                AfterUpload = async uploadCall =>
+                {
+                    if (uploadCall != 1)
+                    {
+                        return;
+                    }
+
+                    _ = await UploadStateObjectAsync(
+                        inner,
+                        lease,
+                        selected,
+                        StateObjectClass.Acceptance,
+                        predecessorIdentity: null,
+                        logicalExpiry: LineageTestData.Now,
+                        payloadMarker: 1,
+                        underRetained: false);
+                    if (StringComparer.Ordinal.Equals(
+                            acceptanceState,
+                            "siblings"))
+                    {
+                        _ = await UploadStateObjectAsync(
+                            inner,
+                            lease,
+                            selected,
+                            StateObjectClass.Acceptance,
+                            predecessorIdentity: null,
+                            logicalExpiry: LineageTestData.Now,
+                            payloadMarker: 2,
+                            underRetained: false);
+                    }
+                    else
+                    {
+                        Assert.Equal("expired", acceptanceState);
+                    }
+                },
+            };
+            var request = LineageTestData.Request(lease.Access) with
+            {
+                RequiredLogicalExpiresAtUnixSeconds =
+                    LineageTestData.LogicalExpiry + 60,
+            };
+            var result = await new LineageService(probe, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    request,
+                    CancellationToken.None);
+
+            Assert.False(result.Succeeded);
+            Assert.Null(result.Context);
+            Assert.Equal(
+                StringComparer.Ordinal.Equals(acceptanceState, "siblings")
+                    ? LineageCodes.Conflict
+                    : LineageCodes.Unavailable,
+                result.Code);
+
+            var recovered = await new LineageService(inner, lease.Time)
+                .ResolveAsync(
+                    lease.Context,
+                    request,
+                    CancellationToken.None);
+            if (StringComparer.Ordinal.Equals(acceptanceState, "siblings"))
+            {
+                Assert.False(recovered.Succeeded);
+                Assert.Null(recovered.Context);
+                Assert.Equal(LineageCodes.Conflict, recovered.Code);
+                return;
+            }
+
+            Assert.True(recovered.Succeeded, recovered.Code);
+            using (recovered.Context)
+            {
+                Assert.True(recovered.Context!.TryGetSnapshot(
+                    lease.Access,
+                    out var snapshot));
+                Assert.Equal(LineageTransitionKind.Expiry,
+                    snapshot!.Transition);
+            }
+        });
+    }
+
     [Fact]
     public async Task FreshProcessKeepsAdequateHeadWhileCleaningSevenUnderRetainedCopies()
     {
@@ -2063,6 +2296,81 @@ public sealed class LineageRecoveryAndFailureTests
                 Assert.NotNull(uploaded.Metadata);
                 Assert.True(uploaded.Metadata!.ExpiresAtUnixSeconds <
                     requiredExpiry);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(envelope);
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(payload);
+        }
+    }
+
+    private static async Task UploadTransitionIntentAsync(
+        IRestrictedStateStore store,
+        LineageTestData.ContextLease lease,
+        SelectedLineageSnapshot selected,
+        LineageTransitionIntentKind kind,
+        string priorHeadIdentity,
+        string transitionEvidenceIdentity,
+        long? expiryBoundaryUnixSeconds,
+        System.Collections.Immutable.ImmutableArray<
+            LineageArtifactEvidence> targets,
+        long logicalExpiry,
+        long requiredPlatformExpiry)
+    {
+        var intent = new LineageTransitionIntentV1(
+            kind,
+            priorHeadIdentity,
+            selected.Epoch,
+            transitionEvidenceIdentity,
+            expiryBoundaryUnixSeconds,
+            LineageTestData.Reviewed(),
+            LineageCryptography.InventoryDigest(targets),
+            targets,
+            kind == LineageTransitionIntentKind.Reset
+                ? "workflow-run-42"
+                : null,
+            kind == LineageTransitionIntentKind.Reset ? 1 : null);
+        Assert.True(LineageTransitionIntentCodec.TryEncode(
+            intent,
+            out var payload));
+        var objectClass = LineageTransitionIntentCodec.ObjectClass(kind);
+        var name = await ResolveNameAsync(lease, objectClass);
+        var draft = new StateControlHeaderDraft(
+            selected.BaseScopeDigest,
+            selected.Epoch,
+            selected.SessionId,
+            objectClass,
+            selected.LineageHeadIdentity,
+            SuccessorIdentity: null,
+            "workflow-run-42",
+            ProducingRunAttempt: 1,
+            LineageTestData.Now,
+            logicalExpiry,
+            requiredPlatformExpiry);
+        try
+        {
+            Assert.True(StateControlEnvelopeV1Codec.TryEncrypt(
+                lease.Context,
+                lease.Access,
+                name,
+                draft,
+                payload,
+                out var envelope,
+                out _,
+                out var code), code);
+            try
+            {
+                var uploaded = await new ScopedStateUploadProtocol(store)
+                    .UploadAndReadBackAsync(
+                        name,
+                        envelope,
+                        requiredPlatformExpiry,
+                        CancellationToken.None);
+                Assert.True(uploaded.Succeeded, uploaded.Code);
             }
             finally
             {

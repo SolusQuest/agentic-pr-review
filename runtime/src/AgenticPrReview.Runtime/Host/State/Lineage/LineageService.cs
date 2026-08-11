@@ -145,23 +145,20 @@ internal sealed class LineageService
                 selection = observed.Selection.Selection!;
             }
 
-            if (!ValidateActiveState(observed.Snapshot!, selection.Head))
-            {
-                return LineageResolveResult.Fail(LineageCodes.Conflict);
-            }
-
-            var pending = SelectPendingIntent(
+            var authority = EvaluateOrdinaryAuthority(
                 observed.Snapshot!,
                 selection.Head,
+                request,
                 currentKeyId,
                 request.RequiredLogicalExpiresAtUnixSeconds,
-                requiredPlatformExpiry);
-            if (!pending.Succeeded)
+                requiredPlatformExpiry,
+                now);
+            if (!authority.Succeeded)
             {
-                return LineageResolveResult.Fail(pending.Code);
+                return LineageResolveResult.Fail(authority.Code);
             }
 
-            if (pending.Intent is not null)
+            if (authority.PendingIntent is not null)
             {
                 return await ResumeTransitionAsync(
                         context,
@@ -171,7 +168,7 @@ internal sealed class LineageService
                         now,
                         requiredPlatformExpiry,
                         observed,
-                        pending.Intent,
+                        authority.PendingIntent,
                         cancellationToken)
                     .ConfigureAwait(false);
             }
@@ -231,16 +228,7 @@ internal sealed class LineageService
                     .ConfigureAwait(false);
             }
 
-            var expiry = SelectExpiredAcceptance(
-                observed.Snapshot!,
-                selection.Head,
-                now);
-            if (!expiry.Succeeded)
-            {
-                return LineageResolveResult.Fail(expiry.Code);
-            }
-
-            if (expiry.Acceptance is not null)
+            if (authority.ExpiredAcceptance is not null)
             {
                 return await StartTransitionAsync(
                         context,
@@ -251,8 +239,9 @@ internal sealed class LineageService
                         requiredPlatformExpiry,
                         observed,
                         LineageTransitionIntentKind.Expiry,
-                        expiry.Acceptance.Header.ObjectIdentity,
-                        expiry.Acceptance.Header.LogicalExpiresAtUnixSeconds,
+                        authority.ExpiredAcceptance.Header.ObjectIdentity,
+                        authority.ExpiredAcceptance.Header
+                            .LogicalExpiresAtUnixSeconds,
                         cancellationToken)
                     .ConfigureAwait(false);
             }
@@ -358,6 +347,7 @@ internal sealed class LineageService
                 baseScopeDigest,
                 currentKeyId,
                 written.Header!,
+                now,
                 requiredPlatformExpiry,
                 CancellationToken.None)
             .ConfigureAwait(false);
@@ -390,6 +380,7 @@ internal sealed class LineageService
                     baseScopeDigest,
                     currentKeyId,
                     head.Header,
+                    now,
                     requiredPlatformExpiry,
                     cancellationToken)
                 .ConfigureAwait(false);
@@ -442,6 +433,7 @@ internal sealed class LineageService
                 baseScopeDigest,
                 currentKeyId,
                 written.Header,
+                now,
                 requiredPlatformExpiry,
                 CancellationToken.None)
             .ConfigureAwait(false);
@@ -961,6 +953,7 @@ internal sealed class LineageService
                     baseScopeDigest,
                     currentKeyId,
                     written.Header!,
+                    now,
                     requiredPlatformExpiry,
                     ExpectedHeadConvergenceMode.TransitionSuccessor,
                     CancellationToken.None)
@@ -1563,6 +1556,7 @@ internal sealed class LineageService
             string baseScopeDigest,
             string currentKeyId,
             StateControlHeaderV1 expected,
+            long now,
             long requiredPlatformExpiry,
             CancellationToken cancellationToken)
     {
@@ -1572,6 +1566,7 @@ internal sealed class LineageService
                 baseScopeDigest,
                 currentKeyId,
                 expected,
+                now,
                 requiredPlatformExpiry,
                 ExpectedHeadConvergenceMode.Ordinary,
                 cancellationToken)
@@ -1587,6 +1582,7 @@ internal sealed class LineageService
         string baseScopeDigest,
         string currentKeyId,
         StateControlHeaderV1 expected,
+        long now,
         long requiredPlatformExpiry,
         ExpectedHeadConvergenceMode mode,
         CancellationToken cancellationToken)
@@ -1669,16 +1665,32 @@ internal sealed class LineageService
                                 LineageCodes.RetentionFailed);
                         }
 
-                        if (!ValidateActiveState(
-                                observed.Snapshot,
-                                selection.Head) ||
-                            observed.Snapshot.Unknown.Any(item =>
+                        if (observed.Snapshot.Unknown.Any(item =>
                                 item.Metadata.Reference.Name !=
                                     observed.Snapshot.Names[
                                         StateObjectClass.LineageHead]))
                         {
                             return HeadConvergenceResult.Fail(
                                 LineageCodes.Conflict);
+                        }
+
+                        var authority = EvaluateOrdinaryAuthority(
+                            observed.Snapshot,
+                            selection.Head,
+                            request,
+                            currentKeyId,
+                            request.RequiredLogicalExpiresAtUnixSeconds,
+                            requiredPlatformExpiry,
+                            now);
+                        if (!authority.Succeeded)
+                        {
+                            return HeadConvergenceResult.Fail(authority.Code);
+                        }
+
+                        if (authority.RequiresTransition)
+                        {
+                            return HeadConvergenceResult.Fail(
+                                LineageCodes.Unavailable);
                         }
                     }
 
@@ -2225,6 +2237,52 @@ internal sealed class LineageService
             selected.Header.RequiredPlatformExpiresAtUnixSeconds &&
         selected.Metadata.ExpiresAtUnixSeconds >= requiredPlatformExpiry;
 
+    private static OrdinaryAuthorityResult EvaluateOrdinaryAuthority(
+        ScopedStateInventorySnapshot snapshot,
+        LineageHeadCandidate active,
+        LineageResolveRequest request,
+        string currentKeyId,
+        long requiredLogicalExpiry,
+        long requiredPlatformExpiry,
+        long now)
+    {
+        if (!ValidateActiveState(snapshot, active))
+        {
+            return OrdinaryAuthorityResult.Fail(LineageCodes.Conflict);
+        }
+
+        var pending = SelectPendingIntent(
+            snapshot,
+            active,
+            currentKeyId,
+            requiredLogicalExpiry,
+            requiredPlatformExpiry);
+        if (!pending.Succeeded)
+        {
+            return OrdinaryAuthorityResult.Fail(pending.Code);
+        }
+
+        if (pending.Intent is not null)
+        {
+            return OrdinaryAuthorityResult.Pending(pending.Intent);
+        }
+
+        if (request.Reset is not null)
+        {
+            return OrdinaryAuthorityResult.Ready();
+        }
+
+        var expiry = SelectExpiredAcceptance(snapshot, active, now);
+        if (!expiry.Succeeded)
+        {
+            return OrdinaryAuthorityResult.Fail(expiry.Code);
+        }
+
+        return expiry.Acceptance is null
+            ? OrdinaryAuthorityResult.Ready()
+            : OrdinaryAuthorityResult.Expired(expiry.Acceptance);
+    }
+
     private static PendingIntentResult SelectPendingIntent(
         ScopedStateInventorySnapshot snapshot,
         LineageHeadCandidate active,
@@ -2733,6 +2791,31 @@ internal sealed class LineageService
     private sealed record SelectedIntent(
         AuthenticatedStateObject Object,
         LineageTransitionIntentV1 Intent);
+
+    private sealed record OrdinaryAuthorityResult(
+        string Code,
+        SelectedIntent? PendingIntent,
+        AuthenticatedStateObject? ExpiredAcceptance)
+    {
+        internal bool Succeeded =>
+            StringComparer.Ordinal.Equals(Code, LineageCodes.Ready);
+        internal bool RequiresTransition =>
+            PendingIntent is not null || ExpiredAcceptance is not null;
+
+        internal static OrdinaryAuthorityResult Ready() =>
+            new(LineageCodes.Ready, null, null);
+
+        internal static OrdinaryAuthorityResult Pending(
+            SelectedIntent intent) =>
+            new(LineageCodes.Ready, intent, null);
+
+        internal static OrdinaryAuthorityResult Expired(
+            AuthenticatedStateObject acceptance) =>
+            new(LineageCodes.Ready, null, acceptance);
+
+        internal static OrdinaryAuthorityResult Fail(string code) =>
+            new(code, null, null);
+    }
 
     private sealed record IntentHeadroomResult(
         string Code,
