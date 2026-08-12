@@ -40,13 +40,19 @@ internal sealed record AcceptedStateRestoreResult(
 internal sealed class AcceptedStateContext : IDisposable
 {
     private RestrictedStateAdmittedSession? admitted;
+    private readonly string stateEnvelopeSha256;
+    private readonly AgentSessionHeadTransition transition;
 
     internal AcceptedStateContext(
         RestrictedStateAdmittedSession admitted,
+        string stateEnvelopeSha256,
+        AgentSessionHeadTransition transition,
         string logicalGenerationIdentity,
         string selectedLineageHeadIdentity)
     {
         this.admitted = admitted;
+        this.stateEnvelopeSha256 = stateEnvelopeSha256;
+        this.transition = transition;
         LogicalGenerationIdentity = logicalGenerationIdentity;
         SelectedLineageHeadIdentity = selectedLineageHeadIdentity;
     }
@@ -59,6 +65,33 @@ internal sealed class AcceptedStateContext : IDisposable
     {
         value = Volatile.Read(ref admitted)?.Value;
         return value is not null;
+    }
+
+    internal bool TryCreateSuccessorPredecessor(
+        out AgentSessionPredecessor? predecessor,
+        out AgentSessionHeadTransition admittedTransition)
+    {
+        predecessor = null;
+        admittedTransition = transition;
+        var current = Volatile.Read(ref admitted);
+        if (current is null ||
+            !AcceptedStateRecordValidation.FixedDigest(
+                current.SessionSha256,
+                current.Value.Artifact.SessionSha256) ||
+            !Lineage.LineageValidation.IsSha256(stateEnvelopeSha256))
+        {
+            return false;
+        }
+
+        predecessor = new AgentSessionPredecessor(
+            current.Plaintext.ToArray(),
+            current.SessionSha256,
+            stateEnvelopeSha256,
+            current.Generation,
+            current.ProducerBaseSha,
+            current.ProducerHeadSha,
+            current.PredecessorEnvelopeSha256);
+        return true;
     }
 
     internal bool AllowsExpiry(
@@ -254,6 +287,8 @@ internal sealed class AcceptedStateRestoreService
             return AcceptedStateRestoreResult.Success(
                 new AcceptedStateContext(
                     admitted.Session,
+                    generation.StateEnvelopeSha256,
+                    transition,
                     selected.LogicalGenerationIdentity,
                     selection.LineageHead.Header.ObjectIdentity));
         }

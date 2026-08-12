@@ -12,6 +12,7 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
     private readonly HashSet<string> expiredObjectIds =
         new(StringComparer.Ordinal);
     private int nextObjectId;
+    private OpaqueStoreObjectReference? delayedUploadedReference;
 
     internal bool ListComplete { get; set; } = true;
     internal bool FilterListsByName { get; set; }
@@ -24,14 +25,21 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
     internal OpaqueStoreMutationState NextUploadMutationState { get; set; }
         = OpaqueStoreMutationState.NotCommitted;
     internal bool PersistFailedUpload { get; set; }
+    internal int FailUploadOnUploadCall { get; set; }
+    internal OpaqueStoreFailure ScheduledUploadFailure { get; set; }
+    internal OpaqueStoreMutationState ScheduledUploadMutationState { get; set; }
     internal OpaqueStoreFailure NextDeleteFailure { get; set; }
     internal OpaqueStoreMutationState NextDeleteMutationState { get; set; }
         = OpaqueStoreMutationState.NotCommitted;
     internal int DeleteFailuresRemaining { get; set; }
     internal bool RemoveOnDeleteFailure { get; set; }
     internal long ExtraRetentionSeconds { get; set; } = 3_600;
+    internal string ProducingRunIdentity { get; set; } = "scripted";
+    internal long? ProducingRunAttempt { get; set; }
     internal int HideExistingObjectsForNextLists { get; set; }
     internal int HideNewestObjectForNextLists { get; set; }
+    internal int HideNextUploadedObjectForNextLists { get; set; }
+    internal int HideUploadedObjectOnUploadCall { get; set; }
     internal System.Action? BeforeDelete { get; set; }
     internal System.Action? AfterDelete { get; set; }
     internal System.Func<
@@ -153,6 +161,19 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
                 references = references[..^1];
             }
 
+            if (delayedUploadedReference is not null &&
+                HideNextUploadedObjectForNextLists > 0 &&
+                request.Name == delayedUploadedReference.Name &&
+                references.Contains(delayedUploadedReference))
+            {
+                HideNextUploadedObjectForNextLists--;
+                references = references.Remove(delayedUploadedReference);
+                if (HideNextUploadedObjectForNextLists == 0)
+                {
+                    delayedUploadedReference = null;
+                }
+            }
+
             if (!ListComplete || references.Length > request.MaximumObjects)
             {
                 return Task.FromResult(new OpaqueStoreListResult(
@@ -244,15 +265,22 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
                 new OpaqueStoreObjectReference(
                     request.Name,
                     new OpaqueStoreObjectId(id)),
-                new OpaqueStoreProducingRun("scripted", UploadCalls),
+                new OpaqueStoreProducingRun(
+                    ProducingRunIdentity,
+                    ProducingRunAttempt ?? UploadCalls),
                 new OpaqueStoreArchiveDigest(digest),
                 request.EncryptedObjectDigest,
                 checked(
                     request.MinimumExpiresAtUnixSeconds +
                     ExtraRetentionSeconds),
                 request.EncryptedBytes.Length);
-            var failure = NextUploadFailure;
-            var mutationState = NextUploadMutationState;
+            var scheduled = UploadCalls == FailUploadOnUploadCall;
+            var failure = scheduled
+                ? ScheduledUploadFailure
+                : NextUploadFailure;
+            var mutationState = scheduled
+                ? ScheduledUploadMutationState
+                : NextUploadMutationState;
             var persist = failure == OpaqueStoreFailure.None ||
                 PersistFailedUpload ||
                 mutationState != OpaqueStoreMutationState.NotCommitted;
@@ -266,12 +294,24 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
                 MaximumObservedObjects = Math.Max(
                     MaximumObservedObjects,
                     objects.Count);
+                if (HideNextUploadedObjectForNextLists > 0 &&
+                    UploadCalls == HideUploadedObjectOnUploadCall)
+                {
+                    delayedUploadedReference = metadata.Reference;
+                }
             }
 
             NextUploadFailure = OpaqueStoreFailure.None;
             NextUploadMutationState =
                 OpaqueStoreMutationState.NotCommitted;
             PersistFailedUpload = false;
+            if (scheduled)
+            {
+                FailUploadOnUploadCall = 0;
+                ScheduledUploadFailure = OpaqueStoreFailure.None;
+                ScheduledUploadMutationState =
+                    OpaqueStoreMutationState.NotCommitted;
+            }
             var returnedMetadata = NextUploadMetadataTransform?.Invoke(
                 metadata) ?? metadata;
             NextUploadMetadataTransform = null;
