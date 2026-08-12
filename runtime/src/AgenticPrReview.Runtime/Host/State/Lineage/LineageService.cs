@@ -404,7 +404,7 @@ internal sealed class LineageService
                 if (remaining.Value.Length == interrupted.Intent.Targets.Length)
                 {
                     // All accepted-state evidence is still available. Leave the
-                    // intent in place so S5 can re-admit the selected SESSION
+                    // intent in place so S5 can re-admit the accepted state
                     // and bind this exact intent to typed expiry authority.
                     return LineageInterruptedTransitionRecoveryResult.None();
                 }
