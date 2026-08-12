@@ -456,18 +456,21 @@ internal sealed class RetainedStateOpaqueWriteAttempt : IDisposable
         RetainedStateTransactionAuthority authority,
         RetainedStatePersistedCandidate candidate,
         StateObjectClass objectClass,
+        string operationIdentity,
         long semanticRequiredExpiresAtUnixSeconds,
         OpaqueStoreName name,
         StateControlHeaderV1 header,
         byte[] payload,
         byte[] envelope,
         byte[] recoveryPayload,
+        OpaqueStoreObjectMetadata anchorMetadata,
         string inventoryDigest,
         bool reconcileOnly)
     {
         this.authority = authority;
         Candidate = candidate;
         ObjectClass = objectClass;
+        OperationIdentity = operationIdentity;
         SemanticRequiredExpiresAtUnixSeconds =
             semanticRequiredExpiresAtUnixSeconds;
         Name = name;
@@ -475,6 +478,7 @@ internal sealed class RetainedStateOpaqueWriteAttempt : IDisposable
         this.payload = payload;
         this.envelope = envelope;
         this.recoveryPayload = recoveryPayload;
+        AnchorMetadata = anchorMetadata;
         InventoryDigest = inventoryDigest;
         ReconcileOnly = reconcileOnly;
         dispatchState = reconcileOnly ? 1 : 0;
@@ -483,9 +487,11 @@ internal sealed class RetainedStateOpaqueWriteAttempt : IDisposable
     private readonly RetainedStateTransactionAuthority authority;
     internal RetainedStatePersistedCandidate Candidate { get; }
     internal StateObjectClass ObjectClass { get; }
+    internal string OperationIdentity { get; }
     internal long SemanticRequiredExpiresAtUnixSeconds { get; }
     internal OpaqueStoreName Name { get; }
     internal StateControlHeaderV1 Header { get; }
+    internal OpaqueStoreObjectMetadata AnchorMetadata { get; }
     internal string InventoryDigest { get; }
     internal bool ReconcileOnly { get; }
     internal bool HasEnteredDispatch => Volatile.Read(ref dispatchState) != 0;
@@ -529,7 +535,8 @@ internal sealed class RetainedStateOpaqueWriteAttempt : IDisposable
             ImmutableArray.CreateRange(current),
             SemanticRequiredExpiresAtUnixSeconds,
             Candidate.Prepared.Header.ObjectIdentity,
-            ObjectClass);
+            ObjectClass,
+            OperationIdentity);
         return true;
     }
 
@@ -550,12 +557,14 @@ internal sealed class RetainedStateOpaqueWriteAttempt : IDisposable
         RetainedStateTransactionAuthority authority,
         RetainedStatePersistedCandidate candidate,
         StateObjectClass objectClass,
+        string operationIdentity,
         long semanticRequiredExpiresAtUnixSeconds,
         OpaqueStoreName name,
         StateControlHeaderV1 header,
         byte[] payload,
         byte[] envelope,
         byte[] recoveryPayload,
+        OpaqueStoreObjectMetadata anchorMetadata,
         string inventoryDigest,
         bool reconcileOnly = false)
     {
@@ -564,12 +573,14 @@ internal sealed class RetainedStateOpaqueWriteAttempt : IDisposable
             authority,
             candidate,
             objectClass,
+            operationIdentity,
             semanticRequiredExpiresAtUnixSeconds,
             name,
             header,
             payload,
             envelope,
             recoveryPayload,
+            anchorMetadata,
             inventoryDigest,
             reconcileOnly);
     }
@@ -597,7 +608,36 @@ internal sealed record RetainedStateOpaqueWriteRecoveryHandoff(
     ImmutableArray<byte> OpaqueInnerPayload,
     long MinimumSemanticExpiresAtUnixSeconds,
     string CandidateObjectIdentity,
-    StateObjectClass ObjectClass);
+    StateObjectClass ObjectClass,
+    string OperationIdentity);
+
+internal sealed class RetainedStateOpaqueWriteAttemptSet : IDisposable
+{
+    private ImmutableArray<RetainedStateOpaqueWriteAttempt> attempts;
+
+    private RetainedStateOpaqueWriteAttemptSet(
+        ImmutableArray<RetainedStateOpaqueWriteAttempt> attempts) =>
+        this.attempts = attempts;
+
+    internal ImmutableArray<RetainedStateOpaqueWriteAttempt> Attempts =>
+        attempts;
+
+    internal static RetainedStateOpaqueWriteAttemptSet Create(
+        ImmutableArray<RetainedStateOpaqueWriteAttempt> attempts) =>
+        new(attempts);
+
+    public void Dispose()
+    {
+        var current = attempts;
+        attempts = [];
+        foreach (var attempt in current)
+        {
+            attempt.Dispose();
+        }
+    }
+
+    public override string ToString() => "[PRIVATE]";
+}
 
 internal sealed class RetainedStateOpaqueRecord : IDisposable
 {
@@ -795,6 +835,69 @@ internal sealed record RetainedStateAcceptanceRecoveryHandoff(
     ImmutableArray<byte> OpaqueInnerPayload,
     long MinimumSemanticExpiresAtUnixSeconds,
     string CandidateObjectIdentity);
+
+internal sealed class RetainedStateAcceptanceRecoveryDurability : IDisposable
+{
+    private int predecessorAuthorized;
+    private int usable = 1;
+
+    private RetainedStateAcceptanceRecoveryDurability(
+        RetainedStateTransactionAuthority authority,
+        RetainedStateAcceptancePreparation preparation,
+        OpaqueStoreObjectMetadata recoveryRecordMetadata,
+        string inventoryDigest)
+    {
+        this.authority = authority;
+        Preparation = preparation;
+        RecoveryRecordMetadata = recoveryRecordMetadata;
+        InventoryDigest = inventoryDigest;
+    }
+
+    private readonly RetainedStateTransactionAuthority authority;
+    internal RetainedStateAcceptancePreparation Preparation { get; }
+    internal OpaqueStoreObjectMetadata RecoveryRecordMetadata { get; }
+    internal string InventoryDigest { get; }
+
+    internal bool TryAuthorizePredecessor(
+        RetainedStateTransactionAuthority value,
+        RetainedStateAcceptancePreparation preparation) =>
+        ReferenceEquals(authority, value) &&
+        value.IsLive &&
+        Volatile.Read(ref usable) == 1 &&
+        ReferenceEquals(Preparation, preparation) &&
+        Interlocked.CompareExchange(
+            ref predecessorAuthorized,
+            1,
+            0) is 0 or 1;
+
+    internal bool TryConsumeForEvidence(
+        RetainedStateTransactionAuthority value,
+        RetainedStateAcceptancePreparation preparation) =>
+        ReferenceEquals(authority, value) &&
+        value.IsLive &&
+        ReferenceEquals(Preparation, preparation) &&
+        Volatile.Read(ref predecessorAuthorized) == 1 &&
+        Interlocked.CompareExchange(ref usable, 0, 1) == 1;
+
+    internal static RetainedStateAcceptanceRecoveryDurability Create(
+        object issuer,
+        RetainedStateTransactionAuthority authority,
+        RetainedStateAcceptancePreparation preparation,
+        OpaqueStoreObjectMetadata recoveryRecordMetadata,
+        string inventoryDigest)
+    {
+        RetainedStateCapabilityIssuer.Require(issuer);
+        return new(
+            authority,
+            preparation,
+            recoveryRecordMetadata,
+            inventoryDigest);
+    }
+
+    public void Dispose() => Interlocked.Exchange(ref usable, 0);
+
+    public override string ToString() => "[PRIVATE]";
+}
 
 internal sealed class RetainedStateAcceptanceEvidence : IDisposable
 {
@@ -1125,6 +1228,124 @@ internal sealed class VerifiedRetainedStateAcceptance
 
 internal sealed record RetainedStateCleanupTarget(
     OpaqueStoreObjectMetadata Metadata);
+
+internal sealed class RetainedStatePendingCandidateEvidence
+{
+    private RetainedStatePendingCandidateEvidence(
+        RetainedStateTransactionAuthority authority,
+        OpaqueStoreObjectMetadata metadata,
+        StateControlHeaderV1 header,
+        string logicalGenerationIdentity,
+        long generation,
+        string producerHeadSha,
+        bool matchesCurrentReviewedHead,
+        string inventoryDigest)
+    {
+        this.authority = authority;
+        Metadata = metadata;
+        Header = header;
+        LogicalGenerationIdentity = logicalGenerationIdentity;
+        Generation = generation;
+        ProducerHeadSha = producerHeadSha;
+        MatchesCurrentReviewedHead = matchesCurrentReviewedHead;
+        InventoryDigest = inventoryDigest;
+    }
+
+    private readonly RetainedStateTransactionAuthority authority;
+    internal OpaqueStoreObjectMetadata Metadata { get; }
+    internal StateControlHeaderV1 Header { get; }
+    internal string LogicalGenerationIdentity { get; }
+    internal long Generation { get; }
+    internal string ProducerHeadSha { get; }
+    internal bool MatchesCurrentReviewedHead { get; }
+    internal string InventoryDigest { get; }
+
+    internal bool IsIssuedBy(RetainedStateTransactionAuthority value) =>
+        ReferenceEquals(authority, value) && value.IsLive;
+
+    internal static RetainedStatePendingCandidateEvidence Create(
+        object issuer,
+        RetainedStateTransactionAuthority authority,
+        OpaqueStoreObjectMetadata metadata,
+        StateControlHeaderV1 header,
+        string logicalGenerationIdentity,
+        long generation,
+        string producerHeadSha,
+        bool matchesCurrentReviewedHead,
+        string inventoryDigest)
+    {
+        RetainedStateCapabilityIssuer.Require(issuer);
+        return new(
+            authority,
+            metadata,
+            header,
+            logicalGenerationIdentity,
+            generation,
+            producerHeadSha,
+            matchesCurrentReviewedHead,
+            inventoryDigest);
+    }
+
+    public override string ToString() => "[PRIVATE]";
+}
+
+internal enum RetainedStateP5CleanupClassification
+{
+    StaleCandidateAbandonment,
+    CompletedOpaqueRecord,
+    CompletedOpaqueWriteAnchor,
+}
+
+internal sealed record RetainedStateP5CleanupDecision(
+    RetainedStateP5CleanupClassification Classification,
+    string ClassificationIdentity,
+    string? MarkerEvidenceIdentity);
+
+internal sealed class RetainedStateP5CleanupAuthorization : IDisposable
+{
+    private int usable = 1;
+
+    private RetainedStateP5CleanupAuthorization(
+        RetainedStateTransactionAuthority authority,
+        RetainedStateP5CleanupDecision decision,
+        OpaqueStoreObjectMetadata target,
+        string inventoryDigest)
+    {
+        this.authority = authority;
+        Decision = decision;
+        Target = target;
+        InventoryDigest = inventoryDigest;
+    }
+
+    private readonly RetainedStateTransactionAuthority authority;
+    internal RetainedStateP5CleanupDecision Decision { get; }
+    internal OpaqueStoreObjectMetadata Target { get; }
+    internal string InventoryDigest { get; }
+
+    internal bool TryConsume(RetainedStateTransactionAuthority value) =>
+        ReferenceEquals(authority, value) &&
+        value.IsLive &&
+        Interlocked.CompareExchange(ref usable, 0, 1) == 1;
+
+    internal static RetainedStateP5CleanupAuthorization Create(
+        object issuer,
+        RetainedStateTransactionAuthority authority,
+        RetainedStateP5CleanupDecision decision,
+        OpaqueStoreObjectMetadata target,
+        string inventoryDigest)
+    {
+        RetainedStateCapabilityIssuer.Require(issuer);
+        return new(authority, decision, target, inventoryDigest);
+    }
+
+    public void Dispose() => Interlocked.Exchange(ref usable, 0);
+
+    public override string ToString() => "[PRIVATE]";
+}
+
+internal sealed record RetainedStateP5CleanupRequest(
+    RetainedStateP5CleanupAuthorization Authorization,
+    long SemanticRequiredExpiresAtUnixSeconds);
 
 internal sealed class RetainedStateCleanupAuthorization : IDisposable
 {

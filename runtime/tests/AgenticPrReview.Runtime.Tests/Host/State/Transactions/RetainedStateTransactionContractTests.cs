@@ -113,6 +113,85 @@ public sealed class RetainedStateTransactionContractTests
     }
 
     [Fact]
+    public void OpaqueWriteAnchorIsCanonicalTamperBoundAndExactlyBounded()
+    {
+        var envelope = Enumerable.Range(0, 257)
+            .Select(index => (byte)index)
+            .ToArray();
+        var value = Anchor(envelope);
+        Assert.True(RetainedStateOpaqueWriteAnchorCodec.TryEncode(
+            value,
+            out var bytes));
+        Assert.True(RetainedStateOpaqueWriteAnchorCodec.TryDecode(
+            bytes,
+            out var decoded));
+        Assert.NotNull(decoded);
+        Assert.Equal(value.CandidateObjectIdentity,
+            decoded!.CandidateObjectIdentity);
+        Assert.Equal(value.OperationIdentity, decoded.OperationIdentity);
+        Assert.Equal(value.ObjectClass, decoded.ObjectClass);
+        Assert.Equal(value.PredecessorIdentity,
+            decoded.PredecessorIdentity);
+        Assert.Equal(value.SuccessorIdentity, decoded.SuccessorIdentity);
+        Assert.Equal(value.SemanticRequiredExpiresAtUnixSeconds,
+            decoded.SemanticRequiredExpiresAtUnixSeconds);
+        Assert.Equal(value.RequiredPlatformExpiresAtUnixSeconds,
+            decoded.RequiredPlatformExpiresAtUnixSeconds);
+        Assert.Equal(value.ProducingRunIdentity,
+            decoded.ProducingRunIdentity);
+        Assert.Equal(value.ProducingRunAttempt,
+            decoded.ProducingRunAttempt);
+        Assert.Equal(value.TargetName, decoded.TargetName);
+        Assert.Equal(value.TargetObjectIdentity,
+            decoded.TargetObjectIdentity);
+        Assert.True(value.TargetEnvelope.AsSpan().SequenceEqual(
+            decoded.TargetEnvelope.AsSpan()));
+        Assert.Equal(value.TargetEnvelopeSha256,
+            decoded.TargetEnvelopeSha256);
+        Assert.Equal(value.DispatchPhase, decoded.DispatchPhase);
+        Assert.Equal(value.TargetPayloadSha256,
+            decoded.TargetPayloadSha256);
+
+        var tampered = bytes.ToArray();
+        var envelopeOffset = tampered.AsSpan().IndexOf(envelope);
+        Assert.True(envelopeOffset >= 0);
+        tampered[envelopeOffset] ^= 1;
+        Assert.False(RetainedStateOpaqueWriteAnchorCodec.TryDecode(
+            tampered,
+            out _));
+
+        var low = 1;
+        var high = LineageFormat.MaximumEnvelopeBytes;
+        var maximumEnvelopeBytes = 0;
+        byte[] maximumEncoding = [];
+        while (low <= high)
+        {
+            var middle = low + (high - low) / 2;
+            if (RetainedStateOpaqueWriteAnchorCodec.TryEncode(
+                    Anchor(new byte[middle]),
+                    out var encoded))
+            {
+                maximumEnvelopeBytes = middle;
+                maximumEncoding = encoded;
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle - 1;
+            }
+        }
+
+        Assert.Equal(LineageFormat.MaximumPayloadBytes,
+            maximumEncoding.Length);
+        Assert.True(RetainedStateOpaqueWriteAnchorCodec.TryDecode(
+            maximumEncoding,
+            out _));
+        Assert.False(RetainedStateOpaqueWriteAnchorCodec.TryEncode(
+            Anchor(new byte[maximumEnvelopeBytes + 1]),
+            out _));
+    }
+
+    [Fact]
     public void PublicationCapabilityCarriesExactOutcomeAndRendering()
     {
         var outcome = R4PublicationTestData.Outcome(summary: "exact A");
@@ -139,11 +218,15 @@ public sealed class RetainedStateTransactionContractTests
             typeof(RetainedStatePreparedCandidate),
             typeof(RetainedStatePersistedCandidate),
             typeof(RetainedStateOwnership),
+            typeof(RetainedStateOpaqueWriteAttempt),
             typeof(RetainedStateOpaqueRecord),
             typeof(RetainedStateAcceptancePreparation),
+            typeof(RetainedStateAcceptanceRecoveryDurability),
             typeof(RetainedStateAcceptanceEvidence),
             typeof(RetainedStateAcceptanceAttempt),
             typeof(RetainedStatePredecessorCopyAttempt),
+            typeof(RetainedStatePendingCandidateEvidence),
+            typeof(RetainedStateP5CleanupAuthorization),
             typeof(VerifiedRetainedStateAcceptance),
             typeof(RetainedStateCleanupAuthorization),
             typeof(RetainedStateAuthorityLease),
@@ -204,4 +287,22 @@ public sealed class RetainedStateTransactionContractTests
             new OpaqueStoreEncryptedObjectDigest(new string('b', 64)),
             1_800_000_000,
             100);
+
+    private static RetainedStateOpaqueWriteAnchor Anchor(byte[] envelope) =>
+        new(
+            new string('a', 64),
+            new string('b', 64),
+            StateObjectClass.PublicationIntent,
+            new string('a', 64),
+            new string('c', 64),
+            1_700_000_000,
+            1_800_000_000,
+            "900",
+            2,
+            new OpaqueStoreName("target"),
+            new string('d', 64),
+            ImmutableArray.CreateRange(envelope),
+            OpaqueStoreHash.Sha256(envelope),
+            RetainedStateOpaqueWriteAnchorPhase.PreparedBeforeTargetDispatch,
+            new string('e', 64));
 }
