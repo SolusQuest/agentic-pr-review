@@ -15,12 +15,14 @@ public sealed class ActionHostGitObjectTransportTests
     {
         var commitSha = new string('a', 40);
         var treeSha = new string('b', 40);
+        var parentSha = new string('c', 40);
         var blobBytes = Encoding.UTF8.GetBytes("policy\n");
         var blobSha = GitBlobSha(blobBytes);
         var responses = new Queue<HttpResponseMessage>(
         [
             JsonResponse(
-                $"{{\"sha\":\"{commitSha}\",\"tree\":{{\"sha\":\"{treeSha}\"}}}}"),
+                $"{{\"sha\":\"{commitSha}\",\"tree\":{{\"sha\":\"{treeSha}\"}}," +
+                $"\"parents\":[{{\"sha\":\"{parentSha}\"}}]}}"),
             JsonResponse(
                 $"{{\"sha\":\"{treeSha}\",\"truncated\":false,\"tree\":[" +
                 $"{{\"path\":\"config.json\",\"mode\":\"100644\"," +
@@ -48,6 +50,7 @@ public sealed class ActionHostGitObjectTransportTests
             CancellationToken.None);
 
         Assert.NotNull(commit.Value);
+        Assert.Equal([parentSha], commit.Value.ParentShas);
         Assert.NotNull(tree.Value);
         Assert.Equal(blobBytes.Length,
             Assert.Single(tree.Value!.Entries).Size);
@@ -89,6 +92,42 @@ public sealed class ActionHostGitObjectTransportTests
         { "blob", "{\"sha\":\"{sha}\",\"size\":0,\"content\":\"\"}" },
         { "blob", "{\"sha\":\"{sha}\",\"size\":0,\"encoding\":\"base64\"}" },
     };
+
+    public static TheoryData<string> InvalidCommitParents => new()
+    {
+        "[null]",
+        "[{}]",
+        "[{\"sha\":\"bad\"}]",
+        "[{\"sha\":\"{sha}\"}]",
+        "[{\"sha\":\"{other}\"},{\"sha\":\"{other}\"}]",
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidCommitParents))]
+    public async Task CommitParentsRejectMalformedDuplicateAndSelfDescriptors(
+        string parentsTemplate)
+    {
+        var sha = new string('a', 40);
+        var tree = new string('b', 40);
+        var other = new string('c', 40);
+        var parents = parentsTemplate
+            .Replace("{sha}", sha, StringComparison.Ordinal)
+            .Replace("{other}", other, StringComparison.Ordinal);
+        var handler = new CapturingHandler(_ => JsonResponse(
+            $"{{\"sha\":\"{sha}\",\"tree\":{{\"sha\":\"{tree}\"}}," +
+            $"\"parents\":{parents}}}"));
+        using var transport = ActionHostGitObjectTransport.CreateForTesting(
+            "token-canary",
+            handler);
+
+        var result = await transport.GetCommitObjectAsync(
+            "SolusQuest/agentic-pr-review",
+            sha,
+            CancellationToken.None);
+
+        Assert.Equal(ActionHostGitObjectFailure.InvalidResponse, result.Failure);
+        Assert.Null(result.Value);
+    }
 
     [Theory]
     [MemberData(nameof(MissingRequiredMembers))]

@@ -71,7 +71,8 @@ internal sealed class ActionHostGitObjectResult<T>
 
 internal sealed record ActionHostGitCommitObject(
     string Sha,
-    string TreeSha);
+    string TreeSha,
+    IReadOnlyList<string>? ParentShas = null);
 
 internal sealed record ActionHostGitTreeEntryObject(
     string Path,

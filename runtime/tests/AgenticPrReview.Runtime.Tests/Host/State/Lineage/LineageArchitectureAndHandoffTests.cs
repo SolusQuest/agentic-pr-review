@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Security.Cryptography;
 using AgenticPrReview.Runtime.Host.State.Lineage;
 using AgenticPrReview.Runtime.Host.State.Locator;
+using AgenticPrReview.Runtime.Host.State.Restore;
 
 namespace AgenticPrReview.Runtime.Tests.Host.State.Lineage;
 
@@ -57,10 +58,19 @@ public sealed class LineageArchitectureAndHandoffTests
             BindingFlags.Instance | BindingFlags.Public));
         Assert.DoesNotContain(
             typeof(AuthorizedLineageReset).GetMethods(
-                BindingFlags.Static |
-                BindingFlags.Public |
-                BindingFlags.NonPublic),
+                BindingFlags.Static | BindingFlags.Public),
             method => method.ReturnType == typeof(AuthorizedLineageReset));
+        var issuer = Assert.Single(
+            typeof(AuthorizedLineageReset).GetMethods(
+                BindingFlags.Static | BindingFlags.NonPublic),
+            method => method.ReturnType == typeof(AuthorizedLineageReset));
+        Assert.Equal("Issue", issuer.Name);
+        Assert.Equal(
+            typeof(AcceptedStateProductionAuthorization),
+            issuer.GetParameters()[0].ParameterType);
+        Assert.DoesNotContain(
+            issuer.GetParameters(),
+            parameter => parameter.ParameterType == typeof(LocatorContext));
 
         var constructor = Assert.Single(
             typeof(AuthorizedLineageReset).GetConstructors(

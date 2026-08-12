@@ -27,14 +27,24 @@ internal static class LineageFormat
     internal const int TagBytes = 16;
     internal const int MaximumHeaderBytes = 16 * 1024;
     internal const int MaximumPayloadBytes = 1024 * 1024;
+    internal const int MaximumReaderPayloadBytes = 1_500_000;
     internal const int MaximumEnvelopeBytes = MaximumHeaderBytes +
-        MaximumPayloadBytes + 1024;
+        MaximumReaderPayloadBytes + 1024;
     internal const int MaximumPhysicalPerClass = 8;
     internal const int MaximumScopedObjects = 9 * MaximumPhysicalPerClass;
     internal const int MaximumTextBytes = 512;
     internal const int MaximumRunIdentityBytes = 256;
     internal const int MaximumEvidenceObjects = MaximumScopedObjects;
     internal const long MaximumJavaScriptInteger = 9_007_199_254_740_991;
+
+    internal static bool IsPayloadLengthAllowed(
+        StateObjectClass objectClass,
+        int payloadLength) =>
+        payloadLength >= 0 &&
+        payloadLength <= (objectClass is
+            StateObjectClass.Candidate or StateObjectClass.Acceptance
+                ? MaximumReaderPayloadBytes
+                : MaximumPayloadBytes);
 }
 
 internal static class LineageCodes
@@ -293,6 +303,126 @@ internal sealed record LineageResolveResult(
 
     internal static LineageResolveResult Fail(string code) =>
         new(code, null);
+}
+
+internal sealed record LineageReadOnlyObservationResult(
+    string Code,
+    LineageReadOnlyObservationContext? Context)
+{
+    internal bool Succeeded =>
+        StringComparer.Ordinal.Equals(Code, LineageCodes.Ready) &&
+        Context is not null;
+
+    internal static LineageReadOnlyObservationResult Success(
+        LineageReadOnlyObservationContext context) =>
+        new(LineageCodes.Ready, context);
+
+    internal static LineageReadOnlyObservationResult Fail(string code) =>
+        new(code, null);
+}
+
+internal enum LineageInterruptedTransitionRecoveryPhase
+{
+    None,
+    PendingIntact,
+    RecoveredSuccessor,
+}
+
+internal sealed record LineagePendingExpiryIntent(
+    string IntentIdentity,
+    string PriorHeadIdentity,
+    string PriorEpoch,
+    string SessionId,
+    string TerminalReceiptIdentity,
+    long ExpiryBoundaryUnixSeconds,
+    string TargetInventoryDigest);
+
+internal sealed record LineageInterruptedTransitionRecoveryResult(
+    string Code,
+    LineageInterruptedTransitionRecoveryPhase Phase,
+    SelectedLineageContext? Context,
+    LineagePendingExpiryIntent? PendingExpiry)
+{
+    internal bool Recovered =>
+        Phase == LineageInterruptedTransitionRecoveryPhase.RecoveredSuccessor;
+    internal bool RequiresTypedExpiry =>
+        Phase == LineageInterruptedTransitionRecoveryPhase.PendingIntact;
+
+    internal bool Succeeded =>
+        StringComparer.Ordinal.Equals(Code, LineageCodes.Ready) &&
+        (!Recovered || Context is not null) &&
+        (!RequiresTypedExpiry || PendingExpiry is not null);
+
+    internal static LineageInterruptedTransitionRecoveryResult None() =>
+        new(
+            LineageCodes.Ready,
+            LineageInterruptedTransitionRecoveryPhase.None,
+            Context: null,
+            PendingExpiry: null);
+
+    internal static LineageInterruptedTransitionRecoveryResult
+        AwaitingTypedExpiry(LineagePendingExpiryIntent pending) =>
+        new(
+            LineageCodes.Ready,
+            LineageInterruptedTransitionRecoveryPhase.PendingIntact,
+            Context: null,
+            pending);
+
+    internal static LineageInterruptedTransitionRecoveryResult Success(
+        SelectedLineageContext context) =>
+        new(
+            LineageCodes.Ready,
+            LineageInterruptedTransitionRecoveryPhase.RecoveredSuccessor,
+            context,
+            PendingExpiry: null);
+
+    internal static LineageInterruptedTransitionRecoveryResult Fail(
+        string code) =>
+        new(
+            code,
+            LineageInterruptedTransitionRecoveryPhase.None,
+            Context: null,
+            PendingExpiry: null);
+}
+
+internal sealed class LineageReadOnlyObservationContext : IDisposable
+{
+    private ScopedStateInventorySnapshot? snapshot;
+
+    internal LineageReadOnlyObservationContext(
+        ScopedStateInventorySnapshot snapshot,
+        LineageSelectionResult selection,
+        string baseScopeDigest,
+        string currentKeyId,
+        string inventoryDigest,
+        long requiredPlatformExpiresAtUnixSeconds)
+    {
+        this.snapshot = snapshot;
+        Selection = selection;
+        BaseScopeDigest = baseScopeDigest;
+        CurrentKeyId = currentKeyId;
+        InventoryDigest = inventoryDigest;
+        RequiredPlatformExpiresAtUnixSeconds =
+            requiredPlatformExpiresAtUnixSeconds;
+    }
+
+    internal ScopedStateInventorySnapshot? Snapshot =>
+        Volatile.Read(ref snapshot);
+    internal LineageSelectionResult Selection { get; }
+    internal string BaseScopeDigest { get; }
+    internal string CurrentKeyId { get; }
+    internal string InventoryDigest { get; }
+    internal long RequiredPlatformExpiresAtUnixSeconds { get; }
+
+    internal ScopedStateInventorySnapshot? DetachSnapshot() =>
+        Interlocked.Exchange(ref snapshot, null);
+
+    public void Dispose() =>
+        ScopedStateInventory.Clear(
+            Interlocked.Exchange(ref snapshot, null));
+
+    public override string ToString() =>
+        nameof(LineageReadOnlyObservationContext);
 }
 
 internal sealed class SelectedLineageContext : IDisposable

@@ -157,6 +157,7 @@ internal sealed class ActionHostTrustedPolicyRequest
         failure = ActionHostTrustedPolicyFailure.AuthorityMismatch;
         if (launch is null ||
             invocation is null ||
+            !invocation.IsBoundTo(launch) ||
             launch.RepositoryId != invocation.PullRequest.RepositoryId ||
             !StringComparer.Ordinal.Equals(
                 launch.RepositoryName,

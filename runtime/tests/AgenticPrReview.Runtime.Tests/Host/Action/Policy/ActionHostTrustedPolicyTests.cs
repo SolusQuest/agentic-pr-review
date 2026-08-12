@@ -77,7 +77,7 @@ public sealed class ActionHostTrustedPolicyTests
             scenario.Launch,
             configPath: ".github/custom-policy.json");
         var authorization = await scenario.CreateAuthorizer().AuthorizeAsync(
-            scenario.Launch,
+            customLaunch,
             CancellationToken.None);
         Assert.True(ActionHostTrustedPolicyRequest.TryBind(
             customLaunch,
@@ -134,7 +134,7 @@ public sealed class ActionHostTrustedPolicyTests
             scenario.Launch,
             configPath: configPath);
         var authorization = await scenario.CreateAuthorizer().AuthorizeAsync(
-            scenario.Launch,
+            customLaunch,
             CancellationToken.None);
         Assert.True(ActionHostTrustedPolicyRequest.TryBind(
             customLaunch,
@@ -463,13 +463,13 @@ public sealed class ActionHostTrustedPolicyTests
     public async Task BuildAndPayloadInputsParticipateInPolicyIdentity()
     {
         var (original, scenario) = await Request();
-        var authorization = await scenario.CreateAuthorizer().AuthorizeAsync(
-            scenario.Launch,
-            CancellationToken.None);
         var changedLaunch = CloneLaunch(
             scenario.Launch,
             payloadSha256: new string('e', 64),
             buildDiscriminator: "build-identity-variant");
+        var authorization = await scenario.CreateAuthorizer().AuthorizeAsync(
+            changedLaunch,
+            CancellationToken.None);
         Assert.True(ActionHostTrustedPolicyRequest.TryBind(
             changedLaunch,
             authorization.Invocation,
@@ -681,7 +681,7 @@ public sealed class ActionHostTrustedPolicyTests
         return (request!, scenario);
     }
 
-    private static byte[] Config(
+    internal static byte[] Config(
         string mode,
         string? inlineSeverity,
         string instructionsPath =
@@ -752,7 +752,7 @@ public sealed class ActionHostTrustedPolicyTests
         return clone!;
     }
 
-    private sealed class ScriptedObjectTransport :
+    internal sealed class ScriptedObjectTransport :
         IActionHostGitObjectTransport
     {
         internal static readonly string RootTree = new('1', 40);

@@ -1,4 +1,5 @@
 using AgenticPrReview.Runtime.Host.State.Locator;
+using AgenticPrReview.Runtime.Host.State.Restore;
 
 namespace AgenticPrReview.Runtime.Host.State.Lineage;
 
@@ -28,6 +29,50 @@ internal sealed class AuthorizedLineageReset
         ProducingRunAttempt = producingRunAttempt;
         RequestIdentity = requestIdentity;
         PriorHeadIdentity = priorHeadIdentity;
+    }
+
+    internal static AuthorizedLineageReset? Issue(
+        AcceptedStateProductionAuthorization authorization,
+        AuthorizedLocatorAccess access,
+        LineageBaseScope scope,
+        string baseScopeDigest,
+        string producingRunIdentity,
+        long producingRunAttempt,
+        string requestIdentity,
+        string priorHeadIdentity)
+    {
+        if (authorization is null ||
+            access is null ||
+            !LineageValidation.IsValid(scope) ||
+            !LineageValidation.IsSha256(baseScopeDigest) ||
+            !LineageValidation.IsText(
+                producingRunIdentity,
+                LineageFormat.MaximumRunIdentityBytes) ||
+            producingRunAttempt < 0 ||
+            !LineageValidation.IsSha256(requestIdentity) ||
+            !LineageValidation.IsSha256(priorHeadIdentity) ||
+            !access.Allows(access, scope.RepositoryId) ||
+            !authorization.AllowsReset(
+                scope.RepositoryId,
+                scope.PullRequestNumber,
+                scope.TrustedWorkflowIdentity,
+                producingRunIdentity,
+                producingRunAttempt))
+        {
+            return null;
+        }
+
+        return new AuthorizedLineageReset(
+            access,
+            baseScopeDigest,
+            scope.RepositoryId,
+            scope.PullRequestNumber,
+            scope.TrustedWorkflowIdentity,
+            "workflow_dispatch",
+            producingRunIdentity,
+            producingRunAttempt,
+            requestIdentity,
+            priorHeadIdentity);
     }
 
     internal string BaseScopeDigest { get; }
