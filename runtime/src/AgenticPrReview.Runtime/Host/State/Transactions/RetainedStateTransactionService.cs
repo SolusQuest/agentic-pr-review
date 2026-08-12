@@ -35,6 +35,13 @@ internal sealed class RetainedStateTransactionService
         R4PreparedPublication publication,
         CancellationToken cancellationToken)
     {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return RetainedStateTransactionResult<
+                RetainedStatePreparedCandidate>.Fail(
+                    RetainedStateTransactionCodes.Cancelled);
+        }
+
         using var lease = await authority.EnterAsync(cancellationToken)
             .ConfigureAwait(false);
         var buildCode = RetainedStateTransactionCodes.AccessDenied;
@@ -54,7 +61,9 @@ internal sealed class RetainedStateTransactionService
             return RetainedStateTransactionResult<
                 RetainedStatePreparedCandidate>.Fail(
                     lease is null
-                        ? RetainedStateTransactionCodes.AccessDenied
+                        ? cancellationToken.IsCancellationRequested
+                            ? RetainedStateTransactionCodes.Cancelled
+                            : RetainedStateTransactionCodes.AccessDenied
                         : buildCode);
         }
 
@@ -219,7 +228,10 @@ internal sealed class RetainedStateTransactionService
         {
             return RetainedStateTransactionResult<
                 RetainedStatePersistedCandidate>.Fail(
-                    RetainedStateTransactionCodes.AccessDenied);
+                    lease is null &&
+                        cancellationToken.IsCancellationRequested
+                        ? RetainedStateTransactionCodes.Cancelled
+                        : RetainedStateTransactionCodes.AccessDenied);
         }
 
         var sentinel = await authority.EnsureSentinelCoverageAsync(
@@ -402,7 +414,7 @@ internal sealed class RetainedStateTransactionService
     }
 
     internal async Task<RetainedStateTransactionResult<
-        RetainedStateOpaqueRecord>> PersistOpaqueAsync(
+        RetainedStateOpaqueWriteAttempt>> PrepareOpaqueAsync(
         RetainedStateTransactionAuthority authority,
         RetainedStateOwnership ownership,
         RetainedStateOpaqueWriteRequest request,
@@ -411,7 +423,7 @@ internal sealed class RetainedStateTransactionService
         if (cancellationToken.IsCancellationRequested)
         {
             return RetainedStateTransactionResult<
-                RetainedStateOpaqueRecord>.Fail(
+                RetainedStateOpaqueWriteAttempt>.Fail(
                     RetainedStateTransactionCodes.Cancelled);
         }
 
@@ -442,8 +454,11 @@ internal sealed class RetainedStateTransactionService
         {
             ownership.Dispose();
             return RetainedStateTransactionResult<
-                RetainedStateOpaqueRecord>.Fail(
-                    RetainedStateTransactionCodes.AccessDenied);
+                RetainedStateOpaqueWriteAttempt>.Fail(
+                    lease is null &&
+                        cancellationToken.IsCancellationRequested
+                        ? RetainedStateTransactionCodes.Cancelled
+                        : RetainedStateTransactionCodes.AccessDenied);
         }
 
         var sentinel = await authority.EnsureSentinelCoverageAsync(
@@ -455,7 +470,7 @@ internal sealed class RetainedStateTransactionService
         if (!Ready(sentinel))
         {
             return RetainedStateTransactionResult<
-                RetainedStateOpaqueRecord>.Fail(sentinel);
+                RetainedStateOpaqueWriteAttempt>.Fail(sentinel);
         }
 
         var observedResult = await authority.ObserveAsync(
@@ -476,6 +491,7 @@ internal sealed class RetainedStateTransactionService
             !StringComparer.Ordinal.Equals(
                 observed.InventoryDigest,
                 ownership.InventoryDigest) ||
+            observed.InventoryDigest is not { } inventoryDigest ||
             observed.Snapshot is not { } snapshot ||
             snapshot.Authenticated.Count(item =>
                 item.Header.ObjectClass == request.ObjectClass) >=
@@ -487,13 +503,15 @@ internal sealed class RetainedStateTransactionService
                     snapshot.Names[request.ObjectClass]))
         {
             return RetainedStateTransactionResult<
-                RetainedStateOpaqueRecord>.Fail(
+                RetainedStateOpaqueWriteAttempt>.Fail(
                     observedResult.Succeeded
                         ? RetainedStateTransactionCodes.Conflict
                         : observedResult.Code);
         }
 
+        byte[] payload = request.Payload.ToArray();
         byte[] envelope = [];
+        byte[] recoveryPayload = [];
         var envelopeCode = RetainedStateTransactionCodes.Invalid;
         if (!authority.TryGetPersistenceContext(
                 lease,
@@ -516,63 +534,360 @@ internal sealed class RetainedStateTransactionService
                 trustedNow,
                 request.SemanticRequiredExpiresAtUnixSeconds,
                 requiredPlatformExpiry,
-                request.Payload.AsSpan(),
+                payload,
                 out var name,
                 out envelope,
                 out var header,
                 out envelopeCode) ||
             name is null ||
-            header is null ||
-            !authority.TryCreatePersistence(lease, out var persistence) ||
-            persistence is null)
+            header is null)
         {
+            CryptographicOperations.ZeroMemory(payload);
             CryptographicOperations.ZeroMemory(envelope);
             return RetainedStateTransactionResult<
-                RetainedStateOpaqueRecord>.Fail(envelopeCode);
+                RetainedStateOpaqueWriteAttempt>.Fail(envelopeCode);
+        }
+
+        if (!RetainedStateOpaqueWriteRecoveryCodec.TryEncode(
+                request.ObjectClass,
+                request.SemanticRequiredExpiresAtUnixSeconds,
+                ownership.Candidate.Prepared.Header.ObjectIdentity,
+                name,
+                header,
+                envelope,
+                out recoveryPayload))
+        {
+            CryptographicOperations.ZeroMemory(payload);
+            CryptographicOperations.ZeroMemory(envelope);
+            CryptographicOperations.ZeroMemory(recoveryPayload);
+            return RetainedStateTransactionResult<
+                RetainedStateOpaqueWriteAttempt>.Fail(
+                    RetainedStateTransactionCodes.Invalid);
         }
 
         try
         {
-            var persisted = await persistence.UploadAndReconcileAsync(
+            return RetainedStateTransactionResult<
+                RetainedStateOpaqueWriteAttempt>.Success(
+                    RetainedStateTransactionCodes.Prepared,
+                    RetainedStateOpaqueWriteAttempt.Create(
+                        issuer,
+                        authority,
+                        ownership.Candidate,
+                        request.ObjectClass,
+                        request.SemanticRequiredExpiresAtUnixSeconds,
+                        name,
+                        header,
+                        payload,
+                        envelope,
+                        recoveryPayload,
+                        inventoryDigest));
+        }
+        finally
+        {
+            payload = [];
+            envelope = [];
+            recoveryPayload = [];
+        }
+    }
+
+    internal async Task<RetainedStateTransactionResult<
+        RetainedStateOpaqueRecord>> PersistOpaqueAttemptAsync(
+        RetainedStateTransactionAuthority authority,
+        RetainedStateOpaqueWriteAttempt attempt,
+        CancellationToken cancellationToken)
+    {
+        if (attempt is null ||
+            (!attempt.HasEnteredDispatch &&
+                cancellationToken.IsCancellationRequested))
+        {
+            return RetainedStateTransactionResult<
+                RetainedStateOpaqueRecord>.Fail(
+                    attempt is null
+                        ? RetainedStateTransactionCodes.AccessDenied
+                        : RetainedStateTransactionCodes.Cancelled);
+        }
+
+        using var lease = await authority.EnterAsync(
+                attempt.HasEnteredDispatch
+                    ? CancellationToken.None
+                    : cancellationToken)
+            .ConfigureAwait(false);
+        var candidate = attempt.Candidate;
+        if (lease is null ||
+            !attempt.IsIssuedBy(authority) ||
+            !candidate.IsIssuedBy(authority) ||
+            !authority.TryGetBinding(lease, out var binding) ||
+            binding is null ||
+            !MatchesPreparedBinding(candidate.Prepared, binding) ||
+            !MatchesOpaqueWriteAttempt(attempt, binding) ||
+            !authority.TryReadTrustedTime(lease, out var trustedNow) ||
+            trustedNow > attempt.SemanticRequiredExpiresAtUnixSeconds ||
+            !attempt.TryGetBytes(
+                authority,
+                out var payload,
+                out var envelope) ||
+            !authority.TryGetPersistenceContext(
+                lease,
+                out var locator,
+                out var locatorAccess,
+                out var baseScope) ||
+            locator is null ||
+            locatorAccess is null ||
+            baseScope is null ||
+            !authority.TryCreatePersistence(lease, out var persistence) ||
+            persistence is null)
+        {
+            return RetainedStateTransactionResult<
+                RetainedStateOpaqueRecord>.Fail(
+                    lease is null && cancellationToken.IsCancellationRequested
+                        ? RetainedStateTransactionCodes.Cancelled
+                        : RetainedStateTransactionCodes.AccessDenied);
+        }
+
+        if (!attempt.HasEnteredDispatch)
+        {
+            var observedResult = await authority.ObserveAsync(
+                    lease,
+                    candidate.Prepared.Header.LogicalExpiresAtUnixSeconds,
+                    trustedNow,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            using var observed = observedResult.Value;
+            if (!observedResult.Succeeded ||
+                observed is null ||
+                !CanAppendCandidate(
+                    observed,
+                    authority,
+                    binding,
+                    candidate) ||
+                !StringComparer.Ordinal.Equals(
+                    observed.InventoryDigest,
+                    attempt.InventoryDigest) ||
+                observed.Snapshot is not { } snapshot ||
+                snapshot.Authenticated.Count(item =>
+                    item.Header.ObjectClass == attempt.ObjectClass) >=
+                        LineageFormat.MaximumPhysicalPerClass ||
+                snapshot.UnderRetained.Any(item =>
+                    item.Header.ObjectClass == attempt.ObjectClass) ||
+                snapshot.Unknown.Any(item =>
+                    item.Metadata.Reference.Name ==
+                        snapshot.Names[attempt.ObjectClass]))
+            {
+                return RetainedStateTransactionResult<
+                    RetainedStateOpaqueRecord>.Fail(
+                        observedResult.Succeeded
+                            ? RetainedStateTransactionCodes.Conflict
+                            : observedResult.Code);
+            }
+        }
+
+        var shouldDispatch = attempt.TryBeginDispatch();
+        var persisted = shouldDispatch
+            ? await persistence.UploadAndReconcileAsync(
                     locator,
                     locatorAccess,
                     baseScope,
                     binding.SelectedLineage.BaseScopeDigest,
+                    attempt.Name,
+                    envelope,
+                    attempt.Header,
+                    payload,
+                    attempt.Header.ProducingRunIdentity,
+                    attempt.Header.ProducingRunAttempt,
+                    attempt.Header.RequiredPlatformExpiresAtUnixSeconds,
+                    cancellationToken)
+                .ConfigureAwait(false)
+            : await persistence.ReconcileExistingAsync(
+                    locator,
+                    locatorAccess,
+                    baseScope,
+                    binding.SelectedLineage.BaseScopeDigest,
+                    attempt.Name,
+                    envelope,
+                    attempt.Header,
+                    payload,
+                    attempt.Header.ProducingRunIdentity,
+                    attempt.Header.ProducingRunAttempt,
+                    attempt.Header.RequiredPlatformExpiresAtUnixSeconds)
+                .ConfigureAwait(false);
+        if (!persisted.Succeeded &&
+            !persisted.MayHaveCommitted &&
+            shouldDispatch)
+        {
+            attempt.ResetDispatchIfDefinitelyNotCommitted();
+        }
+
+        if (!persisted.Succeeded ||
+            persisted.Metadata is null ||
+            persisted.Header is null ||
+            persisted.Payload is null ||
+            persisted.InventoryDigest is null)
+        {
+            CryptographicOperations.ZeroMemory(persisted.Payload ?? []);
+            return RetainedStateTransactionResult<
+                RetainedStateOpaqueRecord>.Fail(persisted.Code);
+        }
+
+        return RetainedStateTransactionResult<
+            RetainedStateOpaqueRecord>.Success(
+                RetainedStateTransactionCodes.Persisted,
+                RetainedStateOpaqueRecord.Create(
+                    issuer,
+                    authority,
+                    attempt.ObjectClass,
+                    persisted.Metadata,
+                    persisted.Header,
+                    persisted.Payload,
+                    persisted.InventoryDigest));
+    }
+
+    internal async Task<RetainedStateTransactionResult<
+        RetainedStateOpaqueWriteAttempt>> RecoverOpaqueAttemptAsync(
+        RetainedStateTransactionAuthority authority,
+        RetainedStatePersistedCandidate candidate,
+        ImmutableArray<byte> recoveryPayload,
+        CancellationToken cancellationToken)
+    {
+        using var lease = await authority.EnterAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (lease is null ||
+            candidate is null ||
+            !candidate.IsIssuedBy(authority) ||
+            !candidate.Prepared.IsIssuedBy(authority) ||
+            recoveryPayload.IsDefaultOrEmpty ||
+            recoveryPayload.Length > LineageFormat.MaximumPayloadBytes ||
+            !authority.TryGetBinding(lease, out var binding) ||
+            binding is null ||
+            !MatchesPreparedBinding(candidate.Prepared, binding) ||
+            !authority.TryReadTrustedTime(lease, out var trustedNow))
+        {
+            return RetainedStateTransactionResult<
+                RetainedStateOpaqueWriteAttempt>.Fail(
+                    lease is null && cancellationToken.IsCancellationRequested
+                        ? RetainedStateTransactionCodes.Cancelled
+                        : RetainedStateTransactionCodes.AccessDenied);
+        }
+
+        byte[] payload = [];
+        byte[] envelope = [];
+        byte[] canonicalRecovery = [];
+        var encoded = recoveryPayload.ToArray();
+        try
+        {
+            if (!RetainedStateOpaqueWriteRecoveryCodec.TryDecode(
+                    encoded,
+                    out var objectClass,
+                    out var semanticExpiry,
+                    out var candidateIdentity,
+                    out var name,
+                out envelope) ||
+                candidateIdentity is null ||
+                name is null ||
+                !StringComparer.Ordinal.Equals(
+                    candidateIdentity,
+                    candidate.Prepared.Header.ObjectIdentity) ||
+                trustedNow > semanticExpiry ||
+                !authority.TryGetPersistenceContext(
+                    lease,
+                    out var locator,
+                    out var locatorAccess,
+                    out _) ||
+                locator is null ||
+                locatorAccess is null ||
+                !StateControlEnvelopeV1Codec.TryDecrypt(
+                    locator,
+                    locatorAccess,
                     name,
                     envelope,
+                    out var header,
+                    out payload,
+                    out _) ||
+                header is null ||
+                header.ObjectClass != objectClass ||
+                !StringComparer.Ordinal.Equals(
+                    header.PredecessorIdentity,
+                    candidateIdentity) ||
+                header.LogicalExpiresAtUnixSeconds != semanticExpiry ||
+                !RetainedStateRetention.TryOpaque(
+                    header.CreatedAtUnixSeconds,
+                    semanticExpiry,
+                    out var requiredPlatformExpiry) ||
+                requiredPlatformExpiry !=
+                    header.RequiredPlatformExpiresAtUnixSeconds ||
+                !RetainedStateOpaqueWriteRecoveryCodec.TryEncode(
+                    objectClass,
+                    semanticExpiry,
+                    candidateIdentity,
+                    name,
                     header,
-                    request.Payload.AsMemory(),
-                    binding.ProducingRunIdentity,
-                    binding.ProducingRunAttempt,
-                    requiredPlatformExpiry,
+                    envelope,
+                    out canonicalRecovery) ||
+                !encoded.AsSpan().SequenceEqual(canonicalRecovery))
+            {
+                return RetainedStateTransactionResult<
+                    RetainedStateOpaqueWriteAttempt>.Fail(
+                        RetainedStateTransactionCodes.Conflict);
+            }
+
+            var observedResult = await authority.ObserveAsync(
+                    lease,
+                    candidate.Prepared.Header.LogicalExpiresAtUnixSeconds,
+                    trustedNow,
                     cancellationToken)
                 .ConfigureAwait(false);
-            if (!persisted.Succeeded ||
-                persisted.Metadata is null ||
-                persisted.Header is null ||
-                persisted.Payload is null ||
-                persisted.InventoryDigest is null)
+            using var observed = observedResult.Value;
+            if (!observedResult.Succeeded ||
+                observed is null ||
+                !CanAppendCandidate(
+                    observed,
+                    authority,
+                    binding,
+                    candidate) ||
+                observed.InventoryDigest is not { } inventoryDigest)
             {
-                CryptographicOperations.ZeroMemory(persisted.Payload ?? []);
                 return RetainedStateTransactionResult<
-                    RetainedStateOpaqueRecord>.Fail(persisted.Code);
+                    RetainedStateOpaqueWriteAttempt>.Fail(
+                        observedResult.Succeeded
+                            ? RetainedStateTransactionCodes.Conflict
+                            : observedResult.Code);
+            }
+
+            var attempt = RetainedStateOpaqueWriteAttempt.Create(
+                issuer,
+                authority,
+                candidate,
+                objectClass,
+                semanticExpiry,
+                name,
+                header,
+                payload,
+                envelope,
+                canonicalRecovery,
+                inventoryDigest,
+                reconcileOnly: true);
+            payload = [];
+            envelope = [];
+            canonicalRecovery = [];
+            if (!MatchesOpaqueWriteAttempt(attempt, binding))
+            {
+                attempt.Dispose();
+                return RetainedStateTransactionResult<
+                    RetainedStateOpaqueWriteAttempt>.Fail(
+                        RetainedStateTransactionCodes.Conflict);
             }
 
             return RetainedStateTransactionResult<
-                RetainedStateOpaqueRecord>.Success(
-                    RetainedStateTransactionCodes.Persisted,
-                    RetainedStateOpaqueRecord.Create(
-                        issuer,
-                        authority,
-                        request.ObjectClass,
-                        persisted.Metadata,
-                        persisted.Header,
-                        persisted.Payload,
-                        persisted.InventoryDigest));
+                RetainedStateOpaqueWriteAttempt>.Success(
+                    RetainedStateTransactionCodes.Ready,
+                    attempt);
         }
         finally
         {
+            CryptographicOperations.ZeroMemory(encoded);
+            CryptographicOperations.ZeroMemory(payload);
             CryptographicOperations.ZeroMemory(envelope);
+            CryptographicOperations.ZeroMemory(canonicalRecovery);
         }
     }
 
@@ -583,6 +898,14 @@ internal sealed class RetainedStateTransactionService
         StickyCommentPublisher.StickyPublicationReceipt receipt,
         CancellationToken cancellationToken)
     {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            ownership.Dispose();
+            return RetainedStateTransactionResult<
+                RetainedStateAcceptancePreparation>.Fail(
+                    RetainedStateTransactionCodes.Cancelled);
+        }
+
         using var lease = await authority.EnterAsync(cancellationToken)
             .ConfigureAwait(false);
         var candidate = ownership.Candidate;
@@ -604,7 +927,10 @@ internal sealed class RetainedStateTransactionService
             ownership.Dispose();
             return RetainedStateTransactionResult<
                 RetainedStateAcceptancePreparation>.Fail(
-                    RetainedStateTransactionCodes.AccessDenied);
+                    lease is null &&
+                        cancellationToken.IsCancellationRequested
+                        ? RetainedStateTransactionCodes.Cancelled
+                        : RetainedStateTransactionCodes.AccessDenied);
         }
 
         var initialResult = await authority.ObserveAsync(
@@ -656,7 +982,7 @@ internal sealed class RetainedStateTransactionService
                 RetainedStateAcceptancePreparation>.Fail(refreshed);
         }
 
-        var predecessorCode = await EnsureImmediatePredecessorAsync(
+        var predecessor = await PrepareImmediatePredecessorAsync(
                 authority,
                 lease,
                 binding,
@@ -665,11 +991,13 @@ internal sealed class RetainedStateTransactionService
                 logicalExpiry,
                 cancellationToken)
             .ConfigureAwait(false);
-        if (!Ready(predecessorCode))
+        if (!Ready(predecessor.Code))
         {
             return RetainedStateTransactionResult<
-                RetainedStateAcceptancePreparation>.Fail(predecessorCode);
+                RetainedStateAcceptancePreparation>.Fail(predecessor.Code);
         }
+
+        var predecessorCopy = predecessor.Attempt;
 
         var beforeResult = await authority.ObserveAsync(
                 lease,
@@ -681,7 +1009,13 @@ internal sealed class RetainedStateTransactionService
         if (!beforeResult.Succeeded ||
             before is null ||
             !CanAppendCandidate(before, authority, binding, candidate) ||
-            !PredecessorCovers(before, binding, logicalExpiry) ||
+            (predecessorCopy is null
+                ? !PredecessorCovers(before, binding, logicalExpiry)
+                : before.AcceptedState.Selection?.Current is not { } current ||
+                    !MatchesPredecessorCopyAttempt(
+                        predecessorCopy,
+                        current,
+                        binding)) ||
             before.Snapshot is not { } snapshot ||
             !snapshot.UnderRetained.IsEmpty ||
             !snapshot.Unknown.IsEmpty ||
@@ -780,6 +1114,7 @@ internal sealed class RetainedStateTransactionService
             acceptanceEnvelope = [];
             if (!RetainedStateAcceptanceRecoveryCodec.TryEncode(
                     attempt,
+                    predecessorCopy,
                     out recoveryPayload))
             {
                 return RetainedStateTransactionResult<
@@ -808,6 +1143,7 @@ internal sealed class RetainedStateTransactionService
                 receipt,
                 refreshedOwnership,
                 attempt,
+                predecessorCopy,
                 recoveryPayload);
             attempt = null;
             recoveryPayload = [];
@@ -823,6 +1159,92 @@ internal sealed class RetainedStateTransactionService
             CryptographicOperations.ZeroMemory(acceptanceEnvelope);
             CryptographicOperations.ZeroMemory(recoveryPayload);
         }
+    }
+
+    internal async Task<string> ReconcileAcceptancePredecessorAsync(
+        RetainedStateTransactionAuthority authority,
+        RetainedStateAcceptancePreparation preparation,
+        CancellationToken cancellationToken)
+    {
+        var attempt = preparation?.GetPredecessorCopyAttempt(authority);
+        if (cancellationToken.IsCancellationRequested &&
+            attempt is not null &&
+            !attempt.HasEnteredDispatch)
+        {
+            return RetainedStateTransactionCodes.Cancelled;
+        }
+
+        using var lease = await authority.EnterAsync(
+                attempt?.HasEnteredDispatch == true
+                    ? CancellationToken.None
+                    : cancellationToken)
+            .ConfigureAwait(false);
+        if (lease is null)
+        {
+            return cancellationToken.IsCancellationRequested
+                ? RetainedStateTransactionCodes.Cancelled
+                : RetainedStateTransactionCodes.AccessDenied;
+        }
+
+        if (preparation is null ||
+            !preparation.IsIssuedBy(authority))
+        {
+            return RetainedStateTransactionCodes.AccessDenied;
+        }
+
+        if (attempt is null)
+        {
+            return cancellationToken.IsCancellationRequested
+                ? RetainedStateTransactionCodes.Cancelled
+                : RetainedStateTransactionCodes.Ready;
+        }
+
+        var candidate = preparation.Candidate;
+        if (!authority.TryGetBinding(lease, out var binding) ||
+            binding is null ||
+            !MatchesPreparedBinding(candidate.Prepared, binding) ||
+            !authority.TryReadTrustedTime(lease, out var observedAt) ||
+            observedAt > attempt.RequiredLogicalExpiresAtUnixSeconds ||
+            authority.GetAcceptedSelection(lease)?.Current is not { } current ||
+            !MatchesPredecessorCopyAttempt(attempt, current, binding))
+        {
+            return RetainedStateTransactionCodes.AccessDenied;
+        }
+
+        var persisted = await PersistPredecessorCopyAttemptAsync(
+                authority,
+                lease,
+                binding,
+                attempt,
+                dispatchIfUnresolved: !attempt.ReconcileOnly,
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (!Ready(persisted))
+        {
+            return persisted;
+        }
+
+        var observedResult = await authority.ObserveAsync(
+                lease,
+                attempt.RequiredLogicalExpiresAtUnixSeconds,
+                observedAt,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+        using var observed = observedResult.Value;
+        if (!observedResult.Succeeded ||
+            observed is null ||
+            !CanAppendCandidate(observed, authority, binding, candidate) ||
+            !PredecessorCovers(
+                observed,
+                binding,
+                attempt.RequiredLogicalExpiresAtUnixSeconds))
+        {
+            return observedResult.Succeeded
+                ? RetainedStateTransactionCodes.Conflict
+                : observedResult.Code;
+        }
+
+        return RetainedStateTransactionCodes.Ready;
     }
 
     internal async Task<RetainedStateTransactionResult<
@@ -954,6 +1376,14 @@ internal sealed class RetainedStateTransactionService
                     cached);
         }
 
+        if (cachedAttempt is null &&
+            cancellationToken.IsCancellationRequested)
+        {
+            return RetainedStateTransactionResult<
+                VerifiedRetainedStateAcceptance>.Fail(
+                    RetainedStateTransactionCodes.Cancelled);
+        }
+
         using var lease = await authority.EnterAsync(
                 cachedAttempt is null
                     ? cancellationToken
@@ -1045,6 +1475,13 @@ internal sealed class RetainedStateTransactionService
             return reconciled;
         }
 
+        if (attempt.ReconcileOnly)
+        {
+            return RetainedStateTransactionResult<
+                VerifiedRetainedStateAcceptance>.Fail(
+                    RetainedStateTransactionCodes.OutcomeUnknown);
+        }
+
         var beforeResult = await authority.ObserveAsync(
                 lease,
                 logicalExpiry,
@@ -1105,21 +1542,43 @@ internal sealed class RetainedStateTransactionService
                     RetainedStateTransactionCodes.AccessDenied);
         }
 
-        var persisted = await persistence.UploadAndReconcileAsync(
-                locator,
-                locatorAccess,
-                baseScope,
-                binding.SelectedLineage.BaseScopeDigest,
-                attempt.Name,
-                frozenEnvelopeBytes,
-                attempt.Header,
-                frozenReceiptBytes,
-                attempt.Header.ProducingRunIdentity,
-                attempt.Header.ProducingRunAttempt,
-                receiptPlatformExpiry,
-                cancellationToken)
-            .ConfigureAwait(false);
+        var shouldDispatch = attempt.TryBeginDispatch();
+        var persisted = shouldDispatch
+            ? await persistence.UploadAndReconcileAsync(
+                    locator,
+                    locatorAccess,
+                    baseScope,
+                    binding.SelectedLineage.BaseScopeDigest,
+                    attempt.Name,
+                    frozenEnvelopeBytes,
+                    attempt.Header,
+                    frozenReceiptBytes,
+                    attempt.Header.ProducingRunIdentity,
+                    attempt.Header.ProducingRunAttempt,
+                    receiptPlatformExpiry,
+                    cancellationToken)
+                .ConfigureAwait(false)
+            : await persistence.ReconcileExistingAsync(
+                    locator,
+                    locatorAccess,
+                    baseScope,
+                    binding.SelectedLineage.BaseScopeDigest,
+                    attempt.Name,
+                    frozenEnvelopeBytes,
+                    attempt.Header,
+                    frozenReceiptBytes,
+                    attempt.Header.ProducingRunIdentity,
+                    attempt.Header.ProducingRunAttempt,
+                    receiptPlatformExpiry)
+                .ConfigureAwait(false);
         CryptographicOperations.ZeroMemory(persisted.Payload ?? []);
+        if (!persisted.Succeeded &&
+            !persisted.MayHaveCommitted &&
+            shouldDispatch)
+        {
+            attempt.ResetDispatchIfDefinitelyNotCommitted();
+        }
+
         if (!persisted.Succeeded ||
             persisted.Metadata is null ||
             persisted.InventoryDigest is null)
@@ -1542,7 +2001,7 @@ internal sealed class RetainedStateTransactionService
         RecoverAcceptancePreparationAsync(
         RetainedStateTransactionAuthority authority,
         RetainedStatePersistedCandidate candidate,
-        RetainedStateOpaqueRecord recoveryRecord,
+        ImmutableArray<byte> recoveryPayload,
         CancellationToken cancellationToken)
     {
         using var lease = await authority.EnterAsync(cancellationToken)
@@ -1553,12 +2012,8 @@ internal sealed class RetainedStateTransactionService
             prepared is null ||
             !candidate.IsIssuedBy(authority) ||
             !prepared.IsIssuedBy(authority) ||
-            recoveryRecord is null ||
-            recoveryRecord.ObjectClass != StateObjectClass.PublicationIntent ||
-            !StringComparer.Ordinal.Equals(
-                recoveryRecord.Header.PredecessorIdentity,
-                prepared.Header.ObjectIdentity) ||
-            !recoveryRecord.TryCopyPayload(authority, out var encoded) ||
+            recoveryPayload.IsDefaultOrEmpty ||
+            recoveryPayload.Length > LineageFormat.MaximumPayloadBytes ||
             !authority.TryGetBinding(lease, out var binding) ||
             binding is null ||
             !MatchesPreparedBinding(prepared, binding) ||
@@ -1575,37 +2030,20 @@ internal sealed class RetainedStateTransactionService
         byte[] receiptBytes = [];
         byte[] envelopeBytes = [];
         byte[] canonicalReceipt = [];
-        byte[] expectedEnvelope = [];
-        byte[] decryptedPayload = [];
+        byte[] copyPayload = [];
         RetainedStateAcceptanceAttempt? attempt = null;
+        RetainedStatePredecessorCopyAttempt? predecessorCopyAttempt = null;
+        RetainedStateRecoveredPredecessorCopy? recoveredCopy = null;
         byte[] canonicalRecovery = [];
+        var encoded = recoveryPayload.ToArray();
         try
         {
             if (!RetainedStateAcceptanceRecoveryCodec.TryDecode(
                     encoded.AsSpan(),
                     out name,
-                    out header,
-                    out recoveredReceipt,
-                    out receiptBytes,
-                    out envelopeBytes) ||
+                    out envelopeBytes,
+                    out recoveredCopy) ||
                 name is null ||
-                header is null ||
-                recoveredReceipt is null ||
-                observedAt > recoveredReceipt.LogicalExpiresAtUnixSeconds ||
-                !RetainedStateRetention.TryAcceptance(
-                    recoveredReceipt.AcceptedAtUnixSeconds,
-                    out var logicalExpiry,
-                    out var platformExpiry) ||
-                logicalExpiry != recoveredReceipt.LogicalExpiresAtUnixSeconds ||
-                header.RequiredPlatformExpiresAtUnixSeconds !=
-                    platformExpiry ||
-                recoveryRecord.Header.LogicalExpiresAtUnixSeconds <
-                    logicalExpiry ||
-                candidate.Metadata.ExpiresAtUnixSeconds < logicalExpiry ||
-                !AcceptedStateAcceptanceReceiptCodec.TryEncode(
-                    recoveredReceipt,
-                    out canonicalReceipt) ||
-                !receiptBytes.AsSpan().SequenceEqual(canonicalReceipt) ||
                 !authority.TryGetPersistenceContext(
                     lease,
                     out var locator,
@@ -1614,36 +2052,41 @@ internal sealed class RetainedStateTransactionService
                 locator is null ||
                 locatorAccess is null ||
                 baseScope is null ||
-                !RetainedStatePersistence.TryPrepareEnvelope(
-                    locator,
-                    locatorAccess,
-                    baseScope,
-                    binding.SelectedLineage,
-                    StateObjectClass.Acceptance,
-                    binding.CurrentAcceptanceReceiptIdentity,
-                    successorIdentity: null,
-                    binding.ProducingRunIdentity,
-                    binding.ProducingRunAttempt,
-                    recoveredReceipt.AcceptedAtUnixSeconds,
-                    logicalExpiry,
-                    platformExpiry,
-                    canonicalReceipt,
-                    out var expectedName,
-                    out expectedEnvelope,
-                    out var expectedHeader,
-                    out _) ||
-                expectedName != name ||
-                expectedHeader != header ||
                 !StateControlEnvelopeV1Codec.TryDecrypt(
                     locator,
                     locatorAccess,
                     name,
                     envelopeBytes,
-                    out var decryptedHeader,
-                    out decryptedPayload,
+                    out header,
+                    out receiptBytes,
                     out _) ||
-                decryptedHeader != header ||
-                !decryptedPayload.AsSpan().SequenceEqual(canonicalReceipt) ||
+                header is null ||
+                !AcceptedStateAcceptanceReceiptCodec.TryDecode(
+                    receiptBytes,
+                    out recoveredReceipt) ||
+                recoveredReceipt is null ||
+                observedAt > recoveredReceipt.LogicalExpiresAtUnixSeconds ||
+                !RetainedStateRetention.TryAcceptance(
+                    recoveredReceipt.AcceptedAtUnixSeconds,
+                    out var logicalExpiry,
+                    out var platformExpiry) ||
+                logicalExpiry != recoveredReceipt.LogicalExpiresAtUnixSeconds ||
+                header.ObjectClass != StateObjectClass.Acceptance ||
+                header.CreatedAtUnixSeconds !=
+                    recoveredReceipt.AcceptedAtUnixSeconds ||
+                header.LogicalExpiresAtUnixSeconds != logicalExpiry ||
+                header.RequiredPlatformExpiresAtUnixSeconds !=
+                    platformExpiry ||
+                !StringComparer.Ordinal.Equals(
+                    header.ProducingRunIdentity,
+                    recoveredReceipt.ProducingRunIdentity) ||
+                header.ProducingRunAttempt !=
+                    recoveredReceipt.ProducingRunAttempt ||
+                candidate.Metadata.ExpiresAtUnixSeconds < logicalExpiry ||
+                !AcceptedStateAcceptanceReceiptCodec.TryEncode(
+                    recoveredReceipt,
+                    out canonicalReceipt) ||
+                !receiptBytes.AsSpan().SequenceEqual(canonicalReceipt) ||
                 !StickyCommentPublisher.StickyPublicationReceipt.TryRehydrate(
                     recoveredReceipt.PublicationOperation,
                     recoveredReceipt.RepositoryId,
@@ -1670,9 +2113,65 @@ internal sealed class RetainedStateTransactionService
                 name,
                 header,
                 receiptBytes,
-                envelopeBytes);
+                envelopeBytes,
+                reconcileOnly: true);
             receiptBytes = [];
             envelopeBytes = [];
+
+            var acceptedSelection = authority.GetAcceptedSelection(lease);
+            if (recoveredCopy is not null)
+            {
+                if (acceptedSelection?.Current is not { } selectedCurrent ||
+                    recoveredCopy.RequiredLogicalExpiresAtUnixSeconds !=
+                        logicalExpiry ||
+                    !StateControlEnvelopeV1Codec.TryDecrypt(
+                        locator,
+                        locatorAccess,
+                        recoveredCopy.Name,
+                        recoveredCopy.Envelope,
+                        out var copyHeader,
+                        out copyPayload,
+                        out _) ||
+                    copyHeader is null ||
+                    copyHeader.ObjectClass != StateObjectClass.Candidate ||
+                    copyHeader.LogicalExpiresAtUnixSeconds != logicalExpiry ||
+                    copyHeader.RequiredPlatformExpiresAtUnixSeconds !=
+                        recoveredCopy.RequiredPlatformExpiresAtUnixSeconds ||
+                    !RetainedStateRetention.TryOpaque(
+                        copyHeader.CreatedAtUnixSeconds,
+                        recoveredCopy.RequiredLogicalExpiresAtUnixSeconds,
+                        out var copyPlatformExpiry) ||
+                    copyPlatformExpiry !=
+                        recoveredCopy.RequiredPlatformExpiresAtUnixSeconds)
+                {
+                    return RetainedStateTransactionResult<
+                        RetainedStateAcceptancePreparation>.Fail(
+                            RetainedStateTransactionCodes.Conflict);
+                }
+
+                predecessorCopyAttempt =
+                    RetainedStatePredecessorCopyAttempt.Create(
+                        issuer,
+                        recoveredCopy.LogicalGenerationIdentity,
+                        recoveredCopy.RequiredLogicalExpiresAtUnixSeconds,
+                        recoveredCopy.RequiredPlatformExpiresAtUnixSeconds,
+                        recoveredCopy.Name,
+                        copyHeader,
+                        copyPayload,
+                        recoveredCopy.Envelope.ToArray(),
+                        reconcileOnly: true);
+                copyPayload = [];
+                if (!MatchesPredecessorCopyAttempt(
+                        predecessorCopyAttempt,
+                        selectedCurrent,
+                        binding))
+                {
+                    return RetainedStateTransactionResult<
+                        RetainedStateAcceptancePreparation>.Fail(
+                            RetainedStateTransactionCodes.Conflict);
+                }
+            }
+
             if (!MatchesReceipt(sticky, prepared) ||
                 !MatchesAcceptanceAttempt(
                     attempt,
@@ -1681,6 +2180,7 @@ internal sealed class RetainedStateTransactionService
                     prepared) ||
                 !RetainedStateAcceptanceRecoveryCodec.TryEncode(
                     attempt,
+                    predecessorCopyAttempt,
                     out canonicalRecovery) ||
                 !encoded.AsSpan().SequenceEqual(canonicalRecovery))
             {
@@ -1698,16 +2198,27 @@ internal sealed class RetainedStateTransactionService
             using var observed = observedResult.Value;
             if (!observedResult.Succeeded ||
                 observed is null ||
-                !CanAppendCandidate(observed, authority, binding, candidate) ||
-                !PredecessorCovers(observed, binding, logicalExpiry) ||
+                (!CanAppendCandidate(
+                        observed,
+                        authority,
+                        binding,
+                        candidate) &&
+                    !MatchesVisibleAcceptance(
+                        observed,
+                        authority,
+                        binding,
+                        candidate,
+                        attempt)) ||
+                (predecessorCopyAttempt is null
+                    ? !PredecessorCovers(observed, binding, logicalExpiry)
+                    : acceptedSelection?.Current is not { } predecessor ||
+                        !MatchesPredecessorCopyAttempt(
+                            predecessorCopyAttempt,
+                            predecessor,
+                            binding)) ||
                 observed.Snapshot is not { } snapshot ||
                 !snapshot.UnderRetained.IsEmpty ||
                 !snapshot.Unknown.IsEmpty ||
-                snapshot.Authenticated.Count(item =>
-                    item.Header.ObjectClass == StateObjectClass.Acceptance) >=
-                        LineageFormat.MaximumPhysicalPerClass ||
-                snapshot.Authenticated.Count(item =>
-                    recoveryRecord.MatchesAuthenticated(authority, item)) != 1 ||
                 observed.InventoryDigest is not { } inventoryDigest ||
                 observed.SelectedHead is null)
             {
@@ -1718,7 +2229,7 @@ internal sealed class RetainedStateTransactionService
                             : observedResult.Code);
             }
 
-            var selected = new SelectedLineageSnapshot(
+            var selectedLineage = new SelectedLineageSnapshot(
                 observed.SelectedHead.Header.BaseScopeDigest,
                 observed.SelectedHead.Header.Epoch,
                 observed.SelectedHead.Header.SessionId,
@@ -1728,7 +2239,7 @@ internal sealed class RetainedStateTransactionService
                 issuer,
                 authority,
                 candidate,
-                selected,
+                selectedLineage,
                 inventoryDigest,
                 observedAt,
                 logicalExpiry);
@@ -1739,8 +2250,10 @@ internal sealed class RetainedStateTransactionService
                 sticky,
                 ownership,
                 attempt,
+                predecessorCopyAttempt,
                 canonicalRecovery);
             attempt = null;
+            predecessorCopyAttempt = null;
             canonicalRecovery = [];
             return RetainedStateTransactionResult<
                 RetainedStateAcceptancePreparation>.Success(
@@ -1750,11 +2263,13 @@ internal sealed class RetainedStateTransactionService
         finally
         {
             attempt?.Dispose();
+            predecessorCopyAttempt?.Dispose();
+            recoveredCopy?.Dispose();
+            CryptographicOperations.ZeroMemory(encoded);
             CryptographicOperations.ZeroMemory(receiptBytes);
             CryptographicOperations.ZeroMemory(envelopeBytes);
             CryptographicOperations.ZeroMemory(canonicalReceipt);
-            CryptographicOperations.ZeroMemory(expectedEnvelope);
-            CryptographicOperations.ZeroMemory(decryptedPayload);
+            CryptographicOperations.ZeroMemory(copyPayload);
             CryptographicOperations.ZeroMemory(canonicalRecovery);
         }
     }
@@ -1861,30 +2376,30 @@ internal sealed class RetainedStateTransactionService
         RetainedStateCleanupAuthorization>> PlanCleanupAsync(
         RetainedStateTransactionAuthority authority,
         VerifiedRetainedStateAcceptance acceptance,
-        ImmutableArray<RetainedStateOpaqueRecord> completedP5Records,
         CancellationToken cancellationToken)
     {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return RetainedStateTransactionResult<
+                RetainedStateCleanupAuthorization>.Fail(
+                    RetainedStateTransactionCodes.Cancelled);
+        }
+
         using var lease = await authority.EnterAsync(cancellationToken)
             .ConfigureAwait(false);
         if (lease is null ||
             acceptance is null ||
             !acceptance.IsIssuedBy(authority) ||
-            completedP5Records.IsDefault ||
-            completedP5Records.Any(record =>
-                record is null ||
-                record.ObjectClass is not (
-                    StateObjectClass.PublicationIntent or
-                    StateObjectClass.PublicationFailure or
-                    StateObjectClass.Abandonment)) ||
-            completedP5Records.Select(record => record.Metadata)
-                .Distinct().Count() != completedP5Records.Length ||
             !authority.TryGetBinding(lease, out var binding) ||
             binding is null ||
             !authority.TryReadTrustedTime(lease, out var trustedNow))
         {
             return RetainedStateTransactionResult<
                 RetainedStateCleanupAuthorization>.Fail(
-                    RetainedStateTransactionCodes.AccessDenied);
+                    lease is null &&
+                        cancellationToken.IsCancellationRequested
+                        ? RetainedStateTransactionCodes.Cancelled
+                        : RetainedStateTransactionCodes.AccessDenied);
         }
 
         var observedResult = await authority.ObserveAsync(
@@ -1899,10 +2414,7 @@ internal sealed class RetainedStateTransactionService
             observed.Snapshot is not { } snapshot ||
             observed.InventoryDigest is not { } inventoryDigest ||
             !IsTerminal(observed, acceptance) ||
-            !snapshot.Unknown.IsEmpty ||
-            completedP5Records.Any(record =>
-                snapshot.Authenticated.Count(item =>
-                    record.MatchesAuthenticated(authority, item)) != 1))
+            !snapshot.Unknown.IsEmpty)
         {
             return RetainedStateTransactionResult<
                 RetainedStateCleanupAuthorization>.Fail(
@@ -1942,9 +2454,6 @@ internal sealed class RetainedStateTransactionService
                     RetainedStateTransactionCodes.Conflict);
         }
 
-        var p5Targets = completedP5Records
-            .Select(record => record.Metadata)
-            .ToHashSet();
         var targets = activeCleanup.Length == 1
             ? activeCleanup[0].Parsed!.Targets
                 .Select(item => new RetainedStateCleanupTarget(item))
@@ -1952,15 +2461,14 @@ internal sealed class RetainedStateTransactionService
             : snapshot.Authenticated
                 .Concat(snapshot.UnderRetained)
                 .Where(item =>
-                    p5Targets.Contains(item.Metadata) ||
-                    (!IsProtected(item, snapshot, selected) &&
-                        item.Header.ObjectClass is (
-                            StateObjectClass.Candidate or
-                            StateObjectClass.Acceptance) &&
-                        !StringComparer.Ordinal.Equals(
-                            item.Header.PredecessorIdentity,
-                            selected.Current.ReceiptPhysical.Header
-                                .ObjectIdentity)))
+                    !IsProtected(item, snapshot, selected) &&
+                    item.Header.ObjectClass is (
+                        StateObjectClass.Candidate or
+                        StateObjectClass.Acceptance) &&
+                    !StringComparer.Ordinal.Equals(
+                        item.Header.PredecessorIdentity,
+                        selected.Current.ReceiptPhysical.Header
+                            .ObjectIdentity))
                 .Select(item =>
                     new RetainedStateCleanupTarget(item.Metadata))
                 .Distinct()
@@ -2010,6 +2518,14 @@ internal sealed class RetainedStateTransactionService
                 RetainedStateTransactionCodes.AccessDenied);
         }
 
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return new RetainedStateCleanupResult(
+                acceptance,
+                Completed: false,
+                RetainedStateTransactionCodes.Cancelled);
+        }
+
         var semanticRequiredExpiresAtUnixSeconds =
             request!.SemanticRequiredExpiresAtUnixSeconds;
         using var lease = await authority.EnterAsync(cancellationToken)
@@ -2035,7 +2551,10 @@ internal sealed class RetainedStateTransactionService
             return new RetainedStateCleanupResult(
                 acceptance,
                 Completed: false,
-                RetainedStateTransactionCodes.AccessDenied);
+                lease is null &&
+                    cancellationToken.IsCancellationRequested
+                    ? RetainedStateTransactionCodes.Cancelled
+                    : RetainedStateTransactionCodes.AccessDenied);
         }
 
         var sentinel = await authority.EnsureSentinelCoverageAsync(
@@ -2407,7 +2926,9 @@ internal sealed class RetainedStateTransactionService
         }
     }
 
-    private async Task<string> EnsureImmediatePredecessorAsync(
+    private async Task<(string Code,
+        RetainedStatePredecessorCopyAttempt? Attempt)>
+        PrepareImmediatePredecessorAsync(
         RetainedStateTransactionAuthority authority,
         RetainedStateAuthorityLease lease,
         RetainedStateTransactionBinding binding,
@@ -2420,15 +2941,15 @@ internal sealed class RetainedStateTransactionService
         if (selected is null)
         {
             return candidate.Prepared.Generation.Generation == 0
-                ? RetainedStateTransactionCodes.Ready
-                : RetainedStateTransactionCodes.Conflict;
+                ? (RetainedStateTransactionCodes.Ready, null)
+                : (RetainedStateTransactionCodes.Conflict, null);
         }
 
         var current = selected.Current;
         if (current.ReceiptPhysical.Metadata.ExpiresAtUnixSeconds <
             requiredLogicalExpiry)
         {
-            return RetainedStateTransactionCodes.RetentionFailed;
+            return (RetainedStateTransactionCodes.RetentionFailed, null);
         }
 
         var observedResult = await authority.ObserveAsync(
@@ -2445,9 +2966,11 @@ internal sealed class RetainedStateTransactionService
                 !snapshot.UnderRetained.IsEmpty ||
                 !snapshot.Unknown.IsEmpty)
             {
-                return observedResult.Succeeded
-                    ? RetainedStateTransactionCodes.Conflict
-                    : observedResult.Code;
+                return (
+                    observedResult.Succeeded
+                        ? RetainedStateTransactionCodes.Conflict
+                        : observedResult.Code,
+                    null);
             }
 
             if (PredecessorCovers(
@@ -2455,41 +2978,45 @@ internal sealed class RetainedStateTransactionService
                     binding,
                     requiredLogicalExpiry))
             {
-                return RetainedStateTransactionCodes.Ready;
+                return (RetainedStateTransactionCodes.Ready, null);
             }
 
             if (snapshot.Authenticated.Count(item =>
                     item.Header.ObjectClass == StateObjectClass.Candidate) >=
                 LineageFormat.MaximumPhysicalPerClass)
             {
-                return RetainedStateTransactionCodes.CleanupDebt;
+                return (RetainedStateTransactionCodes.CleanupDebt, null);
             }
         }
 
         var frozen = authority.GetPredecessorCopyAttempt(lease);
         if (frozen is not null)
         {
-            return StringComparer.Ordinal.Equals(
+            if (StringComparer.Ordinal.Equals(
                     frozen.LogicalGenerationIdentity,
                     current.LogicalGenerationIdentity) &&
                 frozen.RequiredLogicalExpiresAtUnixSeconds ==
-                    requiredLogicalExpiry
-                ? await PersistPredecessorCopyAttemptAsync(
-                        authority,
-                        lease,
-                        binding,
-                        frozen,
-                        dispatchIfUnresolved: false,
-                        cancellationToken)
-                    .ConfigureAwait(false)
-                : RetainedStateTransactionCodes.Conflict;
+                    requiredLogicalExpiry &&
+                MatchesPredecessorCopyAttempt(
+                    frozen,
+                    current,
+                    binding))
+            {
+                return (RetainedStateTransactionCodes.Ready, frozen);
+            }
+
+            if (frozen.HasEnteredDispatch ||
+                !authority.TryClearPredecessorCopyAttempt(lease, frozen))
+            {
+                return (RetainedStateTransactionCodes.Conflict, null);
+            }
         }
 
         if (!AcceptedStateGenerationRecordCodec.TryEncode(
                 current.Generation,
                 out var generationBytes))
         {
-            return RetainedStateTransactionCodes.Invalid;
+            return (RetainedStateTransactionCodes.Invalid, null);
         }
 
         var source = Source(current);
@@ -2503,7 +3030,7 @@ internal sealed class RetainedStateTransactionService
         if (!AcceptedStatePhysicalCopyCodec.TryEncode(copy, out var copyBytes))
         {
             CryptographicOperations.ZeroMemory(generationBytes);
-            return RetainedStateTransactionCodes.Invalid;
+            return (RetainedStateTransactionCodes.Invalid, null);
         }
 
         try
@@ -2544,7 +3071,7 @@ internal sealed class RetainedStateTransactionService
                 header is null)
             {
                 CryptographicOperations.ZeroMemory(envelope);
-                return envelopeCode;
+                return (envelopeCode, null);
             }
 
             var created = RetainedStatePredecessorCopyAttempt.Create(
@@ -2561,17 +3088,10 @@ internal sealed class RetainedStateTransactionService
             if (!authority.TrySetPredecessorCopyAttempt(lease, created))
             {
                 created.Dispose();
-                return RetainedStateTransactionCodes.Conflict;
+                return (RetainedStateTransactionCodes.Conflict, null);
             }
 
-            return await PersistPredecessorCopyAttemptAsync(
-                    authority,
-                    lease,
-                    binding,
-                    created,
-                    dispatchIfUnresolved: true,
-                    cancellationToken)
-                .ConfigureAwait(false);
+            return (RetainedStateTransactionCodes.Ready, created);
         }
         finally
         {
@@ -2603,7 +3123,9 @@ internal sealed class RetainedStateTransactionService
             return RetainedStateTransactionCodes.AccessDenied;
         }
 
-        var persisted = dispatchIfUnresolved
+        var shouldDispatch = dispatchIfUnresolved &&
+            attempt.TryBeginDispatch();
+        var persisted = shouldDispatch
             ? await persistence.UploadAndReconcileAsync(
                     locator,
                     locatorAccess,
@@ -2634,9 +3156,9 @@ internal sealed class RetainedStateTransactionService
         CryptographicOperations.ZeroMemory(persisted.Payload ?? []);
         if (!persisted.Succeeded &&
             !persisted.MayHaveCommitted &&
-            dispatchIfUnresolved)
+            shouldDispatch)
         {
-            authority.TryClearPredecessorCopyAttempt(lease, attempt);
+            attempt.ResetDispatchIfDefinitelyNotCommitted();
         }
 
         return persisted.Succeeded
@@ -2836,6 +3358,119 @@ internal sealed class RetainedStateTransactionService
             StringComparer.Ordinal.Equals(
                 selection.Current.ReceiptPhysical.Header.ObjectIdentity,
                 binding.CurrentAcceptanceReceiptIdentity);
+    }
+
+    private static bool MatchesVisibleAcceptance(
+        RetainedStateObservation observation,
+        RetainedStateTransactionAuthority authority,
+        RetainedStateTransactionBinding binding,
+        RetainedStatePersistedCandidate candidate,
+        RetainedStateAcceptanceAttempt attempt)
+    {
+        if (observation.Snapshot is not { } snapshot ||
+            observation.SelectedHead is not { } selectedHead ||
+            !MatchesSelected(binding.SelectedLineage, selectedHead) ||
+            !snapshot.UnderRetained.IsEmpty ||
+            !snapshot.Unknown.IsEmpty ||
+            observation.AcceptedState.Selection?.Current is not { } current ||
+            current.Physical.Metadata != candidate.Metadata ||
+            !StringComparer.Ordinal.Equals(
+                current.LogicalGenerationIdentity,
+                candidate.Prepared.LogicalGenerationIdentity) ||
+            !attempt.TryGetBytes(out var receipt, out var envelope))
+        {
+            return false;
+        }
+
+        var physical = current.ReceiptPhysical;
+        return physical.Header == attempt.Header &&
+            physical.Metadata.Reference.Name == attempt.Name &&
+            physical.Metadata.EncryptedObjectDigest.Sha256 ==
+                OpaqueStoreHash.Sha256(envelope.Span) &&
+            physical.Metadata.Size == envelope.Length &&
+            physical.Metadata.ExpiresAtUnixSeconds >=
+                attempt.RequiredPlatformExpiresAtUnixSeconds &&
+            physical.Payload.AsSpan().SequenceEqual(receipt.Span) &&
+            StringComparer.Ordinal.Equals(
+                physical.Metadata.ProducingRun.Identity,
+                attempt.Header.ProducingRunIdentity) &&
+            physical.Metadata.ProducingRun.Attempt ==
+                attempt.Header.ProducingRunAttempt;
+    }
+
+    private static bool MatchesPredecessorCopyAttempt(
+        RetainedStatePredecessorCopyAttempt attempt,
+        SelectedAcceptedGeneration current,
+        RetainedStateTransactionBinding binding)
+    {
+        if (!attempt.TryGetBytes(out var payload, out _) ||
+            !StringComparer.Ordinal.Equals(
+                attempt.LogicalGenerationIdentity,
+                current.LogicalGenerationIdentity) ||
+            attempt.Header.ObjectClass != StateObjectClass.Candidate ||
+            !StringComparer.Ordinal.Equals(
+                attempt.Header.BaseScopeDigest,
+                binding.SelectedLineage.BaseScopeDigest) ||
+            !StringComparer.Ordinal.Equals(
+                attempt.Header.Epoch,
+                binding.SelectedLineage.Epoch) ||
+            !StringComparer.Ordinal.Equals(
+                attempt.Header.SessionId,
+                binding.SelectedLineage.SessionId) ||
+            !StringComparer.Ordinal.Equals(
+                attempt.Header.PredecessorIdentity,
+                current.Physical.Header.PredecessorIdentity) ||
+            attempt.Header.SuccessorIdentity is not null ||
+            attempt.Header.LogicalExpiresAtUnixSeconds !=
+                attempt.RequiredLogicalExpiresAtUnixSeconds ||
+            attempt.Header.RequiredPlatformExpiresAtUnixSeconds !=
+                attempt.RequiredPlatformExpiresAtUnixSeconds ||
+            !RetainedStateRetention.TryOpaque(
+                attempt.Header.CreatedAtUnixSeconds,
+                attempt.RequiredLogicalExpiresAtUnixSeconds,
+                out var platformExpiry) ||
+            platformExpiry != attempt.RequiredPlatformExpiresAtUnixSeconds ||
+            !AcceptedStatePhysicalCopyCodec.TryDecode(
+                payload.Span,
+                out var copy) ||
+            copy is null ||
+            !AcceptedStateGenerationRecordCodec.TryEncode(
+                current.Generation,
+                out var canonicalGeneration) ||
+            !AcceptedStatePhysicalCopyCodec.TryEncode(
+                copy,
+                out var canonicalCopy))
+        {
+            return false;
+        }
+
+        try
+        {
+            var source = Source(current);
+            return payload.Span.SequenceEqual(canonicalCopy) &&
+                copy.CanonicalGenerationBytes.AsSpan().SequenceEqual(
+                    canonicalGeneration) &&
+                StringComparer.Ordinal.Equals(
+                    copy.LogicalGenerationIdentity,
+                    current.LogicalGenerationIdentity) &&
+                StringComparer.Ordinal.Equals(
+                    copy.OriginalCandidateObjectIdentity,
+                    current.OriginalCandidateObjectIdentity) &&
+                StringComparer.Ordinal.Equals(
+                    copy.SourceArtifactId,
+                    source.Metadata.Reference.ObjectId.Value) &&
+                StringComparer.Ordinal.Equals(
+                    copy.SourceArchiveSha256,
+                    source.Metadata.ArchiveDigest.Sha256) &&
+                StringComparer.Ordinal.Equals(
+                    copy.SourceEncryptedEnvelopeSha256,
+                    source.Metadata.EncryptedObjectDigest.Sha256);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(canonicalGeneration);
+            CryptographicOperations.ZeroMemory(canonicalCopy);
+        }
     }
 
     private static bool PredecessorCovers(
@@ -3088,6 +3723,35 @@ internal sealed class RetainedStateTransactionService
             logicalExpiry);
         return attempt.Receipt == expected;
     }
+
+    private static bool MatchesOpaqueWriteAttempt(
+        RetainedStateOpaqueWriteAttempt attempt,
+        RetainedStateTransactionBinding binding) =>
+        attempt.ObjectClass is StateObjectClass.PublicationIntent or
+            StateObjectClass.PublicationFailure or
+            StateObjectClass.Abandonment &&
+        attempt.Header.ObjectClass == attempt.ObjectClass &&
+        StringComparer.Ordinal.Equals(
+            attempt.Header.BaseScopeDigest,
+            binding.SelectedLineage.BaseScopeDigest) &&
+        StringComparer.Ordinal.Equals(
+            attempt.Header.Epoch,
+            binding.SelectedLineage.Epoch) &&
+        StringComparer.Ordinal.Equals(
+            attempt.Header.SessionId,
+            binding.SelectedLineage.SessionId) &&
+        StringComparer.Ordinal.Equals(
+            attempt.Header.PredecessorIdentity,
+            attempt.Candidate.Prepared.Header.ObjectIdentity) &&
+        attempt.Header.LogicalExpiresAtUnixSeconds ==
+            attempt.SemanticRequiredExpiresAtUnixSeconds &&
+        RetainedStateRetention.TryOpaque(
+            attempt.Header.CreatedAtUnixSeconds,
+            attempt.SemanticRequiredExpiresAtUnixSeconds,
+            out var platformExpiry) &&
+        platformExpiry ==
+            attempt.Header.RequiredPlatformExpiresAtUnixSeconds &&
+        OpaqueStoreValidation.IsValid(attempt.Name);
 
     private static bool MatchesOpaqueEvidence(
         RetainedStateObservation observed,
@@ -3347,14 +4011,10 @@ internal sealed class RetainedStateTransactionService
         AuthenticatedStateObject item,
         ScopedStateInventorySnapshot snapshot,
         AcceptedStateSelection selected) =>
-        item.Header.ObjectClass is
-            StateObjectClass.PublicationIntent or
-            StateObjectClass.PublicationFailure or
-            StateObjectClass.Abandonment ||
-        (item.Header.ObjectClass is (
+        item.Header.ObjectClass is (
                 StateObjectClass.Candidate or
                 StateObjectClass.Acceptance) &&
-            !IsProtected(item, snapshot, selected));
+            !IsProtected(item, snapshot, selected);
 
     private static async Task<(string Code, bool Pruned)>
         PruneCompletedCleanupRecordsAsync(

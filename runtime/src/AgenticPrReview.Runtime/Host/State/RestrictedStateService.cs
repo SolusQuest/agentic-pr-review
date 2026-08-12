@@ -110,7 +110,7 @@ internal sealed class RestrictedStateService
                     RetainedStateTransactionCodes.AccessDenied));
 
     internal static Task<RetainedStateTransactionResult<
-        RetainedStateOpaqueRecord>> PersistRetainedOpaqueRecordAsync(
+        RetainedStateOpaqueWriteAttempt>> PrepareRetainedOpaqueWriteAsync(
         AuthorizedAcceptedStateRestoreContext context,
         RetainedStateOwnership ownership,
         RetainedStateOpaqueWriteRequest request,
@@ -121,13 +121,53 @@ internal sealed class RestrictedStateService
             out var authority) &&
         authority is not null
             ? new RetainedStateTransactionService(RetainedStateIssuer)
-                .PersistOpaqueAsync(
-                authority,
-                ownership,
-                request,
-                cancellationToken)
+                .PrepareOpaqueAsync(
+                    authority,
+                    ownership,
+                    request,
+                    cancellationToken)
+            : Task.FromResult(RetainedStateTransactionResult<
+                RetainedStateOpaqueWriteAttempt>.Fail(
+                    RetainedStateTransactionCodes.AccessDenied));
+
+    internal static Task<RetainedStateTransactionResult<
+        RetainedStateOpaqueRecord>> PersistPreparedRetainedOpaqueWriteAsync(
+        AuthorizedAcceptedStateRestoreContext context,
+        RetainedStateOpaqueWriteAttempt attempt,
+        CancellationToken cancellationToken) =>
+        context is not null &&
+        context.TryGetTransactionAuthority(
+            RetainedStateIssuer,
+            out var authority) &&
+        authority is not null
+            ? new RetainedStateTransactionService(RetainedStateIssuer)
+                .PersistOpaqueAttemptAsync(
+                    authority,
+                    attempt,
+                    cancellationToken)
             : Task.FromResult(RetainedStateTransactionResult<
                 RetainedStateOpaqueRecord>.Fail(
+                    RetainedStateTransactionCodes.AccessDenied));
+
+    internal static Task<RetainedStateTransactionResult<
+        RetainedStateOpaqueWriteAttempt>> RecoverRetainedOpaqueWriteAsync(
+        AuthorizedAcceptedStateRestoreContext context,
+        RetainedStatePersistedCandidate candidate,
+        ImmutableArray<byte> recoveryPayload,
+        CancellationToken cancellationToken) =>
+        context is not null &&
+        context.TryGetTransactionAuthority(
+            RetainedStateIssuer,
+            out var authority) &&
+        authority is not null
+            ? new RetainedStateTransactionService(RetainedStateIssuer)
+                .RecoverOpaqueAttemptAsync(
+                    authority,
+                    candidate,
+                    recoveryPayload,
+                    cancellationToken)
+            : Task.FromResult(RetainedStateTransactionResult<
+                RetainedStateOpaqueWriteAttempt>.Fail(
                     RetainedStateTransactionCodes.AccessDenied));
 
     internal static Task<RetainedStateTransactionResult<
@@ -151,6 +191,23 @@ internal sealed class RestrictedStateService
             : Task.FromResult(RetainedStateTransactionResult<
                 RetainedStateAcceptancePreparation>.Fail(
                     RetainedStateTransactionCodes.AccessDenied));
+
+    internal static Task<string>
+        ReconcileRetainedStateAcceptancePredecessorAsync(
+        AuthorizedAcceptedStateRestoreContext context,
+        RetainedStateAcceptancePreparation preparation,
+        CancellationToken cancellationToken) =>
+        context is not null &&
+        context.TryGetTransactionAuthority(
+            RetainedStateIssuer,
+            out var authority) &&
+        authority is not null
+            ? new RetainedStateTransactionService(RetainedStateIssuer)
+                .ReconcileAcceptancePredecessorAsync(
+                    authority,
+                    preparation,
+                    cancellationToken)
+            : Task.FromResult(RetainedStateTransactionCodes.AccessDenied);
 
     internal static Task<RetainedStateTransactionResult<
         RetainedStateAcceptanceEvidence>>
@@ -269,7 +326,7 @@ internal sealed class RestrictedStateService
         RecoverRetainedStateAcceptancePreparationAsync(
         AuthorizedAcceptedStateRestoreContext context,
         RetainedStatePersistedCandidate candidate,
-        RetainedStateOpaqueRecord recoveryRecord,
+        ImmutableArray<byte> recoveryPayload,
         CancellationToken cancellationToken) =>
         context is not null &&
         context.TryGetTransactionAuthority(
@@ -280,7 +337,7 @@ internal sealed class RestrictedStateService
                 .RecoverAcceptancePreparationAsync(
                     authority,
                     candidate,
-                    recoveryRecord,
+                    recoveryPayload,
                     cancellationToken)
             : Task.FromResult(RetainedStateTransactionResult<
                 RetainedStateAcceptancePreparation>.Fail(
@@ -308,7 +365,6 @@ internal sealed class RestrictedStateService
         RetainedStateCleanupAuthorization>> PlanRetainedStateCleanupAsync(
         AuthorizedAcceptedStateRestoreContext context,
         VerifiedRetainedStateAcceptance acceptance,
-        ImmutableArray<RetainedStateOpaqueRecord> completedP5Records,
         CancellationToken cancellationToken) =>
         context is not null &&
         context.TryGetTransactionAuthority(
@@ -319,7 +375,6 @@ internal sealed class RestrictedStateService
                 .PlanCleanupAsync(
                     authority,
                     acceptance,
-                    completedP5Records,
                     cancellationToken)
             : Task.FromResult(RetainedStateTransactionResult<
                 RetainedStateCleanupAuthorization>.Fail(

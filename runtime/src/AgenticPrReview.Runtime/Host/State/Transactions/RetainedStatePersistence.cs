@@ -215,7 +215,7 @@ internal sealed class RetainedStatePersistence
                         immutableEnvelope,
                         encryptedDigest,
                         requiredPlatformExpiresAtUnixSeconds),
-                    cancellationToken)
+                    CancellationToken.None)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -544,7 +544,7 @@ internal sealed class RetainedStatePersistence
         {
             deleted = await store.DeleteExactAsync(
                     new OpaqueStoreDeleteRequest(target),
-                    cancellationToken)
+                    CancellationToken.None)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException)

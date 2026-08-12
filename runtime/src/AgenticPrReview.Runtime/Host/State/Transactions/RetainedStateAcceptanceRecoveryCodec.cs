@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
 using AgenticPrReview.Runtime.Host.State.Lineage;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
-using AgenticPrReview.Runtime.Host.State.Restore;
 
 namespace AgenticPrReview.Runtime.Host.State.Transactions;
 
@@ -12,19 +11,20 @@ internal static class RetainedStateAcceptanceRecoveryCodec
 
     internal static bool TryEncode(
         RetainedStateAcceptanceAttempt attempt,
+        RetainedStatePredecessorCopyAttempt? predecessorCopy,
         out byte[] bytes)
     {
         bytes = [];
-        ReadOnlyMemory<byte> receipt = default;
         ReadOnlyMemory<byte> envelope = default;
-        byte[] header = [];
+        ReadOnlyMemory<byte> copyEnvelope = default;
         try
         {
             if (attempt is null ||
-                !attempt.TryGetBytes(out receipt, out envelope) ||
-                !StateControlHeaderV1Codec.TryEncode(
-                    attempt.Header,
-                    out header))
+                !attempt.TryGetBytes(out _, out envelope) ||
+                (predecessorCopy is not null &&
+                    (!predecessorCopy.TryGetBytes(
+                        out _,
+                        out copyEnvelope))))
             {
                 return false;
             }
@@ -33,9 +33,20 @@ internal static class RetainedStateAcceptanceRecoveryCodec
             writer.WriteString(Magic);
             writer.WriteUInt16(Version);
             writer.WriteString(attempt.Name.Value);
-            writer.WriteBytes(header);
-            writer.WriteBytes(receipt.Span);
             writer.WriteBytes(envelope.Span);
+            writer.WriteUInt16(predecessorCopy is null ? (ushort)0 : (ushort)1);
+            if (predecessorCopy is not null)
+            {
+                writer.WriteString(
+                    predecessorCopy.LogicalGenerationIdentity);
+                writer.WriteInt64(
+                    predecessorCopy.RequiredLogicalExpiresAtUnixSeconds);
+                writer.WriteInt64(
+                    predecessorCopy.RequiredPlatformExpiresAtUnixSeconds);
+                writer.WriteString(predecessorCopy.Name.Value);
+                writer.WriteBytes(copyEnvelope.Span);
+            }
+
             bytes = writer.ToArray();
             return bytes.Length <= LineageFormat.MaximumPayloadBytes;
         }
@@ -46,26 +57,18 @@ internal static class RetainedStateAcceptanceRecoveryCodec
             bytes = [];
             return false;
         }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(header);
-        }
     }
 
     internal static bool TryDecode(
         ReadOnlySpan<byte> bytes,
         out OpaqueStoreName? name,
-        out StateControlHeaderV1? header,
-        out AcceptanceReceiptV1? receipt,
-        out byte[] receiptBytes,
-        out byte[] envelopeBytes)
+        out byte[] envelopeBytes,
+        out RetainedStateRecoveredPredecessorCopy? predecessorCopy)
     {
         name = null;
-        header = null;
-        receipt = null;
-        receiptBytes = [];
         envelopeBytes = [];
-        byte[] headerBytes = [];
+        predecessorCopy = null;
+        byte[] copyEnvelope = [];
         if (bytes.Length is < 1 or > LineageFormat.MaximumPayloadBytes)
         {
             return false;
@@ -82,40 +85,57 @@ internal static class RetainedStateAcceptanceRecoveryCodec
                     OpaqueStoreLimits.MaximumNameBytes,
                     out var nameValue) ||
                 !reader.TryReadBytes(
-                    LineageFormat.MaximumHeaderBytes,
-                    out headerBytes) ||
-                !reader.TryReadBytes(
-                    LineageFormat.MaximumReaderPayloadBytes,
-                    out receiptBytes) ||
-                !reader.TryReadBytes(
                     LineageFormat.MaximumEnvelopeBytes,
                     out envelopeBytes) ||
-                !reader.IsComplete ||
-                !StateControlHeaderV1Codec.TryDecode(
-                    headerBytes,
-                    receiptBytes,
-                    out header) ||
-                header is null ||
-                !AcceptedStateAcceptanceReceiptCodec.TryDecode(
-                    receiptBytes,
-                    out receipt) ||
-                receipt is null)
+                !reader.TryReadUInt16(out var hasCopy) ||
+                hasCopy > 1)
+            {
+                return false;
+            }
+
+            if (hasCopy == 1)
+            {
+                if (!reader.TryReadString(
+                        OpaqueStoreLimits.MaximumIdentityBytes,
+                        out var logicalGenerationIdentity) ||
+                    !reader.TryReadInt64(out var requiredLogicalExpiry) ||
+                    !reader.TryReadInt64(out var requiredPlatformExpiry) ||
+                    !reader.TryReadString(
+                        OpaqueStoreLimits.MaximumNameBytes,
+                        out var copyNameValue) ||
+                    !reader.TryReadBytes(
+                        LineageFormat.MaximumEnvelopeBytes,
+                        out copyEnvelope))
+                {
+                    return false;
+                }
+
+                var copyName = new OpaqueStoreName(copyNameValue);
+                if (!LineageValidation.IsSha256(
+                        logicalGenerationIdentity) ||
+                    !LineageValidation.IsTime(requiredLogicalExpiry) ||
+                    !LineageValidation.IsTime(requiredPlatformExpiry) ||
+                    !OpaqueStoreValidation.IsValid(copyName))
+                {
+                    return false;
+                }
+
+                predecessorCopy = new RetainedStateRecoveredPredecessorCopy(
+                    logicalGenerationIdentity,
+                    requiredLogicalExpiry,
+                    requiredPlatformExpiry,
+                    copyName,
+                    copyEnvelope);
+                copyEnvelope = [];
+            }
+
+            if (!reader.IsComplete)
             {
                 return false;
             }
 
             var parsedName = new OpaqueStoreName(nameValue);
-            if (!OpaqueStoreValidation.IsValid(parsedName) ||
-                header.ObjectClass != StateObjectClass.Acceptance ||
-                header.CreatedAtUnixSeconds !=
-                    receipt.AcceptedAtUnixSeconds ||
-                header.LogicalExpiresAtUnixSeconds !=
-                    receipt.LogicalExpiresAtUnixSeconds ||
-                !StringComparer.Ordinal.Equals(
-                    header.ProducingRunIdentity,
-                    receipt.ProducingRunIdentity) ||
-                header.ProducingRunAttempt !=
-                    receipt.ProducingRunAttempt)
+            if (!OpaqueStoreValidation.IsValid(parsedName))
             {
                 return false;
             }
@@ -125,14 +145,27 @@ internal static class RetainedStateAcceptanceRecoveryCodec
         }
         finally
         {
-            CryptographicOperations.ZeroMemory(headerBytes);
-            if (name is null || header is null || receipt is null)
+            CryptographicOperations.ZeroMemory(copyEnvelope);
+            if (name is null)
             {
-                CryptographicOperations.ZeroMemory(receiptBytes);
                 CryptographicOperations.ZeroMemory(envelopeBytes);
-                receiptBytes = [];
                 envelopeBytes = [];
+                predecessorCopy?.Dispose();
+                predecessorCopy = null;
             }
         }
+    }
+}
+
+internal sealed record RetainedStateRecoveredPredecessorCopy(
+    string LogicalGenerationIdentity,
+    long RequiredLogicalExpiresAtUnixSeconds,
+    long RequiredPlatformExpiresAtUnixSeconds,
+    OpaqueStoreName Name,
+    byte[] Envelope) : IDisposable
+{
+    public void Dispose()
+    {
+        CryptographicOperations.ZeroMemory(Envelope);
     }
 }

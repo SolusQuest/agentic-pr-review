@@ -43,6 +43,7 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
     internal int HideUploadedObjectOnUploadCall { get; set; }
     internal int HideFailedUploadForNextLists { get; set; }
     internal System.Action? BeforeDelete { get; set; }
+    internal System.Action? BeforeUpload { get; set; }
     internal System.Action? AfterDelete { get; set; }
     internal System.Func<
         OpaqueStoreObjectMetadata,
@@ -256,6 +257,9 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
         OpaqueStoreUploadRequest request,
         CancellationToken cancellationToken)
     {
+        var beforeUpload = BeforeUpload;
+        BeforeUpload = null;
+        beforeUpload?.Invoke();
         cancellationToken.ThrowIfCancellationRequested();
         lock (gate)
         {

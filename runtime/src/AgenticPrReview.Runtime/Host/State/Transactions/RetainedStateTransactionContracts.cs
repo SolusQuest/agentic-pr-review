@@ -445,6 +445,160 @@ internal sealed record RetainedStateOpaqueWriteRequest(
     string? SuccessorIdentity,
     long SemanticRequiredExpiresAtUnixSeconds);
 
+internal sealed class RetainedStateOpaqueWriteAttempt : IDisposable
+{
+    private byte[]? payload;
+    private byte[]? envelope;
+    private byte[]? recoveryPayload;
+    private int dispatchState;
+
+    private RetainedStateOpaqueWriteAttempt(
+        RetainedStateTransactionAuthority authority,
+        RetainedStatePersistedCandidate candidate,
+        StateObjectClass objectClass,
+        long semanticRequiredExpiresAtUnixSeconds,
+        OpaqueStoreName name,
+        StateControlHeaderV1 header,
+        byte[] payload,
+        byte[] envelope,
+        byte[] recoveryPayload,
+        string inventoryDigest,
+        bool reconcileOnly)
+    {
+        this.authority = authority;
+        Candidate = candidate;
+        ObjectClass = objectClass;
+        SemanticRequiredExpiresAtUnixSeconds =
+            semanticRequiredExpiresAtUnixSeconds;
+        Name = name;
+        Header = header;
+        this.payload = payload;
+        this.envelope = envelope;
+        this.recoveryPayload = recoveryPayload;
+        InventoryDigest = inventoryDigest;
+        ReconcileOnly = reconcileOnly;
+        dispatchState = reconcileOnly ? 1 : 0;
+    }
+
+    private readonly RetainedStateTransactionAuthority authority;
+    internal RetainedStatePersistedCandidate Candidate { get; }
+    internal StateObjectClass ObjectClass { get; }
+    internal long SemanticRequiredExpiresAtUnixSeconds { get; }
+    internal OpaqueStoreName Name { get; }
+    internal StateControlHeaderV1 Header { get; }
+    internal string InventoryDigest { get; }
+    internal bool ReconcileOnly { get; }
+    internal bool HasEnteredDispatch => Volatile.Read(ref dispatchState) != 0;
+
+    internal bool IsIssuedBy(RetainedStateTransactionAuthority value) =>
+        ReferenceEquals(authority, value) && value.IsLive;
+
+    internal bool TryGetBytes(
+        RetainedStateTransactionAuthority value,
+        out ReadOnlyMemory<byte> payloadBytes,
+        out ReadOnlyMemory<byte> envelopeBytes)
+    {
+        payloadBytes = default;
+        envelopeBytes = default;
+        var currentPayload = Volatile.Read(ref payload);
+        var currentEnvelope = Volatile.Read(ref envelope);
+        if (!ReferenceEquals(authority, value) ||
+            !value.IsLive ||
+            currentPayload is null ||
+            currentEnvelope is null)
+        {
+            return false;
+        }
+
+        payloadBytes = currentPayload;
+        envelopeBytes = currentEnvelope;
+        return true;
+    }
+
+    internal bool TryCreateRecoveryHandoff(
+        out RetainedStateOpaqueWriteRecoveryHandoff? handoff)
+    {
+        var current = Volatile.Read(ref recoveryPayload);
+        if (current is null || !authority.IsLive)
+        {
+            handoff = null;
+            return false;
+        }
+
+        handoff = new RetainedStateOpaqueWriteRecoveryHandoff(
+            ImmutableArray.CreateRange(current),
+            SemanticRequiredExpiresAtUnixSeconds,
+            Candidate.Prepared.Header.ObjectIdentity,
+            ObjectClass);
+        return true;
+    }
+
+    internal bool TryBeginDispatch() =>
+        !ReconcileOnly &&
+        Interlocked.CompareExchange(ref dispatchState, 1, 0) == 0;
+
+    internal void ResetDispatchIfDefinitelyNotCommitted()
+    {
+        if (!ReconcileOnly)
+        {
+            Interlocked.CompareExchange(ref dispatchState, 0, 1);
+        }
+    }
+
+    internal static RetainedStateOpaqueWriteAttempt Create(
+        object issuer,
+        RetainedStateTransactionAuthority authority,
+        RetainedStatePersistedCandidate candidate,
+        StateObjectClass objectClass,
+        long semanticRequiredExpiresAtUnixSeconds,
+        OpaqueStoreName name,
+        StateControlHeaderV1 header,
+        byte[] payload,
+        byte[] envelope,
+        byte[] recoveryPayload,
+        string inventoryDigest,
+        bool reconcileOnly = false)
+    {
+        RetainedStateCapabilityIssuer.Require(issuer);
+        return new(
+            authority,
+            candidate,
+            objectClass,
+            semanticRequiredExpiresAtUnixSeconds,
+            name,
+            header,
+            payload,
+            envelope,
+            recoveryPayload,
+            inventoryDigest,
+            reconcileOnly);
+    }
+
+    public void Dispose()
+    {
+        Zero(ref payload);
+        Zero(ref envelope);
+        Zero(ref recoveryPayload);
+    }
+
+    private static void Zero(ref byte[]? value)
+    {
+        var current = Interlocked.Exchange(ref value, null);
+        if (current is not null)
+        {
+            CryptographicOperations.ZeroMemory(current);
+        }
+    }
+
+    public override string ToString() => "[PRIVATE]";
+}
+
+internal sealed record RetainedStateOpaqueWriteRecoveryHandoff(
+    ImmutableArray<byte> OpaqueInnerPayload,
+    long MinimumSemanticExpiresAtUnixSeconds,
+    string CandidateObjectIdentity,
+    StateObjectClass ObjectClass);
+
 internal sealed class RetainedStateOpaqueRecord : IDisposable
 {
     private byte[]? payload;
@@ -536,6 +690,7 @@ internal sealed class RetainedStateOpaqueRecord : IDisposable
 internal sealed class RetainedStateAcceptancePreparation : IDisposable
 {
     private RetainedStateAcceptanceAttempt? attempt;
+    private RetainedStatePredecessorCopyAttempt? predecessorCopyAttempt;
     private byte[]? recoveryPayload;
 
     private RetainedStateAcceptancePreparation(
@@ -544,6 +699,7 @@ internal sealed class RetainedStateAcceptancePreparation : IDisposable
         StickyCommentPublisher.StickyPublicationReceipt receipt,
         RetainedStateOwnership ownership,
         RetainedStateAcceptanceAttempt attempt,
+        RetainedStatePredecessorCopyAttempt? predecessorCopyAttempt,
         byte[] recoveryPayload)
     {
         this.authority = authority;
@@ -551,6 +707,7 @@ internal sealed class RetainedStateAcceptancePreparation : IDisposable
         Receipt = receipt;
         Ownership = ownership;
         this.attempt = attempt;
+        this.predecessorCopyAttempt = predecessorCopyAttempt;
         this.recoveryPayload = recoveryPayload;
     }
 
@@ -574,17 +731,27 @@ internal sealed class RetainedStateAcceptancePreparation : IDisposable
             ? Interlocked.Exchange(ref attempt, null)
             : null;
 
-    internal bool TryCopyRecoveryPayload(
-        out ImmutableArray<byte> payload)
+    internal RetainedStatePredecessorCopyAttempt? GetPredecessorCopyAttempt(
+        RetainedStateTransactionAuthority value) =>
+        ReferenceEquals(authority, value)
+            ? Volatile.Read(ref predecessorCopyAttempt)
+            : null;
+
+    internal bool TryCreateRecoveryHandoff(
+        out RetainedStateAcceptanceRecoveryHandoff? handoff)
     {
         var current = Volatile.Read(ref recoveryPayload);
-        if (current is null || !authority.IsLive)
+        var currentAttempt = Volatile.Read(ref attempt);
+        if (current is null || currentAttempt is null || !authority.IsLive)
         {
-            payload = [];
+            handoff = null;
             return false;
         }
 
-        payload = ImmutableArray.CreateRange(current);
+        handoff = new RetainedStateAcceptanceRecoveryHandoff(
+            ImmutableArray.CreateRange(current),
+            currentAttempt.LogicalExpiresAtUnixSeconds,
+            Candidate.Prepared.Header.ObjectIdentity);
         return true;
     }
 
@@ -595,6 +762,7 @@ internal sealed class RetainedStateAcceptancePreparation : IDisposable
         StickyCommentPublisher.StickyPublicationReceipt receipt,
         RetainedStateOwnership ownership,
         RetainedStateAcceptanceAttempt attempt,
+        RetainedStatePredecessorCopyAttempt? predecessorCopyAttempt,
         byte[] recoveryPayload)
     {
         RetainedStateCapabilityIssuer.Require(issuer);
@@ -604,6 +772,7 @@ internal sealed class RetainedStateAcceptancePreparation : IDisposable
             receipt,
             ownership,
             attempt,
+            predecessorCopyAttempt,
             recoveryPayload);
     }
 
@@ -611,6 +780,7 @@ internal sealed class RetainedStateAcceptancePreparation : IDisposable
     {
         Ownership.Dispose();
         Interlocked.Exchange(ref attempt, null)?.Dispose();
+        Interlocked.Exchange(ref predecessorCopyAttempt, null)?.Dispose();
         var current = Interlocked.Exchange(ref recoveryPayload, null);
         if (current is not null)
         {
@@ -620,6 +790,11 @@ internal sealed class RetainedStateAcceptancePreparation : IDisposable
 
     public override string ToString() => "[PRIVATE]";
 }
+
+internal sealed record RetainedStateAcceptanceRecoveryHandoff(
+    ImmutableArray<byte> OpaqueInnerPayload,
+    long MinimumSemanticExpiresAtUnixSeconds,
+    string CandidateObjectIdentity);
 
 internal sealed class RetainedStateAcceptanceEvidence : IDisposable
 {
@@ -686,6 +861,7 @@ internal sealed class RetainedStateAcceptanceAttempt : IDisposable
 {
     private byte[]? receiptBytes;
     private byte[]? envelopeBytes;
+    private int dispatchState;
 
     private RetainedStateAcceptanceAttempt(
         long acceptedAtUnixSeconds,
@@ -695,7 +871,8 @@ internal sealed class RetainedStateAcceptanceAttempt : IDisposable
         OpaqueStoreName name,
         StateControlHeaderV1 header,
         byte[] receiptBytes,
-        byte[] envelopeBytes)
+        byte[] envelopeBytes,
+        bool reconcileOnly)
     {
         AcceptedAtUnixSeconds = acceptedAtUnixSeconds;
         LogicalExpiresAtUnixSeconds = logicalExpiresAtUnixSeconds;
@@ -706,6 +883,8 @@ internal sealed class RetainedStateAcceptanceAttempt : IDisposable
         Header = header;
         this.receiptBytes = receiptBytes;
         this.envelopeBytes = envelopeBytes;
+        ReconcileOnly = reconcileOnly;
+        dispatchState = reconcileOnly ? 1 : 0;
     }
 
     internal static RetainedStateAcceptanceAttempt Create(
@@ -717,7 +896,8 @@ internal sealed class RetainedStateAcceptanceAttempt : IDisposable
         OpaqueStoreName name,
         StateControlHeaderV1 header,
         byte[] receiptBytes,
-        byte[] envelopeBytes)
+        byte[] envelopeBytes,
+        bool reconcileOnly = false)
     {
         RetainedStateCapabilityIssuer.Require(issuer);
         return new RetainedStateAcceptanceAttempt(
@@ -728,7 +908,8 @@ internal sealed class RetainedStateAcceptanceAttempt : IDisposable
             name,
             header,
             receiptBytes,
-            envelopeBytes);
+            envelopeBytes,
+            reconcileOnly);
     }
 
     internal long AcceptedAtUnixSeconds { get; }
@@ -737,6 +918,20 @@ internal sealed class RetainedStateAcceptanceAttempt : IDisposable
     internal AcceptanceReceiptV1 Receipt { get; }
     internal OpaqueStoreName Name { get; }
     internal StateControlHeaderV1 Header { get; }
+    internal bool ReconcileOnly { get; }
+    internal bool HasEnteredDispatch => Volatile.Read(ref dispatchState) != 0;
+
+    internal bool TryBeginDispatch() =>
+        !ReconcileOnly &&
+        Interlocked.CompareExchange(ref dispatchState, 1, 0) == 0;
+
+    internal void ResetDispatchIfDefinitelyNotCommitted()
+    {
+        if (!ReconcileOnly)
+        {
+            Interlocked.CompareExchange(ref dispatchState, 0, 1);
+        }
+    }
 
     internal bool TryGetBytes(
         out ReadOnlyMemory<byte> receipt,
@@ -778,6 +973,7 @@ internal sealed class RetainedStatePredecessorCopyAttempt : IDisposable
 {
     private byte[]? payload;
     private byte[]? envelope;
+    private int dispatchState;
 
     private RetainedStatePredecessorCopyAttempt(
         string logicalGenerationIdentity,
@@ -786,7 +982,8 @@ internal sealed class RetainedStatePredecessorCopyAttempt : IDisposable
         OpaqueStoreName name,
         StateControlHeaderV1 header,
         byte[] payload,
-        byte[] envelope)
+        byte[] envelope,
+        bool reconcileOnly)
     {
         LogicalGenerationIdentity = logicalGenerationIdentity;
         RequiredLogicalExpiresAtUnixSeconds =
@@ -797,6 +994,8 @@ internal sealed class RetainedStatePredecessorCopyAttempt : IDisposable
         Header = header;
         this.payload = payload;
         this.envelope = envelope;
+        ReconcileOnly = reconcileOnly;
+        dispatchState = reconcileOnly ? 1 : 0;
     }
 
     internal string LogicalGenerationIdentity { get; }
@@ -804,6 +1003,20 @@ internal sealed class RetainedStatePredecessorCopyAttempt : IDisposable
     internal long RequiredPlatformExpiresAtUnixSeconds { get; }
     internal OpaqueStoreName Name { get; }
     internal StateControlHeaderV1 Header { get; }
+    internal bool ReconcileOnly { get; }
+    internal bool HasEnteredDispatch => Volatile.Read(ref dispatchState) != 0;
+
+    internal bool TryBeginDispatch() =>
+        !ReconcileOnly &&
+        Interlocked.CompareExchange(ref dispatchState, 1, 0) == 0;
+
+    internal void ResetDispatchIfDefinitelyNotCommitted()
+    {
+        if (!ReconcileOnly)
+        {
+            Interlocked.CompareExchange(ref dispatchState, 0, 1);
+        }
+    }
 
     internal bool TryGetBytes(
         out ReadOnlyMemory<byte> payloadBytes,
@@ -822,7 +1035,8 @@ internal sealed class RetainedStatePredecessorCopyAttempt : IDisposable
         OpaqueStoreName name,
         StateControlHeaderV1 header,
         byte[] payload,
-        byte[] envelope)
+        byte[] envelope,
+        bool reconcileOnly = false)
     {
         RetainedStateCapabilityIssuer.Require(issuer);
         return new(
@@ -832,7 +1046,8 @@ internal sealed class RetainedStatePredecessorCopyAttempt : IDisposable
             name,
             header,
             payload,
-            envelope);
+            envelope,
+            reconcileOnly);
     }
 
     public void Dispose()
