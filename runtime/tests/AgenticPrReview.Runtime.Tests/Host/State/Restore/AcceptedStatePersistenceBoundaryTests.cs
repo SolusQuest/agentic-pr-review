@@ -11,10 +11,13 @@ using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.Lineage;
+using AgenticPrReview.Runtime.Host.State.Locator;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 using AgenticPrReview.Runtime.Host.State.Restore;
 using AgenticPrReview.Runtime.Tests.Host.Publishing.GitHub.Sticky;
+using AgenticPrReview.Runtime.Tests.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Tests.Host.State.Lineage;
+using AgenticPrReview.Runtime.Tests.Host.State.Locator;
 
 namespace AgenticPrReview.Runtime.Tests.Host.State.Restore;
 
@@ -105,15 +108,33 @@ public sealed class AcceptedStatePersistenceBoundaryTests
     [Fact]
     public async Task MaximumSessionAndPublicationCompositeFitsAllLayers()
     {
+        var lineageTemplate = LineageTestData.Scope();
         var fixture = await AgentSessionStateBoundaryTests
-            .BuildSessionAsync();
+            .BuildSessionAsync(
+                AcceptedStateTestData.RepositoryId.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture),
+                AcceptedStateTestData.PullRequestNumber,
+                AcceptedStateTestData.SessionId,
+                lineageTemplate.TrustedWorkflowIdentity,
+                buildId: AcceptedStateTestData.BuildDiscriminator,
+                baseSha: R4PublicationTestData.BaseSha,
+                headSha: R4PublicationTestData.HeadSha);
         var admittedSession = MaximumAdmittedSession(fixture);
+        var document = admittedSession.Value.Artifact.Document;
         Assert.Equal(
             AgentLimits.SessionPlaintextBytes,
             admittedSession.Plaintext.Length);
 
-        var stateAccess = RestrictedStateTestData.Access();
-        var binding = RestrictedStateTestData.Binding();
+        var stateScope = RestrictedScope(document);
+        var stateAccess = RestrictedStateTestData.Access(stateScope);
+        var binding = new RestrictedStateBinding(
+            stateScope,
+            document.ProducerBaseSha,
+            document.ProducerHeadSha,
+            document.Generation,
+            document.PredecessorStateSha256,
+            AcceptedStateTestData.AcceptedAtUnixSeconds,
+            AcceptedStateTestData.LogicalExpiresAtUnixSeconds);
         var keyResolver = new TestKeyResolver();
         Assert.True(RestrictedStateEnvelope.TryEncrypt(
             stateAccess,
@@ -123,6 +144,10 @@ public sealed class AcceptedStatePersistenceBoundaryTests
             out var stateEnvelope,
             out var stateFailure), stateFailure);
         Assert.NotNull(stateEnvelope);
+        Assert.Equal(document.Generation, binding.Generation);
+        Assert.Equal(
+            document.PredecessorStateSha256,
+            binding.PredecessorEnvelopeSha256);
         Assert.InRange(
             stateEnvelope!.Length,
             1,
@@ -145,19 +170,25 @@ public sealed class AcceptedStatePersistenceBoundaryTests
             publication!,
             out var publicationBytes));
 
-        var template = AcceptedStateTestData.Generation(out _);
-        var generation = template with
-        {
-            EncryptedStateEnvelope =
-                ImmutableArray.CreateRange(stateEnvelope),
-            StateEnvelopeSha256 =
-                RestrictedStateEnvelope.EnvelopeSha256(stateEnvelope),
-            SessionSha256 = admittedSession.SessionSha256,
-            PublicationPayloadBytes =
-                ImmutableArray.CreateRange(publicationBytes),
-            PublicationPayloadSha256 =
-                AcceptedStateRecordValidation.Sha256(publicationBytes),
-        };
+        var previousLogicalGenerationIdentity = new string('f', 64);
+        var generation = new StateGenerationRecordV1(
+            ImmutableArray.CreateRange(stateEnvelope),
+            RestrictedStateEnvelope.EnvelopeSha256(stateEnvelope),
+            admittedSession.SessionSha256,
+            document.ProducerBaseSha,
+            document.ProducerHeadSha,
+            document.Generation,
+            document.PredecessorStateSha256,
+            previousLogicalGenerationIdentity,
+            binding.AcceptedAtUnixSeconds,
+            binding.ExpiresAtUnixSeconds,
+            ImmutableArray.CreateRange(publicationBytes),
+            AcceptedStateRecordValidation.Sha256(publicationBytes),
+            AcceptedStateTestData.PolicySha256,
+            AcceptedStateTestData.ConfigSha256,
+            document.PolicySha256,
+            AcceptedStateTestData.PayloadSha256,
+            document.BuildId);
         Assert.True(AcceptedStateGenerationRecordCodec.TryEncode(
             generation,
             out var generationBytes));
@@ -166,76 +197,247 @@ public sealed class AcceptedStatePersistenceBoundaryTests
             1,
             AcceptedStateFormat.MaximumGenerationPayloadBytes);
 
-        var copy = new AcceptedStatePhysicalCopyV1(
-            ImmutableArray.CreateRange(generationBytes),
-            new string('a', 64),
-            AcceptedStateTestData.OriginalCandidateIdentity,
-            "9007199254740991",
-            new string('b', 64),
-            new string('c', 64));
-        Assert.True(AcceptedStatePhysicalCopyCodec.TryEncode(
-            copy,
-            out var copyBytes));
-        Assert.InRange(
-            copyBytes.Length,
-            1,
-            AcceptedStateFormat.MaximumPhysicalCopyPayloadBytes);
-
-        using var lease = LineageTestData.Context(
+        var scope = new LineageBaseScope(
+            document.RepositoryId,
+            document.WorkflowIdentity,
+            lineageTemplate.TrustedSourceIdentity,
+            document.ReviewTarget,
+            document.ProviderId,
+            document.ModelId,
+            document.AdapterId,
+            AcceptedStateTestData.ConfigSha256,
+            document.PolicySha256,
+            document.ToolsetSha256,
+            document.LimitsSha256,
+            document.BuildId);
+        using var locatorAccess = LocatorTestData.Access(document.RepositoryId);
+        using var locatorKeys = LocatorTestData.KeyRing(
+            locatorAccess,
+            repositoryId: document.RepositoryId);
+        var time = new MutableLineageTimeProvider(
             AcceptedStateTestData.AcceptedAtUnixSeconds);
-        var scope = LineageTestData.Scope();
+        Assert.True(LocatorContext.TryCreate(
+            locatorAccess,
+            locatorKeys,
+            LineageTestData.Root,
+            currentSingletonProven: true,
+            AcceptedStateTestData.LogicalExpiresAtUnixSeconds + 3_600,
+            time,
+            out var createdContext));
+        using var locatorContext = Assert.IsType<LocatorContext>(
+            createdContext);
         Assert.True(LineageBaseScopeCodec.TryEncode(
             scope,
             out var scopeBytes));
+        byte[]? sourceEnvelope = null;
+        byte[]? copyBytes = null;
+        byte[]? copyEnvelope = null;
+        byte[]? recoveredCopyBytes = null;
+        byte[]? recoveredSessionBytes = null;
         try
         {
             Assert.True(LineageBaseScopeCodec.TryDigest(
                 scope,
                 out var scopeDigest));
-            Assert.True(lease.Context.TryDeriveOpaqueName(
-                lease.Access,
+            Assert.True(locatorContext.TryDeriveOpaqueName(
+                locatorAccess,
                 StateObjectClasses.ToWireName(StateObjectClass.Candidate),
                 scopeBytes,
                 out var name));
             Assert.NotNull(name);
-            var draft = new StateControlHeaderDraft(
+            Assert.True(AcceptedStateIdentity.TryComputeLogicalGeneration(
+                generationBytes,
                 scopeDigest,
                 AcceptedStateTestData.Epoch,
-                AcceptedStateTestData.SessionId,
+                document.SessionId,
+                previousLogicalGenerationIdentity,
+                out var logicalGenerationIdentity));
+            var sourceDraft = new StateControlHeaderDraft(
+                scopeDigest,
+                AcceptedStateTestData.Epoch,
+                document.SessionId,
                 StateObjectClass.Candidate,
-                PredecessorIdentity: null,
+                previousLogicalGenerationIdentity,
                 SuccessorIdentity: null,
-                "boundary-run",
+                "boundary-source",
                 1,
                 AcceptedStateTestData.AcceptedAtUnixSeconds,
                 AcceptedStateTestData.LogicalExpiresAtUnixSeconds,
                 AcceptedStateTestData.LogicalExpiresAtUnixSeconds + 3_600);
             Assert.True(StateControlEnvelopeV1Codec.TryEncrypt(
-                lease.Context,
-                lease.Access,
+                locatorContext,
+                locatorAccess,
                 name!,
-                draft,
-                copyBytes,
-                out var outerEnvelope,
-                out _,
-                out var outerFailure), outerFailure);
+                sourceDraft,
+                generationBytes,
+                out sourceEnvelope,
+                out var sourceHeader,
+                out var sourceFailure), sourceFailure);
+            Assert.NotNull(sourceHeader);
+
+            var store = new ScriptedLocatorStore
+            {
+                UseNumericObjectIds = true,
+            };
+            var sourceUpload = new OpaqueStoreUploadRequest(
+                name!,
+                new OpaqueStoreCorrelationId("s5-boundary-source"),
+                sourceEnvelope,
+                new OpaqueStoreEncryptedObjectDigest(
+                    OpaqueStoreHash.Sha256(sourceEnvelope)),
+                AcceptedStateTestData.LogicalExpiresAtUnixSeconds + 3_600);
+            Assert.True(OpaqueStoreValidation.IsValid(sourceUpload));
+            var uploadedSource = await store.UploadImmutableAsync(
+                sourceUpload,
+                CancellationToken.None);
+            Assert.True(uploadedSource.Succeeded);
+            var sourceMetadata = Assert.IsType<OpaqueStoreObjectMetadata>(
+                uploadedSource.Metadata);
+            Assert.True((await store.ReadBackExactAsync(
+                new OpaqueStoreReadBackRequest(sourceMetadata),
+                CancellationToken.None)).Succeeded);
+
+            var copy = new AcceptedStatePhysicalCopyV1(
+                ImmutableArray.CreateRange(generationBytes),
+                logicalGenerationIdentity,
+                sourceHeader!.ObjectIdentity,
+                sourceMetadata.Reference.ObjectId.Value,
+                sourceMetadata.ArchiveDigest.Sha256,
+                sourceMetadata.EncryptedObjectDigest.Sha256);
+            Assert.True(AcceptedStatePhysicalCopyCodec.TryEncode(
+                copy,
+                out copyBytes));
             Assert.InRange(
-                outerEnvelope.Length,
+                copyBytes.Length,
+                1,
+                AcceptedStateFormat.MaximumPhysicalCopyPayloadBytes);
+
+            var copyDraft = sourceDraft with
+            {
+                ProducingRunIdentity = "boundary-copy",
+            };
+            Assert.True(StateControlEnvelopeV1Codec.TryEncrypt(
+                locatorContext,
+                locatorAccess,
+                name!,
+                copyDraft,
+                copyBytes,
+                out copyEnvelope,
+                out var copyHeader,
+                out var copyFailure), copyFailure);
+            Assert.NotNull(copyHeader);
+            Assert.NotEqual(
+                sourceHeader.ObjectIdentity,
+                copyHeader!.ObjectIdentity);
+            Assert.InRange(
+                copyEnvelope.Length,
                 1,
                 LineageFormat.MaximumEnvelopeBytes);
 
-            var upload = new OpaqueStoreUploadRequest(
+            var copyUpload = new OpaqueStoreUploadRequest(
                 name!,
-                new OpaqueStoreCorrelationId("s5-boundary"),
-                outerEnvelope,
+                new OpaqueStoreCorrelationId("s5-boundary-copy"),
+                copyEnvelope,
                 new OpaqueStoreEncryptedObjectDigest(
-                    OpaqueStoreHash.Sha256(outerEnvelope)),
+                    OpaqueStoreHash.Sha256(copyEnvelope)),
                 AcceptedStateTestData.LogicalExpiresAtUnixSeconds + 3_600);
-            Assert.True(OpaqueStoreValidation.IsValid(upload));
+            Assert.True(OpaqueStoreValidation.IsValid(copyUpload));
+            var uploadedCopy = await store.UploadImmutableAsync(
+                copyUpload,
+                CancellationToken.None);
+            Assert.True(uploadedCopy.Succeeded);
+            var copyMetadata = Assert.IsType<OpaqueStoreObjectMetadata>(
+                uploadedCopy.Metadata);
+            Assert.NotEqual(
+                sourceMetadata.Reference.ObjectId.Value,
+                copyMetadata.Reference.ObjectId.Value);
+            Assert.True((await store.ReadBackExactAsync(
+                new OpaqueStoreReadBackRequest(copyMetadata),
+                CancellationToken.None)).Succeeded);
+            var downloadedCopy = await store.DownloadAsync(
+                new OpaqueStoreDownloadRequest(
+                    copyMetadata,
+                    OpaqueStoreLimits.MaximumObjectBytes),
+                CancellationToken.None);
+            Assert.True(downloadedCopy.Succeeded);
+
+            Assert.True(StateControlEnvelopeV1Codec.TryDecrypt(
+                locatorContext,
+                locatorAccess,
+                name!,
+                downloadedCopy.EncryptedBytes.Span,
+                out var recoveredHeader,
+                out recoveredCopyBytes,
+                out var outerFailure), outerFailure);
+            Assert.Equal(copyHeader, recoveredHeader);
+            Assert.True(AcceptedStatePhysicalCopyCodec.TryDecode(
+                recoveredCopyBytes,
+                out var recoveredCopy));
+            Assert.NotNull(recoveredCopy);
+            Assert.Equal(
+                logicalGenerationIdentity,
+                recoveredCopy!.LogicalGenerationIdentity);
+            Assert.Equal(
+                sourceHeader.ObjectIdentity,
+                recoveredCopy.OriginalCandidateObjectIdentity);
+            Assert.Equal(
+                sourceMetadata.Reference.ObjectId.Value,
+                recoveredCopy.SourceArtifactId);
+            Assert.Equal(
+                sourceMetadata.ArchiveDigest.Sha256,
+                recoveredCopy.SourceArchiveSha256);
+            Assert.Equal(
+                sourceMetadata.EncryptedObjectDigest.Sha256,
+                recoveredCopy.SourceEncryptedEnvelopeSha256);
+            Assert.True(AcceptedStateGenerationRecordCodec.TryDecode(
+                recoveredCopy.CanonicalGenerationBytes.AsSpan(),
+                out var recoveredGeneration));
+            Assert.NotNull(recoveredGeneration);
+            Assert.Equal(document.Generation, recoveredGeneration!.Generation);
+            Assert.Equal(
+                document.PredecessorStateSha256,
+                recoveredGeneration.PredecessorEnvelopeSha256);
+            Assert.Equal(
+                previousLogicalGenerationIdentity,
+                recoveredGeneration.PreviousLogicalGenerationIdentity);
+
+            var recoveredBinding = new RestrictedStateBinding(
+                stateScope,
+                recoveredGeneration.ProducerBaseSha,
+                recoveredGeneration.ProducerHeadSha,
+                recoveredGeneration.Generation,
+                recoveredGeneration.PredecessorEnvelopeSha256,
+                recoveredGeneration.PreparedAtUnixSeconds,
+                recoveredGeneration.PreparedExpiresAtUnixSeconds);
+            Assert.True(RestrictedStateEnvelope.TryDecrypt(
+                stateAccess,
+                recoveredBinding,
+                recoveredGeneration.EncryptedStateEnvelope.AsSpan(),
+                keyResolver,
+                out recoveredSessionBytes,
+                out var decryptFailure), decryptFailure);
+            Assert.NotNull(recoveredSessionBytes);
+            Assert.Equal(admittedSession.Plaintext, recoveredSessionBytes);
+            var readmitted = new AgentSessionRestrictedStateAdmission().Admit(
+                stateAccess,
+                recoveredSessionBytes,
+                AdmissionContext(
+                    fixture,
+                    document,
+                    recoveredGeneration.StateEnvelopeSha256));
+            Assert.True(readmitted.Succeeded);
+            Assert.NotNull(readmitted.Session);
+            Assert.Equal(
+                recoveredGeneration.SessionSha256,
+                readmitted.Session!.SessionSha256);
+            Assert.Equal(document.Generation, readmitted.Session.Generation);
+            Assert.Equal(
+                document.PredecessorStateSha256,
+                readmitted.Session.PredecessorEnvelopeSha256);
 
             Assert.False(StateControlEnvelopeV1Codec.TryDecrypt(
-                lease.Context,
-                lease.Access,
+                locatorContext,
+                locatorAccess,
                 name!,
                 new byte[LineageFormat.MaximumEnvelopeBytes + 1],
                 out _,
@@ -245,6 +447,11 @@ public sealed class AcceptedStatePersistenceBoundaryTests
         finally
         {
             CryptographicOperations.ZeroMemory(scopeBytes);
+            Zero(sourceEnvelope);
+            Zero(copyBytes);
+            Zero(copyEnvelope);
+            Zero(recoveredCopyBytes);
+            Zero(recoveredSessionBytes);
         }
 
         Assert.False(AcceptedStatePublicationPayloadCodec.TryDecode(
@@ -271,6 +478,52 @@ public sealed class AcceptedStatePersistenceBoundaryTests
             EncryptedBytes =
                 new byte[OpaqueStoreLimits.MaximumObjectBytes + 1],
         }));
+
+        Zero(admittedSession.Plaintext);
+        Zero(admittedSession.Value.Artifact.Plaintext);
+    }
+
+    private static RestrictedStateScope RestrictedScope(
+        AgentSessionDocument document) =>
+        new(
+            document.RepositoryId,
+            document.WorkflowIdentity,
+            document.ReviewTarget,
+            document.SessionId,
+            document.ProviderId,
+            document.ModelId,
+            document.AdapterId,
+            document.PolicySha256,
+            document.LimitsSha256,
+            document.ToolsetSha256,
+            document.BuildId);
+
+    private static RestrictedStateSessionAdmissionContext AdmissionContext(
+        AgentSessionStateBoundaryTests.SessionFixture fixture,
+        AgentSessionDocument document,
+        string envelopeSha256) =>
+        new(
+            document.ProducerBaseSha,
+            document.ProducerHeadSha,
+            document.Generation,
+            document.PredecessorStateSha256,
+            new AgentSessionStateAdmissionContext(
+                fixture.Trusted,
+                document.SessionId,
+                fixture.Identity,
+                new ProjectChatMessage(
+                    "user",
+                    [new ProjectTextContent("current review context")]),
+                AgentSessionHeadTransition.SameHead,
+                DeepSeekReasoningContinuationCodec.Instance,
+                envelopeSha256));
+
+    private static void Zero(byte[]? bytes)
+    {
+        if (bytes is not null)
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+        }
     }
 
     private static RestrictedStateAdmittedSession MaximumAdmittedSession(
