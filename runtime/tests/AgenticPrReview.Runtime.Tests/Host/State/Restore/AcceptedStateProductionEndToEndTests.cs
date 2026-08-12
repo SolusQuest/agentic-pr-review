@@ -590,6 +590,143 @@ public sealed class AcceptedStateProductionEndToEndTests
                 item.Reference.Name == seed.LineageName));
     }
 
+    [Theory]
+    [InlineData("disappear")]
+    [InlineData("successor")]
+    [InlineData("replacement")]
+    public async Task PendingIntentChangeAfterClassifiedSnapshotFailsClosed(
+        string mutation)
+    {
+        var scenario = await CreateInterruptedExpiryScenarioAsync(
+            ExpiryCrashCut.AfterIntentUpload);
+        var interleaving = new RecoveryInterleavingStore(
+            scenario.InterruptedStore,
+            scenario.Seed.ExpiryName);
+        var retry = scenario.Request with
+        {
+            Dependencies = new EndToEndDependencies(interleaving),
+        };
+        var uploadsAfterMutation = -1;
+        interleaving.AfterExpiryDownload = async () =>
+        {
+            var intent = Assert.Single(scenario.Store.Objects.Where(item =>
+                item.Reference.Name == scenario.Seed.ExpiryName));
+            if (mutation is "disappear" or "replacement")
+            {
+                var deleted = await scenario.Store.DeleteExactAsync(
+                    new OpaqueStoreDeleteRequest(intent),
+                    CancellationToken.None);
+                Assert.True(deleted.Succeeded);
+            }
+
+            if (mutation == "successor")
+            {
+                var completed = await RestrictedStateService
+                    .RestoreAuthorizedArtifactStateAsync(
+                        scenario.Request,
+                        CancellationToken.None);
+                Assert.True(completed.Succeeded, completed.Code);
+                Assert.True(completed.IsBootstrap);
+                completed.Context?.Dispose();
+            }
+            else if (mutation == "replacement")
+            {
+                var observed = await ObserveSelectedLineageAsync(
+                    scenario.Store,
+                    scenario.Request,
+                    scenario.Time);
+                await UploadTransitionIntentAsync(
+                    scenario.Store,
+                    scenario.Request,
+                    scenario.Time,
+                    observed.Snapshot,
+                    LineageTransitionIntentKind.Expiry,
+                    new string('f', 64),
+                    scenario.Time.GetUtcNow().ToUnixTimeSeconds());
+            }
+
+            uploadsAfterMutation = scenario.Store.UploadCalls;
+        };
+
+        var result = await RestrictedStateService
+            .RestoreAuthorizedArtifactStateAsync(
+                retry,
+                CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(AcceptedStateCodes.Conflict, result.Code);
+        Assert.Null(result.Context);
+        Assert.True(interleaving.Interleaved);
+        Assert.Equal(uploadsAfterMutation, scenario.Store.UploadCalls);
+        Assert.Equal(
+            mutation == "replacement" ? 1 : 0,
+            scenario.Store.Objects.Count(item =>
+                item.Reference.Name == scenario.Seed.ExpiryName));
+    }
+
+    [Theory]
+    [InlineData("reset")]
+    [InlineData("expiry")]
+    public async Task DelayedIntentAfterSuccessorCleanupIsReclassified(
+        string transition)
+    {
+        var kind = transition == "reset"
+            ? LineageTransitionIntentKind.Reset
+            : LineageTransitionIntentKind.Expiry;
+        var scenario = await CreateInterruptedExpiryScenarioAsync(
+            ExpiryCrashCut.AfterSuccessorUpload);
+        var interleaving = new RecoveryInterleavingStore(
+            scenario.InterruptedStore,
+            scenario.Seed.ExpiryName);
+        var retry = scenario.Request with
+        {
+            Dependencies = new EndToEndDependencies(interleaving),
+        };
+        var uploadsAfterMutation = -1;
+        OpaqueStoreName? delayedName = null;
+        interleaving.BeforeFirstListAfterDelete = async () =>
+        {
+            var observed = await ObserveSelectedLineageAsync(
+                scenario.Store,
+                scenario.Request,
+                scenario.Time);
+            Assert.Equal(
+                LineageTransitionKind.Expiry,
+                observed.Snapshot.Transition);
+            delayedName = await UploadTransitionIntentAsync(
+                scenario.Store,
+                scenario.Request,
+                scenario.Time,
+                observed.Snapshot,
+                kind,
+                new string(kind == LineageTransitionIntentKind.Reset
+                    ? 'd'
+                    : 'e', 64),
+                kind == LineageTransitionIntentKind.Expiry
+                    ? scenario.Time.GetUtcNow().ToUnixTimeSeconds()
+                    : null);
+            uploadsAfterMutation = scenario.Store.UploadCalls;
+        };
+
+        var result = await RestrictedStateService
+            .RestoreAuthorizedArtifactStateAsync(
+                retry,
+                CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(
+            kind == LineageTransitionIntentKind.Reset
+                ? AcceptedStateCodes.AccessDenied
+                : AcceptedStateCodes.Conflict,
+            result.Code);
+        Assert.Null(result.Context);
+        Assert.True(interleaving.Interleaved);
+        Assert.Equal(uploadsAfterMutation, scenario.Store.UploadCalls);
+        Assert.NotNull(delayedName);
+        Assert.Equal(1, scenario.Store.Objects.Count(item =>
+            item.Reference.Name == delayedName));
+    }
+
     [Fact]
     public async Task ProductionEntryRestoresMaximumGenerationFifteenComposite()
     {
@@ -1126,6 +1263,225 @@ public sealed class AcceptedStateProductionEndToEndTests
     {
         CryptographicOperations.ZeroMemory(session.Plaintext);
         CryptographicOperations.ZeroMemory(session.Value.Artifact.Plaintext);
+    }
+
+    private static async Task<InterruptedExpiryScenario>
+        CreateInterruptedExpiryScenarioAsync(ExpiryCrashCut crashCut)
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowRun);
+        var launch = StateLaunch(scenario.Launch, currentKeyByte: 0x42);
+        var authorized = await scenario.CreateAuthorizer().AuthorizeAsync(
+            launch,
+            CancellationToken.None);
+        var invocation = Assert.IsType<
+            ActionHostAuthorizer.AuthorizedInvocation>(authorized.Invocation);
+        Assert.True(ActionHostTrustedPolicyRequest.TryBind(
+            launch,
+            invocation,
+            out var policyRequest,
+            out _));
+        var materialized = await ActionHostTrustedPolicy.MaterializeAsync(
+            policyRequest!,
+            ActionHostTrustedPolicyTests.ScriptedObjectTransport.Valid(
+                ActionHostTrustedPolicyTests.Config("sticky", null),
+                Encoding.UTF8.GetBytes("trusted accepted-state policy")),
+            CancellationToken.None);
+        Assert.True(materialized.Succeeded);
+        var time = new MutableLineageTimeProvider(
+            AcceptedStateTestData.AcceptedAtUnixSeconds);
+        var store = new ScriptedLocatorStore
+        {
+            FilterListsByName = true,
+            UseNumericObjectIds = true,
+        };
+        var request = new ArtifactStateRestoreRequest(
+            launch,
+            invocation,
+            materialized.Policy!,
+            User("current review context"),
+            DeepSeekReasoningContinuationCodec.Instance,
+            new EndToEndDependencies(store),
+            time);
+        var bootstrap = await RestrictedStateService
+            .RestoreAuthorizedArtifactStateAsync(
+                request,
+                CancellationToken.None);
+        Assert.True(bootstrap.Succeeded, bootstrap.Code);
+        AcceptedSeed seed;
+        using (var context = Assert.IsType<
+            AuthorizedAcceptedStateRestoreContext>(bootstrap.Context))
+        {
+            Assert.True(context.TryGetLineageSnapshot(out var selected));
+            seed = await SeedAcceptedGenerationAsync(
+                store,
+                request,
+                selected!,
+                time);
+        }
+
+        time.UnixSeconds += AcceptedStateFormat.LogicalWindowSeconds;
+        var interruptedStore = new InterruptedExpiryStore(
+            store,
+            seed,
+            crashCut);
+        var interruptedRequest = request with
+        {
+            Dependencies = new EndToEndDependencies(interruptedStore),
+        };
+        var interrupted = await RestrictedStateService
+            .RestoreAuthorizedArtifactStateAsync(
+                interruptedRequest,
+                CancellationToken.None);
+        Assert.False(interrupted.Succeeded);
+        Assert.Equal(AcceptedStateCodes.OutcomeUnknown, interrupted.Code);
+        return new InterruptedExpiryScenario(
+            store,
+            interruptedStore,
+            request,
+            time,
+            seed);
+    }
+
+    private static async Task<OpaqueStoreName> UploadTransitionIntentAsync(
+        ScriptedLocatorStore store,
+        ArtifactStateRestoreRequest request,
+        TimeProvider time,
+        SelectedLineageSnapshot selected,
+        LineageTransitionIntentKind kind,
+        string transitionEvidenceIdentity,
+        long? expiryBoundaryUnixSeconds)
+    {
+        Assert.True(AcceptedStateProductionAuthorization.TryAuthorize(
+            request,
+            out var authorization));
+        Assert.NotNull(authorization);
+        var launch = request.Launch;
+        var invocation = request.Invocation;
+        var repositoryId = launch.RepositoryId.ToString(
+            CultureInfo.InvariantCulture);
+        using var locatorAccess = AuthorizedLocatorAccess.Issue(
+            authorization!,
+            repositoryId);
+        Assert.NotNull(locatorAccess);
+        var currentKey = launch.Inputs.StateKey!.ExportForPrivateLaunch();
+        var previousKey = launch.Inputs.PreviousStateKey?
+            .ExportForPrivateLaunch();
+        Assert.True(LocatorStateKeyRing.TryCreate(
+            locatorAccess!,
+            repositoryId,
+            currentKey,
+            previousKey,
+            out var keyRing,
+            out var keyCode), keyCode);
+        using (keyRing)
+        {
+            var now = time.GetUtcNow().ToUnixTimeSeconds();
+            var logicalExpiry = checked(
+                now + AcceptedStateFormat.LogicalWindowSeconds);
+            var requiredPlatformExpiry = Math.Max(
+                checked(now +
+                    StateRetentionRequirements.ScopedPlatformRequestSeconds),
+                checked(logicalExpiry +
+                    StateRetentionRequirements.SentinelDependentMarginSeconds));
+            var retainedLocatorDependency = checked(
+                requiredPlatformExpiry +
+                AcceptedStateFormat.LogicalWindowSeconds +
+                StateRetentionRequirements.SentinelDependentMarginSeconds);
+            var locatorResult = await new LocatorRootService(
+                    store,
+                    keyRing!,
+                    time)
+                .ResolveAsync(
+                    locatorAccess!,
+                    retainedLocatorDependency,
+                    CancellationToken.None);
+            Assert.True(locatorResult.Succeeded, locatorResult.Code);
+            using var locator = Assert.IsType<LocatorContext>(
+                locatorResult.Context);
+            var baseScope = AuthorizedAcceptedStateComposer.BaseScope(
+                authorization!);
+            Assert.True(LineageBaseScopeCodec.TryEncode(
+                baseScope,
+                out var canonicalScope));
+            OpaqueStoreName? uploadedName = null;
+            try
+            {
+                var objectClass = LineageTransitionIntentCodec.ObjectClass(
+                    kind);
+                Assert.True(locator.TryDeriveOpaqueName(
+                    locatorAccess!,
+                    StateObjectClasses.ToWireName(objectClass),
+                    canonicalScope,
+                    out var name));
+                Assert.NotNull(name);
+                uploadedName = name;
+                var targets = ImmutableArray<LineageArtifactEvidence>.Empty;
+                var intent = new LineageTransitionIntentV1(
+                    kind,
+                    selected.LineageHeadIdentity,
+                    selected.Epoch,
+                    transitionEvidenceIdentity,
+                    expiryBoundaryUnixSeconds,
+                    new ReviewedTransitionFacts(
+                        invocation.PullRequest.BaseSha,
+                        invocation.PullRequest.HeadSha),
+                    LineageCryptography.InventoryDigest(targets),
+                    targets,
+                    kind == LineageTransitionIntentKind.Reset
+                        ? launch.RunId.ToString(CultureInfo.InvariantCulture)
+                        : null,
+                    kind == LineageTransitionIntentKind.Reset
+                        ? launch.RunAttempt
+                        : null);
+                Assert.True(LineageTransitionIntentCodec.TryEncode(
+                    intent,
+                    out var payload));
+                try
+                {
+                    var draft = new StateControlHeaderDraft(
+                        selected.BaseScopeDigest,
+                        selected.Epoch,
+                        selected.SessionId,
+                        objectClass,
+                        selected.LineageHeadIdentity,
+                        SuccessorIdentity: null,
+                        kind == LineageTransitionIntentKind.Reset
+                            ? intent.ResetAuthorityRunIdentity!
+                            : "delayed-expiry",
+                        kind == LineageTransitionIntentKind.Reset
+                            ? intent.ResetAuthorityRunAttempt!.Value
+                            : 1,
+                        now,
+                        logicalExpiry,
+                        requiredPlatformExpiry);
+                    Assert.True(StateControlEnvelopeV1Codec.TryEncrypt(
+                        locator,
+                        locatorAccess!,
+                        name!,
+                        draft,
+                        payload,
+                        out var envelope,
+                        out _,
+                        out var envelopeCode), envelopeCode);
+                    await UploadAsync(
+                        store,
+                        name!,
+                        envelope,
+                        requiredPlatformExpiry);
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(payload);
+                }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(canonicalScope);
+            }
+
+            return uploadedName!;
+        }
     }
 
     private static async Task<ObservedLineage>
@@ -1773,6 +2129,13 @@ public sealed class AcceptedStateProductionEndToEndTests
         bool HasSelection,
         bool HasExpiry);
 
+    private sealed record InterruptedExpiryScenario(
+        ScriptedLocatorStore Store,
+        InterruptedExpiryStore InterruptedStore,
+        ArtifactStateRestoreRequest Request,
+        MutableLineageTimeProvider Time,
+        AcceptedSeed Seed);
+
     private sealed record AcceptedGenerationSeed(
         string LogicalGenerationIdentity,
         string ReceiptIdentity);
@@ -1869,6 +2232,79 @@ public sealed class AcceptedStateProductionEndToEndTests
                 interrupted = true;
                 throw new IOException($"Simulated crash at {point}.");
             }
+        }
+    }
+
+    private sealed class RecoveryInterleavingStore(
+        IRestrictedStateStore inner,
+        OpaqueStoreName expiryName) : IRestrictedStateStore
+    {
+        private bool armListAfterDelete;
+
+        internal Func<Task>? AfterExpiryDownload { get; set; }
+        internal Func<Task>? BeforeFirstListAfterDelete { get; set; }
+        internal bool Interleaved { get; private set; }
+
+        public async Task<OpaqueStoreListResult> ListExactAsync(
+            OpaqueStoreListRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (armListAfterDelete &&
+                BeforeFirstListAfterDelete is { } inject)
+            {
+                armListAfterDelete = false;
+                BeforeFirstListAfterDelete = null;
+                await inject();
+                Interleaved = true;
+            }
+
+            return await inner.ListExactAsync(request, cancellationToken);
+        }
+
+        public Task<OpaqueStoreMetadataResult> ReadMetadataAsync(
+            OpaqueStoreMetadataRequest request,
+            CancellationToken cancellationToken) =>
+            inner.ReadMetadataAsync(request, cancellationToken);
+
+        public async Task<OpaqueStoreDownloadResult> DownloadAsync(
+            OpaqueStoreDownloadRequest request,
+            CancellationToken cancellationToken)
+        {
+            var result = await inner.DownloadAsync(request, cancellationToken);
+            if (request.Expected.Reference.Name == expiryName &&
+                AfterExpiryDownload is { } inject)
+            {
+                AfterExpiryDownload = null;
+                await inject();
+                Interleaved = true;
+            }
+
+            return result;
+        }
+
+        public Task<OpaqueStoreUploadResult> UploadImmutableAsync(
+            OpaqueStoreUploadRequest request,
+            CancellationToken cancellationToken) =>
+            inner.UploadImmutableAsync(request, cancellationToken);
+
+        public Task<OpaqueStoreReadBackResult> ReadBackExactAsync(
+            OpaqueStoreReadBackRequest request,
+            CancellationToken cancellationToken) =>
+            inner.ReadBackExactAsync(request, cancellationToken);
+
+        public async Task<OpaqueStoreDeleteResult> DeleteExactAsync(
+            OpaqueStoreDeleteRequest request,
+            CancellationToken cancellationToken)
+        {
+            var result = await inner.DeleteExactAsync(
+                request,
+                cancellationToken);
+            if (result.MutationState == OpaqueStoreMutationState.Committed)
+            {
+                armListAfterDelete = true;
+            }
+
+            return result;
         }
     }
 

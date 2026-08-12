@@ -299,6 +299,7 @@ internal sealed class AuthorizedAcceptedStateComposer
         LocatorContext? locator = null;
         SelectedLineageContext? selectedLineage = null;
         AcceptedStateContext? accepted = null;
+        LineageReadOnlyObservationContext? observation = null;
         var ownershipTransferred = false;
         try
         {
@@ -384,59 +385,22 @@ internal sealed class AuthorizedAcceptedStateComposer
                 logicalExpiry,
                 Reset: null);
             var lineageService = new LineageService(store, timeProvider);
-            SelectedLineageSnapshot? recoveredHead = null;
             LineageInterruptedTransitionRecoveryResult? recoveredTransition =
                 null;
-            if (launch.Inputs.StateMode != ActionHostStateMode.Reset)
+            if (launch.Inputs.StateMode == ActionHostStateMode.Reset)
             {
-                recoveredTransition = await lineageService
-                    .RecoverInterruptedTransitionAsync(
+                var observedResult = await lineageService.ObserveReadOnlyAsync(
                         locator,
                         lineageRequest,
                         cancellationToken)
                     .ConfigureAwait(false);
-                if (!recoveredTransition.Succeeded)
+                observation = observedResult.Context;
+                if (!observedResult.Succeeded || observation is null)
                 {
                     return AuthorizedAcceptedStateRestoreResult.Fail(
-                        MapLineageCode(recoveredTransition.Code));
+                        MapLineageCode(observedResult.Code));
                 }
 
-                if (recoveredTransition.Recovered)
-                {
-                    using var recoveredLineage = recoveredTransition.Context;
-                    if (recoveredLineage is null ||
-                        !recoveredLineage.TryGetSnapshot(
-                            access,
-                            out recoveredHead) ||
-                        recoveredHead is null)
-                    {
-                        return AuthorizedAcceptedStateRestoreResult.Fail(
-                            AcceptedStateCodes.Conflict);
-                    }
-                }
-            }
-
-            var observedResult = await lineageService.ObserveReadOnlyAsync(
-                    locator,
-                    lineageRequest,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            using var observation = observedResult.Context;
-            if (!observedResult.Succeeded || observation is null)
-            {
-                return AuthorizedAcceptedStateRestoreResult.Fail(
-                    MapLineageCode(observedResult.Code));
-            }
-
-            if (recoveredHead is not null &&
-                !MatchesRecoveredHead(observation, recoveredHead))
-            {
-                return AuthorizedAcceptedStateRestoreResult.Fail(
-                    AcceptedStateCodes.Conflict);
-            }
-
-            if (launch.Inputs.StateMode == ActionHostStateMode.Reset)
-            {
                 var reset = await ResolveResetAsync(
                         authorization,
                         lineageService,
@@ -460,6 +424,74 @@ internal sealed class AuthorizedAcceptedStateComposer
                     accepted: null);
                 ownershipTransferred = true;
                 return AuthorizedAcceptedStateRestoreResult.Bootstrap(context);
+            }
+
+            SelectedLineageSnapshot? expectedRecoveredHead = null;
+            for (var recoveryAttempt = 0;
+                recoveryAttempt <= LineageFormat.MaximumScopedObjects;
+                recoveryAttempt++)
+            {
+                var observedResult = await lineageService.ObserveReadOnlyAsync(
+                        locator,
+                        lineageRequest,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                observation = observedResult.Context;
+                if (!observedResult.Succeeded || observation is null)
+                {
+                    return AuthorizedAcceptedStateRestoreResult.Fail(
+                        MapLineageCode(observedResult.Code));
+                }
+
+                if (expectedRecoveredHead is not null &&
+                    !MatchesRecoveredHead(
+                        observation,
+                        expectedRecoveredHead))
+                {
+                    return AuthorizedAcceptedStateRestoreResult.Fail(
+                        AcceptedStateCodes.Conflict);
+                }
+
+                recoveredTransition = await lineageService
+                    .RecoverInterruptedTransitionAsync(
+                        locator,
+                        lineageRequest,
+                        observation,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (!recoveredTransition.Succeeded)
+                {
+                    return AuthorizedAcceptedStateRestoreResult.Fail(
+                        MapLineageCode(recoveredTransition.Code));
+                }
+
+                if (!recoveredTransition.Recovered)
+                {
+                    break;
+                }
+
+                using (var recoveredLineage = recoveredTransition.Context)
+                {
+                    if (recoveredLineage is null ||
+                        !recoveredLineage.TryGetSnapshot(
+                            access,
+                            out expectedRecoveredHead) ||
+                        expectedRecoveredHead is null)
+                    {
+                        return AuthorizedAcceptedStateRestoreResult.Fail(
+                            AcceptedStateCodes.Conflict);
+                    }
+                }
+
+                observation.Dispose();
+                observation = null;
+                recoveredTransition = null;
+            }
+
+            if (observation is null || recoveredTransition is null)
+            {
+                return AuthorizedAcceptedStateRestoreResult.Fail(
+                    AcceptedStateCodes.OutcomeUnknown);
             }
 
             var selectorResult = new AcceptedStateSelector(timeProvider)
@@ -616,6 +648,7 @@ internal sealed class AuthorizedAcceptedStateComposer
                                 locator,
                                 lineageRequest,
                                 expiry,
+                                recoveredTransition.PendingExpiry,
                                 cancellationToken)
                             .ConfigureAwait(false);
                         if (!expired.Succeeded || expired.Context is null)
@@ -673,6 +706,7 @@ internal sealed class AuthorizedAcceptedStateComposer
         }
         finally
         {
+            observation?.Dispose();
             if (!ownershipTransferred)
             {
                 accepted?.Dispose();

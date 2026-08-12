@@ -215,6 +215,7 @@ internal sealed class LineageService
         LocatorContext context,
         LineageResolveRequest request,
         AcceptedStateSelector.AuthorizedAcceptedStateExpiry authority,
+        LineagePendingExpiryIntent? expectedPending,
         CancellationToken cancellationToken)
     {
         if (authority is null)
@@ -253,6 +254,16 @@ internal sealed class LineageService
         if (!pending.Succeeded)
         {
             return LineageResolveResult.Fail(pending.Code);
+        }
+
+        if (expectedPending is not null &&
+            (pending.Intent is null ||
+                !MatchesPendingExpiry(
+                    expectedPending,
+                    pending.Intent,
+                    selection.Head)))
+        {
+            return LineageResolveResult.Fail(LineageCodes.Conflict);
         }
 
         if (pending.Intent is { } selectedIntent &&
@@ -324,17 +335,14 @@ internal sealed class LineageService
         RecoverInterruptedTransitionAsync(
             LocatorContext context,
             LineageResolveRequest request,
+            LineageReadOnlyObservationContext observation,
             CancellationToken cancellationToken)
     {
-        var read = await ObserveReadOnlyAsync(
-                context,
-                request,
-                cancellationToken)
-            .ConfigureAwait(false);
-        using var observation = read.Context;
-        if (!read.Succeeded || observation is null)
+        if (context is null || request is null || observation is null ||
+            observation.Snapshot is not { } snapshot)
         {
-            return LineageInterruptedTransitionRecoveryResult.Fail(read.Code);
+            return LineageInterruptedTransitionRecoveryResult.Fail(
+                LineageCodes.AccessDenied);
         }
 
         if (observation.Selection.IsAbsent)
@@ -342,21 +350,17 @@ internal sealed class LineageService
             return LineageInterruptedTransitionRecoveryResult.None();
         }
 
-        var snapshot = observation.DetachSnapshot();
-        if (snapshot is null)
+        var selection = observation.Selection.Selection;
+        if (selection is null)
         {
             return LineageInterruptedTransitionRecoveryResult.Fail(
                 LineageCodes.Conflict);
         }
 
-        var owned = ObservationResult.Success(
-            snapshot,
-            observation.Selection);
         try
         {
-            var selection = owned.Selection!.Selection!;
             var pending = SelectPendingIntent(
-                owned.Snapshot!,
+                snapshot,
                 selection.Head,
                 observation.CurrentKeyId,
                 request.RequiredLogicalExpiresAtUnixSeconds,
@@ -368,7 +372,7 @@ internal sealed class LineageService
             }
 
             var staleCleanup = FindAuthorizedStaleCleanup(
-                owned.Snapshot!,
+                snapshot,
                 selection,
                 pending.Intent);
             if (staleCleanup is null)
@@ -386,7 +390,7 @@ internal sealed class LineageService
                 }
 
                 var remaining = ResolveTargets(
-                    owned.Snapshot!,
+                    snapshot,
                     interrupted.Intent.Targets);
                 if (remaining is null)
                 {
@@ -407,32 +411,51 @@ internal sealed class LineageService
                     // intent in place so S5 can re-admit the accepted state
                     // and bind this exact intent to typed expiry authority.
                     return LineageInterruptedTransitionRecoveryResult
-                        .AwaitingTypedExpiry();
+                        .AwaitingTypedExpiry(
+                            PendingExpiry(interrupted, selection.Head));
                 }
 
+                var detached = observation.DetachSnapshot();
+                if (detached is null)
+                {
+                    return LineageInterruptedTransitionRecoveryResult.Fail(
+                        LineageCodes.Conflict);
+                }
+
+                var owned = ObservationResult.Success(
+                    detached,
+                    observation.Selection);
                 var now = timeProvider.GetUtcNow().ToUnixTimeSeconds();
                 if (!LineageValidation.IsTime(now))
                 {
+                    ClearObservation(owned);
                     return LineageInterruptedTransitionRecoveryResult.Fail(
                         LineageCodes.Unavailable);
                 }
 
-                var resumed = await ResumeTransitionAsync(
-                        context,
-                        request,
-                        observation.BaseScopeDigest,
-                        observation.CurrentKeyId,
-                        now,
-                        observation.RequiredPlatformExpiresAtUnixSeconds,
-                        owned,
-                        interrupted,
-                        CancellationToken.None)
-                    .ConfigureAwait(false);
-                return resumed.Succeeded && resumed.Context is not null
-                    ? LineageInterruptedTransitionRecoveryResult.Success(
-                        resumed.Context)
-                    : LineageInterruptedTransitionRecoveryResult.Fail(
-                        resumed.Code);
+                try
+                {
+                    var resumed = await ResumeTransitionAsync(
+                            context,
+                            request,
+                            observation.BaseScopeDigest,
+                            observation.CurrentKeyId,
+                            now,
+                            observation.RequiredPlatformExpiresAtUnixSeconds,
+                            owned,
+                            interrupted,
+                            CancellationToken.None)
+                        .ConfigureAwait(false);
+                    return resumed.Succeeded && resumed.Context is not null
+                        ? LineageInterruptedTransitionRecoveryResult.Success(
+                            resumed.Context)
+                        : LineageInterruptedTransitionRecoveryResult.Fail(
+                            resumed.Code);
+                }
+                finally
+                {
+                    ClearObservation(owned);
+                }
             }
 
             // Once the authenticated successor is selected, its supersession
@@ -450,51 +473,69 @@ internal sealed class LineageService
                 return LineageInterruptedTransitionRecoveryResult.None();
             }
 
+            var detachedForCleanup = observation.DetachSnapshot();
+            if (detachedForCleanup is null)
+            {
+                return LineageInterruptedTransitionRecoveryResult.Fail(
+                    LineageCodes.Conflict);
+            }
+
+            var ownedForCleanup = ObservationResult.Success(
+                detachedForCleanup,
+                observation.Selection);
             var nowForCleanup = timeProvider.GetUtcNow().ToUnixTimeSeconds();
             if (!LineageValidation.IsTime(nowForCleanup))
             {
+                ClearObservation(ownedForCleanup);
                 return LineageInterruptedTransitionRecoveryResult.Fail(
                     LineageCodes.Unavailable);
             }
 
-            var converged = await ConvergeExpectedHeadAsync(
-                    context,
-                    request,
-                    observation.BaseScopeDigest,
-                    observation.CurrentKeyId,
-                    selection.Head.Header,
-                    nowForCleanup,
-                    observation.RequiredPlatformExpiresAtUnixSeconds,
-                    ExpectedHeadConvergenceMode.TransitionSuccessor,
-                    CancellationToken.None)
-                .ConfigureAwait(false);
-            if (!converged.Succeeded)
+            try
             {
-                return LineageInterruptedTransitionRecoveryResult.Fail(
-                    converged.Code);
-            }
-
-            if (!staleCleanup.Value.IsEmpty &&
-                !await DeleteAndVerifyAsync(
+                var converged = await ConvergeExpectedHeadAsync(
                         context,
                         request,
                         observation.BaseScopeDigest,
                         observation.CurrentKeyId,
-                        staleCleanup.Value,
+                        selection.Head.Header,
+                        nowForCleanup,
+                        observation.RequiredPlatformExpiresAtUnixSeconds,
+                        ExpectedHeadConvergenceMode.TransitionSuccessor,
                         CancellationToken.None)
-                    .ConfigureAwait(false))
-            {
-                return LineageInterruptedTransitionRecoveryResult.Fail(
-                    LineageCodes.CleanupFailed);
-            }
+                    .ConfigureAwait(false);
+                if (!converged.Succeeded)
+                {
+                    return LineageInterruptedTransitionRecoveryResult.Fail(
+                        converged.Code);
+                }
 
-            var finalized = await FinalizeAsync(request, converged.Head!)
-                .ConfigureAwait(false);
-            return finalized.Succeeded && finalized.Context is not null
-                ? LineageInterruptedTransitionRecoveryResult.Success(
-                    finalized.Context)
-                : LineageInterruptedTransitionRecoveryResult.Fail(
-                    finalized.Code);
+                if (!staleCleanup.Value.IsEmpty &&
+                    !await DeleteAndVerifyAsync(
+                            context,
+                            request,
+                            observation.BaseScopeDigest,
+                            observation.CurrentKeyId,
+                            staleCleanup.Value,
+                            CancellationToken.None)
+                        .ConfigureAwait(false))
+                {
+                    return LineageInterruptedTransitionRecoveryResult.Fail(
+                        LineageCodes.CleanupFailed);
+                }
+
+                var finalized = await FinalizeAsync(request, converged.Head!)
+                    .ConfigureAwait(false);
+                return finalized.Succeeded && finalized.Context is not null
+                    ? LineageInterruptedTransitionRecoveryResult.Success(
+                        finalized.Context)
+                    : LineageInterruptedTransitionRecoveryResult.Fail(
+                        finalized.Code);
+            }
+            finally
+            {
+                ClearObservation(ownedForCleanup);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -509,10 +550,6 @@ internal sealed class LineageService
         {
             return LineageInterruptedTransitionRecoveryResult.Fail(
                 LineageCodes.Unavailable);
-        }
-        finally
-        {
-            ClearObservation(owned);
         }
     }
 
@@ -2877,6 +2914,53 @@ internal sealed class LineageService
                 StringComparer.Ordinal)
             .First());
     }
+
+    private static LineagePendingExpiryIntent PendingExpiry(
+        SelectedIntent selected,
+        LineageHeadCandidate head) =>
+        new(
+            selected.Object.Header.ObjectIdentity,
+            selected.Intent.PriorHeadIdentity,
+            selected.Intent.PriorEpoch,
+            head.Header.SessionId,
+            selected.Intent.TransitionEvidenceIdentity,
+            selected.Intent.ExpiryBoundaryUnixSeconds!.Value,
+            selected.Intent.InventorySha256);
+
+    private static bool MatchesPendingExpiry(
+        LineagePendingExpiryIntent expected,
+        SelectedIntent actual,
+        LineageHeadCandidate head) =>
+        actual.Intent.Kind == LineageTransitionIntentKind.Expiry &&
+        StringComparer.Ordinal.Equals(
+            actual.Object.Header.ObjectIdentity,
+            expected.IntentIdentity) &&
+        StringComparer.Ordinal.Equals(
+            actual.Intent.PriorHeadIdentity,
+            expected.PriorHeadIdentity) &&
+        StringComparer.Ordinal.Equals(
+            actual.Intent.PriorEpoch,
+            expected.PriorEpoch) &&
+        StringComparer.Ordinal.Equals(
+            head.Header.ObjectIdentity,
+            expected.PriorHeadIdentity) &&
+        StringComparer.Ordinal.Equals(
+            head.Header.Epoch,
+            expected.PriorEpoch) &&
+        StringComparer.Ordinal.Equals(
+            head.Header.SessionId,
+            expected.SessionId) &&
+        StringComparer.Ordinal.Equals(
+            actual.Intent.TransitionEvidenceIdentity,
+            expected.TerminalReceiptIdentity) &&
+        actual.Intent.ExpiryBoundaryUnixSeconds ==
+            expected.ExpiryBoundaryUnixSeconds &&
+        StringComparer.Ordinal.Equals(
+            actual.Intent.InventorySha256,
+            expected.TargetInventoryDigest) &&
+        StringComparer.Ordinal.Equals(
+            LineageCryptography.InventoryDigest(actual.Intent.Targets),
+            expected.TargetInventoryDigest);
 
     private static ExpiredAcceptanceResult SelectExpiredAcceptance(
         ScopedStateInventorySnapshot snapshot,
