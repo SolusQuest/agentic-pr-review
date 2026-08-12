@@ -12,6 +12,19 @@ using AgenticPrReview.Runtime.Host.State.Restore;
 
 namespace AgenticPrReview.Runtime.Host.State.Transactions;
 
+internal static class RetainedStateCapabilityIssuer
+{
+    internal static void Require(object issuer)
+    {
+        if (!RestrictedStateService.IsRetainedStateIssuer(issuer))
+        {
+            throw new ArgumentException(
+                "The retained-state issuer is not authorized.",
+                nameof(issuer));
+        }
+    }
+}
+
 internal static class RetainedStateTransactionCodes
 {
     internal const string Ready = "retained_state_ready";
@@ -23,6 +36,7 @@ internal static class RetainedStateTransactionCodes
     internal const string Invalid = "retained_state_invalid";
     internal const string Conflict = "retained_state_conflict";
     internal const string Stale = "retained_state_stale";
+    internal const string Cancelled = "retained_state_cancelled";
     internal const string OutcomeUnknown = "retained_state_outcome_unknown";
     internal const string RetentionFailed = "retained_state_retention_failed";
     internal const string KeyUnavailable = "retained_state_key_unavailable";
@@ -206,7 +220,7 @@ internal sealed class RetainedStatePreparedCandidate : IDisposable
         StateControlHeaderV1 header,
         string logicalGenerationIdentity)
     {
-        Authority = authority;
+        this.authority = authority;
         Run = run;
         Generation = generation;
         Publication = publication;
@@ -217,8 +231,9 @@ internal sealed class RetainedStatePreparedCandidate : IDisposable
         LogicalGenerationIdentity = logicalGenerationIdentity;
     }
 
-    internal RetainedStateTransactionAuthority Authority { get; }
+    private readonly RetainedStateTransactionAuthority authority;
     internal AgentRunRequest? Run { get; }
+    internal bool IsRecovered => Run is null;
     internal StateGenerationRecordV1 Generation { get; }
     internal ValidatedPublicationPayloadV1 Publication { get; }
     internal OpaqueStoreName Name { get; }
@@ -234,7 +249,7 @@ internal sealed class RetainedStatePreparedCandidate : IDisposable
         envelopeBytes = default;
         var generation = Volatile.Read(ref canonicalGeneration);
         var envelope = Volatile.Read(ref outerEnvelope);
-        if (!ReferenceEquals(Authority, authority) ||
+        if (!ReferenceEquals(this.authority, authority) ||
             !authority.IsLive ||
             generation is null ||
             envelope is null)
@@ -247,7 +262,11 @@ internal sealed class RetainedStatePreparedCandidate : IDisposable
         return true;
     }
 
+    internal bool IsIssuedBy(RetainedStateTransactionAuthority value) =>
+        ReferenceEquals(authority, value) && value.IsLive;
+
     internal static RetainedStatePreparedCandidate Create(
+        object issuer,
         RetainedStateTransactionAuthority authority,
         AgentRunRequest run,
         StateGenerationRecordV1 generation,
@@ -256,8 +275,10 @@ internal sealed class RetainedStatePreparedCandidate : IDisposable
         OpaqueStoreName name,
         byte[] outerEnvelope,
         StateControlHeaderV1 header,
-        string logicalGenerationIdentity) =>
-        new(
+        string logicalGenerationIdentity)
+    {
+        RetainedStateCapabilityIssuer.Require(issuer);
+        return new(
             authority,
             run,
             generation,
@@ -267,16 +288,20 @@ internal sealed class RetainedStatePreparedCandidate : IDisposable
             outerEnvelope,
             header,
             logicalGenerationIdentity);
+    }
 
     internal static RetainedStatePreparedCandidate CreateRecovered(
+        object issuer,
         RetainedStateTransactionAuthority authority,
         StateGenerationRecordV1 generation,
         ValidatedPublicationPayloadV1 publication,
         byte[] canonicalGeneration,
         OpaqueStoreName name,
         StateControlHeaderV1 header,
-        string logicalGenerationIdentity) =>
-        new(
+        string logicalGenerationIdentity)
+    {
+        RetainedStateCapabilityIssuer.Require(issuer);
+        return new(
             authority,
             run: null,
             generation,
@@ -286,6 +311,7 @@ internal sealed class RetainedStatePreparedCandidate : IDisposable
             outerEnvelope: [],
             header,
             logicalGenerationIdentity);
+    }
 
     public void Dispose()
     {
@@ -327,23 +353,30 @@ internal sealed class RetainedStatePersistedCandidate
         OpaqueStoreObjectMetadata metadata,
         string inventoryDigest)
     {
-        Authority = authority;
+        this.authority = authority;
         Prepared = prepared;
         Metadata = metadata;
         InventoryDigest = inventoryDigest;
     }
 
-    internal RetainedStateTransactionAuthority Authority { get; }
+    private readonly RetainedStateTransactionAuthority authority;
     internal RetainedStatePreparedCandidate Prepared { get; }
     internal OpaqueStoreObjectMetadata Metadata { get; }
     internal string InventoryDigest { get; }
 
+    internal bool IsIssuedBy(RetainedStateTransactionAuthority value) =>
+        ReferenceEquals(authority, value) && value.IsLive;
+
     internal static RetainedStatePersistedCandidate Create(
+        object issuer,
         RetainedStateTransactionAuthority authority,
         RetainedStatePreparedCandidate prepared,
         OpaqueStoreObjectMetadata metadata,
-        string inventoryDigest) =>
-        new(authority, prepared, metadata, inventoryDigest);
+        string inventoryDigest)
+    {
+        RetainedStateCapabilityIssuer.Require(issuer);
+        return new(authority, prepared, metadata, inventoryDigest);
+    }
 
     public override string ToString() => "[PRIVATE]";
 }
@@ -357,39 +390,48 @@ internal sealed class RetainedStateOwnership : IDisposable
         RetainedStatePersistedCandidate candidate,
         SelectedLineageSnapshot selectedLineage,
         string inventoryDigest,
-        long observedAtUnixSeconds)
+        long observedAtUnixSeconds,
+        long? acceptanceNotAfterUnixSeconds)
     {
-        Authority = authority;
+        this.authority = authority;
         Candidate = candidate;
         SelectedLineage = selectedLineage;
         InventoryDigest = inventoryDigest;
         ObservedAtUnixSeconds = observedAtUnixSeconds;
+        AcceptanceNotAfterUnixSeconds = acceptanceNotAfterUnixSeconds;
     }
 
-    internal RetainedStateTransactionAuthority Authority { get; }
+    private readonly RetainedStateTransactionAuthority authority;
     internal RetainedStatePersistedCandidate Candidate { get; }
     internal SelectedLineageSnapshot SelectedLineage { get; }
     internal string InventoryDigest { get; }
     internal long ObservedAtUnixSeconds { get; }
+    internal long? AcceptanceNotAfterUnixSeconds { get; }
     internal bool IsUsable => Volatile.Read(ref usable) == 1;
 
     internal bool TryConsume(RetainedStateTransactionAuthority authority) =>
-        ReferenceEquals(Authority, authority) &&
+        ReferenceEquals(this.authority, authority) &&
         authority.IsLive &&
         Interlocked.CompareExchange(ref usable, 0, 1) == 1;
 
     internal static RetainedStateOwnership Create(
+        object issuer,
         RetainedStateTransactionAuthority authority,
         RetainedStatePersistedCandidate candidate,
         SelectedLineageSnapshot selectedLineage,
         string inventoryDigest,
-        long observedAtUnixSeconds) =>
-        new(
+        long observedAtUnixSeconds,
+        long? acceptanceNotAfterUnixSeconds = null)
+    {
+        RetainedStateCapabilityIssuer.Require(issuer);
+        return new(
             authority,
             candidate,
             selectedLineage,
             inventoryDigest,
-            observedAtUnixSeconds);
+            observedAtUnixSeconds,
+            acceptanceNotAfterUnixSeconds);
+    }
 
     public void Dispose() => Interlocked.Exchange(ref usable, 0);
 
@@ -415,7 +457,7 @@ internal sealed class RetainedStateOpaqueRecord : IDisposable
         byte[] payload,
         string inventoryDigest)
     {
-        Authority = authority;
+        this.authority = authority;
         ObjectClass = objectClass;
         Metadata = metadata;
         Header = header;
@@ -423,7 +465,7 @@ internal sealed class RetainedStateOpaqueRecord : IDisposable
         InventoryDigest = inventoryDigest;
     }
 
-    internal RetainedStateTransactionAuthority Authority { get; }
+    private readonly RetainedStateTransactionAuthority authority;
     internal StateObjectClass ObjectClass { get; }
     internal OpaqueStoreObjectMetadata Metadata { get; }
     internal StateControlHeaderV1 Header { get; }
@@ -435,7 +477,7 @@ internal sealed class RetainedStateOpaqueRecord : IDisposable
     {
         value = [];
         var current = Volatile.Read(ref payload);
-        if (!ReferenceEquals(Authority, authority) ||
+        if (!ReferenceEquals(this.authority, authority) ||
             !authority.IsLive ||
             current is null)
         {
@@ -451,7 +493,7 @@ internal sealed class RetainedStateOpaqueRecord : IDisposable
         AuthenticatedStateObject value)
     {
         var current = Volatile.Read(ref payload);
-        return ReferenceEquals(Authority, authority) &&
+        return ReferenceEquals(this.authority, authority) &&
             authority.IsLive &&
             current is not null &&
             value.Header.ObjectClass == ObjectClass &&
@@ -461,19 +503,23 @@ internal sealed class RetainedStateOpaqueRecord : IDisposable
     }
 
     internal static RetainedStateOpaqueRecord Create(
+        object issuer,
         RetainedStateTransactionAuthority authority,
         StateObjectClass objectClass,
         OpaqueStoreObjectMetadata metadata,
         StateControlHeaderV1 header,
         byte[] payload,
-        string inventoryDigest) =>
-        new(
+        string inventoryDigest)
+    {
+        RetainedStateCapabilityIssuer.Require(issuer);
+        return new(
             authority,
             objectClass,
             metadata,
             header,
             payload,
             inventoryDigest);
+    }
 
     public void Dispose()
     {
@@ -487,90 +533,151 @@ internal sealed class RetainedStateOpaqueRecord : IDisposable
     public override string ToString() => "[PRIVATE]";
 }
 
+internal sealed class RetainedStateAcceptancePreparation : IDisposable
+{
+    private RetainedStateAcceptanceAttempt? attempt;
+    private byte[]? recoveryPayload;
+
+    private RetainedStateAcceptancePreparation(
+        RetainedStateTransactionAuthority authority,
+        RetainedStatePersistedCandidate candidate,
+        StickyCommentPublisher.StickyPublicationReceipt receipt,
+        RetainedStateOwnership ownership,
+        RetainedStateAcceptanceAttempt attempt,
+        byte[] recoveryPayload)
+    {
+        this.authority = authority;
+        Candidate = candidate;
+        Receipt = receipt;
+        Ownership = ownership;
+        this.attempt = attempt;
+        this.recoveryPayload = recoveryPayload;
+    }
+
+    private readonly RetainedStateTransactionAuthority authority;
+    internal RetainedStatePersistedCandidate Candidate { get; }
+    internal StickyCommentPublisher.StickyPublicationReceipt Receipt { get; }
+    internal RetainedStateOwnership Ownership { get; }
+
+    internal bool IsIssuedBy(RetainedStateTransactionAuthority value) =>
+        ReferenceEquals(authority, value) && value.IsLive;
+
+    internal RetainedStateAcceptanceAttempt? GetAttempt(
+        RetainedStateTransactionAuthority value) =>
+        ReferenceEquals(authority, value)
+            ? Volatile.Read(ref attempt)
+            : null;
+
+    internal RetainedStateAcceptanceAttempt? TakeAttempt(
+        RetainedStateTransactionAuthority value) =>
+        ReferenceEquals(authority, value)
+            ? Interlocked.Exchange(ref attempt, null)
+            : null;
+
+    internal bool TryCopyRecoveryPayload(
+        out ImmutableArray<byte> payload)
+    {
+        var current = Volatile.Read(ref recoveryPayload);
+        if (current is null || !authority.IsLive)
+        {
+            payload = [];
+            return false;
+        }
+
+        payload = ImmutableArray.CreateRange(current);
+        return true;
+    }
+
+    internal static RetainedStateAcceptancePreparation Create(
+        object issuer,
+        RetainedStateTransactionAuthority authority,
+        RetainedStatePersistedCandidate candidate,
+        StickyCommentPublisher.StickyPublicationReceipt receipt,
+        RetainedStateOwnership ownership,
+        RetainedStateAcceptanceAttempt attempt,
+        byte[] recoveryPayload)
+    {
+        RetainedStateCapabilityIssuer.Require(issuer);
+        return new(
+            authority,
+            candidate,
+            receipt,
+            ownership,
+            attempt,
+            recoveryPayload);
+    }
+
+    public void Dispose()
+    {
+        Ownership.Dispose();
+        Interlocked.Exchange(ref attempt, null)?.Dispose();
+        var current = Interlocked.Exchange(ref recoveryPayload, null);
+        if (current is not null)
+        {
+            CryptographicOperations.ZeroMemory(current);
+        }
+    }
+
+    public override string ToString() => "[PRIVATE]";
+}
+
 internal sealed class RetainedStateAcceptanceEvidence : IDisposable
 {
-    private readonly object gate = new();
     private RetainedStateAcceptanceAttempt? attempt;
     private RetainedStateAcceptanceEvidence(
         RetainedStateTransactionAuthority authority,
         RetainedStatePersistedCandidate candidate,
         StickyCommentPublisher.StickyPublicationReceipt receipt,
         ExactHeadRevalidationResult exactHead,
-        string inventoryDigest)
+        string inventoryDigest,
+        RetainedStateAcceptanceAttempt attempt)
     {
-        Authority = authority;
+        this.authority = authority;
         Candidate = candidate;
         Receipt = receipt;
         ExactHead = exactHead;
         InventoryDigest = inventoryDigest;
+        this.attempt = attempt;
     }
 
-    internal RetainedStateTransactionAuthority Authority { get; }
+    private readonly RetainedStateTransactionAuthority authority;
     internal RetainedStatePersistedCandidate Candidate { get; }
     internal StickyCommentPublisher.StickyPublicationReceipt Receipt { get; }
     internal ExactHeadRevalidationResult ExactHead { get; }
     internal string InventoryDigest { get; }
 
+    internal bool IsIssuedBy(RetainedStateTransactionAuthority value) =>
+        ReferenceEquals(authority, value) && value.IsLive;
+
     internal static RetainedStateAcceptanceEvidence Create(
+        object issuer,
         RetainedStateTransactionAuthority authority,
         RetainedStatePersistedCandidate candidate,
         StickyCommentPublisher.StickyPublicationReceipt receipt,
         ExactHeadRevalidationResult exactHead,
-        string inventoryDigest) =>
-        new(authority, candidate, receipt, exactHead, inventoryDigest);
+        string inventoryDigest,
+        RetainedStateAcceptanceAttempt attempt)
+    {
+        RetainedStateCapabilityIssuer.Require(issuer);
+        return new(
+            authority,
+            candidate,
+            receipt,
+            exactHead,
+            inventoryDigest,
+            attempt);
+    }
 
     internal RetainedStateAcceptanceAttempt? GetAttempt(
         RetainedStateTransactionAuthority authority)
     {
-        lock (gate)
-        {
-            return ReferenceEquals(Authority, authority) ? attempt : null;
-        }
+        return ReferenceEquals(this.authority, authority)
+            ? Volatile.Read(ref attempt)
+            : null;
     }
 
-    internal bool TrySetAttempt(
-        RetainedStateTransactionAuthority authority,
-        RetainedStateAcceptanceAttempt value)
-    {
-        lock (gate)
-        {
-            if (!ReferenceEquals(Authority, authority) || attempt is not null)
-            {
-                return false;
-            }
-
-            attempt = value;
-            return true;
-        }
-    }
-
-    internal bool TryClearAttempt(
-        RetainedStateTransactionAuthority authority,
-        RetainedStateAcceptanceAttempt value)
-    {
-        lock (gate)
-        {
-            if (!ReferenceEquals(Authority, authority) ||
-                !ReferenceEquals(attempt, value))
-            {
-                return false;
-            }
-
-            attempt = null;
-        }
-
-        value.Dispose();
-        return true;
-    }
-
-    public void Dispose()
-    {
-        lock (gate)
-        {
-            attempt?.Dispose();
-            attempt = null;
-        }
-    }
+    public void Dispose() =>
+        Interlocked.Exchange(ref attempt, null)?.Dispose();
 
     public override string ToString() => "[PRIVATE]";
 }
@@ -580,7 +687,7 @@ internal sealed class RetainedStateAcceptanceAttempt : IDisposable
     private byte[]? receiptBytes;
     private byte[]? envelopeBytes;
 
-    internal RetainedStateAcceptanceAttempt(
+    private RetainedStateAcceptanceAttempt(
         long acceptedAtUnixSeconds,
         long logicalExpiresAtUnixSeconds,
         long requiredPlatformExpiresAtUnixSeconds,
@@ -599,6 +706,29 @@ internal sealed class RetainedStateAcceptanceAttempt : IDisposable
         Header = header;
         this.receiptBytes = receiptBytes;
         this.envelopeBytes = envelopeBytes;
+    }
+
+    internal static RetainedStateAcceptanceAttempt Create(
+        object issuer,
+        long acceptedAtUnixSeconds,
+        long logicalExpiresAtUnixSeconds,
+        long requiredPlatformExpiresAtUnixSeconds,
+        AcceptanceReceiptV1 receipt,
+        OpaqueStoreName name,
+        StateControlHeaderV1 header,
+        byte[] receiptBytes,
+        byte[] envelopeBytes)
+    {
+        RetainedStateCapabilityIssuer.Require(issuer);
+        return new RetainedStateAcceptanceAttempt(
+            acceptedAtUnixSeconds,
+            logicalExpiresAtUnixSeconds,
+            requiredPlatformExpiresAtUnixSeconds,
+            receipt,
+            name,
+            header,
+            receiptBytes,
+            envelopeBytes);
     }
 
     internal long AcceptedAtUnixSeconds { get; }
@@ -644,6 +774,85 @@ internal sealed class RetainedStateAcceptanceAttempt : IDisposable
     public override string ToString() => "[PRIVATE]";
 }
 
+internal sealed class RetainedStatePredecessorCopyAttempt : IDisposable
+{
+    private byte[]? payload;
+    private byte[]? envelope;
+
+    private RetainedStatePredecessorCopyAttempt(
+        string logicalGenerationIdentity,
+        long requiredLogicalExpiresAtUnixSeconds,
+        long requiredPlatformExpiresAtUnixSeconds,
+        OpaqueStoreName name,
+        StateControlHeaderV1 header,
+        byte[] payload,
+        byte[] envelope)
+    {
+        LogicalGenerationIdentity = logicalGenerationIdentity;
+        RequiredLogicalExpiresAtUnixSeconds =
+            requiredLogicalExpiresAtUnixSeconds;
+        RequiredPlatformExpiresAtUnixSeconds =
+            requiredPlatformExpiresAtUnixSeconds;
+        Name = name;
+        Header = header;
+        this.payload = payload;
+        this.envelope = envelope;
+    }
+
+    internal string LogicalGenerationIdentity { get; }
+    internal long RequiredLogicalExpiresAtUnixSeconds { get; }
+    internal long RequiredPlatformExpiresAtUnixSeconds { get; }
+    internal OpaqueStoreName Name { get; }
+    internal StateControlHeaderV1 Header { get; }
+
+    internal bool TryGetBytes(
+        out ReadOnlyMemory<byte> payloadBytes,
+        out ReadOnlyMemory<byte> envelopeBytes)
+    {
+        payloadBytes = Volatile.Read(ref payload) ?? [];
+        envelopeBytes = Volatile.Read(ref envelope) ?? [];
+        return payloadBytes.Length > 0 && envelopeBytes.Length > 0;
+    }
+
+    internal static RetainedStatePredecessorCopyAttempt Create(
+        object issuer,
+        string logicalGenerationIdentity,
+        long requiredLogicalExpiresAtUnixSeconds,
+        long requiredPlatformExpiresAtUnixSeconds,
+        OpaqueStoreName name,
+        StateControlHeaderV1 header,
+        byte[] payload,
+        byte[] envelope)
+    {
+        RetainedStateCapabilityIssuer.Require(issuer);
+        return new(
+            logicalGenerationIdentity,
+            requiredLogicalExpiresAtUnixSeconds,
+            requiredPlatformExpiresAtUnixSeconds,
+            name,
+            header,
+            payload,
+            envelope);
+    }
+
+    public void Dispose()
+    {
+        var currentPayload = Interlocked.Exchange(ref payload, null);
+        if (currentPayload is not null)
+        {
+            CryptographicOperations.ZeroMemory(currentPayload);
+        }
+
+        var currentEnvelope = Interlocked.Exchange(ref envelope, null);
+        if (currentEnvelope is not null)
+        {
+            CryptographicOperations.ZeroMemory(currentEnvelope);
+        }
+    }
+
+    public override string ToString() => "[PRIVATE]";
+}
+
 internal sealed class VerifiedRetainedStateAcceptance
 {
     private VerifiedRetainedStateAcceptance(
@@ -655,7 +864,7 @@ internal sealed class VerifiedRetainedStateAcceptance
         long logicalExpiresAtUnixSeconds,
         string inventoryDigest)
     {
-        Authority = authority;
+        this.authority = authority;
         LogicalGenerationIdentity = logicalGenerationIdentity;
         AcceptanceReceiptIdentity = acceptanceReceiptIdentity;
         ReceiptMetadata = receiptMetadata;
@@ -664,7 +873,7 @@ internal sealed class VerifiedRetainedStateAcceptance
         InventoryDigest = inventoryDigest;
     }
 
-    internal RetainedStateTransactionAuthority Authority { get; }
+    private readonly RetainedStateTransactionAuthority authority;
     internal string LogicalGenerationIdentity { get; }
     internal string AcceptanceReceiptIdentity { get; }
     internal OpaqueStoreObjectMetadata ReceiptMetadata { get; }
@@ -672,15 +881,21 @@ internal sealed class VerifiedRetainedStateAcceptance
     internal long LogicalExpiresAtUnixSeconds { get; }
     internal string InventoryDigest { get; }
 
+    internal bool IsIssuedBy(RetainedStateTransactionAuthority value) =>
+        ReferenceEquals(authority, value) && value.IsLive;
+
     internal static VerifiedRetainedStateAcceptance Create(
+        object issuer,
         RetainedStateTransactionAuthority authority,
         string logicalGenerationIdentity,
         string acceptanceReceiptIdentity,
         OpaqueStoreObjectMetadata receiptMetadata,
         long acceptedAtUnixSeconds,
         long logicalExpiresAtUnixSeconds,
-        string inventoryDigest) =>
-        new(
+        string inventoryDigest)
+    {
+        RetainedStateCapabilityIssuer.Require(issuer);
+        return new(
             authority,
             logicalGenerationIdentity,
             acceptanceReceiptIdentity,
@@ -688,6 +903,7 @@ internal sealed class VerifiedRetainedStateAcceptance
             acceptedAtUnixSeconds,
             logicalExpiresAtUnixSeconds,
             inventoryDigest);
+    }
 
     public override string ToString() => "[PRIVATE]";
 }
@@ -695,9 +911,61 @@ internal sealed class VerifiedRetainedStateAcceptance
 internal sealed record RetainedStateCleanupTarget(
     OpaqueStoreObjectMetadata Metadata);
 
+internal sealed class RetainedStateCleanupAuthorization : IDisposable
+{
+    private int usable = 1;
+
+    private RetainedStateCleanupAuthorization(
+        RetainedStateTransactionAuthority authority,
+        string terminalAcceptanceIdentity,
+        ImmutableArray<RetainedStateCleanupTarget> targets,
+        string inventoryDigest)
+    {
+        this.authority = authority;
+        TerminalAcceptanceIdentity = terminalAcceptanceIdentity;
+        Targets = targets;
+        InventoryDigest = inventoryDigest;
+    }
+
+    private readonly RetainedStateTransactionAuthority authority;
+    internal string TerminalAcceptanceIdentity { get; }
+    internal ImmutableArray<RetainedStateCleanupTarget> Targets { get; }
+    internal string InventoryDigest { get; }
+
+    internal bool TryConsume(
+        RetainedStateTransactionAuthority value,
+        VerifiedRetainedStateAcceptance acceptance) =>
+        ReferenceEquals(authority, value) &&
+        value.IsLive &&
+        acceptance.IsIssuedBy(value) &&
+        StringComparer.Ordinal.Equals(
+            TerminalAcceptanceIdentity,
+            acceptance.AcceptanceReceiptIdentity) &&
+        Interlocked.CompareExchange(ref usable, 0, 1) == 1;
+
+    internal static RetainedStateCleanupAuthorization Create(
+        object issuer,
+        RetainedStateTransactionAuthority authority,
+        string terminalAcceptanceIdentity,
+        ImmutableArray<RetainedStateCleanupTarget> targets,
+        string inventoryDigest)
+    {
+        RetainedStateCapabilityIssuer.Require(issuer);
+        return new(
+            authority,
+            terminalAcceptanceIdentity,
+            targets,
+            inventoryDigest);
+    }
+
+    public void Dispose() => Interlocked.Exchange(ref usable, 0);
+
+    public override string ToString() => "[PRIVATE]";
+}
+
 internal sealed record RetainedStateCleanupRequest(
     VerifiedRetainedStateAcceptance Acceptance,
-    ImmutableArray<RetainedStateCleanupTarget> Targets,
+    RetainedStateCleanupAuthorization Authorization,
     long SemanticRequiredExpiresAtUnixSeconds);
 
 internal sealed record RetainedStateCleanupResult(

@@ -31,8 +31,10 @@ public sealed class AcceptedStateProductionArchitectureTests
             EmptyContinuationCodec.Instance,
             dependencies);
 
-        var result = await new AuthorizedAcceptedStateComposer()
-            .RestoreAsync(request, CancellationToken.None);
+        var result = await RestrictedStateService
+            .RestoreAuthorizedArtifactStateAsync(
+                request,
+                CancellationToken.None);
 
         Assert.Equal(AcceptedStateCodes.AccessDenied, result.Code);
         Assert.Equal(0, dependencies.StoreCreates);
@@ -164,8 +166,10 @@ public sealed class AcceptedStateProductionArchitectureTests
             EmptyContinuationCodec.Instance,
             dependencies);
 
-        var result = await new AuthorizedAcceptedStateComposer()
-            .RestoreAsync(request, CancellationToken.None);
+        var result = await RestrictedStateService
+            .RestoreAuthorizedArtifactStateAsync(
+                request,
+                CancellationToken.None);
 
         Assert.Equal(AcceptedStateCodes.AccessDenied, result.Code);
         Assert.Equal(0, dependencies.StoreCreates);
@@ -196,7 +200,8 @@ public sealed class AcceptedStateProductionArchitectureTests
             CancellationToken.None);
         var dependencies = new ThrowingDependencies();
 
-        var result = await new AuthorizedAcceptedStateComposer().RestoreAsync(
+        var result = await RestrictedStateService
+            .RestoreAuthorizedArtifactStateAsync(
             new ArtifactStateRestoreRequest(
                 launch,
                 invocation,

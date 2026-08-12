@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Reflection;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.Lineage;
@@ -128,6 +129,67 @@ public sealed class RetainedStateTransactionContractTests
         Assert.Equal(R4PublicationTestData.Scope, scope);
         Assert.Contains("exact A", rendered!.Comment, StringComparison.Ordinal);
         Assert.Equal("[PRIVATE]", prepared.ToString());
+    }
+
+    [Fact]
+    public void RetainedStateCapabilitiesDoNotExposeOrSelfIssueAuthority()
+    {
+        var capabilities = new[]
+        {
+            typeof(RetainedStatePreparedCandidate),
+            typeof(RetainedStatePersistedCandidate),
+            typeof(RetainedStateOwnership),
+            typeof(RetainedStateOpaqueRecord),
+            typeof(RetainedStateAcceptancePreparation),
+            typeof(RetainedStateAcceptanceEvidence),
+            typeof(RetainedStateAcceptanceAttempt),
+            typeof(RetainedStatePredecessorCopyAttempt),
+            typeof(VerifiedRetainedStateAcceptance),
+            typeof(RetainedStateCleanupAuthorization),
+            typeof(RetainedStateAuthorityLease),
+            typeof(RetainedStateObservation),
+        };
+        foreach (var capability in capabilities)
+        {
+            Assert.DoesNotContain(
+                capability.GetProperties(
+                    BindingFlags.Instance |
+                    BindingFlags.Public |
+                    BindingFlags.NonPublic),
+                property => property.PropertyType ==
+                    typeof(RetainedStateTransactionAuthority));
+        }
+
+        var issuerFactories = capabilities
+            .SelectMany(type => type.GetMethods(
+                BindingFlags.Static | BindingFlags.NonPublic))
+            .Where(method => method.Name == "Create")
+            .ToArray();
+        Assert.NotEmpty(issuerFactories);
+        Assert.All(issuerFactories, method => Assert.Equal(
+            typeof(object),
+            method.GetParameters()[0].ParameterType));
+
+        var serviceConstructor = Assert.Single(
+            typeof(RetainedStateTransactionService).GetConstructors(
+                BindingFlags.Instance | BindingFlags.NonPublic));
+        var exception = Assert.Throws<TargetInvocationException>(() =>
+            serviceConstructor.Invoke([new object()]));
+        Assert.IsType<ArgumentException>(exception.InnerException);
+
+        var persistenceConstructor = Assert.Single(
+            typeof(RetainedStatePersistence).GetConstructors(
+                BindingFlags.Instance | BindingFlags.NonPublic));
+        Assert.Equal(
+            typeof(object),
+            persistenceConstructor.GetParameters()[0].ParameterType);
+        var authorityFactory = Assert.Single(
+            typeof(RetainedStateTransactionAuthority).GetMethods(
+                BindingFlags.Static | BindingFlags.NonPublic),
+            method => method.Name == "TryCreate");
+        Assert.Equal(
+            typeof(object),
+            authorityFactory.GetParameters()[0].ParameterType);
     }
 
     private static OpaqueStoreObjectMetadata Metadata(

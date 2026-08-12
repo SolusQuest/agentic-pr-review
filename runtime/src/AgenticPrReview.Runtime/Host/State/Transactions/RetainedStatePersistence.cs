@@ -48,8 +48,11 @@ internal sealed class RetainedStatePersistence
     private readonly IRestrictedStateStore store;
     private readonly ScopedStateInventory inventory;
 
-    internal RetainedStatePersistence(IRestrictedStateStore store)
+    internal RetainedStatePersistence(
+        object issuer,
+        IRestrictedStateStore store)
     {
+        RetainedStateCapabilityIssuer.Require(issuer);
         this.store = store ?? throw new ArgumentNullException(nameof(store));
         inventory = new ScopedStateInventory(store);
     }
@@ -165,6 +168,9 @@ internal sealed class RetainedStatePersistence
             access is null ||
             !LineageValidation.IsValid(scope) ||
             !LineageValidation.IsSha256(baseScopeDigest) ||
+            !StringComparer.Ordinal.Equals(
+                baseScopeDigest,
+                Digest(scope)) ||
             !OpaqueStoreValidation.IsValid(name) ||
             immutableEnvelope.Length is < 1 or >
                 LineageFormat.MaximumEnvelopeBytes ||
@@ -189,9 +195,15 @@ internal sealed class RetainedStatePersistence
                 RetainedStateTransactionCodes.Invalid);
         }
 
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return RetainedStatePersistenceResult.Fail(
+                RetainedStateTransactionCodes.Cancelled);
+        }
+
         var encryptedDigest = new OpaqueStoreEncryptedObjectDigest(
             OpaqueStoreHash.Sha256(immutableEnvelope.Span));
-        OpaqueStoreUploadResult upload;
+        OpaqueStoreUploadResult? upload = null;
         try
         {
             upload = await store.UploadImmutableAsync(
@@ -208,9 +220,8 @@ internal sealed class RetainedStatePersistence
         }
         catch (OperationCanceledException)
         {
-            return RetainedStatePersistenceResult.Fail(
-                RetainedStateTransactionCodes.OutcomeUnknown,
-                mayHaveCommitted: true);
+            // Dispatch has started. Reconcile with uncancelled reads because
+            // cancellation no longer proves that the mutation was not applied.
         }
         catch (Exception exception) when (
             exception is ArgumentException or
@@ -219,25 +230,24 @@ internal sealed class RetainedStatePersistence
                 UnauthorizedAccessException or
                 CryptographicException)
         {
-            return RetainedStatePersistenceResult.Fail(
-                RetainedStateTransactionCodes.OutcomeUnknown,
-                mayHaveCommitted: true);
+            // The store boundary may throw after committing. The inventory is
+            // the source of truth for all post-dispatch outcomes.
         }
 
-        if (upload.MutationState == OpaqueStoreMutationState.NotCommitted)
+        if (upload?.MutationState == OpaqueStoreMutationState.NotCommitted)
         {
             return RetainedStatePersistenceResult.Fail(
                 MapStoreFailure(upload.Failure));
         }
 
         var returned = ExactReturnedMetadata(
-                upload.Metadata,
+                upload?.Metadata,
                 name,
                 encryptedDigest,
                 immutableEnvelope.Length,
                 expectedProducingRunIdentity,
                 expectedProducingRunAttempt)
-            ? upload.Metadata
+            ? upload!.Metadata
             : null;
         if (returned is not null)
         {
@@ -365,6 +375,156 @@ internal sealed class RetainedStatePersistence
             mayHaveCommitted: true);
     }
 
+    internal async Task<RetainedStatePersistenceResult>
+        ReconcileExistingAsync(
+        LocatorContext context,
+        AuthorizedLocatorAccess access,
+        LineageBaseScope scope,
+        string baseScopeDigest,
+        OpaqueStoreName name,
+        ReadOnlyMemory<byte> immutableEnvelope,
+        StateControlHeaderV1 expectedHeader,
+        ReadOnlyMemory<byte> expectedPayload,
+        string expectedProducingRunIdentity,
+        long expectedProducingRunAttempt,
+        long requiredPlatformExpiresAtUnixSeconds)
+    {
+        if (context is null ||
+            access is null ||
+            !LineageValidation.IsValid(scope) ||
+            !LineageValidation.IsSha256(baseScopeDigest) ||
+            !OpaqueStoreValidation.IsValid(name) ||
+            immutableEnvelope.Length is < 1 or >
+                LineageFormat.MaximumEnvelopeBytes ||
+            expectedHeader is null ||
+            !LineageValidation.IsValid(expectedHeader) ||
+            expectedPayload.Length >
+                LineageFormat.MaximumReaderPayloadBytes ||
+            expectedHeader.ProducingRunIdentity !=
+                expectedProducingRunIdentity ||
+            expectedHeader.ProducingRunAttempt !=
+                expectedProducingRunAttempt ||
+            expectedHeader.RequiredPlatformExpiresAtUnixSeconds !=
+                requiredPlatformExpiresAtUnixSeconds ||
+            !context.CoversDependentExpiry(
+                access,
+                requiredPlatformExpiresAtUnixSeconds))
+        {
+            return RetainedStatePersistenceResult.Fail(
+                RetainedStateTransactionCodes.Invalid);
+        }
+
+        var encryptedDigest = new OpaqueStoreEncryptedObjectDigest(
+            OpaqueStoreHash.Sha256(immutableEnvelope.Span));
+        for (var attempt = 0;
+            attempt < ReconciliationAttempts;
+            attempt++)
+        {
+            var read = await inventory.ReadAsync(
+                    context,
+                    access,
+                    scope,
+                    baseScopeDigest,
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            if (!read.Succeeded || read.Snapshot is null)
+            {
+                if (StringComparer.Ordinal.Equals(
+                        read.Code,
+                        LineageCodes.Unavailable))
+                {
+                    continue;
+                }
+
+                return RetainedStatePersistenceResult.Fail(
+                    MapLineageCode(read.Code),
+                    mayHaveCommitted: true);
+            }
+
+            try
+            {
+                var snapshot = read.Snapshot;
+                if (snapshot.Unknown.Any(item =>
+                    item.Metadata.Reference.Name == name))
+                {
+                    return RetainedStatePersistenceResult.Fail(
+                        RetainedStateTransactionCodes.OutcomeUnknown,
+                        mayHaveCommitted: true);
+                }
+
+                var all = snapshot.Authenticated
+                    .Concat(snapshot.UnderRetained)
+                    .Where(item =>
+                        item.Metadata.Reference.Name == name &&
+                        item.Header.ObjectClass ==
+                            expectedHeader.ObjectClass &&
+                        item.Header == expectedHeader &&
+                        item.Payload.AsSpan().SequenceEqual(
+                            expectedPayload.Span) &&
+                        item.Metadata.EncryptedObjectDigest ==
+                            encryptedDigest &&
+                        item.Metadata.Size == immutableEnvelope.Length &&
+                        StringComparer.Ordinal.Equals(
+                            item.Metadata.ProducingRun.Identity,
+                            expectedProducingRunIdentity) &&
+                        item.Metadata.ProducingRun.Attempt ==
+                            expectedProducingRunAttempt)
+                    .ToArray();
+                if (all.Length > 1)
+                {
+                    return RetainedStatePersistenceResult.Fail(
+                        RetainedStateTransactionCodes.Conflict,
+                        mayHaveCommitted: true);
+                }
+
+                if (all.Length == 0)
+                {
+                    continue;
+                }
+
+                var match = all[0];
+                if (match.Metadata.ExpiresAtUnixSeconds <
+                        requiredPlatformExpiresAtUnixSeconds ||
+                    snapshot.UnderRetained.Contains(match))
+                {
+                    var removed = await DeleteExactAndVerifyAbsentAsync(
+                            match.Metadata,
+                            CancellationToken.None)
+                        .ConfigureAwait(false);
+                    return RetainedStatePersistenceResult.Fail(
+                        StringComparer.Ordinal.Equals(
+                            removed,
+                            RetainedStateTransactionCodes.Ready)
+                            ? RetainedStateTransactionCodes.RetentionFailed
+                            : RetainedStateTransactionCodes.CleanupDebt,
+                        mayHaveCommitted: true);
+                }
+
+                var digest = LineageCryptography.InventoryDigest(
+                    snapshot.Authenticated
+                        .Concat(snapshot.UnderRetained)
+                        .Select(item =>
+                            LineageHeadCodec.Evidence(item.Metadata))
+                        .Concat(snapshot.Unknown.Select(item =>
+                            LineageHeadCodec.Evidence(item.Metadata)))
+                        .ToImmutableArray());
+                return RetainedStatePersistenceResult.Success(
+                    match.Metadata,
+                    match.Header,
+                    match.Payload.ToArray(),
+                    digest);
+            }
+            finally
+            {
+                ScopedStateInventory.Clear(read.Snapshot);
+            }
+        }
+
+        return RetainedStatePersistenceResult.Fail(
+            RetainedStateTransactionCodes.OutcomeUnknown,
+            mayHaveCommitted: true);
+    }
+
     internal async Task<string> DeleteExactAndVerifyAbsentAsync(
         OpaqueStoreObjectMetadata target,
         CancellationToken cancellationToken)
@@ -374,7 +534,12 @@ internal sealed class RetainedStatePersistence
             return RetainedStateTransactionCodes.Invalid;
         }
 
-        OpaqueStoreDeleteResult deleted;
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return RetainedStateTransactionCodes.Cancelled;
+        }
+
+        OpaqueStoreDeleteResult? deleted = null;
         try
         {
             deleted = await store.DeleteExactAsync(
@@ -384,12 +549,19 @@ internal sealed class RetainedStatePersistence
         }
         catch (OperationCanceledException)
         {
-            deleted = OpaqueStoreDeleteResult.Fail(
-                OpaqueStoreFailure.OutcomeUnknown,
-                OpaqueStoreMutationState.OutcomeUnknown);
+            // Dispatch has started. Reconcile below without cancellation.
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or
+                InvalidOperationException or
+                IOException or
+                UnauthorizedAccessException or
+                CryptographicException)
+        {
+            // The delete may have committed before the store threw.
         }
 
-        if (deleted.MutationState == OpaqueStoreMutationState.NotCommitted)
+        if (deleted?.MutationState == OpaqueStoreMutationState.NotCommitted)
         {
             return MapStoreFailure(deleted.Failure);
         }

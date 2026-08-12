@@ -26,6 +26,7 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
         = OpaqueStoreMutationState.NotCommitted;
     internal bool PersistFailedUpload { get; set; }
     internal int FailUploadOnUploadCall { get; set; }
+    internal OpaqueStoreName? FailNextUploadForName { get; set; }
     internal OpaqueStoreFailure ScheduledUploadFailure { get; set; }
     internal OpaqueStoreMutationState ScheduledUploadMutationState { get; set; }
     internal OpaqueStoreFailure NextDeleteFailure { get; set; }
@@ -40,6 +41,7 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
     internal int HideNewestObjectForNextLists { get; set; }
     internal int HideNextUploadedObjectForNextLists { get; set; }
     internal int HideUploadedObjectOnUploadCall { get; set; }
+    internal int HideFailedUploadForNextLists { get; set; }
     internal System.Action? BeforeDelete { get; set; }
     internal System.Action? AfterDelete { get; set; }
     internal System.Func<
@@ -274,7 +276,8 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
                     request.MinimumExpiresAtUnixSeconds +
                     ExtraRetentionSeconds),
                 request.EncryptedBytes.Length);
-            var scheduled = UploadCalls == FailUploadOnUploadCall;
+            var scheduled = UploadCalls == FailUploadOnUploadCall ||
+                FailNextUploadForName == request.Name;
             var failure = scheduled
                 ? ScheduledUploadFailure
                 : NextUploadFailure;
@@ -299,6 +302,13 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
                 {
                     delayedUploadedReference = metadata.Reference;
                 }
+
+                if (scheduled && HideFailedUploadForNextLists > 0)
+                {
+                    delayedUploadedReference = metadata.Reference;
+                    HideNextUploadedObjectForNextLists =
+                        HideFailedUploadForNextLists;
+                }
             }
 
             NextUploadFailure = OpaqueStoreFailure.None;
@@ -308,6 +318,8 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
             if (scheduled)
             {
                 FailUploadOnUploadCall = 0;
+                FailNextUploadForName = null;
+                HideFailedUploadForNextLists = 0;
                 ScheduledUploadFailure = OpaqueStoreFailure.None;
                 ScheduledUploadMutationState =
                     OpaqueStoreMutationState.NotCommitted;

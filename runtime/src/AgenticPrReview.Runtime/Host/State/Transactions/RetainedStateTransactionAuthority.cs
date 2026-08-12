@@ -15,6 +15,7 @@ namespace AgenticPrReview.Runtime.Host.State.Transactions;
 internal sealed class RetainedStateTransactionAuthority : IDisposable
 {
     private readonly SemaphoreSlim gate = new(1, 1);
+    private readonly object issuer;
     private readonly AcceptedStateProductionAuthorization production;
     private readonly IRestrictedStateStore store;
     private readonly TimeProvider timeProvider;
@@ -37,9 +38,11 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
     private AcceptedStateContext? accepted;
     private AcceptedStateSelection? acceptedSelection;
     private VerifiedRetainedStateAcceptance? terminalAcceptance;
+    private RetainedStatePredecessorCopyAttempt? predecessorCopyAttempt;
     private int disposed;
 
     private RetainedStateTransactionAuthority(
+        object issuer,
         AcceptedStateProductionAuthorization production,
         AuthorizedLocatorAccess locatorAccess,
         LocatorStateKeyRing keys,
@@ -62,6 +65,7 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
         AcceptedStateSelection? acceptedSelection,
         string initialInventoryDigest)
     {
+        this.issuer = issuer;
         this.production = production;
         this.locatorAccess = locatorAccess;
         this.keys = keys;
@@ -96,6 +100,7 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
         Volatile.Read(ref terminalAcceptance) is not null;
 
     internal static bool TryCreate(
+        object issuer,
         AcceptedStateProductionAuthorization production,
         AuthorizedLocatorAccess locatorAccess,
         LocatorStateKeyRing keys,
@@ -120,7 +125,8 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
         out RetainedStateTransactionAuthority? authority)
     {
         authority = null;
-        if (production is null ||
+        if (!RestrictedStateService.IsRetainedStateIssuer(issuer) ||
+            production is null ||
             locatorAccess is null ||
             keys is null ||
             locator is null ||
@@ -169,6 +175,7 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
                 TrustedPolicyBytes = trustedPolicy,
             };
             authority = new RetainedStateTransactionAuthority(
+                issuer,
                 production,
                 locatorAccess,
                 keys,
@@ -222,7 +229,7 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
             return null;
         }
 
-        return RetainedStateAuthorityLease.Create(this);
+        return RetainedStateAuthorityLease.Create(issuer, this);
     }
 
     internal bool TryGetLineageSnapshot(
@@ -466,6 +473,141 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
         return true;
     }
 
+    internal bool TryValidateRecoveredGeneration(
+        RetainedStateAuthorityLease lease,
+        StateGenerationRecordV1 generation,
+        out string code)
+    {
+        code = RetainedStateTransactionCodes.Invalid;
+        if (!Allows(lease) ||
+            generation is null ||
+            !AcceptedStateRecordValidation.FixedDigest(
+                RestrictedStateEnvelope.EnvelopeSha256(
+                    generation.EncryptedStateEnvelope.AsSpan()),
+                generation.StateEnvelopeSha256))
+        {
+            return false;
+        }
+
+        AgentSessionPredecessor? predecessor = null;
+        var transition = AgentSessionHeadTransition.SameHead;
+        var currentAccepted = Volatile.Read(ref accepted);
+        if (currentAccepted is not null &&
+            !currentAccepted.TryCreateSuccessorPredecessor(
+                out predecessor,
+                out transition))
+        {
+            return false;
+        }
+
+        byte[]? plaintext = null;
+        RestrictedStateAdmittedSession? admittedSession = null;
+        try
+        {
+            var access = Volatile.Read(ref locatorAccess);
+            var context = Volatile.Read(ref locator);
+            if (access is null || context is null)
+            {
+                return false;
+            }
+
+            var restrictedBinding = new RestrictedStateBinding(
+                stateAccess.Scope,
+                generation.ProducerBaseSha,
+                generation.ProducerHeadSha,
+                generation.Generation,
+                generation.PredecessorEnvelopeSha256,
+                generation.PreparedAtUnixSeconds,
+                generation.PreparedExpiresAtUnixSeconds);
+            var resolver = new TransactionRestrictedStateKeyResolver(
+                stateAccess,
+                access,
+                context);
+            if (!RestrictedStateEnvelope.TryDecrypt(
+                    stateAccess,
+                    restrictedBinding,
+                    generation.EncryptedStateEnvelope.AsSpan(),
+                    resolver,
+                    out plaintext,
+                    out var failureCode) ||
+                plaintext is null)
+            {
+                code = StringComparer.Ordinal.Equals(
+                    failureCode,
+                    RestrictedStateCodes.KeyUnavailable)
+                    ? RetainedStateTransactionCodes.KeyUnavailable
+                    : RetainedStateTransactionCodes.Invalid;
+                return false;
+            }
+
+            var sessionContext = new AgentSessionStateAdmissionContext(
+                trustedRequest,
+                stateAccess.Scope.SessionId,
+                currentReviewedIdentity,
+                currentReviewContext,
+                transition,
+                continuationCodec,
+                generation.StateEnvelopeSha256);
+            var admitted = new AgentSessionRestrictedStateAdmission().Admit(
+                stateAccess,
+                plaintext,
+                new RestrictedStateSessionAdmissionContext(
+                    generation.ProducerBaseSha,
+                    generation.ProducerHeadSha,
+                    generation.Generation,
+                    generation.PredecessorEnvelopeSha256,
+                    sessionContext));
+            admittedSession = admitted.Session;
+            if (!admitted.Succeeded || admittedSession is null)
+            {
+                return false;
+            }
+
+            var document = admittedSession.Value.Artifact.Document;
+            if (!AcceptedStateRecordValidation.FixedDigest(
+                    admittedSession.SessionSha256,
+                    generation.SessionSha256) ||
+                document.Generation != generation.Generation ||
+                !StringComparer.Ordinal.Equals(
+                    document.ProducerBaseSha,
+                    generation.ProducerBaseSha) ||
+                !StringComparer.Ordinal.Equals(
+                    document.ProducerHeadSha,
+                    generation.ProducerHeadSha) ||
+                !StringComparer.Ordinal.Equals(
+                    document.PredecessorStateSha256,
+                    generation.PredecessorEnvelopeSha256) ||
+                !StringComparer.Ordinal.Equals(
+                    document.PriorSessionSha256,
+                    predecessor?.SessionSha256))
+            {
+                return false;
+            }
+
+            code = RetainedStateTransactionCodes.Ready;
+            return true;
+        }
+        finally
+        {
+            if (plaintext is not null)
+            {
+                CryptographicOperations.ZeroMemory(plaintext);
+            }
+
+            if (admittedSession is not null)
+            {
+                CryptographicOperations.ZeroMemory(admittedSession.Plaintext);
+                CryptographicOperations.ZeroMemory(
+                    admittedSession.Value.Artifact.Plaintext);
+            }
+
+            if (predecessor?.Plaintext is { } predecessorPlaintext)
+            {
+                CryptographicOperations.ZeroMemory(predecessorPlaintext);
+            }
+        }
+    }
+
     internal async Task<string> EnsureSentinelCoverageAsync(
         RetainedStateAuthorityLease lease,
         long dependentExpiresAtUnixSeconds,
@@ -569,7 +711,7 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
             .Success(
                 RetainedStateTransactionCodes.Ready,
                 RetainedStateObservation.Create(
-                    this,
+                    issuer,
                     observation,
                     acceptedState));
     }
@@ -633,9 +775,44 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
         out RetainedStatePersistence? persistence)
     {
         persistence = Allows(lease)
-            ? new RetainedStatePersistence(store)
+            ? new RetainedStatePersistence(issuer, store)
             : null;
         return persistence is not null;
+    }
+
+    internal RetainedStatePredecessorCopyAttempt? GetPredecessorCopyAttempt(
+        RetainedStateAuthorityLease lease) =>
+        Allows(lease)
+            ? Volatile.Read(ref predecessorCopyAttempt)
+            : null;
+
+    internal bool TrySetPredecessorCopyAttempt(
+        RetainedStateAuthorityLease lease,
+        RetainedStatePredecessorCopyAttempt attempt) =>
+        Allows(lease) &&
+        attempt is not null &&
+        Interlocked.CompareExchange(
+            ref predecessorCopyAttempt,
+            attempt,
+            null) is null;
+
+    internal bool TryClearPredecessorCopyAttempt(
+        RetainedStateAuthorityLease lease,
+        RetainedStatePredecessorCopyAttempt attempt)
+    {
+        if (!Allows(lease) ||
+            !ReferenceEquals(
+                Interlocked.CompareExchange(
+                    ref predecessorCopyAttempt,
+                    null,
+                    attempt),
+                attempt))
+        {
+            return false;
+        }
+
+        attempt.Dispose();
+        return true;
     }
 
     internal bool TryEvaluatePreviousKeyRetirement(
@@ -712,7 +889,7 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
         VerifiedRetainedStateAcceptance acceptance) =>
         Allows(lease) &&
         acceptance is not null &&
-        ReferenceEquals(acceptance.Authority, this) &&
+        acceptance.IsIssuedBy(this) &&
         Interlocked.CompareExchange(
             ref terminalAcceptance,
             acceptance,
@@ -732,6 +909,7 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
 
         CryptographicOperations.ZeroMemory(
             trustedRequest.TrustedPolicyBytes);
+        Interlocked.Exchange(ref predecessorCopyAttempt, null)?.Dispose();
         ClearSelection(Interlocked.Exchange(ref acceptedSelection, null));
         Interlocked.Exchange(ref accepted, null)?.Dispose();
         Interlocked.Exchange(ref lineage, null)?.Dispose();
@@ -1004,7 +1182,12 @@ internal sealed class RetainedStateAuthorityLease : IDisposable
         this.authority = authority;
 
     internal static RetainedStateAuthorityLease Create(
-        RetainedStateTransactionAuthority authority) => new(authority);
+        object issuer,
+        RetainedStateTransactionAuthority authority)
+    {
+        RetainedStateCapabilityIssuer.Require(issuer);
+        return new(authority);
+    }
 
     internal bool Allows(RetainedStateTransactionAuthority expected) =>
         ReferenceEquals(Volatile.Read(ref authority), expected);
@@ -1023,16 +1206,13 @@ internal sealed class RetainedStateObservation : IDisposable
     private LineageReadOnlyObservationContext? observation;
 
     private RetainedStateObservation(
-        RetainedStateTransactionAuthority authority,
         LineageReadOnlyObservationContext observation,
         AcceptedStateSelectionResult acceptedState)
     {
-        Authority = authority;
         this.observation = observation;
         AcceptedState = acceptedState;
     }
 
-    internal RetainedStateTransactionAuthority Authority { get; }
     internal AcceptedStateSelectionResult AcceptedState { get; }
     internal ScopedStateInventorySnapshot? Snapshot =>
         Volatile.Read(ref observation)?.Snapshot;
@@ -1042,10 +1222,13 @@ internal sealed class RetainedStateObservation : IDisposable
         Volatile.Read(ref observation)?.Selection.Selection?.Head;
 
     internal static RetainedStateObservation Create(
-        RetainedStateTransactionAuthority authority,
+        object issuer,
         LineageReadOnlyObservationContext observation,
-        AcceptedStateSelectionResult acceptedState) =>
-        new(authority, observation, acceptedState);
+        AcceptedStateSelectionResult acceptedState)
+    {
+        RetainedStateCapabilityIssuer.Require(issuer);
+        return new(observation, acceptedState);
+    }
 
     public void Dispose() =>
         Interlocked.Exchange(ref observation, null)?.Dispose();

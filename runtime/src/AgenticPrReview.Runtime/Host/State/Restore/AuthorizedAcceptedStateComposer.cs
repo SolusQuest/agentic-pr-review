@@ -54,8 +54,16 @@ internal sealed class AuthorizedAcceptedStateRestoreContext : IDisposable
     private RetainedStateTransactionAuthority? transaction;
 
     internal AuthorizedAcceptedStateRestoreContext(
+        object issuer,
         RetainedStateTransactionAuthority transaction)
     {
+        if (!RestrictedStateService.IsRetainedStateIssuer(issuer))
+        {
+            throw new ArgumentException(
+                "The retained-state issuer is not authorized.",
+                nameof(issuer));
+        }
+
         this.transaction = transaction;
     }
 
@@ -79,9 +87,12 @@ internal sealed class AuthorizedAcceptedStateRestoreContext : IDisposable
     }
 
     internal bool TryGetTransactionAuthority(
+        object issuer,
         out RetainedStateTransactionAuthority? authority)
     {
-        authority = Volatile.Read(ref transaction);
+        authority = RestrictedStateService.IsRetainedStateIssuer(issuer)
+            ? Volatile.Read(ref transaction)
+            : null;
         return authority?.IsLive == true;
     }
 
@@ -256,6 +267,20 @@ internal sealed class AcceptedStateProductionAuthorization
 
 internal sealed class AuthorizedAcceptedStateComposer
 {
+    private readonly object issuer;
+
+    internal AuthorizedAcceptedStateComposer(object issuer)
+    {
+        if (!RestrictedStateService.IsRetainedStateIssuer(issuer))
+        {
+            throw new ArgumentException(
+                "The retained-state issuer is not authorized.",
+                nameof(issuer));
+        }
+
+        this.issuer = issuer;
+    }
+
     internal async Task<AuthorizedAcceptedStateRestoreResult> RestoreAsync(
         ArtifactStateRestoreRequest request,
         CancellationToken cancellationToken)
@@ -907,7 +932,7 @@ internal sealed class AuthorizedAcceptedStateComposer
             selected.Head.Transition == recovered.Transition;
     }
 
-    private static bool TryTransfer(
+    private bool TryTransfer(
         AcceptedStateProductionAuthorization authorization,
         ArtifactStateRestoreRequest request,
         IRestrictedStateStore store,
@@ -986,6 +1011,7 @@ internal sealed class AuthorizedAcceptedStateComposer
                 policy.PayloadSha256,
                 policy.BuildDiscriminator);
             if (!RetainedStateTransactionAuthority.TryCreate(
+                    issuer,
                     authorization,
                     access,
                     keys,
@@ -1013,7 +1039,9 @@ internal sealed class AuthorizedAcceptedStateComposer
                 return false;
             }
 
-            context = new AuthorizedAcceptedStateRestoreContext(transaction);
+            context = new AuthorizedAcceptedStateRestoreContext(
+                issuer,
+                transaction);
             return true;
         }
         finally

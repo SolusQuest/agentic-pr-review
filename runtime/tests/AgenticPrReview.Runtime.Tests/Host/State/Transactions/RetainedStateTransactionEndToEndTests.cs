@@ -109,9 +109,11 @@ public sealed class RetainedStateTransactionEndToEndTests
             queried.Value))
         {
             var storedIntent = Assert.Single(records.Records);
-            Assert.True(storedIntent.TryCopyPayload(
-                candidate.Authority,
-                out var roundTrip));
+            Assert.True(RestrictedStateService
+                .TryCopyRetainedStateOpaquePayload(
+                    context,
+                    storedIntent,
+                    out var roundTrip));
             Assert.True(intentPayload.AsSpan().SequenceEqual(
                 roundTrip.AsSpan()));
         }
@@ -164,15 +166,13 @@ public sealed class RetainedStateTransactionEndToEndTests
             ExactHeadRevalidationStatus.Exact,
             preparedCandidate.Publication.ReviewedHeadSha,
             preparedCandidate.Publication.ReviewedHeadSha);
-        var evidence = await RestrictedStateService
-            .CreateRetainedStateAcceptanceEvidenceAsync(
-                context,
-                ownershipC,
-                sticky!,
-                exactHead,
-                CancellationToken.None);
-        using var acceptanceEvidence = Assert.IsType<
-            RetainedStateAcceptanceEvidence>(evidence.Value);
+        using var acceptanceEvidence = await CreateFinalEvidenceAsync(
+            fixture,
+            candidate,
+            ownershipC,
+            sticky!,
+            [intentRecord],
+            exactHead);
         Assert.False(ownershipC.IsUsable);
 
         var accepted = await RestrictedStateService
@@ -253,8 +253,11 @@ public sealed class RetainedStateTransactionEndToEndTests
         Assert.Equal(persisted.Value!.Metadata, retried.Value!.Metadata);
 
         context.Dispose();
-        var nextProcess = await RestoreFixtureAsync(fixture);
+        var nextProcess = await RestoreFixtureAsync(
+            fixture,
+            newWorkflowRun: true);
         using var nextContext = nextProcess.Context;
+        Assert.NotEqual(fixture.Launch.RunId, nextProcess.Launch.RunId);
         var uploadsBeforeRecovery = fixture.Store.UploadCalls;
         var recoveredResult = await RestrictedStateService
             .RecoverRetainedCandidateAsync(
@@ -281,6 +284,112 @@ public sealed class RetainedStateTransactionEndToEndTests
             recoveredPublication));
         Assert.Equal(persisted.Value.Metadata, recovered.Metadata);
         Assert.Equal(uploadsBeforeRecovery, fixture.Store.UploadCalls);
+    }
+
+    [Fact]
+    public async Task PreDispatchCancellationDoesNotMutateTheStore()
+    {
+        var fixture = await CreateFixtureAsync();
+        using var context = fixture.Context;
+        var run = await CompleteRunAsync(fixture);
+        Assert.True(R4PreparedPublication.TryCreate(
+            run.Outcome,
+            fixture.PublicationScope,
+            out var publication));
+        var preparedResult = await RestrictedStateService
+            .PrepareRetainedCandidateAsync(
+                context,
+                run.Run,
+                publication!,
+                CancellationToken.None);
+        using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
+            preparedResult.Value);
+        var uploadsBefore = fixture.Store.UploadCalls;
+
+        var cancelled = await RestrictedStateService
+            .PersistRetainedCandidateAsync(
+                context,
+                prepared,
+                new CancellationToken(canceled: true));
+
+        Assert.Equal(RetainedStateTransactionCodes.Cancelled, cancelled.Code);
+        Assert.Equal(uploadsBefore, fixture.Store.UploadCalls);
+        Assert.DoesNotContain(fixture.Store.Objects, item =>
+            item.Reference.Name == prepared.Name);
+    }
+
+    [Fact]
+    public async Task ForkedOwnershipCannotMutateAfterInventoryChanges()
+    {
+        var fixture = await CreateFixtureAsync();
+        using var context = fixture.Context;
+        var run = await CompleteRunAsync(fixture);
+        Assert.True(R4PreparedPublication.TryCreate(
+            run.Outcome,
+            fixture.PublicationScope,
+            out var publication));
+        var preparedResult = await RestrictedStateService
+            .PrepareRetainedCandidateAsync(
+                context,
+                run.Run,
+                publication!,
+                CancellationToken.None);
+        using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
+            preparedResult.Value);
+        var persistedResult = await RestrictedStateService
+            .PersistRetainedCandidateAsync(
+                context,
+                prepared,
+                CancellationToken.None);
+        var candidate = Assert.IsType<RetainedStatePersistedCandidate>(
+            persistedResult.Value);
+        var ownedAResult = await RestrictedStateService
+            .RenewRetainedStateOwnershipAsync(
+                context,
+                candidate,
+                prior: null,
+                expectedP5Records: [],
+                CancellationToken.None);
+        using var ownedA = Assert.IsType<RetainedStateOwnership>(
+            ownedAResult.Value);
+        var ownedBResult = await RestrictedStateService
+            .RenewRetainedStateOwnershipAsync(
+                context,
+                candidate,
+                prior: null,
+                expectedP5Records: [],
+                CancellationToken.None);
+        using var ownedB = Assert.IsType<RetainedStateOwnership>(
+            ownedBResult.Value);
+        var request = new RetainedStateOpaqueWriteRequest(
+            StateObjectClass.PublicationIntent,
+            ImmutableArray.CreateRange("first-writer"u8.ToArray()),
+            prepared.Header.ObjectIdentity,
+            SuccessorIdentity: null,
+            prepared.Header.LogicalExpiresAtUnixSeconds);
+        var first = await RestrictedStateService
+            .PersistRetainedOpaqueRecordAsync(
+                context,
+                ownedB,
+                request,
+                CancellationToken.None);
+        using var firstRecord = Assert.IsType<RetainedStateOpaqueRecord>(
+            first.Value);
+        var uploadsAfterFirst = fixture.Store.UploadCalls;
+
+        var stale = await RestrictedStateService
+            .PersistRetainedOpaqueRecordAsync(
+                context,
+                ownedA,
+                request with
+                {
+                    Payload = ImmutableArray.CreateRange(
+                        "stale-writer"u8.ToArray()),
+                },
+                CancellationToken.None);
+
+        Assert.Equal(RetainedStateTransactionCodes.Conflict, stale.Code);
+        Assert.Equal(uploadsAfterFirst, fixture.Store.UploadCalls);
     }
 
     [Fact]
@@ -333,20 +442,14 @@ public sealed class RetainedStateTransactionEndToEndTests
                 preparedCandidate.Publication.BodySha256,
                 preparedCandidate.Publication.ReviewedHeadSha,
                 out var sticky));
-        var evidenceResult = await RestrictedStateService
-            .CreateRetainedStateAcceptanceEvidenceAsync(
-                context,
-                ownership,
-                sticky!,
-                new ExactHeadRevalidationResult(
-                    ExactHeadRevalidationStatus.Exact,
-                    preparedCandidate.Publication.ReviewedHeadSha,
-                    preparedCandidate.Publication.ReviewedHeadSha),
-                CancellationToken.None);
-        using var evidence = Assert.IsType<RetainedStateAcceptanceEvidence>(
-            evidenceResult.Value);
+        using var evidence = await CreateFinalEvidenceAsync(
+            fixture,
+            candidate,
+            ownership,
+            sticky!);
         var uploadsBefore = fixture.Store.UploadCalls;
-        fixture.Store.FailUploadOnUploadCall = uploadsBefore + 2;
+        var acceptedAt = fixture.Time.UnixSeconds;
+        fixture.Store.FailUploadOnUploadCall = uploadsBefore + 1;
         fixture.Store.ScheduledUploadFailure = OpaqueStoreFailure.Io;
         fixture.Store.ScheduledUploadMutationState =
             OpaqueStoreMutationState.NotCommitted;
@@ -358,12 +461,11 @@ public sealed class RetainedStateTransactionEndToEndTests
                 CancellationToken.None);
 
         Assert.False(notCommitted.Succeeded);
-        Assert.Equal(uploadsBefore + 2, fixture.Store.UploadCalls);
+        Assert.Equal(uploadsBefore + 1, fixture.Store.UploadCalls);
         fixture.Time.UnixSeconds += 30;
-        var acceptedAt = fixture.Time.UnixSeconds;
         var uploadsAfterKnownFailure = fixture.Store.UploadCalls;
         fixture.Store.HideUploadedObjectOnUploadCall =
-            uploadsAfterKnownFailure + 3;
+            uploadsAfterKnownFailure + 1;
         fixture.Store.HideNextUploadedObjectForNextLists = 3;
 
         var uncertain = await RestrictedStateService
@@ -376,7 +478,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             RetainedStateTransactionCodes.OutcomeUnknown,
             uncertain.Code);
         Assert.Equal(
-            uploadsAfterKnownFailure + 3,
+            uploadsAfterKnownFailure + 1,
             fixture.Store.UploadCalls);
         fixture.Time.UnixSeconds += 30;
 
@@ -390,7 +492,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         Assert.Equal(RetainedStateTransactionCodes.Accepted, retried.Code);
         Assert.Equal(acceptedAt, verified.AcceptedAtUnixSeconds);
         Assert.Equal(
-            uploadsAfterKnownFailure + 3,
+            uploadsAfterKnownFailure + 1,
             fixture.Store.UploadCalls);
         Assert.Single(fixture.Store.Objects.Where(item =>
             item.Reference.Name == verified.ReceiptMetadata.Reference.Name));
@@ -402,7 +504,7 @@ public sealed class RetainedStateTransactionEndToEndTests
                 new CancellationToken(canceled: true));
         Assert.Same(verified, replayed.Value);
         Assert.Equal(
-            uploadsAfterKnownFailure + 3,
+            uploadsAfterKnownFailure + 1,
             fixture.Store.UploadCalls);
     }
 
@@ -422,7 +524,8 @@ public sealed class RetainedStateTransactionEndToEndTests
         Assert.Equal(0, admittedFirst!.Artifact.Document.Generation);
         var second = await AcceptGenerationAsync(
             successorFixture,
-            commentId: 202);
+            commentId: 202,
+            exercisePredecessorCopyPossibleCommit: true);
         Assert.Equal(1, second.Generation);
 
         Assert.Equal(
@@ -435,15 +538,53 @@ public sealed class RetainedStateTransactionEndToEndTests
         var thirdFixture = await RestoreFixtureAsync(successorFixture);
         var third = await AcceptGenerationAsync(thirdFixture, commentId: 203);
         Assert.Equal(2, third.Generation);
+        var cleanupPlan = await RestrictedStateService
+            .PlanRetainedStateCleanupAsync(
+                thirdFixture.Context,
+                third.Acceptance,
+                completedP5Records: [],
+                CancellationToken.None);
+        using var cleanupAuthorization = Assert.IsType<
+            RetainedStateCleanupAuthorization>(cleanupPlan.Value);
+        Assert.Contains(cleanupAuthorization.Targets, target =>
+            target.Metadata == first.CandidateMetadata);
+        Assert.Contains(cleanupAuthorization.Targets, target =>
+            target.Metadata == first.Acceptance.ReceiptMetadata);
+        fixture.Store.AfterDelete = () =>
+        {
+            fixture.Store.DeleteFailuresRemaining = 1;
+            fixture.Store.NextDeleteFailure = OpaqueStoreFailure.Io;
+            fixture.Store.NextDeleteMutationState =
+                OpaqueStoreMutationState.NotCommitted;
+        };
+        var interrupted = await RestrictedStateService
+            .CleanupRetainedStateAsync(
+            thirdFixture.Context,
+            new RetainedStateCleanupRequest(
+                third.Acceptance,
+                cleanupAuthorization,
+                fixture.Time.UnixSeconds +
+                    StateRetentionRequirements.ScopedPlatformRequestSeconds),
+            CancellationToken.None);
+        Assert.False(interrupted.Completed);
+        Assert.True(interrupted.AcceptanceRemainsVerified);
+        Assert.DoesNotContain(
+            cleanupAuthorization.Targets[0].Metadata,
+            fixture.Store.Objects);
+
+        var resumedPlan = await RestrictedStateService
+            .PlanRetainedStateCleanupAsync(
+                thirdFixture.Context,
+                third.Acceptance,
+                completedP5Records: [],
+                CancellationToken.None);
+        using var resumedAuthorization = Assert.IsType<
+            RetainedStateCleanupAuthorization>(resumedPlan.Value);
         var cleanup = await RestrictedStateService.CleanupRetainedStateAsync(
             thirdFixture.Context,
             new RetainedStateCleanupRequest(
                 third.Acceptance,
-                [
-                    new RetainedStateCleanupTarget(first.CandidateMetadata),
-                    new RetainedStateCleanupTarget(
-                        first.Acceptance.ReceiptMetadata),
-                ],
+                resumedAuthorization,
                 fixture.Time.UnixSeconds +
                     StateRetentionRequirements.ScopedPlatformRequestSeconds),
             CancellationToken.None);
@@ -461,6 +602,169 @@ public sealed class RetainedStateTransactionEndToEndTests
             out var admittedSecond));
         Assert.Equal(2, admittedSecond!.Artifact.Document.Generation);
         Assert.Equal(3, admittedSecond.Artifact.Document.CompletedRuns.Length);
+    }
+
+    [Fact]
+    public async Task DurableAcceptanceAttemptAndVerifiedReceiptRecoverAcrossProcesses()
+    {
+        var fixture = await CreateFixtureAsync();
+        var run = await CompleteRunAsync(fixture);
+        Assert.True(R4PreparedPublication.TryCreate(
+            run.Outcome,
+            fixture.PublicationScope,
+            out var publication));
+        var preparedResult = await RestrictedStateService
+            .PrepareRetainedCandidateAsync(
+                fixture.Context,
+                run.Run,
+                publication!,
+                CancellationToken.None);
+        using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
+            preparedResult.Value);
+        var persistedResult = await RestrictedStateService
+            .PersistRetainedCandidateAsync(
+                fixture.Context,
+                prepared,
+                CancellationToken.None);
+        var candidate = Assert.IsType<RetainedStatePersistedCandidate>(
+            persistedResult.Value);
+        var ownershipResult = await RestrictedStateService
+            .RenewRetainedStateOwnershipAsync(
+                fixture.Context,
+                candidate,
+                prior: null,
+                expectedP5Records: [],
+                CancellationToken.None);
+        using var ownership = Assert.IsType<RetainedStateOwnership>(
+            ownershipResult.Value);
+        Assert.True(StickyCommentPublisher.StickyPublicationReceipt
+            .TryRehydrate(
+                StickyPublicationOperation.Observed,
+                prepared.Publication.RepositoryId,
+                prepared.Publication.PullRequestNumber,
+                commentId: 301,
+                $"https://github.com/{prepared.Publication.RepositoryName}" +
+                    $"/pull/{prepared.Publication.PullRequestNumber}" +
+                    "#issuecomment-301",
+                prepared.Publication.ScopeSha256,
+                prepared.Publication.BodySha256,
+                prepared.Publication.ReviewedHeadSha,
+                out var sticky));
+        var preparationResult = await RestrictedStateService
+            .PrepareRetainedStateAcceptanceAsync(
+                fixture.Context,
+                ownership,
+                sticky!,
+                CancellationToken.None);
+        using var preparation = Assert.IsType<
+            RetainedStateAcceptancePreparation>(preparationResult.Value);
+        Assert.True(preparation.TryCopyRecoveryPayload(out var recoveryBytes));
+        var recordResult = await RestrictedStateService
+            .PersistRetainedOpaqueRecordAsync(
+                fixture.Context,
+                preparation.Ownership,
+                new RetainedStateOpaqueWriteRequest(
+                    StateObjectClass.PublicationIntent,
+                    recoveryBytes,
+                    prepared.Header.ObjectIdentity,
+                    SuccessorIdentity: null,
+                    prepared.Header.LogicalExpiresAtUnixSeconds),
+                CancellationToken.None);
+        using var record = Assert.IsType<RetainedStateOpaqueRecord>(
+            recordResult.Value);
+
+        fixture.Context.Dispose();
+        var resumed = await RestoreFixtureAsync(fixture);
+        var recoveredCandidateResult = await RestrictedStateService
+            .RecoverRetainedCandidateAsync(
+                resumed.Context,
+                CancellationToken.None);
+        var recoveredCandidate = Assert.IsType<
+            RetainedStatePersistedCandidate>(recoveredCandidateResult.Value);
+        var recordsResult = await RestrictedStateService
+            .QueryRetainedOpaqueRecordsAsync(
+                resumed.Context,
+                StateObjectClass.PublicationIntent,
+                CancellationToken.None);
+        using var records = Assert.IsType<RetainedStateOpaqueRecordSet>(
+            recordsResult.Value);
+        var recoveredRecord = Assert.Single(records.Records);
+        var recoveredPreparationResult = await RestrictedStateService
+            .RecoverRetainedStateAcceptancePreparationAsync(
+                resumed.Context,
+                recoveredCandidate,
+                recoveredRecord,
+                CancellationToken.None);
+        using var recoveredPreparation = Assert.IsType<
+            RetainedStateAcceptancePreparation>(
+                recoveredPreparationResult.Value);
+        var evidenceResult = await RestrictedStateService
+            .CreateRetainedStateAcceptanceEvidenceAsync(
+                resumed.Context,
+                recoveredPreparation,
+                recoveredPreparation.Ownership,
+                new ExactHeadRevalidationResult(
+                    ExactHeadRevalidationStatus.Exact,
+                    prepared.Publication.ReviewedHeadSha,
+                    prepared.Publication.ReviewedHeadSha),
+                CancellationToken.None);
+        using var evidence = Assert.IsType<RetainedStateAcceptanceEvidence>(
+            evidenceResult.Value);
+        var accepted = await RestrictedStateService.AcceptRetainedStateAsync(
+            resumed.Context,
+            evidence,
+            CancellationToken.None);
+        var verified = Assert.IsType<VerifiedRetainedStateAcceptance>(
+            accepted.Value);
+
+        resumed.Context.Dispose();
+        var afterCommit = await RestoreFixtureAsync(resumed);
+        using var afterCommitContext = afterCommit.Context;
+        var recoveredVerified = await RestrictedStateService
+            .RecoverVerifiedRetainedStateAcceptanceAsync(
+                afterCommitContext,
+                CancellationToken.None);
+        var verifiedAfterRestart = Assert.IsType<
+            VerifiedRetainedStateAcceptance>(recoveredVerified.Value);
+        Assert.Equal(
+            verified.AcceptanceReceiptIdentity,
+            verifiedAfterRestart.AcceptanceReceiptIdentity);
+        Assert.Equal(
+            verified.AcceptedAtUnixSeconds,
+            verifiedAfterRestart.AcceptedAtUnixSeconds);
+
+        var completedRecordsResult = await RestrictedStateService
+            .QueryRetainedOpaqueRecordsAsync(
+                afterCommitContext,
+                StateObjectClass.PublicationIntent,
+                CancellationToken.None);
+        using var completedRecords = Assert.IsType<
+            RetainedStateOpaqueRecordSet>(completedRecordsResult.Value);
+        var completedRecord = Assert.Single(completedRecords.Records);
+        var cleanupPlan = await RestrictedStateService
+            .PlanRetainedStateCleanupAsync(
+                afterCommitContext,
+                verifiedAfterRestart,
+                [completedRecord],
+                CancellationToken.None);
+        using var cleanupAuthorization = Assert.IsType<
+            RetainedStateCleanupAuthorization>(cleanupPlan.Value);
+        Assert.Contains(cleanupAuthorization.Targets, target =>
+            target.Metadata == completedRecord.Metadata);
+        var cleanup = await RestrictedStateService
+            .CleanupRetainedStateAsync(
+                afterCommitContext,
+                new RetainedStateCleanupRequest(
+                    verifiedAfterRestart,
+                    cleanupAuthorization,
+                    fixture.Time.UnixSeconds +
+                        StateRetentionRequirements
+                            .ScopedPlatformRequestSeconds),
+                CancellationToken.None);
+        Assert.True(cleanup.Completed, cleanup.Code);
+        Assert.DoesNotContain(
+            completedRecord.Metadata,
+            fixture.Store.Objects);
     }
 
     [Fact]
@@ -556,6 +860,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             policy.PolicySha256,
             baseScope.PayloadBuildIdentity);
         return new TransactionFixture(
+            scenario,
             store,
             time,
             context,
@@ -568,13 +873,39 @@ public sealed class RetainedStateTransactionEndToEndTests
     }
 
     private static async Task<TransactionFixture> RestoreFixtureAsync(
-        TransactionFixture fixture)
+        TransactionFixture fixture,
+        bool newWorkflowRun = false)
     {
+        var launch = fixture.Launch;
+        var invocation = fixture.Invocation;
+        if (newWorkflowRun)
+        {
+            launch = StateLaunch(
+                fixture.Launch,
+                currentKeyByte: 0x42,
+                runId: fixture.Launch.RunId + 1,
+                runAttempt: 1);
+            fixture.Scenario.Transport.CurrentRun =
+                fixture.Scenario.Transport.CurrentRun with
+                {
+                    Id = launch.RunId,
+                    Attempt = launch.RunAttempt,
+                };
+            var authorization = await fixture.Scenario.CreateAuthorizer()
+                .AuthorizeAsync(launch, CancellationToken.None);
+            invocation = Assert.IsType<
+                ActionHostAuthorizer.AuthorizedInvocation>(
+                    authorization.Invocation);
+            fixture.Store.ProducingRunIdentity = launch.RunId.ToString(
+                CultureInfo.InvariantCulture);
+            fixture.Store.ProducingRunAttempt = launch.RunAttempt;
+        }
+
         var restored = await RestrictedStateService
             .RestoreAuthorizedArtifactStateAsync(
                 new ArtifactStateRestoreRequest(
-                    fixture.Launch,
-                    fixture.Invocation,
+                    launch,
+                    invocation,
                     fixture.Policy,
                     fixture.CurrentReview,
                     DeepSeekReasoningContinuationCodec.Instance,
@@ -589,13 +920,16 @@ public sealed class RetainedStateTransactionEndToEndTests
         return fixture with
         {
             Context = context,
+            Launch = launch,
+            Invocation = invocation,
             Selected = selected!,
         };
     }
 
     private static async Task<AcceptedGeneration> AcceptGenerationAsync(
         TransactionFixture fixture,
-        long commentId)
+        long commentId,
+        bool exercisePredecessorCopyPossibleCommit = false)
     {
         var run = await CompleteRunAsync(
             fixture,
@@ -621,15 +955,24 @@ public sealed class RetainedStateTransactionEndToEndTests
                 CancellationToken.None);
         var candidate = Assert.IsType<RetainedStatePersistedCandidate>(
             persisted.Value);
+        var existingP5Result = await RestrictedStateService
+            .QueryRetainedOpaqueRecordsAsync(
+                fixture.Context,
+                StateObjectClass.PublicationIntent,
+                CancellationToken.None);
+        using var existingP5 = Assert.IsType<RetainedStateOpaqueRecordSet>(
+            existingP5Result.Value);
         var owned = await RestrictedStateService
             .RenewRetainedStateOwnershipAsync(
                 fixture.Context,
                 candidate,
                 prior: null,
-                expectedP5Records: [],
+                existingP5.Records,
                 CancellationToken.None);
         using var ownership = Assert.IsType<RetainedStateOwnership>(
             owned.Value);
+        RetainedStateOwnership? renewedOwnership = null;
+        var acceptanceOwnership = ownership;
         Assert.True(StickyCommentPublisher.StickyPublicationReceipt
             .TryRehydrate(
                 StickyPublicationOperation.Observed,
@@ -643,18 +986,44 @@ public sealed class RetainedStateTransactionEndToEndTests
                 preparedCandidate.Publication.BodySha256,
                 preparedCandidate.Publication.ReviewedHeadSha,
                 out var sticky));
-        var evidenceResult = await RestrictedStateService
-            .CreateRetainedStateAcceptanceEvidenceAsync(
-                fixture.Context,
-                ownership,
-                sticky!,
-                new ExactHeadRevalidationResult(
-                    ExactHeadRevalidationStatus.Exact,
-                    preparedCandidate.Publication.ReviewedHeadSha,
-                    preparedCandidate.Publication.ReviewedHeadSha),
-                CancellationToken.None);
-        using var evidence = Assert.IsType<RetainedStateAcceptanceEvidence>(
-            evidenceResult.Value);
+        if (exercisePredecessorCopyPossibleCommit)
+        {
+            fixture.Store.FailNextUploadForName = candidate.Prepared.Name;
+            fixture.Store.ScheduledUploadFailure =
+                OpaqueStoreFailure.OutcomeUnknown;
+            fixture.Store.ScheduledUploadMutationState =
+                OpaqueStoreMutationState.OutcomeUnknown;
+            fixture.Store.PersistFailedUpload = true;
+            fixture.Store.HideFailedUploadForNextLists = 6;
+            var uncertain = await RestrictedStateService
+                .PrepareRetainedStateAcceptanceAsync(
+                    fixture.Context,
+                    ownership,
+                    sticky!,
+                    CancellationToken.None);
+            Assert.Equal(
+                RetainedStateTransactionCodes.OutcomeUnknown,
+                uncertain.Code);
+
+            var renewed = await RestrictedStateService
+                .RenewRetainedStateOwnershipAsync(
+                    fixture.Context,
+                    candidate,
+                    prior: null,
+                    existingP5.Records,
+                    CancellationToken.None);
+            renewedOwnership = Assert.IsType<RetainedStateOwnership>(
+                renewed.Value);
+            acceptanceOwnership = renewedOwnership;
+        }
+
+        using var renewedOwnershipLifetime = renewedOwnership;
+        using var evidence = await CreateFinalEvidenceAsync(
+            fixture,
+            candidate,
+            acceptanceOwnership,
+            sticky!,
+            existingP5.Records);
         var accepted = await RestrictedStateService.AcceptRetainedStateAsync(
             fixture.Context,
             evidence,
@@ -667,6 +1036,69 @@ public sealed class RetainedStateTransactionEndToEndTests
             preparedCandidate.Name,
             candidate.Metadata,
             verified);
+    }
+
+    private static async Task<RetainedStateAcceptanceEvidence>
+        CreateFinalEvidenceAsync(
+        TransactionFixture fixture,
+        RetainedStatePersistedCandidate candidate,
+        RetainedStateOwnership ownership,
+        StickyCommentPublisher.StickyPublicationReceipt sticky,
+        ImmutableArray<RetainedStateOpaqueRecord> existingP5Records = default,
+        ExactHeadRevalidationResult? exactHead = null)
+    {
+        if (existingP5Records.IsDefault)
+        {
+            existingP5Records = [];
+        }
+
+        var preparationResult = await RestrictedStateService
+            .PrepareRetainedStateAcceptanceAsync(
+                fixture.Context,
+                ownership,
+                sticky,
+                CancellationToken.None);
+        using var preparation = Assert.IsType<
+            RetainedStateAcceptancePreparation>(preparationResult.Value);
+        Assert.True(preparation.TryCopyRecoveryPayload(
+            out var recoveryPayload));
+        var recoveredAttemptResult = await RestrictedStateService
+            .PersistRetainedOpaqueRecordAsync(
+                fixture.Context,
+                preparation.Ownership,
+                new RetainedStateOpaqueWriteRequest(
+                    StateObjectClass.PublicationIntent,
+                    recoveryPayload,
+                    candidate.Prepared.Header.ObjectIdentity,
+                    SuccessorIdentity: null,
+                    candidate.Prepared.Header.LogicalExpiresAtUnixSeconds),
+                CancellationToken.None);
+        using var recoveryRecord = Assert.IsType<RetainedStateOpaqueRecord>(
+            recoveredAttemptResult.Value);
+        var allP5 = existingP5Records.Add(recoveryRecord);
+        var finalOwnershipResult = await RestrictedStateService
+            .RenewRetainedStateOwnershipAsync(
+                fixture.Context,
+                candidate,
+                prior: null,
+                allP5,
+                CancellationToken.None);
+        using var finalOwnership = Assert.IsType<RetainedStateOwnership>(
+            finalOwnershipResult.Value);
+        var head = exactHead ?? new ExactHeadRevalidationResult(
+            ExactHeadRevalidationStatus.Exact,
+            candidate.Prepared.Publication.ReviewedHeadSha,
+            candidate.Prepared.Publication.ReviewedHeadSha);
+        var evidenceResult = await RestrictedStateService
+            .CreateRetainedStateAcceptanceEvidenceAsync(
+                fixture.Context,
+                preparation,
+                finalOwnership,
+                head,
+                CancellationToken.None);
+        Assert.True(evidenceResult.Succeeded, evidenceResult.Code);
+        return Assert.IsType<RetainedStateAcceptanceEvidence>(
+            evidenceResult.Value);
     }
 
     private static async Task<CompletedRun> CompleteRunAsync(
@@ -750,7 +1182,9 @@ public sealed class RetainedStateTransactionEndToEndTests
 
     private static ActionHostLaunchContract StateLaunch(
         ActionHostLaunchContract launch,
-        byte currentKeyByte)
+        byte currentKeyByte,
+        long? runId = null,
+        int? runAttempt = null)
     {
         Assert.True(ActionHostStateKey.TryCreate(
             Convert.ToBase64String(
@@ -771,8 +1205,8 @@ public sealed class RetainedStateTransactionEndToEndTests
             launch.EventJsonSha256,
             launch.RepositoryName,
             launch.RepositoryId,
-            launch.RunId,
-            launch.RunAttempt,
+            runId ?? launch.RunId,
+            runAttempt ?? launch.RunAttempt,
             launch.WorkflowPath,
             launch.WorkflowRef,
             launch.WorkflowSha,
@@ -789,6 +1223,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         new("user", [new ProjectTextContent(text)]);
 
     private sealed record TransactionFixture(
+        ActionHostAuthorizationScenario Scenario,
         ScriptedLocatorStore Store,
         MutableLineageTimeProvider Time,
         AuthorizedAcceptedStateRestoreContext Context,
