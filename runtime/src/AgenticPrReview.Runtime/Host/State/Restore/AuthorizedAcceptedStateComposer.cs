@@ -462,32 +462,9 @@ internal sealed class AuthorizedAcceptedStateComposer
                 return AuthorizedAcceptedStateRestoreResult.Bootstrap(context);
             }
 
-            if (selectorResult.Expiry is not null)
-            {
-                var expired = await lineageService.ExpireAuthorizedAsync(
-                        locator,
-                        lineageRequest,
-                        selectorResult.Expiry,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-                if (!expired.Succeeded || expired.Context is null)
-                {
-                    return AuthorizedAcceptedStateRestoreResult.Fail(
-                        MapLineageCode(expired.Code));
-                }
-
-                selectedLineage = expired.Context;
-                var context = Transfer(
-                    access,
-                    keys,
-                    locator,
-                    selectedLineage,
-                    accepted: null);
-                ownershipTransferred = true;
-                return AuthorizedAcceptedStateRestoreResult.Bootstrap(context);
-            }
-
-            if (!selectorResult.Succeeded || selectorResult.Selection is null)
+            if (selectorResult.Selection is null ||
+                (!selectorResult.Succeeded &&
+                    selectorResult.Expiry is null))
             {
                 return AuthorizedAcceptedStateRestoreResult.Fail(
                     selectorResult.Code);
@@ -573,6 +550,47 @@ internal sealed class AuthorizedAcceptedStateComposer
                 {
                     return AuthorizedAcceptedStateRestoreResult.Fail(
                         restored.Code);
+                }
+
+                if (selectorResult.Expiry is { } expiryCandidate)
+                {
+                    using (restored.Context)
+                    {
+                        if (!expiryCandidate.TryAuthorize(
+                                restored.Context,
+                                out var expiry) ||
+                            expiry is null)
+                        {
+                            return AuthorizedAcceptedStateRestoreResult.Fail(
+                                AcceptedStateCodes.AccessDenied);
+                        }
+
+                        var expired = await lineageService
+                            .ExpireAuthorizedAsync(
+                                locator,
+                                lineageRequest,
+                                expiry,
+                                cancellationToken)
+                            .ConfigureAwait(false);
+                        if (!expired.Succeeded || expired.Context is null)
+                        {
+                            return AuthorizedAcceptedStateRestoreResult.Fail(
+                                MapLineageCode(expired.Code));
+                        }
+
+                        selectedLineage.Dispose();
+                        selectedLineage = expired.Context;
+                    }
+
+                    var context = Transfer(
+                        access,
+                        keys,
+                        locator,
+                        selectedLineage,
+                        accepted: null);
+                    ownershipTransferred = true;
+                    return AuthorizedAcceptedStateRestoreResult.Bootstrap(
+                        context);
                 }
 
                 accepted = restored.Context;

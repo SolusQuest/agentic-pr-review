@@ -26,10 +26,12 @@ namespace AgenticPrReview.Runtime.Tests.Host.State.Restore;
 public sealed class AcceptedStateProductionEndToEndTests
 {
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
     public async Task ProductionEntryRestoresRealEncryptedAcceptedSession(
-        bool rotateCurrentKey)
+        bool rotateCurrentKey,
+        bool expireAfterAdmission)
     {
         var scenario = ActionHostAuthorizationScenario.Valid(
             ActionHostAuthorizationRoute.WorkflowRun);
@@ -133,12 +135,30 @@ public sealed class AcceptedStateProductionEndToEndTests
                 time);
         }
 
+        var uploadsBeforeRestore = store.UploadCalls;
+        var deletesBeforeRestore = store.DeleteCalls;
+        if (expireAfterAdmission)
+        {
+            time.UnixSeconds += AcceptedStateFormat.LogicalWindowSeconds;
+        }
+
         var restored = await RestrictedStateService
             .RestoreAuthorizedArtifactStateAsync(
                 restoreRequest,
                 CancellationToken.None);
 
         Assert.True(restored.Succeeded, restored.Code);
+        if (expireAfterAdmission)
+        {
+            Assert.True(restored.IsBootstrap);
+            using var expiredContext = Assert.IsType<
+                AuthorizedAcceptedStateRestoreContext>(restored.Context);
+            Assert.False(expiredContext.HasAcceptedSession);
+            Assert.True(store.UploadCalls > uploadsBeforeRestore);
+            Assert.True(store.DeleteCalls > deletesBeforeRestore);
+            return;
+        }
+
         Assert.False(restored.IsBootstrap);
         using var restoredContext = Assert.IsType<
             AuthorizedAcceptedStateRestoreContext>(restored.Context);
@@ -150,11 +170,90 @@ public sealed class AcceptedStateProductionEndToEndTests
             admitted!.RunRequest.ReviewedIdentity.HeadSha);
     }
 
+    [Theory]
+    [InlineData("publication")]
+    [InlineData("policy")]
+    [InlineData("aead")]
+    [InlineData("unavailable-key")]
+    [InlineData("session")]
+    [InlineData("continuation")]
+    [InlineData("ancestry")]
+    public async Task ExpiredInvalidAcceptedStatePerformsNoS4Mutation(
+        string mutation)
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowRun);
+        var launch = StateLaunch(scenario.Launch, currentKeyByte: 0x42);
+        var authorized = await scenario.CreateAuthorizer().AuthorizeAsync(
+            launch,
+            CancellationToken.None);
+        var invocation = Assert.IsType<
+            ActionHostAuthorizer.AuthorizedInvocation>(authorized.Invocation);
+        Assert.True(ActionHostTrustedPolicyRequest.TryBind(
+            launch,
+            invocation,
+            out var policyRequest,
+            out _));
+        var materialized = await ActionHostTrustedPolicy.MaterializeAsync(
+            policyRequest!,
+            ActionHostTrustedPolicyTests.ScriptedObjectTransport.Valid(
+                ActionHostTrustedPolicyTests.Config("sticky", null),
+                Encoding.UTF8.GetBytes("trusted accepted-state policy")),
+            CancellationToken.None);
+        Assert.True(materialized.Succeeded);
+        var time = new MutableLineageTimeProvider(
+            AcceptedStateTestData.AcceptedAtUnixSeconds);
+        var store = new ScriptedLocatorStore
+        {
+            FilterListsByName = true,
+            UseNumericObjectIds = true,
+        };
+        var request = new ArtifactStateRestoreRequest(
+            launch,
+            invocation,
+            materialized.Policy!,
+            User("current review context"),
+            DeepSeekReasoningContinuationCodec.Instance,
+            new EndToEndDependencies(store),
+            time);
+        var bootstrap = await RestrictedStateService
+            .RestoreAuthorizedArtifactStateAsync(
+                request,
+                CancellationToken.None);
+        Assert.True(bootstrap.Succeeded, bootstrap.Code);
+        using (var bootstrapContext = Assert.IsType<
+            AuthorizedAcceptedStateRestoreContext>(bootstrap.Context))
+        {
+            Assert.True(bootstrapContext.TryGetLineageSnapshot(
+                out var selected));
+            await SeedAcceptedGenerationAsync(
+                store,
+                request,
+                selected!,
+                time,
+                mutation);
+        }
+
+        time.UnixSeconds += AcceptedStateFormat.LogicalWindowSeconds;
+        var uploadsBeforeRestore = store.UploadCalls;
+        var deletesBeforeRestore = store.DeleteCalls;
+
+        var restored = await RestrictedStateService
+            .RestoreAuthorizedArtifactStateAsync(
+                request,
+                CancellationToken.None);
+
+        Assert.False(restored.Succeeded);
+        Assert.Equal(uploadsBeforeRestore, store.UploadCalls);
+        Assert.Equal(deletesBeforeRestore, store.DeleteCalls);
+    }
+
     private static async Task SeedAcceptedGenerationAsync(
         ScriptedLocatorStore store,
         ArtifactStateRestoreRequest request,
         SelectedLineageSnapshot selected,
-        TimeProvider time)
+        TimeProvider time,
+        string? mutation = null)
     {
         Assert.True(AcceptedStateProductionAuthorization.TryAuthorize(
             request,
@@ -191,13 +290,17 @@ public sealed class AcceptedStateProductionEndToEndTests
                     StateRetentionRequirements.ScopedPlatformRequestSeconds),
                 checked(logicalExpiry +
                     StateRetentionRequirements.SentinelDependentMarginSeconds));
+            var retainedLocatorDependency = checked(
+                requiredPlatformExpiry +
+                AcceptedStateFormat.LogicalWindowSeconds +
+                StateRetentionRequirements.SentinelDependentMarginSeconds);
             var locatorResult = await new LocatorRootService(
                     store,
                     keyRing!,
                     time)
                 .ResolveAsync(
                     locatorAccess!,
-                    requiredPlatformExpiry,
+                    retainedLocatorDependency,
                     CancellationToken.None);
             Assert.True(locatorResult.Succeeded, locatorResult.Code);
             using var locator = Assert.IsType<LocatorContext>(
@@ -239,7 +342,50 @@ public sealed class AcceptedStateProductionEndToEndTests
                         policy.BuildDiscriminator,
                         invocation.PullRequest.BaseSha,
                         invocation.PullRequest.HeadSha);
-                var document = session.Artifact.Document;
+                var sessionArtifact = session.Artifact;
+                if (mutation == "session")
+                {
+                    Assert.True(AgentSessionCodec.TryWrite(
+                        sessionArtifact.Document with
+                        {
+                            WorkflowIdentity = "wrong-workflow",
+                        },
+                        out var malformedSession,
+                        out var sessionFailure), sessionFailure);
+                    sessionArtifact = malformedSession!;
+                }
+                else if (mutation == "continuation")
+                {
+                    var run = Assert.Single(
+                        sessionArtifact.Document.CompletedRuns);
+                    var item = Assert.Single(run.Continuation.Items);
+                    var malformedDocument = sessionArtifact.Document with
+                    {
+                        CompletedRuns =
+                        [
+                            run with
+                            {
+                                Continuation = run.Continuation with
+                                {
+                                    Items =
+                                    [
+                                        item with
+                                        {
+                                            AssociatedCallId = "finish0",
+                                        },
+                                    ],
+                                },
+                            },
+                        ],
+                    };
+                    Assert.True(AgentSessionCodec.TryWrite(
+                        malformedDocument,
+                        out var malformedSession,
+                        out var sessionFailure), sessionFailure);
+                    sessionArtifact = malformedSession!;
+                }
+
+                var document = sessionArtifact.Document;
                 var stateScope = new RestrictedStateScope(
                     repositoryId,
                     trustedWorkflowIdentity,
@@ -279,11 +425,27 @@ public sealed class AcceptedStateProductionEndToEndTests
                 Assert.True(RestrictedStateEnvelope.TryEncrypt(
                     stateAccess!,
                     stateBinding,
-                    session.Artifact.Plaintext,
+                    sessionArtifact.Plaintext,
                     stateResolver,
                     out var stateEnvelope,
                     out var stateCode), stateCode);
                 Assert.NotNull(stateEnvelope);
+                if (mutation == "aead")
+                {
+                    stateEnvelope![^1] ^= 0x01;
+                }
+                else if (mutation == "unavailable-key")
+                {
+                    Assert.True(RestrictedStateEnvelope.TryParse(
+                        stateEnvelope!,
+                        out var parsed));
+                    var keyBytes = Encoding.ASCII.GetBytes(parsed!.KeyId);
+                    var keyOffset = stateEnvelope!.AsSpan().IndexOf(keyBytes);
+                    Assert.True(keyOffset >= 0);
+                    Encoding.ASCII.GetBytes(
+                            new string('e', keyBytes.Length))
+                        .CopyTo(stateEnvelope, keyOffset);
+                }
 
                 var publicationScope = new R4PublicationScopeV1(
                     (ulong)launch.RepositoryId,
@@ -294,12 +456,20 @@ public sealed class AcceptedStateProductionEndToEndTests
                     policy.PolicySha256,
                     AuthorizedAcceptedStateComposer.PayloadBuildIdentity(
                         policy));
+                var producerHeadSha = mutation == "ancestry"
+                    ? new string('a', 40)
+                    : document.ProducerHeadSha;
+                var publicationIdentity = mutation == "ancestry"
+                    ? session.Identity with { HeadSha = producerHeadSha }
+                    : session.Identity;
                 _ = AcceptedStateTestData.Publication(
                     out var publicationBytes,
-                    session.Identity,
+                    publicationIdentity,
                     policy.BuildDiscriminator,
                     publicationScope,
-                    launch.RepositoryId,
+                    mutation == "publication"
+                        ? launch.RepositoryId + 1
+                        : launch.RepositoryId,
                     launch.RepositoryName,
                     invocation.PullRequest.Number,
                     policy.PolicySha256,
@@ -307,9 +477,9 @@ public sealed class AcceptedStateProductionEndToEndTests
                 var generation = new StateGenerationRecordV1(
                     ImmutableArray.CreateRange(stateEnvelope!),
                     RestrictedStateEnvelope.EnvelopeSha256(stateEnvelope!),
-                    session.Artifact.SessionSha256,
+                    sessionArtifact.SessionSha256,
                     document.ProducerBaseSha,
-                    document.ProducerHeadSha,
+                    producerHeadSha,
                     document.Generation,
                     document.PredecessorStateSha256,
                     PreviousLogicalGenerationIdentity: null,
@@ -317,7 +487,9 @@ public sealed class AcceptedStateProductionEndToEndTests
                     logicalExpiry,
                     ImmutableArray.CreateRange(publicationBytes),
                     AcceptedStateRecordValidation.Sha256(publicationBytes),
-                    policy.PolicySha256,
+                    mutation == "policy"
+                        ? new string('f', 64)
+                        : policy.PolicySha256,
                     policy.ConfigSha256,
                     policy.InstructionsSha256,
                     policy.PayloadSha256,
@@ -362,10 +534,12 @@ public sealed class AcceptedStateProductionEndToEndTests
                     candidateHeader!.ObjectIdentity,
                     out _,
                     acceptedAtUnixSeconds: now,
-                    identity: session.Identity,
+                    identity: publicationIdentity,
                     buildDiscriminator: policy.BuildDiscriminator,
                     scope: publicationScope,
-                    repositoryId: launch.RepositoryId,
+                    repositoryId: mutation == "publication"
+                        ? launch.RepositoryId + 1
+                        : launch.RepositoryId,
                     repositoryName: launch.RepositoryName,
                     pullRequestNumber: invocation.PullRequest.Number,
                     policyIdentitySha256: policy.PolicySha256,

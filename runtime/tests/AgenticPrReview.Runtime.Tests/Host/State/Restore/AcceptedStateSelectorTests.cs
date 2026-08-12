@@ -95,7 +95,7 @@ public sealed class AcceptedStateSelectorTests
     }
 
     [Fact]
-    public void TerminalReceiptExpiryMintsTypedExpiryAuthority()
+    public void TerminalReceiptExpiryPreservesSelectionForAdmission()
     {
         using var fixture = SelectorFixture.Ready();
         fixture.Time.UnixSeconds =
@@ -106,7 +106,8 @@ public sealed class AcceptedStateSelectorTests
 
         Assert.Equal(AcceptedStateCodes.Expired, result.Code);
         Assert.NotNull(result.Expiry);
-        Assert.Null(result.Selection);
+        Assert.NotNull(result.Selection);
+        Assert.False(result.Expiry!.TryAuthorize(null, out _));
         Assert.False(result.IsBootstrap);
     }
 
@@ -173,6 +174,38 @@ public sealed class AcceptedStateSelectorTests
             .Select(fixture.Observation, fixture.Request);
 
         Assert.Equal(AcceptedStateCodes.IncompatibleCurrent, result.Code);
+    }
+
+    [Theory]
+    [InlineData("artifact")]
+    [InlineData("archive")]
+    [InlineData("envelope")]
+    public void CopyOnlyGenerationRequiresOneExactSourceTuple(
+        string mutation)
+    {
+        using var fixture = SelectorFixture.Ready(
+            copyOnly: true,
+            addHigherCopy: true,
+            copyProvenanceMutation: mutation);
+
+        var result = new AcceptedStateSelector(fixture.Time)
+            .Select(fixture.Observation, fixture.Request);
+
+        Assert.Equal(AcceptedStateCodes.Conflict, result.Code);
+    }
+
+    [Fact]
+    public void LiveOriginalRequiresCopySourceTupleToMatchMetadata()
+    {
+        using var fixture = SelectorFixture.Ready(
+            addHigherCopy: true,
+            addCopyAlongsideOriginal: true,
+            copyProvenanceMutation: "archive");
+
+        var result = new AcceptedStateSelector(fixture.Time)
+            .Select(fixture.Observation, fixture.Request);
+
+        Assert.Equal(AcceptedStateCodes.Conflict, result.Code);
     }
 
     [Fact]
@@ -242,7 +275,9 @@ public sealed class AcceptedStateSelectorTests
             bool addDuplicateReceipt = false,
             bool addStaleCandidate = false,
             bool authorizeStaleCandidate = false,
-            bool selfSourceCopy = false)
+            bool selfSourceCopy = false,
+            bool addCopyAlongsideOriginal = false,
+            string? copyProvenanceMutation = null)
         {
             var lease = LineageTestData.Context(
                 AcceptedStateTestData.AcceptedAtUnixSeconds);
@@ -265,17 +300,17 @@ public sealed class AcceptedStateSelectorTests
             var candidatePayload = generationBytes;
             var candidateIdentity =
                 AcceptedStateTestData.OriginalCandidateIdentity;
+            var copy = new AcceptedStatePhysicalCopyV1(
+                ImmutableArray.CreateRange(generationBytes),
+                logicalIdentity,
+                AcceptedStateTestData.OriginalCandidateIdentity,
+                SourceArtifactId: selfSourceCopy
+                    ? addHigherCopy ? "10" : "20"
+                    : "42",
+                SourceArchiveSha256: new string('a', 64),
+                SourceEncryptedEnvelopeSha256: new string('b', 64));
             if (copyOnly)
             {
-                var copy = new AcceptedStatePhysicalCopyV1(
-                    ImmutableArray.CreateRange(generationBytes),
-                    logicalIdentity,
-                    AcceptedStateTestData.OriginalCandidateIdentity,
-                    SourceArtifactId: selfSourceCopy
-                        ? addHigherCopy ? "10" : "20"
-                        : "42",
-                    SourceArchiveSha256: new string('a', 64),
-                    SourceEncryptedEnvelopeSha256: new string('b', 64));
                 Assert.True(AcceptedStatePhysicalCopyCodec.TryEncode(
                     copy,
                     out candidatePayload));
@@ -308,6 +343,36 @@ public sealed class AcceptedStateSelectorTests
                 candidatePayload));
             if (addHigherCopy)
             {
+                var higherPayload = candidatePayload;
+                if (copyOnly || addCopyAlongsideOriginal)
+                {
+                    var higherCopy = addCopyAlongsideOriginal
+                        ? copy with { SourceArtifactId = "10" }
+                        : copy;
+                    higherCopy = copyProvenanceMutation switch
+                    {
+                        "artifact" => higherCopy with
+                        {
+                            SourceArtifactId = "43",
+                        },
+                        "archive" => higherCopy with
+                        {
+                            SourceArchiveSha256 = new string('c', 64),
+                        },
+                        "envelope" => higherCopy with
+                        {
+                            SourceEncryptedEnvelopeSha256 =
+                                new string('c', 64),
+                        },
+                        null => higherCopy,
+                        _ => throw new InvalidOperationException(
+                            "Unknown provenance mutation."),
+                    };
+                    Assert.True(AcceptedStatePhysicalCopyCodec.TryEncode(
+                        higherCopy,
+                        out higherPayload));
+                }
+
                 authenticated.Add(Object(
                     names,
                     baseScopeDigest,
@@ -315,7 +380,7 @@ public sealed class AcceptedStateSelectorTests
                     objectId: "20",
                     objectIdentity: new string('b', 64),
                     predecessorIdentity: null,
-                    candidatePayload));
+                    higherPayload));
             }
 
             if (addDuplicateOriginal)

@@ -61,6 +61,17 @@ internal sealed class AcceptedStateContext : IDisposable
         return value is not null;
     }
 
+    internal bool AllowsExpiry(
+        string logicalGenerationIdentity,
+        string selectedLineageHeadIdentity) =>
+        Volatile.Read(ref admitted) is not null &&
+        StringComparer.Ordinal.Equals(
+            LogicalGenerationIdentity,
+            logicalGenerationIdentity) &&
+        StringComparer.Ordinal.Equals(
+            SelectedLineageHeadIdentity,
+            selectedLineageHeadIdentity);
+
     public void Dispose()
     {
         var current = Interlocked.Exchange(ref admitted, null);

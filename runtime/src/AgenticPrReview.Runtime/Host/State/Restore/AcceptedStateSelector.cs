@@ -25,7 +25,7 @@ internal sealed record AcceptedStateSelectionResult(
     bool IsBootstrap,
     AcceptedStateSelection? Selection,
     AcceptedStateSelector.AuthorizedInitialLineageAbsence? InitialAbsence,
-    AcceptedStateSelector.AuthorizedAcceptedStateExpiry? Expiry)
+    AcceptedStateSelector.AcceptedStateExpiryCandidate? Expiry)
 {
     internal bool Succeeded =>
         StringComparer.Ordinal.Equals(Code, AcceptedStateCodes.Ready) &&
@@ -41,8 +41,9 @@ internal sealed record AcceptedStateSelectionResult(
         new(AcceptedStateCodes.Bootstrap, true, null, authority, null);
 
     internal static AcceptedStateSelectionResult Expired(
-        AcceptedStateSelector.AuthorizedAcceptedStateExpiry authority) =>
-        new(AcceptedStateCodes.Expired, false, null, null, authority);
+        AcceptedStateSelection selection,
+        AcceptedStateSelector.AcceptedStateExpiryCandidate candidate) =>
+        new(AcceptedStateCodes.Expired, false, selection, null, candidate);
 
     internal static AcceptedStateSelectionResult Fail(string code) =>
         new(code, false, null, null, null);
@@ -268,7 +269,12 @@ internal sealed class AcceptedStateSelector
         if (requiredWindow <= now)
         {
             return AcceptedStateSelectionResult.Expired(
-                new AuthorizedAcceptedStateExpiry(
+                new AcceptedStateSelection(
+                    current,
+                    predecessor,
+                    selectedHead,
+                    requiredWindow),
+                new AcceptedStateExpiryCandidate(
                     CapabilityIssuer,
                     request.Access,
                     request.BaseScope.RepositoryId,
@@ -511,6 +517,17 @@ internal sealed class AcceptedStateSelector
             }
         }
 
+        var copies = logical
+            .Where(candidate => candidate.Copy is not null)
+            .Select(candidate => candidate.Copy!)
+            .ToArray();
+        if (originals.Length == 0 &&
+            copies.Skip(1).Any(copy =>
+                !SourceMatchesCopy(copies[0], copy)))
+        {
+            return false;
+        }
+
         if (originals.Length == 1 &&
             !StringComparer.Ordinal.Equals(
                 originals[0].Physical.Header.ObjectIdentity,
@@ -573,6 +590,22 @@ internal sealed class AcceptedStateSelector
         StringComparer.Ordinal.Equals(
             copy.SourceEncryptedEnvelopeSha256,
             original.Metadata.EncryptedObjectDigest.Sha256);
+
+    private static bool SourceMatchesCopy(
+        AcceptedStatePhysicalCopyV1 expected,
+        AcceptedStatePhysicalCopyV1 actual) =>
+        StringComparer.Ordinal.Equals(
+            expected.OriginalCandidateObjectIdentity,
+            actual.OriginalCandidateObjectIdentity) &&
+        StringComparer.Ordinal.Equals(
+            expected.SourceArtifactId,
+            actual.SourceArtifactId) &&
+        AcceptedStateRecordValidation.FixedDigest(
+            expected.SourceArchiveSha256,
+            actual.SourceArchiveSha256) &&
+        AcceptedStateRecordValidation.FixedDigest(
+            expected.SourceEncryptedEnvelopeSha256,
+            actual.SourceEncryptedEnvelopeSha256);
 
     private sealed record ParsedCandidate(
         AuthenticatedStateObject Physical,
@@ -669,11 +702,11 @@ internal sealed class AcceptedStateSelector
             nameof(AuthorizedInitialLineageAbsence);
     }
 
-    internal sealed class AuthorizedAcceptedStateExpiry
+    internal sealed class AcceptedStateExpiryCandidate
     {
         private readonly AuthorizedLocatorAccess authority;
 
-        internal AuthorizedAcceptedStateExpiry(
+        internal AcceptedStateExpiryCandidate(
             object issuer,
             AuthorizedLocatorAccess authority,
             string repositoryId,
@@ -693,7 +726,7 @@ internal sealed class AcceptedStateSelector
             if (!ReferenceEquals(issuer, CapabilityIssuer))
             {
                 throw new InvalidOperationException(
-                    "Only accepted-state selection may mint expiry authority.");
+                    "Only accepted-state selection may identify expiry.");
             }
 
             this.authority = authority;
@@ -726,6 +759,26 @@ internal sealed class AcceptedStateSelector
         internal string ProducingRunIdentity { get; }
         internal long ProducingRunAttempt { get; }
 
+        internal bool TryAuthorize(
+            AcceptedStateContext? validated,
+            out AuthorizedAcceptedStateExpiry? expiry)
+        {
+            expiry = null;
+            if (validated is null ||
+                !validated.AllowsExpiry(
+                    LogicalGenerationIdentity,
+                    SelectedHeadIdentity))
+            {
+                return false;
+            }
+
+            expiry = new AuthorizedAcceptedStateExpiry(
+                CapabilityIssuer,
+                this,
+                validated);
+            return true;
+        }
+
         internal bool Allows(
             AuthorizedLocatorAccess access,
             LineageResolveRequest request,
@@ -752,6 +805,52 @@ internal sealed class AcceptedStateSelector
             StringComparer.Ordinal.Equals(
                 selected.Head.Header.ObjectIdentity,
                 SelectedHeadIdentity);
+
+        public override string ToString() =>
+            nameof(AcceptedStateExpiryCandidate);
+    }
+
+    internal sealed class AuthorizedAcceptedStateExpiry
+    {
+        private readonly AcceptedStateExpiryCandidate candidate;
+        private readonly AcceptedStateContext validated;
+
+        internal AuthorizedAcceptedStateExpiry(
+            object issuer,
+            AcceptedStateExpiryCandidate candidate,
+            AcceptedStateContext validated)
+        {
+            if (!ReferenceEquals(issuer, CapabilityIssuer))
+            {
+                throw new InvalidOperationException(
+                    "Only admitted accepted state may authorize expiry.");
+            }
+
+            this.candidate = candidate;
+            this.validated = validated;
+        }
+
+        internal string TerminalReceiptIdentity =>
+            candidate.TerminalReceiptIdentity;
+        internal string OriginalCandidateIdentity =>
+            candidate.OriginalCandidateIdentity;
+        internal string LogicalGenerationIdentity =>
+            candidate.LogicalGenerationIdentity;
+        internal string? ImmediatePredecessorReference =>
+            candidate.ImmediatePredecessorReference;
+        internal string? ImmediatePredecessorIdentity =>
+            candidate.ImmediatePredecessorIdentity;
+        internal long LogicalExpiresAtUnixSeconds =>
+            candidate.LogicalExpiresAtUnixSeconds;
+
+        internal bool Allows(
+            AuthorizedLocatorAccess access,
+            LineageResolveRequest request,
+            LineageReadOnlyObservationContext observation) =>
+            validated.AllowsExpiry(
+                candidate.LogicalGenerationIdentity,
+                candidate.SelectedHeadIdentity) &&
+            candidate.Allows(access, request, observation);
 
         public override string ToString() =>
             nameof(AuthorizedAcceptedStateExpiry);
