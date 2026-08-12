@@ -97,6 +97,36 @@ public sealed class AcceptedStateRecordCodecTests
     }
 
     [Fact]
+    public void PhysicalCopySourceArtifactIdUsesExactJavaScriptSafeBoundary()
+    {
+        var copy = AcceptedStateTestData.PhysicalCopy(out _);
+        var maximum = copy with
+        {
+            SourceArtifactId = "9007199254740991",
+        };
+
+        Assert.True(AcceptedStatePhysicalCopyCodec.TryEncode(
+            maximum,
+            out var encoded));
+        Assert.True(AcceptedStatePhysicalCopyCodec.TryDecode(
+            encoded,
+            out var decoded));
+        Assert.Equal(maximum.SourceArtifactId, decoded!.SourceArtifactId);
+
+        foreach (var invalid in new[]
+        {
+            "9007199254740992",
+            "9223372036854775808",
+            "18446744073709551616",
+        })
+        {
+            Assert.False(AcceptedStatePhysicalCopyCodec.TryEncode(
+                copy with { SourceArtifactId = invalid },
+                out _));
+        }
+    }
+
+    [Fact]
     public void EveryCodecRejectsWrongMagicAndVersion()
     {
         _ = AcceptedStateTestData.Publication(out var publication);

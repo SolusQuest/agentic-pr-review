@@ -404,6 +404,7 @@ internal static class AcceptedStateRecordValidation
             CultureInfo.InvariantCulture,
             out var parsed) &&
         parsed > 0 &&
+        parsed <= (ulong)LineageFormat.MaximumJavaScriptInteger &&
         StringComparer.Ordinal.Equals(
             value,
             parsed.ToString(CultureInfo.InvariantCulture));

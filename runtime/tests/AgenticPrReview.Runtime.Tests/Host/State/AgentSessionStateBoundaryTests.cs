@@ -489,14 +489,19 @@ public sealed class AgentSessionStateBoundaryTests
     internal static async Task<SessionFixture> BuildSessionAsync(
         string repositoryId = "repo",
         long reviewTarget = 1,
-        string sessionId = "session_0")
+        string sessionId = "session_0",
+        string workflowIdentity = "workflow",
+        byte[]? trustedPolicyBytes = null,
+        string buildId = "build",
+        string? baseSha = null,
+        string? headSha = null)
     {
         var trusted = new AgentSessionTrustedRequest(
             repositoryId,
             reviewTarget,
-            "workflow",
-            "trusted policy"u8.ToArray(),
-            "build",
+            workflowIdentity,
+            trustedPolicyBytes ?? "trusted policy"u8.ToArray(),
+            buildId,
             DeepSeekAdapterContext.Provider,
             DeepSeekAdapterContext.Model,
             DeepSeekAdapterContext.Adapter);
@@ -507,8 +512,8 @@ public sealed class AgentSessionStateBoundaryTests
         var identity = new ReviewedIdentity(
             repositoryId,
             reviewTarget,
-            new string('4', 40),
-            new string('5', 40));
+            baseSha ?? new string('4', 40),
+            headSha ?? new string('5', 40));
         var user = User("synthetic review context");
         var run = new AgentRunRequest(
             identity,

@@ -14,6 +14,8 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
     private int nextObjectId;
 
     internal bool ListComplete { get; set; } = true;
+    internal bool FilterListsByName { get; set; }
+    internal bool UseNumericObjectIds { get; set; }
     internal OpaqueStoreFailure ListFailure { get; set; }
     internal OpaqueStoreFailure MetadataFailure { get; set; }
     internal OpaqueStoreFailure DownloadFailure { get; set; }
@@ -129,6 +131,8 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
             }
 
             var references = objects.Values
+                .Where(item => !FilterListsByName ||
+                    item.Metadata.Reference.Name == request.Name)
                 .Select(item => item.Metadata.Reference)
                 .OrderBy(item => item.ObjectId.Value, StringComparer.Ordinal)
                 .ToImmutableArray();
@@ -368,7 +372,10 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
     }
 
     private string NextId() =>
-        string.Concat("object-", nextObjectId++.ToString("D4"));
+        UseNumericObjectIds
+            ? (++nextObjectId).ToString(
+                System.Globalization.CultureInfo.InvariantCulture)
+            : string.Concat("object-", nextObjectId++.ToString("D4"));
 
     private sealed record StoredObject(
         OpaqueStoreObjectMetadata Metadata,

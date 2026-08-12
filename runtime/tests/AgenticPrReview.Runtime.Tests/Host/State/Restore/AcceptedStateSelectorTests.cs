@@ -137,6 +137,81 @@ public sealed class AcceptedStateSelectorTests
             result.Selection.ImmediatePredecessor.Generation.Generation);
     }
 
+    [Fact]
+    public void NonActiveAcceptedStateRequiresExactSelectedHeadEvidence()
+    {
+        using var fixture = SelectorFixture.Ready(addStaleCandidate: true);
+
+        var result = new AcceptedStateSelector(fixture.Time)
+            .Select(fixture.Observation, fixture.Request);
+
+        Assert.Equal(AcceptedStateCodes.Conflict, result.Code);
+        Assert.False(result.IsBootstrap);
+    }
+
+    [Fact]
+    public void ExactSelectedHeadEvidenceAccountsForNonActiveAcceptedState()
+    {
+        using var fixture = SelectorFixture.Ready(
+            addStaleCandidate: true,
+            authorizeStaleCandidate: true);
+
+        var result = new AcceptedStateSelector(fixture.Time)
+            .Select(fixture.Observation, fixture.Request);
+
+        Assert.True(result.Succeeded, result.Code);
+    }
+
+    [Fact]
+    public void CopyMayNotNameItsOwnPhysicalArtifactAsSource()
+    {
+        using var fixture = SelectorFixture.Ready(
+            copyOnly: true,
+            selfSourceCopy: true);
+
+        var result = new AcceptedStateSelector(fixture.Time)
+            .Select(fixture.Observation, fixture.Request);
+
+        Assert.Equal(AcceptedStateCodes.IncompatibleCurrent, result.Code);
+    }
+
+    [Fact]
+    public void CurrentGenerationMustNameImmediatePredecessorEnvelope()
+    {
+        using var fixture = SelectorFixture.BoundedTail(
+            currentPredecessorMismatch: true);
+
+        var result = new AcceptedStateSelector(fixture.Time)
+            .Select(fixture.Observation, fixture.Request);
+
+        Assert.Equal(AcceptedStateCodes.Conflict, result.Code);
+    }
+
+    [Fact]
+    public void EveryPresentOlderReceiptMustContinueLogicalLineage()
+    {
+        using var fixture = SelectorFixture.BoundedTail(
+            includeOlderReceipt: true,
+            olderReceiptLogicalMismatch: true);
+
+        var result = new AcceptedStateSelector(fixture.Time)
+            .Select(fixture.Observation, fixture.Request);
+
+        Assert.Equal(AcceptedStateCodes.Conflict, result.Code);
+    }
+
+    [Fact]
+    public void ConsistentPresentOlderReceiptMayTerminateAtAbsentTail()
+    {
+        using var fixture = SelectorFixture.BoundedTail(
+            includeOlderReceipt: true);
+
+        var result = new AcceptedStateSelector(fixture.Time)
+            .Select(fixture.Observation, fixture.Request);
+
+        Assert.True(result.Succeeded, result.Code);
+    }
+
     private sealed class SelectorFixture : IDisposable
     {
         private readonly LineageTestData.ContextLease lease;
@@ -164,7 +239,10 @@ public sealed class AcceptedStateSelectorTests
             bool withReceipt = true,
             bool addUnknownCandidate = false,
             bool addDuplicateOriginal = false,
-            bool addDuplicateReceipt = false)
+            bool addDuplicateReceipt = false,
+            bool addStaleCandidate = false,
+            bool authorizeStaleCandidate = false,
+            bool selfSourceCopy = false)
         {
             var lease = LineageTestData.Context(
                 AcceptedStateTestData.AcceptedAtUnixSeconds);
@@ -193,13 +271,31 @@ public sealed class AcceptedStateSelectorTests
                     ImmutableArray.CreateRange(generationBytes),
                     logicalIdentity,
                     AcceptedStateTestData.OriginalCandidateIdentity,
-                    SourceArtifactId: "42",
+                    SourceArtifactId: selfSourceCopy
+                        ? addHigherCopy ? "10" : "20"
+                        : "42",
                     SourceArchiveSha256: new string('a', 64),
                     SourceEncryptedEnvelopeSha256: new string('b', 64));
                 Assert.True(AcceptedStatePhysicalCopyCodec.TryEncode(
                     copy,
                     out candidatePayload));
                 candidateIdentity = new string('a', 64);
+            }
+
+            AuthenticatedStateObject? staleCandidate = null;
+            if (addStaleCandidate)
+            {
+                staleCandidate = Object(
+                    names,
+                    baseScopeDigest,
+                    StateObjectClass.Candidate,
+                    objectId: "41",
+                    objectIdentity: new string('c', 64),
+                    predecessorIdentity: null,
+                    generationBytes,
+                    epoch: new string('a', 64),
+                    sessionId: new string('b', 64));
+                authenticated.Add(staleCandidate);
             }
 
             authenticated.Add(Object(
@@ -269,7 +365,12 @@ public sealed class AcceptedStateSelectorTests
                         AcceptedStateTestData.LogicalExpiresAtUnixSeconds),
                     LineageCodes.AuthenticationFailed))
                 : ImmutableArray<UnknownStateObject>.Empty;
-            var selectedHead = Head(names, baseScopeDigest);
+            var selectedHead = Head(
+                names,
+                baseScopeDigest,
+                authorizeStaleCandidate && staleCandidate is not null
+                    ? [LineageHeadCodec.Evidence(staleCandidate.Metadata)]
+                    : []);
             var snapshot = new ScopedStateInventorySnapshot(
                 names,
                 authenticated.ToImmutable(),
@@ -300,7 +401,10 @@ public sealed class AcceptedStateSelectorTests
                 logicalIdentity);
         }
 
-        internal static SelectorFixture BoundedTail()
+        internal static SelectorFixture BoundedTail(
+            bool currentPredecessorMismatch = false,
+            bool includeOlderReceipt = false,
+            bool olderReceiptLogicalMismatch = false)
         {
             var lease = LineageTestData.Context(
                 AcceptedStateTestData.AcceptedAtUnixSeconds);
@@ -340,7 +444,9 @@ public sealed class AcceptedStateSelectorTests
                 out var secondGenerationBytes,
                 generation: 2,
                 predecessorEnvelopeSha256:
-                    firstGeneration.StateEnvelopeSha256,
+                    currentPredecessorMismatch
+                        ? new string('7', 64)
+                        : firstGeneration.StateEnvelopeSha256,
                 previousLogicalGenerationIdentity: firstLogicalIdentity);
             Assert.True(AcceptedStateIdentity.TryComputeLogicalGeneration(
                 secondGenerationBytes,
@@ -388,6 +494,23 @@ public sealed class AcceptedStateSelectorTests
                 new string('6', 64),
                 firstReceiptIdentity,
                 secondReceiptBytes));
+            if (includeOlderReceipt)
+            {
+                _ = AcceptedStateTestData.Receipt(
+                    olderReceiptLogicalMismatch
+                        ? new string('8', 64)
+                        : missingLogicalIdentity,
+                    originalCandidateIdentity: new string('9', 64),
+                    bytes: out var olderReceiptBytes);
+                authenticated.Add(Object(
+                    names,
+                    baseScopeDigest,
+                    StateObjectClass.Acceptance,
+                    "29",
+                    missingReceiptIdentity,
+                    predecessorIdentity: null,
+                    olderReceiptBytes));
+            }
 
             var selectedHead = Head(names, baseScopeDigest);
             var snapshot = new ScopedStateInventorySnapshot(
@@ -468,7 +591,9 @@ public sealed class AcceptedStateSelectorTests
             string objectId,
             string objectIdentity,
             string? predecessorIdentity,
-            byte[] payload) =>
+            byte[] payload,
+            string? epoch = null,
+            string? sessionId = null) =>
             new(
                 Metadata(
                     names[objectClass],
@@ -476,8 +601,8 @@ public sealed class AcceptedStateSelectorTests
                     AcceptedStateTestData.LogicalExpiresAtUnixSeconds),
                 new StateControlHeaderV1(
                     baseScopeDigest,
-                    AcceptedStateTestData.Epoch,
-                    AcceptedStateTestData.SessionId,
+                    epoch ?? AcceptedStateTestData.Epoch,
+                    sessionId ?? AcceptedStateTestData.SessionId,
                     objectClass,
                     KeyId: new string('d', 64),
                     objectIdentity,
@@ -494,8 +619,11 @@ public sealed class AcceptedStateSelectorTests
 
         private static LineageHeadCandidate Head(
             ImmutableDictionary<StateObjectClass, OpaqueStoreName> names,
-            string baseScopeDigest)
+            string baseScopeDigest,
+            ImmutableArray<LineageArtifactEvidence>? authorizedHistorical =
+                null)
         {
+            var historical = authorizedHistorical ?? [];
             var metadata = Metadata(
                 names[StateObjectClass.LineageHead],
                 "1",
@@ -515,21 +643,31 @@ public sealed class AcceptedStateSelectorTests
                 AcceptedStateTestData.LogicalExpiresAtUnixSeconds,
                 RequiredPlatformExpiresAtUnixSeconds:
                     AcceptedStateTestData.LogicalExpiresAtUnixSeconds + 3_600);
+            var isReset = !historical.IsEmpty;
             var head = new LineageHeadV1(
-                LineageTransitionKind.Initial,
-                Ordinal: 0,
+                isReset
+                    ? LineageTransitionKind.Reset
+                    : LineageTransitionKind.Initial,
+                Ordinal: isReset ? 1UL : 0UL,
                 LineageTestData.Reviewed(),
-                PreviousEpoch: null,
-                PreviousHeadIdentity: null,
-                TransitionEvidenceIdentity: null,
+                PreviousEpoch: isReset ? new string('0', 64) : null,
+                PreviousHeadIdentity: isReset ? new string('1', 64) : null,
+                TransitionEvidenceIdentity: isReset
+                    ? new string('2', 64)
+                    : null,
                 ExpiryBoundaryUnixSeconds: null,
-                PhysicalPredecessors:
-                    ImmutableArray<LineageArtifactEvidence>.Empty,
+                PhysicalPredecessors: isReset
+                    ? [LineageHeadCodec.Evidence(metadata)]
+                    : [],
                 PhysicalSuperseded:
                     ImmutableArray<LineageArtifactEvidence>.Empty,
-                Superseded: ImmutableArray<LineageArtifactEvidence>.Empty,
+                Superseded: historical,
                 CompletedCleanup:
-                    ImmutableArray<LineageArtifactEvidence>.Empty);
+                    ImmutableArray<LineageArtifactEvidence>.Empty,
+                ResetAuthorityRunIdentity: isReset
+                    ? "workflow-run-42"
+                    : null,
+                ResetAuthorityRunAttempt: isReset ? 1 : null);
             return new LineageHeadCandidate(metadata, header, head);
         }
 

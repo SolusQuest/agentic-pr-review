@@ -7,6 +7,7 @@ using AgenticPrReview.Runtime.ActionHost.Policy;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Session;
+using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.State.GitHubArtifacts;
 using AgenticPrReview.Runtime.Host.State.Lineage;
 using AgenticPrReview.Runtime.Host.State.Locator;
@@ -173,6 +174,7 @@ internal sealed class AcceptedStateProductionAuthorization
             _ => false,
         };
         if (!validRoute ||
+            !invocation.IsBoundTo(launch) ||
             launch.Inputs.StateKey is null ||
             launch.Inputs.GitHubToken is null ||
             (invocation.Route == ActionHostAuthorizationRoute.WorkflowRun
@@ -219,6 +221,10 @@ internal sealed class AcceptedStateProductionAuthorization
             !StringComparer.Ordinal.Equals(
                 policy.BuildDiscriminator,
                 launch.BuildDiscriminator) ||
+            !StringComparer.Ordinal.Equals(
+                policy.ConfigPath,
+                launch.Inputs.ConfigPath ??
+                    ActionHostTrustedPolicyRequest.DefaultConfigPath) ||
             policy.StateRetentionSeconds !=
                 AcceptedStateFormat.LogicalWindowSeconds)
         {
@@ -350,6 +356,20 @@ internal sealed class AuthorizedAcceptedStateComposer
 
             locator = locatorResult.Context;
             var baseScope = BaseScope(authorization);
+            var publicationScope = new R4PublicationScopeV1(
+                (ulong)launch.RepositoryId,
+                (ulong)launch.RepositoryId,
+                invocation.WorkflowPath,
+                launch.WorkflowRef,
+                (ulong)invocation.PullRequest.Number,
+                policy.PolicySha256,
+                baseScope.PayloadBuildIdentity);
+            var publicationBinding = new AcceptedStatePublicationBinding(
+                publicationScope,
+                R4PublicationIdentityV1.ComputeScopeSha256(publicationScope),
+                launch.RepositoryName,
+                policy.PayloadSha256,
+                policy.BuildDiscriminator);
             var reviewed = new ReviewedTransitionFacts(
                 invocation.PullRequest.BaseSha,
                 invocation.PullRequest.HeadSha);
@@ -538,6 +558,7 @@ internal sealed class AuthorizedAcceptedStateComposer
                             policy.InstructionsSha256,
                             policy.PayloadSha256,
                             policy.BuildDiscriminator),
+                        publicationBinding,
                         trustedRequest,
                         currentReviewedIdentity,
                         request.CurrentReviewContext,
@@ -608,7 +629,7 @@ internal sealed class AuthorizedAcceptedStateComposer
             invocation.WorkflowBlobSha,
             policy.WorkflowCommitSha);
 
-    private static LineageBaseScope BaseScope(
+    internal static LineageBaseScope BaseScope(
         AcceptedStateProductionAuthorization authorization)
     {
         var launch = authorization.Launch;
@@ -629,12 +650,16 @@ internal sealed class AuthorizedAcceptedStateComposer
             policy.InstructionsSha256,
             policy.ToolsetSha256,
             policy.LimitsSha256,
-            Hash(
-                "apr.payload-build.s5",
-                policy.PolicySha256,
-                policy.PayloadSha256,
-                policy.BuildDiscriminator));
+            PayloadBuildIdentity(policy));
     }
+
+    internal static string PayloadBuildIdentity(
+        ActionHostTrustedPolicy policy) =>
+        Hash(
+            "apr.payload-build.s5",
+            policy.PolicySha256,
+            policy.PayloadSha256,
+            policy.BuildDiscriminator);
 
     private static async Task<LineageResolveResult> ResolveResetAsync(
         AcceptedStateProductionAuthorization authorization,

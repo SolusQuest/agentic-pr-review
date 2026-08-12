@@ -29,16 +29,26 @@ internal static class AcceptedStateTestData
     internal static ValidatedPublicationPayloadV1 Publication(
         out byte[] bytes,
         ReviewedIdentity? identity = null,
-        string? buildDiscriminator = null)
+        string? buildDiscriminator = null,
+        R4PublicationScopeV1? scope = null,
+        long? repositoryId = null,
+        string? repositoryName = null,
+        long? pullRequestNumber = null,
+        string? policyIdentitySha256 = null,
+        string? payloadSha256 = null,
+        string summary = "Review complete")
     {
-        var rendered = R4PublicationTestData.Render(identity: identity);
+        var rendered = R4PublicationTestData.Render(
+            summary: summary,
+            identity: identity,
+            scope: scope);
         Assert.True(ValidatedPublicationPayloadV1.TryCreate(
             rendered.Comment,
-            RepositoryId,
-            RepositoryName,
-            PullRequestNumber,
-            PolicySha256,
-            PayloadSha256,
+            repositoryId ?? RepositoryId,
+            repositoryName ?? RepositoryName,
+            pullRequestNumber ?? PullRequestNumber,
+            policyIdentitySha256 ?? PolicySha256,
+            payloadSha256 ?? PayloadSha256,
             buildDiscriminator ?? BuildDiscriminator,
             AcceptedStateFormat.RenderingVersion,
             out var publication));
@@ -95,12 +105,26 @@ internal static class AcceptedStateTestData
         string? previousAcceptanceReceiptIdentity = null,
         long acceptedAtUnixSeconds = AcceptedAtUnixSeconds,
         ReviewedIdentity? identity = null,
-        string? buildDiscriminator = null)
+        string? buildDiscriminator = null,
+        R4PublicationScopeV1? scope = null,
+        long? repositoryId = null,
+        string? repositoryName = null,
+        long? pullRequestNumber = null,
+        string? policyIdentitySha256 = null,
+        string? payloadSha256 = null,
+        string summary = "Review complete")
     {
         var publication = Publication(
             out var publicationBytes,
             identity,
-            buildDiscriminator);
+            buildDiscriminator,
+            scope,
+            repositoryId,
+            repositoryName,
+            pullRequestNumber,
+            policyIdentitySha256,
+            payloadSha256,
+            summary);
         var value = new AcceptanceReceiptV1(
             logicalGenerationIdentity,
             originalCandidateIdentity,
@@ -111,8 +135,8 @@ internal static class AcceptedStateTestData
             publication.RepositoryId,
             publication.PullRequestNumber,
             CommentId: 99,
-            $"https://github.com/{RepositoryName}/pull/" +
-                $"{PullRequestNumber}#issuecomment-99",
+            $"https://github.com/{repositoryName ?? RepositoryName}/pull/" +
+                $"{pullRequestNumber ?? PullRequestNumber}#issuecomment-99",
             publication.ScopeSha256,
             publication.BodySha256,
             AcceptedStateRecordValidation.Sha256(publicationBytes),

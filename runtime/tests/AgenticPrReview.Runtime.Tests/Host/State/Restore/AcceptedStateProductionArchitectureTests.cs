@@ -60,11 +60,6 @@ public sealed class AcceptedStateProductionArchitectureTests
     {
         var scenario = ActionHostAuthorizationScenario.Valid(
             ActionHostAuthorizationRoute.WorkflowRun);
-        var authorized = await scenario.CreateAuthorizer().AuthorizeAsync(
-            scenario.Launch,
-            CancellationToken.None);
-        var invocation = Assert.IsType<
-            ActionHostAuthorizer.AuthorizedInvocation>(authorized.Invocation);
         Assert.True(ActionHostStateKey.TryCreate(
             "state-key-material",
             out var stateKey));
@@ -94,6 +89,11 @@ public sealed class AcceptedStateProductionArchitectureTests
             scenario.Launch.Cancellation,
             scenario.Launch.ArtifactBridgeEndpoint,
             out var launch));
+        var authorized = await scenario.CreateAuthorizer().AuthorizeAsync(
+            launch!,
+            CancellationToken.None);
+        var invocation = Assert.IsType<
+            ActionHostAuthorizer.AuthorizedInvocation>(authorized.Invocation);
         Assert.True(ActionHostTrustedPolicyRequest.TryBind(
             launch,
             invocation,
@@ -120,6 +120,150 @@ public sealed class AcceptedStateProductionArchitectureTests
             request,
             out var production));
         Assert.NotNull(production);
+    }
+
+    [Theory]
+    [InlineData("run")]
+    [InlineData("attempt")]
+    [InlineData("workflow-ref")]
+    [InlineData("config")]
+    [InlineData("cancellation")]
+    [InlineData("credential-input")]
+    public async Task CrossPairedLaunchFailsBeforeEveryExternalDependency(
+        string mutation)
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowRun);
+        var exactLaunch = CloneLaunch(scenario.Launch, "state-key");
+        var authorized = await scenario.CreateAuthorizer().AuthorizeAsync(
+            exactLaunch,
+            CancellationToken.None);
+        var invocation = Assert.IsType<
+            ActionHostAuthorizer.AuthorizedInvocation>(authorized.Invocation);
+        Assert.True(ActionHostTrustedPolicyRequest.TryBind(
+            exactLaunch,
+            invocation,
+            out var policyRequest,
+            out var bindFailure));
+        Assert.Equal(ActionHostTrustedPolicyFailure.None, bindFailure);
+        var materialized = await ActionHostTrustedPolicy.MaterializeAsync(
+            policyRequest!,
+            ActionHostTrustedPolicyTests.ScriptedObjectTransport.Valid(
+                ActionHostTrustedPolicyTests.Config("sticky", null),
+                Encoding.UTF8.GetBytes("instructions")),
+            CancellationToken.None);
+        Assert.True(materialized.Succeeded);
+        var dependencies = new ThrowingDependencies();
+        var request = new ArtifactStateRestoreRequest(
+            CloneLaunch(exactLaunch, mutation),
+            invocation,
+            materialized.Policy!,
+            new ProjectChatMessage(
+                "user",
+                [new ProjectTextContent("review")]),
+            EmptyContinuationCodec.Instance,
+            dependencies);
+
+        var result = await new AuthorizedAcceptedStateComposer()
+            .RestoreAsync(request, CancellationToken.None);
+
+        Assert.Equal(AcceptedStateCodes.AccessDenied, result.Code);
+        Assert.Equal(0, dependencies.StoreCreates);
+        Assert.Equal(0, dependencies.TransportCreates);
+    }
+
+    [Fact]
+    public async Task MalformedAuthorizedStateKeyFailsBeforeStoreCreation()
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowRun);
+        var launch = CloneLaunch(scenario.Launch, "state-key");
+        var authorized = await scenario.CreateAuthorizer().AuthorizeAsync(
+            launch,
+            CancellationToken.None);
+        var invocation = Assert.IsType<
+            ActionHostAuthorizer.AuthorizedInvocation>(authorized.Invocation);
+        Assert.True(ActionHostTrustedPolicyRequest.TryBind(
+            launch,
+            invocation,
+            out var policyRequest,
+            out _));
+        var materialized = await ActionHostTrustedPolicy.MaterializeAsync(
+            policyRequest!,
+            ActionHostTrustedPolicyTests.ScriptedObjectTransport.Valid(
+                ActionHostTrustedPolicyTests.Config("sticky", null),
+                Encoding.UTF8.GetBytes("instructions")),
+            CancellationToken.None);
+        var dependencies = new ThrowingDependencies();
+
+        var result = await new AuthorizedAcceptedStateComposer().RestoreAsync(
+            new ArtifactStateRestoreRequest(
+                launch,
+                invocation,
+                materialized.Policy!,
+                new ProjectChatMessage(
+                    "user",
+                    [new ProjectTextContent("review")]),
+                EmptyContinuationCodec.Instance,
+                dependencies),
+            CancellationToken.None);
+
+        Assert.Equal(AcceptedStateCodes.KeyUnavailable, result.Code);
+        Assert.Equal(0, dependencies.StoreCreates);
+        Assert.Equal(0, dependencies.TransportCreates);
+    }
+
+    private static ActionHostLaunchContract CloneLaunch(
+        ActionHostLaunchContract launch,
+        string mutation)
+    {
+        var stateKey = launch.Inputs.StateKey;
+        var configPath = launch.Inputs.ConfigPath;
+        if (mutation is "state-key" or "credential-input")
+        {
+            Assert.True(ActionHostStateKey.TryCreate(
+                mutation == "state-key"
+                    ? "state-key-material"
+                    : "different-state-key-material",
+                out stateKey));
+        }
+
+        if (mutation == "config")
+        {
+            configPath = ".github/other-policy.json";
+        }
+
+        Assert.True(ActionHostInputs.TryCreate(
+            launch.Inputs.GitHubToken,
+            launch.Inputs.ProviderApiKey,
+            stateKey,
+            launch.Inputs.PreviousStateKey,
+            configPath,
+            launch.Inputs.PullRequestNumber,
+            launch.Inputs.StateMode,
+            out var inputs));
+        Assert.True(ActionHostLaunchContract.TryCreate(
+            inputs,
+            launch.EventJsonPath,
+            launch.EventJsonSha256,
+            launch.RepositoryName,
+            launch.RepositoryId,
+            mutation == "run" ? launch.RunId + 1 : launch.RunId,
+            mutation == "attempt" ? launch.RunAttempt + 1 : launch.RunAttempt,
+            launch.WorkflowPath,
+            mutation == "workflow-ref"
+                ? "refs/heads/other"
+                : launch.WorkflowRef,
+            launch.WorkflowSha,
+            launch.ActionSourceSha,
+            launch.PayloadSha256,
+            launch.BuildDiscriminator,
+            mutation == "cancellation"
+                ? ActionHostCancellationState.Requested
+                : launch.Cancellation,
+            launch.ArtifactBridgeEndpoint,
+            out var clone));
+        return clone!;
     }
 
     private sealed class ThrowingDependencies

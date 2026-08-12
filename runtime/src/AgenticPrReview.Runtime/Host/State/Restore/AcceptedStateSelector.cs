@@ -114,8 +114,12 @@ internal sealed class AcceptedStateSelector
                 AcceptedStateCodes.OutcomeUnknown);
         }
 
-        var active = snapshot.Authenticated
+        var relevant = snapshot.Authenticated
             .Concat(snapshot.UnderRetained)
+            .Where(item => item.Header.ObjectClass is
+                StateObjectClass.Candidate or StateObjectClass.Acceptance)
+            .ToImmutableArray();
+        var active = relevant
             .Where(item =>
                 StringComparer.Ordinal.Equals(
                     item.Header.Epoch,
@@ -124,20 +128,29 @@ internal sealed class AcceptedStateSelector
                     item.Header.SessionId,
                     selectedHead.Header.SessionId))
             .ToImmutableArray();
-        if (snapshot.Authenticated
-            .Concat(snapshot.UnderRetained)
-            .Any(item =>
-                (item.Header.ObjectClass is
-                    StateObjectClass.Candidate or StateObjectClass.Acceptance) &&
-                (StringComparer.Ordinal.Equals(
-                        item.Header.Epoch,
-                        selectedHead.Header.Epoch) !=
-                    StringComparer.Ordinal.Equals(
-                        item.Header.SessionId,
-                        selectedHead.Header.SessionId))))
+        var historicalEvidence = selectedHead.Head.Superseded
+            .Concat(selectedHead.Head.CompletedCleanup)
+            .ToImmutableArray();
+        foreach (var item in relevant.Except(active))
         {
-            return AcceptedStateSelectionResult.Fail(
-                AcceptedStateCodes.ScopeMismatch);
+            var epochMatches = StringComparer.Ordinal.Equals(
+                item.Header.Epoch,
+                selectedHead.Header.Epoch);
+            var sessionMatches = StringComparer.Ordinal.Equals(
+                item.Header.SessionId,
+                selectedHead.Header.SessionId);
+            if (epochMatches != sessionMatches)
+            {
+                return AcceptedStateSelectionResult.Fail(
+                    AcceptedStateCodes.ScopeMismatch);
+            }
+
+            if (!historicalEvidence.Any(evidence =>
+                LineageHeadCodec.Matches(evidence, item.Metadata)))
+            {
+                return AcceptedStateSelectionResult.Fail(
+                    AcceptedStateCodes.Conflict);
+            }
         }
 
         var candidates = new List<ParsedCandidate>();
@@ -227,6 +240,9 @@ internal sealed class AcceptedStateSelector
                     predecessor.LogicalGenerationIdentity) ||
                 current.Generation.Generation !=
                     predecessor.Generation.Generation + 1 ||
+                !AcceptedStateRecordValidation.FixedDigest(
+                    current.Generation.PredecessorEnvelopeSha256!,
+                    predecessor.Generation.StateEnvelopeSha256) ||
                 !StringComparer.Ordinal.Equals(
                     current.Generation.PreviousLogicalGenerationIdentity,
                     predecessor.LogicalGenerationIdentity))
@@ -324,6 +340,9 @@ internal sealed class AcceptedStateSelector
                         copy.LogicalGenerationIdentity,
                         logicalIdentity) ||
                     StringComparer.Ordinal.Equals(
+                        copy.SourceArtifactId,
+                        physical.Metadata.Reference.ObjectId.Value) ||
+                    StringComparer.Ordinal.Equals(
                         physical.Header.ObjectIdentity,
                         copy.OriginalCandidateObjectIdentity))))
             {
@@ -406,6 +425,7 @@ internal sealed class AcceptedStateSelector
         };
         var predecessorIdentity =
             terminal.Receipt.PreviousAcceptanceReceiptIdentity;
+        var successor = terminal;
         if (predecessorIdentity is not null)
         {
             if (!byIdentity.TryGetValue(predecessorIdentity, out immediate))
@@ -413,7 +433,13 @@ internal sealed class AcceptedStateSelector
                 return false;
             }
 
+            if (!ReceiptContinues(successor, immediate))
+            {
+                return false;
+            }
+
             visited.Add(predecessorIdentity);
+            successor = immediate;
             predecessorIdentity =
                 immediate.Receipt.PreviousAcceptanceReceiptIdentity;
         }
@@ -426,11 +452,27 @@ internal sealed class AcceptedStateSelector
                 return false;
             }
 
+            if (!ReceiptContinues(successor, older))
+            {
+                return false;
+            }
+
+            successor = older;
             predecessorIdentity = older.Receipt.PreviousAcceptanceReceiptIdentity;
         }
 
         return visited.Count == receipts.Count;
     }
+
+    private static bool ReceiptContinues(
+        ParsedReceipt successor,
+        ParsedReceipt predecessor) =>
+        StringComparer.Ordinal.Equals(
+            successor.Receipt.PreviousAcceptanceReceiptIdentity,
+            predecessor.Physical.Header.ObjectIdentity) &&
+        StringComparer.Ordinal.Equals(
+            successor.Receipt.PreviousLogicalGenerationIdentity,
+            predecessor.Receipt.LogicalGenerationIdentity);
 
     private static bool TrySelectGeneration(
         ParsedReceipt accepted,

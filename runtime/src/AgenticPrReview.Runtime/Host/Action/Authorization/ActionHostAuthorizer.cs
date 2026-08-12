@@ -254,6 +254,7 @@ internal sealed class ActionHostAuthorizer
                 $"agentic-pr-review-r4-{repository.Id}-pr-{pullRequest.Number}";
             var invocation = AuthorizedInvocation.Mint(
                 MintAuthority,
+                launch,
                 eventFact.Route,
                 launch.WorkflowPath,
                 launch.WorkflowSha,
@@ -752,7 +753,10 @@ internal sealed class ActionHostAuthorizer
 
     internal sealed class AuthorizedInvocation
     {
+        private readonly ActionHostLaunchContract authorizedLaunch;
+
         private AuthorizedInvocation(
+            ActionHostLaunchContract authorizedLaunch,
             ActionHostAuthorizationRoute route,
             string workflowPath,
             string workflowCommitSha,
@@ -763,6 +767,7 @@ internal sealed class ActionHostAuthorizer
             string declaredPermissions,
             FrozenPullRequest pullRequest)
         {
+            this.authorizedLaunch = authorizedLaunch;
             Route = route;
             WorkflowPath = workflowPath;
             WorkflowCommitSha = workflowCommitSha;
@@ -776,6 +781,7 @@ internal sealed class ActionHostAuthorizer
 
         internal static AuthorizedInvocation Mint(
             object authority,
+            ActionHostLaunchContract authorizedLaunch,
             ActionHostAuthorizationRoute route,
             string workflowPath,
             string workflowCommitSha,
@@ -793,6 +799,7 @@ internal sealed class ActionHostAuthorizer
             }
 
             return new(
+                authorizedLaunch,
                 route,
                 workflowPath,
                 workflowCommitSha,
@@ -813,5 +820,9 @@ internal sealed class ActionHostAuthorizer
         internal string ConcurrencyIdentity { get; }
         internal string DeclaredPermissions { get; }
         internal FrozenPullRequest PullRequest { get; }
+
+        internal bool IsBoundTo(ActionHostLaunchContract? launch) =>
+            ReferenceEquals(authorizedLaunch, launch) &&
+            launch?.Cancellation == ActionHostCancellationState.Active;
     }
 }

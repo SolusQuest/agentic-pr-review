@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Session;
+using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.State.Locator;
 
 namespace AgenticPrReview.Runtime.Host.State.Restore;
@@ -10,6 +11,13 @@ internal sealed record AcceptedStatePolicyBinding(
     string PolicyIdentitySha256,
     string ConfigSha256,
     string InstructionsSha256,
+    string PayloadSha256,
+    string BuildDiscriminator);
+
+internal sealed record AcceptedStatePublicationBinding(
+    R4PublicationScopeV1 Scope,
+    string ScopeSha256,
+    string RepositoryName,
     string PayloadSha256,
     string BuildDiscriminator);
 
@@ -85,6 +93,7 @@ internal sealed class AcceptedStateRestoreService
         LocatorContext locatorContext,
         AcceptedStateSelection selection,
         AcceptedStatePolicyBinding policyBinding,
+        AcceptedStatePublicationBinding publicationBinding,
         AgentSessionTrustedRequest trustedRequest,
         ReviewedIdentity currentReviewedIdentity,
         ProjectChatMessage currentReviewContext,
@@ -98,6 +107,7 @@ internal sealed class AcceptedStateRestoreService
             locatorContext is null ||
             selection is null ||
             policyBinding is null ||
+            publicationBinding is null ||
             trustedRequest is null ||
             currentReviewedIdentity is null ||
             !currentReviewedIdentity.IsValid() ||
@@ -111,32 +121,15 @@ internal sealed class AcceptedStateRestoreService
 
         var selected = selection.Current;
         var generation = selected.Generation;
-        if (!MatchesPolicy(generation, policyBinding) ||
-            !AcceptedStatePublicationPayloadCodec.TryDecode(
-                generation.PublicationPayloadBytes.AsSpan(),
-                out var publication) ||
-            publication is null ||
-            publication.RepositoryId != selected.Receipt.RepositoryId ||
-            publication.PullRequestNumber !=
-                selected.Receipt.PullRequestNumber ||
-            !StringComparer.Ordinal.Equals(
-                publication.ScopeSha256,
-                selected.Receipt.ScopeSha256) ||
-            !StringComparer.Ordinal.Equals(
-                publication.BodySha256,
-                selected.Receipt.BodySha256) ||
-            !StringComparer.Ordinal.Equals(
-                publication.ReviewedHeadSha,
-                selected.Receipt.ReviewedHeadSha) ||
-            !StringComparer.Ordinal.Equals(
-                publication.PolicyIdentitySha256,
-                policyBinding.PolicyIdentitySha256) ||
-            !StringComparer.Ordinal.Equals(
-                publication.PayloadSha256,
-                policyBinding.PayloadSha256) ||
-            !StringComparer.Ordinal.Equals(
-                publication.BuildDiscriminator,
-                policyBinding.BuildDiscriminator) ||
+        if (!MatchesPublication(
+                selected,
+                policyBinding,
+                publicationBinding) ||
+            (selection.ImmediatePredecessor is { } predecessor &&
+                !MatchesPublication(
+                    predecessor,
+                    policyBinding,
+                    publicationBinding)) ||
             !StringComparer.Ordinal.Equals(
                 currentReviewedIdentity.RepositoryId,
                 stateAccess.Scope.RepositoryId) ||
@@ -231,7 +224,12 @@ internal sealed class AcceptedStateRestoreService
                 !AcceptedStateRecordValidation.FixedDigest(
                     RestrictedStateEnvelope.EnvelopeSha256(
                         generation.EncryptedStateEnvelope.AsSpan()),
-                    generation.StateEnvelopeSha256))
+                    generation.StateEnvelopeSha256) ||
+                (selection.ImmediatePredecessor is { } admittedPredecessor &&
+                    !AcceptedStateRecordValidation.FixedDigest(
+                        admitted.Session.Value.Artifact.Document
+                            .PriorSessionSha256!,
+                        admittedPredecessor.Generation.SessionSha256)))
             {
                 if (admitted.Session is not null)
                 {
@@ -272,6 +270,81 @@ internal sealed class AcceptedStateRestoreService
         StringComparer.Ordinal.Equals(
             generation.BuildDiscriminator,
             expected.BuildDiscriminator);
+
+    private static bool MatchesPublication(
+        SelectedAcceptedGeneration selected,
+        AcceptedStatePolicyBinding policy,
+        AcceptedStatePublicationBinding expected)
+    {
+        var generation = selected.Generation;
+        var receipt = selected.Receipt;
+        if (!MatchesPolicy(generation, policy) ||
+            !R4PublicationIdentityV1.IsValidScope(expected.Scope) ||
+            !AcceptedStateRecordValidation.FixedDigest(
+                expected.Scope.PolicyIdentitySha256,
+                policy.PolicyIdentitySha256) ||
+            !AcceptedStateRecordValidation.FixedDigest(
+                expected.PayloadSha256,
+                policy.PayloadSha256) ||
+            !StringComparer.Ordinal.Equals(
+                expected.BuildDiscriminator,
+                policy.BuildDiscriminator) ||
+            !StringComparer.Ordinal.Equals(
+                R4PublicationIdentityV1.ComputeScopeSha256(expected.Scope),
+                expected.ScopeSha256) ||
+            expected.Scope.RepositoryId > long.MaxValue ||
+            expected.Scope.PullRequestNumber > long.MaxValue ||
+            !AcceptedStatePublicationPayloadCodec.TryDecode(
+                generation.PublicationPayloadBytes.AsSpan(),
+                out var publication) ||
+            publication is null)
+        {
+            return false;
+        }
+
+        var repositoryId = (long)expected.Scope.RepositoryId;
+        var pullRequestNumber = (long)expected.Scope.PullRequestNumber;
+        var canonicalCommentUrl =
+            $"https://github.com/{expected.RepositoryName}/pull/" +
+            $"{pullRequestNumber}#issuecomment-{receipt.CommentId}";
+        return publication.RepositoryId == repositoryId &&
+            receipt.RepositoryId == repositoryId &&
+            publication.PullRequestNumber == pullRequestNumber &&
+            receipt.PullRequestNumber == pullRequestNumber &&
+            StringComparer.Ordinal.Equals(
+                publication.RepositoryName,
+                expected.RepositoryName) &&
+            StringComparer.Ordinal.Equals(
+                receipt.CommentUrl,
+                canonicalCommentUrl) &&
+            StringComparer.Ordinal.Equals(
+                publication.ScopeSha256,
+                expected.ScopeSha256) &&
+            StringComparer.Ordinal.Equals(
+                receipt.ScopeSha256,
+                expected.ScopeSha256) &&
+            StringComparer.Ordinal.Equals(
+                publication.BodySha256,
+                receipt.BodySha256) &&
+            StringComparer.Ordinal.Equals(
+                publication.ReviewedHeadSha,
+                generation.ProducerHeadSha) &&
+            StringComparer.Ordinal.Equals(
+                publication.ReviewedHeadSha,
+                receipt.ReviewedHeadSha) &&
+            StringComparer.Ordinal.Equals(
+                publication.PolicyIdentitySha256,
+                expected.Scope.PolicyIdentitySha256) &&
+            StringComparer.Ordinal.Equals(
+                publication.PayloadSha256,
+                expected.PayloadSha256) &&
+            StringComparer.Ordinal.Equals(
+                publication.BuildDiscriminator,
+                expected.BuildDiscriminator) &&
+            AcceptedStateRecordValidation.FixedDigest(
+                generation.PublicationPayloadSha256,
+                receipt.PublicationPayloadSha256);
+    }
 
     private static void Zero(RestrictedStateAdmittedSession admitted)
     {

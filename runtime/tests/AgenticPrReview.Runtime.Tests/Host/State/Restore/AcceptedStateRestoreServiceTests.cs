@@ -4,6 +4,7 @@ using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
+using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.Lineage;
 using AgenticPrReview.Runtime.Host.State.Locator;
@@ -16,8 +17,26 @@ namespace AgenticPrReview.Runtime.Tests.Host.State.Restore;
 
 public sealed class AcceptedStateRestoreServiceTests
 {
-    [Fact]
-    public async Task RealEncryptedAgentSessionPassesRetainedR3Admission()
+    [Theory]
+    [InlineData("none")]
+    [InlineData("repository-id")]
+    [InlineData("source-repository-id")]
+    [InlineData("repository-name")]
+    [InlineData("workflow-path")]
+    [InlineData("workflow-ref")]
+    [InlineData("pull-request")]
+    [InlineData("comment-url")]
+    [InlineData("scope-policy")]
+    [InlineData("payload-build")]
+    [InlineData("reviewed-head")]
+    [InlineData("body")]
+    [InlineData("payload")]
+    [InlineData("build")]
+    [InlineData("publication-corruption")]
+    [InlineData("predecessor-publication")]
+    [InlineData("predecessor-session")]
+    public async Task RealEncryptedAgentSessionRequiresExactPublicationBinding(
+        string mutation)
     {
         var fixture = await AgentSessionStateBoundaryTests.BuildSessionAsync(
             AcceptedStateTestData.RepositoryId.ToString(
@@ -75,10 +94,76 @@ public sealed class AcceptedStateRestoreServiceTests
             encryptCode);
         Assert.NotNull(envelope);
 
+        var authorizedPublicationScope = new R4PublicationScopeV1(
+            (ulong)AcceptedStateTestData.RepositoryId,
+            (ulong)AcceptedStateTestData.RepositoryId,
+            ".github/workflows/review.yml",
+            "refs/heads/main",
+            (ulong)AcceptedStateTestData.PullRequestNumber,
+            AcceptedStateTestData.PolicySha256,
+            "action-contract/v1+payload-build:runtime-payload-v1");
+        var publicationScope = mutation switch
+        {
+            "repository-id" => authorizedPublicationScope with
+            {
+                RepositoryId = authorizedPublicationScope.RepositoryId + 1,
+            },
+            "source-repository-id" => authorizedPublicationScope with
+            {
+                WorkflowSourceRepositoryId =
+                    authorizedPublicationScope.WorkflowSourceRepositoryId + 1,
+            },
+            "workflow-path" => authorizedPublicationScope with
+            {
+                WorkflowPath = ".github/workflows/other.yml",
+            },
+            "workflow-ref" => authorizedPublicationScope with
+            {
+                WorkflowRef = "refs/heads/other",
+            },
+            "pull-request" => authorizedPublicationScope with
+            {
+                PullRequestNumber =
+                    authorizedPublicationScope.PullRequestNumber + 1,
+            },
+            "scope-policy" => authorizedPublicationScope with
+            {
+                PolicyIdentitySha256 = new string('e', 64),
+            },
+            "payload-build" => authorizedPublicationScope with
+            {
+                ActionContractPayloadIdentity = "other-payload-build",
+            },
+            _ => authorizedPublicationScope,
+        };
+        var publicationIdentity = new ReviewedIdentity(
+            publicationScope.RepositoryId.ToString(
+                System.Globalization.CultureInfo.InvariantCulture),
+            (long)publicationScope.PullRequestNumber,
+            fixture.Identity.BaseSha,
+            mutation == "reviewed-head"
+                ? new string('e', 40)
+                : fixture.Identity.HeadSha);
+        var publicationRepositoryName = mutation == "repository-name"
+            ? "other/repository"
+            : AcceptedStateTestData.RepositoryName;
+        var publicationPolicy = publicationScope.PolicyIdentitySha256;
+        var publicationPayload = mutation == "payload"
+            ? new string('e', 64)
+            : AcceptedStateTestData.PayloadSha256;
+        var publicationBuild = mutation == "build"
+            ? "other-runtime-payload"
+            : document.BuildId;
         var publication = AcceptedStateTestData.Publication(
             out var publicationBytes,
-            fixture.Identity,
-            document.BuildId);
+            publicationIdentity,
+            publicationBuild,
+            publicationScope,
+            (long)publicationScope.RepositoryId,
+            publicationRepositoryName,
+            (long)publicationScope.PullRequestNumber,
+            publicationPolicy,
+            publicationPayload);
         var generation = new StateGenerationRecordV1(
             ImmutableArray.CreateRange(envelope),
             RestrictedStateEnvelope.EnvelopeSha256(envelope),
@@ -111,8 +196,40 @@ public sealed class AcceptedStateRestoreServiceTests
             logicalIdentity,
             AcceptedStateTestData.OriginalCandidateIdentity,
             out var receiptBytes,
-            identity: fixture.Identity,
-            buildDiscriminator: document.BuildId);
+            identity: publicationIdentity,
+            buildDiscriminator: publicationBuild,
+            scope: publicationScope,
+            repositoryId: (long)publicationScope.RepositoryId,
+            repositoryName: publicationRepositoryName,
+            pullRequestNumber: (long)publicationScope.PullRequestNumber,
+            policyIdentitySha256: publicationPolicy,
+            payloadSha256: publicationPayload);
+        if (mutation == "comment-url")
+        {
+            receipt = receipt with
+            {
+                CommentUrl = $"https://github.com/other/repository/pull/" +
+                    $"{receipt.PullRequestNumber}#issuecomment-" +
+                    receipt.CommentId,
+            };
+        }
+        else if (mutation == "body")
+        {
+            receipt = receipt with { BodySha256 = new string('e', 64) };
+        }
+        if (mutation == "publication-corruption")
+        {
+            var corruptedPublication = publicationBytes.ToArray();
+            corruptedPublication[^1] ^= 0x01;
+            generation = generation with
+            {
+                PublicationPayloadBytes =
+                    ImmutableArray.CreateRange(corruptedPublication),
+                PublicationPayloadSha256 =
+                    AcceptedStateRecordValidation.Sha256(
+                        corruptedPublication),
+            };
+        }
         Assert.Equal(publication.ReviewedHeadSha, receipt.ReviewedHeadSha);
 
         var candidatePhysical = Physical(
@@ -130,15 +247,28 @@ public sealed class AcceptedStateRestoreServiceTests
             document.SessionId,
             receiptBytes);
         var head = Head(document.SessionId);
+        var current = new SelectedAcceptedGeneration(
+            candidatePhysical,
+            generation,
+            receipt,
+            receiptPhysical,
+            logicalIdentity,
+            AcceptedStateTestData.OriginalCandidateIdentity);
+        var immediatePredecessor = mutation is
+            "predecessor-publication" or "predecessor-session"
+            ? current with
+            {
+                Receipt = mutation == "predecessor-publication"
+                    ? receipt with
+                    {
+                        ScopeSha256 = new string('e', 64),
+                    }
+                    : receipt,
+            }
+            : null;
         var selection = new AcceptedStateSelection(
-            new SelectedAcceptedGeneration(
-                candidatePhysical,
-                generation,
-                receipt,
-                receiptPhysical,
-                logicalIdentity,
-                AcceptedStateTestData.OriginalCandidateIdentity),
-            ImmediatePredecessor: null,
+            current,
+            immediatePredecessor,
             head,
             AcceptedStateTestData.LogicalExpiresAtUnixSeconds);
         using var transport = new NoCallGitObjectTransport();
@@ -154,6 +284,13 @@ public sealed class AcceptedStateRestoreServiceTests
                 AcceptedStateTestData.InstructionsSha256,
                 AcceptedStateTestData.PayloadSha256,
                 document.BuildId),
+            new AcceptedStatePublicationBinding(
+                authorizedPublicationScope,
+                R4PublicationIdentityV1.ComputeScopeSha256(
+                    authorizedPublicationScope),
+                AcceptedStateTestData.RepositoryName,
+                AcceptedStateTestData.PayloadSha256,
+                document.BuildId),
             fixture.Trusted,
             fixture.Identity,
             new ProjectChatMessage(
@@ -164,12 +301,26 @@ public sealed class AcceptedStateRestoreServiceTests
             AcceptedStateTestData.RepositoryName,
             CancellationToken.None);
 
-        Assert.True(result.Succeeded, result.Code);
-        using var context = Assert.IsType<AcceptedStateContext>(result.Context);
-        Assert.True(context.TryGetAdmittedValue(out var admitted));
-        Assert.NotNull(admitted);
-        Assert.Equal(logicalIdentity, context.LogicalGenerationIdentity);
-        Assert.Equal(0, transport.CommitCalls);
+        if (mutation == "none")
+        {
+            Assert.True(result.Succeeded, result.Code);
+            using var context = Assert.IsType<AcceptedStateContext>(
+                result.Context);
+            Assert.True(context.TryGetAdmittedValue(out var admitted));
+            Assert.NotNull(admitted);
+            Assert.Equal(logicalIdentity, context.LogicalGenerationIdentity);
+            Assert.Equal(0, transport.CommitCalls);
+        }
+        else
+        {
+            Assert.Equal(
+                mutation == "predecessor-session"
+                    ? AcceptedStateCodes.IncompatibleCurrent
+                    : AcceptedStateCodes.ScopeMismatch,
+                result.Code);
+            Assert.Null(result.Context);
+            Assert.Equal(0, transport.CommitCalls);
+        }
     }
 
     private static AuthenticatedStateObject Physical(
