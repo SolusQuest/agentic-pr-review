@@ -192,8 +192,10 @@ internal sealed class AcceptedStateSelector
         {
             return candidates.Count == 0
                 ? AcceptedStateSelectionResult.Bootstrap()
-                : AcceptedStateSelectionResult.Fail(
-                    AcceptedStateCodes.IncompatibleCurrent);
+                : IsUniqueInitialPendingGeneration(candidates)
+                    ? AcceptedStateSelectionResult.Bootstrap()
+                    : AcceptedStateSelectionResult.Fail(
+                        AcceptedStateCodes.IncompatibleCurrent);
         }
 
         if (!TrySelectBoundedReceiptTail(
@@ -280,6 +282,7 @@ internal sealed class AcceptedStateSelector
                     request.BaseScope.RepositoryId,
                     observation.BaseScopeDigest,
                     observation.InventoryDigest,
+                    TransitionTargetInventoryDigest(snapshot, selectedHead),
                     observation.CurrentKeyId,
                     selectedHead.Header.ObjectIdentity,
                     terminal.Physical.Header.ObjectIdentity,
@@ -369,6 +372,66 @@ internal sealed class AcceptedStateSelector
             CryptographicOperations.ZeroMemory(canonical);
         }
     }
+
+    private static bool IsUniqueInitialPendingGeneration(
+        IReadOnlyList<ParsedCandidate> candidates)
+    {
+        var first = candidates[0];
+        if (first.Generation.Generation != 0 ||
+            first.Generation.PredecessorEnvelopeSha256 is not null ||
+            first.Generation.PreviousLogicalGenerationIdentity is not null ||
+            first.Physical.Header.PredecessorIdentity is not null ||
+            candidates.Any(candidate =>
+                candidate.Generation.Generation != 0 ||
+                candidate.Generation.PredecessorEnvelopeSha256 is not null ||
+                candidate.Generation.PreviousLogicalGenerationIdentity is not null ||
+                candidate.Physical.Header.PredecessorIdentity is not null ||
+                !StringComparer.Ordinal.Equals(
+                    candidate.LogicalIdentity,
+                    first.LogicalIdentity) ||
+                !candidate.CanonicalGeneration.AsSpan().SequenceEqual(
+                    first.CanonicalGeneration.AsSpan())))
+        {
+            return false;
+        }
+
+        var originals = candidates.Where(candidate => candidate.IsOriginal)
+            .ToArray();
+        if (originals.Length > 1)
+        {
+            return false;
+        }
+
+        var copies = candidates
+            .Where(candidate => candidate.Copy is not null)
+            .Select(candidate => candidate.Copy!)
+            .ToArray();
+        return originals.Length == 1
+            ? copies.All(copy =>
+                StringComparer.Ordinal.Equals(
+                    copy.OriginalCandidateObjectIdentity,
+                    originals[0].Physical.Header.ObjectIdentity) &&
+                SourceMatchesOriginal(copy, originals[0].Physical))
+            : copies.Length == candidates.Count &&
+                copies.Skip(1).All(copy => SourceMatchesCopy(copies[0], copy));
+    }
+
+    private static string TransitionTargetInventoryDigest(
+        ScopedStateInventorySnapshot snapshot,
+        LineageHeadCandidate selectedHead) =>
+        LineageCryptography.InventoryDigest(snapshot.Authenticated
+            .Concat(snapshot.UnderRetained)
+            .Where(item =>
+                item.Header.ObjectClass != StateObjectClass.LineageHead &&
+                item.Header.ObjectClass is not StateObjectClass.Reset and not
+                    StateObjectClass.ExpiryTransition &&
+                StringComparer.Ordinal.Equals(
+                    item.Header.Epoch,
+                    selectedHead.Header.Epoch))
+            .Select(item => LineageHeadCodec.Evidence(item.Metadata))
+            .OrderBy(value => value.Name, StringComparer.Ordinal)
+            .ThenBy(value => value.ObjectId, StringComparer.Ordinal)
+            .ToImmutableArray());
 
     private static bool ReceiptMatchesOuter(
         AuthenticatedStateObject physical,
@@ -712,6 +775,7 @@ internal sealed class AcceptedStateSelector
             string repositoryId,
             string baseScopeDigest,
             string inventoryDigest,
+            string targetInventoryDigest,
             string currentKeyId,
             string selectedHeadIdentity,
             string terminalReceiptIdentity,
@@ -733,6 +797,7 @@ internal sealed class AcceptedStateSelector
             RepositoryId = repositoryId;
             BaseScopeDigest = baseScopeDigest;
             InventoryDigest = inventoryDigest;
+            TargetInventoryDigest = targetInventoryDigest;
             CurrentKeyId = currentKeyId;
             SelectedHeadIdentity = selectedHeadIdentity;
             TerminalReceiptIdentity = terminalReceiptIdentity;
@@ -748,6 +813,7 @@ internal sealed class AcceptedStateSelector
         internal string RepositoryId { get; }
         internal string BaseScopeDigest { get; }
         internal string InventoryDigest { get; }
+        internal string TargetInventoryDigest { get; }
         internal string CurrentKeyId { get; }
         internal string SelectedHeadIdentity { get; }
         internal string TerminalReceiptIdentity { get; }
@@ -836,6 +902,8 @@ internal sealed class AcceptedStateSelector
             candidate.OriginalCandidateIdentity;
         internal string LogicalGenerationIdentity =>
             candidate.LogicalGenerationIdentity;
+        internal string TargetInventoryDigest =>
+            candidate.TargetInventoryDigest;
         internal string? ImmediatePredecessorReference =>
             candidate.ImmediatePredecessorReference;
         internal string? ImmediatePredecessorIdentity =>

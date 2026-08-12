@@ -321,6 +321,27 @@ internal sealed record LineageReadOnlyObservationResult(
         new(code, null);
 }
 
+internal sealed record LineageInterruptedTransitionRecoveryResult(
+    string Code,
+    bool Recovered,
+    SelectedLineageContext? Context)
+{
+    internal bool Succeeded =>
+        StringComparer.Ordinal.Equals(Code, LineageCodes.Ready) &&
+        (!Recovered || Context is not null);
+
+    internal static LineageInterruptedTransitionRecoveryResult None() =>
+        new(LineageCodes.Ready, false, null);
+
+    internal static LineageInterruptedTransitionRecoveryResult Success(
+        SelectedLineageContext context) =>
+        new(LineageCodes.Ready, true, context);
+
+    internal static LineageInterruptedTransitionRecoveryResult Fail(
+        string code) =>
+        new(code, false, null);
+}
+
 internal sealed class LineageReadOnlyObservationContext : IDisposable
 {
     private ScopedStateInventorySnapshot? snapshot;

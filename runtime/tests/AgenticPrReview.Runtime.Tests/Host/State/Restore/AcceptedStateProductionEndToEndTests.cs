@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
@@ -10,6 +11,7 @@ using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
+using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.Lineage;
@@ -18,6 +20,7 @@ using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 using AgenticPrReview.Runtime.Host.State.Restore;
 using AgenticPrReview.Runtime.Tests.Host.Action.Authorization;
 using AgenticPrReview.Runtime.Tests.Host.Action.Policy;
+using AgenticPrReview.Runtime.Tests.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Tests.Host.State.Lineage;
 using AgenticPrReview.Runtime.Tests.Host.State.Locator;
 
@@ -85,7 +88,7 @@ public sealed class AcceptedStateProductionEndToEndTests
             Assert.True(bootstrapContext.TryGetLineageSnapshot(
                 out var selected));
             Assert.NotNull(selected);
-            await SeedAcceptedGenerationAsync(
+            _ = await SeedAcceptedGenerationAsync(
                 store,
                 request,
                 selected!,
@@ -226,7 +229,7 @@ public sealed class AcceptedStateProductionEndToEndTests
         {
             Assert.True(bootstrapContext.TryGetLineageSnapshot(
                 out var selected));
-            await SeedAcceptedGenerationAsync(
+            _ = await SeedAcceptedGenerationAsync(
                 store,
                 request,
                 selected!,
@@ -248,12 +251,726 @@ public sealed class AcceptedStateProductionEndToEndTests
         Assert.Equal(deletesBeforeRestore, store.DeleteCalls);
     }
 
-    private static async Task SeedAcceptedGenerationAsync(
+    [Fact]
+    public async Task ProductionEntryPreservesInitialPendingCandidateForP5()
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowRun);
+        var launch = StateLaunch(scenario.Launch, currentKeyByte: 0x42);
+        var authorized = await scenario.CreateAuthorizer().AuthorizeAsync(
+            launch,
+            CancellationToken.None);
+        var invocation = Assert.IsType<
+            ActionHostAuthorizer.AuthorizedInvocation>(authorized.Invocation);
+        Assert.True(ActionHostTrustedPolicyRequest.TryBind(
+            launch,
+            invocation,
+            out var policyRequest,
+            out _));
+        var materialized = await ActionHostTrustedPolicy.MaterializeAsync(
+            policyRequest!,
+            ActionHostTrustedPolicyTests.ScriptedObjectTransport.Valid(
+                ActionHostTrustedPolicyTests.Config("sticky", null),
+                Encoding.UTF8.GetBytes("trusted accepted-state policy")),
+            CancellationToken.None);
+        Assert.True(materialized.Succeeded);
+        var time = new MutableLineageTimeProvider(
+            AcceptedStateTestData.AcceptedAtUnixSeconds);
+        var store = new ScriptedLocatorStore
+        {
+            FilterListsByName = true,
+            UseNumericObjectIds = true,
+        };
+        var request = new ArtifactStateRestoreRequest(
+            launch,
+            invocation,
+            materialized.Policy!,
+            User("current review context"),
+            DeepSeekReasoningContinuationCodec.Instance,
+            new EndToEndDependencies(store),
+            time);
+        var bootstrap = await RestrictedStateService
+            .RestoreAuthorizedArtifactStateAsync(
+                request,
+                CancellationToken.None);
+        Assert.True(bootstrap.Succeeded, bootstrap.Code);
+        SelectedLineageSnapshot selected;
+        using (var bootstrapContext = Assert.IsType<
+            AuthorizedAcceptedStateRestoreContext>(bootstrap.Context))
+        {
+            Assert.True(bootstrapContext.TryGetLineageSnapshot(
+                out var snapshot));
+            selected = snapshot!;
+            _ = await SeedAcceptedGenerationAsync(
+                store,
+                request,
+                selected,
+                time,
+                includeReceipt: false);
+        }
+
+        var uploadsBeforeRetry = store.UploadCalls;
+        var deletesBeforeRetry = store.DeleteCalls;
+        var retried = await RestrictedStateService
+            .RestoreAuthorizedArtifactStateAsync(
+                request,
+                CancellationToken.None);
+
+        Assert.True(retried.Succeeded, retried.Code);
+        Assert.True(retried.IsBootstrap);
+        using var retriedContext = Assert.IsType<
+            AuthorizedAcceptedStateRestoreContext>(retried.Context);
+        Assert.False(retriedContext.HasAcceptedSession);
+        Assert.True(retriedContext.TryGetLineageSnapshot(out var retriedLineage));
+        Assert.Equal(selected, retriedLineage);
+        Assert.Equal(uploadsBeforeRetry, store.UploadCalls);
+        Assert.Equal(deletesBeforeRetry, store.DeleteCalls);
+    }
+
+    [Theory]
+    [InlineData(ExpiryCrashCut.AfterIntentUpload)]
+    [InlineData(ExpiryCrashCut.AfterTargetDelete)]
+    [InlineData(ExpiryCrashCut.AfterSuccessorUpload)]
+    [InlineData(ExpiryCrashCut.DuringSuccessorCleanup)]
+    public async Task NextProcessConvergesInterruptedTypedExpiry(
+        ExpiryCrashCut crashCut)
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowRun);
+        var launch = StateLaunch(scenario.Launch, currentKeyByte: 0x42);
+        var authorized = await scenario.CreateAuthorizer().AuthorizeAsync(
+            launch,
+            CancellationToken.None);
+        var invocation = Assert.IsType<
+            ActionHostAuthorizer.AuthorizedInvocation>(authorized.Invocation);
+        Assert.True(ActionHostTrustedPolicyRequest.TryBind(
+            launch,
+            invocation,
+            out var policyRequest,
+            out _));
+        var materialized = await ActionHostTrustedPolicy.MaterializeAsync(
+            policyRequest!,
+            ActionHostTrustedPolicyTests.ScriptedObjectTransport.Valid(
+                ActionHostTrustedPolicyTests.Config("sticky", null),
+                Encoding.UTF8.GetBytes("trusted accepted-state policy")),
+            CancellationToken.None);
+        Assert.True(materialized.Succeeded);
+        var time = new MutableLineageTimeProvider(
+            AcceptedStateTestData.AcceptedAtUnixSeconds);
+        var store = new ScriptedLocatorStore
+        {
+            FilterListsByName = true,
+            UseNumericObjectIds = true,
+        };
+        var request = new ArtifactStateRestoreRequest(
+            launch,
+            invocation,
+            materialized.Policy!,
+            User("current review context"),
+            DeepSeekReasoningContinuationCodec.Instance,
+            new EndToEndDependencies(store),
+            time);
+        var bootstrap = await RestrictedStateService
+            .RestoreAuthorizedArtifactStateAsync(
+                request,
+                CancellationToken.None);
+        Assert.True(bootstrap.Succeeded, bootstrap.Code);
+        AcceptedSeed seed;
+        using (var bootstrapContext = Assert.IsType<
+            AuthorizedAcceptedStateRestoreContext>(bootstrap.Context))
+        {
+            Assert.True(bootstrapContext.TryGetLineageSnapshot(
+                out var selected));
+            seed = await SeedAcceptedGenerationAsync(
+                store,
+                request,
+                selected!,
+                time);
+        }
+
+        time.UnixSeconds += AcceptedStateFormat.LogicalWindowSeconds;
+        var interruptedStore = new InterruptedExpiryStore(
+            store,
+            seed,
+            crashCut);
+        var interruptedRequest = request with
+        {
+            Dependencies = new EndToEndDependencies(interruptedStore),
+        };
+        var interrupted = await RestrictedStateService
+            .RestoreAuthorizedArtifactStateAsync(
+                interruptedRequest,
+                CancellationToken.None);
+        Assert.False(interrupted.Succeeded);
+        Assert.Equal(AcceptedStateCodes.OutcomeUnknown, interrupted.Code);
+
+        var recovered = await RestrictedStateService
+            .RestoreAuthorizedArtifactStateAsync(
+                interruptedRequest,
+                CancellationToken.None);
+
+        Assert.True(recovered.Succeeded, recovered.Code);
+        Assert.True(recovered.IsBootstrap);
+        using var recoveredContext = Assert.IsType<
+            AuthorizedAcceptedStateRestoreContext>(recovered.Context);
+        Assert.False(recoveredContext.HasAcceptedSession);
+        Assert.True(recoveredContext.TryGetLineageSnapshot(out var lineage));
+        Assert.Equal(LineageTransitionKind.Expiry, lineage!.Transition);
+        Assert.Equal(1, interruptedStore.ExpiryIntentUploads);
+        Assert.Equal(1, interruptedStore.SuccessorUploads);
+        Assert.Empty(store.Objects.Where(item =>
+            item.Reference.Name == seed.CandidateName ||
+            item.Reference.Name == seed.AcceptanceName ||
+            item.Reference.Name == seed.ExpiryName));
+        Assert.Equal(2, store.Objects.Count(item =>
+            item.Reference.Name == seed.LineageName));
+    }
+
+    [Fact]
+    public async Task ProductionEntryRestoresMaximumGenerationFifteenComposite()
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowRun);
+        var launch = StateLaunch(scenario.Launch, currentKeyByte: 0x42);
+        var authorized = await scenario.CreateAuthorizer().AuthorizeAsync(
+            launch,
+            CancellationToken.None);
+        var invocation = Assert.IsType<
+            ActionHostAuthorizer.AuthorizedInvocation>(authorized.Invocation);
+        Assert.True(ActionHostTrustedPolicyRequest.TryBind(
+            launch,
+            invocation,
+            out var policyRequest,
+            out _));
+        var materialized = await ActionHostTrustedPolicy.MaterializeAsync(
+            policyRequest!,
+            ActionHostTrustedPolicyTests.ScriptedObjectTransport.Valid(
+                ActionHostTrustedPolicyTests.Config("sticky", null),
+                Encoding.UTF8.GetBytes("trusted accepted-state policy")),
+            CancellationToken.None);
+        Assert.True(materialized.Succeeded);
+        var time = new MutableLineageTimeProvider(
+            AcceptedStateTestData.AcceptedAtUnixSeconds);
+        var store = new ScriptedLocatorStore
+        {
+            FilterListsByName = true,
+            UseNumericObjectIds = true,
+        };
+        var request = new ArtifactStateRestoreRequest(
+            launch,
+            invocation,
+            materialized.Policy!,
+            User("current review context"),
+            DeepSeekReasoningContinuationCodec.Instance,
+            new EndToEndDependencies(store),
+            time);
+        var bootstrap = await RestrictedStateService
+            .RestoreAuthorizedArtifactStateAsync(
+                request,
+                CancellationToken.None);
+        Assert.True(bootstrap.Succeeded, bootstrap.Code);
+        using (var bootstrapContext = Assert.IsType<
+            AuthorizedAcceptedStateRestoreContext>(bootstrap.Context))
+        {
+            Assert.True(bootstrapContext.TryGetLineageSnapshot(
+                out var selected));
+            await SeedMaximumAcceptedChainAsync(
+                store,
+                request,
+                selected!,
+                time);
+        }
+
+        var restored = await RestrictedStateService
+            .RestoreAuthorizedArtifactStateAsync(
+                request,
+                CancellationToken.None);
+
+        Assert.True(restored.Succeeded, restored.Code);
+        Assert.False(restored.IsBootstrap);
+        using var restoredContext = Assert.IsType<
+            AuthorizedAcceptedStateRestoreContext>(restored.Context);
+        Assert.True(restoredContext.TryGetAdmittedValue(out var admitted));
+        Assert.NotNull(admitted);
+        Assert.Equal(15, admitted!.Artifact.Document.Generation);
+        Assert.Equal(
+            AgentLimits.SessionPlaintextBytes,
+            admitted.Artifact.Plaintext.Length);
+        Assert.NotNull(admitted.Artifact.Document.PredecessorStateSha256);
+        Assert.NotNull(admitted.Artifact.Document.PriorSessionSha256);
+    }
+
+    private static async Task SeedMaximumAcceptedChainAsync(
+        ScriptedLocatorStore store,
+        ArtifactStateRestoreRequest request,
+        SelectedLineageSnapshot selected,
+        TimeProvider time)
+    {
+        Assert.True(AcceptedStateProductionAuthorization.TryAuthorize(
+            request,
+            out var authorization));
+        Assert.NotNull(authorization);
+        var launch = request.Launch;
+        var invocation = request.Invocation;
+        var policy = request.TrustedPolicy;
+        var repositoryId = launch.RepositoryId.ToString(
+            CultureInfo.InvariantCulture);
+        using var locatorAccess = AuthorizedLocatorAccess.Issue(
+            authorization!,
+            repositoryId);
+        Assert.NotNull(locatorAccess);
+        var currentKey = launch.Inputs.StateKey!.ExportForPrivateLaunch();
+        var previousKey = launch.Inputs.PreviousStateKey?
+            .ExportForPrivateLaunch();
+        Assert.True(LocatorStateKeyRing.TryCreate(
+            locatorAccess!,
+            repositoryId,
+            currentKey,
+            previousKey,
+            out var keyRing,
+            out var keyCode), keyCode);
+        using (keyRing)
+        {
+            var now = time.GetUtcNow().ToUnixTimeSeconds();
+            var logicalExpiry = checked(
+                now + AcceptedStateFormat.LogicalWindowSeconds);
+            var requiredPlatformExpiry = Math.Max(
+                checked(now +
+                    StateRetentionRequirements.ScopedPlatformRequestSeconds),
+                checked(logicalExpiry +
+                    StateRetentionRequirements.SentinelDependentMarginSeconds));
+            var retainedLocatorDependency = checked(
+                requiredPlatformExpiry +
+                AcceptedStateFormat.LogicalWindowSeconds +
+                StateRetentionRequirements.SentinelDependentMarginSeconds);
+            var locatorResult = await new LocatorRootService(
+                    store,
+                    keyRing!,
+                    time)
+                .ResolveAsync(
+                    locatorAccess!,
+                    retainedLocatorDependency,
+                    CancellationToken.None);
+            Assert.True(locatorResult.Succeeded, locatorResult.Code);
+            using var locator = Assert.IsType<LocatorContext>(
+                locatorResult.Context);
+            var baseScope = AuthorizedAcceptedStateComposer.BaseScope(
+                authorization!);
+            Assert.True(LineageBaseScopeCodec.TryEncode(
+                baseScope,
+                out var canonicalScope));
+            try
+            {
+                Assert.True(locator.TryDeriveOpaqueName(
+                    locatorAccess!,
+                    StateObjectClasses.ToWireName(StateObjectClass.Candidate),
+                    canonicalScope,
+                    out var candidateName));
+                Assert.True(locator.TryDeriveOpaqueName(
+                    locatorAccess!,
+                    StateObjectClasses.ToWireName(StateObjectClass.Acceptance),
+                    canonicalScope,
+                    out var acceptanceName));
+                Assert.NotNull(candidateName);
+                Assert.NotNull(acceptanceName);
+
+                var trustedWorkflowIdentity =
+                    AuthorizedAcceptedStateComposer.TrustedWorkflowIdentity(
+                        invocation,
+                        policy);
+                var fixture = await AgentSessionStateBoundaryTests
+                    .BuildSessionAsync(
+                        repositoryId,
+                        invocation.PullRequest.Number,
+                        selected.SessionId,
+                        trustedWorkflowIdentity,
+                        policy.InstructionBytes.ToArray(),
+                        policy.BuildDiscriminator,
+                        invocation.PullRequest.BaseSha,
+                        invocation.PullRequest.HeadSha);
+                var predecessor = AcceptedStatePersistenceBoundaryTests
+                    .BuildAdmittedSession(
+                        fixture,
+                        completedRuns: 15,
+                        predecessorEnvelopeSha256: new string('d', 64),
+                        priorSessionSha256: new string('e', 64),
+                        maximize: false);
+                var stateScope = new RestrictedStateScope(
+                    repositoryId,
+                    trustedWorkflowIdentity,
+                    invocation.PullRequest.Number,
+                    selected.SessionId,
+                    policy.ProviderId,
+                    policy.ModelId,
+                    policy.AdapterId,
+                    policy.InstructionsSha256,
+                    policy.LimitsSha256,
+                    policy.ToolsetSha256,
+                    policy.BuildDiscriminator);
+                var stateAccessResult = AuthorizedStateAccess.Authorize(
+                    new RestrictedStateAccessRequest(
+                        stateScope,
+                        stateScope,
+                        IsTrustedWorkflow: true,
+                        IsSameRepository: true,
+                        IsForkOrigin: false),
+                    out var stateAccess);
+                Assert.Equal(
+                    RestrictedStateCodes.Authorized,
+                    stateAccessResult.Code);
+                Assert.NotNull(stateAccess);
+                var stateResolver = new LocatorStateResolver(
+                    stateAccess!,
+                    locatorAccess!,
+                    locator);
+                var predecessorDocument = predecessor.Value.Artifact.Document;
+                var predecessorBinding = new RestrictedStateBinding(
+                    stateScope,
+                    predecessorDocument.ProducerBaseSha,
+                    predecessorDocument.ProducerHeadSha,
+                    predecessorDocument.Generation,
+                    predecessorDocument.PredecessorStateSha256,
+                    now,
+                    logicalExpiry);
+                Assert.True(RestrictedStateEnvelope.TryEncrypt(
+                    stateAccess!,
+                    predecessorBinding,
+                    predecessor.Plaintext,
+                    stateResolver,
+                    out var predecessorEnvelope,
+                    out var predecessorCode), predecessorCode);
+                Assert.NotNull(predecessorEnvelope);
+
+                var current = AcceptedStatePersistenceBoundaryTests
+                    .BuildAdmittedSession(
+                        fixture,
+                        completedRuns: 16,
+                        predecessorEnvelopeSha256:
+                            RestrictedStateEnvelope.EnvelopeSha256(
+                                predecessorEnvelope!),
+                        priorSessionSha256: predecessor.SessionSha256,
+                        maximize: true);
+                var currentDocument = current.Value.Artifact.Document;
+                var currentBinding = new RestrictedStateBinding(
+                    stateScope,
+                    currentDocument.ProducerBaseSha,
+                    currentDocument.ProducerHeadSha,
+                    currentDocument.Generation,
+                    currentDocument.PredecessorStateSha256,
+                    now,
+                    logicalExpiry);
+                Assert.True(RestrictedStateEnvelope.TryEncrypt(
+                    stateAccess!,
+                    currentBinding,
+                    current.Plaintext,
+                    stateResolver,
+                    out var currentEnvelope,
+                    out var currentCode), currentCode);
+                Assert.NotNull(currentEnvelope);
+
+                var publicationScope = new R4PublicationScopeV1(
+                    (ulong)launch.RepositoryId,
+                    (ulong)launch.RepositoryId,
+                    invocation.WorkflowPath,
+                    launch.WorkflowRef,
+                    (ulong)invocation.PullRequest.Number,
+                    policy.PolicySha256,
+                    AuthorizedAcceptedStateComposer.PayloadBuildIdentity(
+                        policy));
+                var identity = new ReviewedIdentity(
+                    repositoryId,
+                    invocation.PullRequest.Number,
+                    currentDocument.ProducerBaseSha,
+                    currentDocument.ProducerHeadSha);
+                var vector = R4StickyPublicationByteVectors.All.MaxBy(item =>
+                    Encoding.UTF8.GetByteCount(item.Rendered.Comment))!;
+                var rendered = R4StickyPublicationByteVectors.RenderForScope(
+                    vector.Name,
+                    identity,
+                    publicationScope);
+                Assert.True(ValidatedPublicationPayloadV1.TryCreate(
+                    rendered.Comment,
+                    launch.RepositoryId,
+                    launch.RepositoryName,
+                    invocation.PullRequest.Number,
+                    policy.PolicySha256,
+                    policy.PayloadSha256,
+                    policy.BuildDiscriminator,
+                    AcceptedStateFormat.RenderingVersion,
+                    out var publication));
+                Assert.NotNull(publication);
+                Assert.Equal(
+                    R4PublicationIdentityV1.ComputeScopeSha256(
+                        publicationScope),
+                    publication!.ScopeSha256);
+                Assert.True(AcceptedStatePublicationPayloadCodec.TryEncode(
+                    publication,
+                    out var publicationBytes));
+
+                var retainedAncestorLogicalIdentity = new string('a', 64);
+                var retainedAncestorReceiptIdentity = new string('b', 64);
+                var predecessorGeneration = Generation(
+                    predecessor,
+                    predecessorEnvelope!,
+                    retainedAncestorLogicalIdentity,
+                    publicationBytes,
+                    policy,
+                    now,
+                    logicalExpiry);
+                var predecessorAccepted = await UploadAcceptedGenerationAsync(
+                    store,
+                    locator,
+                    locatorAccess!,
+                    selected,
+                    candidateName!,
+                    acceptanceName!,
+                    predecessorGeneration,
+                    retainedAncestorLogicalIdentity,
+                    retainedAncestorReceiptIdentity,
+                    publication,
+                    now,
+                    logicalExpiry,
+                    requiredPlatformExpiry);
+                var currentGeneration = Generation(
+                    current,
+                    currentEnvelope!,
+                    predecessorAccepted.LogicalGenerationIdentity,
+                    publicationBytes,
+                    policy,
+                    now,
+                    logicalExpiry);
+                _ = await UploadAcceptedGenerationAsync(
+                    store,
+                    locator,
+                    locatorAccess!,
+                    selected,
+                    candidateName!,
+                    acceptanceName!,
+                    currentGeneration,
+                    predecessorAccepted.LogicalGenerationIdentity,
+                    predecessorAccepted.ReceiptIdentity,
+                    publication,
+                    now,
+                    logicalExpiry,
+                    requiredPlatformExpiry);
+
+                CryptographicOperations.ZeroMemory(predecessorEnvelope!);
+                CryptographicOperations.ZeroMemory(currentEnvelope!);
+                CryptographicOperations.ZeroMemory(publicationBytes);
+                Zero(predecessor);
+                Zero(current);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(canonicalScope);
+            }
+        }
+    }
+
+    private static StateGenerationRecordV1 Generation(
+        RestrictedStateAdmittedSession session,
+        byte[] envelope,
+        string? previousLogicalGenerationIdentity,
+        byte[] publicationBytes,
+        ActionHostTrustedPolicy policy,
+        long now,
+        long logicalExpiry)
+    {
+        var document = session.Value.Artifact.Document;
+        return new StateGenerationRecordV1(
+            ImmutableArray.CreateRange(envelope),
+            RestrictedStateEnvelope.EnvelopeSha256(envelope),
+            session.SessionSha256,
+            document.ProducerBaseSha,
+            document.ProducerHeadSha,
+            document.Generation,
+            document.PredecessorStateSha256,
+            previousLogicalGenerationIdentity,
+            now,
+            logicalExpiry,
+            ImmutableArray.CreateRange(publicationBytes),
+            AcceptedStateRecordValidation.Sha256(publicationBytes),
+            policy.PolicySha256,
+            policy.ConfigSha256,
+            policy.InstructionsSha256,
+            policy.PayloadSha256,
+            policy.BuildDiscriminator);
+    }
+
+    private static async Task<AcceptedGenerationSeed>
+        UploadAcceptedGenerationAsync(
+            ScriptedLocatorStore store,
+            LocatorContext locator,
+            AuthorizedLocatorAccess locatorAccess,
+            SelectedLineageSnapshot selected,
+            OpaqueStoreName candidateName,
+            OpaqueStoreName acceptanceName,
+            StateGenerationRecordV1 generation,
+            string? previousLogicalGenerationIdentity,
+            string? previousAcceptanceReceiptIdentity,
+            ValidatedPublicationPayloadV1 publication,
+            long now,
+            long logicalExpiry,
+            long requiredPlatformExpiry)
+    {
+        Assert.True(AcceptedStateGenerationRecordCodec.TryEncode(
+            generation,
+            out var generationBytes));
+        Assert.True(AcceptedStateIdentity.TryComputeLogicalGeneration(
+            generationBytes,
+            selected.BaseScopeDigest,
+            selected.Epoch,
+            selected.SessionId,
+            previousAcceptanceReceiptIdentity,
+            out var logicalIdentity));
+        var originalDraft = Draft(
+            store,
+            selected,
+            StateObjectClass.Candidate,
+            previousAcceptanceReceiptIdentity,
+            now,
+            logicalExpiry,
+            requiredPlatformExpiry);
+        Assert.True(StateControlEnvelopeV1Codec.TryEncrypt(
+            locator,
+            locatorAccess,
+            candidateName,
+            originalDraft,
+            generationBytes,
+            out var originalEnvelope,
+            out var originalHeader,
+            out var originalCode), originalCode);
+        Assert.NotNull(originalHeader);
+        var originalMetadata = await UploadWithMetadataAsync(
+            store,
+            candidateName,
+            originalEnvelope,
+            requiredPlatformExpiry);
+
+        var copy = new AcceptedStatePhysicalCopyV1(
+            ImmutableArray.CreateRange(generationBytes),
+            logicalIdentity,
+            originalHeader!.ObjectIdentity,
+            originalMetadata.Reference.ObjectId.Value,
+            originalMetadata.ArchiveDigest.Sha256,
+            originalMetadata.EncryptedObjectDigest.Sha256);
+        Assert.True(AcceptedStatePhysicalCopyCodec.TryEncode(
+            copy,
+            out var copyBytes));
+        var copyDraft = Draft(
+            store,
+            selected,
+            StateObjectClass.Candidate,
+            previousAcceptanceReceiptIdentity,
+            now,
+            logicalExpiry,
+            requiredPlatformExpiry);
+        Assert.True(StateControlEnvelopeV1Codec.TryEncrypt(
+            locator,
+            locatorAccess,
+            candidateName,
+            copyDraft,
+            copyBytes,
+            out var copyEnvelope,
+            out _,
+            out var copyCode), copyCode);
+        _ = await UploadWithMetadataAsync(
+            store,
+            candidateName,
+            copyEnvelope,
+            requiredPlatformExpiry);
+
+        var receipt = new AcceptanceReceiptV1(
+            logicalIdentity,
+            originalHeader.ObjectIdentity,
+            previousLogicalGenerationIdentity,
+            previousAcceptanceReceiptIdentity,
+            publication.ReviewedHeadSha,
+            StickyPublicationOperation.Observed,
+            publication.RepositoryId,
+            publication.PullRequestNumber,
+            CommentId: 99,
+            $"https://github.com/{publication.RepositoryName}/pull/" +
+                $"{publication.PullRequestNumber}#issuecomment-99",
+            publication.ScopeSha256,
+            publication.BodySha256,
+            generation.PublicationPayloadSha256,
+            "scripted",
+            store.UploadCalls + 1,
+            now,
+            logicalExpiry);
+        Assert.True(AcceptedStateAcceptanceReceiptCodec.TryEncode(
+            receipt,
+            out var receiptBytes));
+        var receiptDraft = Draft(
+            store,
+            selected,
+            StateObjectClass.Acceptance,
+            previousAcceptanceReceiptIdentity,
+            now,
+            logicalExpiry,
+            requiredPlatformExpiry);
+        Assert.True(StateControlEnvelopeV1Codec.TryEncrypt(
+            locator,
+            locatorAccess,
+            acceptanceName,
+            receiptDraft,
+            receiptBytes,
+            out var receiptEnvelope,
+            out var receiptHeader,
+            out var receiptCode), receiptCode);
+        Assert.NotNull(receiptHeader);
+        _ = await UploadWithMetadataAsync(
+            store,
+            acceptanceName,
+            receiptEnvelope,
+            requiredPlatformExpiry);
+        CryptographicOperations.ZeroMemory(generationBytes);
+        CryptographicOperations.ZeroMemory(copyBytes);
+        CryptographicOperations.ZeroMemory(receiptBytes);
+        return new AcceptedGenerationSeed(
+            logicalIdentity,
+            receiptHeader!.ObjectIdentity);
+    }
+
+    private static async Task<OpaqueStoreObjectMetadata>
+        UploadWithMetadataAsync(
+            ScriptedLocatorStore store,
+            OpaqueStoreName name,
+            byte[] envelope,
+            long requiredPlatformExpiry)
+    {
+        try
+        {
+            var uploaded = await new ScopedStateUploadProtocol(store)
+                .UploadAndReadBackAsync(
+                    name,
+                    envelope,
+                    requiredPlatformExpiry,
+                    CancellationToken.None);
+            Assert.True(uploaded.Succeeded, uploaded.Code);
+            return Assert.IsType<OpaqueStoreObjectMetadata>(
+                uploaded.Metadata);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(envelope);
+        }
+    }
+
+    private static void Zero(RestrictedStateAdmittedSession session)
+    {
+        CryptographicOperations.ZeroMemory(session.Plaintext);
+        CryptographicOperations.ZeroMemory(session.Value.Artifact.Plaintext);
+    }
+
+    private static async Task<AcceptedSeed> SeedAcceptedGenerationAsync(
         ScriptedLocatorStore store,
         ArtifactStateRestoreRequest request,
         SelectedLineageSnapshot selected,
         TimeProvider time,
-        string? mutation = null)
+        string? mutation = null,
+        bool includeReceipt = true)
     {
         Assert.True(AcceptedStateProductionAuthorization.TryAuthorize(
             request,
@@ -325,8 +1042,22 @@ public sealed class AcceptedStateProductionEndToEndTests
                         StateObjectClass.Acceptance),
                     canonicalScope,
                     out var acceptanceName));
+                Assert.True(locator.TryDeriveOpaqueName(
+                    locatorAccess!,
+                    StateObjectClasses.ToWireName(
+                        StateObjectClass.ExpiryTransition),
+                    canonicalScope,
+                    out var expiryName));
+                Assert.True(locator.TryDeriveOpaqueName(
+                    locatorAccess!,
+                    StateObjectClasses.ToWireName(
+                        StateObjectClass.LineageHead),
+                    canonicalScope,
+                    out var lineageName));
                 Assert.NotNull(candidateName);
                 Assert.NotNull(acceptanceName);
+                Assert.NotNull(expiryName);
+                Assert.NotNull(lineageName);
 
                 var trustedWorkflowIdentity =
                     AuthorizedAcceptedStateComposer.TrustedWorkflowIdentity(
@@ -529,6 +1260,15 @@ public sealed class AcceptedStateProductionEndToEndTests
                     candidateEnvelope,
                     requiredPlatformExpiry);
 
+                if (!includeReceipt)
+                {
+                    return new AcceptedSeed(
+                        candidateName!,
+                        acceptanceName!,
+                        expiryName!,
+                        lineageName!);
+                }
+
                 var receipt = AcceptedStateTestData.Receipt(
                     logicalIdentity,
                     candidateHeader!.ObjectIdentity,
@@ -573,6 +1313,11 @@ public sealed class AcceptedStateProductionEndToEndTests
                     acceptanceName!,
                     receiptEnvelope,
                     requiredPlatformExpiry);
+                return new AcceptedSeed(
+                    candidateName!,
+                    acceptanceName!,
+                    expiryName!,
+                    lineageName!);
             }
             finally
             {
@@ -672,7 +1417,25 @@ public sealed class AcceptedStateProductionEndToEndTests
     private static ProjectChatMessage User(string text) =>
         new("user", [new ProjectTextContent(text)]);
 
-    private sealed class EndToEndDependencies(ScriptedLocatorStore store) :
+    public enum ExpiryCrashCut
+    {
+        AfterIntentUpload,
+        AfterTargetDelete,
+        AfterSuccessorUpload,
+        DuringSuccessorCleanup,
+    }
+
+    private sealed record AcceptedSeed(
+        OpaqueStoreName CandidateName,
+        OpaqueStoreName AcceptanceName,
+        OpaqueStoreName ExpiryName,
+        OpaqueStoreName LineageName);
+
+    private sealed record AcceptedGenerationSeed(
+        string LogicalGenerationIdentity,
+        string ReceiptIdentity);
+
+    private sealed class EndToEndDependencies(IRestrictedStateStore store) :
         IAcceptedStateProductionDependencies
     {
         public IRestrictedStateStore CreateArtifactStore(
@@ -680,6 +1443,91 @@ public sealed class AcceptedStateProductionEndToEndTests
 
         public IActionHostGitObjectTransport CreateAncestryTransport(
             ActionHostGitHubToken token) => new NoCallTransport();
+    }
+
+    private sealed class InterruptedExpiryStore(
+        IRestrictedStateStore inner,
+        AcceptedSeed seed,
+        ExpiryCrashCut crashCut) : IRestrictedStateStore
+    {
+        private bool interrupted;
+        private bool successorUploaded;
+
+        internal int ExpiryIntentUploads { get; private set; }
+        internal int SuccessorUploads { get; private set; }
+
+        public Task<OpaqueStoreListResult> ListExactAsync(
+            OpaqueStoreListRequest request,
+            CancellationToken cancellationToken) =>
+            inner.ListExactAsync(request, cancellationToken);
+
+        public Task<OpaqueStoreMetadataResult> ReadMetadataAsync(
+            OpaqueStoreMetadataRequest request,
+            CancellationToken cancellationToken) =>
+            inner.ReadMetadataAsync(request, cancellationToken);
+
+        public Task<OpaqueStoreDownloadResult> DownloadAsync(
+            OpaqueStoreDownloadRequest request,
+            CancellationToken cancellationToken) =>
+            inner.DownloadAsync(request, cancellationToken);
+
+        public async Task<OpaqueStoreUploadResult> UploadImmutableAsync(
+            OpaqueStoreUploadRequest request,
+            CancellationToken cancellationToken)
+        {
+            var result = await inner.UploadImmutableAsync(
+                request,
+                cancellationToken);
+            if (request.Name == seed.ExpiryName)
+            {
+                ExpiryIntentUploads++;
+                InterruptAfterCommit(ExpiryCrashCut.AfterIntentUpload);
+            }
+            else if (request.Name == seed.LineageName)
+            {
+                SuccessorUploads++;
+                successorUploaded = true;
+                InterruptAfterCommit(ExpiryCrashCut.AfterSuccessorUpload);
+            }
+
+            return result;
+        }
+
+        public Task<OpaqueStoreReadBackResult> ReadBackExactAsync(
+            OpaqueStoreReadBackRequest request,
+            CancellationToken cancellationToken) =>
+            inner.ReadBackExactAsync(request, cancellationToken);
+
+        public async Task<OpaqueStoreDeleteResult> DeleteExactAsync(
+            OpaqueStoreDeleteRequest request,
+            CancellationToken cancellationToken)
+        {
+            var result = await inner.DeleteExactAsync(
+                request,
+                cancellationToken);
+            if (request.Expected.Reference.Name == seed.CandidateName ||
+                request.Expected.Reference.Name == seed.AcceptanceName)
+            {
+                InterruptAfterCommit(ExpiryCrashCut.AfterTargetDelete);
+            }
+            else if (successorUploaded &&
+                request.Expected.Reference.Name == seed.ExpiryName)
+            {
+                InterruptAfterCommit(
+                    ExpiryCrashCut.DuringSuccessorCleanup);
+            }
+
+            return result;
+        }
+
+        private void InterruptAfterCommit(ExpiryCrashCut point)
+        {
+            if (!interrupted && crashCut == point)
+            {
+                interrupted = true;
+                throw new IOException($"Simulated crash at {point}.");
+            }
+        }
     }
 
     private sealed class NoCallTransport : IActionHostGitObjectTransport

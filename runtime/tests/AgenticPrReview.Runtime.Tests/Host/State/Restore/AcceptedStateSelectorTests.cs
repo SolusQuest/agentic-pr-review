@@ -60,9 +60,25 @@ public sealed class AcceptedStateSelectorTests
     }
 
     [Fact]
-    public void CandidateWithoutReceiptNeverFallsBackToBootstrap()
+    public void UniqueInitialCandidateWithoutReceiptPreservesBootstrapForP5()
     {
         using var fixture = SelectorFixture.Ready(withReceipt: false);
+
+        var result = new AcceptedStateSelector(fixture.Time)
+            .Select(fixture.Observation, fixture.Request);
+
+        Assert.True(result.IsBootstrap);
+        Assert.Equal(AcceptedStateCodes.Bootstrap, result.Code);
+        Assert.Null(result.InitialAbsence);
+        Assert.Null(result.Selection);
+    }
+
+    [Fact]
+    public void AmbiguousInitialCandidatesWithoutReceiptFailClosed()
+    {
+        using var fixture = SelectorFixture.Ready(
+            withReceipt: false,
+            addDuplicateOriginal: true);
 
         var result = new AcceptedStateSelector(fixture.Time)
             .Select(fixture.Observation, fixture.Request);

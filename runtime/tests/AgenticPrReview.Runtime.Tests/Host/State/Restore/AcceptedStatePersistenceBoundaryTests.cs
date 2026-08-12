@@ -106,7 +106,7 @@ public sealed class AcceptedStatePersistenceBoundaryTests
     }
 
     [Fact]
-    public async Task MaximumSessionAndPublicationCompositeFitsAllLayers()
+    public async Task MaximumCompositeSerializesWithinPhysicalLayerCaps()
     {
         var lineageTemplate = LineageTestData.Scope();
         var fixture = await AgentSessionStateBoundaryTests
@@ -526,13 +526,14 @@ public sealed class AcceptedStatePersistenceBoundaryTests
         }
     }
 
-    private static RestrictedStateAdmittedSession MaximumAdmittedSession(
-        AgentSessionStateBoundaryTests.SessionFixture fixture)
+    internal static RestrictedStateAdmittedSession BuildAdmittedSession(
+        AgentSessionStateBoundaryTests.SessionFixture fixture,
+        int completedRuns,
+        string predecessorEnvelopeSha256,
+        string priorSessionSha256,
+        bool maximize)
     {
-        const int completedRuns = 16;
         var original = fixture.Artifact.Document;
-        var predecessorEnvelopeSha256 = new string('d', 64);
-        var priorSessionSha256 = new string('e', 64);
         var expandedRoot = original with
         {
             Generation = completedRuns - 1,
@@ -561,27 +562,31 @@ public sealed class AcceptedStatePersistenceBoundaryTests
             out var baselineArtifact,
             out var baselineFailure), baselineFailure);
 
-        var remaining = AgentLimits.SessionPlaintextBytes -
-            baselineArtifact!.Plaintext.Length;
-        Assert.InRange(
-            remaining,
-            1,
-            completedRuns * (AgentLimits.ContentBytes - 1));
         var paddedRuns = runs.ToBuilder();
-        for (var index = 0;
-            index < paddedRuns.Count && remaining > 0;
-            index++)
+        if (maximize)
         {
-            var additional = Math.Min(
+            var remaining = AgentLimits.SessionPlaintextBytes -
+                baselineArtifact!.Plaintext.Length;
+            Assert.InRange(
                 remaining,
-                AgentLimits.ContentBytes - 1);
-            paddedRuns[index] = WithReviewContextLength(
-                paddedRuns[index],
-                additional + 1);
-            remaining -= additional;
+                1,
+                completedRuns * (AgentLimits.ContentBytes - 1));
+            for (var index = 0;
+                index < paddedRuns.Count && remaining > 0;
+                index++)
+            {
+                var additional = Math.Min(
+                    remaining,
+                    AgentLimits.ContentBytes - 1);
+                paddedRuns[index] = WithReviewContextLength(
+                    paddedRuns[index],
+                    additional + 1);
+                remaining -= additional;
+            }
+
+            Assert.Equal(0, remaining);
         }
 
-        Assert.Equal(0, remaining);
         var maximumDocument = baselineDocument with
         {
             CompletedRuns = paddedRuns.MoveToImmutable(),
@@ -590,9 +595,12 @@ public sealed class AcceptedStatePersistenceBoundaryTests
             maximumDocument,
             out var maximumArtifact,
             out var maximumFailure), maximumFailure);
-        Assert.Equal(
-            AgentLimits.SessionPlaintextBytes,
-            maximumArtifact!.Plaintext.Length);
+        if (maximize)
+        {
+            Assert.Equal(
+                AgentLimits.SessionPlaintextBytes,
+                maximumArtifact!.Plaintext.Length);
+        }
         Assert.True(AgentSessionValidation.TryValidateRoot(
             maximumDocument,
             out var rootFailure), rootFailure);
@@ -616,7 +624,7 @@ public sealed class AcceptedStatePersistenceBoundaryTests
         var access = RestrictedStateTestData.Access(scope);
         var admitted = new AgentSessionRestrictedStateAdmission().Admit(
             access,
-            maximumArtifact.Plaintext,
+            maximumArtifact!.Plaintext,
             new RestrictedStateSessionAdmissionContext(
                 maximumDocument.ProducerBaseSha,
                 maximumDocument.ProducerHeadSha,
@@ -639,6 +647,15 @@ public sealed class AcceptedStatePersistenceBoundaryTests
             admitted.Session!.SessionSha256);
         return admitted.Session;
     }
+
+    private static RestrictedStateAdmittedSession MaximumAdmittedSession(
+        AgentSessionStateBoundaryTests.SessionFixture fixture) =>
+        BuildAdmittedSession(
+            fixture,
+            completedRuns: 16,
+            predecessorEnvelopeSha256: new string('d', 64),
+            priorSessionSha256: new string('e', 64),
+            maximize: true);
 
     private static AgentSessionCompletedRun CloneRun(
         AgentSessionCompletedRun template,

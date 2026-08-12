@@ -423,6 +423,31 @@ internal sealed class AuthorizedAcceptedStateComposer
                 return AuthorizedAcceptedStateRestoreResult.Bootstrap(context);
             }
 
+            var recoveredTransition = await lineageService
+                .RecoverInterruptedTransitionAsync(
+                    locator,
+                    lineageRequest,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (!recoveredTransition.Succeeded)
+            {
+                return AuthorizedAcceptedStateRestoreResult.Fail(
+                    MapLineageCode(recoveredTransition.Code));
+            }
+
+            if (recoveredTransition.Recovered)
+            {
+                selectedLineage = recoveredTransition.Context;
+                var context = Transfer(
+                    access,
+                    keys,
+                    locator,
+                    selectedLineage!,
+                    accepted: null);
+                ownershipTransferred = true;
+                return AuthorizedAcceptedStateRestoreResult.Bootstrap(context);
+            }
+
             var selectorResult = new AcceptedStateSelector(timeProvider)
                 .Select(observation, lineageRequest);
             if (selectorResult.IsBootstrap)

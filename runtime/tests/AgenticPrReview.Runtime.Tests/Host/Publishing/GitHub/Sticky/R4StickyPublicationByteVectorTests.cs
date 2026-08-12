@@ -96,8 +96,23 @@ internal static class R4StickyPublicationByteVectors
         Vectors.Single(vector => StringComparer.Ordinal.Equals(
             vector.Name, name));
 
+    internal static R4RenderedStickyComment RenderForScope(
+        string name,
+        ReviewedIdentity identity,
+        R4PublicationScopeV1 scope) =>
+        RenderMaximum(Unit(name), identity, scope);
+
     private static R4StickyPublicationByteVector Build(string name,
         string unit, string commentSha256, string requestSha256)
+    {
+        var rendered = RenderMaximum(unit, identity: null, scope: null);
+        return new(name, rendered, commentSha256, requestSha256);
+    }
+
+    private static R4RenderedStickyComment RenderMaximum(
+        string unit,
+        ReviewedIdentity? identity,
+        R4PublicationScopeV1? scope)
     {
         var summary = RepeatWithinUtf8(unit, AgentLimits.SummaryBytes);
         var findings = ImmutableArray.CreateBuilder<AgentFinding>();
@@ -106,8 +121,11 @@ internal static class R4StickyPublicationByteVectors
         {
             findings.Add(Finding(unit, index,
                 AgentLimits.FindingMessageBytes));
-            var rendered = R4PublicationTestData.Render(summary,
-                findings.ToImmutable());
+            var rendered = R4PublicationTestData.Render(
+                summary,
+                findings.ToImmutable(),
+                identity,
+                scope);
             if (rendered.RenderedFindingCount != findings.Count)
             {
                 findings.RemoveAt(findings.Count - 1);
@@ -125,8 +143,11 @@ internal static class R4StickyPublicationByteVectors
                 var middle = low + (high - low) / 2;
                 var candidate = findings.ToImmutable().Add(
                     Finding(unit, findings.Count, middle));
-                var rendered = R4PublicationTestData.Render(summary,
-                    candidate);
+                var rendered = R4PublicationTestData.Render(
+                    summary,
+                    candidate,
+                    identity,
+                    scope);
                 if (rendered.RenderedFindingCount == candidate.Length)
                 {
                     lastAccepted = rendered;
@@ -141,9 +162,19 @@ internal static class R4StickyPublicationByteVectors
 
         if (lastAccepted is null)
             throw new InvalidOperationException(
-                $"Unable to build P1 byte vector {name}.");
-        return new(name, lastAccepted, commentSha256, requestSha256);
+                $"Unable to build P1 byte vector for unit {unit}.");
+        return lastAccepted;
     }
+
+    private static string Unit(string name) => name switch
+    {
+        "ascii" => "a",
+        "quotes-backslashes" => "\"\\",
+        "html-sensitive" => "<>&",
+        "bmp" => "é",
+        "supplementary" => "😀",
+        _ => throw new ArgumentOutOfRangeException(nameof(name)),
+    };
 
     private static AgentFinding Finding(string unit, int index,
         int messageBytes) => R4PublicationTestData.Finding(
