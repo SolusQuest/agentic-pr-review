@@ -406,7 +406,8 @@ internal sealed class LineageService
                     // All accepted-state evidence is still available. Leave the
                     // intent in place so S5 can re-admit the accepted state
                     // and bind this exact intent to typed expiry authority.
-                    return LineageInterruptedTransitionRecoveryResult.None();
+                    return LineageInterruptedTransitionRecoveryResult
+                        .AwaitingTypedExpiry();
                 }
 
                 var now = timeProvider.GetUtcNow().ToUnixTimeSeconds();

@@ -321,25 +321,53 @@ internal sealed record LineageReadOnlyObservationResult(
         new(code, null);
 }
 
+internal enum LineageInterruptedTransitionRecoveryPhase
+{
+    None,
+    PendingIntact,
+    RecoveredSuccessor,
+}
+
 internal sealed record LineageInterruptedTransitionRecoveryResult(
     string Code,
-    bool Recovered,
+    LineageInterruptedTransitionRecoveryPhase Phase,
     SelectedLineageContext? Context)
 {
+    internal bool Recovered =>
+        Phase == LineageInterruptedTransitionRecoveryPhase.RecoveredSuccessor;
+    internal bool RequiresTypedExpiry =>
+        Phase == LineageInterruptedTransitionRecoveryPhase.PendingIntact;
+
     internal bool Succeeded =>
         StringComparer.Ordinal.Equals(Code, LineageCodes.Ready) &&
         (!Recovered || Context is not null);
 
     internal static LineageInterruptedTransitionRecoveryResult None() =>
-        new(LineageCodes.Ready, false, null);
+        new(
+            LineageCodes.Ready,
+            LineageInterruptedTransitionRecoveryPhase.None,
+            null);
+
+    internal static LineageInterruptedTransitionRecoveryResult
+        AwaitingTypedExpiry() =>
+        new(
+            LineageCodes.Ready,
+            LineageInterruptedTransitionRecoveryPhase.PendingIntact,
+            null);
 
     internal static LineageInterruptedTransitionRecoveryResult Success(
         SelectedLineageContext context) =>
-        new(LineageCodes.Ready, true, context);
+        new(
+            LineageCodes.Ready,
+            LineageInterruptedTransitionRecoveryPhase.RecoveredSuccessor,
+            context);
 
     internal static LineageInterruptedTransitionRecoveryResult Fail(
         string code) =>
-        new(code, false, null);
+        new(
+            code,
+            LineageInterruptedTransitionRecoveryPhase.None,
+            null);
 }
 
 internal sealed class LineageReadOnlyObservationContext : IDisposable

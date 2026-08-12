@@ -384,6 +384,38 @@ internal sealed class AuthorizedAcceptedStateComposer
                 logicalExpiry,
                 Reset: null);
             var lineageService = new LineageService(store, timeProvider);
+            SelectedLineageSnapshot? recoveredHead = null;
+            LineageInterruptedTransitionRecoveryResult? recoveredTransition =
+                null;
+            if (launch.Inputs.StateMode != ActionHostStateMode.Reset)
+            {
+                recoveredTransition = await lineageService
+                    .RecoverInterruptedTransitionAsync(
+                        locator,
+                        lineageRequest,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (!recoveredTransition.Succeeded)
+                {
+                    return AuthorizedAcceptedStateRestoreResult.Fail(
+                        MapLineageCode(recoveredTransition.Code));
+                }
+
+                if (recoveredTransition.Recovered)
+                {
+                    using var recoveredLineage = recoveredTransition.Context;
+                    if (recoveredLineage is null ||
+                        !recoveredLineage.TryGetSnapshot(
+                            access,
+                            out recoveredHead) ||
+                        recoveredHead is null)
+                    {
+                        return AuthorizedAcceptedStateRestoreResult.Fail(
+                            AcceptedStateCodes.Conflict);
+                    }
+                }
+            }
+
             var observedResult = await lineageService.ObserveReadOnlyAsync(
                     locator,
                     lineageRequest,
@@ -394,6 +426,13 @@ internal sealed class AuthorizedAcceptedStateComposer
             {
                 return AuthorizedAcceptedStateRestoreResult.Fail(
                     MapLineageCode(observedResult.Code));
+            }
+
+            if (recoveredHead is not null &&
+                !MatchesRecoveredHead(observation, recoveredHead))
+            {
+                return AuthorizedAcceptedStateRestoreResult.Fail(
+                    AcceptedStateCodes.Conflict);
             }
 
             if (launch.Inputs.StateMode == ActionHostStateMode.Reset)
@@ -423,33 +462,15 @@ internal sealed class AuthorizedAcceptedStateComposer
                 return AuthorizedAcceptedStateRestoreResult.Bootstrap(context);
             }
 
-            var recoveredTransition = await lineageService
-                .RecoverInterruptedTransitionAsync(
-                    locator,
-                    lineageRequest,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            if (!recoveredTransition.Succeeded)
-            {
-                return AuthorizedAcceptedStateRestoreResult.Fail(
-                    MapLineageCode(recoveredTransition.Code));
-            }
-
-            if (recoveredTransition.Recovered)
-            {
-                selectedLineage = recoveredTransition.Context;
-                var context = Transfer(
-                    access,
-                    keys,
-                    locator,
-                    selectedLineage!,
-                    accepted: null);
-                ownershipTransferred = true;
-                return AuthorizedAcceptedStateRestoreResult.Bootstrap(context);
-            }
-
             var selectorResult = new AcceptedStateSelector(timeProvider)
                 .Select(observation, lineageRequest);
+            if (recoveredTransition!.RequiresTypedExpiry &&
+                selectorResult.Expiry is null)
+            {
+                return AuthorizedAcceptedStateRestoreResult.Fail(
+                    AcceptedStateCodes.Conflict);
+            }
+
             if (selectorResult.IsBootstrap)
             {
                 if (selectorResult.InitialAbsence is not null)
@@ -774,6 +795,27 @@ internal sealed class AuthorizedAcceptedStateComposer
                 head.Header.SessionId,
                 head.Header.ObjectIdentity,
                 head.Head.Transition));
+
+    private static bool MatchesRecoveredHead(
+        LineageReadOnlyObservationContext observation,
+        SelectedLineageSnapshot recovered)
+    {
+        var selected = observation.Selection.Selection?.Head;
+        return selected is not null &&
+            StringComparer.Ordinal.Equals(
+                selected.Header.BaseScopeDigest,
+                recovered.BaseScopeDigest) &&
+            StringComparer.Ordinal.Equals(
+                selected.Header.Epoch,
+                recovered.Epoch) &&
+            StringComparer.Ordinal.Equals(
+                selected.Header.SessionId,
+                recovered.SessionId) &&
+            StringComparer.Ordinal.Equals(
+                selected.Header.ObjectIdentity,
+                recovered.LineageHeadIdentity) &&
+            selected.Head.Transition == recovered.Transition;
+    }
 
     private static AuthorizedAcceptedStateRestoreContext Transfer(
         AuthorizedLocatorAccess access,
