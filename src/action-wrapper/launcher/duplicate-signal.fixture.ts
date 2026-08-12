@@ -32,6 +32,9 @@ setInterval(() => {}, 1000);
 `;
 await writeFile(executable, source);
 await chmod(executable, 0o700);
+// The test-only Vite server owns SIGTERM in its CLI process; production does not run under Vite.
+process.removeAllListeners('SIGTERM');
+process.removeAllListeners('SIGINT');
 const termination = createTerminationSignal();
 try {
   const result = await runHostProcess({
