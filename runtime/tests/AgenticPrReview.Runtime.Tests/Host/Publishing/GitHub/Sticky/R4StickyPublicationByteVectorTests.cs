@@ -4,6 +4,8 @@ using System.Text;
 using System.Text.Json;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent.Tools;
+using AgenticPrReview.Runtime.Canonical;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
@@ -102,6 +104,24 @@ internal static class R4StickyPublicationByteVectors
         R4PublicationScopeV1 scope) =>
         RenderMaximum(Unit(name), identity, scope);
 
+    internal static AgentTerminalReview TerminalReview(
+        string name,
+        ReviewedIdentity? identity = null,
+        R4PublicationScopeV1? scope = null)
+    {
+        var input = MaximumInput(Unit(name), identity, scope);
+        var canonical = AgentToolArguments.WriteFinishReview(
+            input.Summary,
+            input.Findings);
+        return new AgentTerminalReview(
+            input.Summary,
+            input.Findings,
+            AgentCanonical.HashDomain(
+                AgentCanonical.TerminalDomain,
+                canonical),
+            canonical);
+    }
+
     private static R4StickyPublicationByteVector Build(string name,
         string unit, string commentSha256, string requestSha256)
     {
@@ -114,9 +134,24 @@ internal static class R4StickyPublicationByteVectors
         ReviewedIdentity? identity,
         R4PublicationScopeV1? scope)
     {
+        var input = MaximumInput(unit, identity, scope);
+        return R4PublicationTestData.Render(
+            input.Summary,
+            input.Findings,
+            identity,
+            scope);
+    }
+
+    private static (string Summary, ImmutableArray<AgentFinding> Findings)
+        MaximumInput(
+        string unit,
+        ReviewedIdentity? identity,
+        R4PublicationScopeV1? scope)
+    {
         var summary = RepeatWithinUtf8(unit, AgentLimits.SummaryBytes);
         var findings = ImmutableArray.CreateBuilder<AgentFinding>();
         R4RenderedStickyComment? lastAccepted = null;
+        ImmutableArray<AgentFinding> lastAcceptedFindings = [];
         for (var index = 0; index < AgentLimits.Findings; index++)
         {
             findings.Add(Finding(unit, index,
@@ -132,6 +167,7 @@ internal static class R4StickyPublicationByteVectors
                 break;
             }
             lastAccepted = rendered;
+            lastAcceptedFindings = findings.ToImmutable();
         }
 
         if (findings.Count < AgentLimits.Findings)
@@ -151,6 +187,7 @@ internal static class R4StickyPublicationByteVectors
                 if (rendered.RenderedFindingCount == candidate.Length)
                 {
                     lastAccepted = rendered;
+                    lastAcceptedFindings = candidate;
                     low = middle + 1;
                 }
                 else
@@ -163,7 +200,7 @@ internal static class R4StickyPublicationByteVectors
         if (lastAccepted is null)
             throw new InvalidOperationException(
                 $"Unable to build P1 byte vector for unit {unit}.");
-        return lastAccepted;
+        return (summary, lastAcceptedFindings);
     }
 
     private static string Unit(string name) => name switch

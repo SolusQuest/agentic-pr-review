@@ -12,6 +12,7 @@ using AgenticPrReview.Runtime.Host.State.GitHubArtifacts;
 using AgenticPrReview.Runtime.Host.State.Lineage;
 using AgenticPrReview.Runtime.Host.State.Locator;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
+using AgenticPrReview.Runtime.Host.State.Transactions;
 
 namespace AgenticPrReview.Runtime.Host.State.Restore;
 
@@ -50,55 +51,53 @@ internal sealed record AuthorizedAcceptedStateRestoreResult(
 
 internal sealed class AuthorizedAcceptedStateRestoreContext : IDisposable
 {
-    private AuthorizedLocatorAccess? access;
-    private LocatorStateKeyRing? keys;
-    private LocatorContext? locator;
-    private SelectedLineageContext? lineage;
-    private AcceptedStateContext? accepted;
+    private RetainedStateTransactionAuthority? transaction;
 
     internal AuthorizedAcceptedStateRestoreContext(
-        AuthorizedLocatorAccess access,
-        LocatorStateKeyRing keys,
-        LocatorContext locator,
-        SelectedLineageContext lineage,
-        AcceptedStateContext? accepted)
+        object issuer,
+        RetainedStateTransactionAuthority transaction)
     {
-        this.access = access;
-        this.keys = keys;
-        this.locator = locator;
-        this.lineage = lineage;
-        this.accepted = accepted;
+        if (!RestrictedStateService.IsRetainedStateIssuer(issuer))
+        {
+            throw new ArgumentException(
+                "The retained-state issuer is not authorized.",
+                nameof(issuer));
+        }
+
+        this.transaction = transaction;
     }
 
-    internal bool HasAcceptedSession => Volatile.Read(ref accepted) is not null;
+    internal bool HasAcceptedSession =>
+        Volatile.Read(ref transaction)?.TryGetAdmittedValue(out _) == true;
 
     internal bool TryGetLineageSnapshot(
         out SelectedLineageSnapshot? snapshot)
     {
         snapshot = null;
-        var currentAccess = Volatile.Read(ref access);
-        var currentLineage = Volatile.Read(ref lineage);
-        return currentAccess is not null &&
-            currentLineage is not null &&
-            currentLineage.TryGetSnapshot(currentAccess, out snapshot);
+        return Volatile.Read(ref transaction)?.TryGetLineageSnapshot(
+            out snapshot) == true;
     }
 
     internal bool TryGetAdmittedValue(
         out AgentSessionStateAdmittedValue? value)
     {
         value = null;
-        return Volatile.Read(ref accepted)?.TryGetAdmittedValue(out value) ==
+        return Volatile.Read(ref transaction)?.TryGetAdmittedValue(out value) ==
             true;
     }
 
-    public void Dispose()
+    internal bool TryGetTransactionAuthority(
+        object issuer,
+        out RetainedStateTransactionAuthority? authority)
     {
-        Interlocked.Exchange(ref accepted, null)?.Dispose();
-        Interlocked.Exchange(ref lineage, null)?.Dispose();
-        Interlocked.Exchange(ref locator, null)?.Dispose();
-        Interlocked.Exchange(ref keys, null)?.Dispose();
-        Interlocked.Exchange(ref access, null)?.Dispose();
+        authority = RestrictedStateService.IsRetainedStateIssuer(issuer)
+            ? Volatile.Read(ref transaction)
+            : null;
+        return authority?.IsLive == true;
     }
+
+    public void Dispose() =>
+        Interlocked.Exchange(ref transaction, null)?.Dispose();
 
     public override string ToString() =>
         nameof(AuthorizedAcceptedStateRestoreContext);
@@ -268,6 +267,20 @@ internal sealed class AcceptedStateProductionAuthorization
 
 internal sealed class AuthorizedAcceptedStateComposer
 {
+    private readonly object issuer;
+
+    internal AuthorizedAcceptedStateComposer(object issuer)
+    {
+        if (!RestrictedStateService.IsRetainedStateIssuer(issuer))
+        {
+            throw new ArgumentException(
+                "The retained-state issuer is not authorized.",
+                nameof(issuer));
+        }
+
+        this.issuer = issuer;
+    }
+
     internal async Task<AuthorizedAcceptedStateRestoreResult> RestoreAsync(
         ArtifactStateRestoreRequest request,
         CancellationToken cancellationToken)
@@ -416,12 +429,29 @@ internal sealed class AuthorizedAcceptedStateComposer
                 }
 
                 selectedLineage = reset.Context;
-                var context = Transfer(
+                if (!TryTransfer(
+                    authorization,
+                    request,
+                    store,
+                    timeProvider,
                     access,
                     keys,
                     locator,
                     selectedLineage,
-                    accepted: null);
+                    baseScope,
+                    reviewed,
+                    publicationBinding,
+                    runIdentity,
+                    accepted: null,
+                    acceptedSelection: null,
+                    observation.InventoryDigest,
+                    out var context) ||
+                    context is null)
+                {
+                    return AuthorizedAcceptedStateRestoreResult.Fail(
+                        AcceptedStateCodes.AccessDenied);
+                }
+
                 ownershipTransferred = true;
                 return AuthorizedAcceptedStateRestoreResult.Bootstrap(context);
             }
@@ -530,12 +560,29 @@ internal sealed class AuthorizedAcceptedStateComposer
                         observation.Selection.Selection!.Head);
                 }
 
-                var context = Transfer(
+                if (!TryTransfer(
+                    authorization,
+                    request,
+                    store,
+                    timeProvider,
                     access,
                     keys,
                     locator,
                     selectedLineage,
-                    accepted: null);
+                    baseScope,
+                    reviewed,
+                    publicationBinding,
+                    runIdentity,
+                    accepted: null,
+                    acceptedSelection: null,
+                    observation.InventoryDigest,
+                    out var context) ||
+                    context is null)
+                {
+                    return AuthorizedAcceptedStateRestoreResult.Fail(
+                        AcceptedStateCodes.AccessDenied);
+                }
+
                 ownershipTransferred = true;
                 return AuthorizedAcceptedStateRestoreResult.Bootstrap(context);
             }
@@ -661,12 +708,29 @@ internal sealed class AuthorizedAcceptedStateComposer
                         selectedLineage = expired.Context;
                     }
 
-                    var context = Transfer(
+                    if (!TryTransfer(
+                        authorization,
+                        request,
+                        store,
+                        timeProvider,
                         access,
                         keys,
                         locator,
                         selectedLineage,
-                        accepted: null);
+                        baseScope,
+                        reviewed,
+                        publicationBinding,
+                        runIdentity,
+                        accepted: null,
+                        acceptedSelection: null,
+                        observation.InventoryDigest,
+                        out var context) ||
+                        context is null)
+                    {
+                        return AuthorizedAcceptedStateRestoreResult.Fail(
+                            AcceptedStateCodes.AccessDenied);
+                    }
+
                     ownershipTransferred = true;
                     return AuthorizedAcceptedStateRestoreResult.Bootstrap(
                         context);
@@ -679,12 +743,29 @@ internal sealed class AuthorizedAcceptedStateComposer
                 CryptographicOperations.ZeroMemory(trustedPolicyBytes);
             }
 
-            var readyContext = Transfer(
+            if (!TryTransfer(
+                authorization,
+                request,
+                store,
+                timeProvider,
                 access,
                 keys,
                 locator,
                 selectedLineage,
-                accepted);
+                baseScope,
+                reviewed,
+                publicationBinding,
+                runIdentity,
+                accepted,
+                selectorResult.Selection,
+                observation.InventoryDigest,
+                out var readyContext) ||
+                readyContext is null)
+            {
+                return AuthorizedAcceptedStateRestoreResult.Fail(
+                    AcceptedStateCodes.AccessDenied);
+            }
+
             ownershipTransferred = true;
             return AuthorizedAcceptedStateRestoreResult.Ready(readyContext);
         }
@@ -851,13 +932,123 @@ internal sealed class AuthorizedAcceptedStateComposer
             selected.Head.Transition == recovered.Transition;
     }
 
-    private static AuthorizedAcceptedStateRestoreContext Transfer(
+    private bool TryTransfer(
+        AcceptedStateProductionAuthorization authorization,
+        ArtifactStateRestoreRequest request,
+        IRestrictedStateStore store,
+        TimeProvider timeProvider,
         AuthorizedLocatorAccess access,
         LocatorStateKeyRing keys,
         LocatorContext locator,
         SelectedLineageContext lineage,
-        AcceptedStateContext? accepted) =>
-        new(access, keys, locator, lineage, accepted);
+        LineageBaseScope baseScope,
+        ReviewedTransitionFacts reviewed,
+        AcceptedStatePublicationBinding publicationBinding,
+        string producingRunIdentity,
+        AcceptedStateContext? accepted,
+        AcceptedStateSelection? acceptedSelection,
+        string initialInventoryDigest,
+        out AuthorizedAcceptedStateRestoreContext? context)
+    {
+        context = null;
+        if (!lineage.TryGetSnapshot(access, out var selected) ||
+            selected is null)
+        {
+            return false;
+        }
+
+        var policy = authorization.Policy;
+        var invocation = authorization.Invocation;
+        var stateScope = new RestrictedStateScope(
+            baseScope.RepositoryId,
+            baseScope.TrustedWorkflowIdentity,
+            invocation.PullRequest.Number,
+            selected.SessionId,
+            policy.ProviderId,
+            policy.ModelId,
+            policy.AdapterId,
+            policy.InstructionsSha256,
+            policy.LimitsSha256,
+            policy.ToolsetSha256,
+            policy.BuildDiscriminator);
+        var stateAuthorization = AuthorizedStateAccess.Authorize(
+            new RestrictedStateAccessRequest(
+                stateScope,
+                stateScope,
+                IsTrustedWorkflow: true,
+                IsSameRepository: true,
+                IsForkOrigin: false),
+            out var stateAccess);
+        if (!StringComparer.Ordinal.Equals(
+                stateAuthorization.Code,
+                RestrictedStateCodes.Authorized) ||
+            stateAccess is null)
+        {
+            return false;
+        }
+
+        var trustedPolicyBytes = policy.InstructionBytes.ToArray();
+        try
+        {
+            var trustedRequest = new AgentSessionTrustedRequest(
+                baseScope.RepositoryId,
+                invocation.PullRequest.Number,
+                baseScope.TrustedWorkflowIdentity,
+                trustedPolicyBytes,
+                policy.BuildDiscriminator,
+                policy.ProviderId,
+                policy.ModelId,
+                policy.AdapterId);
+            var currentReviewedIdentity = new ReviewedIdentity(
+                baseScope.RepositoryId,
+                invocation.PullRequest.Number,
+                invocation.PullRequest.BaseSha,
+                invocation.PullRequest.HeadSha);
+            var policyBinding = new AcceptedStatePolicyBinding(
+                policy.PolicySha256,
+                policy.ConfigSha256,
+                policy.InstructionsSha256,
+                policy.PayloadSha256,
+                policy.BuildDiscriminator);
+            if (!RetainedStateTransactionAuthority.TryCreate(
+                    issuer,
+                    authorization,
+                    access,
+                    keys,
+                    locator,
+                    lineage,
+                    store,
+                    timeProvider,
+                    stateAccess,
+                    baseScope,
+                    reviewed,
+                    producingRunIdentity,
+                    authorization.Launch.RunAttempt,
+                    policyBinding,
+                    publicationBinding,
+                    trustedRequest,
+                    currentReviewedIdentity,
+                    request.CurrentReviewContext,
+                    request.ContinuationCodec,
+                    accepted,
+                    acceptedSelection,
+                    initialInventoryDigest,
+                    out var transaction) ||
+                transaction is null)
+            {
+                return false;
+            }
+
+            context = new AuthorizedAcceptedStateRestoreContext(
+                issuer,
+                transaction);
+            return true;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(trustedPolicyBytes);
+        }
+    }
 
     private static string Hash(string domain, params string[] values)
     {

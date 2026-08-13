@@ -421,7 +421,7 @@ internal sealed class FakeGitHubTransport :
             CancellationToken cancellationToken)
     {
         Calls.Add($"run:{runId}:{attempt}");
-        return Result(runId == ActionHostAuthorizationScenario.CurrentRunId
+        return Result(runId == CurrentRun.Id
             ? CurrentRun
             : TriggerRun, cancellationToken);
     }
