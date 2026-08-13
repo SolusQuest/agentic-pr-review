@@ -689,7 +689,7 @@ public sealed class RetainedStateTransactionEndToEndTests
     }
 
     [Fact]
-    public async Task DurableOpaqueAnchorBlocksSiblingAfterPreDispatchCrash()
+    public async Task DurableOpaqueAnchorBlocksEverySiblingAfterPreDispatchCrash()
     {
         var fixture = await CreateFixtureAsync();
         var run = await CompleteRunAsync(fixture);
@@ -774,28 +774,44 @@ public sealed class RetainedStateTransactionEndToEndTests
             reconcileOnly.Code);
         Assert.Equal(uploadsBeforeReconcile, fixture.Store.UploadCalls);
 
-        var freshOwnershipResult = await RestrictedStateService
-            .RenewRetainedStateOwnershipAsync(
-                resumedContext,
-                recoveredCandidate,
-                prior: null,
-                expectedP5Records: [],
-                CancellationToken.None);
-        using var freshOwnership = Assert.IsType<RetainedStateOwnership>(
-            freshOwnershipResult.Value);
-        var duplicate = await RestrictedStateService
-            .PrepareRetainedOpaqueWriteAsync(
-                resumedContext,
-                freshOwnership,
-                request,
-                CancellationToken.None);
-        Assert.Equal(RetainedStateTransactionCodes.Conflict, duplicate.Code);
-        Assert.Null(duplicate.Value);
-        Assert.Equal(uploadsBeforeReconcile, fixture.Store.UploadCalls);
+        var siblingRequests = new[]
+        {
+            request,
+            request with
+            {
+                Payload = ImmutableArray.CreateRange(
+                    "different-payload"u8.ToArray()),
+            },
+            request with
+            {
+                ObjectClass = StateObjectClass.PublicationFailure,
+            },
+        };
+        foreach (var siblingRequest in siblingRequests)
+        {
+            var freshOwnershipResult = await RestrictedStateService
+                .RenewRetainedStateOwnershipAsync(
+                    resumedContext,
+                    recoveredCandidate,
+                    prior: null,
+                    expectedP5Records: [],
+                    CancellationToken.None);
+            using var freshOwnership = Assert.IsType<RetainedStateOwnership>(
+                freshOwnershipResult.Value);
+            var sibling = await RestrictedStateService
+                .PrepareRetainedOpaqueWriteAsync(
+                    resumedContext,
+                    freshOwnership,
+                    siblingRequest,
+                    CancellationToken.None);
+            Assert.Equal(RetainedStateTransactionCodes.Conflict, sibling.Code);
+            Assert.Null(sibling.Value);
+            Assert.Equal(uploadsBeforeReconcile, fixture.Store.UploadCalls);
+        }
     }
 
     [Fact]
-    public async Task PossibleCommitOpaqueAnchorRecoversWithoutTargetDispatch()
+    public async Task PossibleCommitOpaqueAnchorRecoversAndBlocksEverySibling()
     {
         var fixture = await CreateFixtureAsync();
         var run = await CompleteRunAsync(fixture);
@@ -890,24 +906,40 @@ public sealed class RetainedStateTransactionEndToEndTests
             unresolved.Code);
         Assert.Equal(uploadsBeforeReconcile, fixture.Store.UploadCalls);
 
-        var freshOwnershipResult = await RestrictedStateService
-            .RenewRetainedStateOwnershipAsync(
-                resumedContext,
-                recoveredCandidate,
-                prior: null,
-                expectedP5Records: [],
-                CancellationToken.None);
-        using var freshOwnership = Assert.IsType<RetainedStateOwnership>(
-            freshOwnershipResult.Value);
-        var sibling = await RestrictedStateService
-            .PrepareRetainedOpaqueWriteAsync(
-                resumedContext,
-                freshOwnership,
-                request,
-                CancellationToken.None);
-        Assert.Equal(RetainedStateTransactionCodes.Conflict, sibling.Code);
-        Assert.Null(sibling.Value);
-        Assert.Equal(uploadsBeforeReconcile, fixture.Store.UploadCalls);
+        var siblingRequests = new[]
+        {
+            request with
+            {
+                Payload = ImmutableArray.CreateRange(
+                    "different-possible-payload"u8.ToArray()),
+            },
+            request with
+            {
+                ObjectClass = StateObjectClass.Abandonment,
+            },
+            request,
+        };
+        foreach (var siblingRequest in siblingRequests)
+        {
+            var freshOwnershipResult = await RestrictedStateService
+                .RenewRetainedStateOwnershipAsync(
+                    resumedContext,
+                    recoveredCandidate,
+                    prior: null,
+                    expectedP5Records: [],
+                    CancellationToken.None);
+            using var freshOwnership = Assert.IsType<RetainedStateOwnership>(
+                freshOwnershipResult.Value);
+            var sibling = await RestrictedStateService
+                .PrepareRetainedOpaqueWriteAsync(
+                    resumedContext,
+                    freshOwnership,
+                    siblingRequest,
+                    CancellationToken.None);
+            Assert.Equal(RetainedStateTransactionCodes.Conflict, sibling.Code);
+            Assert.Null(sibling.Value);
+            Assert.Equal(uploadsBeforeReconcile, fixture.Store.UploadCalls);
+        }
     }
 
     [Fact]

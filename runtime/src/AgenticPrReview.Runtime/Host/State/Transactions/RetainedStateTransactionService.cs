@@ -546,9 +546,13 @@ internal sealed class RetainedStateTransactionService
                 StringComparer.Ordinal.Equals(
                     item.Anchor.CandidateObjectIdentity,
                     ownership.Candidate.Prepared.Header.ObjectIdentity) &&
-                StringComparer.Ordinal.Equals(
-                    item.Anchor.OperationIdentity,
-                    operationIdentity)))
+                (StringComparer.Ordinal.Equals(
+                        item.Anchor.OperationIdentity,
+                        operationIdentity) ||
+                    !HasExactOpaqueWriteTarget(
+                        snapshot,
+                        binding,
+                        item.Anchor))))
         {
             return RetainedStateTransactionResult<
                 RetainedStateOpaqueWriteAttempt>.Fail(
@@ -5029,6 +5033,54 @@ internal sealed class RetainedStateTransactionService
                 StringComparer.Ordinal.Equals(
                     anchor.TargetPayloadSha256,
                     OpaqueStoreHash.Sha256(payload.Span)))
+            .ToArray();
+        return matches.Length == 1;
+    }
+
+    private static bool HasExactOpaqueWriteTarget(
+        ScopedStateInventorySnapshot snapshot,
+        RetainedStateTransactionBinding binding,
+        RetainedStateOpaqueWriteAnchor anchor)
+    {
+        var matches = snapshot.Authenticated.Where(item =>
+                item.Metadata.Reference.Name == anchor.TargetName &&
+                StringComparer.Ordinal.Equals(
+                    item.Metadata.ProducingRun.Identity,
+                    anchor.ProducingRunIdentity) &&
+                item.Metadata.ProducingRun.Attempt ==
+                    anchor.ProducingRunAttempt &&
+                StringComparer.Ordinal.Equals(
+                    item.Metadata.EncryptedObjectDigest.Sha256,
+                    anchor.TargetEnvelopeSha256) &&
+                item.Metadata.ExpiresAtUnixSeconds >=
+                    anchor.RequiredPlatformExpiresAtUnixSeconds &&
+                item.Metadata.Size == anchor.TargetEnvelope.Length &&
+                Active(item, binding) &&
+                item.Header.ObjectClass == anchor.ObjectClass &&
+                StringComparer.Ordinal.Equals(
+                    item.Header.ObjectIdentity,
+                    anchor.TargetObjectIdentity) &&
+                StringComparer.Ordinal.Equals(
+                    item.Header.PredecessorIdentity,
+                    anchor.CandidateObjectIdentity) &&
+                StringComparer.Ordinal.Equals(
+                    item.Header.PredecessorIdentity,
+                    anchor.PredecessorIdentity) &&
+                StringComparer.Ordinal.Equals(
+                    item.Header.SuccessorIdentity,
+                    anchor.SuccessorIdentity) &&
+                item.Header.LogicalExpiresAtUnixSeconds ==
+                    anchor.SemanticRequiredExpiresAtUnixSeconds &&
+                item.Header.RequiredPlatformExpiresAtUnixSeconds ==
+                    anchor.RequiredPlatformExpiresAtUnixSeconds &&
+                StringComparer.Ordinal.Equals(
+                    item.Header.ProducingRunIdentity,
+                    anchor.ProducingRunIdentity) &&
+                item.Header.ProducingRunAttempt ==
+                    anchor.ProducingRunAttempt &&
+                StringComparer.Ordinal.Equals(
+                    OpaqueStoreHash.Sha256(item.Payload),
+                    anchor.TargetPayloadSha256))
             .ToArray();
         return matches.Length == 1;
     }
