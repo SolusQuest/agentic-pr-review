@@ -44,8 +44,10 @@ public sealed class PublicationRecoveryArchitectureTests
     {
         Assert.Equal(
             PublicationRecoveryAction.Conflict,
-            PublicationRecoveryClassifier.Classify(null).Action);
-        Assert.Equal(8, Enum.GetValues<PublicationRecoveryAction>().Length);
+            PublicationRecoveryClassifier.Classify(
+                null,
+                PublicationMarkerObservation.Incomplete).Action);
+        Assert.Equal(10, Enum.GetValues<PublicationRecoveryAction>().Length);
         Assert.Equal(
             6,
             Enum.GetValues<PublicationRecoveryLifecycleState>().Length);

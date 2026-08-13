@@ -1023,6 +1023,8 @@ public sealed class RetainedStateTransactionEndToEndTests
                 pendingCandidate: null,
                 record,
                 opaqueWrite: null,
+                recoveryInventory: null,
+                recoveryAnchor: null,
                 CancellationToken.None);
         using var recordAuthorization = Assert.IsType<
             RetainedStateP5CleanupAuthorization>(
@@ -1048,6 +1050,8 @@ public sealed class RetainedStateTransactionEndToEndTests
                 pendingCandidate: null,
                 opaqueRecord: null,
                 write,
+                recoveryInventory: null,
+                recoveryAnchor: null,
                 CancellationToken.None);
         using var anchorAuthorization = Assert.IsType<
             RetainedStateP5CleanupAuthorization>(
@@ -1380,6 +1384,59 @@ public sealed class RetainedStateTransactionEndToEndTests
             out var admittedSecond));
         Assert.Equal(2, admittedSecond!.Artifact.Document.Generation);
         Assert.Equal(3, admittedSecond.Artifact.Document.CompletedRuns.Length);
+    }
+
+    [Fact]
+    public async Task SupersededTerminalRecoveryCleansP5BeforeProvider()
+    {
+        var fixture = await CreateFixtureAsync(
+            extraRetentionSeconds: 0,
+            route: ActionHostAuthorizationRoute.WorkflowDispatch);
+        var accepted = await AcceptGenerationAsync(fixture, commentId: 700);
+        Assert.Equal(0, accepted.Generation);
+        fixture.Context.Dispose();
+
+        var resumed = await RestoreFixtureAsync(
+            fixture,
+            newWorkflowRun: true,
+            reviewedHeadSha: new string('f', 40));
+        var factory = new FakePublisherTransportFactory();
+        var service = new PublicationRecoveryService(
+            new StickyCommentPublisher(factory));
+        using var evaluation = await service.ClassifyBeforeProviderAsync(
+            resumed.Launch.Inputs.GitHubToken!,
+            resumed.Invocation,
+            resumed.PublicationScope,
+            resumed.Context,
+            CancellationToken.None);
+        Assert.Equal(
+            PublicationRecoveryAction.NoPendingWork,
+            evaluation.Decision.Action);
+        Assert.Equal(
+            PublicationRecoveryLifecycleState.SupersededTerminalRecovery,
+            evaluation.Decision.Lifecycle);
+
+        var cleanup = await PublicationRecoveryService
+            .CleanupHistoricalRecoveryRecordsAsync(
+                resumed.Invocation,
+                resumed.Context,
+                evaluation,
+                CancellationToken.None);
+        Assert.True(cleanup.Completed, cleanup.Code);
+        var inventoryResult = await RestrictedStateService
+            .ObserveRetainedPublicationRecoveryInventoryAsync(
+                resumed.Context,
+                CancellationToken.None);
+        using var inventory = Assert.IsType<
+            RetainedStatePublicationRecoveryInventory>(inventoryResult.Value);
+        Assert.Empty(inventory.Records);
+        Assert.Empty(inventory.Anchors);
+        Assert.Null(inventory.Candidate);
+        Assert.NotNull(inventory.CurrentAcceptance);
+        Assert.Equal(0, factory.Transport.Lists);
+        Assert.Equal(0, factory.Transport.Creates);
+        Assert.Equal(0, factory.Transport.Updates);
+        resumed.Context.Dispose();
     }
 
     [Fact]
@@ -2300,120 +2357,35 @@ public sealed class RetainedStateTransactionEndToEndTests
             fixture,
             newWorkflowRun: true,
             reviewedHeadSha: nextHead);
-        var admitted = await RestrictedStateService
-            .RecoverRetainedCandidateAsync(
-                resumed.Context,
-                CancellationToken.None);
-        Assert.Equal(RetainedStateTransactionCodes.Conflict, admitted.Code);
-        var inspected = await RestrictedStateService
-            .InspectRetainedPendingCandidateAsync(
-                resumed.Context,
-                CancellationToken.None);
-        var evidence = Assert.IsType<RetainedStatePendingCandidateEvidence>(
-            inspected.Value);
-        Assert.Equal(0, evidence.Generation);
-        Assert.False(evidence.MatchesCurrentReviewedHead);
-        Assert.Equal(
-            prepared.Publication.ReviewedHeadSha,
-            evidence.ProducerHeadSha);
-        var observed = await RestrictedStateService
-            .ObserveRetainedPendingCandidateAsync(
-                resumed.Context,
-                CancellationToken.None);
-        using var exact = Assert.IsType<RetainedStateObservedCandidate>(
-            observed.Value);
-        Assert.False(exact.MatchesCurrentReviewedHead);
-        Assert.Equal(target, exact.Metadata);
-        Assert.Equal(
-            prepared.Publication.BodySha256,
-            exact.Publication.BodySha256);
-        Assert.True(exact.Publication.FinalizedCommentUtf8.AsSpan()
-            .SequenceEqual(
-                prepared.Publication.FinalizedCommentUtf8.AsSpan()));
-        Assert.True(PublicationRecoveryInventoryFactory.TryCreate(
+        var factory = new FakePublisherTransportFactory();
+        factory.Transport.Enqueue();
+        factory.Transport.Enqueue();
+        var service = new PublicationRecoveryService(
+            new StickyCommentPublisher(factory));
+        using var evaluation = await service.ClassifyBeforeProviderAsync(
+            resumed.Launch.Inputs.GitHubToken!,
+            resumed.Invocation,
+            resumed.PublicationScope,
             resumed.Context,
-            exact,
-            ImmutableArray<RetainedStateOpaqueRecord>.Empty,
-            matchedAcceptance: null,
-            PublicationRecoveryAnchorState.None,
-            out var recoveryInventory));
-        Assert.False(recoveryInventory!.CandidateMatchesCurrentHead);
-        Assert.True(recoveryInventory.HasStoredValidatedPublication);
+            CancellationToken.None);
+        Assert.Equal(
+            PublicationRecoveryAction.AbandonStaleCandidate,
+            evaluation.Decision.Action);
+        Assert.NotNull(evaluation.MarkerAbsenceEvidence);
 
-        var markerAbsenceEvidence =
-            OpaqueStoreHash.Sha256("complete-marker-absence"u8);
-        Assert.True(PublicationRecoveryPersistence
-            .TryCreateStaleAbandonmentWrite(
-                exact,
-                markerAbsenceEvidence,
-                resumed.Time.UnixSeconds,
-                out var abandonment,
-                out var abandonmentRequest));
-        var staleOwnershipResult = await RestrictedStateService
-            .AuthorizeRetainedStaleAbandonmentOwnershipAsync(
-                resumed.Context,
-                exact,
-                CancellationToken.None);
-        using var staleOwnership = Assert.IsType<RetainedStateOwnership>(
-            staleOwnershipResult.Value);
-        var preparedAbandonment = await RestrictedStateService
-            .PrepareRetainedOpaqueWriteAsync(
-                resumed.Context,
-                staleOwnership,
-                abandonmentRequest!,
-                CancellationToken.None);
-        using var abandonmentWrite = Assert.IsType<
-            RetainedStateOpaqueWriteAttempt>(preparedAbandonment.Value);
-        var persistedAbandonment = await RestrictedStateService
-            .PersistPreparedRetainedOpaqueWriteAsync(
-                resumed.Context,
-                abandonmentWrite,
-                CancellationToken.None);
-        using var abandonmentRecord = Assert.IsType<
-            RetainedStateOpaqueRecord>(persistedAbandonment.Value);
-        Assert.True(RestrictedStateService.TryCopyRetainedStateOpaquePayload(
+        var cleaned = await service.AbandonAndCleanupStaleCandidateAsync(
+            resumed.Launch.Inputs.GitHubToken!,
+            resumed.Invocation,
+            resumed.PublicationScope,
             resumed.Context,
-            abandonmentRecord,
-            out var abandonmentPayload));
-        Assert.True(AbandonmentV1Codec.TryDecode(
-            abandonmentPayload.AsSpan(),
-            out var decodedAbandonment));
-        Assert.Equal(abandonment, decodedAbandonment);
-
-        var refreshedInspection = await RestrictedStateService
-            .InspectRetainedPendingCandidateAsync(
-                resumed.Context,
-                CancellationToken.None);
-        var refreshedEvidence = Assert.IsType<
-            RetainedStatePendingCandidateEvidence>(
-                refreshedInspection.Value);
-
-        var decision = new RetainedStateP5CleanupDecision(
-            RetainedStateP5CleanupClassification.StaleCandidateAbandonment,
-            OpaqueStoreHash.Sha256("p5-stale-classification"u8),
-            markerAbsenceEvidence);
-        var authorized = await RestrictedStateService
-            .AuthorizeRetainedP5CleanupAsync(
-                resumed.Context,
-                decision,
-                refreshedEvidence,
-                opaqueRecord: null,
-                opaqueWrite: null,
-                CancellationToken.None);
-        using var authorization = Assert.IsType<
-            RetainedStateP5CleanupAuthorization>(authorized.Value);
-        var cleaned = await RestrictedStateService
-            .CleanupRetainedP5AuthorizedAsync(
-                resumed.Context,
-                new RetainedStateP5CleanupRequest(
-                    authorization,
-                    resumed.Time.UnixSeconds +
-                        StateRetentionRequirements
-                            .ScopedPlatformRequestSeconds),
-                CancellationToken.None);
+            evaluation,
+            CancellationToken.None);
 
         Assert.True(cleaned.Completed, cleaned.Code);
         Assert.DoesNotContain(target, resumed.Store.Objects);
+        Assert.Equal(2, factory.Transport.Lists);
+        Assert.Equal(0, factory.Transport.Creates);
+        Assert.Equal(0, factory.Transport.Updates);
         var after = await RestrictedStateService
             .InspectRetainedPendingCandidateAsync(
                 resumed.Context,
@@ -2444,7 +2416,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             disposed.Code);
     }
 
-    private static async Task<TransactionFixture> CreateFixtureAsync(
+    internal static async Task<TransactionFixture> CreateFixtureAsync(
         long extraRetentionSeconds = 3_600,
         ActionHostAuthorizationRoute route =
             ActionHostAuthorizationRoute.WorkflowRun)
@@ -2532,7 +2504,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             publicationScope);
     }
 
-    private static async Task<TransactionFixture> RestoreFixtureAsync(
+    internal static async Task<TransactionFixture> RestoreFixtureAsync(
         TransactionFixture fixture,
         bool newWorkflowRun = false,
         bool rotateStateKey = false,
@@ -2590,7 +2562,10 @@ public sealed class RetainedStateTransactionEndToEndTests
                     fixture.Policy,
                     fixture.CurrentReview,
                     DeepSeekReasoningContinuationCodec.Instance,
-                    new TestDependencies(fixture.Store),
+                    new TestDependencies(
+                        fixture.Store,
+                        reviewedHeadSha,
+                        fixture.Invocation.PullRequest.HeadSha),
                     fixture.Time),
                 CancellationToken.None);
         Assert.True(restored.Succeeded, restored.Code);
@@ -2607,7 +2582,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         };
     }
 
-    private static async Task<AcceptedGeneration> AcceptGenerationAsync(
+    internal static async Task<AcceptedGeneration> AcceptGenerationAsync(
         TransactionFixture fixture,
         long commentId,
         bool exercisePredecessorCopyPossibleCommit = false)
@@ -2692,11 +2667,19 @@ public sealed class RetainedStateTransactionEndToEndTests
         Assert.Equal(RetainedStateTransactionCodes.Accepted, accepted.Code);
         var verified = Assert.IsType<VerifiedRetainedStateAcceptance>(
             accepted.Value);
+        Assert.True(AcceptedStatePublicationPayloadCodec.TryEncode(
+            preparedCandidate.Publication,
+            out var publicationBytes));
+        Assert.True(AcceptedStatePublicationPayloadCodec.TryDecode(
+            publicationBytes,
+            out var retainedPublication));
+        CryptographicOperations.ZeroMemory(publicationBytes);
         return new AcceptedGeneration(
             preparedCandidate.Generation.Generation,
             preparedCandidate.Name,
             candidate.Metadata,
-            verified);
+            verified,
+            retainedPublication!);
     }
 
     private static async Task<RetainedStateAcceptanceEvidence>
@@ -2713,26 +2696,47 @@ public sealed class RetainedStateTransactionEndToEndTests
             existingP5Records = [];
         }
 
+        Assert.True(PublicationRecoveryPersistence
+            .TryCreateStickyReadbackWrite(
+                candidate,
+                sticky,
+                fixture.Time.UnixSeconds,
+                candidate.Prepared.Header.LogicalExpiresAtUnixSeconds,
+                out var stickyBody,
+                out var stickyRequest));
+        var stickyPersistedResult = await PersistOpaqueRecordAsync(
+                fixture.Context,
+                ownership,
+                stickyRequest!,
+                CancellationToken.None);
+        using var stickyRecord = Assert.IsType<RetainedStateOpaqueRecord>(
+            stickyPersistedResult.Value);
+        var p5WithReadback = existingP5Records.Add(stickyRecord);
+        var acceptanceOwnershipResult = await RestrictedStateService
+            .RenewRetainedStateOwnershipAsync(
+                fixture.Context,
+                candidate,
+                prior: null,
+                p5WithReadback,
+                CancellationToken.None);
+        using var acceptanceOwnership = Assert.IsType<RetainedStateOwnership>(
+            acceptanceOwnershipResult.Value);
         var preparationResult = await RestrictedStateService
             .PrepareRetainedStateAcceptanceAsync(
                 fixture.Context,
-                ownership,
+                acceptanceOwnership,
                 sticky,
                 CancellationToken.None);
+        Assert.True(preparationResult.Succeeded, preparationResult.Code);
         using var preparation = Assert.IsType<
             RetainedStateAcceptancePreparation>(preparationResult.Value);
         Assert.True(preparation.TryCreateRecoveryHandoff(out var handoff));
-        Assert.True(PublicationRecoveryPersistence.TryBinding(
+        Assert.True(PublicationRecoveryPersistence.TryPublication(
             candidate,
-            out var recoveryBinding));
-        Assert.True(StickyReadbackRecordV1Codec.TryCreate(
-            recoveryBinding!,
-            sticky,
-            fixture.Time.UnixSeconds,
-            out var stickyRecord));
+            out var recoveryPublication));
         Assert.True(RecoveryRecordV1Codec.TryCreate(
-            recoveryBinding!,
-            stickyRecord!.RecordIdentity,
+            recoveryPublication!,
+            stickyBody!.RecordIdentity,
             handoff!.OpaqueInnerPayload,
             handoff.MinimumSemanticExpiresAtUnixSeconds,
             out var recovery));
@@ -2785,7 +2789,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         }
 
         Assert.Equal(RetainedStateTransactionCodes.Ready, predecessorCode);
-        var allP5 = existingP5Records.Add(recoveryRecord);
+        var allP5 = p5WithReadback.Add(recoveryRecord);
         var finalOwnershipResult = await RestrictedStateService
             .RenewRetainedStateOwnershipAsync(
                 fixture.Context,
@@ -3234,7 +3238,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             fixture.Policy.ModelId,
             fixture.Policy.AdapterId);
 
-    private static async Task<CompletedRun> CompleteRunAsync(
+    internal static async Task<CompletedRun> CompleteRunAsync(
         TransactionFixture fixture,
         string summary = "complete",
         string callId = "finish0")
@@ -3355,7 +3359,7 @@ public sealed class RetainedStateTransactionEndToEndTests
     private static ProjectChatMessage User(string text) =>
         new("user", [new ProjectTextContent(text)]);
 
-    private sealed record TransactionFixture(
+    internal sealed record TransactionFixture(
         ActionHostAuthorizationScenario Scenario,
         ScriptedLocatorStore Store,
         MutableLineageTimeProvider Time,
@@ -3367,24 +3371,74 @@ public sealed class RetainedStateTransactionEndToEndTests
         SelectedLineageSnapshot Selected,
         R4PublicationScopeV1 PublicationScope);
 
-    private sealed record CompletedRun(
+    internal sealed record CompletedRun(
         AgentRunRequest Run,
         AgentRunOutcome Outcome);
 
-    private sealed record AcceptedGeneration(
+    internal sealed record AcceptedGeneration(
         long Generation,
         OpaqueStoreName CandidateName,
         OpaqueStoreObjectMetadata CandidateMetadata,
-        VerifiedRetainedStateAcceptance Acceptance);
+        VerifiedRetainedStateAcceptance Acceptance,
+        ValidatedPublicationPayloadV1 Publication);
 
-    private sealed class TestDependencies(IRestrictedStateStore store) :
+    private sealed class TestDependencies(
+        IRestrictedStateStore store,
+        string? currentHead = null,
+        string? previousHead = null) :
         IAcceptedStateProductionDependencies
     {
         public IRestrictedStateStore CreateArtifactStore(
             ActionHostLaunchContract launch) => store;
 
         public IActionHostGitObjectTransport CreateAncestryTransport(
-            ActionHostGitHubToken token) => new NoCallTransport();
+            ActionHostGitHubToken token) =>
+            currentHead is not null && previousHead is not null
+                ? new LinearAheadTransport(currentHead, previousHead)
+                : new NoCallTransport();
+    }
+
+    private sealed class LinearAheadTransport(
+        string currentHead,
+        string previousHead) : IActionHostGitObjectTransport
+    {
+        private static readonly string Tree = new('e', 40);
+
+        public Task<ActionHostGitObjectResult<ActionHostGitCommitObject>>
+            GetCommitObjectAsync(
+                string repositoryName,
+                string commitSha,
+                CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = StringComparer.Ordinal.Equals(commitSha, currentHead)
+                ? ActionHostGitObjectResult<ActionHostGitCommitObject>.Success(
+                    new ActionHostGitCommitObject(
+                        currentHead,
+                        Tree,
+                        [previousHead]),
+                    512)
+                : ActionHostGitObjectResult<ActionHostGitCommitObject>.Failed(
+                    ActionHostGitObjectFailure.NotFound);
+            return Task.FromResult(result);
+        }
+
+        public Task<ActionHostGitObjectResult<ActionHostGitTreeObject>>
+            GetTreeObjectAsync(
+                string repositoryName,
+                string treeSha,
+                CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Tree transport was called.");
+
+        public Task<ActionHostGitObjectResult<ActionHostGitBlobObject>>
+            GetBlobObjectAsync(
+                string repositoryName,
+                string blobSha,
+                ActionHostGitBlobReadBudget budget,
+                CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Blob transport was called.");
+
+        public void Dispose() { }
     }
 
     private sealed class NoCallTransport : IActionHostGitObjectTransport

@@ -12,9 +12,9 @@ public sealed class PublicationRecoveryCodecTests
     [Fact]
     public void EveryRecordRoundTripsAndRejectsOneByteTampering()
     {
-        var binding = Binding();
+        var publication = Publication();
         Assert.True(PublicationIntentV1Codec.TryCreate(
-            binding,
+            publication,
             Now,
             out var intent));
         AssertRoundTrip(
@@ -24,7 +24,7 @@ public sealed class PublicationRecoveryCodecTests
 
         var receipt = Receipt();
         Assert.True(StickyReadbackRecordV1Codec.TryCreate(
-            binding,
+            publication,
             receipt,
             Now + 1,
             out var readback));
@@ -36,7 +36,7 @@ public sealed class PublicationRecoveryCodecTests
         Assert.Equal(receipt.CommentId, rehydrated!.CommentId);
 
         Assert.True(PublicationFailureV1Codec.TryCreate(
-            binding,
+            publication,
             BoundedGitHubPublisherOutcome.KnownNotWritten,
             StickyPublicationReason.Deadline,
             Now + 2,
@@ -47,7 +47,7 @@ public sealed class PublicationRecoveryCodecTests
             PublicationFailureV1Codec.TryDecode);
 
         Assert.True(AbandonmentV1Codec.TryCreate(
-            binding,
+            publication,
             Hex('9'),
             Now + 3,
             out var abandonment));
@@ -59,7 +59,7 @@ public sealed class PublicationRecoveryCodecTests
         var handoff = ImmutableArray.CreateRange(
             Enumerable.Range(0, 96).Select(static value => (byte)value));
         Assert.True(RecoveryRecordV1Codec.TryCreate(
-            binding,
+            publication,
             readback.RecordIdentity,
             handoff,
             Now + 900,
@@ -79,7 +79,7 @@ public sealed class PublicationRecoveryCodecTests
             out var decodedOffset,
             out var decodedLength));
         var decoded = Assert.IsType<RecoveryRecordV1>(decodedRecovery);
-        Assert.Equal(recoveryRecord.Binding, decoded.Binding);
+        Assert.Equal(recoveryRecord.Publication, decoded.Publication);
         Assert.Equal(
             recoveryRecord.StickyReadbackRecordIdentity,
             decoded.StickyReadbackRecordIdentity);
@@ -104,15 +104,15 @@ public sealed class PublicationRecoveryCodecTests
     [Fact]
     public void StickyReadbackRequiresAnExactP2Receipt()
     {
-        var binding = Binding();
-        var mismatched = binding with { BodySha256 = Hex('8') };
+        var publication = Publication();
+        var mismatched = publication with { BodySha256 = Hex('8') };
         Assert.False(StickyReadbackRecordV1Codec.TryCreate(
             mismatched,
             Receipt(),
             Now,
             out _));
         Assert.False(PublicationFailureV1Codec.TryCreate(
-            binding,
+            publication,
             BoundedGitHubPublisherOutcome.WrittenAndReadBack,
             StickyPublicationReason.None,
             Now,
@@ -120,14 +120,42 @@ public sealed class PublicationRecoveryCodecTests
     }
 
     [Fact]
-    public void BindingFieldsParticipateInTheRecordIdentity()
+    public void FailureCodecRejectsEveryImpossibleOutcomeReasonPair()
+    {
+        var invalid = new[]
+        {
+            (BoundedGitHubPublisherOutcome.WrittenAndReadBack,
+                StickyPublicationReason.None),
+            (BoundedGitHubPublisherOutcome.KnownNotWritten,
+                StickyPublicationReason.ReconciliationIncomplete),
+            (BoundedGitHubPublisherOutcome.OutcomeUnknown,
+                StickyPublicationReason.RequestInvalid),
+            (BoundedGitHubPublisherOutcome.CancelledBeforeSend,
+                StickyPublicationReason.Deadline),
+            (BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure,
+                StickyPublicationReason.Cancelled),
+        };
+
+        foreach (var (outcome, reason) in invalid)
+        {
+            Assert.False(PublicationFailureV1Codec.TryCreate(
+                Publication(),
+                outcome,
+                reason,
+                Now,
+                out _));
+        }
+    }
+
+    [Fact]
+    public void PublicationFieldsParticipateInTheRecordIdentity()
     {
         Assert.True(PublicationIntentV1Codec.TryCreate(
-            Binding(),
+            Publication(),
             Now,
             out var original));
         Assert.True(PublicationIntentV1Codec.TryCreate(
-            Binding() with { CandidateObjectIdentity = Hex('8') },
+            Publication() with { ReviewedHeadSha = new string('b', 40) },
             Now,
             out var changed));
         Assert.NotEqual(original!.RecordIdentity, changed!.RecordIdentity);
@@ -172,24 +200,32 @@ public sealed class PublicationRecoveryCodecTests
             receipt: null);
         Assert.True(retry.AllowsRetry);
 
-        foreach (var outcome in new[]
+        foreach (var pair in new[]
         {
-            BoundedGitHubPublisherOutcome.CancelledBeforeSend,
-            BoundedGitHubPublisherOutcome.OutcomeUnknown,
-            BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure,
+            (BoundedGitHubPublisherOutcome.CancelledBeforeSend,
+                StickyPublicationReason.Cancelled),
+            (BoundedGitHubPublisherOutcome.OutcomeUnknown,
+                StickyPublicationReason.ReconciliationIncomplete),
+            (BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure,
+                StickyPublicationReason.AdmissionInvalid),
         })
         {
-            var reason = outcome ==
-                BoundedGitHubPublisherOutcome.CancelledBeforeSend
-                ? StickyPublicationReason.Cancelled
-                : StickyPublicationReason.ReconciliationIncomplete;
             var decision = PublicationTransportOutcomeMapper.Map(
-                outcome,
-                reason,
+                pair.Item1,
+                pair.Item2,
                 receipt: null);
             Assert.False(decision.AllowsRetry);
             Assert.Null(decision.Receipt);
         }
+
+        var impossible = PublicationTransportOutcomeMapper.Map(
+            BoundedGitHubPublisherOutcome.KnownNotWritten,
+            StickyPublicationReason.Cancelled,
+            receipt: null);
+        Assert.Equal(
+            PublicationTransportTransition.AuthorizationOrValidationFailure,
+            impossible.Transition);
+        Assert.False(impossible.AllowsRetry);
     }
 
     private static void AssertRoundTrip<T>(
@@ -204,12 +240,7 @@ public sealed class PublicationRecoveryCodecTests
         Assert.False(decode(bytes, out _));
     }
 
-    private static PublicationRecoveryBindingV1 Binding() => new(
-        Hex('1'),
-        Hex('2'),
-        Hex('3'),
-        Hex('4'),
-        Hex('5'),
+    private static PublicationRecoveryPublicationV1 Publication() => new(
         new string('a', 40),
         Hex('6'),
         Hex('7'));

@@ -396,6 +396,24 @@ internal sealed class RestrictedStateService
                     RetainedStateTransactionCodes.AccessDenied));
 
     internal static Task<RetainedStateTransactionResult<
+        RetainedStatePublicationRecoveryInventory>>
+        ObserveRetainedPublicationRecoveryInventoryAsync(
+        AuthorizedAcceptedStateRestoreContext context,
+        CancellationToken cancellationToken) =>
+        context is not null &&
+        context.TryGetTransactionAuthority(
+            RetainedStateIssuer,
+            out var authority) &&
+        authority is not null
+            ? new RetainedStateTransactionService(RetainedStateIssuer)
+                .ObservePublicationRecoveryInventoryAsync(
+                    authority,
+                    cancellationToken)
+            : Task.FromResult(RetainedStateTransactionResult<
+                RetainedStatePublicationRecoveryInventory>.Fail(
+                    RetainedStateTransactionCodes.AccessDenied));
+
+    internal static Task<RetainedStateTransactionResult<
         RetainedStateOwnership>>
         AuthorizeRetainedStaleAbandonmentOwnershipAsync(
         AuthorizedAcceptedStateRestoreContext context,
@@ -520,6 +538,8 @@ internal sealed class RestrictedStateService
         RetainedStatePendingCandidateEvidence? pendingCandidate,
         RetainedStateOpaqueRecord? opaqueRecord,
         RetainedStateOpaqueWriteAttempt? opaqueWrite,
+        RetainedStatePublicationRecoveryInventory? recoveryInventory,
+        RetainedStatePublicationRecoveryAnchorEvidence? recoveryAnchor,
         CancellationToken cancellationToken) =>
         context is not null &&
         context.TryGetTransactionAuthority(
@@ -533,6 +553,8 @@ internal sealed class RestrictedStateService
                     pendingCandidate,
                     opaqueRecord,
                     opaqueWrite,
+                    recoveryInventory,
+                    recoveryAnchor,
                     cancellationToken)
             : Task.FromResult(RetainedStateTransactionResult<
                 RetainedStateP5CleanupAuthorization>.Fail(

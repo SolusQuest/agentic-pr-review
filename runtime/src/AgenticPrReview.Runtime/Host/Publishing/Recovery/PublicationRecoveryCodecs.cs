@@ -16,27 +16,14 @@ internal enum PublicationRecoveryRecordKind : ushort
     Recovery,
 }
 
-internal static class PublicationRecoveryRecordClasses
-{
-    internal static StateObjectClass For(PublicationRecoveryRecordKind kind) =>
-        kind switch
-        {
-            PublicationRecoveryRecordKind.PublicationFailure =>
-                StateObjectClass.PublicationFailure,
-            PublicationRecoveryRecordKind.Abandonment =>
-                StateObjectClass.Abandonment,
-            _ => StateObjectClass.PublicationIntent,
-        };
-}
-
 internal static class PublicationIntentV1Codec
 {
     internal static bool TryCreate(
-        PublicationRecoveryBindingV1 binding,
+        PublicationRecoveryPublicationV1 publication,
         long createdAtUnixSeconds,
         out PublicationIntentV1? value) =>
         PublicationRecoveryPayloadCodec.TryCreateIntent(
-            binding,
+            publication,
             createdAtUnixSeconds,
             out value);
 
@@ -52,12 +39,12 @@ internal static class PublicationIntentV1Codec
 internal static class StickyReadbackRecordV1Codec
 {
     internal static bool TryCreate(
-        PublicationRecoveryBindingV1 binding,
+        PublicationRecoveryPublicationV1 publication,
         StickyCommentPublisher.StickyPublicationReceipt receipt,
         long observedAtUnixSeconds,
         out StickyReadbackRecordV1? value) =>
         PublicationRecoveryPayloadCodec.TryCreateReadback(
-            binding,
+            publication,
             receipt,
             observedAtUnixSeconds,
             out value);
@@ -76,13 +63,13 @@ internal static class StickyReadbackRecordV1Codec
 internal static class PublicationFailureV1Codec
 {
     internal static bool TryCreate(
-        PublicationRecoveryBindingV1 binding,
+        PublicationRecoveryPublicationV1 publication,
         BoundedGitHubPublisherOutcome outcome,
         StickyPublicationReason reason,
         long failedAtUnixSeconds,
         out PublicationFailureV1? value) =>
         PublicationRecoveryPayloadCodec.TryCreateFailure(
-            binding,
+            publication,
             outcome,
             reason,
             failedAtUnixSeconds,
@@ -102,12 +89,12 @@ internal static class PublicationFailureV1Codec
 internal static class AbandonmentV1Codec
 {
     internal static bool TryCreate(
-        PublicationRecoveryBindingV1 binding,
+        PublicationRecoveryPublicationV1 publication,
         string completeMarkerAbsenceEvidenceIdentity,
         long abandonedAtUnixSeconds,
         out AbandonmentV1? value) =>
         PublicationRecoveryPayloadCodec.TryCreateAbandonment(
-            binding,
+            publication,
             completeMarkerAbsenceEvidenceIdentity,
             abandonedAtUnixSeconds,
             out value);
@@ -124,13 +111,13 @@ internal static class AbandonmentV1Codec
 internal static class RecoveryRecordV1Codec
 {
     internal static bool TryCreate(
-        PublicationRecoveryBindingV1 binding,
+        PublicationRecoveryPublicationV1 publication,
         string stickyReadbackRecordIdentity,
         ImmutableArray<byte> acceptanceRecoveryHandoff,
         long minimumSemanticExpiresAtUnixSeconds,
         out RecoveryRecordV1? value) =>
         PublicationRecoveryPayloadCodec.TryCreateRecovery(
-            binding,
+            publication,
             stickyReadbackRecordIdentity,
             acceptanceRecoveryHandoff,
             minimumSemanticExpiresAtUnixSeconds,
@@ -168,13 +155,13 @@ internal static class PublicationRecoveryPayloadCodec
     private const int MaximumUrlBytes = 2_048;
 
     internal static bool TryCreateIntent(
-        PublicationRecoveryBindingV1 binding,
+        PublicationRecoveryPublicationV1 publication,
         long createdAt,
         out PublicationIntentV1? value)
     {
         value = null;
         var provisional = new PublicationIntentV1(
-            binding,
+            publication,
             createdAt,
             Zeros());
         if (!TryIdentity(provisional, out var identity))
@@ -187,7 +174,7 @@ internal static class PublicationRecoveryPayloadCodec
     }
 
     internal static bool TryCreateReadback(
-        PublicationRecoveryBindingV1 binding,
+        PublicationRecoveryPublicationV1 publication,
         StickyCommentPublisher.StickyPublicationReceipt receipt,
         long observedAt,
         out StickyReadbackRecordV1? value)
@@ -196,19 +183,19 @@ internal static class PublicationRecoveryPayloadCodec
         if (receipt is null ||
             !StringComparer.Ordinal.Equals(
                 receipt.ScopeSha256,
-                binding.ScopeSha256) ||
+                publication.ScopeSha256) ||
             !StringComparer.Ordinal.Equals(
                 receipt.BodySha256,
-                binding.BodySha256) ||
+                publication.BodySha256) ||
             !StringComparer.Ordinal.Equals(
                 receipt.HeadSha,
-                binding.ReviewedHeadSha))
+                publication.ReviewedHeadSha))
         {
             return false;
         }
 
         var provisional = new StickyReadbackRecordV1(
-            binding,
+            publication,
             receipt.Operation,
             receipt.RepositoryId,
             receipt.PullRequestNumber,
@@ -227,7 +214,7 @@ internal static class PublicationRecoveryPayloadCodec
     }
 
     internal static bool TryCreateFailure(
-        PublicationRecoveryBindingV1 binding,
+        PublicationRecoveryPublicationV1 publication,
         BoundedGitHubPublisherOutcome outcome,
         StickyPublicationReason reason,
         long failedAt,
@@ -235,7 +222,7 @@ internal static class PublicationRecoveryPayloadCodec
     {
         value = null;
         var provisional = new PublicationFailureV1(
-            binding,
+            publication,
             outcome,
             reason,
             failedAt,
@@ -250,14 +237,14 @@ internal static class PublicationRecoveryPayloadCodec
     }
 
     internal static bool TryCreateAbandonment(
-        PublicationRecoveryBindingV1 binding,
+        PublicationRecoveryPublicationV1 publication,
         string evidenceIdentity,
         long abandonedAt,
         out AbandonmentV1? value)
     {
         value = null;
         var provisional = new AbandonmentV1(
-            binding,
+            publication,
             evidenceIdentity,
             abandonedAt,
             Zeros());
@@ -271,7 +258,7 @@ internal static class PublicationRecoveryPayloadCodec
     }
 
     internal static bool TryCreateRecovery(
-        PublicationRecoveryBindingV1 binding,
+        PublicationRecoveryPublicationV1 publication,
         string stickyIdentity,
         ImmutableArray<byte> handoff,
         long minimumSemanticExpiry,
@@ -279,7 +266,7 @@ internal static class PublicationRecoveryPayloadCodec
     {
         value = null;
         var provisional = new RecoveryRecordV1(
-            binding,
+            publication,
             stickyIdentity,
             handoff,
             minimumSemanticExpiry,
@@ -334,11 +321,11 @@ internal static class PublicationRecoveryPayloadCodec
                 bytes,
                 PublicationRecoveryRecordKind.PublicationIntent,
                 out var reader,
-                out var binding) &&
+                out var publication) &&
             reader.TryReadInt64(out var createdAt) &&
             reader.TryReadString(64, out var identity) &&
             reader.IsComplete &&
-            TryCreateIntent(binding!, createdAt, out var canonical) &&
+            TryCreateIntent(publication!, createdAt, out var canonical) &&
             canonical is not null &&
             StringComparer.Ordinal.Equals(
                 canonical.RecordIdentity,
@@ -355,7 +342,7 @@ internal static class PublicationRecoveryPayloadCodec
                 bytes,
                 PublicationRecoveryRecordKind.StickyReadback,
                 out var reader,
-                out var binding) ||
+                out var publication) ||
             !reader.TryReadUInt16(out var operationValue) ||
             !Enum.IsDefined(
                 typeof(StickyPublicationOperation),
@@ -373,13 +360,13 @@ internal static class PublicationRecoveryPayloadCodec
                 pullRequest,
                 commentId,
                 commentUrl,
-                binding!.ScopeSha256,
-                binding.BodySha256,
-                binding.ReviewedHeadSha,
+                publication!.ScopeSha256,
+                publication.BodySha256,
+                publication.ReviewedHeadSha,
                 out var receipt) ||
             receipt is null ||
             !TryCreateReadback(
-                binding,
+                publication,
                 receipt,
                 observedAt,
                 out var canonical) ||
@@ -403,7 +390,7 @@ internal static class PublicationRecoveryPayloadCodec
                 bytes,
                 PublicationRecoveryRecordKind.PublicationFailure,
                 out var reader,
-                out var binding) ||
+                out var publication) ||
             !reader.TryReadUInt16(out var outcomeValue) ||
             !Enum.IsDefined(
                 typeof(BoundedGitHubPublisherOutcome),
@@ -416,7 +403,7 @@ internal static class PublicationRecoveryPayloadCodec
             !reader.TryReadString(64, out var identity) ||
             !reader.IsComplete ||
             !TryCreateFailure(
-                binding!,
+                publication!,
                 (BoundedGitHubPublisherOutcome)outcomeValue,
                 (StickyPublicationReason)reasonValue,
                 failedAt,
@@ -441,13 +428,13 @@ internal static class PublicationRecoveryPayloadCodec
                 bytes,
                 PublicationRecoveryRecordKind.Abandonment,
                 out var reader,
-                out var binding) ||
+                out var publication) ||
             !reader.TryReadString(64, out var evidence) ||
             !reader.TryReadInt64(out var abandonedAt) ||
             !reader.TryReadString(64, out var identity) ||
             !reader.IsComplete ||
             !TryCreateAbandonment(
-                binding!,
+                publication!,
                 evidence,
                 abandonedAt,
                 out var canonical) ||
@@ -478,7 +465,7 @@ internal static class PublicationRecoveryPayloadCodec
                     bytes,
                     PublicationRecoveryRecordKind.Recovery,
                     out var reader,
-                    out var binding) ||
+                    out var publication) ||
                 !reader.TryReadString(64, out var stickyIdentity))
             {
                 return false;
@@ -486,7 +473,7 @@ internal static class PublicationRecoveryPayloadCodec
 
             handoffOffset = PrefixLength(
                 PublicationRecoveryRecordKind.Recovery,
-                binding!,
+                publication!,
                 stickyIdentity);
             if (!reader.TryReadBytes(
                     LineageFormat.MaximumPayloadBytes,
@@ -496,7 +483,7 @@ internal static class PublicationRecoveryPayloadCodec
                 !reader.TryReadString(64, out var identity) ||
                 !reader.IsComplete ||
                 !TryCreateRecovery(
-                    binding!,
+                    publication!,
                     stickyIdentity,
                     ImmutableArray.CreateRange(handoff),
                     minimumExpiry,
@@ -591,19 +578,19 @@ internal static class PublicationRecoveryPayloadCodec
         handoffLength = 0;
         try
         {
-            if (!TryKindAndBinding(
+            if (!TryKindAndPublication(
                     value,
                     out var kind,
-                    out var binding,
+                    out var publication,
                     out var identity) ||
-                binding is null ||
-                !ValidBinding(binding))
+                publication is null ||
+                !ValidPublication(publication))
             {
                 return false;
             }
 
             var writer = new LineageBinaryWriter();
-            WriteHeader(writer, kind, binding);
+            WriteHeader(writer, kind, publication);
             switch (value)
             {
                 case PublicationIntentV1 intent
@@ -650,7 +637,7 @@ internal static class PublicationRecoveryPayloadCodec
                         recovery.StickyReadbackRecordIdentity);
                     handoffOffset = PrefixLength(
                         kind,
-                        binding,
+                        publication,
                         recovery.StickyReadbackRecordIdentity);
                     handoffLength =
                         recovery.AcceptanceRecoveryHandoff.Length;
@@ -695,10 +682,10 @@ internal static class PublicationRecoveryPayloadCodec
         ReadOnlySpan<byte> bytes,
         PublicationRecoveryRecordKind expectedKind,
         out LineageBinaryReader reader,
-        out PublicationRecoveryBindingV1? binding)
+        out PublicationRecoveryPublicationV1? publication)
     {
         reader = new LineageBinaryReader(bytes);
-        binding = null;
+        publication = null;
         if (bytes.Length is < 1 or > LineageFormat.MaximumPayloadBytes ||
             !reader.TryReadString(32, out var magic) ||
             !StringComparer.Ordinal.Equals(magic, Magic) ||
@@ -706,11 +693,6 @@ internal static class PublicationRecoveryPayloadCodec
             version != Version ||
             !reader.TryReadUInt16(out var kindValue) ||
             kindValue != (ushort)expectedKind ||
-            !reader.TryReadString(64, out var baseScope) ||
-            !reader.TryReadString(64, out var epoch) ||
-            !reader.TryReadString(64, out var session) ||
-            !reader.TryReadOptionalString(64, out var predecessor) ||
-            !reader.TryReadString(64, out var candidate) ||
             !reader.TryReadString(40, out var head) ||
             !reader.TryReadString(64, out var scope) ||
             !reader.TryReadString(64, out var body))
@@ -718,108 +700,104 @@ internal static class PublicationRecoveryPayloadCodec
             return false;
         }
 
-        var parsed = new PublicationRecoveryBindingV1(
-            baseScope,
-            epoch,
-            session,
-            predecessor,
-            candidate,
+        var parsed = new PublicationRecoveryPublicationV1(
             head,
             scope,
             body);
-        if (!ValidBinding(parsed))
+        if (!ValidPublication(parsed))
         {
             return false;
         }
 
-        binding = parsed;
+        publication = parsed;
         return true;
     }
 
     private static void WriteHeader(
         LineageBinaryWriter writer,
         PublicationRecoveryRecordKind kind,
-        PublicationRecoveryBindingV1 binding)
+        PublicationRecoveryPublicationV1 publication)
     {
         writer.WriteString(Magic);
         writer.WriteUInt16(Version);
         writer.WriteUInt16((ushort)kind);
-        writer.WriteString(binding.BaseScopeDigest);
-        writer.WriteString(binding.Epoch);
-        writer.WriteString(binding.SessionId);
-        writer.WriteOptionalString(binding.PredecessorAcceptanceIdentity);
-        writer.WriteString(binding.CandidateObjectIdentity);
-        writer.WriteString(binding.ReviewedHeadSha);
-        writer.WriteString(binding.ScopeSha256);
-        writer.WriteString(binding.BodySha256);
+        writer.WriteString(publication.ReviewedHeadSha);
+        writer.WriteString(publication.ScopeSha256);
+        writer.WriteString(publication.BodySha256);
     }
 
     private static int PrefixLength(
         PublicationRecoveryRecordKind kind,
-        PublicationRecoveryBindingV1 binding,
+        PublicationRecoveryPublicationV1 publication,
         string stickyIdentity)
     {
         var writer = new LineageBinaryWriter();
-        WriteHeader(writer, kind, binding);
+        WriteHeader(writer, kind, publication);
         writer.WriteString(stickyIdentity);
         writer.WriteUInt32(0);
         return writer.ToArray().Length;
     }
 
-    private static bool TryKindAndBinding(
+    private static bool TryKindAndPublication(
         object? value,
         out PublicationRecoveryRecordKind kind,
-        out PublicationRecoveryBindingV1? binding,
+        out PublicationRecoveryPublicationV1? publication,
         out string? identity)
     {
-        (kind, binding, identity) = value switch
+        (kind, publication, identity) = value switch
         {
             PublicationIntentV1 item => (
                 PublicationRecoveryRecordKind.PublicationIntent,
-                item.Binding,
+                item.Publication,
                 item.RecordIdentity),
             StickyReadbackRecordV1 item => (
                 PublicationRecoveryRecordKind.StickyReadback,
-                item.Binding,
+                item.Publication,
                 item.RecordIdentity),
             PublicationFailureV1 item => (
                 PublicationRecoveryRecordKind.PublicationFailure,
-                item.Binding,
+                item.Publication,
                 item.RecordIdentity),
             AbandonmentV1 item => (
                 PublicationRecoveryRecordKind.Abandonment,
-                item.Binding,
+                item.Publication,
                 item.RecordIdentity),
             RecoveryRecordV1 item => (
                 PublicationRecoveryRecordKind.Recovery,
-                item.Binding,
+                item.Publication,
                 item.RecordIdentity),
             _ => (default, null, null),
         };
-        return binding is not null;
+        return publication is not null;
     }
 
-    private static bool ValidBinding(PublicationRecoveryBindingV1? value) =>
+    private static bool ValidPublication(
+        PublicationRecoveryPublicationV1? value) =>
         value is not null &&
-        LineageValidation.IsSha256(value.BaseScopeDigest) &&
-        LineageValidation.IsSha256(value.Epoch) &&
-        LineageValidation.IsSha256(value.SessionId) &&
-        LineageValidation.IsOptionalSha256(
-            value.PredecessorAcceptanceIdentity) &&
-        LineageValidation.IsSha256(value.CandidateObjectIdentity) &&
         IsLowerHex(value.ReviewedHeadSha, 40) &&
         LineageValidation.IsSha256(value.ScopeSha256) &&
         LineageValidation.IsSha256(value.BodySha256);
 
     private static bool ValidFailure(PublicationFailureV1 value) =>
-        value.Outcome is
-            BoundedGitHubPublisherOutcome.KnownNotWritten or
-            BoundedGitHubPublisherOutcome.OutcomeUnknown or
-            BoundedGitHubPublisherOutcome.CancelledBeforeSend or
-            BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure &&
-        Enum.IsDefined(value.Reason) &&
-        value.Reason != StickyPublicationReason.None &&
-        LineageValidation.IsTime(value.FailedAtUnixSeconds);
+        LineageValidation.IsTime(value.FailedAtUnixSeconds) &&
+        value.Outcome switch
+        {
+            BoundedGitHubPublisherOutcome.KnownNotWritten =>
+                value.Reason is StickyPublicationReason.RequestInvalid or
+                    StickyPublicationReason.Deadline,
+            BoundedGitHubPublisherOutcome.OutcomeUnknown =>
+                value.Reason is
+                    StickyPublicationReason.ReconciliationIncomplete or
+                    StickyPublicationReason.Deadline,
+            BoundedGitHubPublisherOutcome.CancelledBeforeSend =>
+                value.Reason == StickyPublicationReason.Cancelled,
+            BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure =>
+                value.Reason is StickyPublicationReason.AdmissionInvalid or
+                    StickyPublicationReason.DiscoveryIncomplete or
+                    StickyPublicationReason.TargetConflict or
+                    StickyPublicationReason.AuthorizationDenied,
+            _ => false,
+        };
 
     private static bool Canonical<T>(
         ReadOnlySpan<byte> source,

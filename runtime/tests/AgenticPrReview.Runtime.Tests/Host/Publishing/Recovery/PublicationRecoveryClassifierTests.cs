@@ -1,234 +1,426 @@
+using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
+using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.Publishing.Recovery;
+using AgenticPrReview.Runtime.Host.Publishing.Rendering;
+using AgenticPrReview.Runtime.Host.State;
+using AgenticPrReview.Runtime.Host.State.Lineage;
+using AgenticPrReview.Runtime.Host.State.Restore;
+using AgenticPrReview.Runtime.Host.State.Transactions;
+using AgenticPrReview.Runtime.Tests.Host.Publishing.GitHub.Sticky;
+using AgenticPrReview.Runtime.Tests.Host.State.Transactions;
 
 namespace AgenticPrReview.Runtime.Tests.Host.Publishing.Recovery;
 
 public sealed class PublicationRecoveryClassifierTests
 {
     [Fact]
-    public void D10MatrixMapsToClosedActions()
+    public async Task D10MatrixMapsRealS6AndP2EvidenceToClosedActions()
     {
-        AssertAction(
-            Empty() with { CandidateCount = 0 },
-            PublicationRecoveryAction.NoPendingWork);
-        AssertAction(
-            Current() with
-            {
-                AcceptanceCount = 1,
-                StickyReadbackCount = 1,
-                RecoveryCount = 1,
-                Marker = PublicationMarkerObservation.Exact,
-                AcceptanceMatchesRecovery = true,
-            },
-            PublicationRecoveryAction.ReturnCommitted);
-        AssertAction(
-            Current() with { Marker = PublicationMarkerObservation.Exact },
-            PublicationRecoveryAction.CompleteAcceptance);
-        AssertAction(
-            Current(),
-            PublicationRecoveryAction.ResumeBeforeIntent);
-        AssertAction(
-            Current() with { IntentCount = 1 },
-            PublicationRecoveryAction.StickyOutcomeUnknown);
-        AssertAction(
-            Current() with
-            {
-                IntentCount = 1,
-                FailureCount = 1,
-                HasExactKnownNotWrittenFailure = true,
-            },
-            PublicationRecoveryAction.ResumeKnownNotWritten);
-        AssertAction(
-            Current() with
-            {
-                FailureCount = 1,
-                HasOutcomeUnknownFailure = true,
-            },
-            PublicationRecoveryAction.StickyOutcomeUnknown);
-        AssertAction(
-            Current() with
-            {
-                CandidateMatchesCurrentHead = false,
-                Marker = PublicationMarkerObservation.Absent,
-            },
-            PublicationRecoveryAction.AbandonStaleCandidate);
-    }
-
-    [Theory]
-    [InlineData(CrashCut.AfterCandidateUpload,
-        (int)PublicationRecoveryAction.ResumeBeforeIntent)]
-    [InlineData(CrashCut.AfterIntentUpload,
-        (int)PublicationRecoveryAction.StickyOutcomeUnknown)]
-    [InlineData(CrashCut.AfterStickyRequest,
-        (int)PublicationRecoveryAction.StickyOutcomeUnknown)]
-    [InlineData(CrashCut.AfterStickyReadback,
-        (int)PublicationRecoveryAction.CompleteAcceptance)]
-    [InlineData(CrashCut.AfterAcceptanceUpload,
-        (int)PublicationRecoveryAction.ReturnCommitted)]
-    [InlineData(CrashCut.AfterAcceptanceReadback,
-        (int)PublicationRecoveryAction.ReturnCommitted)]
-    [InlineData(CrashCut.AfterCleanup,
-        (int)PublicationRecoveryAction.NoPendingWork)]
-    public void EveryExternalCrashCutConvergesTruthfully(
-        CrashCut cut,
-        int expected)
-    {
-        AssertAction(At(cut), (PublicationRecoveryAction)expected);
+        Assert.Equal(PublicationRecoveryAction.NoPendingWork,
+            (await EvaluateAsync(RecoveryState.Empty)).Action);
+        var terminal = await EvaluateAsync(RecoveryState.Terminal);
+        Assert.True(terminal.Action ==
+            PublicationRecoveryAction.ReturnCommitted, terminal.ToString());
+        Assert.Equal(PublicationRecoveryAction.CompleteAcceptance,
+            (await EvaluateAsync(RecoveryState.ExactMarker)).Action);
+        Assert.Equal(PublicationRecoveryAction.ResumeBeforeIntent,
+            (await EvaluateAsync(RecoveryState.Candidate)).Action);
+        Assert.Equal(PublicationRecoveryAction.StickyOutcomeUnknown,
+            (await EvaluateAsync(RecoveryState.Intent)).Action);
+        Assert.Equal(PublicationRecoveryAction.ResumeKnownNotWritten,
+            (await EvaluateAsync(RecoveryState.KnownNotWritten)).Action);
+        Assert.Equal(PublicationRecoveryAction.StickyOutcomeUnknown,
+            (await EvaluateAsync(RecoveryState.OutcomeUnknown)).Action);
+        Assert.Equal(PublicationRecoveryAction.CancelledBeforeSend,
+            (await EvaluateAsync(RecoveryState.Cancelled)).Action);
+        Assert.Equal(
+            PublicationRecoveryAction.AuthorizationOrValidationFailure,
+            (await EvaluateAsync(RecoveryState.AuthorizationFailure)).Action);
     }
 
     [Fact]
-    public void AmbiguousIncompleteOrLostOwnershipAlwaysFailsClosed()
+    public async Task ExternalCrashCutsAreReobservedThroughTheRealStores()
     {
-        AssertConflict(Current() with { EnumerationComplete = false });
-        AssertConflict(Current() with { OwnershipRetained = false });
-        AssertConflict(Current() with { CandidateCount = 2 });
-        AssertConflict(Current() with { IntentCount = 2 });
-        AssertConflict(Current() with
-        {
-            Marker = PublicationMarkerObservation.Ambiguous,
-        });
-        AssertConflict(Current() with
-        {
-            Anchors = PublicationRecoveryAnchorState.Unresolved,
-        });
-        AssertConflict(Current() with
-        {
-            CandidateMatchesCurrentHead = false,
-            IntentCount = 1,
-        });
-        AssertConflict(Current() with
-        {
-            CandidateMatchesCurrentHead = false,
-            Marker = PublicationMarkerObservation.Incomplete,
-        });
+        var candidate = await EvaluateAsync(RecoveryState.Candidate);
+        var intent = await EvaluateAsync(RecoveryState.Intent);
+        var sticky = await EvaluateAsync(RecoveryState.ExactMarker);
+        var accepted = await EvaluateAsync(RecoveryState.Terminal);
+        var cleaned = await EvaluateAsync(RecoveryState.Empty);
+
+        Assert.Equal(PublicationRecoveryAction.ResumeBeforeIntent,
+            candidate.Action);
+        Assert.False(candidate.HasStickyAuthorization);
+        Assert.True(intent.Action ==
+            PublicationRecoveryAction.StickyOutcomeUnknown,
+            intent.ToString());
+        Assert.Equal(PublicationRecoveryAction.CompleteAcceptance,
+            sticky.Action);
+        Assert.Equal(PublicationRecoveryAction.ReturnCommitted,
+            accepted.Action);
+        Assert.Equal(PublicationRecoveryAction.NoPendingWork,
+            cleaned.Action);
     }
 
     [Fact]
-    public void OnlyNoPendingWorkAllowsProviderAndOnlyKnownNotWrittenRetries()
+    public void MissingIncompleteOrForgedEvidenceAlwaysFailsClosed()
     {
-        var none = PublicationRecoveryClassifier.Classify(Empty());
+        foreach (var marker in new[]
+        {
+            PublicationMarkerObservation.Incomplete,
+            PublicationMarkerObservation.Ambiguous,
+            PublicationMarkerObservation.Absent,
+            PublicationMarkerObservation.Exact,
+        })
+        {
+            Assert.Equal(
+                PublicationRecoveryAction.Conflict,
+                PublicationRecoveryClassifier.Classify(null, marker).Action);
+        }
+
+        var constructor = typeof(PublicationRecoveryObservation)
+            .GetConstructors(
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic)
+            .Single();
+        var arguments = constructor.GetParameters()
+            .Select(parameter => parameter.ParameterType.IsValueType
+                ? Activator.CreateInstance(parameter.ParameterType)
+                : null)
+            .ToArray();
+        arguments[0] = new object();
+        var thrown = Assert.Throws<
+            System.Reflection.TargetInvocationException>(
+                () => constructor.Invoke(arguments));
+        Assert.IsType<ArgumentException>(thrown.InnerException);
+    }
+
+    [Fact]
+    public async Task OnlyNoPendingWorkAllowsProviderAndOnlyExactFailureAuthorizesRetry()
+    {
+        var none = await EvaluateAsync(RecoveryState.Empty);
+        var candidate = await EvaluateAsync(RecoveryState.Candidate);
+        var retry = await EvaluateAsync(RecoveryState.KnownNotWritten);
+
         Assert.True(none.AllowsProvider);
-        Assert.False(none.AllowsStickyWrite);
-
-        var unknown = PublicationRecoveryClassifier.Classify(
-            Current() with { IntentCount = 1 });
-        Assert.False(unknown.AllowsProvider);
-        Assert.False(unknown.AllowsStickyWrite);
-
-        var retry = PublicationRecoveryClassifier.Classify(Current() with
-        {
-            FailureCount = 1,
-            HasExactKnownNotWrittenFailure = true,
-        });
-        Assert.True(retry.AllowsStickyWrite);
+        Assert.False(none.HasStickyAuthorization);
+        Assert.False(candidate.AllowsProvider);
+        Assert.False(candidate.HasStickyAuthorization);
         Assert.False(retry.AllowsProvider);
+        Assert.True(retry.HasStickyAuthorization, retry.ToString());
     }
 
     [Fact]
-    public void TerminalRecoveryBecomesSupersededOnlyAfterDurableSuccessorProof()
+    public async Task TerminalRecoveryRequiresExactDurableS6AndP2Proof()
     {
-        var prior = Empty() with
-        {
-            RecoveryCount = 1,
-            AcceptanceCount = 1,
-            IsSupersededTerminalRecovery = true,
-        };
-        AssertConflict(prior);
+        var terminal = await EvaluateAsync(RecoveryState.Terminal);
+        Assert.True(terminal.Action ==
+            PublicationRecoveryAction.ReturnCommitted, terminal.ToString());
+        Assert.Equal(PublicationRecoveryLifecycleState.CurrentTerminalRecovery,
+            terminal.Lifecycle);
+        Assert.False(terminal.AllowsProvider);
 
-        var superseded = PublicationRecoveryClassifier.Classify(prior with
-        {
-            HasDurableSuccessorRecovery = true,
-        });
-        Assert.Equal(
-            PublicationRecoveryAction.NoPendingWork,
-            superseded.Action);
-        Assert.Equal(
-            PublicationRecoveryLifecycleState.SupersededTerminalRecovery,
-            superseded.Lifecycle);
-        Assert.True(superseded.AllowsProvider);
-        Assert.True(superseded.AllowsSupersededCleanup);
-
-        var cleanupDebt = PublicationRecoveryClassifier.Classify(Empty() with
-        {
-            Anchors = PublicationRecoveryAnchorState.CleanupDebt,
-        });
-        Assert.Equal(
-            PublicationRecoveryLifecycleState.CompletedCleanupDebt,
-            cleanupDebt.Lifecycle);
-        Assert.True(cleanupDebt.AllowsProvider);
+        var noPending = await EvaluateAsync(RecoveryState.Empty);
+        Assert.Equal(PublicationRecoveryLifecycleState.None,
+            noPending.Lifecycle);
+        Assert.True(noPending.AllowsProvider);
     }
 
-    private static PublicationRecoveryInventory At(CrashCut cut) => cut switch
+    private static async Task<RecoveryProbe> EvaluateAsync(
+        RecoveryState state)
     {
-        CrashCut.AfterCandidateUpload => Current(),
-        CrashCut.AfterIntentUpload or CrashCut.AfterStickyRequest =>
-            Current() with { IntentCount = 1 },
-        CrashCut.AfterStickyReadback => Current() with
+        var fixture = await RetainedStateTransactionEndToEndTests
+            .CreateFixtureAsync();
+        using var context = fixture.Context;
+        var factory = new FakePublisherTransportFactory();
+
+        if (state == RecoveryState.Empty)
         {
-            IntentCount = 1,
-            StickyReadbackCount = 1,
-            RecoveryCount = 1,
-            Marker = PublicationMarkerObservation.Exact,
-        },
-        CrashCut.AfterAcceptanceUpload or
-            CrashCut.AfterAcceptanceReadback => Current() with
+            return await ClassifyAsync(fixture, factory);
+        }
+
+        if (state == RecoveryState.Terminal)
         {
-            IntentCount = 1,
-            StickyReadbackCount = 1,
-            RecoveryCount = 1,
-            AcceptanceCount = 1,
-            AcceptanceMatchesRecovery = true,
-            Marker = PublicationMarkerObservation.Exact,
-        },
-        CrashCut.AfterCleanup => Empty(),
-        _ => throw new ArgumentOutOfRangeException(nameof(cut)),
-    };
+            var accepted = await RetainedStateTransactionEndToEndTests
+                .AcceptGenerationAsync(fixture, commentId: 901);
+            context.Dispose();
+            fixture = await RetainedStateTransactionEndToEndTests
+                .RestoreFixtureAsync(fixture);
+            using var recoveredContext = fixture.Context;
+            Assert.True(PublicationRecoveryService.TryRestoreRendered(
+                accepted.Publication,
+                out var terminalRendered));
+            var comment = StickyPublicationTestData.Comment(
+                901,
+                terminalRendered!.Comment);
+            factory.Transport.Enqueue(comment);
+            factory.Transport.Enqueue(comment);
+            factory.Transport.Read = BoundedGitHubHttpResult<
+                BoundedGitHubIssueComment>.Success(comment);
+            var inventoryResult = await RestrictedStateService
+                .ObserveRetainedPublicationRecoveryInventoryAsync(
+                    recoveredContext,
+                    CancellationToken.None);
+            Assert.True(inventoryResult.Succeeded, inventoryResult.Code);
+            var inventorySummary = RecoveryInventorySummary(
+                recoveredContext,
+                inventoryResult.Value!);
+            var recoveryRecord = inventoryResult.Value!.Records.Single(record =>
+            {
+                Assert.True(RestrictedStateService
+                    .TryCopyRetainedStateOpaquePayload(
+                        recoveredContext,
+                        record,
+                        out var payload));
+                return RecoveryRecordV1Codec.TryDecode(
+                    payload.AsSpan(), out _, out _, out _);
+            });
+            using var extraction = PublicationRecoveryPersistence
+                .CreateAcceptanceRecoveryExtraction(
+                    recoveredContext,
+                    recoveryRecord).Value;
+            Assert.NotNull(extraction);
+            var directMatch = await RestrictedStateService
+                .MatchRecoveredRetainedStateAcceptanceAsync(
+                    recoveredContext,
+                    inventoryResult.Value
+                        .CurrentAcceptanceCandidateObjectIdentity!,
+                    recoveryRecord,
+                    extraction!,
+                    inventoryResult.Value.CurrentAcceptance!,
+                    CancellationToken.None);
+            Assert.True(directMatch.Succeeded, directMatch.Code);
+            var observationResult = await PublicationRecoveryInventoryFactory
+                .CreateAsync(
+                    recoveredContext,
+                    inventoryResult.Value!,
+                    fixture.Invocation.PullRequest.HeadSha,
+                    CancellationToken.None);
+            Assert.True(observationResult.Succeeded,
+                observationResult.Code + "; " + inventorySummary);
+            observationResult.Value!.Dispose();
+            return await ClassifyAsync(fixture, factory);
+        }
 
-    private static PublicationRecoveryInventory Current() => Empty() with
-    {
-        CandidateCount = 1,
-        CandidateMatchesCurrentHead = true,
-        HasStoredValidatedPublication = true,
-        RecordsMatchCandidate = true,
-    };
+        var run = await RetainedStateTransactionEndToEndTests
+            .CompleteRunAsync(fixture);
+        Assert.True(R4PreparedPublication.TryCreate(
+            run.Outcome,
+            fixture.PublicationScope,
+            out var publication));
+        var preparedResult = await RestrictedStateService
+            .PrepareRetainedCandidateAsync(
+                context,
+                run.Run,
+                publication!,
+                CancellationToken.None);
+        using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
+            preparedResult.Value);
+        var candidateResult = await RestrictedStateService
+            .PersistRetainedCandidateAsync(
+                context,
+                prepared,
+                CancellationToken.None);
+        var candidate = Assert.IsType<RetainedStatePersistedCandidate>(
+            candidateResult.Value);
 
-    private static PublicationRecoveryInventory Empty() => new(
-        EnumerationComplete: true,
-        OwnershipRetained: true,
-        CandidateCount: 0,
-        CandidateMatchesCurrentHead: false,
-        HasStoredValidatedPublication: false,
-        IntentCount: 0,
-        StickyReadbackCount: 0,
-        FailureCount: 0,
-        AbandonmentCount: 0,
-        AcceptanceCount: 0,
-        RecoveryCount: 0,
-        RecordsMatchCandidate: true,
-        AcceptanceMatchesRecovery: false,
-        HasExactKnownNotWrittenFailure: false,
-        HasOutcomeUnknownFailure: false,
-        Marker: PublicationMarkerObservation.Absent,
-        Anchors: PublicationRecoveryAnchorState.None);
+        if (state == RecoveryState.Intent)
+        {
+            var beforeFactory = new FakePublisherTransportFactory();
+            beforeFactory.Transport.Enqueue();
+            var beforeService = new PublicationRecoveryService(
+                new StickyCommentPublisher(beforeFactory));
+            using var before = await beforeService.ClassifyBeforeProviderAsync(
+                fixture.Launch.Inputs.GitHubToken!,
+                fixture.Invocation,
+                fixture.PublicationScope,
+                context,
+                CancellationToken.None);
+            Assert.Equal(PublicationRecoveryAction.ResumeBeforeIntent,
+                before.Decision.Action);
+            Assert.Null(before.StickyWriteAuthorization);
+            var persistedIntentResult = await PublicationRecoveryPersistence
+                .PersistIntentAndAuthorizeAsync(
+                    context,
+                    before.Observation!,
+                    CancellationToken.None);
+            using var persistedIntent = Assert.IsType<
+                PublicationIntentPersistenceResult>(
+                    persistedIntentResult.Value);
+            Assert.NotNull(persistedIntent.StickyWriteAuthorization);
+            Assert.True(PublicationRecoveryService.TryRestoreRendered(
+                persistedIntent.Observation.StoredPublication,
+                out var persistedRendered));
+            Assert.True(AuthorizedStickyPublicationRequest.TryCreateRecovery(
+                fixture.Invocation,
+                fixture.PublicationScope,
+                persistedRendered,
+                persistedIntent.Observation,
+                persistedIntent.StickyWriteAuthorization,
+                out var authorizedRequest));
+            Assert.NotNull(authorizedRequest);
+            Assert.False(AuthorizedStickyPublicationRequest.TryCreateRecovery(
+                fixture.Invocation,
+                fixture.PublicationScope,
+                persistedRendered,
+                persistedIntent.Observation,
+                persistedIntent.StickyWriteAuthorization,
+                out _));
+        }
+        else if (state is RecoveryState.KnownNotWritten or
+            RecoveryState.OutcomeUnknown or
+            RecoveryState.Cancelled or
+            RecoveryState.AuthorizationFailure)
+        {
+            var ownershipResult = await RestrictedStateService
+                .RenewRetainedStateOwnershipAsync(
+                    context,
+                    candidate,
+                    prior: null,
+                    expectedP5Records: [],
+                    CancellationToken.None);
+            using var ownership = Assert.IsType<RetainedStateOwnership>(
+                ownershipResult.Value);
+            var (outcome, reason) = state switch
+            {
+                RecoveryState.KnownNotWritten => (
+                    BoundedGitHubPublisherOutcome.KnownNotWritten,
+                    StickyPublicationReason.Deadline),
+                RecoveryState.OutcomeUnknown => (
+                    BoundedGitHubPublisherOutcome.OutcomeUnknown,
+                    StickyPublicationReason.ReconciliationIncomplete),
+                RecoveryState.Cancelled => (
+                    BoundedGitHubPublisherOutcome.CancelledBeforeSend,
+                    StickyPublicationReason.Cancelled),
+                _ => (
+                    BoundedGitHubPublisherOutcome
+                        .AuthorizationOrValidationFailure,
+                    StickyPublicationReason.AdmissionInvalid),
+            };
+            Assert.True(PublicationRecoveryPersistence.TryCreateFailureWrite(
+                candidate,
+                outcome,
+                reason,
+                fixture.Time.UnixSeconds,
+                prepared.Header.LogicalExpiresAtUnixSeconds,
+                out _,
+                out var request));
+            var attemptResult = await RestrictedStateService
+                .PrepareRetainedOpaqueWriteAsync(
+                    context,
+                    ownership,
+                    request!,
+                    CancellationToken.None);
+            using var attempt = Assert.IsType<RetainedStateOpaqueWriteAttempt>(
+                attemptResult.Value);
+            var recordResult = await RestrictedStateService
+                .PersistPreparedRetainedOpaqueWriteAsync(
+                    context,
+                    attempt,
+                    CancellationToken.None);
+            using var record = Assert.IsType<RetainedStateOpaqueRecord>(
+                recordResult.Value);
+        }
 
-    private static void AssertAction(
-        PublicationRecoveryInventory inventory,
-        PublicationRecoveryAction expected) =>
-        Assert.Equal(
-            expected,
-            PublicationRecoveryClassifier.Classify(inventory).Action);
+        if (state == RecoveryState.ExactMarker)
+        {
+            Assert.True(PublicationRecoveryService.TryRestoreRendered(
+                prepared.Publication,
+                out var rendered));
+            var comment = StickyPublicationTestData.Comment(
+                902,
+                rendered!.Comment);
+            factory.Transport.Enqueue(comment);
+            factory.Transport.Enqueue(comment);
+            factory.Transport.Read = BoundedGitHubHttpResult<
+                BoundedGitHubIssueComment>.Success(comment);
+        }
+        else
+        {
+            factory.Transport.Enqueue();
+        }
 
-    private static void AssertConflict(
-        PublicationRecoveryInventory inventory) =>
-        AssertAction(inventory, PublicationRecoveryAction.Conflict);
-
-    public enum CrashCut
-    {
-        AfterCandidateUpload,
-        AfterIntentUpload,
-        AfterStickyRequest,
-        AfterStickyReadback,
-        AfterAcceptanceUpload,
-        AfterAcceptanceReadback,
-        AfterCleanup,
+        return await ClassifyAsync(fixture, factory);
     }
+
+    private static async Task<RecoveryProbe> ClassifyAsync(
+        RetainedStateTransactionEndToEndTests.TransactionFixture fixture,
+        FakePublisherTransportFactory factory)
+    {
+        var service = new PublicationRecoveryService(
+            new StickyCommentPublisher(factory));
+        using var evaluation = await service.ClassifyBeforeProviderAsync(
+            fixture.Launch.Inputs.GitHubToken!,
+            fixture.Invocation,
+            fixture.PublicationScope,
+            fixture.Context,
+            CancellationToken.None);
+        return new(
+            evaluation.Decision.Action,
+            evaluation.Decision.Lifecycle,
+            evaluation.Decision.AllowsProvider,
+            evaluation.StickyWriteAuthorization is not null,
+            evaluation.DiscoveryKind,
+            evaluation.DiscoveryReason,
+            evaluation.Observation?.Anchors,
+            evaluation.Observation?.Candidate is not null,
+            evaluation.Observation?.Inventory?
+                .CurrentAcceptancePublicationReceipt is not null,
+            evaluation.Observation?.Intent is not null,
+            evaluation.Observation?.Failure?.Outcome);
+    }
+
+    private static string RecoveryInventorySummary(
+        AuthorizedAcceptedStateRestoreContext context,
+        RetainedStatePublicationRecoveryInventory inventory)
+    {
+        var records = inventory.Records.Select(record =>
+        {
+            Assert.True(RestrictedStateService
+                .TryCopyRetainedStateOpaquePayload(
+                    context,
+                    record,
+                    out var payload));
+            var kinds = new List<string>();
+            if (StickyReadbackRecordV1Codec.TryDecode(
+                payload.AsSpan(), out _)) kinds.Add("readback");
+            if (RecoveryRecordV1Codec.TryDecode(
+                payload.AsSpan(), out _, out _, out _)) kinds.Add("recovery");
+            if (PublicationIntentV1Codec.TryDecode(
+                payload.AsSpan(), out _)) kinds.Add("intent");
+            return record.ObjectClass + ":" +
+                record.Header.PredecessorIdentity + ":" +
+                string.Join(',', kinds);
+        });
+        return "accepted=" +
+            inventory.CurrentAcceptanceCandidateObjectIdentity +
+            "; receipt=" +
+            (inventory.CurrentAcceptancePublicationReceipt is not null) +
+            "; records=" + string.Join('|', records);
+    }
+
+    private enum RecoveryState
+    {
+        Empty,
+        Candidate,
+        Intent,
+        KnownNotWritten,
+        OutcomeUnknown,
+        Cancelled,
+        AuthorizationFailure,
+        ExactMarker,
+        Terminal,
+    }
+
+    private sealed record RecoveryProbe(
+        PublicationRecoveryAction Action,
+        PublicationRecoveryLifecycleState Lifecycle,
+        bool AllowsProvider,
+        bool HasStickyAuthorization,
+        StickyDiscoveryKind DiscoveryKind,
+        StickyPublicationReason DiscoveryReason,
+        PublicationRecoveryAnchorState? Anchors,
+        bool CandidatePresent,
+        bool AcceptanceReceiptPresent,
+        bool IntentPresent,
+        BoundedGitHubPublisherOutcome? FailureOutcome);
 }

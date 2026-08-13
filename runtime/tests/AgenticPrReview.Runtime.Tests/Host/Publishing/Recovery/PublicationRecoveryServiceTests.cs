@@ -2,10 +2,14 @@ using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.Publishing.Recovery;
+using AgenticPrReview.Runtime.Host.Publishing.Rendering;
+using AgenticPrReview.Runtime.Host.State;
+using AgenticPrReview.Runtime.Host.State.Transactions;
 using AgenticPrReview.Runtime.Host.State.Restore;
 using AgenticPrReview.Runtime.Tests.Host.Action.Authorization;
 using AgenticPrReview.Runtime.Tests.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Tests.Host.Publishing.Rendering;
+using AgenticPrReview.Runtime.Tests.Host.State.Transactions;
 
 namespace AgenticPrReview.Runtime.Tests.Host.Publishing.Recovery;
 
@@ -39,12 +43,36 @@ public sealed class PublicationRecoveryServiceTests
     [Fact]
     public async Task ExactStoredPayloadDiscoveryCompletesAcceptanceWithoutMutation()
     {
-        var (token, request, rendered) = await
-            StickyPublicationTestData.CreateAsync();
+        var fixture = await RetainedStateTransactionEndToEndTests
+            .CreateFixtureAsync();
+        using var context = fixture.Context;
+        var run = await RetainedStateTransactionEndToEndTests
+            .CompleteRunAsync(fixture);
+        Assert.True(R4PreparedPublication.TryCreate(
+            run.Outcome,
+            fixture.PublicationScope,
+            out var publication));
+        var preparedResult = await RestrictedStateService
+            .PrepareRetainedCandidateAsync(
+                context,
+                run.Run,
+                publication!,
+                CancellationToken.None);
+        using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
+            preparedResult.Value);
+        var persistedResult = await RestrictedStateService
+            .PersistRetainedCandidateAsync(
+                context,
+                prepared,
+                CancellationToken.None);
+        Assert.True(persistedResult.Succeeded, persistedResult.Code);
+        Assert.True(PublicationRecoveryService.TryRestoreRendered(
+            prepared.Publication,
+            out var rendered));
         var factory = new FakePublisherTransportFactory();
         var comment = StickyPublicationTestData.Comment(
             77,
-            rendered.Comment);
+            rendered!.Comment);
         factory.Transport.Enqueue(comment);
         factory.Transport.Enqueue(comment);
         factory.Transport.Read = BoundedGitHubHttpResult<
@@ -52,21 +80,11 @@ public sealed class PublicationRecoveryServiceTests
         var service = new PublicationRecoveryService(
             new StickyCommentPublisher(factory));
 
-        var stored = Stored(request, rendered);
-        Assert.True(PublicationRecoveryService.TryRestoreRendered(
-            stored,
-            out var restored));
-        Assert.True(AuthorizedStickyReadbackRequest.TryCreateRecovery(
-            request.Authorization,
-            request.Scope,
-            restored,
-            out _));
-        var result = await service.ClassifyBeforeProviderAsync(
-            token,
-            request.Authorization,
-            request.Scope,
-            stored,
-            Current(),
+        using var result = await service.ClassifyBeforeProviderAsync(
+            fixture.Launch.Inputs.GitHubToken!,
+            fixture.Invocation,
+            fixture.PublicationScope,
+            context,
             CancellationToken.None);
 
         Assert.Equal(StickyDiscoveryKind.ExactTarget, result.DiscoveryKind);
@@ -83,19 +101,39 @@ public sealed class PublicationRecoveryServiceTests
     [Fact]
     public async Task CompleteAbsenceResumesBeforeIntentWithoutMutation()
     {
-        var (token, request, rendered) = await
-            StickyPublicationTestData.CreateAsync();
+        var fixture = await RetainedStateTransactionEndToEndTests
+            .CreateFixtureAsync();
+        using var context = fixture.Context;
+        var run = await RetainedStateTransactionEndToEndTests
+            .CompleteRunAsync(fixture);
+        Assert.True(R4PreparedPublication.TryCreate(
+            run.Outcome,
+            fixture.PublicationScope,
+            out var publication));
+        var preparedResult = await RestrictedStateService
+            .PrepareRetainedCandidateAsync(
+                context,
+                run.Run,
+                publication!,
+                CancellationToken.None);
+        using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
+            preparedResult.Value);
+        var persistedResult = await RestrictedStateService
+            .PersistRetainedCandidateAsync(
+                context,
+                prepared,
+                CancellationToken.None);
+        Assert.True(persistedResult.Succeeded, persistedResult.Code);
         var factory = new FakePublisherTransportFactory();
         factory.Transport.Enqueue();
         var service = new PublicationRecoveryService(
             new StickyCommentPublisher(factory));
 
-        var result = await service.ClassifyBeforeProviderAsync(
-            token,
-            request.Authorization,
-            request.Scope,
-            Stored(request, rendered),
-            Current(),
+        using var result = await service.ClassifyBeforeProviderAsync(
+            fixture.Launch.Inputs.GitHubToken!,
+            fixture.Invocation,
+            fixture.PublicationScope,
+            context,
             CancellationToken.None);
 
         Assert.Equal(
@@ -125,22 +163,4 @@ public sealed class PublicationRecoveryServiceTests
         return stored!;
     }
 
-    private static PublicationRecoveryInventory Current() => new(
-        EnumerationComplete: true,
-        OwnershipRetained: true,
-        CandidateCount: 1,
-        CandidateMatchesCurrentHead: true,
-        HasStoredValidatedPublication: true,
-        IntentCount: 0,
-        StickyReadbackCount: 0,
-        FailureCount: 0,
-        AbandonmentCount: 0,
-        AcceptanceCount: 0,
-        RecoveryCount: 0,
-        RecordsMatchCandidate: true,
-        AcceptanceMatchesRecovery: false,
-        HasExactKnownNotWrittenFailure: false,
-        HasOutcomeUnknownFailure: false,
-        Marker: PublicationMarkerObservation.Incomplete,
-        Anchors: PublicationRecoveryAnchorState.None);
 }

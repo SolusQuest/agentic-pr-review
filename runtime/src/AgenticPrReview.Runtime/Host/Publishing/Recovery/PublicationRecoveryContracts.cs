@@ -3,26 +3,23 @@ using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.State.Lineage;
+using AgenticPrReview.Runtime.Host.State.Restore;
+using AgenticPrReview.Runtime.Host.State.Transactions;
 
 namespace AgenticPrReview.Runtime.Host.Publishing.Recovery;
 
-internal sealed record PublicationRecoveryBindingV1(
-    string BaseScopeDigest,
-    string Epoch,
-    string SessionId,
-    string? PredecessorAcceptanceIdentity,
-    string CandidateObjectIdentity,
+internal sealed record PublicationRecoveryPublicationV1(
     string ReviewedHeadSha,
     string ScopeSha256,
     string BodySha256);
 
 internal sealed record PublicationIntentV1(
-    PublicationRecoveryBindingV1 Binding,
+    PublicationRecoveryPublicationV1 Publication,
     long CreatedAtUnixSeconds,
     string RecordIdentity);
 
 internal sealed record StickyReadbackRecordV1(
-    PublicationRecoveryBindingV1 Binding,
+    PublicationRecoveryPublicationV1 Publication,
     StickyPublicationOperation Operation,
     long RepositoryId,
     long PullRequestNumber,
@@ -39,27 +36,27 @@ internal sealed record StickyReadbackRecordV1(
             PullRequestNumber,
             CommentId,
             CommentUrl,
-            Binding.ScopeSha256,
-            Binding.BodySha256,
-            Binding.ReviewedHeadSha,
+            Publication.ScopeSha256,
+            Publication.BodySha256,
+            Publication.ReviewedHeadSha,
             out receipt);
 }
 
 internal sealed record PublicationFailureV1(
-    PublicationRecoveryBindingV1 Binding,
+    PublicationRecoveryPublicationV1 Publication,
     BoundedGitHubPublisherOutcome Outcome,
     StickyPublicationReason Reason,
     long FailedAtUnixSeconds,
     string RecordIdentity);
 
 internal sealed record AbandonmentV1(
-    PublicationRecoveryBindingV1 Binding,
+    PublicationRecoveryPublicationV1 Publication,
     string CompleteMarkerAbsenceEvidenceIdentity,
     long AbandonedAtUnixSeconds,
     string RecordIdentity);
 
 internal sealed record RecoveryRecordV1(
-    PublicationRecoveryBindingV1 Binding,
+    PublicationRecoveryPublicationV1 Publication,
     string StickyReadbackRecordIdentity,
     ImmutableArray<byte> AcceptanceRecoveryHandoff,
     long MinimumSemanticExpiresAtUnixSeconds,
@@ -132,26 +129,88 @@ internal enum PublicationRecoveryAnchorState
     Ambiguous,
 }
 
-internal sealed record PublicationRecoveryInventory(
-    bool EnumerationComplete,
-    bool OwnershipRetained,
-    int CandidateCount,
-    bool CandidateMatchesCurrentHead,
-    bool HasStoredValidatedPublication,
-    int IntentCount,
-    int StickyReadbackCount,
-    int FailureCount,
-    int AbandonmentCount,
-    int AcceptanceCount,
-    int RecoveryCount,
-    bool RecordsMatchCandidate,
-    bool AcceptanceMatchesRecovery,
-    bool HasExactKnownNotWrittenFailure,
-    bool HasOutcomeUnknownFailure,
-    PublicationMarkerObservation Marker,
-    PublicationRecoveryAnchorState Anchors,
-    bool IsSupersededTerminalRecovery = false,
-    bool HasDurableSuccessorRecovery = false);
+internal sealed class PublicationRecoveryObservation : IDisposable
+{
+    private RetainedStatePublicationRecoveryInventory? inventory;
+
+    internal PublicationRecoveryObservation(
+        object issuer,
+        RetainedStatePublicationRecoveryInventory inventory,
+        string? candidateObjectIdentity,
+        ValidatedPublicationPayloadV1? storedPublication,
+        PublicationIntentV1? intent,
+        StickyReadbackRecordV1? stickyReadback,
+        PublicationFailureV1? failure,
+        AbandonmentV1? abandonment,
+        RecoveryRecordV1? recovery,
+        MatchedRetainedStateRecoveryAcceptance? matchedAcceptance,
+        ImmutableArray<RetainedStateOpaqueRecord> historicalRecords,
+        ImmutableArray<RetainedStatePublicationRecoveryAnchorEvidence>
+            completedAnchors,
+        bool candidateMatchesCurrentHead,
+        bool currentAcceptedHeadMatchesReviewedHead,
+        bool historicalTerminalRecovery,
+        bool hasHistoricalCleanupDebt,
+        PublicationRecoveryAnchorState anchors)
+    {
+        PublicationRecoveryInventoryFactory.RequireIssuer(issuer);
+        this.inventory = inventory;
+        CandidateObjectIdentity = candidateObjectIdentity;
+        StoredPublication = storedPublication;
+        Intent = intent;
+        StickyReadback = stickyReadback;
+        Failure = failure;
+        Abandonment = abandonment;
+        Recovery = recovery;
+        MatchedAcceptance = matchedAcceptance;
+        HistoricalRecords = historicalRecords;
+        CompletedAnchors = completedAnchors;
+        CandidateMatchesCurrentHead = candidateMatchesCurrentHead;
+        CurrentAcceptedHeadMatchesReviewedHead =
+            currentAcceptedHeadMatchesReviewedHead;
+        HistoricalTerminalRecovery = historicalTerminalRecovery;
+        HasHistoricalCleanupDebt = hasHistoricalCleanupDebt;
+        Anchors = anchors;
+    }
+
+    internal RetainedStatePublicationRecoveryInventory? Inventory =>
+        Volatile.Read(ref inventory);
+    internal RetainedStateObservedCandidate? Candidate => Inventory?.Candidate;
+    internal ImmutableArray<RetainedStateOpaqueRecord> Records =>
+        Inventory?.Records ?? default;
+    internal string InventoryDigest => Inventory?.InventoryDigest ??
+        string.Empty;
+    internal long ObservedAtUnixSeconds =>
+        Inventory?.ObservedAtUnixSeconds ?? 0;
+    internal string? CandidateObjectIdentity { get; }
+    internal ValidatedPublicationPayloadV1? StoredPublication { get; }
+    internal PublicationIntentV1? Intent { get; }
+    internal StickyReadbackRecordV1? StickyReadback { get; }
+    internal PublicationFailureV1? Failure { get; }
+    internal AbandonmentV1? Abandonment { get; }
+    internal RecoveryRecordV1? Recovery { get; }
+    internal MatchedRetainedStateRecoveryAcceptance? MatchedAcceptance
+    {
+        get;
+    }
+    internal ImmutableArray<RetainedStateOpaqueRecord> HistoricalRecords
+    {
+        get;
+    }
+    internal ImmutableArray<RetainedStatePublicationRecoveryAnchorEvidence>
+        CompletedAnchors { get; }
+    internal bool CandidateMatchesCurrentHead { get; }
+    internal bool CurrentAcceptedHeadMatchesReviewedHead { get; }
+    internal bool HistoricalTerminalRecovery { get; }
+    internal bool HasHistoricalCleanupDebt { get; }
+    internal PublicationRecoveryAnchorState Anchors { get; }
+    internal bool IsLive => Inventory is not null;
+
+    public void Dispose() =>
+        Interlocked.Exchange(ref inventory, null)?.Dispose();
+
+    public override string ToString() => "[PRIVATE]";
+}
 
 internal enum PublicationRecoveryLifecycleState
 {
@@ -173,6 +232,8 @@ internal enum PublicationRecoveryAction
     CompleteAcceptance,
     StickyOutcomeUnknown,
     AbandonStaleCandidate,
+    CancelledBeforeSend,
+    AuthorizationOrValidationFailure,
 }
 
 internal sealed record PublicationRecoveryDecision(
@@ -182,9 +243,7 @@ internal sealed record PublicationRecoveryDecision(
 {
     internal bool AllowsProvider => Action ==
         PublicationRecoveryAction.NoPendingWork;
-    internal bool AllowsStickyWrite => Action is
-        PublicationRecoveryAction.ResumeBeforeIntent or
-        PublicationRecoveryAction.ResumeKnownNotWritten;
+    internal bool AllowsStickyWrite => false;
     internal bool AllowsAcceptance => Action ==
         PublicationRecoveryAction.CompleteAcceptance;
     internal bool AllowsStaleCleanup => Action ==
@@ -198,7 +257,104 @@ internal sealed record PublicationRecoveryEvaluation(
     PublicationRecoveryDecision Decision,
     StickyCommentPublisher.StickyPublicationReceipt? ExactReadbackReceipt,
     StickyDiscoveryKind DiscoveryKind,
-    StickyPublicationReason DiscoveryReason);
+    StickyPublicationReason DiscoveryReason,
+    PublicationRecoveryObservation? Observation,
+    PublicationStickyWriteAuthorization? StickyWriteAuthorization = null,
+    PublicationMarkerAbsenceEvidence? MarkerAbsenceEvidence = null) :
+    IDisposable
+{
+    public void Dispose()
+    {
+        StickyWriteAuthorization?.Dispose();
+        MarkerAbsenceEvidence?.Dispose();
+        Observation?.Dispose();
+    }
+}
+
+internal sealed class PublicationMarkerAbsenceEvidence : IDisposable
+{
+    private int usable = 1;
+    private readonly object issuer;
+
+    internal PublicationMarkerAbsenceEvidence(
+        object issuer,
+        string candidateObjectIdentity,
+        string inventoryDigest,
+        string evidenceIdentity)
+    {
+        PublicationRecoveryInventoryFactory.RequireIssuer(issuer);
+        this.issuer = issuer;
+        CandidateObjectIdentity = candidateObjectIdentity;
+        InventoryDigest = inventoryDigest;
+        EvidenceIdentity = evidenceIdentity;
+    }
+
+    internal string CandidateObjectIdentity { get; }
+    internal string InventoryDigest { get; }
+    internal string EvidenceIdentity { get; }
+
+    internal bool TryConsume(
+        object expectedIssuer,
+        string candidateObjectIdentity,
+        string inventoryDigest) =>
+        PublicationRecoveryInventoryFactory.IsIssuer(expectedIssuer) &&
+        ReferenceEquals(issuer, expectedIssuer) &&
+        StringComparer.Ordinal.Equals(
+            CandidateObjectIdentity,
+            candidateObjectIdentity) &&
+        StringComparer.Ordinal.Equals(InventoryDigest, inventoryDigest) &&
+        Interlocked.CompareExchange(ref usable, 0, 1) == 1;
+
+    public void Dispose() => Interlocked.Exchange(ref usable, 0);
+
+    public override string ToString() => "[PRIVATE]";
+}
+
+internal sealed class PublicationStickyWriteAuthorization : IDisposable
+{
+    private int usable = 1;
+    private readonly object issuer;
+
+    internal PublicationStickyWriteAuthorization(
+        object issuer,
+        string candidateObjectIdentity,
+        string inventoryDigest,
+        string evidenceRecordIdentity)
+    {
+        PublicationRecoveryInventoryFactory.RequireIssuer(issuer);
+        this.issuer = issuer;
+        CandidateObjectIdentity = candidateObjectIdentity;
+        InventoryDigest = inventoryDigest;
+        EvidenceRecordIdentity = evidenceRecordIdentity;
+    }
+
+    internal string CandidateObjectIdentity { get; }
+    internal string InventoryDigest { get; }
+    internal string EvidenceRecordIdentity { get; }
+
+    internal bool TryConsume(object expectedIssuer) =>
+        PublicationRecoveryInventoryFactory.IsIssuer(expectedIssuer) &&
+        ReferenceEquals(issuer, expectedIssuer) &&
+        Interlocked.CompareExchange(ref usable, 0, 1) == 1;
+
+    public void Dispose() => Interlocked.Exchange(ref usable, 0);
+
+    public override string ToString() => "[PRIVATE]";
+}
+
+internal sealed record PublicationIntentPersistenceResult(
+    PublicationIntentV1 Intent,
+    string InventoryDigest,
+    PublicationRecoveryObservation Observation,
+    PublicationStickyWriteAuthorization StickyWriteAuthorization) :
+    IDisposable
+{
+    public void Dispose()
+    {
+        StickyWriteAuthorization.Dispose();
+        Observation.Dispose();
+    }
+}
 
 internal static class PublicationRecoveryCodes
 {
@@ -214,6 +370,10 @@ internal static class PublicationRecoveryCodes
         "publication_recovery_sticky_outcome_unknown";
     internal const string AbandonStaleCandidate =
         "publication_recovery_abandon_stale_candidate";
+    internal const string CancelledBeforeSend =
+        "publication_recovery_cancelled_before_send";
+    internal const string AuthorizationOrValidationFailure =
+        "publication_recovery_authorization_or_validation_failure";
     internal const string Conflict = "publication_recovery_conflict";
 }
 

@@ -11,6 +11,160 @@ namespace AgenticPrReview.Runtime.Host.Publishing.Recovery;
 
 internal static class PublicationRecoveryPersistence
 {
+    internal static async Task<RetainedStateTransactionResult<
+        PublicationIntentPersistenceResult>> PersistIntentAndAuthorizeAsync(
+        AuthorizedAcceptedStateRestoreContext context,
+        PublicationRecoveryObservation observation,
+        CancellationToken cancellationToken)
+    {
+        if (context is null ||
+            observation is null ||
+            !observation.IsLive ||
+            observation.Candidate is not { } observedCandidate ||
+            observation.Intent is not null ||
+            observation.StickyReadback is not null ||
+            observation.Failure is not null ||
+            observation.Abandonment is not null ||
+            observation.Recovery is not null ||
+            !observedCandidate.MatchesCurrentReviewedHead ||
+            !PublicationRecoveryRetention.TryCompute(
+                observation.ObservedAtUnixSeconds,
+                observedCandidate.Header.LogicalExpiresAtUnixSeconds,
+                out var semanticExpiry,
+                out var requestedPlatformExpiry))
+        {
+            return IntentFailure();
+        }
+
+        var recoveredResult = await RestrictedStateService
+            .RecoverRetainedCandidateAsync(context, cancellationToken)
+            .ConfigureAwait(false);
+        var candidate = recoveredResult.Value;
+        if (!recoveredResult.Succeeded ||
+            candidate is null ||
+            candidate.Metadata != observedCandidate.Metadata ||
+            candidate.Prepared.Header != observedCandidate.Header ||
+            !StringComparer.Ordinal.Equals(
+                candidate.Prepared.LogicalGenerationIdentity,
+                observedCandidate.LogicalGenerationIdentity))
+        {
+            candidate?.Prepared.Dispose();
+            return IntentFailure();
+        }
+
+        using var preparedLifetime = candidate.Prepared;
+        var ownershipResult = await RestrictedStateService
+            .RenewRetainedStateOwnershipAsync(
+                context,
+                candidate,
+                prior: null,
+                observation.Records,
+                cancellationToken)
+            .ConfigureAwait(false);
+        using var ownership = ownershipResult.Value;
+        if (!ownershipResult.Succeeded ||
+            ownership is null ||
+            !StringComparer.Ordinal.Equals(
+                ownership.InventoryDigest,
+                observation.InventoryDigest) ||
+            !TryCreateIntentWrite(
+                candidate,
+                observation.ObservedAtUnixSeconds,
+                observedCandidate.Header.LogicalExpiresAtUnixSeconds,
+                out var intent,
+                out var request) ||
+            intent is null ||
+            request is null ||
+            request.SemanticRequiredExpiresAtUnixSeconds != semanticExpiry)
+        {
+            return IntentFailure();
+        }
+
+        var attemptResult = await RestrictedStateService
+            .PrepareRetainedOpaqueWriteAsync(
+                context,
+                ownership,
+                request,
+                cancellationToken)
+            .ConfigureAwait(false);
+        using var attempt = attemptResult.Value;
+        if (!attemptResult.Succeeded ||
+            attempt is null ||
+            attempt.Header.LogicalExpiresAtUnixSeconds != semanticExpiry ||
+            !StringComparer.Ordinal.Equals(
+                attempt.Header.PredecessorIdentity,
+                observedCandidate.Header.ObjectIdentity))
+        {
+            return IntentFailure();
+        }
+
+        var persistedResult = await RestrictedStateService
+            .PersistPreparedRetainedOpaqueWriteAsync(
+                context,
+                attempt,
+                cancellationToken)
+            .ConfigureAwait(false);
+        using var persisted = persistedResult.Value;
+        if (!persistedResult.Succeeded ||
+            persisted is null ||
+            persisted.ObjectClass != StateObjectClass.PublicationIntent ||
+            persisted.Header != attempt.Header ||
+            persisted.Metadata.ExpiresAtUnixSeconds <
+                requestedPlatformExpiry ||
+            !StringComparer.Ordinal.Equals(
+                persisted.Header.PredecessorIdentity,
+                observedCandidate.Header.ObjectIdentity))
+        {
+            return IntentFailure();
+        }
+
+        var freshInventoryResult = await RestrictedStateService
+            .ObserveRetainedPublicationRecoveryInventoryAsync(
+                context,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+        var freshInventory = freshInventoryResult.Value;
+        if (!freshInventoryResult.Succeeded || freshInventory is null)
+        {
+            freshInventory?.Dispose();
+            return IntentFailure();
+        }
+
+        var freshObservationResult = await PublicationRecoveryInventoryFactory
+            .CreateAsync(
+                context,
+                freshInventory,
+                observedCandidate.Publication.ReviewedHeadSha,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+        var freshObservation = freshObservationResult.Value;
+        if (!freshObservationResult.Succeeded ||
+            freshObservation is null ||
+            freshObservation.Intent != intent ||
+            freshObservation.CandidateObjectIdentity !=
+                observedCandidate.Header.ObjectIdentity ||
+            freshObservation.Records.Count(record =>
+                record.Metadata == persisted.Metadata &&
+                record.Header == persisted.Header) != 1)
+        {
+            freshObservation?.Dispose();
+            return IntentFailure();
+        }
+
+        var stickyAuthorization = PublicationRecoveryInventoryFactory
+            .CreateStickyWriteAuthorization(
+                freshObservation,
+                intent.RecordIdentity);
+        return RetainedStateTransactionResult<
+            PublicationIntentPersistenceResult>.Success(
+                RetainedStateTransactionCodes.Ready,
+                new(
+                    intent,
+                    freshObservation.InventoryDigest,
+                    freshObservation,
+                    stickyAuthorization));
+    }
+
     internal static bool TryCreateIntentWrite(
         RetainedStatePersistedCandidate candidate,
         long trustedNowUnixSeconds,
@@ -20,14 +174,14 @@ internal static class PublicationRecoveryPersistence
     {
         intent = null;
         request = null;
-        if (!TryBinding(candidate, out var binding) ||
+        if (!TryPublication(candidate, out var publication) ||
             !PublicationRecoveryRetention.TryCompute(
                 trustedNowUnixSeconds,
                 candidateLogicalExpiresAtUnixSeconds,
                 out var semanticExpiry,
                 out _) ||
             !PublicationIntentV1Codec.TryCreate(
-                binding!,
+                publication!,
                 trustedNowUnixSeconds,
                 out intent) ||
             !PublicationIntentV1Codec.TryEncode(intent, out var bytes))
@@ -38,7 +192,7 @@ internal static class PublicationRecoveryPersistence
         request = Request(
             StateObjectClass.PublicationIntent,
             bytes,
-            binding!.CandidateObjectIdentity,
+            candidate.Prepared.Header.ObjectIdentity,
             semanticExpiry);
         CryptographicOperations.ZeroMemory(bytes);
         return true;
@@ -54,14 +208,14 @@ internal static class PublicationRecoveryPersistence
     {
         readback = null;
         request = null;
-        if (!TryBinding(candidate, out var binding) ||
+        if (!TryPublication(candidate, out var publication) ||
             !PublicationRecoveryRetention.TryCompute(
                 observedAtUnixSeconds,
                 candidateLogicalExpiresAtUnixSeconds,
                 out var semanticExpiry,
                 out _) ||
             !StickyReadbackRecordV1Codec.TryCreate(
-                binding!,
+                publication!,
                 receipt,
                 observedAtUnixSeconds,
                 out readback) ||
@@ -75,7 +229,7 @@ internal static class PublicationRecoveryPersistence
         request = Request(
             StateObjectClass.PublicationIntent,
             bytes,
-            binding!.CandidateObjectIdentity,
+            candidate.Prepared.Header.ObjectIdentity,
             semanticExpiry);
         CryptographicOperations.ZeroMemory(bytes);
         return true;
@@ -92,14 +246,14 @@ internal static class PublicationRecoveryPersistence
     {
         failure = null;
         request = null;
-        if (!TryBinding(candidate, out var binding) ||
+        if (!TryPublication(candidate, out var publication) ||
             !PublicationRecoveryRetention.TryCompute(
                 failedAtUnixSeconds,
                 candidateLogicalExpiresAtUnixSeconds,
                 out var semanticExpiry,
                 out _) ||
             !PublicationFailureV1Codec.TryCreate(
-                binding!,
+                publication!,
                 outcome,
                 reason,
                 failedAtUnixSeconds,
@@ -112,7 +266,7 @@ internal static class PublicationRecoveryPersistence
         request = Request(
             StateObjectClass.PublicationFailure,
             bytes,
-            binding!.CandidateObjectIdentity,
+            candidate.Prepared.Header.ObjectIdentity,
             semanticExpiry);
         CryptographicOperations.ZeroMemory(bytes);
         return true;
@@ -128,14 +282,14 @@ internal static class PublicationRecoveryPersistence
     {
         abandonment = null;
         request = null;
-        if (!TryBinding(candidate, out var binding) ||
+        if (!TryPublication(candidate, out var publication) ||
             !PublicationRecoveryRetention.TryCompute(
                 abandonedAtUnixSeconds,
                 candidateLogicalExpiresAtUnixSeconds,
                 out var semanticExpiry,
                 out _) ||
             !AbandonmentV1Codec.TryCreate(
-                binding!,
+                publication!,
                 completeMarkerAbsenceEvidenceIdentity,
                 abandonedAtUnixSeconds,
                 out abandonment) ||
@@ -149,32 +303,38 @@ internal static class PublicationRecoveryPersistence
         request = Request(
             StateObjectClass.Abandonment,
             bytes,
-            binding!.CandidateObjectIdentity,
+            candidate.Prepared.Header.ObjectIdentity,
             semanticExpiry);
         CryptographicOperations.ZeroMemory(bytes);
         return true;
     }
 
     internal static bool TryCreateStaleAbandonmentWrite(
-        RetainedStateObservedCandidate candidate,
-        string completeMarkerAbsenceEvidenceIdentity,
+        PublicationRecoveryObservation observation,
+        PublicationMarkerAbsenceEvidence absenceEvidence,
         long abandonedAtUnixSeconds,
         out AbandonmentV1? abandonment,
         out RetainedStateOpaqueWriteRequest? request)
     {
         abandonment = null;
         request = null;
+        var candidate = observation?.Candidate;
         if (candidate is null ||
             candidate.MatchesCurrentReviewedHead ||
-            !TryBinding(candidate, out var binding) ||
+            absenceEvidence is null ||
+            !PublicationRecoveryInventoryFactory
+                .TryConsumeMarkerAbsenceEvidence(
+                    observation!,
+                    absenceEvidence) ||
+            !TryPublication(candidate, out var publication) ||
             !PublicationRecoveryRetention.TryCompute(
                 abandonedAtUnixSeconds,
                 candidate.Header.LogicalExpiresAtUnixSeconds,
                 out var semanticExpiry,
                 out _) ||
             !AbandonmentV1Codec.TryCreate(
-                binding!,
-                completeMarkerAbsenceEvidenceIdentity,
+                publication!,
+                absenceEvidence.EvidenceIdentity,
                 abandonedAtUnixSeconds,
                 out abandonment) ||
             !AbandonmentV1Codec.TryEncode(
@@ -187,7 +347,7 @@ internal static class PublicationRecoveryPersistence
         request = Request(
             StateObjectClass.Abandonment,
             bytes,
-            binding!.CandidateObjectIdentity,
+            candidate.Header.ObjectIdentity,
             semanticExpiry);
         CryptographicOperations.ZeroMemory(bytes);
         return true;
@@ -205,10 +365,10 @@ internal static class PublicationRecoveryPersistence
             readback is null ||
             !preparation.TryCreateRecoveryHandoff(out var handoff) ||
             handoff is null ||
-            !TryBinding(preparation.Candidate, out var binding) ||
-            binding != readback.Binding ||
+            !TryPublication(preparation.Candidate, out var publication) ||
+            publication != readback.Publication ||
             !RecoveryRecordV1Codec.TryCreate(
-                binding!,
+                publication!,
                 readback.RecordIdentity,
                 handoff.OpaqueInnerPayload,
                 handoff.MinimumSemanticExpiresAtUnixSeconds,
@@ -280,43 +440,38 @@ internal static class PublicationRecoveryPersistence
         }
     }
 
-    internal static bool TryBinding(
+    internal static bool TryPublication(
         RetainedStatePersistedCandidate candidate,
-        out PublicationRecoveryBindingV1? binding)
+        out PublicationRecoveryPublicationV1? publication)
     {
-        binding = null;
+        publication = null;
         var prepared = candidate?.Prepared;
         var header = prepared?.Header;
-        var publication = prepared?.Publication;
-        if (prepared is null || header is null || publication is null ||
+        var stored = prepared?.Publication;
+        if (prepared is null || header is null || stored is null ||
             header.ObjectClass != StateObjectClass.Candidate ||
             !StringComparer.Ordinal.Equals(
                 header.ObjectIdentity,
                 prepared.Header.ObjectIdentity) ||
             !StringComparer.Ordinal.Equals(
-                publication.ReviewedHeadSha,
+                stored.ReviewedHeadSha,
                 prepared.Generation.ProducerHeadSha))
         {
             return false;
         }
 
-        binding = new PublicationRecoveryBindingV1(
-            header.BaseScopeDigest,
-            header.Epoch,
-            header.SessionId,
-            header.PredecessorIdentity,
-            header.ObjectIdentity,
-            publication.ReviewedHeadSha,
-            publication.ScopeSha256,
-            publication.BodySha256);
+        publication = new PublicationRecoveryPublicationV1(
+            stored.ReviewedHeadSha,
+            stored.ScopeSha256,
+            stored.BodySha256);
         return true;
     }
 
-    internal static bool TryBinding(
+    internal static bool TryPublication(
         RetainedStateObservedCandidate candidate,
-        out PublicationRecoveryBindingV1? binding)
+        out PublicationRecoveryPublicationV1? publication)
     {
-        binding = null;
+        publication = null;
         if (candidate is null ||
             candidate.Header.ObjectClass != StateObjectClass.Candidate ||
             !StringComparer.Ordinal.Equals(
@@ -326,12 +481,7 @@ internal static class PublicationRecoveryPersistence
             return false;
         }
 
-        binding = new PublicationRecoveryBindingV1(
-            candidate.Header.BaseScopeDigest,
-            candidate.Header.Epoch,
-            candidate.Header.SessionId,
-            candidate.Header.PredecessorIdentity,
-            candidate.Header.ObjectIdentity,
+        publication = new PublicationRecoveryPublicationV1(
             candidate.Publication.ReviewedHeadSha,
             candidate.Publication.ScopeSha256,
             candidate.Publication.BodySha256);
@@ -348,4 +498,10 @@ internal static class PublicationRecoveryPersistence
             candidateIdentity,
             SuccessorIdentity: null,
             semanticExpiry);
+
+    private static RetainedStateTransactionResult<
+        PublicationIntentPersistenceResult> IntentFailure() =>
+        RetainedStateTransactionResult<
+            PublicationIntentPersistenceResult>.Fail(
+                RetainedStateTransactionCodes.Conflict);
 }

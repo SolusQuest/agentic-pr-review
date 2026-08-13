@@ -1680,6 +1680,116 @@ internal sealed class RetainedStateObservedCandidate : IDisposable
     public override string ToString() => "[PRIVATE]";
 }
 
+internal sealed record RetainedStatePublicationRecoveryAnchorEvidence(
+    OpaqueStoreObjectMetadata AnchorMetadata,
+    StateControlHeaderV1 AnchorHeader,
+    string CandidateObjectIdentity,
+    StateObjectClass ObjectClass,
+    OpaqueStoreName TargetName,
+    string TargetObjectIdentity,
+    bool TargetIsPresent);
+
+internal sealed class RetainedStatePublicationRecoveryInventory : IDisposable
+{
+    private ImmutableArray<RetainedStateOpaqueRecord> records;
+    private RetainedStateObservedCandidate? candidate;
+
+    private RetainedStatePublicationRecoveryInventory(
+        RetainedStateTransactionAuthority authority,
+        RetainedStateObservedCandidate? candidate,
+        ImmutableArray<RetainedStateOpaqueRecord> records,
+        VerifiedRetainedStateAcceptance? currentAcceptance,
+        StickyCommentPublisher.StickyPublicationReceipt?
+            currentAcceptancePublicationReceipt,
+        string? currentAcceptanceCandidateObjectIdentity,
+        ValidatedPublicationPayloadV1? currentAcceptedPublication,
+        ImmutableArray<RetainedStatePublicationRecoveryAnchorEvidence>
+            anchors,
+        string inventoryDigest,
+        long observedAtUnixSeconds)
+    {
+        this.authority = authority;
+        this.candidate = candidate;
+        this.records = records;
+        CurrentAcceptance = currentAcceptance;
+        CurrentAcceptancePublicationReceipt =
+            currentAcceptancePublicationReceipt;
+        CurrentAcceptanceCandidateObjectIdentity =
+            currentAcceptanceCandidateObjectIdentity;
+        CurrentAcceptedPublication = currentAcceptedPublication;
+        Anchors = anchors;
+        InventoryDigest = inventoryDigest;
+        ObservedAtUnixSeconds = observedAtUnixSeconds;
+    }
+
+    private readonly RetainedStateTransactionAuthority authority;
+    internal RetainedStateObservedCandidate? Candidate =>
+        Volatile.Read(ref candidate);
+    internal ImmutableArray<RetainedStateOpaqueRecord> Records => records;
+    internal VerifiedRetainedStateAcceptance? CurrentAcceptance { get; }
+    internal StickyCommentPublisher.StickyPublicationReceipt?
+        CurrentAcceptancePublicationReceipt { get; }
+    internal string? CurrentAcceptanceCandidateObjectIdentity { get; }
+    internal ValidatedPublicationPayloadV1? CurrentAcceptedPublication
+    {
+        get;
+    }
+    internal ImmutableArray<RetainedStatePublicationRecoveryAnchorEvidence>
+        Anchors { get; }
+    internal string InventoryDigest { get; }
+    internal long ObservedAtUnixSeconds { get; }
+
+    internal bool IsIssuedBy(RetainedStateTransactionAuthority value) =>
+        ReferenceEquals(authority, value) &&
+        value.IsLive &&
+        !records.IsDefault;
+
+    internal static RetainedStatePublicationRecoveryInventory Create(
+        object issuer,
+        RetainedStateTransactionAuthority authority,
+        RetainedStateObservedCandidate? candidate,
+        ImmutableArray<RetainedStateOpaqueRecord> records,
+        VerifiedRetainedStateAcceptance? currentAcceptance,
+        StickyCommentPublisher.StickyPublicationReceipt?
+            currentAcceptancePublicationReceipt,
+        string? currentAcceptanceCandidateObjectIdentity,
+        ValidatedPublicationPayloadV1? currentAcceptedPublication,
+        ImmutableArray<RetainedStatePublicationRecoveryAnchorEvidence>
+            anchors,
+        string inventoryDigest,
+        long observedAtUnixSeconds)
+    {
+        RetainedStateCapabilityIssuer.Require(issuer);
+        return new(
+            authority,
+            candidate,
+            records,
+            currentAcceptance,
+            currentAcceptancePublicationReceipt,
+            currentAcceptanceCandidateObjectIdentity,
+            currentAcceptedPublication,
+            anchors,
+            inventoryDigest,
+            observedAtUnixSeconds);
+    }
+
+    public void Dispose()
+    {
+        Interlocked.Exchange(ref candidate, null)?.Dispose();
+        var current = records;
+        records = default;
+        if (!current.IsDefault)
+        {
+            foreach (var record in current)
+            {
+                record.Dispose();
+            }
+        }
+    }
+
+    public override string ToString() => "[PRIVATE]";
+}
+
 internal enum RetainedStateP5CleanupClassification
 {
     StaleCandidateAbandonment,

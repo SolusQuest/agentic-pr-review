@@ -6,184 +6,123 @@ namespace AgenticPrReview.Runtime.Host.Publishing.Recovery;
 internal static class PublicationRecoveryClassifier
 {
     internal static PublicationRecoveryDecision Classify(
-        PublicationRecoveryInventory? inventory)
+        PublicationRecoveryObservation? observation,
+        PublicationMarkerObservation marker)
     {
-        if (!StructurallyComplete(inventory))
+        if (observation is null ||
+            !observation.IsLive ||
+            marker is PublicationMarkerObservation.Incomplete or
+                PublicationMarkerObservation.Ambiguous ||
+            observation.Anchors is PublicationRecoveryAnchorState.Unresolved or
+                PublicationRecoveryAnchorState.Ambiguous)
         {
+            return Conflict();
+        }
+
+        if (observation.Candidate is null)
+        {
+            if (observation.CurrentAcceptedHeadMatchesReviewedHead)
+            {
+                return marker == PublicationMarkerObservation.Exact &&
+                    observation.Inventory?
+                        .CurrentAcceptancePublicationReceipt is not null
+                    ? Decision(
+                        PublicationRecoveryAction.ReturnCommitted,
+                        PublicationRecoveryCodes.ReturnCommitted,
+                        PublicationRecoveryLifecycleState
+                            .CurrentTerminalRecovery)
+                    : Conflict();
+            }
+
             return Decision(
-                PublicationRecoveryAction.Conflict,
-                PublicationRecoveryCodes.Conflict);
-        }
-
-        var value = inventory!;
-        if (value.IsSupersededTerminalRecovery)
-        {
-            return value.HasDurableSuccessorRecovery &&
-                value.Anchors is PublicationRecoveryAnchorState.None or
-                    PublicationRecoveryAnchorState.CleanupDebt
-                ? Decision(
-                    PublicationRecoveryAction.NoPendingWork,
-                    PublicationRecoveryCodes.NoPendingWork,
-                    PublicationRecoveryLifecycleState
-                        .SupersededTerminalRecovery)
-                : Decision(
-                    PublicationRecoveryAction.Conflict,
-                    PublicationRecoveryCodes.Conflict);
-        }
-
-        if (value.CandidateCount == 0)
-        {
-            return value.IntentCount == 0 &&
-                value.StickyReadbackCount == 0 &&
-                value.FailureCount == 0 &&
-                value.AbandonmentCount == 0 &&
-                value.AcceptanceCount == 0 &&
-                value.RecoveryCount == 0 &&
-                value.Anchors is PublicationRecoveryAnchorState.None or
-                    PublicationRecoveryAnchorState.CleanupDebt
-                ? Decision(
-                    PublicationRecoveryAction.NoPendingWork,
-                    PublicationRecoveryCodes.NoPendingWork,
-                    value.Anchors ==
+                PublicationRecoveryAction.NoPendingWork,
+                PublicationRecoveryCodes.NoPendingWork,
+                observation.HistoricalTerminalRecovery
+                    ? PublicationRecoveryLifecycleState
+                        .SupersededTerminalRecovery
+                    : observation.HasHistoricalCleanupDebt ||
+                    observation.Anchors ==
                         PublicationRecoveryAnchorState.CleanupDebt
-                        ? PublicationRecoveryLifecycleState
-                            .CompletedCleanupDebt
-                        : PublicationRecoveryLifecycleState.None)
-                : Decision(
-                    PublicationRecoveryAction.Conflict,
-                    PublicationRecoveryCodes.Conflict);
+                    ? PublicationRecoveryLifecycleState.CompletedCleanupDebt
+                    : PublicationRecoveryLifecycleState.None);
         }
 
-        if (!value.CandidateMatchesCurrentHead)
+        if (!observation.CandidateMatchesCurrentHead)
         {
-            return value.IntentCount == 0 &&
-                value.StickyReadbackCount == 0 &&
-                value.FailureCount == 0 &&
-                value.AbandmentFree() &&
-                value.AcceptanceCount == 0 &&
-                value.RecoveryCount == 0 &&
-                value.Marker == PublicationMarkerObservation.Absent &&
-                value.Anchors == PublicationRecoveryAnchorState.None
+            return observation.Intent is null &&
+                observation.StickyReadback is null &&
+                observation.Failure is null &&
+                observation.Abandonment is null &&
+                observation.Recovery is null &&
+                marker == PublicationMarkerObservation.Absent &&
+                observation.Anchors == PublicationRecoveryAnchorState.None
                 ? Decision(
                     PublicationRecoveryAction.AbandonStaleCandidate,
                     PublicationRecoveryCodes.AbandonStaleCandidate,
                     PublicationRecoveryLifecycleState
                         .PendingCurrentTransaction)
-                : Decision(
-                    PublicationRecoveryAction.Conflict,
-                    PublicationRecoveryCodes.Conflict);
+                : Conflict();
         }
 
-        if (!value.HasStoredValidatedPublication ||
-            !value.RecordsMatchCandidate)
+        if (marker == PublicationMarkerObservation.Exact)
         {
-            return Decision(
-                PublicationRecoveryAction.Conflict,
-                PublicationRecoveryCodes.Conflict);
-        }
-
-        if (value.AcceptanceCount == 1)
-        {
-            return value.Marker == PublicationMarkerObservation.Exact &&
-                value.StickyReadbackCount == 1 &&
-                value.RecoveryCount == 1 &&
-                value.AcceptanceMatchesRecovery
-                ? Decision(
-                    PublicationRecoveryAction.ReturnCommitted,
-                    PublicationRecoveryCodes.ReturnCommitted,
-                    PublicationRecoveryLifecycleState
-                        .CurrentTerminalRecovery)
-                : Decision(
-                    PublicationRecoveryAction.Conflict,
-                    PublicationRecoveryCodes.Conflict);
-        }
-
-        if (value.Marker == PublicationMarkerObservation.Exact)
-        {
-            return value.IntentCount <= 1 &&
-                value.StickyReadbackCount <= 1 &&
-                value.FailureCount <= 1
+            return observation.Failure is null &&
+                observation.Abandonment is null
                 ? Decision(
                     PublicationRecoveryAction.CompleteAcceptance,
                     PublicationRecoveryCodes.CompleteAcceptance,
                     PublicationRecoveryLifecycleState
                         .PendingCurrentTransaction)
-                : Decision(
-                    PublicationRecoveryAction.Conflict,
-                    PublicationRecoveryCodes.Conflict);
+                : Conflict();
         }
 
-        if (value.Marker != PublicationMarkerObservation.Absent)
+        if (observation.StickyReadback is not null ||
+            observation.Recovery is not null ||
+            observation.Abandonment is not null)
         {
-            return Decision(
-                PublicationRecoveryAction.Conflict,
-                PublicationRecoveryCodes.Conflict);
+            return Conflict();
         }
 
-        if (value.HasExactKnownNotWrittenFailure &&
-            value.FailureCount == 1 &&
-            value.StickyReadbackCount == 0 &&
-            value.RecoveryCount == 0)
+        if (observation.Failure is { } failure)
         {
-            return Decision(
-                PublicationRecoveryAction.ResumeKnownNotWritten,
-                PublicationRecoveryCodes.ResumeKnownNotWritten,
-                PublicationRecoveryLifecycleState
-                    .PendingCurrentTransaction);
+            return failure.Outcome switch
+            {
+                BoundedGitHubPublisherOutcome.KnownNotWritten =>
+                    Decision(
+                        PublicationRecoveryAction.ResumeKnownNotWritten,
+                        PublicationRecoveryCodes.ResumeKnownNotWritten),
+                BoundedGitHubPublisherOutcome.OutcomeUnknown =>
+                    Decision(
+                        PublicationRecoveryAction.StickyOutcomeUnknown,
+                        PublicationRecoveryCodes.StickyOutcomeUnknown),
+                BoundedGitHubPublisherOutcome.CancelledBeforeSend =>
+                    Decision(
+                        PublicationRecoveryAction.CancelledBeforeSend,
+                        PublicationRecoveryCodes.CancelledBeforeSend),
+                BoundedGitHubPublisherOutcome
+                    .AuthorizationOrValidationFailure => Decision(
+                        PublicationRecoveryAction
+                            .AuthorizationOrValidationFailure,
+                        PublicationRecoveryCodes
+                            .AuthorizationOrValidationFailure),
+                _ => Conflict(),
+            };
         }
 
-        if (value.IntentCount == 1)
-        {
-            return Decision(
-                PublicationRecoveryAction.StickyOutcomeUnknown,
-                PublicationRecoveryCodes.StickyOutcomeUnknown,
-                PublicationRecoveryLifecycleState
-                    .PendingCurrentTransaction);
-        }
-
-        if (value.HasOutcomeUnknownFailure)
-        {
-            return Decision(
-                PublicationRecoveryAction.StickyOutcomeUnknown,
-                PublicationRecoveryCodes.StickyOutcomeUnknown,
-                PublicationRecoveryLifecycleState
-                    .PendingCurrentTransaction);
-        }
-
-        return value.IntentCount == 0 &&
-            value.StickyReadbackCount == 0 &&
-            value.FailureCount == 0 &&
-            value.AbandonmentCount == 0 &&
-            value.RecoveryCount == 0
+        return observation.Intent is null
             ? Decision(
                 PublicationRecoveryAction.ResumeBeforeIntent,
-                PublicationRecoveryCodes.ResumeBeforeIntent,
-                PublicationRecoveryLifecycleState.PendingCurrentTransaction)
+                PublicationRecoveryCodes.ResumeBeforeIntent)
             : Decision(
-                PublicationRecoveryAction.Conflict,
-                PublicationRecoveryCodes.Conflict);
+                PublicationRecoveryAction.StickyOutcomeUnknown,
+                PublicationRecoveryCodes.StickyOutcomeUnknown);
     }
 
-    private static bool StructurallyComplete(
-        PublicationRecoveryInventory? value) =>
-        value is not null &&
-        value.EnumerationComplete &&
-        value.OwnershipRetained &&
-        value.CandidateCount is 0 or 1 &&
-        value.IntentCount is >= 0 and <= 1 &&
-        value.StickyReadbackCount is >= 0 and <= 1 &&
-        value.FailureCount is >= 0 and <= 1 &&
-        value.AbandonmentCount is >= 0 and <= 1 &&
-        value.AcceptanceCount is >= 0 and <= 1 &&
-        value.RecoveryCount is >= 0 and <= 1 &&
-        value.Marker is not PublicationMarkerObservation.Incomplete &&
-        value.Anchors is not (
-            PublicationRecoveryAnchorState.Unresolved or
-            PublicationRecoveryAnchorState.Ambiguous);
-
-    private static bool AbandmentFree(
-        this PublicationRecoveryInventory value) =>
-        value.AbandonmentCount == 0;
+    private static PublicationRecoveryDecision Conflict() =>
+        Decision(
+            PublicationRecoveryAction.Conflict,
+            PublicationRecoveryCodes.Conflict,
+            PublicationRecoveryLifecycleState.AmbiguousConflict);
 
     private static PublicationRecoveryDecision Decision(
         PublicationRecoveryAction action,
@@ -228,14 +167,17 @@ internal static class PublicationTransportOutcomeMapper
                     StickyPublicationReason.None),
             BoundedGitHubPublisherOutcome.KnownNotWritten
                 when receipt is null &&
-                    reason != StickyPublicationReason.None => new(
+                    reason is StickyPublicationReason.RequestInvalid or
+                        StickyPublicationReason.Deadline => new(
                     PublicationTransportTransition
                         .PersistKnownNotWrittenAndRetry,
                     null,
                     reason),
             BoundedGitHubPublisherOutcome.OutcomeUnknown
                 when receipt is null &&
-                    reason != StickyPublicationReason.None => new(
+                    reason is
+                        StickyPublicationReason.ReconciliationIncomplete or
+                        StickyPublicationReason.Deadline => new(
                     PublicationTransportTransition
                         .PersistOutcomeUnknownAndStop,
                     null,
@@ -244,6 +186,16 @@ internal static class PublicationTransportOutcomeMapper
                 when receipt is null &&
                     reason == StickyPublicationReason.Cancelled => new(
                     PublicationTransportTransition.CancelledBeforeSend,
+                    null,
+                    reason),
+            BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure
+                when receipt is null &&
+                    reason is StickyPublicationReason.AdmissionInvalid or
+                        StickyPublicationReason.DiscoveryIncomplete or
+                        StickyPublicationReason.TargetConflict or
+                        StickyPublicationReason.AuthorizationDenied => new(
+                    PublicationTransportTransition
+                        .AuthorizationOrValidationFailure,
                     null,
                     reason),
             _ => new(

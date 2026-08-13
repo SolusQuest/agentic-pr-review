@@ -1,9 +1,12 @@
 using System.Collections.Immutable;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
+using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.Lineage;
+using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 using AgenticPrReview.Runtime.Host.State.Restore;
 using AgenticPrReview.Runtime.Host.State.Transactions;
 
@@ -11,160 +14,705 @@ namespace AgenticPrReview.Runtime.Host.Publishing.Recovery;
 
 internal static class PublicationRecoveryInventoryFactory
 {
-    internal static bool TryCreate(
-        AuthorizedAcceptedStateRestoreContext context,
-        RetainedStateObservedCandidate candidate,
-        ImmutableArray<RetainedStateOpaqueRecord> records,
-        MatchedRetainedStateRecoveryAcceptance? matchedAcceptance,
-        PublicationRecoveryAnchorState anchors,
-        out PublicationRecoveryInventory? inventory)
+    private static readonly object CapabilityIssuer = new();
+
+    internal static bool IsIssuer(object? value) =>
+        ReferenceEquals(value, CapabilityIssuer);
+
+    internal static void RequireIssuer(object? value)
     {
-        inventory = null;
-        if (context is null ||
-            candidate is null ||
-            records.IsDefault ||
-            matchedAcceptance is not null &&
+        if (!IsIssuer(value))
+        {
+            throw new ArgumentException(
+                "The publication-recovery issuer is not authorized.",
+                nameof(value));
+        }
+    }
+
+    internal static async Task<RetainedStateTransactionResult<
+        PublicationRecoveryObservation>> CreateAsync(
+        AuthorizedAcceptedStateRestoreContext context,
+        RetainedStatePublicationRecoveryInventory inventory,
+        string reviewedHeadSha,
+        CancellationToken cancellationToken)
+    {
+        PublicationRecoveryObservation? observation = null;
+        try
+        {
+            if (context is null ||
+                inventory is null ||
+                !LineageValidation.IsGitSha(reviewedHeadSha) ||
+                inventory.Records.IsDefault ||
+                !LineageValidation.IsSha256(inventory.InventoryDigest) ||
+                inventory.Records.Any(record =>
+                    record is null ||
+                    !StringComparer.Ordinal.Equals(
+                        record.InventoryDigest,
+                        inventory.InventoryDigest)))
+            {
+                return Fail();
+            }
+
+            var pending = inventory.Candidate;
+            if (pending is not null &&
+                (!StringComparer.Ordinal.Equals(
+                    pending.InventoryDigest,
+                    inventory.InventoryDigest) ||
+                !PublicationRecoveryPersistence.TryPublication(
+                    pending,
+                    out var pendingPublication) ||
+                pendingPublication is null))
+            {
+                return Fail();
+            }
+
+            var pendingIdentity = pending?.Header.ObjectIdentity;
+            var acceptedIdentity =
+                inventory.CurrentAcceptanceCandidateObjectIdentity;
+            var acceptedPublication = inventory.CurrentAcceptedPublication;
+            var pendingSet = new ParsedRecordSet();
+            var acceptedSet = new ParsedRecordSet();
+            var acceptedRecords = ImmutableArray.CreateBuilder<
+                RetainedStateOpaqueRecord>();
+            var historicalRecords = ImmutableArray.CreateBuilder<
+                RetainedStateOpaqueRecord>();
+            var hasHistoricalCleanupDebt = false;
+            foreach (var record in inventory.Records)
+            {
+                if (!TryDecode(context, record, out var decoded) ||
+                    decoded is null)
+                {
+                    return Fail();
+                }
+
+                var predecessor = record.Header.PredecessorIdentity;
+                if (pendingIdentity is not null &&
+                    StringComparer.Ordinal.Equals(
+                        predecessor,
+                        pendingIdentity))
+                {
+                    if (!decoded.Matches(pending!.Publication) ||
+                        !pendingSet.TryAdd(decoded))
+                    {
+                        return Fail();
+                    }
+                }
+                else if (acceptedIdentity is not null &&
+                    StringComparer.Ordinal.Equals(
+                        predecessor,
+                        acceptedIdentity))
+                {
+                    if (acceptedPublication is null ||
+                        !decoded.Matches(acceptedPublication) ||
+                        !acceptedSet.TryAdd(decoded))
+                    {
+                        return Fail();
+                    }
+                    acceptedRecords.Add(record);
+                }
+                else
+                {
+                    hasHistoricalCleanupDebt = true;
+                    historicalRecords.Add(record);
+                }
+            }
+
+            var acceptedRecordCount = acceptedSet.Count;
+            MatchedRetainedStateRecoveryAcceptance? matched = null;
+            if (acceptedRecordCount > 0)
+            {
+                if (inventory.CurrentAcceptance is null ||
+                    acceptedIdentity is null ||
+                    acceptedSet.StickyReadback is null ||
+                    acceptedSet.Recovery is null ||
+                    acceptedSet.Failure is not null ||
+                    acceptedSet.Abandonment is not null ||
+                    !StringComparer.Ordinal.Equals(
+                        acceptedSet.Recovery.StickyReadbackRecordIdentity,
+                        acceptedSet.StickyReadback.RecordIdentity))
+                {
+                    return Fail();
+                }
+
+                var recoveryRecord = inventory.Records.SingleOrDefault(
+                    record =>
+                        record.Metadata == acceptedSet.RecoveryMetadata);
+                if (recoveryRecord is null)
+                {
+                    return Fail();
+                }
+
+                using var extraction = PublicationRecoveryPersistence
+                    .CreateAcceptanceRecoveryExtraction(
+                        context,
+                        recoveryRecord).Value;
+                if (extraction is null)
+                {
+                    return Fail();
+                }
+
+                var matchedResult = await RestrictedStateService
+                    .MatchRecoveredRetainedStateAcceptanceAsync(
+                        context,
+                        acceptedIdentity,
+                        recoveryRecord,
+                        extraction,
+                        inventory.CurrentAcceptance,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                matched = matchedResult.Value;
+                if (!matchedResult.Succeeded ||
+                    matched is null ||
+                    !StringComparer.Ordinal.Equals(
+                        matched.InventoryDigest,
+                        inventory.InventoryDigest) ||
+                    matched.RecoveryRecordMetadata !=
+                        recoveryRecord.Metadata ||
+                    matched.RecoveryRecordHeader != recoveryRecord.Header ||
+                    !acceptedSet.StickyReadback.TryRehydrate(
+                        out var readbackReceipt) ||
+                    readbackReceipt is null ||
+                    !ReceiptsEqual(readbackReceipt, matched.Receipt))
+                {
+                    return Fail();
+                }
+            }
+
+            var currentHeadMatches =
+                acceptedPublication is not null &&
+                StringComparer.Ordinal.Equals(
+                    acceptedPublication.ReviewedHeadSha,
+                    reviewedHeadSha);
+            if (!currentHeadMatches)
+            {
+                historicalRecords.AddRange(acceptedRecords);
+                hasHistoricalCleanupDebt |= acceptedRecords.Count > 0;
+            }
+            var terminalProven = acceptedRecordCount == 0
+                ? inventory.CurrentAcceptance is not null &&
+                    inventory.CurrentAcceptancePublicationReceipt is not null
+                : matched is not null;
+            if (currentHeadMatches && !terminalProven)
+            {
+                return Fail();
+            }
+
+            var selected = pending is not null
+                ? pendingSet
+                : currentHeadMatches
+                    ? acceptedSet
+                    : new ParsedRecordSet();
+            var selectedPublication = pending?.Publication ??
+                (currentHeadMatches ? acceptedPublication : null);
+            var selectedIdentity = pendingIdentity ??
+                (currentHeadMatches ? acceptedIdentity : null);
+            var selectedMatched = pending is null && currentHeadMatches
+                ? matched
+                : null;
+            var selectedAnchors = inventory.Anchors.Where(anchor =>
+                    selectedIdentity is not null &&
+                    StringComparer.Ordinal.Equals(
+                        anchor.CandidateObjectIdentity,
+                        selectedIdentity))
+                .ToArray();
+            var anchors = selectedAnchors.Any(anchor =>
+                    !anchor.TargetIsPresent)
+                ? PublicationRecoveryAnchorState.Unresolved
+                : inventory.Anchors.IsEmpty
+                    ? PublicationRecoveryAnchorState.None
+                    : PublicationRecoveryAnchorState.CleanupDebt;
+            hasHistoricalCleanupDebt |= inventory.Anchors.Any(anchor =>
+                selectedIdentity is null ||
                 !StringComparer.Ordinal.Equals(
-                    matchedAcceptance.CandidateObjectIdentity,
-                    candidate.Header.ObjectIdentity) ||
-            !TryBinding(candidate, out var binding) ||
-            binding is null)
+                    anchor.CandidateObjectIdentity,
+                    selectedIdentity));
+
+            observation = new PublicationRecoveryObservation(
+                CapabilityIssuer,
+                inventory,
+                selectedIdentity,
+                selectedPublication,
+                selected.Intent,
+                selected.StickyReadback,
+                selected.Failure,
+                selected.Abandonment,
+                selected.Recovery,
+                selectedMatched,
+                historicalRecords.ToImmutable(),
+                inventory.Anchors.Where(anchor => !anchor.TargetIsPresent)
+                    .ToImmutableArray(),
+                pending?.MatchesCurrentReviewedHead ?? false,
+                currentHeadMatches,
+                terminalProven && !currentHeadMatches,
+                hasHistoricalCleanupDebt,
+                anchors);
+            return RetainedStateTransactionResult<
+                PublicationRecoveryObservation>.Success(
+                    RetainedStateTransactionCodes.Ready,
+                    observation);
+        }
+        finally
+        {
+            if (observation is null)
+            {
+                inventory?.Dispose();
+            }
+        }
+    }
+
+    internal static PublicationStickyWriteAuthorization
+        CreateStickyWriteAuthorization(
+        PublicationRecoveryObservation observation,
+        string evidenceRecordIdentity)
+    {
+        if (observation is null ||
+            !observation.IsLive ||
+            observation.CandidateObjectIdentity is not { } candidate ||
+            !LineageValidation.IsSha256(evidenceRecordIdentity))
+        {
+            throw new ArgumentException(
+                "A live exact recovery observation is required.",
+                nameof(observation));
+        }
+
+        return new PublicationStickyWriteAuthorization(
+            CapabilityIssuer,
+            candidate,
+            observation.InventoryDigest,
+            evidenceRecordIdentity);
+    }
+
+    internal static bool TryConsumeStickyWriteAuthorization(
+        PublicationRecoveryObservation observation,
+        PublicationStickyWriteAuthorization authorization)
+    {
+        var evidence = observation?.Intent?.RecordIdentity ??
+            observation?.Failure?.RecordIdentity;
+        return observation is not null &&
+            authorization is not null &&
+            observation.IsLive &&
+            observation.CandidateObjectIdentity is { } candidate &&
+            evidence is not null &&
+            StringComparer.Ordinal.Equals(
+                authorization.CandidateObjectIdentity,
+                candidate) &&
+            StringComparer.Ordinal.Equals(
+                authorization.InventoryDigest,
+                observation.InventoryDigest) &&
+            StringComparer.Ordinal.Equals(
+                authorization.EvidenceRecordIdentity,
+                evidence) &&
+            authorization.TryConsume(CapabilityIssuer);
+    }
+
+    internal static PublicationMarkerAbsenceEvidence
+        CreateMarkerAbsenceEvidence(
+        PublicationRecoveryObservation observation,
+        StickyDiscoveryKind kind,
+        StickyPublicationReason reason)
+    {
+        if (observation is null ||
+            !observation.IsLive ||
+            observation.CandidateObjectIdentity is not { } candidate ||
+            kind != StickyDiscoveryKind.Absent ||
+            reason != StickyPublicationReason.None)
+        {
+            throw new ArgumentException(
+                "An exact complete marker-absence observation is required.",
+                nameof(observation));
+        }
+
+        var preimage = Encoding.UTF8.GetBytes(
+            "publication-marker-absence-v1\n" + candidate + "\n" +
+            observation.InventoryDigest + "\n" +
+            observation.StoredPublication!.ReviewedHeadSha + "\n" +
+            observation.StoredPublication.ScopeSha256 + "\n" +
+            observation.StoredPublication.BodySha256);
+        try
+        {
+            var identity = Convert.ToHexString(
+                    SHA256.HashData(preimage))
+                .ToLowerInvariant();
+            return new PublicationMarkerAbsenceEvidence(
+                CapabilityIssuer,
+                candidate,
+                observation.InventoryDigest,
+                identity);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(preimage);
+        }
+    }
+
+    internal static bool TryConsumeMarkerAbsenceEvidence(
+        PublicationRecoveryObservation observation,
+        PublicationMarkerAbsenceEvidence evidence) =>
+        observation is not null &&
+        evidence is not null &&
+        observation.IsLive &&
+        observation.CandidateObjectIdentity is { } candidate &&
+        evidence.TryConsume(
+            CapabilityIssuer,
+            candidate,
+            observation.InventoryDigest);
+
+    internal static string StaleCleanupClassificationIdentity(
+        PublicationRecoveryObservation observation,
+        AbandonmentV1 abandonment,
+        PublicationMarkerAbsenceEvidence freshAbsence)
+    {
+        if (observation is null ||
+            abandonment is null ||
+            freshAbsence is null ||
+            observation.CandidateObjectIdentity is not { } candidate)
+        {
+            throw new ArgumentException(
+                "Exact stale-cleanup evidence is required.");
+        }
+
+        var preimage = Encoding.UTF8.GetBytes(
+            "publication-stale-cleanup-v1\n" + candidate + "\n" +
+            observation.InventoryDigest + "\n" +
+            abandonment.RecordIdentity + "\n" +
+            freshAbsence.EvidenceIdentity);
+        try
+        {
+            return Convert.ToHexString(SHA256.HashData(preimage))
+                .ToLowerInvariant();
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(preimage);
+        }
+    }
+
+    internal static string HistoricalCleanupClassificationIdentity(
+        PublicationRecoveryObservation observation,
+        RetainedStateOpaqueRecord record)
+    {
+        if (observation is null ||
+            record is null ||
+            !observation.IsLive ||
+            !observation.CurrentAcceptedHeadMatchesReviewedHead ||
+            observation.Candidate is not null ||
+            !observation.HistoricalRecords.Any(item =>
+                item.Metadata == record.Metadata &&
+                item.Header == record.Header &&
+                StringComparer.Ordinal.Equals(
+                    item.InventoryDigest,
+                    observation.InventoryDigest)))
+        {
+            throw new ArgumentException(
+                "An exact authenticated historical record is required.",
+                nameof(record));
+        }
+
+        var preimage = Encoding.UTF8.GetBytes(
+            "publication-historical-cleanup-v1\n" +
+            observation.InventoryDigest + "\n" +
+            record.Header.ObjectIdentity + "\n" +
+            record.Header.PredecessorIdentity);
+        try
+        {
+            return Convert.ToHexString(SHA256.HashData(preimage))
+                .ToLowerInvariant();
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(preimage);
+        }
+    }
+
+    internal static string CompletedAnchorCleanupClassificationIdentity(
+        PublicationRecoveryObservation observation,
+        RetainedStatePublicationRecoveryAnchorEvidence anchor)
+    {
+        if (observation is null ||
+            anchor is null ||
+            !observation.IsLive ||
+            anchor.TargetIsPresent ||
+            !observation.CurrentAcceptedHeadMatchesReviewedHead ||
+            observation.Candidate is not null ||
+            !observation.CompletedAnchors.Contains(anchor))
+        {
+            throw new ArgumentException(
+                "An exact authenticated completed anchor is required.",
+                nameof(anchor));
+        }
+
+        var preimage = Encoding.UTF8.GetBytes(
+            "publication-completed-anchor-cleanup-v1\n" +
+            observation.InventoryDigest + "\n" +
+            anchor.AnchorHeader.ObjectIdentity + "\n" +
+            anchor.TargetObjectIdentity);
+        try
+        {
+            return Convert.ToHexString(SHA256.HashData(preimage))
+                .ToLowerInvariant();
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(preimage);
+        }
+    }
+
+    internal static string SupersededCleanupClassificationIdentity(
+        RetainedStatePublicationRecoveryInventory inventory,
+        RetainedStateOpaqueRecord record,
+        string acceptedCandidateIdentity)
+    {
+        if (inventory is null ||
+            record is null ||
+            !LineageValidation.IsSha256(acceptedCandidateIdentity) ||
+            !StringComparer.Ordinal.Equals(
+                inventory.CurrentAcceptanceCandidateObjectIdentity,
+                acceptedCandidateIdentity) ||
+            inventory.Candidate is not null ||
+            !inventory.Records.Any(item =>
+                item.Metadata == record.Metadata &&
+                item.Header == record.Header &&
+                StringComparer.Ordinal.Equals(
+                    item.InventoryDigest,
+                    inventory.InventoryDigest)))
+        {
+            throw new ArgumentException(
+                "An exact superseded recovery record is required.",
+                nameof(record));
+        }
+
+        return CleanupIdentity(
+            "publication-superseded-record-cleanup-v1",
+            inventory.InventoryDigest,
+            acceptedCandidateIdentity,
+            record.Header.ObjectIdentity);
+    }
+
+    internal static string SupersededAnchorCleanupClassificationIdentity(
+        RetainedStatePublicationRecoveryInventory inventory,
+        RetainedStatePublicationRecoveryAnchorEvidence anchor,
+        string acceptedCandidateIdentity)
+    {
+        if (inventory is null ||
+            anchor is null ||
+            anchor.TargetIsPresent ||
+            !LineageValidation.IsSha256(acceptedCandidateIdentity) ||
+            !StringComparer.Ordinal.Equals(
+                inventory.CurrentAcceptanceCandidateObjectIdentity,
+                acceptedCandidateIdentity) ||
+            inventory.Candidate is not null ||
+            !inventory.Anchors.Contains(anchor))
+        {
+            throw new ArgumentException(
+                "An exact superseded completed anchor is required.",
+                nameof(anchor));
+        }
+
+        return CleanupIdentity(
+            "publication-superseded-anchor-cleanup-v1",
+            inventory.InventoryDigest,
+            acceptedCandidateIdentity,
+            anchor.AnchorHeader.ObjectIdentity);
+    }
+
+    private static string CleanupIdentity(
+        string domain,
+        string inventoryDigest,
+        string candidateIdentity,
+        string targetIdentity)
+    {
+        var preimage = Encoding.UTF8.GetBytes(
+            domain + "\n" + inventoryDigest + "\n" +
+            candidateIdentity + "\n" + targetIdentity);
+        try
+        {
+            return Convert.ToHexString(SHA256.HashData(preimage))
+                .ToLowerInvariant();
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(preimage);
+        }
+    }
+
+    private static RetainedStateTransactionResult<
+        PublicationRecoveryObservation> Fail() =>
+        RetainedStateTransactionResult<PublicationRecoveryObservation>.Fail(
+            RetainedStateTransactionCodes.Conflict);
+
+    private static bool ReceiptsEqual(
+        StickyCommentPublisher.StickyPublicationReceipt left,
+        StickyCommentPublisher.StickyPublicationReceipt right) =>
+        left.Operation == right.Operation &&
+        left.RepositoryId == right.RepositoryId &&
+        left.PullRequestNumber == right.PullRequestNumber &&
+        left.CommentId == right.CommentId &&
+        StringComparer.Ordinal.Equals(left.CommentUrl, right.CommentUrl) &&
+        StringComparer.Ordinal.Equals(
+            left.ScopeSha256,
+            right.ScopeSha256) &&
+        StringComparer.Ordinal.Equals(left.BodySha256, right.BodySha256) &&
+        StringComparer.Ordinal.Equals(left.HeadSha, right.HeadSha);
+
+    private static bool TryDecode(
+        AuthorizedAcceptedStateRestoreContext context,
+        RetainedStateOpaqueRecord record,
+        out DecodedRecord? decoded)
+    {
+        decoded = null;
+        if (!RestrictedStateService.TryCopyRetainedStateOpaquePayload(
+                context,
+                record,
+                out var payload))
         {
             return false;
         }
 
-        var intents = 0;
-        var readbacks = 0;
-        var failures = 0;
-        var abandonments = 0;
-        var recoveries = 0;
-        var knownNotWritten = false;
-        var outcomeUnknown = false;
-        foreach (var record in records)
+        try
         {
-            if (record is null ||
-                !StringComparer.Ordinal.Equals(
-                    record.InventoryDigest,
-                    candidate.InventoryDigest) ||
-                !StringComparer.Ordinal.Equals(
-                    record.Header.PredecessorIdentity,
-                    candidate.Header.ObjectIdentity) ||
-                !RestrictedStateService.TryCopyRetainedStateOpaquePayload(
-                    context,
-                    record,
-                    out var payload))
+            object? value = null;
+            var matches = 0;
+            if (record.ObjectClass == StateObjectClass.PublicationIntent)
+            {
+                if (PublicationIntentV1Codec.TryDecode(
+                        payload.AsSpan(),
+                        out var intent) &&
+                    intent is not null)
+                {
+                    value = intent;
+                    matches++;
+                }
+                if (StickyReadbackRecordV1Codec.TryDecode(
+                        payload.AsSpan(),
+                        out var readback) &&
+                    readback is not null)
+                {
+                    value = readback;
+                    matches++;
+                }
+                if (RecoveryRecordV1Codec.TryDecode(
+                        payload.AsSpan(),
+                        out var recovery,
+                        out _,
+                        out _) &&
+                    recovery is not null)
+                {
+                    value = recovery;
+                    matches++;
+                }
+            }
+            else if (record.ObjectClass ==
+                    StateObjectClass.PublicationFailure &&
+                PublicationFailureV1Codec.TryDecode(
+                    payload.AsSpan(),
+                    out var failure) &&
+                failure is not null)
+            {
+                value = failure;
+                matches++;
+            }
+            else if (record.ObjectClass == StateObjectClass.Abandonment &&
+                AbandonmentV1Codec.TryDecode(
+                    payload.AsSpan(),
+                    out var abandonment) &&
+                abandonment is not null)
+            {
+                value = abandonment;
+                matches++;
+            }
+
+            if (matches != 1 || value is null)
             {
                 return false;
             }
 
-            try
+            decoded = new DecodedRecord(value, record.Metadata);
+            return true;
+        }
+        finally
+        {
+            var array = ImmutableCollectionsMarshal.AsArray(payload);
+            if (array is not null)
             {
-                switch (record.ObjectClass)
-                {
-                    case StateObjectClass.PublicationIntent
-                        when PublicationIntentV1Codec.TryDecode(
-                            payload.AsSpan(),
-                            out var intent) &&
-                            intent is not null &&
-                            intent.Binding == binding:
-                        intents++;
-                        break;
-                    case StateObjectClass.PublicationIntent
-                        when StickyReadbackRecordV1Codec.TryDecode(
-                            payload.AsSpan(),
-                            out var readback) &&
-                            readback is not null &&
-                            readback.Binding == binding:
-                        readbacks++;
-                        break;
-                    case StateObjectClass.PublicationIntent
-                        when RecoveryRecordV1Codec.TryDecode(
-                            payload.AsSpan(),
-                            out var recovery,
-                            out _,
-                            out _) &&
-                            recovery is not null &&
-                            recovery.Binding == binding:
-                        recoveries++;
-                        break;
-                    case StateObjectClass.PublicationFailure
-                        when PublicationFailureV1Codec.TryDecode(
-                            payload.AsSpan(),
-                            out var failure) &&
-                            failure is not null &&
-                            failure.Binding == binding:
-                        failures++;
-                        knownNotWritten |= failure.Outcome ==
-                            BoundedGitHubPublisherOutcome.KnownNotWritten;
-                        outcomeUnknown |= failure.Outcome ==
-                            BoundedGitHubPublisherOutcome.OutcomeUnknown;
-                        break;
-                    case StateObjectClass.Abandonment
-                        when AbandonmentV1Codec.TryDecode(
-                            payload.AsSpan(),
-                            out var abandonment) &&
-                            abandonment is not null &&
-                            abandonment.Binding == binding:
-                        abandonments++;
-                        break;
-                    default:
-                        return false;
-                }
-            }
-            finally
-            {
-                var array = ImmutableCollectionsMarshal.AsArray(payload);
-                if (array is not null)
-                {
-                    CryptographicOperations.ZeroMemory(array);
-                }
+                CryptographicOperations.ZeroMemory(array);
             }
         }
-
-        inventory = new PublicationRecoveryInventory(
-            EnumerationComplete: true,
-            OwnershipRetained: true,
-            CandidateCount: 1,
-            CandidateMatchesCurrentHead:
-                candidate.MatchesCurrentReviewedHead,
-            HasStoredValidatedPublication: true,
-            IntentCount: intents,
-            StickyReadbackCount: readbacks,
-            FailureCount: failures,
-            AbandonmentCount: abandonments,
-            AcceptanceCount: matchedAcceptance is null ? 0 : 1,
-            RecoveryCount: recoveries,
-            RecordsMatchCandidate: true,
-            AcceptanceMatchesRecovery: matchedAcceptance is not null,
-            HasExactKnownNotWrittenFailure: knownNotWritten,
-            HasOutcomeUnknownFailure: outcomeUnknown,
-            Marker: PublicationMarkerObservation.Incomplete,
-            Anchors: anchors);
-        return true;
     }
 
-    private static bool TryBinding(
-        RetainedStateObservedCandidate candidate,
-        out PublicationRecoveryBindingV1? binding)
+    private sealed record DecodedRecord(
+        object Value,
+        OpaqueStoreObjectMetadata Metadata)
     {
-        binding = null;
-        if (candidate.Header.ObjectClass != StateObjectClass.Candidate ||
-            !StringComparer.Ordinal.Equals(
-                candidate.Publication.ReviewedHeadSha,
-                candidate.Generation.ProducerHeadSha))
+        internal PublicationRecoveryPublicationV1 Publication => Value switch
         {
-            return false;
-        }
+            PublicationIntentV1 value => value.Publication,
+            StickyReadbackRecordV1 value => value.Publication,
+            PublicationFailureV1 value => value.Publication,
+            AbandonmentV1 value => value.Publication,
+            RecoveryRecordV1 value => value.Publication,
+            _ => throw new InvalidOperationException(),
+        };
 
-        binding = new PublicationRecoveryBindingV1(
-            candidate.Header.BaseScopeDigest,
-            candidate.Header.Epoch,
-            candidate.Header.SessionId,
-            candidate.Header.PredecessorIdentity,
-            candidate.Header.ObjectIdentity,
-            candidate.Publication.ReviewedHeadSha,
-            candidate.Publication.ScopeSha256,
-            candidate.Publication.BodySha256);
-        return true;
+        internal bool Matches(ValidatedPublicationPayloadV1 value) =>
+            StringComparer.Ordinal.Equals(
+                Publication.ReviewedHeadSha,
+                value.ReviewedHeadSha) &&
+            StringComparer.Ordinal.Equals(
+                Publication.ScopeSha256,
+                value.ScopeSha256) &&
+            StringComparer.Ordinal.Equals(
+                Publication.BodySha256,
+                value.BodySha256);
+    }
+
+    private sealed class ParsedRecordSet
+    {
+        internal PublicationIntentV1? Intent { get; private set; }
+        internal StickyReadbackRecordV1? StickyReadback { get; private set; }
+        internal PublicationFailureV1? Failure { get; private set; }
+        internal AbandonmentV1? Abandonment { get; private set; }
+        internal RecoveryRecordV1? Recovery { get; private set; }
+        internal OpaqueStoreObjectMetadata? RecoveryMetadata
+        {
+            get;
+            private set;
+        }
+        internal int Count { get; private set; }
+
+        internal bool TryAdd(DecodedRecord decoded)
+        {
+            var added = false;
+            switch (decoded.Value)
+            {
+                case PublicationIntentV1 value when Intent is null:
+                    Intent = value;
+                    added = true;
+                    break;
+                case StickyReadbackRecordV1 value
+                    when StickyReadback is null:
+                    StickyReadback = value;
+                    added = true;
+                    break;
+                case PublicationFailureV1 value when Failure is null:
+                    Failure = value;
+                    added = true;
+                    break;
+                case AbandonmentV1 value when Abandonment is null:
+                    Abandonment = value;
+                    added = true;
+                    break;
+                case RecoveryRecordV1 value when Recovery is null:
+                    Recovery = value;
+                    RecoveryMetadata = decoded.Metadata;
+                    added = true;
+                    break;
+            }
+
+            if (added)
+            {
+                Count++;
+            }
+            return added;
+        }
     }
 }

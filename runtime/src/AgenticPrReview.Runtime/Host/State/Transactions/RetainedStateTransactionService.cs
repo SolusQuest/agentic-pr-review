@@ -2787,6 +2787,290 @@ internal sealed class RetainedStateTransactionService
     }
 
     internal async Task<RetainedStateTransactionResult<
+        RetainedStatePublicationRecoveryInventory>>
+        ObservePublicationRecoveryInventoryAsync(
+        RetainedStateTransactionAuthority authority,
+        CancellationToken cancellationToken)
+    {
+        using var lease = await authority.EnterAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (lease is null ||
+            !authority.TryGetBinding(lease, out var binding) ||
+            binding is null ||
+            !authority.TryReadTrustedTime(lease, out var trustedNow) ||
+            !RetainedStateRetention.TryCandidate(
+                trustedNow,
+                out var requiredLogical,
+                out _))
+        {
+            return RetainedStateTransactionResult<
+                RetainedStatePublicationRecoveryInventory>.Fail(
+                    lease is null && cancellationToken.IsCancellationRequested
+                        ? RetainedStateTransactionCodes.Cancelled
+                        : RetainedStateTransactionCodes.AccessDenied);
+        }
+
+        var observedResult = await authority.ObserveAsync(
+                lease,
+                requiredLogical,
+                trustedNow,
+                cancellationToken)
+            .ConfigureAwait(false);
+        using var observed = observedResult.Value;
+        if (!observedResult.Succeeded ||
+            observed is null ||
+            observed.Snapshot is not { } snapshot ||
+            observed.InventoryDigest is not { } inventoryDigest ||
+            !snapshot.Unknown.IsEmpty ||
+            !snapshot.UnderRetained.IsEmpty ||
+            !MatchesAcceptedTail(observed.AcceptedState, binding) ||
+            HasAcceptanceSuccessor(snapshot, binding))
+        {
+            return RetainedStateTransactionResult<
+                RetainedStatePublicationRecoveryInventory>.Fail(
+                    observedResult.Succeeded
+                        ? RetainedStateTransactionCodes.Conflict
+                        : observedResult.Code);
+        }
+
+        var pending = snapshot.Authenticated
+            .Where(item =>
+                item.Header.ObjectClass == StateObjectClass.Candidate &&
+                Active(item, binding) &&
+                StringComparer.Ordinal.Equals(
+                    item.Header.PredecessorIdentity,
+                    binding.CurrentAcceptanceReceiptIdentity))
+            .ToArray();
+        if (pending.Length > 1)
+        {
+            return RetainedStateTransactionResult<
+                RetainedStatePublicationRecoveryInventory>.Fail(
+                    RetainedStateTransactionCodes.Conflict);
+        }
+
+        RetainedStateObservedCandidate? candidate = null;
+        var records = ImmutableArray<RetainedStateOpaqueRecord>.Empty;
+        try
+        {
+            if (pending.Length == 1)
+            {
+                if (!AcceptedStateGenerationRecordCodec.TryDecode(
+                        pending[0].Payload,
+                        out var generation) ||
+                    generation is null ||
+                    !AcceptedStateRecordValidation.IsValid(generation) ||
+                    !MatchesObservedGeneration(generation, binding) ||
+                    !AcceptedStatePublicationPayloadCodec.TryDecode(
+                        generation.PublicationPayloadBytes.AsSpan(),
+                        out var publication) ||
+                    publication is null ||
+                    !MatchesObservedPublication(
+                        publication,
+                        generation,
+                        binding) ||
+                    pending[0].Header.CreatedAtUnixSeconds !=
+                        generation.PreparedAtUnixSeconds ||
+                    pending[0].Header.LogicalExpiresAtUnixSeconds !=
+                        generation.PreparedExpiresAtUnixSeconds ||
+                    !StringComparer.Ordinal.Equals(
+                        pending[0].Header.ProducingRunIdentity,
+                        pending[0].Metadata.ProducingRun.Identity) ||
+                    pending[0].Header.ProducingRunAttempt !=
+                        pending[0].Metadata.ProducingRun.Attempt ||
+                    !AcceptedStateIdentity.TryComputeLogicalGeneration(
+                        pending[0].Payload,
+                        binding.SelectedLineage.BaseScopeDigest,
+                        binding.SelectedLineage.Epoch,
+                        binding.SelectedLineage.SessionId,
+                        binding.CurrentAcceptanceReceiptIdentity,
+                        out var logicalIdentity))
+                {
+                    return RetainedStateTransactionResult<
+                        RetainedStatePublicationRecoveryInventory>.Fail(
+                            RetainedStateTransactionCodes.Conflict);
+                }
+
+                candidate = RetainedStateObservedCandidate.Create(
+                    issuer,
+                    authority,
+                    pending[0].Metadata,
+                    pending[0].Header,
+                    logicalIdentity,
+                    generation,
+                    publication,
+                    pending[0].Payload.ToArray(),
+                    StringComparer.Ordinal.Equals(
+                        generation.ProducerHeadSha,
+                        binding.Reviewed.HeadSha),
+                    inventoryDigest);
+            }
+
+            var activeRecords = snapshot.Authenticated
+                .Where(item =>
+                    item.Header.ObjectClass is
+                        StateObjectClass.PublicationIntent or
+                        StateObjectClass.PublicationFailure or
+                        StateObjectClass.Abandonment &&
+                    Active(item, binding))
+                .ToArray();
+            records = activeRecords.Select(item =>
+                    RetainedStateOpaqueRecord.Create(
+                        issuer,
+                        authority,
+                        item.Header.ObjectClass,
+                        item.Metadata,
+                        item.Header,
+                        item.Payload.ToArray(),
+                        inventoryDigest))
+                .ToImmutableArray();
+
+            var cleanup = snapshot.Authenticated
+                .Where(item =>
+                    item.Header.ObjectClass == StateObjectClass.Cleanup &&
+                    Active(item, binding))
+                .ToArray();
+            var anchors = ImmutableArray.CreateBuilder<
+                RetainedStatePublicationRecoveryAnchorEvidence>();
+            foreach (var item in cleanup)
+            {
+                if (RetainedStateCleanupRecordCodec.TryDecode(
+                        item.Payload,
+                        out _))
+                {
+                    continue;
+                }
+
+                if (!RetainedStateOpaqueWriteAnchorCodec.TryDecode(
+                        item.Payload,
+                        out var anchor) ||
+                    anchor is null ||
+                    !StringComparer.Ordinal.Equals(
+                        item.Header.PredecessorIdentity,
+                        anchor.CandidateObjectIdentity) ||
+                    item.Header.LogicalExpiresAtUnixSeconds !=
+                        anchor.SemanticRequiredExpiresAtUnixSeconds)
+                {
+                    return RetainedStateTransactionResult<
+                        RetainedStatePublicationRecoveryInventory>.Fail(
+                            RetainedStateTransactionCodes.Conflict);
+                }
+
+                var targets = snapshot.Authenticated.Count(target =>
+                    target.Metadata.Reference.Name == anchor.TargetName &&
+                    StringComparer.Ordinal.Equals(
+                        target.Header.ObjectIdentity,
+                        anchor.TargetObjectIdentity));
+                if (targets > 1)
+                {
+                    return RetainedStateTransactionResult<
+                        RetainedStatePublicationRecoveryInventory>.Fail(
+                            RetainedStateTransactionCodes.Conflict);
+                }
+
+                anchors.Add(new(
+                    item.Metadata,
+                    item.Header,
+                    anchor.CandidateObjectIdentity,
+                    anchor.ObjectClass,
+                    anchor.TargetName,
+                    anchor.TargetObjectIdentity,
+                    targets == 1));
+            }
+
+            var anchorEvidence = anchors.ToImmutable();
+            if (anchorEvidence.Distinct().Count() != anchorEvidence.Length)
+            {
+                return RetainedStateTransactionResult<
+                    RetainedStatePublicationRecoveryInventory>.Fail(
+                        RetainedStateTransactionCodes.Conflict);
+            }
+
+            VerifiedRetainedStateAcceptance? acceptance = null;
+            StickyCommentPublisher.StickyPublicationReceipt?
+                acceptancePublicationReceipt = null;
+            string? acceptedCandidateIdentity = null;
+            ValidatedPublicationPayloadV1? acceptedPublication = null;
+            var current = observed.AcceptedState.Selection?.Current;
+            if (current is not null)
+            {
+                if (!AcceptedStatePublicationPayloadCodec.TryDecode(
+                        current.Generation.PublicationPayloadBytes.AsSpan(),
+                        out acceptedPublication) ||
+                    acceptedPublication is null ||
+                    !StringComparer.Ordinal.Equals(
+                        acceptedPublication.ReviewedHeadSha,
+                        current.Generation.ProducerHeadSha))
+                {
+                    return RetainedStateTransactionResult<
+                        RetainedStatePublicationRecoveryInventory>.Fail(
+                            RetainedStateTransactionCodes.Conflict);
+                }
+
+                acceptedCandidateIdentity =
+                    current.Receipt.OriginalCandidateObjectIdentity;
+                if (!StickyCommentPublisher.StickyPublicationReceipt
+                        .TryRehydrate(
+                            current.Receipt.PublicationOperation,
+                            current.Receipt.RepositoryId,
+                            current.Receipt.PullRequestNumber,
+                            current.Receipt.CommentId,
+                            current.Receipt.CommentUrl,
+                            current.Receipt.ScopeSha256,
+                            current.Receipt.BodySha256,
+                            current.Receipt.ReviewedHeadSha,
+                            out acceptancePublicationReceipt) ||
+                    acceptancePublicationReceipt is null)
+                {
+                    return RetainedStateTransactionResult<
+                        RetainedStatePublicationRecoveryInventory>.Fail(
+                            RetainedStateTransactionCodes.Conflict);
+                }
+
+                acceptance = VerifiedRetainedStateAcceptance.Create(
+                    issuer,
+                    authority,
+                    current.LogicalGenerationIdentity,
+                    current.ReceiptPhysical.Header.ObjectIdentity,
+                    current.ReceiptPhysical.Metadata,
+                    current.Receipt.AcceptedAtUnixSeconds,
+                    current.Receipt.LogicalExpiresAtUnixSeconds,
+                    inventoryDigest);
+            }
+
+            var value =
+                RetainedStatePublicationRecoveryInventory.Create(
+                    issuer,
+                    authority,
+                    candidate,
+                    records,
+                    acceptance,
+                    acceptancePublicationReceipt,
+                    acceptedCandidateIdentity,
+                    acceptedPublication,
+                    anchorEvidence,
+                    inventoryDigest,
+                    trustedNow);
+            candidate = null;
+            records = default;
+            return RetainedStateTransactionResult<
+                RetainedStatePublicationRecoveryInventory>.Success(
+                    RetainedStateTransactionCodes.Ready,
+                    value);
+        }
+        finally
+        {
+            candidate?.Dispose();
+            if (!records.IsDefault)
+            {
+                foreach (var record in records)
+                {
+                    record.Dispose();
+                }
+            }
+        }
+    }
+
+    internal async Task<RetainedStateTransactionResult<
         RetainedStateOwnership>>
         AuthorizeStaleAbandonmentOwnershipAsync(
         RetainedStateTransactionAuthority authority,
@@ -3665,16 +3949,37 @@ internal sealed class RetainedStateTransactionService
         RetainedStatePendingCandidateEvidence? pendingCandidate,
         RetainedStateOpaqueRecord? opaqueRecord,
         RetainedStateOpaqueWriteAttempt? opaqueWrite,
+        RetainedStatePublicationRecoveryInventory? recoveryInventory,
+        RetainedStatePublicationRecoveryAnchorEvidence? recoveryAnchor,
         CancellationToken cancellationToken)
     {
         using var lease = await authority.EnterAsync(cancellationToken)
             .ConfigureAwait(false);
         var sourceCount = (pendingCandidate is null ? 0 : 1) +
             (opaqueRecord is null ? 0 : 1) +
-            (opaqueWrite is null ? 0 : 1);
+            (opaqueWrite is null ? 0 : 1) +
+            (recoveryInventory is null && recoveryAnchor is null ? 0 : 1);
+        var stalePair = decision?.Classification ==
+                RetainedStateP5CleanupClassification
+                    .StaleCandidateAbandonment &&
+            pendingCandidate is not null &&
+            opaqueRecord is not null &&
+            opaqueWrite is null &&
+            recoveryInventory is null &&
+            recoveryAnchor is null;
+        var completedAnchorPair = decision?.Classification ==
+                RetainedStateP5CleanupClassification
+                    .CompletedOpaqueWriteAnchor &&
+            recoveryInventory is not null &&
+            recoveryAnchor is not null &&
+            pendingCandidate is null &&
+            opaqueRecord is null &&
+            opaqueWrite is null;
         if (lease is null ||
             decision is null ||
-            sourceCount != 1 ||
+            (!stalePair && !completedAnchorPair && sourceCount != 1) ||
+            (stalePair && sourceCount != 2) ||
+            (completedAnchorPair && sourceCount != 1) ||
             !LineageValidation.IsSha256(decision.ClassificationIdentity) ||
             (decision.MarkerEvidenceIdentity is not null &&
                 !LineageValidation.IsSha256(
@@ -3697,9 +4002,17 @@ internal sealed class RetainedStateTransactionService
                 RetainedStateP5CleanupClassification
                     .StaleCandidateAbandonment &&
             pendingCandidate is not null &&
+            opaqueRecord is not null &&
             pendingCandidate.IsIssuedBy(authority) &&
             !pendingCandidate.MatchesCurrentReviewedHead &&
-            decision.MarkerEvidenceIdentity is not null)
+            decision.MarkerEvidenceIdentity is not null &&
+            opaqueRecord.ObjectClass == StateObjectClass.Abandonment &&
+            StringComparer.Ordinal.Equals(
+                opaqueRecord.InventoryDigest,
+                pendingCandidate.InventoryDigest) &&
+            StringComparer.Ordinal.Equals(
+                opaqueRecord.Header.PredecessorIdentity,
+                pendingCandidate.Header.ObjectIdentity))
         {
             target = pendingCandidate.Metadata;
             sourceInventoryDigest = pendingCandidate.InventoryDigest;
@@ -3725,6 +4038,18 @@ internal sealed class RetainedStateTransactionService
             target = opaqueWrite.AnchorMetadata;
             sourceInventoryDigest = opaqueWrite.InventoryDigest;
             requireSourceInventoryMatch = false;
+        }
+        else if (decision.Classification ==
+                RetainedStateP5CleanupClassification
+                    .CompletedOpaqueWriteAnchor &&
+            recoveryInventory is not null &&
+            recoveryAnchor is not null &&
+            recoveryInventory.IsIssuedBy(authority) &&
+            !recoveryAnchor.TargetIsPresent &&
+            recoveryInventory.Anchors.Contains(recoveryAnchor))
+        {
+            target = recoveryAnchor.AnchorMetadata;
+            sourceInventoryDigest = recoveryInventory.InventoryDigest;
         }
         else
         {
@@ -3769,7 +4094,11 @@ internal sealed class RetainedStateTransactionService
                     matches[0].Header.ObjectClass ==
                         StateObjectClass.Candidate &&
                     matches[0].Header.ObjectIdentity ==
-                        pendingCandidate!.Header.ObjectIdentity,
+                        pendingCandidate!.Header.ObjectIdentity &&
+                    snapshot.Authenticated.Count(item =>
+                        opaqueRecord!.MatchesAuthenticated(
+                            authority,
+                            item)) == 1,
                 RetainedStateP5CleanupClassification
                     .CompletedOpaqueRecord =>
                     opaqueRecord!.MatchesAuthenticated(
@@ -3777,12 +4106,41 @@ internal sealed class RetainedStateTransactionService
                         matches[0]),
                 RetainedStateP5CleanupClassification
                     .CompletedOpaqueWriteAnchor =>
-                    matches[0].Header.ObjectClass ==
-                        StateObjectClass.Cleanup &&
-                    HasExactOpaqueWriteAnchor(
-                        snapshot,
-                        authority,
-                        opaqueWrite!),
+                    opaqueWrite is not null
+                        ? matches[0].Header.ObjectClass ==
+                            StateObjectClass.Cleanup &&
+                            HasExactOpaqueWriteAnchor(
+                                snapshot,
+                                authority,
+                                opaqueWrite)
+                        : recoveryAnchor is not null &&
+                            matches[0].Header ==
+                                recoveryAnchor.AnchorHeader &&
+                            matches[0].Metadata ==
+                                recoveryAnchor.AnchorMetadata &&
+                            RetainedStateOpaqueWriteAnchorCodec.TryDecode(
+                                matches[0].Payload,
+                                out var decodedAnchor) &&
+                            decodedAnchor is not null &&
+                            StringComparer.Ordinal.Equals(
+                                decodedAnchor.CandidateObjectIdentity,
+                                recoveryAnchor.CandidateObjectIdentity) &&
+                            decodedAnchor.ObjectClass ==
+                                recoveryAnchor.ObjectClass &&
+                            decodedAnchor.TargetName ==
+                                recoveryAnchor.TargetName &&
+                            StringComparer.Ordinal.Equals(
+                                decodedAnchor.TargetObjectIdentity,
+                                recoveryAnchor.TargetObjectIdentity) &&
+                            !snapshot.Authenticated
+                                .Concat(snapshot.UnderRetained)
+                                .Any(item =>
+                                    item.Metadata.Reference.Name ==
+                                        recoveryAnchor.TargetName &&
+                                    StringComparer.Ordinal.Equals(
+                                        item.Header.ObjectIdentity,
+                                        recoveryAnchor
+                                            .TargetObjectIdentity)),
                 _ => false,
             };
         if (!validTarget)

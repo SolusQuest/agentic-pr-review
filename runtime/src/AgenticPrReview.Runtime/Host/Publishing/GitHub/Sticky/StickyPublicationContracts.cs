@@ -2,6 +2,7 @@ using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
+using AgenticPrReview.Runtime.Host.Publishing.Recovery;
 
 namespace AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 
@@ -53,6 +54,80 @@ internal sealed class AuthorizedStickyPublicationRequest
             if (inspected.Kind != R4StickyInspectionKind.ValidR4 ||
                 !StringComparer.Ordinal.Equals(inspected.Body, rendered.Body) ||
                 !Equals(inspected.Identity, rendered.Identity)) return false;
+            request = new(authorization, scope, rendered);
+            return true;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException
+            and not StackOverflowException and not AccessViolationException)
+        {
+            return false;
+        }
+    }
+
+    internal static bool TryCreateRecovery(
+        ActionHostAuthorizer.AuthorizedInvocation? authorization,
+        R4PublicationScopeV1? scope,
+        R4RenderedStickyComment? rendered,
+        PublicationRecoveryObservation? observation,
+        PublicationStickyWriteAuthorization? stickyAuthorization,
+        out AuthorizedStickyPublicationRequest? request)
+    {
+        request = null;
+        try
+        {
+            if (authorization is null ||
+                scope is null ||
+                rendered is null ||
+                observation is null ||
+                stickyAuthorization is null ||
+                !R4PublicationIdentityV1.IsValidScope(scope) ||
+                scope.RepositoryId > long.MaxValue ||
+                (long)scope.RepositoryId !=
+                    authorization.PullRequest.RepositoryId ||
+                scope.WorkflowSourceRepositoryId > long.MaxValue ||
+                (long)scope.WorkflowSourceRepositoryId !=
+                    authorization.PullRequest.RepositoryId ||
+                scope.PullRequestNumber > long.MaxValue ||
+                (long)scope.PullRequestNumber !=
+                    authorization.PullRequest.Number ||
+                !StringComparer.Ordinal.Equals(
+                    scope.WorkflowPath,
+                    authorization.WorkflowPath) ||
+                !R4PublicationBudget.Fits(
+                    rendered.Comment,
+                    R4PublicationBudget.MaximumScalars,
+                    R4PublicationBudget.MaximumUtf8Bytes) ||
+                !StringComparer.Ordinal.Equals(
+                    R4PublicationIdentityV1.ComputeScopeSha256(scope),
+                    rendered.Identity.ScopeSha256) ||
+                observation.StoredPublication is not { } stored ||
+                !StringComparer.Ordinal.Equals(
+                    rendered.Identity.HeadSha,
+                    stored.ReviewedHeadSha) ||
+                !StringComparer.Ordinal.Equals(
+                    rendered.Identity.ScopeSha256,
+                    stored.ScopeSha256) ||
+                !StringComparer.Ordinal.Equals(
+                    rendered.Identity.BodySha256,
+                    stored.BodySha256))
+            {
+                return false;
+            }
+
+            var inspected = R4StickyMarker.Inspect(rendered.Comment);
+            if (inspected.Kind != R4StickyInspectionKind.ValidR4 ||
+                !StringComparer.Ordinal.Equals(
+                    inspected.Body,
+                    rendered.Body) ||
+                !Equals(inspected.Identity, rendered.Identity) ||
+                !PublicationRecoveryInventoryFactory
+                    .TryConsumeStickyWriteAuthorization(
+                        observation,
+                        stickyAuthorization))
+            {
+                return false;
+            }
+
             request = new(authorization, scope, rendered);
             return true;
         }
