@@ -117,6 +117,53 @@ internal sealed class AuthorizedStickyReadbackRequest
         }
     }
 
+    internal static bool TryCreateRecovery(
+        ActionHostAuthorizer.AuthorizedInvocation? authorization,
+        R4PublicationScopeV1? scope,
+        R4RenderedStickyComment? persisted,
+        out AuthorizedStickyReadbackRequest? request)
+    {
+        request = null;
+        try
+        {
+            if (authorization is null || scope is null || persisted is null ||
+                !IsBound(authorization, scope) ||
+                !R4PublicationBudget.Fits(
+                    persisted.Comment,
+                    R4PublicationBudget.MaximumScalars,
+                    R4PublicationBudget.MaximumUtf8Bytes) ||
+                !StringComparer.Ordinal.Equals(
+                    R4PublicationIdentityV1.ComputeScopeSha256(scope),
+                    persisted.Identity.ScopeSha256))
+            {
+                return false;
+            }
+
+            var inspected = R4StickyMarker.Inspect(persisted.Comment);
+            if (inspected.Kind != R4StickyInspectionKind.ValidR4 ||
+                !StringComparer.Ordinal.Equals(
+                    inspected.Body,
+                    persisted.Body) ||
+                !Equals(inspected.Identity, persisted.Identity))
+            {
+                return false;
+            }
+
+            request = new(
+                authorization,
+                scope,
+                persisted.Identity,
+                persisted.Comment,
+                expectedCommentId: null);
+            return true;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException
+            and not StackOverflowException and not AccessViolationException)
+        {
+            return false;
+        }
+    }
+
     internal static bool TryCreate(
         ActionHostAuthorizer.AuthorizedInvocation? authorization,
         R4PublicationScopeV1? scope,

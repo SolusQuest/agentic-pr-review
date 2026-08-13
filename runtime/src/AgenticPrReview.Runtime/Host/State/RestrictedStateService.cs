@@ -334,6 +334,32 @@ internal sealed class RestrictedStateService
                     RetainedStateTransactionCodes.AccessDenied));
 
     internal static Task<RetainedStateTransactionResult<
+        MatchedRetainedStateRecoveryAcceptance>>
+        MatchRecoveredRetainedStateAcceptanceAsync(
+        AuthorizedAcceptedStateRestoreContext context,
+        string candidateObjectIdentity,
+        RetainedStateOpaqueRecord recoveryRecord,
+        RetainedStateOpaquePayloadExtraction extraction,
+        VerifiedRetainedStateAcceptance acceptance,
+        CancellationToken cancellationToken) =>
+        context is not null &&
+        context.TryGetTransactionAuthority(
+            RetainedStateIssuer,
+            out var authority) &&
+        authority is not null
+            ? new RetainedStateTransactionService(RetainedStateIssuer)
+                .MatchRecoveredAcceptanceAsync(
+                    authority,
+                    candidateObjectIdentity,
+                    recoveryRecord,
+                    extraction,
+                    acceptance,
+                    cancellationToken)
+            : Task.FromResult(RetainedStateTransactionResult<
+                MatchedRetainedStateRecoveryAcceptance>.Fail(
+                    RetainedStateTransactionCodes.AccessDenied));
+
+    internal static Task<RetainedStateTransactionResult<
         RetainedStatePendingCandidateEvidence>>
         InspectRetainedPendingCandidateAsync(
         AuthorizedAcceptedStateRestoreContext context,
@@ -349,6 +375,44 @@ internal sealed class RestrictedStateService
                     cancellationToken)
             : Task.FromResult(RetainedStateTransactionResult<
                 RetainedStatePendingCandidateEvidence>.Fail(
+                    RetainedStateTransactionCodes.AccessDenied));
+
+    internal static Task<RetainedStateTransactionResult<
+        RetainedStateObservedCandidate>>
+        ObserveRetainedPendingCandidateAsync(
+        AuthorizedAcceptedStateRestoreContext context,
+        CancellationToken cancellationToken) =>
+        context is not null &&
+        context.TryGetTransactionAuthority(
+            RetainedStateIssuer,
+            out var authority) &&
+        authority is not null
+            ? new RetainedStateTransactionService(RetainedStateIssuer)
+                .ObservePendingCandidateAsync(
+                    authority,
+                    cancellationToken)
+            : Task.FromResult(RetainedStateTransactionResult<
+                RetainedStateObservedCandidate>.Fail(
+                    RetainedStateTransactionCodes.AccessDenied));
+
+    internal static Task<RetainedStateTransactionResult<
+        RetainedStateOwnership>>
+        AuthorizeRetainedStaleAbandonmentOwnershipAsync(
+        AuthorizedAcceptedStateRestoreContext context,
+        RetainedStateObservedCandidate candidate,
+        CancellationToken cancellationToken) =>
+        context is not null &&
+        context.TryGetTransactionAuthority(
+            RetainedStateIssuer,
+            out var authority) &&
+        authority is not null
+            ? new RetainedStateTransactionService(RetainedStateIssuer)
+                .AuthorizeStaleAbandonmentOwnershipAsync(
+                    authority,
+                    candidate,
+                    cancellationToken)
+            : Task.FromResult(RetainedStateTransactionResult<
+                RetainedStateOwnership>.Fail(
                     RetainedStateTransactionCodes.AccessDenied));
 
     internal static Task<RetainedStateTransactionResult<

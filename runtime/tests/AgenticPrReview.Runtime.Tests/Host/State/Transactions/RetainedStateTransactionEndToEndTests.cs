@@ -17,6 +17,7 @@ using AgenticPrReview.Runtime.Canonical;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
+using AgenticPrReview.Runtime.Host.Publishing.Recovery;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.Lineage;
@@ -89,19 +90,16 @@ public sealed class RetainedStateTransactionEndToEndTests
         Assert.True(ownedA.Succeeded, ownedA.Code);
         using var ownershipA = Assert.IsType<RetainedStateOwnership>(
             ownedA.Value);
-        var intentPayload = ImmutableArray.CreateRange(
-            "opaque-p5-publication-intent"u8.ToArray());
+        Assert.True(PublicationRecoveryPersistence.TryCreateIntentWrite(
+            candidate,
+            fixture.Time.UnixSeconds,
+            preparedCandidate.Header.LogicalExpiresAtUnixSeconds,
+            out var intentBody,
+            out var intentRequest));
         var intent = await PersistOpaqueRecordAsync(
                 context,
                 ownershipA,
-                new RetainedStateOpaqueWriteRequest(
-                    StateObjectClass.PublicationIntent,
-                    intentPayload,
-                    preparedCandidate.Header.ObjectIdentity,
-                    SuccessorIdentity: null,
-                    fixture.Time.UnixSeconds +
-                        StateRetentionRequirements.LogicalWindowSeconds +
-                        StateRetentionRequirements.PreStickyBudgetSeconds),
+                intentRequest!,
                 CancellationToken.None);
         using var intentRecord = Assert.IsType<RetainedStateOpaqueRecord>(
             intent.Value);
@@ -121,8 +119,12 @@ public sealed class RetainedStateTransactionEndToEndTests
                     context,
                     storedIntent,
                     out var roundTrip));
-            Assert.True(intentPayload.AsSpan().SequenceEqual(
+            Assert.True(intentRequest!.Payload.AsSpan().SequenceEqual(
                 roundTrip.AsSpan()));
+            Assert.True(PublicationIntentV1Codec.TryDecode(
+                roundTrip.AsSpan(),
+                out var decodedIntent));
+            Assert.Equal(intentBody, decodedIntent);
         }
 
         var missingP5Evidence = await RestrictedStateService
@@ -976,18 +978,21 @@ public sealed class RetainedStateTransactionEndToEndTests
                 CancellationToken.None);
         using var ownership = Assert.IsType<RetainedStateOwnership>(
             ownershipResult.Value);
-        var semanticExpiry = fixture.Time.UnixSeconds +
-            StateRetentionRequirements.ScopedPlatformRequestSeconds;
+        Assert.True(PublicationRecoveryPersistence.TryCreateFailureWrite(
+            candidate,
+            BoundedGitHubPublisherOutcome.KnownNotWritten,
+            StickyPublicationReason.Deadline,
+            fixture.Time.UnixSeconds,
+            prepared.Header.LogicalExpiresAtUnixSeconds,
+            out var failure,
+            out var failureRequest));
+        var semanticExpiry =
+            failureRequest!.SemanticRequiredExpiresAtUnixSeconds;
         var writeResult = await RestrictedStateService
             .PrepareRetainedOpaqueWriteAsync(
                 context,
                 ownership,
-                new RetainedStateOpaqueWriteRequest(
-                    StateObjectClass.PublicationFailure,
-                    ImmutableArray.CreateRange("completed-failure"u8.ToArray()),
-                    prepared.Header.ObjectIdentity,
-                    SuccessorIdentity: null,
-                    semanticExpiry),
+                failureRequest,
                 CancellationToken.None);
         using var write = Assert.IsType<RetainedStateOpaqueWriteAttempt>(
             writeResult.Value);
@@ -998,6 +1003,14 @@ public sealed class RetainedStateTransactionEndToEndTests
                 CancellationToken.None);
         using var record = Assert.IsType<RetainedStateOpaqueRecord>(
             persistedRecordResult.Value);
+        Assert.True(RestrictedStateService.TryCopyRetainedStateOpaquePayload(
+            context,
+            record,
+            out var failurePayload));
+        Assert.True(PublicationFailureV1Codec.TryDecode(
+            failurePayload.AsSpan(),
+            out var decodedFailure));
+        Assert.Equal(failure, decodedFailure);
 
         var recordAuthorizationResult = await RestrictedStateService
             .AuthorizeRetainedP5CleanupAsync(
@@ -1551,7 +1564,7 @@ public sealed class RetainedStateTransactionEndToEndTests
                 fixture.Context,
                 record,
                 P5RecoveryPayloadPrefix.Length - 1,
-                handoff.OpaqueInnerPayload.Length);
+                handoff!.OpaqueInnerPayload.Length);
         using var shiftedExtraction = Assert.IsType<
             RetainedStateOpaquePayloadExtraction>(
                 shiftedExtractionResult.Value);
@@ -1747,6 +1760,25 @@ public sealed class RetainedStateTransactionEndToEndTests
         using var completedRecords = Assert.IsType<
             RetainedStateOpaqueRecordSet>(completedRecordsResult.Value);
         var completedRecord = Assert.Single(completedRecords.Records);
+        using var completedExtraction =
+            CreateAcceptanceRecoveryExtraction(
+                afterCommitContext,
+                completedRecord,
+                handoff.OpaqueInnerPayload.Length);
+        var matchedResult = await RestrictedStateService
+            .MatchRecoveredRetainedStateAcceptanceAsync(
+                afterCommitContext,
+                prepared.Header.ObjectIdentity,
+                completedRecord,
+                completedExtraction,
+                verifiedAfterRestart,
+                CancellationToken.None);
+        var matched = Assert.IsType<
+            MatchedRetainedStateRecoveryAcceptance>(matchedResult.Value);
+        Assert.Equal(
+            verifiedAfterRestart.AcceptanceReceiptIdentity,
+            matched.AcceptanceReceiptIdentity);
+        Assert.Equal(sticky!.CommentId, matched.Receipt.CommentId);
         var cleanupPlan = await RestrictedStateService
             .PlanRetainedStateCleanupAsync(
                 afterCommitContext,
@@ -2284,16 +2316,87 @@ public sealed class RetainedStateTransactionEndToEndTests
         Assert.Equal(
             prepared.Publication.ReviewedHeadSha,
             evidence.ProducerHeadSha);
+        var observed = await RestrictedStateService
+            .ObserveRetainedPendingCandidateAsync(
+                resumed.Context,
+                CancellationToken.None);
+        using var exact = Assert.IsType<RetainedStateObservedCandidate>(
+            observed.Value);
+        Assert.False(exact.MatchesCurrentReviewedHead);
+        Assert.Equal(target, exact.Metadata);
+        Assert.Equal(
+            prepared.Publication.BodySha256,
+            exact.Publication.BodySha256);
+        Assert.True(exact.Publication.FinalizedCommentUtf8.AsSpan()
+            .SequenceEqual(
+                prepared.Publication.FinalizedCommentUtf8.AsSpan()));
+        Assert.True(PublicationRecoveryInventoryFactory.TryCreate(
+            resumed.Context,
+            exact,
+            ImmutableArray<RetainedStateOpaqueRecord>.Empty,
+            matchedAcceptance: null,
+            PublicationRecoveryAnchorState.None,
+            out var recoveryInventory));
+        Assert.False(recoveryInventory!.CandidateMatchesCurrentHead);
+        Assert.True(recoveryInventory.HasStoredValidatedPublication);
+
+        var markerAbsenceEvidence =
+            OpaqueStoreHash.Sha256("complete-marker-absence"u8);
+        Assert.True(PublicationRecoveryPersistence
+            .TryCreateStaleAbandonmentWrite(
+                exact,
+                markerAbsenceEvidence,
+                resumed.Time.UnixSeconds,
+                out var abandonment,
+                out var abandonmentRequest));
+        var staleOwnershipResult = await RestrictedStateService
+            .AuthorizeRetainedStaleAbandonmentOwnershipAsync(
+                resumed.Context,
+                exact,
+                CancellationToken.None);
+        using var staleOwnership = Assert.IsType<RetainedStateOwnership>(
+            staleOwnershipResult.Value);
+        var preparedAbandonment = await RestrictedStateService
+            .PrepareRetainedOpaqueWriteAsync(
+                resumed.Context,
+                staleOwnership,
+                abandonmentRequest!,
+                CancellationToken.None);
+        using var abandonmentWrite = Assert.IsType<
+            RetainedStateOpaqueWriteAttempt>(preparedAbandonment.Value);
+        var persistedAbandonment = await RestrictedStateService
+            .PersistPreparedRetainedOpaqueWriteAsync(
+                resumed.Context,
+                abandonmentWrite,
+                CancellationToken.None);
+        using var abandonmentRecord = Assert.IsType<
+            RetainedStateOpaqueRecord>(persistedAbandonment.Value);
+        Assert.True(RestrictedStateService.TryCopyRetainedStateOpaquePayload(
+            resumed.Context,
+            abandonmentRecord,
+            out var abandonmentPayload));
+        Assert.True(AbandonmentV1Codec.TryDecode(
+            abandonmentPayload.AsSpan(),
+            out var decodedAbandonment));
+        Assert.Equal(abandonment, decodedAbandonment);
+
+        var refreshedInspection = await RestrictedStateService
+            .InspectRetainedPendingCandidateAsync(
+                resumed.Context,
+                CancellationToken.None);
+        var refreshedEvidence = Assert.IsType<
+            RetainedStatePendingCandidateEvidence>(
+                refreshedInspection.Value);
 
         var decision = new RetainedStateP5CleanupDecision(
             RetainedStateP5CleanupClassification.StaleCandidateAbandonment,
             OpaqueStoreHash.Sha256("p5-stale-classification"u8),
-            OpaqueStoreHash.Sha256("complete-marker-absence"u8));
+            markerAbsenceEvidence);
         var authorized = await RestrictedStateService
             .AuthorizeRetainedP5CleanupAsync(
                 resumed.Context,
                 decision,
-                evidence,
+                refreshedEvidence,
                 opaqueRecord: null,
                 opaqueWrite: null,
                 CancellationToken.None);
@@ -2619,8 +2722,27 @@ public sealed class RetainedStateTransactionEndToEndTests
         using var preparation = Assert.IsType<
             RetainedStateAcceptancePreparation>(preparationResult.Value);
         Assert.True(preparation.TryCreateRecoveryHandoff(out var handoff));
-        var recoveryPayload = WrapP5RecoveryPayload(
-            handoff!.OpaqueInnerPayload);
+        Assert.True(PublicationRecoveryPersistence.TryBinding(
+            candidate,
+            out var recoveryBinding));
+        Assert.True(StickyReadbackRecordV1Codec.TryCreate(
+            recoveryBinding!,
+            sticky,
+            fixture.Time.UnixSeconds,
+            out var stickyRecord));
+        Assert.True(RecoveryRecordV1Codec.TryCreate(
+            recoveryBinding!,
+            stickyRecord!.RecordIdentity,
+            handoff!.OpaqueInnerPayload,
+            handoff.MinimumSemanticExpiresAtUnixSeconds,
+            out var recovery));
+        Assert.True(RecoveryRecordV1Codec.TryEncode(
+            recovery,
+            out var encodedRecovery,
+            out _,
+            out _));
+        var recoveryPayload = ImmutableArray.CreateRange(encodedRecovery);
+        CryptographicOperations.ZeroMemory(encodedRecovery);
         var recoveredAttemptResult = await PersistOpaqueRecordAsync(
                 fixture.Context,
                 preparation.Ownership,
@@ -2737,11 +2859,26 @@ public sealed class RetainedStateTransactionEndToEndTests
         RetainedStateOpaqueRecord record,
         int payloadLength)
     {
+        var offset = P5RecoveryPayloadPrefix.Length;
+        Assert.True(RestrictedStateService.TryCopyRetainedStateOpaquePayload(
+            context,
+            record,
+            out var outerPayload));
+        if (RecoveryRecordV1Codec.TryDecode(
+                outerPayload.AsSpan(),
+                out _,
+                out var recoveryOffset,
+                out var recoveryLength))
+        {
+            offset = recoveryOffset;
+            payloadLength = recoveryLength;
+        }
+
         var extracted = RestrictedStateService
             .CreateRetainedStateOpaquePayloadExtraction(
                 context,
                 record,
-                P5RecoveryPayloadPrefix.Length,
+                offset,
                 payloadLength);
         Assert.True(extracted.Succeeded, extracted.Code);
         return Assert.IsType<RetainedStateOpaquePayloadExtraction>(

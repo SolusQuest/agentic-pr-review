@@ -391,7 +391,8 @@ internal sealed class RetainedStateOwnership : IDisposable
         SelectedLineageSnapshot selectedLineage,
         string inventoryDigest,
         long observedAtUnixSeconds,
-        long? acceptanceNotAfterUnixSeconds)
+        long? acceptanceNotAfterUnixSeconds,
+        StateObjectClass? restrictedObjectClass)
     {
         this.authority = authority;
         Candidate = candidate;
@@ -399,6 +400,7 @@ internal sealed class RetainedStateOwnership : IDisposable
         InventoryDigest = inventoryDigest;
         ObservedAtUnixSeconds = observedAtUnixSeconds;
         AcceptanceNotAfterUnixSeconds = acceptanceNotAfterUnixSeconds;
+        RestrictedObjectClass = restrictedObjectClass;
     }
 
     private readonly RetainedStateTransactionAuthority authority;
@@ -407,6 +409,7 @@ internal sealed class RetainedStateOwnership : IDisposable
     internal string InventoryDigest { get; }
     internal long ObservedAtUnixSeconds { get; }
     internal long? AcceptanceNotAfterUnixSeconds { get; }
+    internal StateObjectClass? RestrictedObjectClass { get; }
     internal bool IsUsable => Volatile.Read(ref usable) == 1;
 
     internal bool TryConsume(RetainedStateTransactionAuthority authority) =>
@@ -430,7 +433,27 @@ internal sealed class RetainedStateOwnership : IDisposable
             selectedLineage,
             inventoryDigest,
             observedAtUnixSeconds,
-            acceptanceNotAfterUnixSeconds);
+            acceptanceNotAfterUnixSeconds,
+            restrictedObjectClass: null);
+    }
+
+    internal static RetainedStateOwnership CreateStaleAbandonment(
+        object issuer,
+        RetainedStateTransactionAuthority authority,
+        RetainedStatePersistedCandidate candidate,
+        SelectedLineageSnapshot selectedLineage,
+        string inventoryDigest,
+        long observedAtUnixSeconds)
+    {
+        RetainedStateCapabilityIssuer.Require(issuer);
+        return new(
+            authority,
+            candidate,
+            selectedLineage,
+            inventoryDigest,
+            observedAtUnixSeconds,
+            acceptanceNotAfterUnixSeconds: null,
+            StateObjectClass.Abandonment);
     }
 
     public void Dispose() => Interlocked.Exchange(ref usable, 0);
@@ -1424,6 +1447,71 @@ internal sealed class VerifiedRetainedStateAcceptance
     public override string ToString() => "[PRIVATE]";
 }
 
+internal sealed class MatchedRetainedStateRecoveryAcceptance
+{
+    private MatchedRetainedStateRecoveryAcceptance(
+        RetainedStateTransactionAuthority authority,
+        string candidateObjectIdentity,
+        string logicalGenerationIdentity,
+        string acceptanceReceiptIdentity,
+        StickyCommentPublisher.StickyPublicationReceipt receipt,
+        long logicalExpiresAtUnixSeconds,
+        OpaqueStoreObjectMetadata recoveryRecordMetadata,
+        StateControlHeaderV1 recoveryRecordHeader,
+        string inventoryDigest)
+    {
+        this.authority = authority;
+        CandidateObjectIdentity = candidateObjectIdentity;
+        LogicalGenerationIdentity = logicalGenerationIdentity;
+        AcceptanceReceiptIdentity = acceptanceReceiptIdentity;
+        Receipt = receipt;
+        LogicalExpiresAtUnixSeconds = logicalExpiresAtUnixSeconds;
+        RecoveryRecordMetadata = recoveryRecordMetadata;
+        RecoveryRecordHeader = recoveryRecordHeader;
+        InventoryDigest = inventoryDigest;
+    }
+
+    private readonly RetainedStateTransactionAuthority authority;
+    internal string CandidateObjectIdentity { get; }
+    internal string LogicalGenerationIdentity { get; }
+    internal string AcceptanceReceiptIdentity { get; }
+    internal StickyCommentPublisher.StickyPublicationReceipt Receipt { get; }
+    internal long LogicalExpiresAtUnixSeconds { get; }
+    internal OpaqueStoreObjectMetadata RecoveryRecordMetadata { get; }
+    internal StateControlHeaderV1 RecoveryRecordHeader { get; }
+    internal string InventoryDigest { get; }
+
+    internal bool IsIssuedBy(RetainedStateTransactionAuthority value) =>
+        ReferenceEquals(authority, value) && value.IsLive;
+
+    internal static MatchedRetainedStateRecoveryAcceptance Create(
+        object issuer,
+        RetainedStateTransactionAuthority authority,
+        string candidateObjectIdentity,
+        string logicalGenerationIdentity,
+        string acceptanceReceiptIdentity,
+        StickyCommentPublisher.StickyPublicationReceipt receipt,
+        long logicalExpiresAtUnixSeconds,
+        OpaqueStoreObjectMetadata recoveryRecordMetadata,
+        StateControlHeaderV1 recoveryRecordHeader,
+        string inventoryDigest)
+    {
+        RetainedStateCapabilityIssuer.Require(issuer);
+        return new(
+            authority,
+            candidateObjectIdentity,
+            logicalGenerationIdentity,
+            acceptanceReceiptIdentity,
+            receipt,
+            logicalExpiresAtUnixSeconds,
+            recoveryRecordMetadata,
+            recoveryRecordHeader,
+            inventoryDigest);
+    }
+
+    public override string ToString() => "[PRIVATE]";
+}
+
 internal sealed record RetainedStateCleanupTarget(
     OpaqueStoreObjectMetadata Metadata);
 
@@ -1482,6 +1570,111 @@ internal sealed class RetainedStatePendingCandidateEvidence
             producerHeadSha,
             matchesCurrentReviewedHead,
             inventoryDigest);
+    }
+
+    public override string ToString() => "[PRIVATE]";
+}
+
+internal sealed class RetainedStateObservedCandidate : IDisposable
+{
+    private byte[]? canonicalGeneration;
+
+    private RetainedStateObservedCandidate(
+        RetainedStateTransactionAuthority authority,
+        OpaqueStoreObjectMetadata metadata,
+        StateControlHeaderV1 header,
+        string logicalGenerationIdentity,
+        StateGenerationRecordV1 generation,
+        ValidatedPublicationPayloadV1 publication,
+        byte[] canonicalGeneration,
+        bool matchesCurrentReviewedHead,
+        string inventoryDigest)
+    {
+        this.authority = authority;
+        Metadata = metadata;
+        Header = header;
+        LogicalGenerationIdentity = logicalGenerationIdentity;
+        Generation = generation;
+        Publication = publication;
+        this.canonicalGeneration = canonicalGeneration;
+        MatchesCurrentReviewedHead = matchesCurrentReviewedHead;
+        InventoryDigest = inventoryDigest;
+    }
+
+    private readonly RetainedStateTransactionAuthority authority;
+    internal OpaqueStoreObjectMetadata Metadata { get; }
+    internal StateControlHeaderV1 Header { get; }
+    internal string LogicalGenerationIdentity { get; }
+    internal StateGenerationRecordV1 Generation { get; }
+    internal ValidatedPublicationPayloadV1 Publication { get; }
+    internal bool MatchesCurrentReviewedHead { get; }
+    internal string InventoryDigest { get; }
+
+    internal bool IsIssuedBy(RetainedStateTransactionAuthority value) =>
+        ReferenceEquals(authority, value) &&
+        value.IsLive &&
+        Volatile.Read(ref canonicalGeneration) is not null;
+
+    internal bool TryCopyCanonicalGeneration(
+        RetainedStateTransactionAuthority value,
+        out ImmutableArray<byte> bytes)
+    {
+        bytes = [];
+        var current = Volatile.Read(ref canonicalGeneration);
+        if (!IsIssuedBy(value) || current is null)
+        {
+            return false;
+        }
+
+        bytes = ImmutableArray.CreateRange(current);
+        return true;
+    }
+
+    internal static RetainedStateObservedCandidate Create(
+        object issuer,
+        RetainedStateTransactionAuthority authority,
+        OpaqueStoreObjectMetadata metadata,
+        StateControlHeaderV1 header,
+        string logicalGenerationIdentity,
+        StateGenerationRecordV1 generation,
+        ValidatedPublicationPayloadV1 publication,
+        byte[] canonicalGeneration,
+        bool matchesCurrentReviewedHead,
+        string inventoryDigest)
+    {
+        RetainedStateCapabilityIssuer.Require(issuer);
+        return new(
+            authority,
+            metadata,
+            header,
+            logicalGenerationIdentity,
+            generation,
+            publication,
+            canonicalGeneration,
+            matchesCurrentReviewedHead,
+            inventoryDigest);
+    }
+
+    public void Dispose()
+    {
+        var current = Interlocked.Exchange(ref canonicalGeneration, null);
+        if (current is not null)
+        {
+            CryptographicOperations.ZeroMemory(current);
+        }
+
+        Zero(Generation.EncryptedStateEnvelope);
+        Zero(Generation.PublicationPayloadBytes);
+        Zero(Publication.FinalizedCommentUtf8);
+    }
+
+    private static void Zero(ImmutableArray<byte> bytes)
+    {
+        var array = ImmutableCollectionsMarshal.AsArray(bytes);
+        if (array is not null)
+        {
+            CryptographicOperations.ZeroMemory(array);
+        }
     }
 
     public override string ToString() => "[PRIVATE]";
