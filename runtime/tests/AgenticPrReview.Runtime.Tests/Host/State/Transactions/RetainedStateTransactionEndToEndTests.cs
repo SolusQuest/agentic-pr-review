@@ -2736,7 +2736,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             out var recoveryPublication));
         Assert.True(RecoveryRecordV1Codec.TryCreate(
             recoveryPublication!,
-            stickyBody!.RecordIdentity,
+            stickyBody!,
             handoff!.OpaqueInnerPayload,
             handoff.MinimumSemanticExpiresAtUnixSeconds,
             out var recovery));

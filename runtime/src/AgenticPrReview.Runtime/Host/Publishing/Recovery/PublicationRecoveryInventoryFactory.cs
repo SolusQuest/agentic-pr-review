@@ -48,7 +48,9 @@ internal static class PublicationRecoveryInventoryFactory
                     record is null ||
                     !StringComparer.Ordinal.Equals(
                         record.InventoryDigest,
-                        inventory.InventoryDigest)))
+                        inventory.InventoryDigest)) ||
+                inventory.CleanupRecords.IsDefault ||
+                inventory.CleanupRecords.Length > 1)
             {
                 return Fail();
             }
@@ -110,11 +112,28 @@ internal static class PublicationRecoveryInventoryFactory
                     }
                     acceptedRecords.Add(record);
                 }
+                else if (inventory.CleanupRecords.Any(cleanup =>
+                    cleanup.Cleanup.Targets.Contains(record.Metadata)))
+                {
+                    // An authenticated cleanup record owns this exact orphan.
+                    // The closed decision surface resumes that cleanup before
+                    // interpreting any remaining publication graph.
+                }
                 else
                 {
-                    hasHistoricalCleanupDebt = true;
-                    historicalRecords.Add(record);
+                    return Fail();
                 }
+            }
+
+            var pendingReadback = pendingSet.StickyReadback ??
+                pendingSet.Recovery?.StickyReadback;
+            if (pendingSet.Recovery is not null &&
+                (pendingReadback is null ||
+                    pendingSet.StickyReadback is not null &&
+                    pendingSet.StickyReadback !=
+                        pendingSet.Recovery.StickyReadback))
+            {
+                return Fail();
             }
 
             var acceptedRecordCount = acceptedSet.Count;
@@ -123,13 +142,12 @@ internal static class PublicationRecoveryInventoryFactory
             {
                 if (inventory.CurrentAcceptance is null ||
                     acceptedIdentity is null ||
-                    acceptedSet.StickyReadback is null ||
                     acceptedSet.Recovery is null ||
                     acceptedSet.Failure is not null ||
                     acceptedSet.Abandonment is not null ||
-                    !StringComparer.Ordinal.Equals(
-                        acceptedSet.Recovery.StickyReadbackRecordIdentity,
-                        acceptedSet.StickyReadback.RecordIdentity))
+                    acceptedSet.StickyReadback is not null &&
+                        acceptedSet.StickyReadback !=
+                            acceptedSet.Recovery.StickyReadback)
                 {
                     return Fail();
                 }
@@ -169,7 +187,7 @@ internal static class PublicationRecoveryInventoryFactory
                     matched.RecoveryRecordMetadata !=
                         recoveryRecord.Metadata ||
                     matched.RecoveryRecordHeader != recoveryRecord.Header ||
-                    !acceptedSet.StickyReadback.TryRehydrate(
+                    !acceptedSet.Recovery.StickyReadback.TryRehydrate(
                         out var readbackReceipt) ||
                     readbackReceipt is null ||
                     !ReceiptsEqual(readbackReceipt, matched.Receipt))
@@ -209,15 +227,40 @@ internal static class PublicationRecoveryInventoryFactory
             var selectedMatched = pending is null && currentHeadMatches
                 ? matched
                 : null;
+            if (inventory.Anchors.Any(anchor =>
+                    !StringComparer.Ordinal.Equals(
+                        anchor.CandidateObjectIdentity,
+                        pendingIdentity) &&
+                    !StringComparer.Ordinal.Equals(
+                        anchor.CandidateObjectIdentity,
+                        acceptedIdentity)))
+            {
+                return Fail();
+            }
+
             var selectedAnchors = inventory.Anchors.Where(anchor =>
                     selectedIdentity is not null &&
                     StringComparer.Ordinal.Equals(
                         anchor.CandidateObjectIdentity,
                         selectedIdentity))
                 .ToArray();
-            var anchors = selectedAnchors.Any(anchor =>
-                    !anchor.TargetIsPresent)
-                ? PublicationRecoveryAnchorState.Unresolved
+            var acceptedAnchors = inventory.Anchors.Where(anchor =>
+                    acceptedIdentity is not null &&
+                    StringComparer.Ordinal.Equals(
+                        anchor.CandidateObjectIdentity,
+                        acceptedIdentity))
+                .ToArray();
+            if (acceptedAnchors.Length > 0 && !terminalProven)
+            {
+                return Fail();
+            }
+
+            var anchors = pending is not null && selectedAnchors.Length > 1
+                ? PublicationRecoveryAnchorState.Ambiguous
+                : pending is not null && selectedAnchors.Length == 1
+                    ? selectedAnchors[0].TargetIsPresent
+                        ? PublicationRecoveryAnchorState.RecoverableWrite
+                        : PublicationRecoveryAnchorState.Unresolved
                 : inventory.Anchors.IsEmpty
                     ? PublicationRecoveryAnchorState.None
                     : PublicationRecoveryAnchorState.CleanupDebt;
@@ -233,14 +276,14 @@ internal static class PublicationRecoveryInventoryFactory
                 selectedIdentity,
                 selectedPublication,
                 selected.Intent,
-                selected.StickyReadback,
+                selected.StickyReadback ?? selected.Recovery?.StickyReadback,
                 selected.Failure,
                 selected.Abandonment,
                 selected.Recovery,
                 selectedMatched,
                 historicalRecords.ToImmutable(),
-                inventory.Anchors.Where(anchor => !anchor.TargetIsPresent)
-                    .ToImmutableArray(),
+                acceptedAnchors.ToImmutableArray(),
+                inventory.CleanupRecords,
                 pending?.MatchesCurrentReviewedHead ?? false,
                 currentHeadMatches,
                 terminalProven && !currentHeadMatches,
@@ -263,12 +306,14 @@ internal static class PublicationRecoveryInventoryFactory
     internal static PublicationStickyWriteAuthorization
         CreateStickyWriteAuthorization(
         PublicationRecoveryObservation observation,
-        string evidenceRecordIdentity)
+        string evidenceRecordIdentity,
+        PublicationStickyWriteTransition transition)
     {
         if (observation is null ||
             !observation.IsLive ||
             observation.CandidateObjectIdentity is not { } candidate ||
-            !LineageValidation.IsSha256(evidenceRecordIdentity))
+            !LineageValidation.IsSha256(evidenceRecordIdentity) ||
+            !CanAuthorizeSticky(observation, evidenceRecordIdentity, transition))
         {
             throw new ArgumentException(
                 "A live exact recovery observation is required.",
@@ -279,15 +324,22 @@ internal static class PublicationRecoveryInventoryFactory
             CapabilityIssuer,
             candidate,
             observation.InventoryDigest,
-            evidenceRecordIdentity);
+            evidenceRecordIdentity,
+            transition);
     }
 
     internal static bool TryConsumeStickyWriteAuthorization(
         PublicationRecoveryObservation observation,
         PublicationStickyWriteAuthorization authorization)
     {
-        var evidence = observation?.Intent?.RecordIdentity ??
-            observation?.Failure?.RecordIdentity;
+        var evidence = authorization?.Transition switch
+        {
+            PublicationStickyWriteTransition.InitialIntent =>
+                observation?.Intent?.RecordIdentity,
+            PublicationStickyWriteTransition.KnownNotWrittenRetry =>
+                observation?.Failure?.RecordIdentity,
+            _ => null,
+        };
         return observation is not null &&
             authorization is not null &&
             observation.IsLive &&
@@ -302,7 +354,148 @@ internal static class PublicationRecoveryInventoryFactory
             StringComparer.Ordinal.Equals(
                 authorization.EvidenceRecordIdentity,
                 evidence) &&
+            CanAuthorizeSticky(
+                observation,
+                evidence,
+                authorization.Transition) &&
             authorization.TryConsume(CapabilityIssuer);
+    }
+
+    internal static PublicationStaleAbandonmentAuthorization
+        CreateStaleAbandonmentAuthorization(
+        PublicationRecoveryObservation observation,
+        PublicationMarkerAbsenceEvidence absenceEvidence)
+    {
+        if (observation is null ||
+            absenceEvidence is null ||
+            observation.Candidate is not { MatchesCurrentReviewedHead: false } ||
+            observation.Intent is not null ||
+            observation.StickyReadback is not null ||
+            observation.Failure is not null ||
+            observation.Abandonment is not null ||
+            observation.Recovery is not null ||
+            observation.Anchors != PublicationRecoveryAnchorState.None ||
+            !observation.HistoricalRecords.IsEmpty ||
+            !observation.CleanupRecords.IsEmpty ||
+            !TryConsumeMarkerAbsenceEvidence(
+                observation,
+                absenceEvidence))
+        {
+            throw new ArgumentException(
+                "Exact stale-abandonment evidence is required.");
+        }
+
+        return new PublicationStaleAbandonmentAuthorization(
+            CapabilityIssuer,
+            observation.CandidateObjectIdentity!,
+            observation.InventoryDigest,
+            absenceEvidence.EvidenceIdentity);
+    }
+
+    internal static bool TryAuthorizeStaleAbandonmentOwnership(
+        PublicationRecoveryObservation observation,
+        PublicationStaleAbandonmentAuthorization authorization) =>
+        observation is not null &&
+        authorization is not null &&
+        observation.CandidateObjectIdentity is { } candidate &&
+        authorization.TryAuthorizeOwnership(
+            CapabilityIssuer,
+            candidate,
+            observation.InventoryDigest);
+
+    internal static bool TryConsumeStaleAbandonmentWriteAuthorization(
+        PublicationRecoveryObservation observation,
+        PublicationStaleAbandonmentAuthorization authorization) =>
+        observation is not null &&
+        authorization is not null &&
+        observation.CandidateObjectIdentity is { } candidate &&
+        authorization.TryCreateWrite(
+            CapabilityIssuer,
+            candidate,
+            observation.InventoryDigest);
+
+    internal static PublicationStaleCleanupAuthorization
+        CreateStaleCleanupAuthorization(
+        PublicationRecoveryObservation observation,
+        AbandonmentV1 abandonment,
+        PublicationMarkerAbsenceEvidence freshAbsence)
+    {
+        var classificationIdentity = StaleCleanupClassificationIdentity(
+            observation,
+            abandonment,
+            freshAbsence);
+        if (observation.Abandonment != abandonment ||
+            !TryConsumeMarkerAbsenceEvidence(observation, freshAbsence))
+        {
+            throw new ArgumentException(
+                "Exact fresh stale-cleanup evidence is required.");
+        }
+
+        return new PublicationStaleCleanupAuthorization(
+            CapabilityIssuer,
+            observation.CandidateObjectIdentity!,
+            observation.InventoryDigest,
+            abandonment.RecordIdentity,
+            classificationIdentity,
+            freshAbsence.EvidenceIdentity);
+    }
+
+    internal static bool TryConsumeStaleCleanupAuthorization(
+        PublicationRecoveryObservation observation,
+        AbandonmentV1 abandonment,
+        PublicationStaleCleanupAuthorization authorization) =>
+        observation is not null &&
+        abandonment is not null &&
+        authorization is not null &&
+        observation.CandidateObjectIdentity is { } candidate &&
+        authorization.TryConsume(
+            CapabilityIssuer,
+            candidate,
+            observation.InventoryDigest,
+            abandonment.RecordIdentity);
+
+    private static bool CanAuthorizeSticky(
+        PublicationRecoveryObservation observation,
+        string evidenceRecordIdentity,
+        PublicationStickyWriteTransition transition)
+    {
+        if (!observation.IsLive ||
+            observation.Candidate is null ||
+            observation.Anchors != PublicationRecoveryAnchorState.None ||
+            !observation.HistoricalRecords.IsEmpty ||
+            !observation.CompletedAnchors.IsEmpty ||
+            !observation.CleanupRecords.IsEmpty)
+        {
+            return false;
+        }
+
+        return transition switch
+        {
+            PublicationStickyWriteTransition.InitialIntent =>
+                observation.Records.Length == 1 &&
+                observation.Intent is { } intent &&
+                StringComparer.Ordinal.Equals(
+                    intent.RecordIdentity,
+                    evidenceRecordIdentity) &&
+                observation.StickyReadback is null &&
+                observation.Failure is null &&
+                observation.Abandonment is null &&
+                observation.Recovery is null,
+            PublicationStickyWriteTransition.KnownNotWrittenRetry =>
+                observation.Records.Length == 2 &&
+                observation.Intent is not null &&
+                observation.Failure is
+                {
+                    Outcome: BoundedGitHubPublisherOutcome.KnownNotWritten,
+                } failure &&
+                StringComparer.Ordinal.Equals(
+                    failure.RecordIdentity,
+                    evidenceRecordIdentity) &&
+                observation.StickyReadback is null &&
+                observation.Abandonment is null &&
+                observation.Recovery is null,
+            _ => false,
+        };
     }
 
     internal static PublicationMarkerAbsenceEvidence
@@ -431,7 +624,6 @@ internal static class PublicationRecoveryInventoryFactory
         if (observation is null ||
             anchor is null ||
             !observation.IsLive ||
-            anchor.TargetIsPresent ||
             !observation.CurrentAcceptedHeadMatchesReviewedHead ||
             observation.Candidate is not null ||
             !observation.CompletedAnchors.Contains(anchor))
@@ -495,7 +687,6 @@ internal static class PublicationRecoveryInventoryFactory
     {
         if (inventory is null ||
             anchor is null ||
-            anchor.TargetIsPresent ||
             !LineageValidation.IsSha256(acceptedCandidateIdentity) ||
             !StringComparer.Ordinal.Equals(
                 inventory.CurrentAcceptanceCandidateObjectIdentity,

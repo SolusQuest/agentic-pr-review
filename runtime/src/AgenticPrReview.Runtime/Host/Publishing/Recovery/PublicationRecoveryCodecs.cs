@@ -112,13 +112,13 @@ internal static class RecoveryRecordV1Codec
 {
     internal static bool TryCreate(
         PublicationRecoveryPublicationV1 publication,
-        string stickyReadbackRecordIdentity,
+        StickyReadbackRecordV1 stickyReadback,
         ImmutableArray<byte> acceptanceRecoveryHandoff,
         long minimumSemanticExpiresAtUnixSeconds,
         out RecoveryRecordV1? value) =>
         PublicationRecoveryPayloadCodec.TryCreateRecovery(
             publication,
-            stickyReadbackRecordIdentity,
+            stickyReadback,
             acceptanceRecoveryHandoff,
             minimumSemanticExpiresAtUnixSeconds,
             out value);
@@ -259,15 +259,22 @@ internal static class PublicationRecoveryPayloadCodec
 
     internal static bool TryCreateRecovery(
         PublicationRecoveryPublicationV1 publication,
-        string stickyIdentity,
+        StickyReadbackRecordV1 stickyReadback,
         ImmutableArray<byte> handoff,
         long minimumSemanticExpiry,
         out RecoveryRecordV1? value)
     {
         value = null;
+        if (stickyReadback is null ||
+            stickyReadback.Publication != publication ||
+            !stickyReadback.TryRehydrate(out _))
+        {
+            return false;
+        }
+
         var provisional = new RecoveryRecordV1(
             publication,
-            stickyIdentity,
+            stickyReadback,
             handoff,
             minimumSemanticExpiry,
             Zeros());
@@ -466,7 +473,36 @@ internal static class PublicationRecoveryPayloadCodec
                     PublicationRecoveryRecordKind.Recovery,
                     out var reader,
                     out var publication) ||
-                !reader.TryReadString(64, out var stickyIdentity))
+                !reader.TryReadUInt16(out var operationValue) ||
+                !Enum.IsDefined(
+                    typeof(StickyPublicationOperation),
+                    (int)operationValue) ||
+                !reader.TryReadInt64(out var repositoryId) ||
+                !reader.TryReadInt64(out var pullRequest) ||
+                !reader.TryReadInt64(out var commentId) ||
+                !reader.TryReadString(MaximumUrlBytes, out var commentUrl) ||
+                !reader.TryReadInt64(out var observedAt) ||
+                !reader.TryReadString(64, out var stickyIdentity) ||
+                !StickyCommentPublisher.StickyPublicationReceipt.TryRehydrate(
+                    (StickyPublicationOperation)operationValue,
+                    repositoryId,
+                    pullRequest,
+                    commentId,
+                    commentUrl,
+                    publication!.ScopeSha256,
+                    publication.BodySha256,
+                    publication.ReviewedHeadSha,
+                    out var receipt) ||
+                receipt is null ||
+                !TryCreateReadback(
+                    publication,
+                    receipt,
+                    observedAt,
+                    out var stickyReadback) ||
+                stickyReadback is null ||
+                !StringComparer.Ordinal.Equals(
+                    stickyReadback.RecordIdentity,
+                    stickyIdentity))
             {
                 return false;
             }
@@ -474,7 +510,7 @@ internal static class PublicationRecoveryPayloadCodec
             handoffOffset = PrefixLength(
                 PublicationRecoveryRecordKind.Recovery,
                 publication!,
-                stickyIdentity);
+                stickyReadback);
             if (!reader.TryReadBytes(
                     LineageFormat.MaximumPayloadBytes,
                     out handoff) ||
@@ -484,7 +520,7 @@ internal static class PublicationRecoveryPayloadCodec
                 !reader.IsComplete ||
                 !TryCreateRecovery(
                     publication!,
-                    stickyIdentity,
+                    stickyReadback,
                     ImmutableArray.CreateRange(handoff),
                     minimumExpiry,
                     out var canonical) ||
@@ -626,19 +662,21 @@ internal static class PublicationRecoveryPayloadCodec
                     writer.WriteInt64(abandonment.AbandonedAtUnixSeconds);
                     break;
                 case RecoveryRecordV1 recovery
-                    when LineageValidation.IsSha256(
+                    when recovery.StickyReadback is not null &&
+                        recovery.StickyReadback.Publication == publication &&
+                        LineageValidation.IsSha256(
                             recovery.StickyReadbackRecordIdentity) &&
+                        recovery.StickyReadback.TryRehydrate(out _) &&
                         !recovery.AcceptanceRecoveryHandoff.IsDefaultOrEmpty &&
                         recovery.AcceptanceRecoveryHandoff.Length <=
                             LineageFormat.MaximumPayloadBytes &&
                         LineageValidation.IsTime(
                             recovery.MinimumSemanticExpiresAtUnixSeconds):
-                    writer.WriteString(
-                        recovery.StickyReadbackRecordIdentity);
+                    WriteReadbackFields(writer, recovery.StickyReadback);
                     handoffOffset = PrefixLength(
                         kind,
                         publication,
-                        recovery.StickyReadbackRecordIdentity);
+                        recovery.StickyReadback);
                     handoffLength =
                         recovery.AcceptanceRecoveryHandoff.Length;
                     writer.WriteBytes(
@@ -729,13 +767,26 @@ internal static class PublicationRecoveryPayloadCodec
     private static int PrefixLength(
         PublicationRecoveryRecordKind kind,
         PublicationRecoveryPublicationV1 publication,
-        string stickyIdentity)
+        StickyReadbackRecordV1 stickyReadback)
     {
         var writer = new LineageBinaryWriter();
         WriteHeader(writer, kind, publication);
-        writer.WriteString(stickyIdentity);
+        WriteReadbackFields(writer, stickyReadback);
         writer.WriteUInt32(0);
         return writer.ToArray().Length;
+    }
+
+    private static void WriteReadbackFields(
+        LineageBinaryWriter writer,
+        StickyReadbackRecordV1 readback)
+    {
+        writer.WriteUInt16((ushort)readback.Operation);
+        writer.WriteInt64(readback.RepositoryId);
+        writer.WriteInt64(readback.PullRequestNumber);
+        writer.WriteInt64(readback.CommentId);
+        writer.WriteString(readback.CommentUrl);
+        writer.WriteInt64(readback.ObservedAtUnixSeconds);
+        writer.WriteString(readback.RecordIdentity);
     }
 
     private static bool TryKindAndPublication(

@@ -71,6 +71,21 @@ internal sealed class PublicationRecoveryService
                 null);
         }
 
+        var durableOnly = PublicationRecoveryClassifier.Classify(
+            observation,
+            PublicationMarkerObservation.Absent);
+        if (durableOnly.Action is
+            PublicationRecoveryAction.ResumeAnchoredWrite or
+            PublicationRecoveryAction.ResumeCleanup)
+        {
+            return Evaluation(
+                durableOnly,
+                null,
+                StickyDiscoveryKind.Absent,
+                StickyPublicationReason.None,
+                observation);
+        }
+
         if (observation.Candidate is null &&
             !observation.CurrentAcceptedHeadMatchesReviewedHead)
         {
@@ -110,11 +125,20 @@ internal sealed class PublicationRecoveryService
                     observation.StoredPublication,
                     out var rendered) ||
             rendered is null ||
-            !AuthorizedStickyReadbackRequest.TryCreateRecovery(
-                authorization,
-                scope,
-                rendered,
-                out request) ||
+            (observation.StickyReadback is { } storedReadback
+                ? !storedReadback.TryRehydrate(out var storedReceipt) ||
+                    storedReceipt is null ||
+                    !AuthorizedStickyReadbackRequest.TryCreateRecovery(
+                        authorization,
+                        scope,
+                        rendered,
+                        storedReceipt,
+                        out request)
+                : !AuthorizedStickyReadbackRequest.TryCreateRecovery(
+                    authorization,
+                    scope,
+                    rendered,
+                    out request)) ||
             request is null)
         {
             observation.Dispose();
@@ -143,6 +167,15 @@ internal sealed class PublicationRecoveryService
                 PublicationMarkerObservation.Ambiguous,
             _ => PublicationMarkerObservation.Incomplete,
         };
+        if (marker == PublicationMarkerObservation.Exact &&
+            observation.StickyReadback is { } durableReadback &&
+            (!durableReadback.TryRehydrate(out var durableReceipt) ||
+                durableReceipt is null ||
+                discovered.Receipt is null ||
+                !ReceiptsEqual(durableReceipt, discovered.Receipt)))
+        {
+            marker = PublicationMarkerObservation.Ambiguous;
+        }
         var classified = PublicationRecoveryClassifier.Classify(
             observation,
             marker);
@@ -155,10 +188,13 @@ internal sealed class PublicationRecoveryService
             stickyAuthorization = PublicationRecoveryInventoryFactory
                 .CreateStickyWriteAuthorization(
                     observation,
-                    failure.RecordIdentity);
+                    failure.RecordIdentity,
+                    PublicationStickyWriteTransition
+                        .KnownNotWrittenRetry);
         }
-        else if (classified.Action ==
-            PublicationRecoveryAction.AbandonStaleCandidate)
+        else if (classified.Action is
+            PublicationRecoveryAction.AbandonStaleCandidate or
+            PublicationRecoveryAction.ResumeStaleCleanup)
         {
             absenceEvidence = PublicationRecoveryInventoryFactory
                 .CreateMarkerAbsenceEvidence(
@@ -196,8 +232,11 @@ internal sealed class PublicationRecoveryService
         var observation = evaluation.Observation;
         var initialAbsence = evaluation.MarkerAbsenceEvidence;
         var candidate = observation?.Candidate;
-        if (evaluation.Decision.Action !=
-                PublicationRecoveryAction.AbandonStaleCandidate ||
+        var creatingAbandonment = evaluation.Decision.Action ==
+            PublicationRecoveryAction.AbandonStaleCandidate;
+        var resumingAbandonment = evaluation.Decision.Action ==
+            PublicationRecoveryAction.ResumeStaleCleanup;
+        if ((!creatingAbandonment && !resumingAbandonment) ||
             observation is null ||
             initialAbsence is null ||
             candidate is null ||
@@ -206,51 +245,83 @@ internal sealed class PublicationRecoveryService
             return CleanupFailure(RetainedStateTransactionCodes.AccessDenied);
         }
 
-        var ownershipResult = await RestrictedStateService
-            .AuthorizeRetainedStaleAbandonmentOwnershipAsync(
-                context,
-                candidate,
-                cancellationToken)
-            .ConfigureAwait(false);
-        using var ownership = ownershipResult.Value;
-        if (!ownershipResult.Succeeded ||
-            ownership is null ||
-            !PublicationRecoveryPersistence
-                .TryCreateStaleAbandonmentWrite(
+        AbandonmentV1? abandonment = observation.Abandonment;
+        OpaqueStoreObjectMetadata? persistedMetadata = null;
+        StateControlHeaderV1? persistedHeader = null;
+        if (creatingAbandonment)
+        {
+            using var abandonmentAuthorization =
+                PublicationRecoveryInventoryFactory
+                    .CreateStaleAbandonmentAuthorization(
+                        observation,
+                        initialAbsence);
+            var ownershipResult = await RestrictedStateService
+                .AuthorizeRetainedStaleAbandonmentOwnershipAsync(
+                    context,
                     observation,
-                    initialAbsence,
-                    observation.ObservedAtUnixSeconds,
-                    out var abandonment,
-                    out var request) ||
-            abandonment is null ||
-            request is null)
+                    candidate,
+                    abandonmentAuthorization,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            using var ownership = ownershipResult.Value;
+            if (!ownershipResult.Succeeded ||
+                ownership is null ||
+                !PublicationRecoveryPersistence
+                    .TryCreateStaleAbandonmentWrite(
+                        observation,
+                        abandonmentAuthorization,
+                        observation.ObservedAtUnixSeconds,
+                        out abandonment,
+                        out var request) ||
+                abandonment is null ||
+                request is null)
+            {
+                return CleanupFailure(RetainedStateTransactionCodes.Conflict);
+            }
+
+            var attemptResult = await RestrictedStateService
+                .PrepareRetainedOpaqueWriteAsync(
+                    context,
+                    ownership,
+                    request,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            using var attempt = attemptResult.Value;
+            if (!attemptResult.Succeeded || attempt is null)
+            {
+                return CleanupFailure(attemptResult.Code);
+            }
+
+            var persistedResult = await RestrictedStateService
+                .PersistPreparedRetainedOpaqueWriteAsync(
+                    context,
+                    attempt,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            using var persisted = persistedResult.Value;
+            if (!persistedResult.Succeeded || persisted is null)
+            {
+                return CleanupFailure(persistedResult.Code);
+            }
+
+            var anchorCleanup = await PublicationRecoveryPersistence
+                .CleanupCompletedWriteAnchorAsync(
+                    context,
+                    attempt,
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            if (!anchorCleanup.Completed)
+            {
+                return CleanupFailure(anchorCleanup.Code);
+            }
+
+            persistedMetadata = persisted.Metadata;
+            persistedHeader = persisted.Header;
+        }
+
+        if (abandonment is null)
         {
             return CleanupFailure(RetainedStateTransactionCodes.Conflict);
-        }
-
-        var attemptResult = await RestrictedStateService
-            .PrepareRetainedOpaqueWriteAsync(
-                context,
-                ownership,
-                request,
-                cancellationToken)
-            .ConfigureAwait(false);
-        using var attempt = attemptResult.Value;
-        if (!attemptResult.Succeeded || attempt is null)
-        {
-            return CleanupFailure(attemptResult.Code);
-        }
-
-        var persistedResult = await RestrictedStateService
-            .PersistPreparedRetainedOpaqueWriteAsync(
-                context,
-                attempt,
-                cancellationToken)
-            .ConfigureAwait(false);
-        using var persisted = persistedResult.Value;
-        if (!persistedResult.Succeeded || persisted is null)
-        {
-            return CleanupFailure(persistedResult.Code);
         }
 
         var freshInventoryResult = await RestrictedStateService
@@ -284,8 +355,14 @@ internal sealed class PublicationRecoveryService
 
         var abandonmentRecord = freshObservation.Records.SingleOrDefault(
             record =>
-                record.Metadata == persisted.Metadata &&
-                record.Header == persisted.Header);
+                (persistedMetadata is null ||
+                    record.Metadata == persistedMetadata) &&
+                (persistedHeader is null ||
+                    record.Header == persistedHeader) &&
+                record.ObjectClass == StateObjectClass.Abandonment &&
+                StringComparer.Ordinal.Equals(
+                    record.Header.PredecessorIdentity,
+                    candidate.Header.ObjectIdentity));
         if (abandonmentRecord is null ||
             !TryRestoreRendered(
                 freshObservation.StoredPublication,
@@ -317,19 +394,12 @@ internal sealed class PublicationRecoveryService
                 freshObservation,
                 discovered.Kind,
                 discovered.Reason);
-        var classificationIdentity =
+        using var staleCleanupAuthorization =
             PublicationRecoveryInventoryFactory
-                .StaleCleanupClassificationIdentity(
+                .CreateStaleCleanupAuthorization(
                     freshObservation,
                     abandonment,
                     freshAbsence);
-        if (!PublicationRecoveryInventoryFactory
-            .TryConsumeMarkerAbsenceEvidence(
-                freshObservation,
-                freshAbsence))
-        {
-            return CleanupFailure(RetainedStateTransactionCodes.Conflict);
-        }
 
         var pendingResult = await RestrictedStateService
             .InspectRetainedPendingCandidateAsync(
@@ -346,20 +416,14 @@ internal sealed class PublicationRecoveryService
             return CleanupFailure(pendingResult.Code);
         }
 
-        var decision = new RetainedStateP5CleanupDecision(
-            RetainedStateP5CleanupClassification
-                .StaleCandidateAbandonment,
-            classificationIdentity,
-            freshAbsence.EvidenceIdentity);
         var authorizationResult = await RestrictedStateService
-            .AuthorizeRetainedP5CleanupAsync(
+            .AuthorizeRetainedStaleP5CleanupAsync(
                 context,
-                decision,
+                freshObservation,
+                abandonment,
+                staleCleanupAuthorization,
                 pending,
                 abandonmentRecord,
-                opaqueWrite: null,
-                recoveryInventory: null,
-                recoveryAnchor: null,
                 CancellationToken.None)
             .ConfigureAwait(false);
         using var cleanupAuthorization = authorizationResult.Value;
@@ -382,6 +446,126 @@ internal sealed class PublicationRecoveryService
                     semanticExpiry),
                 CancellationToken.None)
             .ConfigureAwait(false);
+    }
+
+    internal static async Task<RetainedStateTransactionResult<
+        RetainedStateOpaqueRecord>> ResumeInterruptedWriteAsync(
+        AuthorizedAcceptedStateRestoreContext context,
+        PublicationRecoveryEvaluation evaluation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(evaluation);
+
+        var observation = evaluation.Observation;
+        var inventory = observation?.Inventory;
+        var candidate = observation?.Candidate;
+        if (evaluation.Decision.Action !=
+                PublicationRecoveryAction.ResumeAnchoredWrite ||
+            observation is null ||
+            inventory is null ||
+            candidate is null ||
+            inventory.Anchors.Length != 1 ||
+            !StringComparer.Ordinal.Equals(
+                inventory.Anchors[0].CandidateObjectIdentity,
+                candidate.Header.ObjectIdentity))
+        {
+            return RetainedStateTransactionResult<
+                RetainedStateOpaqueRecord>.Fail(
+                    RetainedStateTransactionCodes.AccessDenied);
+        }
+
+        var recoveredResult = await RestrictedStateService
+            .RecoverRetainedCandidateAsync(context, cancellationToken)
+            .ConfigureAwait(false);
+        var recovered = recoveredResult.Value;
+        if (!recoveredResult.Succeeded ||
+            recovered is null ||
+            recovered.Metadata != candidate.Metadata ||
+            recovered.Prepared.Header != candidate.Header)
+        {
+            recovered?.Prepared.Dispose();
+            return RetainedStateTransactionResult<
+                RetainedStateOpaqueRecord>.Fail(recoveredResult.Code);
+        }
+
+        using var prepared = recovered.Prepared;
+        var attemptsResult = await RestrictedStateService
+            .RecoverAnchoredRetainedOpaqueWritesAsync(
+                context,
+                recovered,
+                cancellationToken)
+            .ConfigureAwait(false);
+        using var attempts = attemptsResult.Value;
+        var anchor = inventory.Anchors[0];
+        if (!attemptsResult.Succeeded ||
+            attempts is null ||
+            attempts.Attempts.Length != 1 ||
+            attempts.Attempts[0].AnchorMetadata != anchor.AnchorMetadata ||
+            attempts.Attempts[0].Header.ObjectIdentity !=
+                anchor.TargetObjectIdentity ||
+            attempts.Attempts[0].ObjectClass != anchor.ObjectClass)
+        {
+            return RetainedStateTransactionResult<
+                RetainedStateOpaqueRecord>.Fail(
+                    attemptsResult.Succeeded
+                        ? RetainedStateTransactionCodes.Conflict
+                        : attemptsResult.Code);
+        }
+
+        var attempt = attempts.Attempts[0];
+        var persistedResult = await RestrictedStateService
+            .PersistPreparedRetainedOpaqueWriteAsync(
+                context,
+                attempt,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+        if (!persistedResult.Succeeded || persistedResult.Value is null)
+        {
+            return persistedResult;
+        }
+
+        var anchorCleanup = await PublicationRecoveryPersistence
+            .CleanupCompletedWriteAnchorAsync(
+                context,
+                attempt,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+        if (!anchorCleanup.Completed)
+        {
+            persistedResult.Value.Dispose();
+            return RetainedStateTransactionResult<
+                RetainedStateOpaqueRecord>.Fail(anchorCleanup.Code);
+        }
+
+        return persistedResult;
+    }
+
+    internal static Task<RetainedStateCleanupResult>
+        ResumeInterruptedCleanupAsync(
+        AuthorizedAcceptedStateRestoreContext context,
+        PublicationRecoveryEvaluation evaluation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(evaluation);
+
+        var observation = evaluation.Observation;
+        var inventory = observation?.Inventory;
+        if (evaluation.Decision.Action !=
+                PublicationRecoveryAction.ResumeCleanup ||
+            inventory is null ||
+            observation!.CleanupRecords.Length != 1)
+        {
+            return Task.FromResult(CleanupFailure(
+                RetainedStateTransactionCodes.AccessDenied));
+        }
+
+        return RestrictedStateService.ResumeRetainedP5CleanupAsync(
+            context,
+            inventory,
+            observation.CleanupRecords[0],
+            cancellationToken);
     }
 
     internal static async Task<RetainedStateCleanupResult>
@@ -636,10 +820,9 @@ internal sealed class PublicationRecoveryService
                 current = ownedInventory;
             }
 
-            while (current.Anchors.Any(anchor => !anchor.TargetIsPresent))
+            while (!current.Anchors.IsEmpty)
             {
-                var anchor = current.Anchors.First(item =>
-                    !item.TargetIsPresent);
+                var anchor = current.Anchors[0];
                 var classificationIdentity =
                     PublicationRecoveryInventoryFactory
                         .SupersededAnchorCleanupClassificationIdentity(
@@ -827,4 +1010,20 @@ internal sealed class PublicationRecoveryService
 
     private static RetainedStateCleanupResult CleanupFailure(string code) =>
         new(null, Completed: false, code);
+
+    private static bool ReceiptsEqual(
+        StickyCommentPublisher.StickyPublicationReceipt left,
+        StickyCommentPublisher.StickyPublicationReceipt right) =>
+        left.Operation == right.Operation &&
+        left.RepositoryId == right.RepositoryId &&
+        left.PullRequestNumber == right.PullRequestNumber &&
+        left.CommentId == right.CommentId &&
+        StringComparer.Ordinal.Equals(left.CommentUrl, right.CommentUrl) &&
+        StringComparer.Ordinal.Equals(
+            left.ScopeSha256,
+            right.ScopeSha256) &&
+        StringComparer.Ordinal.Equals(
+            left.BodySha256,
+            right.BodySha256) &&
+        StringComparer.Ordinal.Equals(left.HeadSha, right.HeadSha);
 }

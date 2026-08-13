@@ -26,6 +26,10 @@ internal static class PublicationRecoveryPersistence
             observation.Failure is not null ||
             observation.Abandonment is not null ||
             observation.Recovery is not null ||
+            observation.Anchors != PublicationRecoveryAnchorState.None ||
+            !observation.HistoricalRecords.IsEmpty ||
+            !observation.CompletedAnchors.IsEmpty ||
+            !observation.CleanupRecords.IsEmpty ||
             !observedCandidate.MatchesCurrentReviewedHead ||
             !PublicationRecoveryRetention.TryCompute(
                 observation.ObservedAtUnixSeconds,
@@ -118,6 +122,16 @@ internal static class PublicationRecoveryPersistence
             return IntentFailure();
         }
 
+        var anchorCleanup = await CleanupCompletedWriteAnchorAsync(
+                context,
+                attempt,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+        if (!anchorCleanup.Completed)
+        {
+            return IntentFailure();
+        }
+
         var freshInventoryResult = await RestrictedStateService
             .ObserveRetainedPublicationRecoveryInventoryAsync(
                 context,
@@ -141,6 +155,15 @@ internal static class PublicationRecoveryPersistence
         if (!freshObservationResult.Succeeded ||
             freshObservation is null ||
             freshObservation.Intent != intent ||
+            freshObservation.StickyReadback is not null ||
+            freshObservation.Failure is not null ||
+            freshObservation.Abandonment is not null ||
+            freshObservation.Recovery is not null ||
+            freshObservation.Anchors != PublicationRecoveryAnchorState.None ||
+            !freshObservation.HistoricalRecords.IsEmpty ||
+            !freshObservation.CompletedAnchors.IsEmpty ||
+            !freshObservation.CleanupRecords.IsEmpty ||
+            freshObservation.Records.Length != 1 ||
             freshObservation.CandidateObjectIdentity !=
                 observedCandidate.Header.ObjectIdentity ||
             freshObservation.Records.Count(record =>
@@ -154,7 +177,8 @@ internal static class PublicationRecoveryPersistence
         var stickyAuthorization = PublicationRecoveryInventoryFactory
             .CreateStickyWriteAuthorization(
                 freshObservation,
-                intent.RecordIdentity);
+                intent.RecordIdentity,
+                PublicationStickyWriteTransition.InitialIntent);
         return RetainedStateTransactionResult<
             PublicationIntentPersistenceResult>.Success(
                 RetainedStateTransactionCodes.Ready,
@@ -163,6 +187,60 @@ internal static class PublicationRecoveryPersistence
                     freshObservation.InventoryDigest,
                     freshObservation,
                     stickyAuthorization));
+    }
+
+    internal static async Task<RetainedStateCleanupResult>
+        CleanupCompletedWriteAnchorAsync(
+        AuthorizedAcceptedStateRestoreContext context,
+        RetainedStateOpaqueWriteAttempt attempt,
+        CancellationToken cancellationToken)
+    {
+        if (context is null ||
+            attempt is null ||
+            !PublicationRecoveryRetention.TryCompute(
+                attempt.Header.CreatedAtUnixSeconds,
+                attempt.Header.LogicalExpiresAtUnixSeconds,
+                out var semanticExpiry,
+                out _))
+        {
+            return new(
+                null,
+                Completed: false,
+                RetainedStateTransactionCodes.Invalid);
+        }
+
+        var authorizationResult = await RestrictedStateService
+            .AuthorizeRetainedP5CleanupAsync(
+                context,
+                new RetainedStateP5CleanupDecision(
+                    RetainedStateP5CleanupClassification
+                        .CompletedOpaqueWriteAnchor,
+                    attempt.OperationIdentity,
+                    MarkerEvidenceIdentity: null),
+                pendingCandidate: null,
+                opaqueRecord: null,
+                attempt,
+                recoveryInventory: null,
+                recoveryAnchor: null,
+                cancellationToken)
+            .ConfigureAwait(false);
+        using var authorization = authorizationResult.Value;
+        if (!authorizationResult.Succeeded || authorization is null)
+        {
+            return new(
+                null,
+                Completed: false,
+                authorizationResult.Code);
+        }
+
+        return await RestrictedStateService
+            .CleanupRetainedP5AuthorizedAsync(
+                context,
+                new RetainedStateP5CleanupRequest(
+                    authorization,
+                    semanticExpiry),
+                CancellationToken.None)
+            .ConfigureAwait(false);
     }
 
     internal static bool TryCreateIntentWrite(
@@ -272,46 +350,9 @@ internal static class PublicationRecoveryPersistence
         return true;
     }
 
-    internal static bool TryCreateAbandonmentWrite(
-        RetainedStatePersistedCandidate candidate,
-        string completeMarkerAbsenceEvidenceIdentity,
-        long abandonedAtUnixSeconds,
-        long candidateLogicalExpiresAtUnixSeconds,
-        out AbandonmentV1? abandonment,
-        out RetainedStateOpaqueWriteRequest? request)
-    {
-        abandonment = null;
-        request = null;
-        if (!TryPublication(candidate, out var publication) ||
-            !PublicationRecoveryRetention.TryCompute(
-                abandonedAtUnixSeconds,
-                candidateLogicalExpiresAtUnixSeconds,
-                out var semanticExpiry,
-                out _) ||
-            !AbandonmentV1Codec.TryCreate(
-                publication!,
-                completeMarkerAbsenceEvidenceIdentity,
-                abandonedAtUnixSeconds,
-                out abandonment) ||
-            !AbandonmentV1Codec.TryEncode(
-                abandonment,
-                out var bytes))
-        {
-            return false;
-        }
-
-        request = Request(
-            StateObjectClass.Abandonment,
-            bytes,
-            candidate.Prepared.Header.ObjectIdentity,
-            semanticExpiry);
-        CryptographicOperations.ZeroMemory(bytes);
-        return true;
-    }
-
     internal static bool TryCreateStaleAbandonmentWrite(
         PublicationRecoveryObservation observation,
-        PublicationMarkerAbsenceEvidence absenceEvidence,
+        PublicationStaleAbandonmentAuthorization authorization,
         long abandonedAtUnixSeconds,
         out AbandonmentV1? abandonment,
         out RetainedStateOpaqueWriteRequest? request)
@@ -321,11 +362,11 @@ internal static class PublicationRecoveryPersistence
         var candidate = observation?.Candidate;
         if (candidate is null ||
             candidate.MatchesCurrentReviewedHead ||
-            absenceEvidence is null ||
+            authorization is null ||
             !PublicationRecoveryInventoryFactory
-                .TryConsumeMarkerAbsenceEvidence(
+                .TryConsumeStaleAbandonmentWriteAuthorization(
                     observation!,
-                    absenceEvidence) ||
+                    authorization) ||
             !TryPublication(candidate, out var publication) ||
             !PublicationRecoveryRetention.TryCompute(
                 abandonedAtUnixSeconds,
@@ -334,7 +375,7 @@ internal static class PublicationRecoveryPersistence
                 out _) ||
             !AbandonmentV1Codec.TryCreate(
                 publication!,
-                absenceEvidence.EvidenceIdentity,
+                authorization.EvidenceIdentity,
                 abandonedAtUnixSeconds,
                 out abandonment) ||
             !AbandonmentV1Codec.TryEncode(
@@ -369,7 +410,7 @@ internal static class PublicationRecoveryPersistence
             publication != readback.Publication ||
             !RecoveryRecordV1Codec.TryCreate(
                 publication!,
-                readback.RecordIdentity,
+                readback,
                 handoff.OpaqueInnerPayload,
                 handoff.MinimumSemanticExpiresAtUnixSeconds,
                 out recovery) ||

@@ -1054,7 +1054,7 @@ internal sealed class RetainedStateTransactionService
             {
                 return RetainedStateTransactionResult<
                     RetainedStateOpaqueWriteAttempt>.Fail(
-                        RetainedStateTransactionCodes.Conflict);
+                    RetainedStateTransactionCodes.Conflict);
             }
 
             var attempt = RetainedStateOpaqueWriteAttempt.Create(
@@ -1259,7 +1259,7 @@ internal sealed class RetainedStateTransactionService
 
                     return RetainedStateTransactionResult<
                         RetainedStateOpaqueWriteAttemptSet>.Fail(
-                            RetainedStateTransactionCodes.Conflict);
+                        RetainedStateTransactionCodes.Conflict);
                 }
 
                 var attempt = RetainedStateOpaqueWriteAttempt.Create(
@@ -2931,12 +2931,46 @@ internal sealed class RetainedStateTransactionService
                 .ToArray();
             var anchors = ImmutableArray.CreateBuilder<
                 RetainedStatePublicationRecoveryAnchorEvidence>();
+            var cleanupRecords = ImmutableArray.CreateBuilder<
+                RetainedStatePublicationRecoveryCleanupEvidence>();
             foreach (var item in cleanup)
             {
                 if (RetainedStateCleanupRecordCodec.TryDecode(
                         item.Payload,
-                        out _))
+                        out var cleanupRecord) &&
+                    cleanupRecord is not null)
                 {
+                    if (!CleanupRecordMatchesPhysical(cleanupRecord, item) ||
+                        cleanupRecord.Targets.IsDefaultOrEmpty ||
+                        cleanupRecord.Targets.Length > 2)
+                    {
+                        return RetainedStateTransactionResult<
+                            RetainedStatePublicationRecoveryInventory>.Fail(
+                                RetainedStateTransactionCodes.Conflict);
+                    }
+
+                    var presentTargets = cleanupRecord.Targets.Where(target =>
+                            snapshot.Authenticated
+                                .Concat(snapshot.UnderRetained)
+                                .Count(item => item.Metadata == target) == 1)
+                        .ToImmutableArray();
+                    if (cleanupRecord.Targets.Any(target =>
+                            snapshot.Authenticated
+                                .Concat(snapshot.UnderRetained)
+                                .Count(item => item.Metadata == target) > 1 ||
+                            snapshot.Unknown.Any(item =>
+                                item.Metadata == target)))
+                    {
+                        return RetainedStateTransactionResult<
+                            RetainedStatePublicationRecoveryInventory>.Fail(
+                                RetainedStateTransactionCodes.Conflict);
+                    }
+
+                    cleanupRecords.Add(new(
+                        item.Metadata,
+                        item.Header,
+                        cleanupRecord,
+                        presentTargets));
                     continue;
                 }
 
@@ -2971,9 +3005,11 @@ internal sealed class RetainedStateTransactionService
                     item.Metadata,
                     item.Header,
                     anchor.CandidateObjectIdentity,
+                    anchor.OperationIdentity,
                     anchor.ObjectClass,
                     anchor.TargetName,
                     anchor.TargetObjectIdentity,
+                    anchor.TargetPayloadSha256,
                     targets == 1));
             }
 
@@ -3048,6 +3084,7 @@ internal sealed class RetainedStateTransactionService
                     acceptedCandidateIdentity,
                     acceptedPublication,
                     anchorEvidence,
+                    cleanupRecords.ToImmutable(),
                     inventoryDigest,
                     trustedNow);
             candidate = null;
@@ -3995,7 +4032,7 @@ internal sealed class RetainedStateTransactionService
                         : RetainedStateTransactionCodes.AccessDenied);
         }
 
-        OpaqueStoreObjectMetadata target;
+        ImmutableArray<OpaqueStoreObjectMetadata> targets;
         string sourceInventoryDigest;
         var requireSourceInventoryMatch = true;
         if (decision.Classification ==
@@ -4014,7 +4051,7 @@ internal sealed class RetainedStateTransactionService
                 opaqueRecord.Header.PredecessorIdentity,
                 pendingCandidate.Header.ObjectIdentity))
         {
-            target = pendingCandidate.Metadata;
+            targets = [pendingCandidate.Metadata, opaqueRecord.Metadata];
             sourceInventoryDigest = pendingCandidate.InventoryDigest;
         }
         else if (decision.Classification ==
@@ -4026,7 +4063,7 @@ internal sealed class RetainedStateTransactionService
                 StateObjectClass.PublicationFailure or
                 StateObjectClass.Abandonment))
         {
-            target = opaqueRecord.Metadata;
+            targets = [opaqueRecord.Metadata];
             sourceInventoryDigest = opaqueRecord.InventoryDigest;
         }
         else if (decision.Classification ==
@@ -4035,7 +4072,7 @@ internal sealed class RetainedStateTransactionService
             opaqueWrite is not null &&
             opaqueWrite.IsIssuedBy(authority))
         {
-            target = opaqueWrite.AnchorMetadata;
+            targets = [opaqueWrite.AnchorMetadata];
             sourceInventoryDigest = opaqueWrite.InventoryDigest;
             requireSourceInventoryMatch = false;
         }
@@ -4045,10 +4082,13 @@ internal sealed class RetainedStateTransactionService
             recoveryInventory is not null &&
             recoveryAnchor is not null &&
             recoveryInventory.IsIssuedBy(authority) &&
-            !recoveryAnchor.TargetIsPresent &&
+            StringComparer.Ordinal.Equals(
+                recoveryInventory
+                    .CurrentAcceptanceCandidateObjectIdentity,
+                recoveryAnchor.CandidateObjectIdentity) &&
             recoveryInventory.Anchors.Contains(recoveryAnchor))
         {
-            target = recoveryAnchor.AnchorMetadata;
+            targets = [recoveryAnchor.AnchorMetadata];
             sourceInventoryDigest = recoveryInventory.InventoryDigest;
         }
         else
@@ -4082,44 +4122,45 @@ internal sealed class RetainedStateTransactionService
                         : observedResult.Code);
         }
 
-        var matches = snapshot.Authenticated
-            .Concat(snapshot.UnderRetained)
-            .Where(item => item.Metadata == target)
+        var matches = targets.Select(target => snapshot.Authenticated
+                .Concat(snapshot.UnderRetained)
+                .Where(item => item.Metadata == target)
+                .ToArray())
             .ToArray();
-        var validTarget = matches.Length == 1 &&
+        var validTarget = matches.All(items => items.Length == 1) &&
             decision.Classification switch
             {
                 RetainedStateP5CleanupClassification
                     .StaleCandidateAbandonment =>
-                    matches[0].Header.ObjectClass ==
+                    matches.Length == 2 &&
+                    matches[0][0].Header.ObjectClass ==
                         StateObjectClass.Candidate &&
-                    matches[0].Header.ObjectIdentity ==
+                    matches[0][0].Header.ObjectIdentity ==
                         pendingCandidate!.Header.ObjectIdentity &&
-                    snapshot.Authenticated.Count(item =>
-                        opaqueRecord!.MatchesAuthenticated(
-                            authority,
-                            item)) == 1,
+                    opaqueRecord!.MatchesAuthenticated(
+                        authority,
+                        matches[1][0]),
                 RetainedStateP5CleanupClassification
                     .CompletedOpaqueRecord =>
                     opaqueRecord!.MatchesAuthenticated(
                         authority,
-                        matches[0]),
+                        matches[0][0]),
                 RetainedStateP5CleanupClassification
                     .CompletedOpaqueWriteAnchor =>
                     opaqueWrite is not null
-                        ? matches[0].Header.ObjectClass ==
+                        ? matches[0][0].Header.ObjectClass ==
                             StateObjectClass.Cleanup &&
                             HasExactOpaqueWriteAnchor(
                                 snapshot,
                                 authority,
                                 opaqueWrite)
                         : recoveryAnchor is not null &&
-                            matches[0].Header ==
+                            matches[0][0].Header ==
                                 recoveryAnchor.AnchorHeader &&
-                            matches[0].Metadata ==
+                            matches[0][0].Metadata ==
                                 recoveryAnchor.AnchorMetadata &&
                             RetainedStateOpaqueWriteAnchorCodec.TryDecode(
-                                matches[0].Payload,
+                                matches[0][0].Payload,
                                 out var decodedAnchor) &&
                             decodedAnchor is not null &&
                             StringComparer.Ordinal.Equals(
@@ -4131,16 +4172,7 @@ internal sealed class RetainedStateTransactionService
                                 recoveryAnchor.TargetName &&
                             StringComparer.Ordinal.Equals(
                                 decodedAnchor.TargetObjectIdentity,
-                                recoveryAnchor.TargetObjectIdentity) &&
-                            !snapshot.Authenticated
-                                .Concat(snapshot.UnderRetained)
-                                .Any(item =>
-                                    item.Metadata.Reference.Name ==
-                                        recoveryAnchor.TargetName &&
-                                    StringComparer.Ordinal.Equals(
-                                        item.Header.ObjectIdentity,
-                                        recoveryAnchor
-                                            .TargetObjectIdentity)),
+                                recoveryAnchor.TargetObjectIdentity),
                 _ => false,
             };
         if (!validTarget)
@@ -4157,7 +4189,7 @@ internal sealed class RetainedStateTransactionService
                     issuer,
                     authority,
                     decision,
-                    target,
+                    targets,
                     inventoryDigest));
     }
 
@@ -4225,9 +4257,20 @@ internal sealed class RetainedStateTransactionService
         }
 
         var authorization = request.Authorization;
+        if (authorization.Targets.IsDefaultOrEmpty ||
+            authorization.Targets.Length > 2 ||
+            authorization.Targets.Distinct().Count() !=
+                authorization.Targets.Length)
+        {
+            return new RetainedStateCleanupResult(
+                null,
+                Completed: false,
+                RetainedStateTransactionCodes.AccessDenied);
+        }
+
         var cleanupPredecessorIdentity =
             binding.CurrentAcceptanceReceiptIdentity ??
-            authorization.Target.EncryptedObjectDigest.Sha256;
+            authorization.Targets[0].EncryptedObjectDigest.Sha256;
         var beforeResult = await authority.ObserveAsync(
                 lease,
                 trustedNow,
@@ -4242,9 +4285,9 @@ internal sealed class RetainedStateTransactionService
                 before.InventoryDigest,
                 authorization.InventoryDigest) ||
             !snapshot.Unknown.IsEmpty ||
-            snapshot.Authenticated
+            authorization.Targets.Any(target => snapshot.Authenticated
                 .Concat(snapshot.UnderRetained)
-                .Count(item => item.Metadata == authorization.Target) != 1)
+                .Count(item => item.Metadata == target) != 1))
         {
             return new RetainedStateCleanupResult(
                 null,
@@ -4260,7 +4303,7 @@ internal sealed class RetainedStateTransactionService
                 binding.SelectedLineage.Epoch,
                 binding.SelectedLineage.SessionId,
                 authorization.InventoryDigest,
-                [authorization.Target],
+                authorization.Targets,
                 out var cleanup) ||
             cleanup is null ||
             !RetainedStateCleanupRecordCodec.TryEncode(
@@ -4350,9 +4393,10 @@ internal sealed class RetainedStateTransactionService
                     freshSnapshot,
                     cleanupMetadata,
                     cleanup) ||
-                freshSnapshot.Authenticated
-                    .Concat(freshSnapshot.UnderRetained)
-                    .Count(item => item.Metadata == authorization.Target) != 1)
+                authorization.Targets.Any(target =>
+                    freshSnapshot.Authenticated
+                        .Concat(freshSnapshot.UnderRetained)
+                        .Count(item => item.Metadata == target) != 1))
             {
                 return new RetainedStateCleanupResult(
                     null,
@@ -4362,16 +4406,19 @@ internal sealed class RetainedStateTransactionService
                         : freshResult.Code);
             }
 
-            var deleted = await persistence.DeleteExactAndVerifyAbsentAsync(
-                    authorization.Target,
-                    CancellationToken.None)
-                .ConfigureAwait(false);
-            if (!Ready(deleted))
+            foreach (var target in authorization.Targets)
             {
-                return new RetainedStateCleanupResult(
-                    null,
-                    Completed: false,
-                    deleted);
+                var deleted = await persistence.DeleteExactAndVerifyAbsentAsync(
+                        target,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+                if (!Ready(deleted))
+                {
+                    return new RetainedStateCleanupResult(
+                        null,
+                        Completed: false,
+                        deleted);
+                }
             }
 
             var completedResult = await authority.ObserveAsync(
@@ -4389,9 +4436,10 @@ internal sealed class RetainedStateTransactionService
                     completedSnapshot,
                     cleanupMetadata,
                     cleanup) ||
-                completedSnapshot.Authenticated
-                    .Concat(completedSnapshot.UnderRetained)
-                    .Any(item => item.Metadata == authorization.Target))
+                authorization.Targets.Any(target =>
+                    completedSnapshot.Authenticated
+                        .Concat(completedSnapshot.UnderRetained)
+                        .Any(item => item.Metadata == target)))
             {
                 return new RetainedStateCleanupResult(
                     null,
@@ -4414,6 +4462,125 @@ internal sealed class RetainedStateTransactionService
         {
             CryptographicOperations.ZeroMemory(cleanupBytes);
         }
+    }
+
+    internal async Task<RetainedStateCleanupResult> ResumeP5CleanupAsync(
+        RetainedStateTransactionAuthority authority,
+        RetainedStatePublicationRecoveryInventory inventory,
+        RetainedStatePublicationRecoveryCleanupEvidence evidence,
+        CancellationToken cancellationToken)
+    {
+        using var lease = await authority.EnterAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (lease is null ||
+            inventory is null ||
+            evidence is null ||
+            !inventory.IsIssuedBy(authority) ||
+            !inventory.CleanupRecords.Contains(evidence) ||
+            evidence.Cleanup.Targets.IsDefaultOrEmpty ||
+            evidence.Cleanup.Targets.Length > 2 ||
+            !authority.TryReadTrustedTime(lease, out var trustedNow) ||
+            evidence.CleanupHeader.LogicalExpiresAtUnixSeconds < trustedNow ||
+            !authority.TryCreatePersistence(lease, out var persistence) ||
+            persistence is null)
+        {
+            return new RetainedStateCleanupResult(
+                null,
+                Completed: false,
+                lease is null && cancellationToken.IsCancellationRequested
+                    ? RetainedStateTransactionCodes.Cancelled
+                    : RetainedStateTransactionCodes.AccessDenied);
+        }
+
+        var observedResult = await authority.ObserveAsync(
+                lease,
+                trustedNow,
+                trustedNow,
+                cancellationToken)
+            .ConfigureAwait(false);
+        using var observed = observedResult.Value;
+        if (!observedResult.Succeeded ||
+            observed is null ||
+            observed.Snapshot is not { } snapshot ||
+            !StringComparer.Ordinal.Equals(
+                observed.InventoryDigest,
+                inventory.InventoryDigest) ||
+            !snapshot.Unknown.IsEmpty ||
+            !snapshot.UnderRetained.IsEmpty ||
+            snapshot.Authenticated.Count(item =>
+                item.Metadata == evidence.CleanupMetadata &&
+                item.Header == evidence.CleanupHeader &&
+                RetainedStateCleanupRecordCodec.TryDecode(
+                    item.Payload,
+                    out var parsed) &&
+                parsed is not null &&
+                EquivalentCleanup(parsed, evidence.Cleanup)) != 1 ||
+            evidence.Cleanup.Targets.Any(target =>
+                snapshot.Authenticated.Count(item =>
+                    item.Metadata == target) > 1) ||
+            !evidence.PresentTargets.SequenceEqual(
+                evidence.Cleanup.Targets.Where(target =>
+                    snapshot.Authenticated.Any(item =>
+                        item.Metadata == target))))
+        {
+            return new RetainedStateCleanupResult(
+                null,
+                Completed: false,
+                observedResult.Succeeded
+                    ? RetainedStateTransactionCodes.Conflict
+                    : observedResult.Code);
+        }
+
+        foreach (var target in evidence.PresentTargets)
+        {
+            var deleted = await persistence.DeleteExactAndVerifyAbsentAsync(
+                    target,
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            if (!Ready(deleted))
+            {
+                return new RetainedStateCleanupResult(
+                    null,
+                    Completed: false,
+                    deleted);
+            }
+        }
+
+        var completedResult = await authority.ObserveAsync(
+                lease,
+                trustedNow,
+                trustedNow,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+        using var completed = completedResult.Value;
+        if (!completedResult.Succeeded ||
+            completed is null ||
+            completed.Snapshot is not { } completedSnapshot ||
+            !completedSnapshot.Unknown.IsEmpty ||
+            !completedSnapshot.UnderRetained.IsEmpty ||
+            completedSnapshot.Authenticated.Count(item =>
+                item.Metadata == evidence.CleanupMetadata &&
+                item.Header == evidence.CleanupHeader) != 1 ||
+            evidence.Cleanup.Targets.Any(target =>
+                completedSnapshot.Authenticated.Any(item =>
+                    item.Metadata == target)))
+        {
+            return new RetainedStateCleanupResult(
+                null,
+                Completed: false,
+                completedResult.Succeeded
+                    ? RetainedStateTransactionCodes.Conflict
+                    : completedResult.Code);
+        }
+
+        var selfDeleted = await persistence.DeleteExactAndVerifyAbsentAsync(
+                evidence.CleanupMetadata,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+        return new RetainedStateCleanupResult(
+            null,
+            Ready(selfDeleted),
+            selfDeleted);
     }
 
     internal async Task<RetainedStateCleanupResult> CleanupAsync(

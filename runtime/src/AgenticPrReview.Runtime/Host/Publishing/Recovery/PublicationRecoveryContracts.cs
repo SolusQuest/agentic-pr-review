@@ -57,10 +57,14 @@ internal sealed record AbandonmentV1(
 
 internal sealed record RecoveryRecordV1(
     PublicationRecoveryPublicationV1 Publication,
-    string StickyReadbackRecordIdentity,
+    StickyReadbackRecordV1 StickyReadback,
     ImmutableArray<byte> AcceptanceRecoveryHandoff,
     long MinimumSemanticExpiresAtUnixSeconds,
-    string RecordIdentity);
+    string RecordIdentity)
+{
+    internal string StickyReadbackRecordIdentity =>
+        StickyReadback.RecordIdentity;
+}
 
 internal static class PublicationRecoveryRetention
 {
@@ -125,6 +129,7 @@ internal enum PublicationRecoveryAnchorState
 {
     None = 0,
     CleanupDebt,
+    RecoverableWrite,
     Unresolved,
     Ambiguous,
 }
@@ -147,6 +152,8 @@ internal sealed class PublicationRecoveryObservation : IDisposable
         ImmutableArray<RetainedStateOpaqueRecord> historicalRecords,
         ImmutableArray<RetainedStatePublicationRecoveryAnchorEvidence>
             completedAnchors,
+        ImmutableArray<RetainedStatePublicationRecoveryCleanupEvidence>
+            cleanupRecords,
         bool candidateMatchesCurrentHead,
         bool currentAcceptedHeadMatchesReviewedHead,
         bool historicalTerminalRecovery,
@@ -165,6 +172,7 @@ internal sealed class PublicationRecoveryObservation : IDisposable
         MatchedAcceptance = matchedAcceptance;
         HistoricalRecords = historicalRecords;
         CompletedAnchors = completedAnchors;
+        CleanupRecords = cleanupRecords;
         CandidateMatchesCurrentHead = candidateMatchesCurrentHead;
         CurrentAcceptedHeadMatchesReviewedHead =
             currentAcceptedHeadMatchesReviewedHead;
@@ -199,6 +207,8 @@ internal sealed class PublicationRecoveryObservation : IDisposable
     }
     internal ImmutableArray<RetainedStatePublicationRecoveryAnchorEvidence>
         CompletedAnchors { get; }
+    internal ImmutableArray<RetainedStatePublicationRecoveryCleanupEvidence>
+        CleanupRecords { get; }
     internal bool CandidateMatchesCurrentHead { get; }
     internal bool CurrentAcceptedHeadMatchesReviewedHead { get; }
     internal bool HistoricalTerminalRecovery { get; }
@@ -232,6 +242,9 @@ internal enum PublicationRecoveryAction
     CompleteAcceptance,
     StickyOutcomeUnknown,
     AbandonStaleCandidate,
+    ResumeStaleCleanup,
+    ResumeAnchoredWrite,
+    ResumeCleanup,
     CancelledBeforeSend,
     AuthorizationOrValidationFailure,
 }
@@ -247,7 +260,8 @@ internal sealed record PublicationRecoveryDecision(
     internal bool AllowsAcceptance => Action ==
         PublicationRecoveryAction.CompleteAcceptance;
     internal bool AllowsStaleCleanup => Action ==
-        PublicationRecoveryAction.AbandonStaleCandidate;
+            PublicationRecoveryAction.AbandonStaleCandidate ||
+        Action == PublicationRecoveryAction.ResumeStaleCleanup;
     internal bool AllowsSupersededCleanup =>
         Lifecycle ==
             PublicationRecoveryLifecycleState.SupersededTerminalRecovery;
@@ -310,6 +324,12 @@ internal sealed class PublicationMarkerAbsenceEvidence : IDisposable
     public override string ToString() => "[PRIVATE]";
 }
 
+internal enum PublicationStickyWriteTransition
+{
+    InitialIntent = 1,
+    KnownNotWrittenRetry,
+}
+
 internal sealed class PublicationStickyWriteAuthorization : IDisposable
 {
     private int usable = 1;
@@ -319,22 +339,131 @@ internal sealed class PublicationStickyWriteAuthorization : IDisposable
         object issuer,
         string candidateObjectIdentity,
         string inventoryDigest,
-        string evidenceRecordIdentity)
+        string evidenceRecordIdentity,
+        PublicationStickyWriteTransition transition)
     {
         PublicationRecoveryInventoryFactory.RequireIssuer(issuer);
         this.issuer = issuer;
         CandidateObjectIdentity = candidateObjectIdentity;
         InventoryDigest = inventoryDigest;
         EvidenceRecordIdentity = evidenceRecordIdentity;
+        Transition = transition;
     }
 
     internal string CandidateObjectIdentity { get; }
     internal string InventoryDigest { get; }
     internal string EvidenceRecordIdentity { get; }
+    internal PublicationStickyWriteTransition Transition { get; }
 
     internal bool TryConsume(object expectedIssuer) =>
         PublicationRecoveryInventoryFactory.IsIssuer(expectedIssuer) &&
         ReferenceEquals(issuer, expectedIssuer) &&
+        Interlocked.CompareExchange(ref usable, 0, 1) == 1;
+
+    public void Dispose() => Interlocked.Exchange(ref usable, 0);
+
+    public override string ToString() => "[PRIVATE]";
+}
+
+internal sealed class PublicationStaleAbandonmentAuthorization : IDisposable
+{
+    private int ownershipUsable = 1;
+    private int writeUsable = 1;
+    private readonly object issuer;
+
+    internal PublicationStaleAbandonmentAuthorization(
+        object issuer,
+        string candidateObjectIdentity,
+        string inventoryDigest,
+        string evidenceIdentity)
+    {
+        PublicationRecoveryInventoryFactory.RequireIssuer(issuer);
+        this.issuer = issuer;
+        CandidateObjectIdentity = candidateObjectIdentity;
+        InventoryDigest = inventoryDigest;
+        EvidenceIdentity = evidenceIdentity;
+    }
+
+    internal string CandidateObjectIdentity { get; }
+    internal string InventoryDigest { get; }
+    internal string EvidenceIdentity { get; }
+
+    internal bool TryAuthorizeOwnership(
+        object expectedIssuer,
+        string candidateObjectIdentity,
+        string inventoryDigest) =>
+        PublicationRecoveryInventoryFactory.IsIssuer(expectedIssuer) &&
+        ReferenceEquals(issuer, expectedIssuer) &&
+        StringComparer.Ordinal.Equals(
+            CandidateObjectIdentity,
+            candidateObjectIdentity) &&
+        StringComparer.Ordinal.Equals(InventoryDigest, inventoryDigest) &&
+        Interlocked.CompareExchange(ref ownershipUsable, 0, 1) == 1;
+
+    internal bool TryCreateWrite(
+        object expectedIssuer,
+        string candidateObjectIdentity,
+        string inventoryDigest) =>
+        PublicationRecoveryInventoryFactory.IsIssuer(expectedIssuer) &&
+        ReferenceEquals(issuer, expectedIssuer) &&
+        Volatile.Read(ref ownershipUsable) == 0 &&
+        StringComparer.Ordinal.Equals(
+            CandidateObjectIdentity,
+            candidateObjectIdentity) &&
+        StringComparer.Ordinal.Equals(InventoryDigest, inventoryDigest) &&
+        Interlocked.CompareExchange(ref writeUsable, 0, 1) == 1;
+
+    public void Dispose()
+    {
+        Interlocked.Exchange(ref ownershipUsable, 0);
+        Interlocked.Exchange(ref writeUsable, 0);
+    }
+
+    public override string ToString() => "[PRIVATE]";
+}
+
+internal sealed class PublicationStaleCleanupAuthorization : IDisposable
+{
+    private int usable = 1;
+    private readonly object issuer;
+
+    internal PublicationStaleCleanupAuthorization(
+        object issuer,
+        string candidateObjectIdentity,
+        string inventoryDigest,
+        string abandonmentRecordIdentity,
+        string classificationIdentity,
+        string markerEvidenceIdentity)
+    {
+        PublicationRecoveryInventoryFactory.RequireIssuer(issuer);
+        this.issuer = issuer;
+        CandidateObjectIdentity = candidateObjectIdentity;
+        InventoryDigest = inventoryDigest;
+        AbandonmentRecordIdentity = abandonmentRecordIdentity;
+        ClassificationIdentity = classificationIdentity;
+        MarkerEvidenceIdentity = markerEvidenceIdentity;
+    }
+
+    internal string CandidateObjectIdentity { get; }
+    internal string InventoryDigest { get; }
+    internal string AbandonmentRecordIdentity { get; }
+    internal string ClassificationIdentity { get; }
+    internal string MarkerEvidenceIdentity { get; }
+
+    internal bool TryConsume(
+        object expectedIssuer,
+        string candidateObjectIdentity,
+        string inventoryDigest,
+        string abandonmentRecordIdentity) =>
+        PublicationRecoveryInventoryFactory.IsIssuer(expectedIssuer) &&
+        ReferenceEquals(issuer, expectedIssuer) &&
+        StringComparer.Ordinal.Equals(
+            CandidateObjectIdentity,
+            candidateObjectIdentity) &&
+        StringComparer.Ordinal.Equals(InventoryDigest, inventoryDigest) &&
+        StringComparer.Ordinal.Equals(
+            AbandonmentRecordIdentity,
+            abandonmentRecordIdentity) &&
         Interlocked.CompareExchange(ref usable, 0, 1) == 1;
 
     public void Dispose() => Interlocked.Exchange(ref usable, 0);
@@ -370,6 +499,12 @@ internal static class PublicationRecoveryCodes
         "publication_recovery_sticky_outcome_unknown";
     internal const string AbandonStaleCandidate =
         "publication_recovery_abandon_stale_candidate";
+    internal const string ResumeStaleCleanup =
+        "publication_recovery_resume_stale_cleanup";
+    internal const string ResumeAnchoredWrite =
+        "publication_recovery_resume_anchored_write";
+    internal const string ResumeCleanup =
+        "publication_recovery_resume_cleanup";
     internal const string CancelledBeforeSend =
         "publication_recovery_cancelled_before_send";
     internal const string AuthorizationOrValidationFailure =

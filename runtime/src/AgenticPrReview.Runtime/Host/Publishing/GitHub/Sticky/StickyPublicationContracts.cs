@@ -197,6 +197,19 @@ internal sealed class AuthorizedStickyReadbackRequest
         R4PublicationScopeV1? scope,
         R4RenderedStickyComment? persisted,
         out AuthorizedStickyReadbackRequest? request)
+        => TryCreateRecovery(
+            authorization,
+            scope,
+            persisted,
+            expectedReceipt: null,
+            out request);
+
+    internal static bool TryCreateRecovery(
+        ActionHostAuthorizer.AuthorizedInvocation? authorization,
+        R4PublicationScopeV1? scope,
+        R4RenderedStickyComment? persisted,
+        StickyCommentPublisher.StickyPublicationReceipt? expectedReceipt,
+        out AuthorizedStickyReadbackRequest? request)
     {
         request = null;
         try
@@ -209,7 +222,21 @@ internal sealed class AuthorizedStickyReadbackRequest
                     R4PublicationBudget.MaximumUtf8Bytes) ||
                 !StringComparer.Ordinal.Equals(
                     R4PublicationIdentityV1.ComputeScopeSha256(scope),
-                    persisted.Identity.ScopeSha256))
+                    persisted.Identity.ScopeSha256) ||
+                expectedReceipt is not null &&
+                    (expectedReceipt.RepositoryId !=
+                            authorization.PullRequest.RepositoryId ||
+                        expectedReceipt.PullRequestNumber !=
+                            authorization.PullRequest.Number ||
+                        !StringComparer.Ordinal.Equals(
+                            expectedReceipt.HeadSha,
+                            persisted.Identity.HeadSha) ||
+                        !StringComparer.Ordinal.Equals(
+                            expectedReceipt.ScopeSha256,
+                            persisted.Identity.ScopeSha256) ||
+                        !StringComparer.Ordinal.Equals(
+                            expectedReceipt.BodySha256,
+                            persisted.Identity.BodySha256)))
             {
                 return false;
             }
@@ -229,7 +256,7 @@ internal sealed class AuthorizedStickyReadbackRequest
                 scope,
                 persisted.Identity,
                 persisted.Comment,
-                expectedCommentId: null);
+                expectedReceipt?.CommentId);
             return true;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException

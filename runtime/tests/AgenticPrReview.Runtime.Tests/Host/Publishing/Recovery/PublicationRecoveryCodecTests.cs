@@ -60,7 +60,7 @@ public sealed class PublicationRecoveryCodecTests
             Enumerable.Range(0, 96).Select(static value => (byte)value));
         Assert.True(RecoveryRecordV1Codec.TryCreate(
             publication,
-            readback.RecordIdentity,
+            readback,
             handoff,
             Now + 900,
             out var recovery));

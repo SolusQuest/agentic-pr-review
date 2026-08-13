@@ -1684,10 +1684,18 @@ internal sealed record RetainedStatePublicationRecoveryAnchorEvidence(
     OpaqueStoreObjectMetadata AnchorMetadata,
     StateControlHeaderV1 AnchorHeader,
     string CandidateObjectIdentity,
+    string OperationIdentity,
     StateObjectClass ObjectClass,
     OpaqueStoreName TargetName,
     string TargetObjectIdentity,
+    string TargetPayloadSha256,
     bool TargetIsPresent);
+
+internal sealed record RetainedStatePublicationRecoveryCleanupEvidence(
+    OpaqueStoreObjectMetadata CleanupMetadata,
+    StateControlHeaderV1 CleanupHeader,
+    RetainedStateCleanupRecord Cleanup,
+    ImmutableArray<OpaqueStoreObjectMetadata> PresentTargets);
 
 internal sealed class RetainedStatePublicationRecoveryInventory : IDisposable
 {
@@ -1705,6 +1713,8 @@ internal sealed class RetainedStatePublicationRecoveryInventory : IDisposable
         ValidatedPublicationPayloadV1? currentAcceptedPublication,
         ImmutableArray<RetainedStatePublicationRecoveryAnchorEvidence>
             anchors,
+        ImmutableArray<RetainedStatePublicationRecoveryCleanupEvidence>
+            cleanupRecords,
         string inventoryDigest,
         long observedAtUnixSeconds)
     {
@@ -1718,6 +1728,7 @@ internal sealed class RetainedStatePublicationRecoveryInventory : IDisposable
             currentAcceptanceCandidateObjectIdentity;
         CurrentAcceptedPublication = currentAcceptedPublication;
         Anchors = anchors;
+        CleanupRecords = cleanupRecords;
         InventoryDigest = inventoryDigest;
         ObservedAtUnixSeconds = observedAtUnixSeconds;
     }
@@ -1736,6 +1747,8 @@ internal sealed class RetainedStatePublicationRecoveryInventory : IDisposable
     }
     internal ImmutableArray<RetainedStatePublicationRecoveryAnchorEvidence>
         Anchors { get; }
+    internal ImmutableArray<RetainedStatePublicationRecoveryCleanupEvidence>
+        CleanupRecords { get; }
     internal string InventoryDigest { get; }
     internal long ObservedAtUnixSeconds { get; }
 
@@ -1756,6 +1769,8 @@ internal sealed class RetainedStatePublicationRecoveryInventory : IDisposable
         ValidatedPublicationPayloadV1? currentAcceptedPublication,
         ImmutableArray<RetainedStatePublicationRecoveryAnchorEvidence>
             anchors,
+        ImmutableArray<RetainedStatePublicationRecoveryCleanupEvidence>
+            cleanupRecords,
         string inventoryDigest,
         long observedAtUnixSeconds)
     {
@@ -1769,6 +1784,7 @@ internal sealed class RetainedStatePublicationRecoveryInventory : IDisposable
             currentAcceptanceCandidateObjectIdentity,
             currentAcceptedPublication,
             anchors,
+            cleanupRecords,
             inventoryDigest,
             observedAtUnixSeconds);
     }
@@ -1809,18 +1825,18 @@ internal sealed class RetainedStateP5CleanupAuthorization : IDisposable
     private RetainedStateP5CleanupAuthorization(
         RetainedStateTransactionAuthority authority,
         RetainedStateP5CleanupDecision decision,
-        OpaqueStoreObjectMetadata target,
+        ImmutableArray<OpaqueStoreObjectMetadata> targets,
         string inventoryDigest)
     {
         this.authority = authority;
         Decision = decision;
-        Target = target;
+        Targets = targets;
         InventoryDigest = inventoryDigest;
     }
 
     private readonly RetainedStateTransactionAuthority authority;
     internal RetainedStateP5CleanupDecision Decision { get; }
-    internal OpaqueStoreObjectMetadata Target { get; }
+    internal ImmutableArray<OpaqueStoreObjectMetadata> Targets { get; }
     internal string InventoryDigest { get; }
 
     internal bool TryConsume(RetainedStateTransactionAuthority value) =>
@@ -1832,11 +1848,11 @@ internal sealed class RetainedStateP5CleanupAuthorization : IDisposable
         object issuer,
         RetainedStateTransactionAuthority authority,
         RetainedStateP5CleanupDecision decision,
-        OpaqueStoreObjectMetadata target,
+        ImmutableArray<OpaqueStoreObjectMetadata> targets,
         string inventoryDigest)
     {
         RetainedStateCapabilityIssuer.Require(issuer);
-        return new(authority, decision, target, inventoryDigest);
+        return new(authority, decision, targets, inventoryDigest);
     }
 
     public void Dispose() => Interlocked.Exchange(ref usable, 0);

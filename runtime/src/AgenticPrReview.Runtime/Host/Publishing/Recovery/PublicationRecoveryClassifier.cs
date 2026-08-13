@@ -12,9 +12,33 @@ internal static class PublicationRecoveryClassifier
         if (observation is null ||
             !observation.IsLive ||
             marker is PublicationMarkerObservation.Incomplete or
-                PublicationMarkerObservation.Ambiguous ||
-            observation.Anchors is PublicationRecoveryAnchorState.Unresolved or
-                PublicationRecoveryAnchorState.Ambiguous)
+                PublicationMarkerObservation.Ambiguous)
+        {
+            return Conflict();
+        }
+
+        if (!observation.CleanupRecords.IsEmpty)
+        {
+            return observation.CleanupRecords.Length == 1
+                ? Decision(
+                    PublicationRecoveryAction.ResumeCleanup,
+                    PublicationRecoveryCodes.ResumeCleanup,
+                    PublicationRecoveryLifecycleState.CompletedCleanupDebt)
+                : Conflict();
+        }
+
+        if (observation.Anchors ==
+            PublicationRecoveryAnchorState.RecoverableWrite)
+        {
+            return observation.Candidate is not null
+                ? Decision(
+                    PublicationRecoveryAction.ResumeAnchoredWrite,
+                    PublicationRecoveryCodes.ResumeAnchoredWrite)
+                : Conflict();
+        }
+
+        if (observation.Anchors is PublicationRecoveryAnchorState.Unresolved or
+            PublicationRecoveryAnchorState.Ambiguous)
         {
             return Conflict();
         }
@@ -49,19 +73,27 @@ internal static class PublicationRecoveryClassifier
 
         if (!observation.CandidateMatchesCurrentHead)
         {
-            return observation.Intent is null &&
+            if (observation.Intent is null &&
                 observation.StickyReadback is null &&
                 observation.Failure is null &&
-                observation.Abandonment is null &&
                 observation.Recovery is null &&
                 marker == PublicationMarkerObservation.Absent &&
-                observation.Anchors == PublicationRecoveryAnchorState.None
-                ? Decision(
+                observation.Anchors == PublicationRecoveryAnchorState.None)
+            {
+                return observation.Abandonment is null
+                    ? Decision(
                     PublicationRecoveryAction.AbandonStaleCandidate,
                     PublicationRecoveryCodes.AbandonStaleCandidate,
                     PublicationRecoveryLifecycleState
                         .PendingCurrentTransaction)
-                : Conflict();
+                    : Decision(
+                        PublicationRecoveryAction.ResumeStaleCleanup,
+                        PublicationRecoveryCodes.ResumeStaleCleanup,
+                        PublicationRecoveryLifecycleState
+                            .PendingCurrentTransaction);
+            }
+
+            return Conflict();
         }
 
         if (marker == PublicationMarkerObservation.Exact)
