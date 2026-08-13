@@ -682,6 +682,31 @@ internal sealed class RetainedStateOpaqueRecord : IDisposable
         return true;
     }
 
+    internal bool TryCopyPayloadRange(
+        RetainedStateTransactionAuthority authority,
+        int offset,
+        int length,
+        out byte[] value,
+        out string payloadSha256)
+    {
+        value = [];
+        payloadSha256 = string.Empty;
+        var current = Volatile.Read(ref payload);
+        if (!ReferenceEquals(this.authority, authority) ||
+            !authority.IsLive ||
+            current is null ||
+            offset < 0 ||
+            length <= 0 ||
+            offset > current.Length - length)
+        {
+            return false;
+        }
+
+        value = current.AsSpan(offset, length).ToArray();
+        payloadSha256 = OpaqueStoreHash.Sha256(current);
+        return true;
+    }
+
     internal bool MatchesAuthenticated(
         RetainedStateTransactionAuthority authority,
         AuthenticatedStateObject value)
@@ -718,6 +743,131 @@ internal sealed class RetainedStateOpaqueRecord : IDisposable
     public void Dispose()
     {
         var current = Interlocked.Exchange(ref payload, null);
+        if (current is not null)
+        {
+            CryptographicOperations.ZeroMemory(current);
+        }
+    }
+
+    public override string ToString() => "[PRIVATE]";
+}
+
+internal sealed class RetainedStateOpaquePayloadExtraction : IDisposable
+{
+    private byte[]? extractedPayload;
+    private int usable = 1;
+
+    private RetainedStateOpaquePayloadExtraction(
+        RetainedStateTransactionAuthority authority,
+        StateObjectClass objectClass,
+        OpaqueStoreObjectMetadata sourceMetadata,
+        StateControlHeaderV1 sourceHeader,
+        string sourcePayloadSha256,
+        int payloadOffset,
+        byte[] extractedPayload,
+        string sourceInventoryDigest)
+    {
+        this.authority = authority;
+        ObjectClass = objectClass;
+        SourceMetadata = sourceMetadata;
+        SourceHeader = sourceHeader;
+        SourcePayloadSha256 = sourcePayloadSha256;
+        PayloadOffset = payloadOffset;
+        this.extractedPayload = extractedPayload;
+        ExtractedPayloadSha256 = OpaqueStoreHash.Sha256(extractedPayload);
+        SourceInventoryDigest = sourceInventoryDigest;
+    }
+
+    private readonly RetainedStateTransactionAuthority authority;
+    internal StateObjectClass ObjectClass { get; }
+    internal OpaqueStoreObjectMetadata SourceMetadata { get; }
+    internal StateControlHeaderV1 SourceHeader { get; }
+    internal string SourcePayloadSha256 { get; }
+    internal int PayloadOffset { get; }
+    internal int PayloadLength =>
+        Volatile.Read(ref extractedPayload)?.Length ?? 0;
+    internal string ExtractedPayloadSha256 { get; }
+    internal string SourceInventoryDigest { get; }
+
+    internal bool IsIssuedBy(RetainedStateTransactionAuthority value) =>
+        ReferenceEquals(authority, value) &&
+        value.IsLive &&
+        Volatile.Read(ref usable) == 1 &&
+        Volatile.Read(ref extractedPayload) is not null;
+
+    internal bool MatchesExpected(
+        RetainedStateTransactionAuthority value,
+        ReadOnlySpan<byte> expected)
+    {
+        var current = Volatile.Read(ref extractedPayload);
+        return IsIssuedBy(value) &&
+            current is not null &&
+            current.AsSpan().SequenceEqual(expected);
+    }
+
+    internal bool TryCopyExtractedPayload(
+        RetainedStateTransactionAuthority value,
+        out byte[] payload)
+    {
+        payload = [];
+        var current = Volatile.Read(ref extractedPayload);
+        if (!IsIssuedBy(value) || current is null)
+        {
+            return false;
+        }
+
+        payload = current.ToArray();
+        return true;
+    }
+
+    internal bool MatchesAuthenticated(AuthenticatedStateObject value)
+    {
+        var current = Volatile.Read(ref extractedPayload);
+        return current is not null &&
+            value.Header.ObjectClass == ObjectClass &&
+            value.Metadata == SourceMetadata &&
+            value.Header == SourceHeader &&
+            StringComparer.Ordinal.Equals(
+                OpaqueStoreHash.Sha256(value.Payload),
+                SourcePayloadSha256) &&
+            PayloadOffset <= value.Payload.Length - current.Length &&
+            value.Payload.AsSpan(PayloadOffset, current.Length)
+                .SequenceEqual(current);
+    }
+
+    internal bool TryConsume(RetainedStateTransactionAuthority value) =>
+        ReferenceEquals(authority, value) &&
+        value.IsLive &&
+        Volatile.Read(ref extractedPayload) is not null &&
+        Interlocked.CompareExchange(ref usable, 0, 1) == 1;
+
+    internal static RetainedStateOpaquePayloadExtraction Create(
+        object issuer,
+        RetainedStateTransactionAuthority authority,
+        StateObjectClass objectClass,
+        OpaqueStoreObjectMetadata sourceMetadata,
+        StateControlHeaderV1 sourceHeader,
+        string sourcePayloadSha256,
+        int payloadOffset,
+        byte[] extractedPayload,
+        string sourceInventoryDigest)
+    {
+        RetainedStateCapabilityIssuer.Require(issuer);
+        return new(
+            authority,
+            objectClass,
+            sourceMetadata,
+            sourceHeader,
+            sourcePayloadSha256,
+            payloadOffset,
+            extractedPayload,
+            sourceInventoryDigest);
+    }
+
+    public void Dispose()
+    {
+        Interlocked.Exchange(ref usable, 0);
+        var current = Interlocked.Exchange(ref extractedPayload, null);
         if (current is not null)
         {
             CryptographicOperations.ZeroMemory(current);
@@ -845,18 +995,56 @@ internal sealed class RetainedStateAcceptanceRecoveryDurability : IDisposable
         RetainedStateTransactionAuthority authority,
         RetainedStateAcceptancePreparation preparation,
         OpaqueStoreObjectMetadata recoveryRecordMetadata,
+        StateControlHeaderV1 recoveryRecordHeader,
+        string recoveryRecordPayloadSha256,
+        int extractionOffset,
+        int extractionLength,
+        string extractedPayloadSha256,
         string inventoryDigest)
     {
         this.authority = authority;
         Preparation = preparation;
         RecoveryRecordMetadata = recoveryRecordMetadata;
+        RecoveryRecordHeader = recoveryRecordHeader;
+        RecoveryRecordPayloadSha256 = recoveryRecordPayloadSha256;
+        ExtractionOffset = extractionOffset;
+        ExtractionLength = extractionLength;
+        ExtractedPayloadSha256 = extractedPayloadSha256;
         InventoryDigest = inventoryDigest;
     }
 
     private readonly RetainedStateTransactionAuthority authority;
     internal RetainedStateAcceptancePreparation Preparation { get; }
     internal OpaqueStoreObjectMetadata RecoveryRecordMetadata { get; }
+    internal StateControlHeaderV1 RecoveryRecordHeader { get; }
+    internal string RecoveryRecordPayloadSha256 { get; }
+    internal int ExtractionOffset { get; }
+    internal int ExtractionLength { get; }
+    internal string ExtractedPayloadSha256 { get; }
     internal string InventoryDigest { get; }
+
+    internal bool IsIssuedFor(
+        RetainedStateTransactionAuthority value,
+        RetainedStateAcceptancePreparation preparation) =>
+        ReferenceEquals(authority, value) &&
+        value.IsLive &&
+        Volatile.Read(ref usable) == 1 &&
+        ReferenceEquals(Preparation, preparation);
+
+    internal bool MatchesRecoveryRecord(AuthenticatedStateObject value) =>
+        value.Metadata == RecoveryRecordMetadata &&
+        value.Header == RecoveryRecordHeader &&
+        StringComparer.Ordinal.Equals(
+            OpaqueStoreHash.Sha256(value.Payload),
+            RecoveryRecordPayloadSha256) &&
+        ExtractionOffset >= 0 &&
+        ExtractionLength > 0 &&
+        ExtractionOffset <= value.Payload.Length - ExtractionLength &&
+        StringComparer.Ordinal.Equals(
+            OpaqueStoreHash.Sha256(value.Payload.AsSpan(
+                ExtractionOffset,
+                ExtractionLength)),
+            ExtractedPayloadSha256);
 
     internal bool TryAuthorizePredecessor(
         RetainedStateTransactionAuthority value,
@@ -884,6 +1072,11 @@ internal sealed class RetainedStateAcceptanceRecoveryDurability : IDisposable
         RetainedStateTransactionAuthority authority,
         RetainedStateAcceptancePreparation preparation,
         OpaqueStoreObjectMetadata recoveryRecordMetadata,
+        StateControlHeaderV1 recoveryRecordHeader,
+        string recoveryRecordPayloadSha256,
+        int extractionOffset,
+        int extractionLength,
+        string extractedPayloadSha256,
         string inventoryDigest)
     {
         RetainedStateCapabilityIssuer.Require(issuer);
@@ -891,6 +1084,11 @@ internal sealed class RetainedStateAcceptanceRecoveryDurability : IDisposable
             authority,
             preparation,
             recoveryRecordMetadata,
+            recoveryRecordHeader,
+            recoveryRecordPayloadSha256,
+            extractionOffset,
+            extractionLength,
+            extractedPayloadSha256,
             inventoryDigest);
     }
 

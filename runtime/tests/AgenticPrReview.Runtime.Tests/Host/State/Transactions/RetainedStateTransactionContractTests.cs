@@ -220,6 +220,7 @@ public sealed class RetainedStateTransactionContractTests
             typeof(RetainedStateOwnership),
             typeof(RetainedStateOpaqueWriteAttempt),
             typeof(RetainedStateOpaqueRecord),
+            typeof(RetainedStateOpaquePayloadExtraction),
             typeof(RetainedStateAcceptancePreparation),
             typeof(RetainedStateAcceptanceRecoveryDurability),
             typeof(RetainedStateAcceptanceEvidence),
@@ -242,6 +243,28 @@ public sealed class RetainedStateTransactionContractTests
                 property => property.PropertyType ==
                     typeof(RetainedStateTransactionAuthority));
         }
+
+        var recoveryMethods = new[]
+        {
+            typeof(RestrictedStateService).GetMethod(
+                "BindRetainedStateAcceptanceRecoveryAsync",
+                BindingFlags.Static | BindingFlags.NonPublic),
+            typeof(RestrictedStateService).GetMethod(
+                "RecoverRetainedStateAcceptancePreparationAsync",
+                BindingFlags.Static | BindingFlags.NonPublic),
+        };
+        Assert.All(recoveryMethods, method =>
+        {
+            Assert.NotNull(method);
+            Assert.Contains(
+                method!.GetParameters(),
+                parameter => parameter.ParameterType ==
+                    typeof(RetainedStateOpaquePayloadExtraction));
+            Assert.DoesNotContain(
+                method.GetParameters(),
+                parameter => parameter.ParameterType ==
+                    typeof(ImmutableArray<byte>));
+        });
 
         var issuerFactories = capabilities
             .SelectMany(type => type.GetMethods(

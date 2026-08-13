@@ -36,6 +36,9 @@ public sealed class RetainedStateTransactionEndToEndTests
 {
     private const string FinishJson =
         "{\"summary\":\"complete\",\"findings\":[]}";
+    private static readonly byte[] P5RecoveryPayloadPrefix =
+        Encoding.UTF8.GetBytes(
+            "P5REC01|status=sticky-published|acceptance=");
 
     [Fact]
     public async Task BootstrapCandidateIntentAndAcceptanceUseOneClosedChain()
@@ -1413,11 +1416,77 @@ public sealed class RetainedStateTransactionEndToEndTests
             RetainedStateTransactionCodes.AccessDenied,
             evidenceWithoutDurability.Code);
         Assert.Equal(uploadsBeforeDurability, fixture.Store.UploadCalls);
-        var recoveryBytes = WrapP5RecoveryPayload(
-            handoff!.OpaqueInnerPayload);
-        var recordResult = await PersistOpaqueRecordAsync(
+        var unrelatedRecoveryBytes = WrapP5RecoveryPayload(
+            ImmutableArray.CreateRange(
+                new byte[handoff!.OpaqueInnerPayload.Length]));
+        var unrelatedRecordResult = await PersistOpaqueRecordAsync(
                 fixture.Context,
                 preparation.Ownership,
+                new RetainedStateOpaqueWriteRequest(
+                    StateObjectClass.PublicationFailure,
+                    unrelatedRecoveryBytes,
+                    prepared.Header.ObjectIdentity,
+                    SuccessorIdentity: null,
+                    handoff.MinimumSemanticExpiresAtUnixSeconds),
+                CancellationToken.None);
+        using var unrelatedRecord = Assert.IsType<RetainedStateOpaqueRecord>(
+            unrelatedRecordResult.Value);
+        using var unrelatedExtraction = CreateAcceptanceRecoveryExtraction(
+            fixture.Context,
+            unrelatedRecord,
+            handoff.OpaqueInnerPayload.Length);
+        var wrongDurability = await RestrictedStateService
+            .BindRetainedStateAcceptanceRecoveryAsync(
+                fixture.Context,
+                preparation,
+                unrelatedExtraction,
+                CancellationToken.None);
+        Assert.Equal(
+            RetainedStateTransactionCodes.AccessDenied,
+            wrongDurability.Code);
+        Assert.Null(wrongDurability.Value);
+        var uploadsAfterUnrelatedRecord = fixture.Store.UploadCalls;
+        Assert.Equal(
+            RetainedStateTransactionCodes.AccessDenied,
+            await RestrictedStateService
+                .ReconcileRetainedStateAcceptancePredecessorAsync(
+                    fixture.Context,
+                    preparation,
+                    wrongDurability.Value!,
+                    CancellationToken.None));
+        var evidenceWithUnrelatedRecord = await RestrictedStateService
+            .CreateRetainedStateAcceptanceEvidenceAsync(
+                fixture.Context,
+                preparation,
+                wrongDurability.Value!,
+                preparation.Ownership,
+                new ExactHeadRevalidationResult(
+                    ExactHeadRevalidationStatus.Exact,
+                    prepared.Publication.ReviewedHeadSha,
+                    prepared.Publication.ReviewedHeadSha),
+                CancellationToken.None);
+        Assert.Equal(
+            RetainedStateTransactionCodes.AccessDenied,
+            evidenceWithUnrelatedRecord.Code);
+        Assert.Null(evidenceWithUnrelatedRecord.Value);
+        Assert.Equal(
+            uploadsAfterUnrelatedRecord,
+            fixture.Store.UploadCalls);
+
+        var ownershipAfterUnrelatedResult = await RestrictedStateService
+            .RenewRetainedStateOwnershipAsync(
+                fixture.Context,
+                candidate,
+                prior: null,
+                expectedP5Records: [unrelatedRecord],
+                CancellationToken.None);
+        using var ownershipAfterUnrelated = Assert.IsType<
+            RetainedStateOwnership>(ownershipAfterUnrelatedResult.Value);
+        var recoveryBytes = WrapP5RecoveryPayload(
+            handoff.OpaqueInnerPayload);
+        var recordResult = await PersistOpaqueRecordAsync(
+                fixture.Context,
+                ownershipAfterUnrelated,
                 new RetainedStateOpaqueWriteRequest(
                     StateObjectClass.PublicationIntent,
                     recoveryBytes,
@@ -1427,24 +1496,74 @@ public sealed class RetainedStateTransactionEndToEndTests
                 CancellationToken.None);
         using var record = Assert.IsType<RetainedStateOpaqueRecord>(
             recordResult.Value);
-        var wrongInnerBytes = handoff.OpaqueInnerPayload.ToArray();
-        wrongInnerBytes[0] ^= 1;
-        var wrongDurability = await RestrictedStateService
+        Assert.Equal(
+            RetainedStateTransactionCodes.AccessDenied,
+            RestrictedStateService
+                .CreateRetainedStateOpaquePayloadExtraction(
+                    fixture.Context,
+                    record,
+                    payloadOffset: -1,
+                    payloadLength: handoff.OpaqueInnerPayload.Length)
+                .Code);
+        Assert.Equal(
+            RetainedStateTransactionCodes.AccessDenied,
+            RestrictedStateService
+                .CreateRetainedStateOpaquePayloadExtraction(
+                    fixture.Context,
+                    record,
+                    P5RecoveryPayloadPrefix.Length,
+                    handoff.OpaqueInnerPayload.Length + 1)
+                .Code);
+        var shiftedExtractionResult = RestrictedStateService
+            .CreateRetainedStateOpaquePayloadExtraction(
+                fixture.Context,
+                record,
+                P5RecoveryPayloadPrefix.Length - 1,
+                handoff.OpaqueInnerPayload.Length);
+        using var shiftedExtraction = Assert.IsType<
+            RetainedStateOpaquePayloadExtraction>(
+                shiftedExtractionResult.Value);
+        var shiftedDurability = await RestrictedStateService
             .BindRetainedStateAcceptanceRecoveryAsync(
                 fixture.Context,
                 preparation,
-                record,
-                ImmutableArray.CreateRange(wrongInnerBytes),
+                shiftedExtraction,
                 CancellationToken.None);
         Assert.Equal(
             RetainedStateTransactionCodes.AccessDenied,
-            wrongDurability.Code);
-        Assert.Null(wrongDurability.Value);
+            shiftedDurability.Code);
+        var disposedExtraction = CreateAcceptanceRecoveryExtraction(
+            fixture.Context,
+            record,
+            handoff.OpaqueInnerPayload.Length);
+        disposedExtraction.Dispose();
+        var disposedDurability = await RestrictedStateService
+            .BindRetainedStateAcceptanceRecoveryAsync(
+                fixture.Context,
+                preparation,
+                disposedExtraction,
+                CancellationToken.None);
+        Assert.Equal(
+            RetainedStateTransactionCodes.AccessDenied,
+            disposedDurability.Code);
+        using var extraction = CreateAcceptanceRecoveryExtraction(
+            fixture.Context,
+            record,
+            handoff.OpaqueInnerPayload.Length);
         using var durability = await BindAcceptanceRecoveryAsync(
             fixture.Context,
             preparation,
-            record,
-            handoff.OpaqueInnerPayload);
+            extraction);
+        var replayedExtraction = await RestrictedStateService
+            .BindRetainedStateAcceptanceRecoveryAsync(
+                fixture.Context,
+                preparation,
+                extraction,
+                CancellationToken.None);
+        Assert.Equal(
+            RetainedStateTransactionCodes.AccessDenied,
+            replayedExtraction.Code);
+        Assert.Null(replayedExtraction.Value);
         Assert.Equal(
             RetainedStateTransactionCodes.Ready,
             await RestrictedStateService
@@ -1458,7 +1577,7 @@ public sealed class RetainedStateTransactionEndToEndTests
                 fixture.Context,
                 candidate,
                 prior: null,
-                expectedP5Records: [record],
+                expectedP5Records: [unrelatedRecord, record],
                 CancellationToken.None);
         using var finalOwnership = Assert.IsType<RetainedStateOwnership>(
             finalOwnershipResult.Value);
@@ -1514,11 +1633,16 @@ public sealed class RetainedStateTransactionEndToEndTests
         Assert.True(TryUnwrapP5RecoveryPayload(
             recoveredOuterPayload,
             out var recoveredInnerPayload));
+        using var recoveredExtraction =
+            CreateAcceptanceRecoveryExtraction(
+                resumed.Context,
+                recoveredRecord,
+                recoveredInnerPayload.Length);
         var recoveredPreparationResult = await RestrictedStateService
             .RecoverRetainedStateAcceptancePreparationAsync(
                 resumed.Context,
                 recoveredCandidate,
-                recoveredInnerPayload,
+                recoveredExtraction,
                 CancellationToken.None);
         using var recoveredPreparation = Assert.IsType<
             RetainedStateAcceptancePreparation>(
@@ -1526,8 +1650,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         using var recoveredDurability = await BindAcceptanceRecoveryAsync(
             resumed.Context,
             recoveredPreparation,
-            recoveredRecord,
-            recoveredInnerPayload);
+            recoveredExtraction);
         Assert.Equal(
             RetainedStateTransactionCodes.Ready,
             await RestrictedStateService
@@ -1672,10 +1795,74 @@ public sealed class RetainedStateTransactionEndToEndTests
         using var preparation = Assert.IsType<
             RetainedStateAcceptancePreparation>(preparationResult.Value);
         Assert.True(preparation.TryCreateRecoveryHandoff(out var handoff));
+        var unrelatedOuter = WrapP5RecoveryPayload(
+            ImmutableArray.CreateRange(
+                new byte[handoff!.OpaqueInnerPayload.Length]));
+        var unrelatedResult = await PersistOpaqueRecordAsync(
+                successor.Context,
+                preparation.Ownership,
+                new RetainedStateOpaqueWriteRequest(
+                    StateObjectClass.PublicationFailure,
+                    unrelatedOuter,
+                    prepared.Header.ObjectIdentity,
+                    SuccessorIdentity: null,
+                    handoff.MinimumSemanticExpiresAtUnixSeconds),
+                CancellationToken.None);
+        using var unrelatedP5 = Assert.IsType<RetainedStateOpaqueRecord>(
+            unrelatedResult.Value);
+        using var unrelatedExtraction = CreateAcceptanceRecoveryExtraction(
+            successor.Context,
+            unrelatedP5,
+            handoff.OpaqueInnerPayload.Length);
+        var unrelatedDurability = await RestrictedStateService
+            .BindRetainedStateAcceptanceRecoveryAsync(
+                successor.Context,
+                preparation,
+                unrelatedExtraction,
+                CancellationToken.None);
+        Assert.Equal(
+            RetainedStateTransactionCodes.AccessDenied,
+            unrelatedDurability.Code);
+        var uploadsBeforeRejectedCopy = successor.Store.UploadCalls;
+        Assert.Equal(
+            RetainedStateTransactionCodes.AccessDenied,
+            await RestrictedStateService
+                .ReconcileRetainedStateAcceptancePredecessorAsync(
+                    successor.Context,
+                    preparation,
+                    unrelatedDurability.Value!,
+                    CancellationToken.None));
+        var rejectedEvidence = await RestrictedStateService
+            .CreateRetainedStateAcceptanceEvidenceAsync(
+                successor.Context,
+                preparation,
+                unrelatedDurability.Value!,
+                preparation.Ownership,
+                new ExactHeadRevalidationResult(
+                    ExactHeadRevalidationStatus.Exact,
+                    prepared.Publication.ReviewedHeadSha,
+                    prepared.Publication.ReviewedHeadSha),
+                CancellationToken.None);
+        Assert.Equal(
+            RetainedStateTransactionCodes.AccessDenied,
+            rejectedEvidence.Code);
+        Assert.Equal(
+            uploadsBeforeRejectedCopy,
+            successor.Store.UploadCalls);
+
+        var ownershipAfterUnrelatedResult = await RestrictedStateService
+            .RenewRetainedStateOwnershipAsync(
+                successor.Context,
+                candidate,
+                prior: null,
+                expectedP5Records: [.. existing.Records, unrelatedP5],
+                CancellationToken.None);
+        using var ownershipAfterUnrelated = Assert.IsType<
+            RetainedStateOwnership>(ownershipAfterUnrelatedResult.Value);
         var outer = WrapP5RecoveryPayload(handoff!.OpaqueInnerPayload);
         var p5Result = await PersistOpaqueRecordAsync(
                 successor.Context,
-                preparation.Ownership,
+                ownershipAfterUnrelated,
                 new RetainedStateOpaqueWriteRequest(
                     StateObjectClass.PublicationIntent,
                     outer,
@@ -1684,11 +1871,66 @@ public sealed class RetainedStateTransactionEndToEndTests
                     handoff.MinimumSemanticExpiresAtUnixSeconds),
                 CancellationToken.None);
         using var p5 = Assert.IsType<RetainedStateOpaqueRecord>(p5Result.Value);
+        using var p5Extraction = CreateAcceptanceRecoveryExtraction(
+            successor.Context,
+            p5,
+            handoff.OpaqueInnerPayload.Length);
+        using var staleDurability = await BindAcceptanceRecoveryAsync(
+            successor.Context,
+            preparation,
+            p5Extraction);
+        var driftOwnershipResult = await RestrictedStateService
+            .RenewRetainedStateOwnershipAsync(
+                successor.Context,
+                candidate,
+                prior: null,
+                expectedP5Records:
+                    [.. existing.Records, unrelatedP5, p5],
+                CancellationToken.None);
+        using var driftOwnership = Assert.IsType<RetainedStateOwnership>(
+            driftOwnershipResult.Value);
+        var driftRecordResult = await PersistOpaqueRecordAsync(
+                successor.Context,
+                driftOwnership,
+                new RetainedStateOpaqueWriteRequest(
+                    StateObjectClass.Abandonment,
+                    ImmutableArray.CreateRange(
+                        "classified-after-binding"u8.ToArray()),
+                    prepared.Header.ObjectIdentity,
+                    SuccessorIdentity: null,
+                    handoff.MinimumSemanticExpiresAtUnixSeconds),
+                CancellationToken.None);
+        using var driftRecord = Assert.IsType<RetainedStateOpaqueRecord>(
+            driftRecordResult.Value);
+        var uploadsAfterInventoryDrift = successor.Store.UploadCalls;
+        Assert.Equal(
+            RetainedStateTransactionCodes.Conflict,
+            await RestrictedStateService
+                .ReconcileRetainedStateAcceptancePredecessorAsync(
+                    successor.Context,
+                    preparation,
+                    staleDurability,
+                    CancellationToken.None));
+        Assert.Equal(
+            uploadsAfterInventoryDrift,
+            successor.Store.UploadCalls);
+        var refreshedP5Result = await RestrictedStateService
+            .QueryRetainedOpaqueRecordsAsync(
+                successor.Context,
+                StateObjectClass.PublicationIntent,
+                CancellationToken.None);
+        using var refreshedP5Records = Assert.IsType<
+            RetainedStateOpaqueRecordSet>(refreshedP5Result.Value);
+        var refreshedP5 = Assert.Single(refreshedP5Records.Records.Where(
+            record => record.Metadata == p5.Metadata));
+        using var freshExtraction = CreateAcceptanceRecoveryExtraction(
+            successor.Context,
+            refreshedP5,
+            handoff.OpaqueInnerPayload.Length);
         using var durability = await BindAcceptanceRecoveryAsync(
             successor.Context,
             preparation,
-            p5,
-            handoff.OpaqueInnerPayload);
+            freshExtraction);
         successor.Store.FailNextUploadForName = candidate.Prepared.Name;
         successor.Store.ScheduledUploadFailure =
             OpaqueStoreFailure.OutcomeUnknown;
@@ -1725,7 +1967,8 @@ public sealed class RetainedStateTransactionEndToEndTests
                 CancellationToken.None);
         using var recoveredRecords = Assert.IsType<
             RetainedStateOpaqueRecordSet>(recoveredRecordsResult.Value);
-        ImmutableArray<byte> recoveredInner = [];
+        RetainedStateOpaqueRecord? recoveredP5 = null;
+        RetainedStateOpaquePayloadExtraction? matchingExtraction = null;
         foreach (var record in recoveredRecords.Records)
         {
             if (RestrictedStateService.TryCopyRetainedStateOpaquePayload(
@@ -1738,35 +1981,31 @@ public sealed class RetainedStateTransactionEndToEndTests
                 inner.AsSpan().SequenceEqual(
                     handoff.OpaqueInnerPayload.AsSpan()))
             {
-                recoveredInner = inner;
+                recoveredP5 = record;
+                matchingExtraction = CreateAcceptanceRecoveryExtraction(
+                    resumed.Context,
+                    record,
+                    inner.Length);
                 break;
             }
         }
 
-        Assert.False(recoveredInner.IsDefaultOrEmpty);
+        Assert.NotNull(recoveredP5);
+        using var recoveredExtraction = Assert.IsType<
+            RetainedStateOpaquePayloadExtraction>(matchingExtraction);
         var recoveredPreparationResult = await RestrictedStateService
             .RecoverRetainedStateAcceptancePreparationAsync(
                 resumed.Context,
                 recoveredCandidate,
-                recoveredInner,
+                recoveredExtraction,
                 CancellationToken.None);
         using var recoveredPreparation = Assert.IsType<
             RetainedStateAcceptancePreparation>(
                 recoveredPreparationResult.Value);
-        var recoveredP5 = Assert.Single(recoveredRecords.Records.Where(record =>
-        {
-            return RestrictedStateService.TryCopyRetainedStateOpaquePayload(
-                    resumed.Context,
-                    record,
-                    out var outerPayload) &&
-                TryUnwrapP5RecoveryPayload(outerPayload, out var innerPayload) &&
-                innerPayload.AsSpan().SequenceEqual(recoveredInner.AsSpan());
-        }));
         using var recoveredDurability = await BindAcceptanceRecoveryAsync(
             resumed.Context,
             recoveredPreparation,
-            recoveredP5,
-            recoveredInner);
+            recoveredExtraction);
         var uploadsBeforeRecoveryReconcile = resumed.Store.UploadCalls;
         var cancelled = new CancellationToken(canceled: true);
         var reconciled = await RestrictedStateService
@@ -2362,11 +2601,14 @@ public sealed class RetainedStateTransactionEndToEndTests
                 CancellationToken.None);
         using var recoveryRecord = Assert.IsType<RetainedStateOpaqueRecord>(
             recoveredAttemptResult.Value);
+        using var extraction = CreateAcceptanceRecoveryExtraction(
+            fixture.Context,
+            recoveryRecord,
+            handoff.OpaqueInnerPayload.Length);
         using var durability = await BindAcceptanceRecoveryAsync(
             fixture.Context,
             preparation,
-            recoveryRecord,
-            handoff.OpaqueInnerPayload);
+            extraction);
         var predecessorCode = await RestrictedStateService
             .ReconcileRetainedStateAcceptancePredecessorAsync(
                 fixture.Context,
@@ -2444,44 +2686,56 @@ public sealed class RetainedStateTransactionEndToEndTests
         BindAcceptanceRecoveryAsync(
         AuthorizedAcceptedStateRestoreContext context,
         RetainedStateAcceptancePreparation preparation,
-        RetainedStateOpaqueRecord record,
-        ImmutableArray<byte> innerPayload)
+        RetainedStateOpaquePayloadExtraction extraction)
     {
         var bound = await RestrictedStateService
             .BindRetainedStateAcceptanceRecoveryAsync(
                 context,
                 preparation,
-                record,
-                innerPayload,
+                extraction,
                 CancellationToken.None);
         Assert.True(bound.Succeeded, bound.Code);
         return Assert.IsType<RetainedStateAcceptanceRecoveryDurability>(
             bound.Value);
     }
 
+    private static RetainedStateOpaquePayloadExtraction
+        CreateAcceptanceRecoveryExtraction(
+        AuthorizedAcceptedStateRestoreContext context,
+        RetainedStateOpaqueRecord record,
+        int payloadLength)
+    {
+        var extracted = RestrictedStateService
+            .CreateRetainedStateOpaquePayloadExtraction(
+                context,
+                record,
+                P5RecoveryPayloadPrefix.Length,
+                payloadLength);
+        Assert.True(extracted.Succeeded, extracted.Code);
+        return Assert.IsType<RetainedStateOpaquePayloadExtraction>(
+            extracted.Value);
+    }
+
     private static ImmutableArray<byte> WrapP5RecoveryPayload(
         ImmutableArray<byte> inner)
     {
-        var prefix = Encoding.UTF8.GetBytes(
-            "P5REC01|status=sticky-published|acceptance=");
-        return [.. prefix, .. inner];
+        return [.. P5RecoveryPayloadPrefix, .. inner];
     }
 
     private static bool TryUnwrapP5RecoveryPayload(
         ImmutableArray<byte> outer,
         out ImmutableArray<byte> inner)
     {
-        var prefix = Encoding.UTF8.GetBytes(
-            "P5REC01|status=sticky-published|acceptance=");
         if (outer.IsDefaultOrEmpty ||
-            outer.Length <= prefix.Length ||
-            !outer.AsSpan(0, prefix.Length).SequenceEqual(prefix))
+            outer.Length <= P5RecoveryPayloadPrefix.Length ||
+            !outer.AsSpan(0, P5RecoveryPayloadPrefix.Length)
+                .SequenceEqual(P5RecoveryPayloadPrefix))
         {
             inner = [];
             return false;
         }
 
-        inner = outer[prefix.Length..];
+        inner = outer[P5RecoveryPayloadPrefix.Length..];
         return true;
     }
 

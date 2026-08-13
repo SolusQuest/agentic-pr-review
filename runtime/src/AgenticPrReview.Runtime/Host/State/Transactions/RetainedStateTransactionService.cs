@@ -1582,7 +1582,7 @@ internal sealed class RetainedStateTransactionService
     {
         if (preparation is null ||
             durability is null ||
-            !durability.TryAuthorizePredecessor(authority, preparation))
+            !durability.IsIssuedFor(authority, preparation))
         {
             return RetainedStateTransactionCodes.AccessDenied;
         }
@@ -1613,23 +1613,66 @@ internal sealed class RetainedStateTransactionService
             return RetainedStateTransactionCodes.AccessDenied;
         }
 
-        if (attempt is null)
-        {
-            return cancellationToken.IsCancellationRequested
-                ? RetainedStateTransactionCodes.Cancelled
-                : RetainedStateTransactionCodes.Ready;
-        }
-
         var candidate = preparation.Candidate;
         if (!authority.TryGetBinding(lease, out var binding) ||
             binding is null ||
             !MatchesPreparedBinding(candidate.Prepared, binding) ||
             !authority.TryReadTrustedTime(lease, out var observedAt) ||
-            observedAt > attempt.RequiredLogicalExpiresAtUnixSeconds ||
-            authority.GetAcceptedSelection(lease)?.Current is not { } current ||
-            !MatchesPredecessorCopyAttempt(attempt, current, binding))
+            (attempt is not null &&
+                (observedAt > attempt.RequiredLogicalExpiresAtUnixSeconds ||
+                    authority.GetAcceptedSelection(lease)?.Current is not
+                    { } current ||
+                    !MatchesPredecessorCopyAttempt(
+                        attempt,
+                        current,
+                        binding))))
         {
             return RetainedStateTransactionCodes.AccessDenied;
+        }
+
+        var durabilityObservedResult = await authority.ObserveAsync(
+                lease,
+                durability.RecoveryRecordHeader
+                    .LogicalExpiresAtUnixSeconds,
+                observedAt,
+                attempt?.HasEnteredDispatch == true
+                    ? CancellationToken.None
+                    : cancellationToken)
+            .ConfigureAwait(false);
+        using var durabilityObserved = durabilityObservedResult.Value;
+        if (!durabilityObservedResult.Succeeded ||
+            durabilityObserved is null ||
+            !CanAppendCandidate(
+                durabilityObserved,
+                authority,
+                binding,
+                candidate) ||
+            durabilityObserved.Snapshot is not { } durabilitySnapshot ||
+            durabilityObserved.InventoryDigest is not { }
+                durabilityInventoryDigest ||
+            durabilitySnapshot.Authenticated.Count(item =>
+                durability.MatchesRecoveryRecord(item)) != 1 ||
+            (attempt is { ReconcileOnly: false } &&
+                !attempt.HasEnteredDispatch &&
+                !StringComparer.Ordinal.Equals(
+                    durabilityInventoryDigest,
+                    durability.InventoryDigest)))
+        {
+            return durabilityObservedResult.Succeeded
+                ? RetainedStateTransactionCodes.Conflict
+                : durabilityObservedResult.Code;
+        }
+
+        if (!durability.TryAuthorizePredecessor(authority, preparation))
+        {
+            return RetainedStateTransactionCodes.AccessDenied;
+        }
+
+        if (attempt is null)
+        {
+            return cancellationToken.IsCancellationRequested
+                ? RetainedStateTransactionCodes.Cancelled
+                : RetainedStateTransactionCodes.Ready;
         }
 
         var persisted = await PersistPredecessorCopyAttemptAsync(
@@ -1737,7 +1780,7 @@ internal sealed class RetainedStateTransactionService
             !snapshot.UnderRetained.IsEmpty ||
             !snapshot.Unknown.IsEmpty ||
             snapshot.Authenticated.Count(item =>
-                item.Metadata == durability.RecoveryRecordMetadata) != 1 ||
+                durability.MatchesRecoveryRecord(item)) != 1 ||
             HasAcceptanceSuccessor(snapshot, binding) ||
             snapshot.Authenticated.Count(item =>
                 item.Header.ObjectClass == StateObjectClass.Acceptance) >=
@@ -2555,36 +2598,76 @@ internal sealed class RetainedStateTransactionService
                 RetainedStateOpaqueRecordSet.Create(records));
     }
 
+    internal RetainedStateTransactionResult<
+        RetainedStateOpaquePayloadExtraction>
+        CreateOpaquePayloadExtraction(
+        RetainedStateTransactionAuthority authority,
+        RetainedStateOpaqueRecord record,
+        int payloadOffset,
+        int payloadLength)
+    {
+        if (record is null ||
+            record.ObjectClass is not (
+                StateObjectClass.PublicationIntent or
+                StateObjectClass.PublicationFailure or
+                StateObjectClass.Abandonment) ||
+            payloadLength > LineageFormat.MaximumPayloadBytes ||
+            !record.TryCopyPayloadRange(
+                authority,
+                payloadOffset,
+                payloadLength,
+                out var extractedPayload,
+                out var payloadSha256))
+        {
+            return RetainedStateTransactionResult<
+                RetainedStateOpaquePayloadExtraction>.Fail(
+                    RetainedStateTransactionCodes.AccessDenied);
+        }
+
+        return RetainedStateTransactionResult<
+            RetainedStateOpaquePayloadExtraction>.Success(
+                RetainedStateTransactionCodes.Ready,
+                RetainedStateOpaquePayloadExtraction.Create(
+                    issuer,
+                    authority,
+                    record.ObjectClass,
+                    record.Metadata,
+                    record.Header,
+                    payloadSha256,
+                    payloadOffset,
+                    extractedPayload,
+                    record.InventoryDigest));
+    }
+
     internal async Task<RetainedStateTransactionResult<
         RetainedStateAcceptanceRecoveryDurability>>
         BindAcceptanceRecoveryDurabilityAsync(
         RetainedStateTransactionAuthority authority,
         RetainedStateAcceptancePreparation preparation,
-        RetainedStateOpaqueRecord recoveryRecord,
-        ImmutableArray<byte> extractedInnerPayload,
+        RetainedStateOpaquePayloadExtraction extraction,
         CancellationToken cancellationToken)
     {
         using var lease = await authority.EnterAsync(cancellationToken)
             .ConfigureAwait(false);
         if (lease is null ||
             preparation is null ||
-            recoveryRecord is null ||
+            extraction is null ||
             !preparation.IsIssuedBy(authority) ||
-            recoveryRecord.ObjectClass is not (
+            extraction.ObjectClass is not (
                 StateObjectClass.PublicationIntent or
                 StateObjectClass.PublicationFailure or
                 StateObjectClass.Abandonment) ||
-            extractedInnerPayload.IsDefaultOrEmpty ||
             !preparation.TryCreateRecoveryHandoff(out var handoff) ||
             handoff is null ||
-            !extractedInnerPayload.AsSpan().SequenceEqual(
+            !extraction.MatchesExpected(
+                authority,
                 handoff.OpaqueInnerPayload.AsSpan()) ||
             !StringComparer.Ordinal.Equals(
-                recoveryRecord.Header.PredecessorIdentity,
+                extraction.SourceHeader.PredecessorIdentity,
                 handoff.CandidateObjectIdentity) ||
-            recoveryRecord.Header.LogicalExpiresAtUnixSeconds <
+            extraction.SourceHeader.LogicalExpiresAtUnixSeconds <
                 handoff.MinimumSemanticExpiresAtUnixSeconds ||
-            recoveryRecord.Metadata.ExpiresAtUnixSeconds <
+            extraction.SourceMetadata.ExpiresAtUnixSeconds <
                 handoff.MinimumSemanticExpiresAtUnixSeconds ||
             !authority.TryGetBinding(lease, out var binding) ||
             binding is null ||
@@ -2599,6 +2682,13 @@ internal sealed class RetainedStateTransactionService
                         ? RetainedStateTransactionCodes.Cancelled
                         : RetainedStateTransactionCodes.AccessDenied);
         }
+
+        var sourceMetadata = extraction.SourceMetadata;
+        var sourceHeader = extraction.SourceHeader;
+        var sourcePayloadSha256 = extraction.SourcePayloadSha256;
+        var extractionOffset = extraction.PayloadOffset;
+        var extractionLength = extraction.PayloadLength;
+        var extractedPayloadSha256 = extraction.ExtractedPayloadSha256;
 
         var observedResult = await authority.ObserveAsync(
                 lease,
@@ -2616,17 +2706,27 @@ internal sealed class RetainedStateTransactionService
                 preparation.Candidate) ||
             observed.Snapshot is not { } snapshot ||
             observed.InventoryDigest is not { } inventoryDigest ||
+            !StringComparer.Ordinal.Equals(
+                inventoryDigest,
+                extraction.SourceInventoryDigest) ||
             snapshot.Unknown.Any(item =>
                 item.Metadata.Reference ==
-                    recoveryRecord.Metadata.Reference) ||
+                    sourceMetadata.Reference) ||
             snapshot.Authenticated.Count(item =>
-                recoveryRecord.MatchesAuthenticated(authority, item)) != 1)
+                extraction.MatchesAuthenticated(item)) != 1)
         {
             return RetainedStateTransactionResult<
                 RetainedStateAcceptanceRecoveryDurability>.Fail(
                     observedResult.Succeeded
                         ? RetainedStateTransactionCodes.Conflict
                         : observedResult.Code);
+        }
+
+        if (!extraction.TryConsume(authority))
+        {
+            return RetainedStateTransactionResult<
+                RetainedStateAcceptanceRecoveryDurability>.Fail(
+                    RetainedStateTransactionCodes.AccessDenied);
         }
 
         return RetainedStateTransactionResult<
@@ -2636,7 +2736,12 @@ internal sealed class RetainedStateTransactionService
                     issuer,
                     authority,
                     preparation,
-                    recoveryRecord.Metadata,
+                    sourceMetadata,
+                    sourceHeader,
+                    sourcePayloadSha256,
+                    extractionOffset,
+                    extractionLength,
+                    extractedPayloadSha256,
                     inventoryDigest));
     }
 
@@ -2645,7 +2750,7 @@ internal sealed class RetainedStateTransactionService
         RecoverAcceptancePreparationAsync(
         RetainedStateTransactionAuthority authority,
         RetainedStatePersistedCandidate candidate,
-        ImmutableArray<byte> recoveryPayload,
+        RetainedStateOpaquePayloadExtraction extraction,
         CancellationToken cancellationToken)
     {
         using var lease = await authority.EnterAsync(cancellationToken)
@@ -2656,13 +2761,27 @@ internal sealed class RetainedStateTransactionService
             prepared is null ||
             !candidate.IsIssuedBy(authority) ||
             !prepared.IsIssuedBy(authority) ||
-            recoveryPayload.IsDefaultOrEmpty ||
-            recoveryPayload.Length > LineageFormat.MaximumPayloadBytes ||
+            extraction is null ||
+            extraction.ObjectClass is not (
+                StateObjectClass.PublicationIntent or
+                StateObjectClass.PublicationFailure or
+                StateObjectClass.Abandonment) ||
             !authority.TryGetBinding(lease, out var binding) ||
             binding is null ||
             !MatchesPreparedBinding(prepared, binding) ||
             !authority.TryReadTrustedTime(lease, out var observedAt))
         {
+            return RetainedStateTransactionResult<
+                RetainedStateAcceptancePreparation>.Fail(
+                    RetainedStateTransactionCodes.AccessDenied);
+        }
+
+        if (!extraction.TryCopyExtractedPayload(
+                authority,
+                out var encoded) ||
+            encoded.Length > LineageFormat.MaximumPayloadBytes)
+        {
+            CryptographicOperations.ZeroMemory(encoded);
             return RetainedStateTransactionResult<
                 RetainedStateAcceptancePreparation>.Fail(
                     RetainedStateTransactionCodes.AccessDenied);
@@ -2679,7 +2798,6 @@ internal sealed class RetainedStateTransactionService
         RetainedStatePredecessorCopyAttempt? predecessorCopyAttempt = null;
         RetainedStateRecoveredPredecessorCopy? recoveredCopy = null;
         byte[] canonicalRecovery = [];
-        var encoded = recoveryPayload.ToArray();
         try
         {
             if (!RetainedStateAcceptanceRecoveryCodec.TryDecode(
@@ -2709,6 +2827,13 @@ internal sealed class RetainedStateTransactionService
                     receiptBytes,
                     out recoveredReceipt) ||
                 recoveredReceipt is null ||
+                !StringComparer.Ordinal.Equals(
+                    extraction.SourceHeader.PredecessorIdentity,
+                    prepared.Header.ObjectIdentity) ||
+                extraction.SourceHeader.LogicalExpiresAtUnixSeconds <
+                    recoveredReceipt.LogicalExpiresAtUnixSeconds ||
+                extraction.SourceMetadata.ExpiresAtUnixSeconds <
+                    recoveredReceipt.LogicalExpiresAtUnixSeconds ||
                 observedAt > recoveredReceipt.LogicalExpiresAtUnixSeconds ||
                 !RetainedStateRetention.TryAcceptance(
                     recoveredReceipt.AcceptedAtUnixSeconds,
@@ -2861,9 +2986,14 @@ internal sealed class RetainedStateTransactionService
                             predecessor,
                             binding)) ||
                 observed.Snapshot is not { } snapshot ||
+                snapshot.Authenticated.Count(item =>
+                    extraction.MatchesAuthenticated(item)) != 1 ||
                 !snapshot.UnderRetained.IsEmpty ||
                 !snapshot.Unknown.IsEmpty ||
                 observed.InventoryDigest is not { } inventoryDigest ||
+                !StringComparer.Ordinal.Equals(
+                    inventoryDigest,
+                    extraction.SourceInventoryDigest) ||
                 observed.SelectedHead is null)
             {
                 return RetainedStateTransactionResult<
