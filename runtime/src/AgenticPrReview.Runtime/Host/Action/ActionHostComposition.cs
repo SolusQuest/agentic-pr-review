@@ -29,24 +29,50 @@ internal enum ActionHostExecutionMode
     ReconciliationOnly,
 }
 
-internal sealed class ActionHostTransactionJournal
+internal enum ActionHostOperationKind
 {
+    StateSetup = 1,
+    Provider,
+    HeadRevalidation,
+    CandidatePreparation,
+    CandidatePersistence,
+    Recovery,
+    StickyPublication,
+    Acceptance,
+    InlinePublication,
+    Cleanup,
+}
+
+internal sealed class ActionHostTransactionJournal : IDisposable
+{
+    private readonly object admissionGate = new();
+    private readonly CancellationToken callerCancellationToken;
+    private readonly CancellationTokenRegistration cancellationRegistration;
     private int cancellationObserved;
     private int currentRunMutationDispatched;
     private int currentRunTransactionAdvanced;
     private int executionMode = (int)ActionHostExecutionMode.Normal;
     private int latestResolution =
         (int)ActionHostOperationResolution.ResolvedNoCommit;
+    private long mutationDispatchVersion;
+    private ActionHostOperationKind? activeOperation;
 
     internal ActionHostTransactionJournal(
-        ActionHostCancellationState cancellation)
+        ActionHostCancellationState cancellation,
+        CancellationToken callerCancellationToken = default)
     {
+        this.callerCancellationToken = callerCancellationToken;
         if (cancellation == ActionHostCancellationState.Requested)
         {
-            cancellationObserved = 1;
-            executionMode =
-                (int)ActionHostExecutionMode.ReconciliationOnly;
+            ObserveCancellationCore();
         }
+
+        cancellationRegistration = callerCancellationToken.CanBeCanceled
+            ? callerCancellationToken.UnsafeRegister(
+                static state =>
+                    ((ActionHostTransactionJournal)state!).ObserveCancellationCore(),
+                this)
+            : default;
     }
 
     internal bool HasCurrentRunMutation =>
@@ -63,29 +89,74 @@ internal sealed class ActionHostTransactionJournal
 
     internal bool ObserveCancellation(CancellationToken cancellationToken)
     {
-        if (cancellationToken.IsCancellationRequested)
+        if (cancellationToken.IsCancellationRequested ||
+            callerCancellationToken.IsCancellationRequested)
         {
-            Interlocked.Exchange(ref cancellationObserved, 1);
-            Interlocked.Exchange(
-                ref executionMode,
-                (int)ActionHostExecutionMode.ReconciliationOnly);
+            ObserveCancellationCore();
         }
 
         return Volatile.Read(ref cancellationObserved) != 0;
     }
 
+    internal bool TryBeginBusinessOperation(
+        ActionHostOperationKind operation,
+        CancellationToken cancellationToken,
+        out ActionHostOperationScope? scope,
+        bool allowReconciliation = false)
+    {
+        lock (admissionGate)
+        {
+            if (cancellationToken.IsCancellationRequested ||
+                callerCancellationToken.IsCancellationRequested)
+            {
+                ObserveCancellationCore();
+            }
+
+            if (!allowReconciliation &&
+                Volatile.Read(ref cancellationObserved) != 0)
+            {
+                scope = null;
+                return false;
+            }
+
+            if (activeOperation is not null)
+            {
+                throw new InvalidOperationException(
+                    "Only one Action Host owner operation may be active.");
+            }
+
+            activeOperation = operation;
+            scope = new ActionHostOperationScope(
+                this,
+                operation,
+                mutationDispatchVersion);
+            return true;
+        }
+    }
+
     internal void BeforeMutationDispatch(CancellationToken cancellationToken)
     {
-        if (cancellationToken.IsCancellationRequested)
+        lock (admissionGate)
         {
-            _ = ObserveCancellation(cancellationToken);
-            cancellationToken.ThrowIfCancellationRequested();
-        }
+            if (activeOperation is null)
+            {
+                throw new InvalidOperationException(
+                    "A state or publication mutation requires an admitted owner operation.");
+            }
 
-        Interlocked.Exchange(ref currentRunMutationDispatched, 1);
-        Interlocked.Exchange(
-            ref latestResolution,
-            (int)ActionHostOperationResolution.Unresolved);
+            if (cancellationToken.IsCancellationRequested ||
+                callerCancellationToken.IsCancellationRequested)
+            {
+                ObserveCancellationCore();
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            mutationDispatchVersion++;
+            Interlocked.Exchange(ref currentRunMutationDispatched, 1);
+            Interlocked.Exchange(
+                ref latestResolution,
+                (int)ActionHostOperationResolution.Unresolved);
+        }
     }
 
     internal void Resolve(OpaqueStoreMutationState state) => Resolve(
@@ -117,10 +188,89 @@ internal sealed class ActionHostTransactionJournal
         ? ActionHostStatus.Cancelled
         : LatestResolution == ActionHostOperationResolution.Unresolved
             ? ActionHostStatus.OutcomeAmbiguous
-            : ActionHostStatus.ProviderFailed;
+            : ActionHostStatus.InternalFailure;
+
+    public void Dispose() => cancellationRegistration.Dispose();
+
+    private void ObserveCancellationCore()
+    {
+        lock (admissionGate)
+        {
+            Interlocked.Exchange(ref cancellationObserved, 1);
+            Interlocked.Exchange(
+                ref executionMode,
+                (int)ActionHostExecutionMode.ReconciliationOnly);
+        }
+    }
+
+    private void CompleteOperation(
+        ActionHostOperationKind operation,
+        long startingMutationVersion,
+        ActionHostOperationResolution? ownerResolution)
+    {
+        lock (admissionGate)
+        {
+            if (activeOperation != operation)
+            {
+                throw new InvalidOperationException(
+                    "The active Action Host owner operation changed unexpectedly.");
+            }
+
+            if (ownerResolution is not null &&
+                mutationDispatchVersion != startingMutationVersion)
+            {
+                Resolve(ownerResolution.Value);
+            }
+
+            activeOperation = null;
+        }
+    }
 
     private void Resolve(ActionHostOperationResolution resolution) =>
         Interlocked.Exchange(ref latestResolution, (int)resolution);
+
+    internal sealed class ActionHostOperationScope : IDisposable
+    {
+        private readonly ActionHostTransactionJournal journal;
+        private readonly ActionHostOperationKind operation;
+        private readonly long startingMutationVersion;
+        private int completed;
+
+        internal ActionHostOperationScope(
+            ActionHostTransactionJournal journal,
+            ActionHostOperationKind operation,
+            long startingMutationVersion)
+        {
+            this.journal = journal;
+            this.operation = operation;
+            this.startingMutationVersion = startingMutationVersion;
+        }
+
+        internal void Resolve(ActionHostOperationResolution resolution)
+        {
+            if (Interlocked.Exchange(ref completed, 1) != 0)
+            {
+                throw new InvalidOperationException(
+                    "The Action Host owner operation is already complete.");
+            }
+
+            journal.CompleteOperation(
+                operation,
+                startingMutationVersion,
+                resolution);
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref completed, 1) == 0)
+            {
+                journal.CompleteOperation(
+                    operation,
+                    startingMutationVersion,
+                    ownerResolution: null);
+            }
+        }
+    }
 }
 
 internal sealed class JournaledAcceptedStateProductionDependencies(
@@ -352,7 +502,9 @@ internal sealed class ActionHostComposition
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(launch);
-        var journal = new ActionHostTransactionJournal(launch.Cancellation);
+        using var journal = new ActionHostTransactionJournal(
+            launch.Cancellation,
+            cancellationToken);
         if (journal.ObserveCancellation(cancellationToken))
         {
             return Completion(
@@ -542,20 +694,36 @@ internal sealed class ActionHostComposition
                     StateWasAccessed: false);
             }
 
-            var restored = await RestrictedStateService
-                .RestoreAuthorizedArtifactStateAsync(
-                    new ArtifactStateRestoreRequest(
-                        launch,
-                        invocation,
-                        policy,
-                        reviewContext,
-                        DeepSeekReasoningContinuationCodec.Instance,
-                        new JournaledAcceptedStateProductionDependencies(
-                            dependencies.StateDependencies,
-                            journal),
-                        dependencies.TimeProvider),
-                    cancellationToken)
-                .ConfigureAwait(false);
+            if (!journal.TryBeginBusinessOperation(
+                    ActionHostOperationKind.StateSetup,
+                    cancellationToken,
+                    out var restoreOperation))
+            {
+                return Completion(
+                    launch,
+                    journal.CancellationStatus,
+                    StateWasAccessed: false);
+            }
+
+            AuthorizedAcceptedStateRestoreResult restored;
+            using (restoreOperation!)
+            {
+                restored = await RestrictedStateService
+                    .RestoreAuthorizedArtifactStateAsync(
+                        new ArtifactStateRestoreRequest(
+                            launch,
+                            invocation,
+                            policy,
+                            reviewContext,
+                            DeepSeekReasoningContinuationCodec.Instance,
+                            new JournaledAcceptedStateProductionDependencies(
+                                dependencies.StateDependencies,
+                                journal),
+                            dependencies.TimeProvider),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                restoreOperation!.Resolve(StateOwnerResolution(restored.Code));
+            }
             using var state = restored.Context;
             if (!restored.Succeeded || state is null)
             {
@@ -727,6 +895,16 @@ internal sealed class ActionHostComposition
         AcceptedStateCodes.Expired => ActionHostStatus.InternalFailure,
         _ => ActionHostStatus.InternalFailure,
     };
+
+    private static ActionHostOperationResolution StateOwnerResolution(
+        string code) => code switch
+        {
+            AcceptedStateCodes.Ready or AcceptedStateCodes.Bootstrap =>
+                ActionHostOperationResolution.ResolvedCommitted,
+            AcceptedStateCodes.OutcomeUnknown =>
+                ActionHostOperationResolution.Unresolved,
+            _ => ActionHostOperationResolution.ResolvedNoCommit,
+        };
 
     private static ActionHostCompletion Completion(
         ActionHostLaunchContract launch,

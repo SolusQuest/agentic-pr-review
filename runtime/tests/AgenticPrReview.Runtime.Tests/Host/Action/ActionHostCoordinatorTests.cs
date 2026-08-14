@@ -13,36 +13,52 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action;
 public sealed class ActionHostCoordinatorTests
 {
     [Fact]
-    public void TransactionJournalSeparatesCancellationFromMutationResolution()
+    public void TransactionJournalUsesFinalOwnerResolutionForCancellation()
     {
-        var journal = new ActionHostTransactionJournal(
-            ActionHostCancellationState.Requested);
+        using var journal = new ActionHostTransactionJournal(
+            ActionHostCancellationState.Active);
+        Assert.True(journal.TryBeginBusinessOperation(
+            ActionHostOperationKind.StateSetup,
+            CancellationToken.None,
+            out var operation));
+        using (operation!)
+        {
+            journal.BeforeMutationDispatch(CancellationToken.None);
+            journal.Resolve(OpaqueStoreMutationState.OutcomeUnknown);
+            operation!.Resolve(
+                ActionHostOperationResolution.ResolvedCommitted);
+        }
 
-        Assert.True(journal.ObserveCancellation(CancellationToken.None));
-        Assert.Equal(
-            ActionHostExecutionMode.ReconciliationOnly,
-            journal.ExecutionMode);
-        Assert.False(journal.HasCurrentRunMutation);
-        Assert.Equal(ActionHostStatus.Cancelled, journal.CancellationStatus);
-
-        journal.BeforeMutationDispatch(CancellationToken.None);
-        journal.Resolve(OpaqueStoreMutationState.Committed);
+        Assert.True(journal.ObserveCancellation(
+            new CancellationToken(canceled: true)));
 
         Assert.True(journal.HasCurrentRunMutation);
         Assert.Equal(
             ActionHostOperationResolution.ResolvedCommitted,
             journal.LatestResolution);
         Assert.Equal(
-            ActionHostStatus.ProviderFailed,
+            ActionHostStatus.InternalFailure,
             journal.CancellationStatus);
 
-        journal.Resolve(OpaqueStoreMutationState.OutcomeUnknown);
+        using var unresolved = new ActionHostTransactionJournal(
+            ActionHostCancellationState.Active);
+        Assert.True(unresolved.TryBeginBusinessOperation(
+            ActionHostOperationKind.StateSetup,
+            CancellationToken.None,
+            out var unresolvedOperation));
+        using (unresolvedOperation!)
+        {
+            unresolved.BeforeMutationDispatch(CancellationToken.None);
+            unresolved.Resolve(OpaqueStoreMutationState.OutcomeUnknown);
+        }
+        Assert.True(unresolved.ObserveCancellation(
+            new CancellationToken(canceled: true)));
 
         Assert.Equal(
             ActionHostStatus.OutcomeAmbiguous,
-            journal.CancellationStatus);
+            unresolved.CancellationStatus);
 
-        var transactionOnly = new ActionHostTransactionJournal(
+        using var transactionOnly = new ActionHostTransactionJournal(
             ActionHostCancellationState.Active);
         Assert.Equal(ActionHostExecutionMode.Normal,
             transactionOnly.ExecutionMode);
@@ -51,16 +67,54 @@ public sealed class ActionHostCoordinatorTests
             new CancellationToken(canceled: true)));
         Assert.False(transactionOnly.HasCurrentRunMutation);
         Assert.Equal(
-            ActionHostStatus.ProviderFailed,
+            ActionHostStatus.InternalFailure,
             transactionOnly.CancellationStatus);
+    }
+
+    [Fact]
+    public void CancellationRegistrationAtomicallyClosesBusinessAdmission()
+    {
+        using var source = new CancellationTokenSource();
+        using var journal = new ActionHostTransactionJournal(
+            ActionHostCancellationState.Active,
+            source.Token);
+
+        Assert.True(journal.TryBeginBusinessOperation(
+            ActionHostOperationKind.Provider,
+            source.Token,
+            out var admitted));
+        admitted!.Dispose();
+
+        source.Cancel();
+
+        Assert.True(journal.ObserveCancellation(CancellationToken.None));
+        Assert.Equal(
+            ActionHostExecutionMode.ReconciliationOnly,
+            journal.ExecutionMode);
+        Assert.False(journal.TryBeginBusinessOperation(
+            ActionHostOperationKind.Provider,
+            CancellationToken.None,
+            out var rejected));
+        Assert.Null(rejected);
+        Assert.True(journal.TryBeginBusinessOperation(
+            ActionHostOperationKind.Recovery,
+            CancellationToken.None,
+            out var reconciliation,
+            allowReconciliation: true));
+        reconciliation!.Dispose();
     }
 
     [Fact]
     public void CancelledMutationTokenDoesNotCrossTheDispatchBoundary()
     {
-        var journal = new ActionHostTransactionJournal(
+        using var journal = new ActionHostTransactionJournal(
             ActionHostCancellationState.Active);
         var cancellationToken = new CancellationToken(canceled: true);
+        Assert.True(journal.TryBeginBusinessOperation(
+            ActionHostOperationKind.StateSetup,
+            CancellationToken.None,
+            out var operation));
+        using var admitted = operation!;
 
         Assert.Throws<OperationCanceledException>(
             () => journal.BeforeMutationDispatch(cancellationToken));

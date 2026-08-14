@@ -77,6 +77,396 @@ public sealed class ActionHostCompositionTests
     }
 
     [Fact]
+    public async Task ReconciledStateSetupCancellationClosesProviderAdmission()
+    {
+        var calibration = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowDispatch);
+        var calibrationLaunch = FullLaunch(calibration.Launch);
+        var calibrationGitHub = new FullPathGitHubFactory(
+            calibration.Transport.PullRequest);
+        var calibrationStore = FullPathStore(
+            calibrationLaunch,
+            rawUnknownFirstUpload: true);
+        var listsBeforeProvider = 0;
+        var calibrationProvider = new FullPathProviderFactory(
+            onCreate: () =>
+            {
+                listsBeforeProvider = calibrationStore.ListCalls;
+                throw new InvalidOperationException("calibration complete");
+            });
+        var calibrationStaging = StagingPath();
+        var calibrationCompletion = await new ActionHostComposition(
+                new ActionHostCompositionDependencies(
+                    calibration.EventReader,
+                    calibration.Factory,
+                    calibrationGitHub,
+                    calibrationGitHub,
+                    new FullPathStateDependencies(
+                        calibrationStore,
+                        calibrationGitHub),
+                    EmptyPublisher(),
+                    calibrationProvider,
+                    new FrozenLocatorTimeProvider(LocatorTestData.Now),
+                    () => calibrationStaging))
+            .RunAsync(calibrationLaunch, CancellationToken.None);
+
+        Assert.Equal(
+            ActionHostStatus.ProviderFailed,
+            calibrationCompletion.Status);
+        Assert.True(listsBeforeProvider > 0);
+        Assert.True(calibrationStore.UploadCalls > 0);
+        Assert.False(Directory.Exists(calibrationStaging));
+
+        var scenario = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowDispatch);
+        var launch = FullLaunch(scenario.Launch);
+        var github = new FullPathGitHubFactory(
+            scenario.Transport.PullRequest);
+        var store = FullPathStore(
+            launch,
+            rawUnknownFirstUpload: true);
+        using var cancellation = new CancellationTokenSource();
+        store.BeforeList = (_, call) =>
+        {
+            if (call == listsBeforeProvider)
+            {
+                cancellation.Cancel();
+            }
+        };
+        var provider = new FullPathProviderFactory();
+        var publisher = EmptyPublisher();
+        var staging = StagingPath();
+
+        var completion = await new ActionHostComposition(
+                new ActionHostCompositionDependencies(
+                    scenario.EventReader,
+                    scenario.Factory,
+                    github,
+                    github,
+                    new FullPathStateDependencies(store, github),
+                    publisher,
+                    provider,
+                    new FrozenLocatorTimeProvider(LocatorTestData.Now),
+                    () => staging))
+            .RunAsync(launch, cancellation.Token);
+
+        Assert.Equal(ActionHostStatus.InternalFailure, completion.Status);
+        Assert.Equal(
+            ActionHostStateDisposition.NotCommitted,
+            completion.Summary.StateDisposition);
+        Assert.Equal(0, provider.Creates);
+        Assert.Equal(0, provider.Runs);
+        Assert.Empty(publisher.Transport.Bodies);
+        Assert.Equal(listsBeforeProvider, store.ListCalls);
+        Assert.True(store.UploadCalls > 0);
+        Assert.False(Directory.Exists(staging));
+    }
+
+    [Fact]
+    public async Task AgentCancellationAfterResolvedStateSetupIsNotProviderFailure()
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowDispatch);
+        var launch = FullLaunch(scenario.Launch);
+        var github = new FullPathGitHubFactory(
+            scenario.Transport.PullRequest);
+        var store = FullPathStore(launch);
+        var provider = new FullPathProviderFactory(cancelledOutcome: true);
+        var publisher = EmptyPublisher();
+        var staging = StagingPath();
+
+        var completion = await new ActionHostComposition(
+                new ActionHostCompositionDependencies(
+                    scenario.EventReader,
+                    scenario.Factory,
+                    github,
+                    github,
+                    new FullPathStateDependencies(store, github),
+                    publisher,
+                    provider,
+                    new FrozenLocatorTimeProvider(LocatorTestData.Now),
+                    () => staging))
+            .RunAsync(launch, CancellationToken.None);
+
+        Assert.Equal(ActionHostStatus.InternalFailure, completion.Status);
+        Assert.NotEqual(ActionHostStatus.ProviderFailed, completion.Status);
+        Assert.Equal(1, provider.Creates);
+        Assert.Equal(1, provider.Runs);
+        Assert.Empty(publisher.Transport.Bodies);
+        Assert.True(store.UploadCalls > 0);
+        Assert.False(Directory.Exists(staging));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    public async Task CancellationAfterCandidateOrIntentTerminalizesThroughP5(
+        int uploadOffsetAfterProvider)
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowDispatch);
+        var launch = FullLaunch(scenario.Launch);
+        var github = new FullPathGitHubFactory(
+            scenario.Transport.PullRequest);
+        var store = FullPathStore(launch);
+        using var cancellation = new CancellationTokenSource();
+        var setupUploads = 0;
+        store.AfterUpload = (_, call) =>
+        {
+            if (setupUploads > 0 &&
+                call == setupUploads + uploadOffsetAfterProvider)
+            {
+                cancellation.Cancel();
+            }
+        };
+        var provider = new FullPathProviderFactory(
+            onRunCompleted: () => setupUploads = store.UploadCalls);
+        var publisher = EmptyPublisher();
+        var staging = StagingPath();
+
+        var completion = await new ActionHostComposition(
+                new ActionHostCompositionDependencies(
+                    scenario.EventReader,
+                    scenario.Factory,
+                    github,
+                    github,
+                    new FullPathStateDependencies(store, github),
+                    publisher,
+                    provider,
+                    new FrozenLocatorTimeProvider(LocatorTestData.Now),
+                    () => staging))
+            .RunAsync(launch, cancellation.Token);
+
+        Assert.True(cancellation.IsCancellationRequested);
+        Assert.Equal(
+            ActionHostStatus.StickyPublicationFailed,
+            completion.Status);
+        Assert.Equal(
+            ActionHostStateDisposition.NotCommitted,
+            completion.Summary.StateDisposition);
+        Assert.Equal(1, provider.Creates);
+        Assert.Equal(1, provider.Runs);
+        Assert.Empty(publisher.Transport.Bodies);
+        Assert.True(store.UploadCalls > setupUploads + uploadOffsetAfterProvider);
+        Assert.False(Directory.Exists(staging));
+    }
+
+    [Theory]
+    [InlineData(
+        (int)BoundedGitHubHttpOutcome.KnownNotSent,
+        (int)BoundedGitHubPublisherReason.Deadline,
+        (int)ActionHostStatus.StickyPublicationFailed,
+        2)]
+    [InlineData(
+        (int)BoundedGitHubHttpOutcome.OutcomeUnknown,
+        (int)BoundedGitHubPublisherReason.Deadline,
+        (int)ActionHostStatus.OutcomeAmbiguous,
+        1)]
+    [InlineData(
+        (int)BoundedGitHubHttpOutcome.AuthorizationOrValidationFailure,
+        (int)BoundedGitHubPublisherReason.ValidationRejected,
+        (int)ActionHostStatus.AuthorizationFailed,
+        1)]
+    public async Task P2FailureClassesConvergeThroughDurableRecovery(
+        int transportOutcomeValue,
+        int transportReasonValue,
+        int expectedStatusValue,
+        int expectedMutations)
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowDispatch);
+        var launch = FullLaunch(scenario.Launch);
+        var github = new FullPathGitHubFactory(
+            scenario.Transport.PullRequest);
+        var store = FullPathStore(launch);
+        var publisher = new FakePublisherTransportFactory();
+        for (var index = 0; index < 256; index++)
+        {
+            publisher.Transport.Enqueue();
+        }
+        var transportOutcome = (BoundedGitHubHttpOutcome)
+            transportOutcomeValue;
+        var transportReason = (BoundedGitHubPublisherReason)
+            transportReasonValue;
+        publisher.Transport.Mutation =
+            BoundedGitHubHttpResult<BoundedGitHubIssueComment>.Failed(
+                transportOutcome,
+                transportReason,
+                transportOutcome == BoundedGitHubHttpOutcome
+                    .AuthorizationOrValidationFailure
+                    ? new BoundedGitHubValidationEvidence(
+                        422,
+                        false,
+                        "validation failed",
+                        null,
+                        [])
+                    : null);
+        var provider = new FullPathProviderFactory();
+        var staging = StagingPath();
+
+        var completion = await new ActionHostComposition(
+                new ActionHostCompositionDependencies(
+                    scenario.EventReader,
+                    scenario.Factory,
+                    github,
+                    github,
+                    new FullPathStateDependencies(store, github),
+                    publisher,
+                    provider,
+                    new FrozenLocatorTimeProvider(LocatorTestData.Now),
+                    () => staging))
+            .RunAsync(launch, CancellationToken.None);
+
+        Assert.Equal((ActionHostStatus)expectedStatusValue, completion.Status);
+        Assert.Equal(1, provider.Creates);
+        Assert.Equal(1, provider.Runs);
+        Assert.Equal(expectedMutations, publisher.Transport.Bodies.Count);
+        Assert.Equal(
+            ActionHostStateDisposition.NotCommitted,
+            completion.Summary.StateDisposition);
+        Assert.False(Directory.Exists(staging));
+    }
+
+    [Theory]
+    [InlineData(1, 0)]
+    [InlineData(2, 0)]
+    [InlineData(3, 1)]
+    public async Task EachCoordinatorExactHeadBarrierStopsAChangedHead(
+        int barrier,
+        int expectedStickyMutations)
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowDispatch);
+        var launch = FullLaunch(scenario.Launch);
+        var github = new FullPathGitHubFactory(
+            scenario.Transport.PullRequest);
+        var store = FullPathStore(launch);
+        var publisher = SuccessfulPublisher(780 + barrier);
+        var setupUploads = 0;
+        var provider = new FullPathProviderFactory(
+            onRunCompleted: () => setupUploads = store.UploadCalls);
+        github.CurrentPullRequestFact = _ =>
+        {
+            var shouldChange = barrier switch
+            {
+                1 => provider.Runs == 1 &&
+                    store.UploadCalls == setupUploads &&
+                    publisher.Transport.Bodies.Count == 0,
+                2 => provider.Runs == 1 &&
+                    store.UploadCalls > setupUploads &&
+                    publisher.Transport.Bodies.Count == 0,
+                3 => publisher.Transport.Bodies.Count > 0,
+                _ => false,
+            };
+            return shouldChange
+                ? scenario.Transport.PullRequest with
+                {
+                    HeadSha = new string('f', 40),
+                }
+                : scenario.Transport.PullRequest;
+        };
+        var staging = StagingPath();
+
+        var completion = await new ActionHostComposition(
+                new ActionHostCompositionDependencies(
+                    scenario.EventReader,
+                    scenario.Factory,
+                    github,
+                    github,
+                    new FullPathStateDependencies(store, github),
+                    publisher,
+                    provider,
+                    new FrozenLocatorTimeProvider(LocatorTestData.Now),
+                    () => staging))
+            .RunAsync(launch, CancellationToken.None);
+
+        Assert.Equal(ActionHostStatus.StaleHead, completion.Status);
+        Assert.Equal(1, provider.Creates);
+        Assert.Equal(1, provider.Runs);
+        Assert.Equal(
+            expectedStickyMutations,
+            publisher.Transport.Bodies.Count);
+        Assert.Equal(
+            ActionHostStateDisposition.NotCommitted,
+            completion.Summary.StateDisposition);
+        Assert.False(Directory.Exists(staging));
+    }
+
+    [Fact]
+    public async Task RecoversAcceptanceCrashWithoutProviderKeyOrDuplicateSticky()
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowDispatch);
+        var launch = FullLaunch(scenario.Launch);
+        var github = new FullPathGitHubFactory(
+            scenario.Transport.PullRequest);
+        var store = FullPathStore(launch);
+        var publisher = SuccessfulPublisher(790);
+        var provider = new FullPathProviderFactory();
+        var acceptanceCrashArmed = false;
+        store.AfterUpload = (_, call) =>
+        {
+            if (acceptanceCrashArmed || publisher.Transport.Bodies.Count == 0)
+            {
+                return;
+            }
+
+            acceptanceCrashArmed = true;
+            store.FailUploadOnUploadCall = call + 1;
+            store.ScheduledUploadFailure = OpaqueStoreFailure.OutcomeUnknown;
+            store.ScheduledUploadMutationState =
+                OpaqueStoreMutationState.OutcomeUnknown;
+            store.HideFailedUploadForNextLists = 128;
+        };
+        var firstStaging = StagingPath();
+
+        var first = await new ActionHostComposition(
+                new ActionHostCompositionDependencies(
+                    scenario.EventReader,
+                    scenario.Factory,
+                    github,
+                    github,
+                    new FullPathStateDependencies(store, github),
+                    publisher,
+                    provider,
+                    new FrozenLocatorTimeProvider(LocatorTestData.Now),
+                    () => firstStaging))
+            .RunAsync(launch, CancellationToken.None);
+
+        Assert.True(acceptanceCrashArmed);
+        Assert.Equal(ActionHostStatus.OutcomeAmbiguous, first.Status);
+        Assert.Equal(1, provider.Creates);
+        Assert.Equal(1, provider.Runs);
+        Assert.Single(publisher.Transport.Bodies);
+        Assert.False(Directory.Exists(firstStaging));
+
+        store.AfterUpload = null;
+        store.HideNextUploadedObjectForNextLists = 0;
+        var resumedStaging = StagingPath();
+        var resumed = await new ActionHostComposition(
+                new ActionHostCompositionDependencies(
+                    scenario.EventReader,
+                    scenario.Factory,
+                    github,
+                    github,
+                    new FullPathStateDependencies(store, github),
+                    publisher,
+                    provider,
+                    new FrozenLocatorTimeProvider(LocatorTestData.Now),
+                    () => resumedStaging))
+            .RunAsync(WithoutProviderKey(launch), CancellationToken.None);
+
+        Assert.Equal(ActionHostStatus.Reviewed, resumed.Status);
+        Assert.Equal(
+            ActionHostStateDisposition.Accepted,
+            resumed.Summary.StateDisposition);
+        Assert.Equal(1, provider.Creates);
+        Assert.Equal(1, provider.Runs);
+        Assert.Single(publisher.Transport.Bodies);
+        Assert.False(Directory.Exists(resumedStaging));
+    }
+
+    [Fact]
     public async Task ExecutesTheCompleteStickyTransactionThroughAcceptance()
     {
         var authorization = ActionHostAuthorizationScenario.Valid(
@@ -181,7 +571,7 @@ public sealed class ActionHostCompositionTests
                     provider,
                     time,
                     () => resumedStaging))
-            .RunAsync(launch, CancellationToken.None);
+            .RunAsync(WithoutProviderKey(launch), CancellationToken.None);
 
         Assert.Equal(ActionHostStatus.Reviewed, resumed.Status);
         Assert.Equal(ActionHostStateDisposition.Accepted,
@@ -497,6 +887,98 @@ public sealed class ActionHostCompositionTests
         return cancelled!;
     }
 
+    private static ActionHostLaunchContract WithoutProviderKey(
+        ActionHostLaunchContract launch)
+    {
+        Assert.True(ActionHostInputs.TryCreate(
+            launch.Inputs.GitHubToken,
+            providerApiKey: null,
+            launch.Inputs.StateKey,
+            launch.Inputs.PreviousStateKey,
+            launch.Inputs.ConfigPath,
+            launch.Inputs.PullRequestNumber,
+            launch.Inputs.StateMode,
+            out var inputs));
+        Assert.True(ActionHostLaunchContract.TryCreate(
+            inputs,
+            launch.EventJsonPath,
+            launch.EventJsonSha256,
+            launch.RepositoryName,
+            launch.RepositoryId,
+            launch.RunId,
+            launch.RunAttempt,
+            launch.WorkflowPath,
+            launch.WorkflowRef,
+            launch.WorkflowSha,
+            launch.ActionSourceSha,
+            launch.PayloadSha256,
+            launch.BuildDiscriminator,
+            launch.Cancellation,
+            launch.ArtifactBridgeEndpoint,
+            out var withoutProviderKey));
+        return withoutProviderKey!;
+    }
+
+    private static ScriptedLocatorStore FullPathStore(
+        ActionHostLaunchContract launch,
+        bool rawUnknownFirstUpload = false) => new()
+        {
+            FilterListsByName = true,
+            UseNumericObjectIds = true,
+            ProducingRunIdentity = launch.RunId.ToString(
+                System.Globalization.CultureInfo.InvariantCulture),
+            ProducingRunAttempt = launch.RunAttempt,
+            NextUploadFailure = rawUnknownFirstUpload
+                ? OpaqueStoreFailure.OutcomeUnknown
+                : OpaqueStoreFailure.None,
+            NextUploadMutationState = rawUnknownFirstUpload
+                ? OpaqueStoreMutationState.OutcomeUnknown
+                : OpaqueStoreMutationState.NotCommitted,
+            PersistFailedUpload = rawUnknownFirstUpload,
+        };
+
+    private static FakePublisherTransportFactory EmptyPublisher()
+    {
+        var publisher = new FakePublisherTransportFactory();
+        for (var index = 0; index < 32; index++)
+        {
+            publisher.Transport.Enqueue();
+        }
+
+        return publisher;
+    }
+
+    private static FakePublisherTransportFactory SuccessfulPublisher(
+        long commentId)
+    {
+        var publisher = EmptyPublisher();
+        publisher.Transport.OnMutation = () =>
+        {
+            var request = Assert.IsType<AuthorizedStickyPublicationRequest>(
+                publisher.Transport.Request);
+            var comment = StickyPublicationTestData.Comment(
+                commentId,
+                request.Rendered.Comment);
+            publisher.Transport.Mutation =
+                BoundedGitHubHttpResult<BoundedGitHubIssueComment>.Success(
+                    comment);
+            publisher.Transport.Read =
+                BoundedGitHubHttpResult<BoundedGitHubIssueComment>.Success(
+                    comment);
+            publisher.Transport.Pages.Clear();
+            for (var index = 0; index < 256; index++)
+            {
+                publisher.Transport.Enqueue(comment);
+            }
+        };
+        return publisher;
+    }
+
+    private static string StagingPath() => Path.Join(
+        Path.GetTempPath(),
+        "agentic-pr-review-r4-tests",
+        Guid.NewGuid().ToString("N"));
+
     private sealed class FullPathStateDependencies(
         IRestrictedStateStore store,
         IActionHostGitObjectTransportFactory github) :
@@ -510,10 +992,17 @@ public sealed class ActionHostCompositionTests
             github.CreateExactObjectTransport(token);
     }
 
-    private sealed class FullPathProviderFactory(bool withFinding = false) :
+    private sealed class FullPathProviderFactory(
+        bool withFinding = false,
+        bool cancelledOutcome = false,
+        System.Action? onCreate = null,
+        System.Action? onRunCompleted = null) :
         IActionHostProviderRunnerFactory
     {
         private readonly bool withFinding = withFinding;
+        private readonly bool cancelledOutcome = cancelledOutcome;
+        private readonly System.Action? onCreate = onCreate;
+        private readonly System.Action? onRunCompleted = onRunCompleted;
         internal int Creates { get; private set; }
         internal int Runs { get; private set; }
         internal AgentRunOutcome? LastOutcome { get; private set; }
@@ -524,6 +1013,7 @@ public sealed class ActionHostCompositionTests
             ReviewedSnapshot snapshot,
             TimeProvider timeProvider)
         {
+            onCreate?.Invoke();
             Creates++;
             return new Runner(this, snapshot, timeProvider);
         }
@@ -539,6 +1029,18 @@ public sealed class ActionHostCompositionTests
                 CancellationToken cancellationToken)
             {
                 owner.Runs++;
+                if (owner.cancelledOutcome)
+                {
+                    var cancelled = AgentRunOutcome.Failure(
+                        AgentFailureCodes.Cancelled,
+                        modelCalls: 0,
+                        toolCalls: 0,
+                        ImmutableArray<AgentLogicalEvent>.Empty);
+                    owner.LastOutcome = cancelled;
+                    owner.onRunCompleted?.Invoke();
+                    return cancelled;
+                }
+
                 var executor = owner.withFinding
                     ? new SnapshotToolExecutor(
                         snapshot,
@@ -585,6 +1087,7 @@ public sealed class ActionHostCompositionTests
                         timeProvider)
                     .RunAsync(request, cancellationToken);
                 owner.LastOutcome = outcome;
+                owner.onRunCompleted?.Invoke();
                 return outcome;
             }
 
@@ -733,6 +1236,8 @@ public sealed class ActionHostCompositionTests
         internal int GitTreeCalls { get; private set; }
         internal int GitBlobCalls { get; private set; }
         internal System.Action? OnCurrentPullRequest { get; set; }
+        internal Func<int, ActionHostGitHubPullRequestFact>?
+            CurrentPullRequestFact { get; set; }
 
         internal FullPathGitHubFactory(
             ActionHostGitHubPullRequestFact pullRequest,
@@ -869,7 +1374,9 @@ public sealed class ActionHostCompositionTests
                 owner.OnCurrentPullRequest?.Invoke();
                 return Task.FromResult(ActionHostGitObjectResult<
                     ActionHostGitHubPullRequestFact>.Success(
-                        owner.pullRequest,
+                        owner.CurrentPullRequestFact?.Invoke(
+                            owner.CurrentPullRequestCalls) ??
+                            owner.pullRequest,
                         64));
             }
 

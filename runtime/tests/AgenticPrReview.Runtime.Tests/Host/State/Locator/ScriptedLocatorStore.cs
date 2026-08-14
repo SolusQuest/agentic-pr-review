@@ -44,6 +44,8 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
     internal int HideFailedUploadForNextLists { get; set; }
     internal System.Action? BeforeDelete { get; set; }
     internal System.Action? BeforeUpload { get; set; }
+    internal System.Action<OpaqueStoreListRequest, int>? BeforeList { get; set; }
+    internal System.Action<OpaqueStoreUploadRequest, int>? AfterUpload { get; set; }
     internal System.Action? AfterDelete { get; set; }
     internal System.Func<
         OpaqueStoreObjectMetadata,
@@ -138,6 +140,7 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
         lock (gate)
         {
             ListCalls++;
+            BeforeList?.Invoke(request, ListCalls);
             if (ListFailure != OpaqueStoreFailure.None)
             {
                 return Task.FromResult(
@@ -334,7 +337,7 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
             var returnedMetadata = NextUploadMetadataTransform?.Invoke(
                 metadata) ?? metadata;
             NextUploadMetadataTransform = null;
-            return Task.FromResult(failure == OpaqueStoreFailure.None
+            var result = failure == OpaqueStoreFailure.None
                 ? new OpaqueStoreUploadResult(
                     OpaqueStoreFailure.None,
                     OpaqueStoreMutationState.Committed,
@@ -344,7 +347,9 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
                     mutationState,
                     mutationState == OpaqueStoreMutationState.NotCommitted
                         ? null
-                        : returnedMetadata));
+                        : returnedMetadata);
+            AfterUpload?.Invoke(request, UploadCalls);
+            return Task.FromResult(result);
         }
     }
 
