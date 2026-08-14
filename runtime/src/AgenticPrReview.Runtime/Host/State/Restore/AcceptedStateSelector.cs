@@ -129,6 +129,12 @@ internal sealed class AcceptedStateSelector
                     item.Header.SessionId,
                     selectedHead.Header.SessionId))
             .ToImmutableArray();
+        var now = timeProvider.GetUtcNow().ToUnixTimeSeconds();
+        if (!LineageValidation.IsTime(now))
+        {
+            return AcceptedStateSelectionResult.Fail(
+                AcceptedStateCodes.OutcomeUnknown);
+        }
         var historicalEvidence = selectedHead.Head.Superseded
             .Concat(selectedHead.Head.CompletedCleanup)
             .ToImmutableArray();
@@ -190,9 +196,21 @@ internal sealed class AcceptedStateSelector
 
         if (receipts.Count == 0)
         {
-            return candidates.Count == 0
+            var liveMetadata = PublicationCandidateFamilySelector.SelectLive(
+                    active,
+                    snapshot.Authenticated.Concat(snapshot.UnderRetained),
+                    selectedHead.Header.Epoch,
+                    selectedHead.Header.SessionId,
+                    now)
+                .Select(item => item.Metadata)
+                .ToHashSet();
+            var liveCandidates = candidates
+                .Where(candidate =>
+                    liveMetadata.Contains(candidate.Physical.Metadata))
+                .ToList();
+            return liveCandidates.Count == 0
                 ? AcceptedStateSelectionResult.Bootstrap()
-                : IsUniqueInitialPendingGeneration(candidates)
+                : IsUniqueInitialPendingGeneration(liveCandidates)
                     ? AcceptedStateSelectionResult.Bootstrap()
                     : AcceptedStateSelectionResult.Fail(
                         AcceptedStateCodes.IncompatibleCurrent);
@@ -259,13 +277,6 @@ internal sealed class AcceptedStateSelector
         {
             return AcceptedStateSelectionResult.Fail(
                 AcceptedStateCodes.Conflict);
-        }
-
-        var now = timeProvider.GetUtcNow().ToUnixTimeSeconds();
-        if (!LineageValidation.IsTime(now))
-        {
-            return AcceptedStateSelectionResult.Fail(
-                AcceptedStateCodes.OutcomeUnknown);
         }
 
         if (requiredWindow <= now)

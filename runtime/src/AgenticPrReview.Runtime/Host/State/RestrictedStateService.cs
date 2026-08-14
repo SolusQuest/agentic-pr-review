@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using AgenticPrReview.Runtime.ActionHost.Snapshot;
 using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
+using AgenticPrReview.Runtime.Host.Publishing.Recovery;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 using AgenticPrReview.Runtime.Host.State.Restore;
@@ -334,6 +335,32 @@ internal sealed class RestrictedStateService
                     RetainedStateTransactionCodes.AccessDenied));
 
     internal static Task<RetainedStateTransactionResult<
+        MatchedRetainedStateRecoveryAcceptance>>
+        MatchRecoveredRetainedStateAcceptanceAsync(
+        AuthorizedAcceptedStateRestoreContext context,
+        string candidateObjectIdentity,
+        RetainedStateOpaqueRecord recoveryRecord,
+        RetainedStateOpaquePayloadExtraction extraction,
+        VerifiedRetainedStateAcceptance acceptance,
+        CancellationToken cancellationToken) =>
+        context is not null &&
+        context.TryGetTransactionAuthority(
+            RetainedStateIssuer,
+            out var authority) &&
+        authority is not null
+            ? new RetainedStateTransactionService(RetainedStateIssuer)
+                .MatchRecoveredAcceptanceAsync(
+                    authority,
+                    candidateObjectIdentity,
+                    recoveryRecord,
+                    extraction,
+                    acceptance,
+                    cancellationToken)
+            : Task.FromResult(RetainedStateTransactionResult<
+                MatchedRetainedStateRecoveryAcceptance>.Fail(
+                    RetainedStateTransactionCodes.AccessDenied));
+
+    internal static Task<RetainedStateTransactionResult<
         RetainedStatePendingCandidateEvidence>>
         InspectRetainedPendingCandidateAsync(
         AuthorizedAcceptedStateRestoreContext context,
@@ -349,6 +376,72 @@ internal sealed class RestrictedStateService
                     cancellationToken)
             : Task.FromResult(RetainedStateTransactionResult<
                 RetainedStatePendingCandidateEvidence>.Fail(
+                    RetainedStateTransactionCodes.AccessDenied));
+
+    internal static Task<RetainedStateTransactionResult<
+        RetainedStateObservedCandidate>>
+        ObserveRetainedPendingCandidateAsync(
+        AuthorizedAcceptedStateRestoreContext context,
+        CancellationToken cancellationToken) =>
+        context is not null &&
+        context.TryGetTransactionAuthority(
+            RetainedStateIssuer,
+            out var authority) &&
+        authority is not null
+            ? new RetainedStateTransactionService(RetainedStateIssuer)
+                .ObservePendingCandidateAsync(
+                    authority,
+                    cancellationToken)
+            : Task.FromResult(RetainedStateTransactionResult<
+                RetainedStateObservedCandidate>.Fail(
+                    RetainedStateTransactionCodes.AccessDenied));
+
+    internal static Task<RetainedStateTransactionResult<
+        RetainedStatePublicationRecoveryInventory>>
+        ObserveRetainedPublicationRecoveryInventoryAsync(
+        AuthorizedAcceptedStateRestoreContext context,
+        CancellationToken cancellationToken) =>
+        context is not null &&
+        context.TryGetTransactionAuthority(
+            RetainedStateIssuer,
+            out var authority) &&
+        authority is not null
+            ? new RetainedStateTransactionService(RetainedStateIssuer)
+                .ObservePublicationRecoveryInventoryAsync(
+                    authority,
+                    cancellationToken)
+            : Task.FromResult(RetainedStateTransactionResult<
+                RetainedStatePublicationRecoveryInventory>.Fail(
+                    RetainedStateTransactionCodes.AccessDenied));
+
+    internal static Task<RetainedStateTransactionResult<
+        RetainedStateOwnership>>
+        AuthorizeRetainedStaleAbandonmentOwnershipAsync(
+        AuthorizedAcceptedStateRestoreContext context,
+        PublicationRecoveryObservation observation,
+        RetainedStateObservedCandidate candidate,
+        PublicationStaleAbandonmentAuthorization authorization,
+        CancellationToken cancellationToken) =>
+        context is not null &&
+        observation is not null &&
+        candidate is not null &&
+        authorization is not null &&
+        ReferenceEquals(observation.Candidate, candidate) &&
+        PublicationRecoveryInventoryFactory
+            .TryAuthorizeStaleAbandonmentOwnership(
+                observation,
+                authorization) &&
+        context.TryGetTransactionAuthority(
+            RetainedStateIssuer,
+            out var authority) &&
+        authority is not null
+            ? new RetainedStateTransactionService(RetainedStateIssuer)
+                .AuthorizeStaleAbandonmentOwnershipAsync(
+                    authority,
+                    candidate,
+                    cancellationToken)
+            : Task.FromResult(RetainedStateTransactionResult<
+                RetainedStateOwnership>.Fail(
                     RetainedStateTransactionCodes.AccessDenied));
 
     internal static Task<RetainedStateTransactionResult<
@@ -456,8 +549,13 @@ internal sealed class RestrictedStateService
         RetainedStatePendingCandidateEvidence? pendingCandidate,
         RetainedStateOpaqueRecord? opaqueRecord,
         RetainedStateOpaqueWriteAttempt? opaqueWrite,
+        RetainedStatePublicationRecoveryInventory? recoveryInventory,
+        RetainedStatePublicationRecoveryAnchorEvidence? recoveryAnchor,
         CancellationToken cancellationToken) =>
         context is not null &&
+        decision is not null &&
+        decision.Classification !=
+            RetainedStateP5CleanupClassification.StaleCandidateAbandonment &&
         context.TryGetTransactionAuthority(
             RetainedStateIssuer,
             out var authority) &&
@@ -469,6 +567,51 @@ internal sealed class RestrictedStateService
                     pendingCandidate,
                     opaqueRecord,
                     opaqueWrite,
+                    recoveryInventory,
+                    recoveryAnchor,
+                    cancellationToken)
+            : Task.FromResult(RetainedStateTransactionResult<
+                RetainedStateP5CleanupAuthorization>.Fail(
+                    RetainedStateTransactionCodes.AccessDenied));
+
+    internal static Task<RetainedStateTransactionResult<
+        RetainedStateP5CleanupAuthorization>>
+        AuthorizeRetainedStaleP5CleanupAsync(
+        AuthorizedAcceptedStateRestoreContext context,
+        PublicationRecoveryObservation observation,
+        AbandonmentV1 abandonment,
+        PublicationStaleCleanupAuthorization authorization,
+        RetainedStatePendingCandidateEvidence pendingCandidate,
+        RetainedStateOpaqueRecord abandonmentRecord,
+        CancellationToken cancellationToken) =>
+        context is not null &&
+        observation is not null &&
+        abandonment is not null &&
+        authorization is not null &&
+        pendingCandidate is not null &&
+        abandonmentRecord is not null &&
+        PublicationRecoveryInventoryFactory
+            .TryConsumeStaleCleanupAuthorization(
+                observation,
+                abandonment,
+                authorization) &&
+        context.TryGetTransactionAuthority(
+            RetainedStateIssuer,
+            out var authority) &&
+        authority is not null
+            ? new RetainedStateTransactionService(RetainedStateIssuer)
+                .AuthorizeP5CleanupAsync(
+                    authority,
+                    new RetainedStateP5CleanupDecision(
+                        RetainedStateP5CleanupClassification
+                            .StaleCandidateAbandonment,
+                        authorization.ClassificationIdentity,
+                        authorization.MarkerEvidenceIdentity),
+                    pendingCandidate,
+                    abandonmentRecord,
+                    opaqueWrite: null,
+                    recoveryInventory: null,
+                    recoveryAnchor: null,
                     cancellationToken)
             : Task.FromResult(RetainedStateTransactionResult<
                 RetainedStateP5CleanupAuthorization>.Fail(
@@ -488,6 +631,30 @@ internal sealed class RestrictedStateService
                 .CleanupP5AuthorizedAsync(
                     authority,
                     request,
+                    cancellationToken)
+            : Task.FromResult(new RetainedStateCleanupResult(
+                null,
+                Completed: false,
+                RetainedStateTransactionCodes.AccessDenied));
+
+    internal static Task<RetainedStateCleanupResult>
+        ResumeRetainedP5CleanupAsync(
+        AuthorizedAcceptedStateRestoreContext context,
+        RetainedStatePublicationRecoveryInventory inventory,
+        RetainedStatePublicationRecoveryCleanupEvidence evidence,
+        CancellationToken cancellationToken) =>
+        context is not null &&
+        inventory is not null &&
+        evidence is not null &&
+        context.TryGetTransactionAuthority(
+            RetainedStateIssuer,
+            out var authority) &&
+        authority is not null
+            ? new RetainedStateTransactionService(RetainedStateIssuer)
+                .ResumeP5CleanupAsync(
+                    authority,
+                    inventory,
+                    evidence,
                     cancellationToken)
             : Task.FromResult(new RetainedStateCleanupResult(
                 null,
