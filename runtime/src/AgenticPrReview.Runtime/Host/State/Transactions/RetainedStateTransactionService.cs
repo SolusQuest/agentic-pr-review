@@ -2356,7 +2356,7 @@ internal sealed class RetainedStateTransactionService
 
         var pending = snapshot.Authenticated.Where(item =>
                 item.Header.ObjectClass == StateObjectClass.Candidate &&
-                Active(item, binding) &&
+                ActiveAt(item, binding, trustedNow) &&
                 StringComparer.Ordinal.Equals(
                     item.Header.PredecessorIdentity,
                     binding.CurrentAcceptanceReceiptIdentity))
@@ -2608,7 +2608,7 @@ internal sealed class RetainedStateTransactionService
             .Concat(snapshot.UnderRetained)
             .Where(item =>
                 item.Header.ObjectClass == StateObjectClass.Candidate &&
-                Active(item, binding) &&
+                ActiveAt(item, binding, trustedNow) &&
                 StringComparer.Ordinal.Equals(
                     item.Header.PredecessorIdentity,
                     binding.CurrentAcceptanceReceiptIdentity))
@@ -2729,7 +2729,7 @@ internal sealed class RetainedStateTransactionService
         var pending = snapshot.Authenticated
             .Where(item =>
                 item.Header.ObjectClass == StateObjectClass.Candidate &&
-                Active(item, binding) &&
+                ActiveAt(item, binding, trustedNow) &&
                 StringComparer.Ordinal.Equals(
                     item.Header.PredecessorIdentity,
                     binding.CurrentAcceptanceReceiptIdentity))
@@ -2833,10 +2833,19 @@ internal sealed class RetainedStateTransactionService
                         : observedResult.Code);
         }
 
-        var pending = snapshot.Authenticated
+        var scopedCandidates = snapshot.Authenticated
             .Where(item =>
                 item.Header.ObjectClass == StateObjectClass.Candidate &&
-                Active(item, binding) &&
+                Active(item, binding))
+            .ToArray();
+        var expiredCandidateIdentities = scopedCandidates
+            .Where(item =>
+                item.Header.LogicalExpiresAtUnixSeconds < trustedNow)
+            .Select(item => item.Header.ObjectIdentity)
+            .ToHashSet(StringComparer.Ordinal);
+        var pending = scopedCandidates
+            .Where(item =>
+                item.Header.LogicalExpiresAtUnixSeconds >= trustedNow &&
                 StringComparer.Ordinal.Equals(
                     item.Header.PredecessorIdentity,
                     binding.CurrentAcceptanceReceiptIdentity))
@@ -2911,7 +2920,9 @@ internal sealed class RetainedStateTransactionService
                         StateObjectClass.PublicationIntent or
                         StateObjectClass.PublicationFailure or
                         StateObjectClass.Abandonment &&
-                    Active(item, binding))
+                    ActiveAt(item, binding, trustedNow) &&
+                    (item.Header.PredecessorIdentity is not { } predecessor ||
+                        !expiredCandidateIdentities.Contains(predecessor)))
                 .ToArray();
             records = activeRecords.Select(item =>
                     RetainedStateOpaqueRecord.Create(
@@ -2927,7 +2938,9 @@ internal sealed class RetainedStateTransactionService
             var cleanup = snapshot.Authenticated
                 .Where(item =>
                     item.Header.ObjectClass == StateObjectClass.Cleanup &&
-                    Active(item, binding))
+                    ActiveAt(item, binding, trustedNow) &&
+                    (item.Header.PredecessorIdentity is not { } predecessor ||
+                        !expiredCandidateIdentities.Contains(predecessor)))
                 .ToArray();
             var anchors = ImmutableArray.CreateBuilder<
                 RetainedStatePublicationRecoveryAnchorEvidence>();
@@ -6103,6 +6116,13 @@ internal sealed class RetainedStateTransactionService
         StringComparer.Ordinal.Equals(
             item.Header.SessionId,
             binding.SelectedLineage.SessionId);
+
+    private static bool ActiveAt(
+        AuthenticatedStateObject item,
+        RetainedStateTransactionBinding binding,
+        long trustedNowUnixSeconds) =>
+        Active(item, binding) &&
+        item.Header.LogicalExpiresAtUnixSeconds >= trustedNowUnixSeconds;
 
     private static bool HasAcceptanceSuccessor(
         ScopedStateInventorySnapshot snapshot,

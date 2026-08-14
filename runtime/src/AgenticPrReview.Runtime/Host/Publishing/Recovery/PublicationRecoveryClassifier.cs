@@ -104,7 +104,9 @@ internal static class PublicationRecoveryClassifier
 
         if (marker == PublicationMarkerObservation.Exact)
         {
-            return observation.Failure is null &&
+            return (observation.Failure is null ||
+                    observation.Failure.Outcome ==
+                        BoundedGitHubPublisherOutcome.OutcomeUnknown) &&
                 observation.Abandonment is null
                 ? Decision(
                     PublicationRecoveryAction.CompleteAcceptance,

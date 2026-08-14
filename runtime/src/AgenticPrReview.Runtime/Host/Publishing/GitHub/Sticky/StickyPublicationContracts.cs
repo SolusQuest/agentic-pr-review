@@ -100,6 +100,9 @@ internal sealed class AuthorizedStickyPublicationRequest
                 !StringComparer.Ordinal.Equals(
                     R4PublicationIdentityV1.ComputeScopeSha256(scope),
                     rendered.Identity.ScopeSha256) ||
+                !StringComparer.Ordinal.Equals(
+                    rendered.Identity.HeadSha,
+                    authorization.PullRequest.HeadSha) ||
                 observation.StoredPublication is not { } stored ||
                 !StringComparer.Ordinal.Equals(
                     rendered.Identity.HeadSha,

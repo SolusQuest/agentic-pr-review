@@ -8,6 +8,7 @@ using AgenticPrReview.Runtime.Host.State.Lineage;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 using AgenticPrReview.Runtime.Host.State.Restore;
 using AgenticPrReview.Runtime.Host.State.Transactions;
+using AgenticPrReview.Runtime.Tests.Host.Action.Authorization;
 using AgenticPrReview.Runtime.Tests.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Tests.Host.State.Transactions;
 
@@ -33,11 +34,24 @@ public sealed class PublicationRecoveryClassifierTests
             (await EvaluateAsync(RecoveryState.KnownNotWritten)).Action);
         Assert.Equal(PublicationRecoveryAction.StickyOutcomeUnknown,
             (await EvaluateAsync(RecoveryState.OutcomeUnknown)).Action);
+        Assert.Equal(PublicationRecoveryAction.CompleteAcceptance,
+            (await EvaluateAsync(
+                RecoveryState.OutcomeUnknownWithExactMarker)).Action);
+        Assert.Equal(PublicationRecoveryAction.Conflict,
+            (await EvaluateAsync(
+                RecoveryState.KnownNotWrittenWithExactMarker)).Action);
         Assert.Equal(PublicationRecoveryAction.CancelledBeforeSend,
             (await EvaluateAsync(RecoveryState.Cancelled)).Action);
         Assert.Equal(
             PublicationRecoveryAction.AuthorizationOrValidationFailure,
             (await EvaluateAsync(RecoveryState.AuthorizationFailure)).Action);
+        var expired = await EvaluateAsync(
+            RecoveryState.ExpiredOutcomeUnknown);
+        Assert.Equal(PublicationRecoveryAction.NoPendingWork, expired.Action);
+        Assert.True(expired.AllowsProvider);
+        Assert.False(expired.CandidatePresent);
+        Assert.False(expired.IntentPresent);
+        Assert.Null(expired.FailureOutcome);
     }
 
     [Fact]
@@ -986,6 +1000,31 @@ public sealed class PublicationRecoveryClassifierTests
             Assert.True(PublicationRecoveryService.TryRestoreRendered(
                 persistedIntent.Observation.StoredPublication,
                 out var persistedRendered));
+            var advancedScenario = ActionHostAuthorizationScenario.Valid(
+                ActionHostAuthorizationRoute.WorkflowDispatch);
+            advancedScenario.Transport.PullRequest =
+                advancedScenario.Transport.PullRequest with
+                {
+                    HeadSha = new string('f', 40),
+                };
+            var advancedAuthorization = await advancedScenario
+                .CreateAuthorizer()
+                .AuthorizeAsync(
+                    advancedScenario.Launch,
+                    CancellationToken.None);
+            Assert.Equal(
+                ActionHostAuthorizationFailure.None,
+                advancedAuthorization.Failure);
+            var advancedInvocation = Assert.IsType<
+                ActionHostAuthorizer.AuthorizedInvocation>(
+                    advancedAuthorization.Invocation);
+            Assert.False(AuthorizedStickyPublicationRequest.TryCreateRecovery(
+                advancedInvocation,
+                fixture.PublicationScope,
+                persistedRendered,
+                persistedIntent.Observation,
+                persistedIntent.StickyWriteAuthorization,
+                out _));
             Assert.True(AuthorizedStickyPublicationRequest.TryCreateRecovery(
                 fixture.Invocation,
                 fixture.PublicationScope,
@@ -1003,7 +1042,10 @@ public sealed class PublicationRecoveryClassifierTests
                 out _));
         }
         else if (state is RecoveryState.KnownNotWritten or
+            RecoveryState.KnownNotWrittenWithExactMarker or
             RecoveryState.OutcomeUnknown or
+            RecoveryState.OutcomeUnknownWithExactMarker or
+            RecoveryState.ExpiredOutcomeUnknown or
             RecoveryState.Cancelled or
             RecoveryState.AuthorizationFailure)
         {
@@ -1050,10 +1092,13 @@ public sealed class PublicationRecoveryClassifierTests
                 ownershipResult.Value);
             var (outcome, reason) = state switch
             {
-                RecoveryState.KnownNotWritten => (
+                RecoveryState.KnownNotWritten or
+                    RecoveryState.KnownNotWrittenWithExactMarker => (
                     BoundedGitHubPublisherOutcome.KnownNotWritten,
                     StickyPublicationReason.Deadline),
-                RecoveryState.OutcomeUnknown => (
+                RecoveryState.OutcomeUnknown or
+                    RecoveryState.OutcomeUnknownWithExactMarker or
+                    RecoveryState.ExpiredOutcomeUnknown => (
                     BoundedGitHubPublisherOutcome.OutcomeUnknown,
                     StickyPublicationReason.ReconciliationIncomplete),
                 RecoveryState.Cancelled => (
@@ -1093,9 +1138,29 @@ public sealed class PublicationRecoveryClassifierTests
                     attempt,
                     CancellationToken.None);
             Assert.True(cleanupResult.Completed, cleanupResult.Code);
+            if (state == RecoveryState.ExpiredOutcomeUnknown)
+            {
+                fixture.Time.UnixSeconds =
+                    prepared.Header.LogicalExpiresAtUnixSeconds + 1;
+                context.Dispose();
+                fixture = await RetainedStateTransactionEndToEndTests
+                    .RestoreFixtureAsync(fixture);
+                var inventoryResult = await RestrictedStateService
+                    .ObserveRetainedPublicationRecoveryInventoryAsync(
+                        fixture.Context,
+                        CancellationToken.None);
+                using var inventory = inventoryResult.Value;
+                Assert.True(inventoryResult.Succeeded, inventoryResult.Code);
+                Assert.Null(inventory!.Candidate);
+                Assert.Empty(inventory.Records);
+                Assert.Empty(inventory.Anchors);
+                Assert.Empty(inventory.CleanupRecords);
+            }
         }
 
-        if (state == RecoveryState.ExactMarker)
+        if (state is RecoveryState.ExactMarker or
+            RecoveryState.OutcomeUnknownWithExactMarker or
+            RecoveryState.KnownNotWrittenWithExactMarker)
         {
             Assert.True(PublicationRecoveryService.TryRestoreRendered(
                 prepared.Publication,
@@ -1204,7 +1269,10 @@ public sealed class PublicationRecoveryClassifierTests
         Candidate,
         Intent,
         KnownNotWritten,
+        KnownNotWrittenWithExactMarker,
         OutcomeUnknown,
+        OutcomeUnknownWithExactMarker,
+        ExpiredOutcomeUnknown,
         Cancelled,
         AuthorizationFailure,
         ExactMarker,
