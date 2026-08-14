@@ -1566,11 +1566,13 @@ public sealed class RetainedStateTransactionEndToEndTests
             resumed.Context,
             CancellationToken.None);
         Assert.Equal(
-            PublicationRecoveryAction.NoPendingWork,
+            PublicationRecoveryAction.CleanupSupersededRecovery,
             evaluation.Decision.Action);
         Assert.Equal(
             PublicationRecoveryLifecycleState.SupersededTerminalRecovery,
             evaluation.Decision.Lifecycle);
+        Assert.False(evaluation.Decision.AllowsProvider);
+        Assert.True(evaluation.Decision.AllowsSupersededCleanup);
 
         var cleanup = await PublicationRecoveryService
             .CleanupHistoricalRecoveryRecordsAsync(
@@ -1592,6 +1594,20 @@ public sealed class RetainedStateTransactionEndToEndTests
         Assert.Equal(0, factory.Transport.Lists);
         Assert.Equal(0, factory.Transport.Creates);
         Assert.Equal(0, factory.Transport.Updates);
+        using var after = await service.ClassifyBeforeProviderAsync(
+            resumed.Launch.Inputs.GitHubToken!,
+            resumed.Invocation,
+            resumed.PublicationScope,
+            resumed.Context,
+            CancellationToken.None);
+        Assert.Equal(
+            PublicationRecoveryAction.NoPendingWork,
+            after.Decision.Action);
+        Assert.Equal(
+            PublicationRecoveryLifecycleState.SupersededTerminalRecovery,
+            after.Decision.Lifecycle);
+        Assert.True(after.Decision.AllowsProvider);
+        Assert.False(after.Decision.AllowsSupersededCleanup);
         resumed.Context.Dispose();
     }
 
@@ -2866,7 +2882,8 @@ public sealed class RetainedStateTransactionEndToEndTests
         TransactionFixture fixture,
         bool newWorkflowRun = false,
         bool rotateStateKey = false,
-        string? reviewedHeadSha = null)
+        string? reviewedHeadSha = null,
+        string? ancestryPreviousHeadSha = null)
     {
         var launch = fixture.Launch;
         var invocation = fixture.Invocation;
@@ -2923,7 +2940,8 @@ public sealed class RetainedStateTransactionEndToEndTests
                     new TestDependencies(
                         fixture.Store,
                         reviewedHeadSha,
-                        fixture.Invocation.PullRequest.HeadSha),
+                        ancestryPreviousHeadSha ??
+                            fixture.Invocation.PullRequest.HeadSha),
                     fixture.Time),
                 CancellationToken.None);
         Assert.True(restored.Succeeded, restored.Code);

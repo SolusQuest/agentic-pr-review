@@ -236,6 +236,7 @@ internal enum PublicationRecoveryAction
 {
     Conflict = 0,
     NoPendingWork,
+    CleanupSupersededRecovery,
     ReturnCommitted,
     ResumeBeforeIntent,
     ResumeKnownNotWritten,
@@ -263,8 +264,7 @@ internal sealed record PublicationRecoveryDecision(
             PublicationRecoveryAction.AbandonStaleCandidate ||
         Action == PublicationRecoveryAction.ResumeStaleCleanup;
     internal bool AllowsSupersededCleanup =>
-        Lifecycle ==
-            PublicationRecoveryLifecycleState.SupersededTerminalRecovery;
+        Action == PublicationRecoveryAction.CleanupSupersededRecovery;
 }
 
 internal sealed record PublicationRecoveryEvaluation(
@@ -488,6 +488,8 @@ internal sealed record PublicationIntentPersistenceResult(
 internal static class PublicationRecoveryCodes
 {
     internal const string NoPendingWork = "publication_recovery_no_pending";
+    internal const string CleanupSupersededRecovery =
+        "publication_recovery_cleanup_superseded";
     internal const string ReturnCommitted = "publication_recovery_committed";
     internal const string ResumeBeforeIntent =
         "publication_recovery_resume_before_intent";

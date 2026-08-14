@@ -215,28 +215,21 @@ internal static class PublicationRecoveryInventoryFactory
                     reviewedHeadSha);
             if (!currentHeadMatches)
             {
-                historicalRecords.AddRange(acceptedRecords);
+                if (!TryAddAcceptedCleanupRecords(
+                        acceptedSet,
+                        acceptedRecords,
+                        historicalRecords))
+                {
+                    return Fail();
+                }
                 hasHistoricalCleanupDebt |= acceptedRecords.Count > 0;
             }
             else if (pending is null && acceptedRecords.Count > 0)
             {
-                if (!TryAddAcceptedCleanupRecord(
-                        acceptedSet.FailureMetadata,
+                if (!TryAddAcceptedCleanupRecords(
+                        acceptedSet,
                         acceptedRecords,
-                        historicalRecords) ||
-                    !TryAddAcceptedCleanupRecord(
-                        acceptedSet.IntentMetadata,
-                        acceptedRecords,
-                        historicalRecords) ||
-                    !TryAddAcceptedCleanupRecord(
-                        acceptedSet.StickyReadbackMetadata,
-                        acceptedRecords,
-                        historicalRecords) ||
-                    !TryAddAcceptedCleanupRecord(
-                        acceptedSet.RecoveryMetadata,
-                        acceptedRecords,
-                        historicalRecords) ||
-                    historicalRecords.Count != acceptedRecords.Count)
+                        historicalRecords))
                 {
                     return Fail();
                 }
@@ -864,6 +857,31 @@ internal static class PublicationRecoveryInventoryFactory
         PublicationRecoveryObservation> Fail() =>
         RetainedStateTransactionResult<PublicationRecoveryObservation>.Fail(
             RetainedStateTransactionCodes.Conflict);
+
+    private static bool TryAddAcceptedCleanupRecords(
+        ParsedRecordSet acceptedSet,
+        ImmutableArray<RetainedStateOpaqueRecord>.Builder acceptedRecords,
+        ImmutableArray<RetainedStateOpaqueRecord>.Builder cleanupOrder)
+    {
+        var initialCount = cleanupOrder.Count;
+        return TryAddAcceptedCleanupRecord(
+                acceptedSet.FailureMetadata,
+                acceptedRecords,
+                cleanupOrder) &&
+            TryAddAcceptedCleanupRecord(
+                acceptedSet.IntentMetadata,
+                acceptedRecords,
+                cleanupOrder) &&
+            TryAddAcceptedCleanupRecord(
+                acceptedSet.StickyReadbackMetadata,
+                acceptedRecords,
+                cleanupOrder) &&
+            TryAddAcceptedCleanupRecord(
+                acceptedSet.RecoveryMetadata,
+                acceptedRecords,
+                cleanupOrder) &&
+            cleanupOrder.Count - initialCount == acceptedRecords.Count;
+    }
 
     private static bool TryAddAcceptedCleanupRecord(
         OpaqueStoreObjectMetadata? metadata,

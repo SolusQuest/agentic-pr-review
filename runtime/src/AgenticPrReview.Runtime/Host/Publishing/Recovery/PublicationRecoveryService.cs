@@ -671,7 +671,7 @@ internal sealed class PublicationRecoveryService
                 PublicationRecoveryAction.ReturnCommitted &&
             initial?.CurrentAcceptedHeadMatchesReviewedHead == true;
         var supersededTerminal = evaluation.Decision.Action ==
-                PublicationRecoveryAction.NoPendingWork &&
+                PublicationRecoveryAction.CleanupSupersededRecovery &&
             evaluation.Decision.Lifecycle ==
                 PublicationRecoveryLifecycleState
                     .SupersededTerminalRecovery &&
@@ -689,6 +689,7 @@ internal sealed class PublicationRecoveryService
             return await CleanupSupersededRecoveryRecordsAsync(
                     context,
                     initial,
+                    authorization.PullRequest.HeadSha,
                     cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -810,6 +811,7 @@ internal sealed class PublicationRecoveryService
         CleanupSupersededRecoveryRecordsAsync(
         AuthorizedAcceptedStateRestoreContext context,
         PublicationRecoveryObservation initial,
+        string reviewedHeadSha,
         CancellationToken cancellationToken)
     {
         var initialInventory = initial.Inventory;
@@ -827,17 +829,19 @@ internal sealed class PublicationRecoveryService
         var remaining = initial.HistoricalRecords
             .Select(record => (record.Metadata, record.Header))
             .ToList();
-        RetainedStatePublicationRecoveryInventory? ownedInventory = null;
-        var current = initialInventory;
+        var remainingAnchors = initial.CompletedAnchors.ToList();
+        PublicationRecoveryObservation? ownedObservation = null;
+        var current = initial;
         try
         {
             while (remaining.Count > 0)
             {
                 var planned = remaining[0];
-                var target = current.Records.SingleOrDefault(record =>
+                var target = current.HistoricalRecords.SingleOrDefault(record =>
                     record.Metadata == planned.Metadata &&
                     record.Header == planned.Header);
-                if (target is null)
+                var inventory = current.Inventory;
+                if (target is null || inventory is null)
                 {
                     return CleanupFailure(
                         RetainedStateTransactionCodes.Conflict);
@@ -846,7 +850,7 @@ internal sealed class PublicationRecoveryService
                 var classificationIdentity =
                     PublicationRecoveryInventoryFactory
                         .SupersededCleanupClassificationIdentity(
-                            current,
+                            inventory,
                             target,
                             acceptedCandidateIdentity);
                 var authorizationResult = await RestrictedStateService
@@ -892,9 +896,11 @@ internal sealed class PublicationRecoveryService
                 remaining.RemoveAt(0);
                 var refreshed = await RefreshSupersededInventoryAsync(
                         context,
+                        reviewedHeadSha,
                         acceptedCandidateIdentity,
                         acceptedPublication,
-                        remaining)
+                        remaining,
+                        remainingAnchors)
                     .ConfigureAwait(false);
                 if (!refreshed.Succeeded || refreshed.Value is null)
                 {
@@ -902,18 +908,26 @@ internal sealed class PublicationRecoveryService
                     return CleanupFailure(refreshed.Code);
                 }
 
-                ownedInventory?.Dispose();
-                ownedInventory = refreshed.Value;
-                current = ownedInventory;
+                ownedObservation?.Dispose();
+                ownedObservation = refreshed.Value;
+                current = ownedObservation;
             }
 
-            while (!current.Anchors.IsEmpty)
+            while (remainingAnchors.Count > 0)
             {
-                var anchor = current.Anchors[0];
+                var planned = remainingAnchors[0];
+                var anchor = current.CompletedAnchors.SingleOrDefault(
+                    candidate => SameSupersededAnchor(candidate, planned));
+                var inventory = current.Inventory;
+                if (anchor is null || inventory is null)
+                {
+                    return CleanupFailure(
+                        RetainedStateTransactionCodes.Conflict);
+                }
                 var classificationIdentity =
                     PublicationRecoveryInventoryFactory
                         .SupersededAnchorCleanupClassificationIdentity(
-                            current,
+                            inventory,
                             anchor,
                             acceptedCandidateIdentity);
                 var authorizationResult = await RestrictedStateService
@@ -927,7 +941,7 @@ internal sealed class PublicationRecoveryService
                         pendingCandidate: null,
                         opaqueRecord: null,
                         opaqueWrite: null,
-                        current,
+                        inventory,
                         anchor,
                         CancellationToken.None)
                     .ConfigureAwait(false);
@@ -956,11 +970,14 @@ internal sealed class PublicationRecoveryService
                     return cleanup;
                 }
 
+                remainingAnchors.RemoveAt(0);
                 var refreshed = await RefreshSupersededInventoryAsync(
                         context,
+                        reviewedHeadSha,
                         acceptedCandidateIdentity,
                         acceptedPublication,
-                        remaining)
+                        remaining,
+                        remainingAnchors)
                     .ConfigureAwait(false);
                 if (!refreshed.Succeeded || refreshed.Value is null)
                 {
@@ -968,9 +985,9 @@ internal sealed class PublicationRecoveryService
                     return CleanupFailure(refreshed.Code);
                 }
 
-                ownedInventory?.Dispose();
-                ownedInventory = refreshed.Value;
-                current = ownedInventory;
+                ownedObservation?.Dispose();
+                ownedObservation = refreshed.Value;
+                current = ownedObservation;
             }
 
             return new RetainedStateCleanupResult(
@@ -980,18 +997,21 @@ internal sealed class PublicationRecoveryService
         }
         finally
         {
-            ownedInventory?.Dispose();
+            ownedObservation?.Dispose();
         }
     }
 
     private static async Task<RetainedStateTransactionResult<
-        RetainedStatePublicationRecoveryInventory>>
+        PublicationRecoveryObservation>>
         RefreshSupersededInventoryAsync(
         AuthorizedAcceptedStateRestoreContext context,
+        string reviewedHeadSha,
         string acceptedCandidateIdentity,
         ValidatedPublicationPayloadV1 acceptedPublication,
         IReadOnlyCollection<(OpaqueStoreObjectMetadata Metadata,
-            StateControlHeaderV1 Header)> remaining)
+            StateControlHeaderV1 Header)> remaining,
+        IReadOnlyCollection<RetainedStatePublicationRecoveryAnchorEvidence>
+            remainingAnchors)
     {
         var result = await RestrictedStateService
             .ObserveRetainedPublicationRecoveryInventoryAsync(
@@ -999,14 +1019,34 @@ internal sealed class PublicationRecoveryService
                 CancellationToken.None)
             .ConfigureAwait(false);
         var inventory = result.Value;
-        if (!result.Succeeded ||
-            inventory is null ||
-            inventory.Candidate is not null ||
-            inventory.CurrentAcceptance is null ||
+        if (!result.Succeeded || inventory is null)
+        {
+            inventory?.Dispose();
+            return RetainedStateTransactionResult<
+                PublicationRecoveryObservation>.Fail(result.Code);
+        }
+
+        var observationResult = await PublicationRecoveryInventoryFactory
+            .CreateAsync(
+                context,
+                inventory,
+                reviewedHeadSha,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+        var observation = observationResult.Value;
+        var refreshedInventory = observation?.Inventory;
+        if (!observationResult.Succeeded ||
+            observation is null ||
+            refreshedInventory is null ||
+            observation.Candidate is not null ||
+            observation.CurrentAcceptedHeadMatchesReviewedHead ||
+            !observation.HistoricalTerminalRecovery ||
+            refreshedInventory.CurrentAcceptance is null ||
             !StringComparer.Ordinal.Equals(
-                inventory.CurrentAcceptanceCandidateObjectIdentity,
+                refreshedInventory.CurrentAcceptanceCandidateObjectIdentity,
                 acceptedCandidateIdentity) ||
-            inventory.CurrentAcceptedPublication is not { } publication ||
+            refreshedInventory.CurrentAcceptedPublication is not
+                { } publication ||
             !StringComparer.Ordinal.Equals(
                 publication.ReviewedHeadSha,
                 acceptedPublication.ReviewedHeadSha) ||
@@ -1016,21 +1056,50 @@ internal sealed class PublicationRecoveryService
             !StringComparer.Ordinal.Equals(
                 publication.BodySha256,
                 acceptedPublication.BodySha256) ||
-            inventory.Records.Length != remaining.Count ||
-            remaining.Any(planned => inventory.Records.Count(record =>
+            observation.HistoricalRecords.Length != remaining.Count ||
+            remaining.Any(planned => observation.HistoricalRecords.Count(
+                record =>
                 record.Metadata == planned.Metadata &&
-                record.Header == planned.Header) != 1))
+                record.Header == planned.Header) != 1) ||
+            observation.CompletedAnchors.Length != remainingAnchors.Count ||
+            remainingAnchors.Any(planned =>
+                observation.CompletedAnchors.Count(anchor =>
+                    SameSupersededAnchor(anchor, planned)) != 1) ||
+            !observation.CleanupRecords.IsEmpty)
         {
-            inventory?.Dispose();
+            observation?.Dispose();
             return RetainedStateTransactionResult<
-                RetainedStatePublicationRecoveryInventory>.Fail(
-                    result.Succeeded
+                PublicationRecoveryObservation>.Fail(
+                    observationResult.Succeeded
                         ? RetainedStateTransactionCodes.Conflict
-                        : result.Code);
+                        : observationResult.Code);
         }
 
-        return result;
+        return RetainedStateTransactionResult<
+            PublicationRecoveryObservation>.Success(
+                RetainedStateTransactionCodes.Ready,
+                observation);
     }
+
+    private static bool SameSupersededAnchor(
+        RetainedStatePublicationRecoveryAnchorEvidence left,
+        RetainedStatePublicationRecoveryAnchorEvidence right) =>
+        left.AnchorMetadata == right.AnchorMetadata &&
+        left.AnchorHeader == right.AnchorHeader &&
+        StringComparer.Ordinal.Equals(
+            left.CandidateObjectIdentity,
+            right.CandidateObjectIdentity) &&
+        StringComparer.Ordinal.Equals(
+            left.OperationIdentity,
+            right.OperationIdentity) &&
+        left.ObjectClass == right.ObjectClass &&
+        left.TargetName == right.TargetName &&
+        StringComparer.Ordinal.Equals(
+            left.TargetObjectIdentity,
+            right.TargetObjectIdentity) &&
+        StringComparer.Ordinal.Equals(
+            left.TargetPayloadSha256,
+            right.TargetPayloadSha256);
 
     internal static bool TryRestoreRendered(
         ValidatedPublicationPayloadV1? stored,

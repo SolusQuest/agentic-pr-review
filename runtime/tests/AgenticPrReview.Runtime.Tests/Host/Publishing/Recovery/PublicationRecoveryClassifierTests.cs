@@ -197,6 +197,190 @@ public sealed class PublicationRecoveryClassifierTests
         Assert.Equal(0, factory.Transport.Updates);
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    public async Task SupersededOutcomeUnknownCleanupIsRestartSafeBeforeProvider(
+        int completedTargetCount)
+    {
+        var reviewedHead = new string('f', 40);
+        var fixture = await RetainedStateTransactionEndToEndTests
+            .CreateFixtureAsync(
+                route: ActionHostAuthorizationRoute.WorkflowDispatch);
+        var acceptedHead = fixture.Invocation.PullRequest.HeadSha;
+        _ = await RetainedStateTransactionEndToEndTests
+            .AcceptGenerationAsync(
+                fixture,
+                commentId: 904,
+                persistOutcomeUnknownFailure: true);
+        fixture.Context.Dispose();
+        fixture = await RetainedStateTransactionEndToEndTests
+            .RestoreFixtureAsync(
+                fixture,
+                newWorkflowRun: true,
+                reviewedHeadSha: reviewedHead,
+                ancestryPreviousHeadSha: acceptedHead);
+        var service = new PublicationRecoveryService(
+            new StickyCommentPublisher(new FakePublisherTransportFactory()));
+        var storeDeleteCount = 0;
+        System.Action? afterDelete = null;
+        afterDelete = () =>
+        {
+            storeDeleteCount++;
+            if (storeDeleteCount == completedTargetCount * 2)
+            {
+                if (completedTargetCount < 6)
+                {
+                    fixture.Store.BeforeUpload = static () =>
+                        throw new SimulatedProcessCrashException();
+                }
+
+                return;
+            }
+
+            fixture.Store.AfterDelete = afterDelete;
+        };
+        fixture.Store.AfterDelete = afterDelete;
+
+        using (var cleanupOnly = await service.ClassifyBeforeProviderAsync(
+            fixture.Launch.Inputs.GitHubToken!,
+            fixture.Invocation,
+            fixture.PublicationScope,
+            fixture.Context,
+            CancellationToken.None))
+        {
+            Assert.NotNull(cleanupOnly.Observation);
+            Assert.Equal(
+                PublicationRecoveryAction.CleanupSupersededRecovery,
+                cleanupOnly.Decision.Action);
+            Assert.False(cleanupOnly.Decision.AllowsProvider);
+            Assert.True(cleanupOnly.Decision.AllowsSupersededCleanup);
+            Assert.Equal(4, cleanupOnly.Observation!.HistoricalRecords.Length);
+            Assert.Equal(2, cleanupOnly.Observation.CompletedAnchors.Length);
+            if (completedTargetCount < 6)
+            {
+                await Assert.ThrowsAsync<SimulatedProcessCrashException>(() =>
+                    PublicationRecoveryService
+                        .CleanupHistoricalRecoveryRecordsAsync(
+                            fixture.Invocation,
+                            fixture.Context,
+                            cleanupOnly,
+                            CancellationToken.None));
+            }
+            else
+            {
+                var completed = await PublicationRecoveryService
+                    .CleanupHistoricalRecoveryRecordsAsync(
+                        fixture.Invocation,
+                        fixture.Context,
+                        cleanupOnly,
+                        CancellationToken.None);
+                Assert.True(completed.Completed, completed.Code);
+            }
+        }
+        Assert.Equal(completedTargetCount * 2, storeDeleteCount);
+
+        fixture.Context.Dispose();
+        fixture = await RetainedStateTransactionEndToEndTests
+            .RestoreFixtureAsync(
+                fixture,
+                newWorkflowRun: true,
+                reviewedHeadSha: reviewedHead,
+                ancestryPreviousHeadSha: acceptedHead);
+        if (completedTargetCount < 6)
+        {
+            using (var resumed = await service.ClassifyBeforeProviderAsync(
+                fixture.Launch.Inputs.GitHubToken!,
+                fixture.Invocation,
+                fixture.PublicationScope,
+                fixture.Context,
+                CancellationToken.None))
+            {
+                Assert.Equal(
+                    PublicationRecoveryAction.CleanupSupersededRecovery,
+                    resumed.Decision.Action);
+                Assert.False(resumed.Decision.AllowsProvider);
+                var cleanup = await PublicationRecoveryService
+                    .CleanupHistoricalRecoveryRecordsAsync(
+                        fixture.Invocation,
+                        fixture.Context,
+                        resumed,
+                        CancellationToken.None);
+                Assert.True(cleanup.Completed, cleanup.Code);
+            }
+        }
+        else
+        {
+            using var resumed = await service.ClassifyBeforeProviderAsync(
+                fixture.Launch.Inputs.GitHubToken!,
+                fixture.Invocation,
+                fixture.PublicationScope,
+                fixture.Context,
+                CancellationToken.None);
+            Assert.Equal(
+                PublicationRecoveryAction.NoPendingWork,
+                resumed.Decision.Action);
+            Assert.True(resumed.Decision.AllowsProvider);
+        }
+
+        using (var cleared = await service.ClassifyBeforeProviderAsync(
+            fixture.Launch.Inputs.GitHubToken!,
+            fixture.Invocation,
+            fixture.PublicationScope,
+            fixture.Context,
+            CancellationToken.None))
+        {
+            Assert.Equal(
+                PublicationRecoveryAction.NoPendingWork,
+                cleared.Decision.Action);
+            Assert.True(cleared.Decision.AllowsProvider);
+            Assert.False(cleared.Decision.AllowsSupersededCleanup);
+            Assert.Empty(cleared.Observation!.HistoricalRecords);
+            Assert.Empty(cleared.Observation.CompletedAnchors);
+        }
+
+        var (prepared, _) = await PersistCandidateAsync(fixture);
+        prepared.Dispose();
+        fixture.Context.Dispose();
+        fixture = await RetainedStateTransactionEndToEndTests
+            .RestoreFixtureAsync(
+                fixture,
+                newWorkflowRun: true,
+                reviewedHeadSha: reviewedHead,
+                ancestryPreviousHeadSha: acceptedHead);
+        using var processB = fixture.Context;
+        var successorFactory = new FakePublisherTransportFactory();
+        successorFactory.Transport.Enqueue();
+        using var successor = await new PublicationRecoveryService(
+                new StickyCommentPublisher(successorFactory))
+            .ClassifyBeforeProviderAsync(
+                fixture.Launch.Inputs.GitHubToken!,
+                fixture.Invocation,
+                fixture.PublicationScope,
+                processB,
+                CancellationToken.None);
+        Assert.Equal(
+            PublicationRecoveryAction.ResumeBeforeIntent,
+            successor.Decision.Action);
+        Assert.Empty(successor.Observation!.HistoricalRecords);
+        Assert.Empty(successor.Observation.CompletedAnchors);
+        var intentResult = await PublicationRecoveryPersistence
+            .PersistIntentAndAuthorizeAsync(
+                processB,
+                successor.Observation,
+                CancellationToken.None);
+        Assert.True(intentResult.Succeeded, intentResult.Code);
+        using var intent = Assert.IsType<PublicationIntentPersistenceResult>(
+            intentResult.Value);
+        Assert.Single(intent.Observation.Records);
+        Assert.Equal(0, successorFactory.Transport.Creates);
+        Assert.Equal(0, successorFactory.Transport.Updates);
+    }
+
     [Fact]
     public async Task ContinuationWithoutReadbackUsesFreshCandidateReceipt()
     {

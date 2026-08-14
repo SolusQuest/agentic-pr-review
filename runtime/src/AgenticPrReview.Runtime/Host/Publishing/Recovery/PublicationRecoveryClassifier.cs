@@ -64,6 +64,16 @@ internal static class PublicationRecoveryClassifier
                     : Conflict();
             }
 
+            if (observation.HistoricalTerminalRecovery &&
+                observation.HasHistoricalCleanupDebt)
+            {
+                return Decision(
+                    PublicationRecoveryAction.CleanupSupersededRecovery,
+                    PublicationRecoveryCodes.CleanupSupersededRecovery,
+                    PublicationRecoveryLifecycleState
+                        .SupersededTerminalRecovery);
+            }
+
             return Decision(
                 PublicationRecoveryAction.NoPendingWork,
                 PublicationRecoveryCodes.NoPendingWork,
