@@ -190,6 +190,9 @@ public sealed class PublicationRecoveryClassifierTests
         Assert.Equal(accepted.Publication.ScopeSha256, receipt.ScopeSha256);
         Assert.Equal(accepted.Publication.BodySha256, receipt.BodySha256);
         Assert.Equal(accepted.Publication.ReviewedHeadSha, receipt.HeadSha);
+        Assert.Equal(
+            StickyPublicationOperation.Observed,
+            recovery.ExactReadbackReceipt!.Operation);
         Assert.Equal(0, factory.Transport.Creates);
         Assert.Equal(0, factory.Transport.Updates);
     }

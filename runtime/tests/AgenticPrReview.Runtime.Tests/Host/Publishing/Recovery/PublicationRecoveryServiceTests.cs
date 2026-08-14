@@ -145,6 +145,51 @@ public sealed class PublicationRecoveryServiceTests
         Assert.Equal(0, factory.Transport.Updates);
     }
 
+    [Fact]
+    public void FreshObservationRequiresEveryImmutableReceiptField()
+    {
+        var durable = Receipt(StickyPublicationOperation.Create);
+        var observed = Receipt(StickyPublicationOperation.Observed);
+
+        Assert.True(PublicationReceiptMatcher.IsFreshObservationOf(
+            durable,
+            observed));
+        Assert.False(PublicationReceiptMatcher.AreDurablyEqual(
+            durable,
+            observed));
+        Assert.True(PublicationReceiptMatcher.AreDurablyEqual(
+            durable,
+            Receipt(StickyPublicationOperation.Create)));
+        Assert.False(PublicationReceiptMatcher.IsFreshObservationOf(
+            durable,
+            Receipt(StickyPublicationOperation.Update)));
+
+        var mismatches = new[]
+        {
+            Receipt(StickyPublicationOperation.Observed, repositoryId: 2),
+            Receipt(StickyPublicationOperation.Observed, pullRequest: 4),
+            Receipt(StickyPublicationOperation.Observed, commentId: 6),
+            Receipt(
+                StickyPublicationOperation.Observed,
+                commentUrl:
+                    "https://github.com/other/repo/pull/3" +
+                    "#issuecomment-5"),
+            Receipt(
+                StickyPublicationOperation.Observed,
+                scopeSha256: new string('d', 64)),
+            Receipt(
+                StickyPublicationOperation.Observed,
+                bodySha256: new string('e', 64)),
+            Receipt(
+                StickyPublicationOperation.Observed,
+                headSha: new string('f', 40)),
+        };
+        Assert.All(mismatches, mismatch =>
+            Assert.False(PublicationReceiptMatcher.IsFreshObservationOf(
+                durable,
+                mismatch)));
+    }
+
     private static ValidatedPublicationPayloadV1 Stored(
         AuthorizedStickyPublicationRequest request,
         AgenticPrReview.Runtime.Host.Publishing.Rendering
@@ -161,6 +206,32 @@ public sealed class PublicationRecoveryServiceTests
             AcceptedStateFormat.RenderingVersion,
             out var stored));
         return stored!;
+    }
+
+    private static StickyCommentPublisher.StickyPublicationReceipt Receipt(
+        StickyPublicationOperation operation,
+        long repositoryId = 1,
+        long pullRequest = 3,
+        long commentId = 5,
+        string? commentUrl = null,
+        string? scopeSha256 = null,
+        string? bodySha256 = null,
+        string? headSha = null)
+    {
+        Assert.True(StickyCommentPublisher.StickyPublicationReceipt
+            .TryRehydrate(
+                operation,
+                repositoryId,
+                pullRequest,
+                commentId,
+                commentUrl ??
+                    $"https://github.com/owner/repo/pull/{pullRequest}" +
+                    $"#issuecomment-{commentId}",
+                scopeSha256 ?? new string('a', 64),
+                bodySha256 ?? new string('b', 64),
+                headSha ?? new string('c', 40),
+                out var receipt));
+        return receipt!;
     }
 
 }

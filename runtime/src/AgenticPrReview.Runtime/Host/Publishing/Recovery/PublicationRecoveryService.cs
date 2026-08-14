@@ -167,12 +167,14 @@ internal sealed class PublicationRecoveryService
                 PublicationMarkerObservation.Ambiguous,
             _ => PublicationMarkerObservation.Incomplete,
         };
+        StickyCommentPublisher.StickyPublicationReceipt?
+            exactReadbackReceipt = null;
         if (marker == PublicationMarkerObservation.Exact &&
-            observation.StickyReadback is { } durableReadback &&
-            (!durableReadback.TryRehydrate(out var durableReceipt) ||
-                durableReceipt is null ||
-                discovered.Receipt is null ||
-                !ReceiptsEqual(durableReceipt, discovered.Receipt)))
+            (discovered.Receipt is null ||
+                !TryResolveExactReadbackReceipt(
+                    observation,
+                    discovered.Receipt,
+                    out exactReadbackReceipt)))
         {
             marker = PublicationMarkerObservation.Ambiguous;
         }
@@ -212,7 +214,7 @@ internal sealed class PublicationRecoveryService
         return Evaluation(
             classified,
             marker == PublicationMarkerObservation.Exact
-                ? discovered.Receipt
+                ? exactReadbackReceipt
                 : null,
             discovered.Kind,
             discovered.Reason,
@@ -1096,19 +1098,43 @@ internal sealed class PublicationRecoveryService
     private static RetainedStateCleanupResult CleanupFailure(string code) =>
         new(null, Completed: false, code);
 
-    private static bool ReceiptsEqual(
-        StickyCommentPublisher.StickyPublicationReceipt left,
-        StickyCommentPublisher.StickyPublicationReceipt right) =>
-        left.Operation == right.Operation &&
-        left.RepositoryId == right.RepositoryId &&
-        left.PullRequestNumber == right.PullRequestNumber &&
-        left.CommentId == right.CommentId &&
-        StringComparer.Ordinal.Equals(left.CommentUrl, right.CommentUrl) &&
-        StringComparer.Ordinal.Equals(
-            left.ScopeSha256,
-            right.ScopeSha256) &&
-        StringComparer.Ordinal.Equals(
-            left.BodySha256,
-            right.BodySha256) &&
-        StringComparer.Ordinal.Equals(left.HeadSha, right.HeadSha);
+    private static bool TryResolveExactReadbackReceipt(
+        PublicationRecoveryObservation observation,
+        StickyCommentPublisher.StickyPublicationReceipt fresh,
+        out StickyCommentPublisher.StickyPublicationReceipt? exact)
+    {
+        exact = null;
+        StickyCommentPublisher.StickyPublicationReceipt? durable = null;
+        if (observation.StickyReadback is { } readback)
+        {
+            if (!readback.TryRehydrate(out durable) || durable is null)
+            {
+                return false;
+            }
+        }
+        else
+        {
+            durable = observation.Inventory?
+                .CurrentAcceptancePublicationReceipt;
+        }
+
+        if (durable is null)
+        {
+            if (fresh.Operation != StickyPublicationOperation.Observed)
+            {
+                return false;
+            }
+
+            exact = fresh;
+            return true;
+        }
+
+        if (!PublicationReceiptMatcher.IsFreshObservationOf(durable, fresh))
+        {
+            return false;
+        }
+
+        exact = durable;
+        return true;
+    }
 }

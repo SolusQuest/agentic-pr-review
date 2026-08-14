@@ -200,7 +200,9 @@ internal static class PublicationRecoveryInventoryFactory
                     !acceptedSet.Recovery.StickyReadback.TryRehydrate(
                         out var readbackReceipt) ||
                     readbackReceipt is null ||
-                    !ReceiptsEqual(readbackReceipt, matched.Receipt))
+                    !PublicationReceiptMatcher.AreDurablyEqual(
+                        readbackReceipt,
+                        matched.Receipt))
                 {
                     return Fail();
                 }
@@ -838,20 +840,6 @@ internal static class PublicationRecoveryInventoryFactory
         PublicationRecoveryObservation> Fail() =>
         RetainedStateTransactionResult<PublicationRecoveryObservation>.Fail(
             RetainedStateTransactionCodes.Conflict);
-
-    private static bool ReceiptsEqual(
-        StickyCommentPublisher.StickyPublicationReceipt left,
-        StickyCommentPublisher.StickyPublicationReceipt right) =>
-        left.Operation == right.Operation &&
-        left.RepositoryId == right.RepositoryId &&
-        left.PullRequestNumber == right.PullRequestNumber &&
-        left.CommentId == right.CommentId &&
-        StringComparer.Ordinal.Equals(left.CommentUrl, right.CommentUrl) &&
-        StringComparer.Ordinal.Equals(
-            left.ScopeSha256,
-            right.ScopeSha256) &&
-        StringComparer.Ordinal.Equals(left.BodySha256, right.BodySha256) &&
-        StringComparer.Ordinal.Equals(left.HeadSha, right.HeadSha);
 
     private static bool TryDecode(
         AuthorizedAcceptedStateRestoreContext context,
