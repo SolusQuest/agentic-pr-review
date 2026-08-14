@@ -218,6 +218,30 @@ internal static class PublicationRecoveryInventoryFactory
                 historicalRecords.AddRange(acceptedRecords);
                 hasHistoricalCleanupDebt |= acceptedRecords.Count > 0;
             }
+            else if (pending is null && acceptedRecords.Count > 0)
+            {
+                if (!TryAddAcceptedCleanupRecord(
+                        acceptedSet.FailureMetadata,
+                        acceptedRecords,
+                        historicalRecords) ||
+                    !TryAddAcceptedCleanupRecord(
+                        acceptedSet.IntentMetadata,
+                        acceptedRecords,
+                        historicalRecords) ||
+                    !TryAddAcceptedCleanupRecord(
+                        acceptedSet.StickyReadbackMetadata,
+                        acceptedRecords,
+                        historicalRecords) ||
+                    !TryAddAcceptedCleanupRecord(
+                        acceptedSet.RecoveryMetadata,
+                        acceptedRecords,
+                        historicalRecords) ||
+                    historicalRecords.Count != acceptedRecords.Count)
+                {
+                    return Fail();
+                }
+                hasHistoricalCleanupDebt = true;
+            }
             var terminalProven = acceptedRecordCount == 0
                 ? inventory.CurrentAcceptance is not null &&
                     inventory.CurrentAcceptancePublicationReceipt is not null
@@ -841,6 +865,27 @@ internal static class PublicationRecoveryInventoryFactory
         RetainedStateTransactionResult<PublicationRecoveryObservation>.Fail(
             RetainedStateTransactionCodes.Conflict);
 
+    private static bool TryAddAcceptedCleanupRecord(
+        OpaqueStoreObjectMetadata? metadata,
+        ImmutableArray<RetainedStateOpaqueRecord>.Builder acceptedRecords,
+        ImmutableArray<RetainedStateOpaqueRecord>.Builder cleanupOrder)
+    {
+        if (metadata is null)
+        {
+            return true;
+        }
+
+        var record = acceptedRecords.SingleOrDefault(candidate =>
+            candidate.Metadata == metadata);
+        if (record is null)
+        {
+            return false;
+        }
+
+        cleanupOrder.Add(record);
+        return true;
+    }
+
     private static bool TryDecode(
         AuthorizedAcceptedStateRestoreContext context,
         RetainedStateOpaqueRecord record,
@@ -955,8 +1000,23 @@ internal static class PublicationRecoveryInventoryFactory
     private sealed class ParsedRecordSet
     {
         internal PublicationIntentV1? Intent { get; private set; }
+        internal OpaqueStoreObjectMetadata? IntentMetadata
+        {
+            get;
+            private set;
+        }
         internal StickyReadbackRecordV1? StickyReadback { get; private set; }
+        internal OpaqueStoreObjectMetadata? StickyReadbackMetadata
+        {
+            get;
+            private set;
+        }
         internal PublicationFailureV1? Failure { get; private set; }
+        internal OpaqueStoreObjectMetadata? FailureMetadata
+        {
+            get;
+            private set;
+        }
         internal AbandonmentV1? Abandonment { get; private set; }
         internal RecoveryRecordV1? Recovery { get; private set; }
         internal OpaqueStoreObjectMetadata? RecoveryMetadata
@@ -973,15 +1033,18 @@ internal static class PublicationRecoveryInventoryFactory
             {
                 case PublicationIntentV1 value when Intent is null:
                     Intent = value;
+                    IntentMetadata = decoded.Metadata;
                     added = true;
                     break;
                 case StickyReadbackRecordV1 value
                     when StickyReadback is null:
                     StickyReadback = value;
+                    StickyReadbackMetadata = decoded.Metadata;
                     added = true;
                     break;
                 case PublicationFailureV1 value when Failure is null:
                     Failure = value;
+                    FailureMetadata = decoded.Metadata;
                     added = true;
                     break;
                 case AbandonmentV1 value when Abandonment is null:

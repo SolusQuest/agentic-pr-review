@@ -1112,7 +1112,7 @@ internal sealed class PublicationRecoveryService
                 return false;
             }
         }
-        else
+        else if (observation.Candidate is null)
         {
             durable = observation.Inventory?
                 .CurrentAcceptancePublicationReceipt;

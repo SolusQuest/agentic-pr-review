@@ -3101,6 +3101,49 @@ public sealed class RetainedStateTransactionEndToEndTests
             retainedPublication!);
     }
 
+    internal static async Task<VerifiedRetainedStateAcceptance>
+        AcceptRecoveredCandidateAsync(
+        TransactionFixture fixture,
+        PublicationRecoveryEvaluation recovery)
+    {
+        Assert.Equal(
+            PublicationRecoveryAction.CompleteAcceptance,
+            recovery.Decision.Action);
+        var observation = Assert.IsType<PublicationRecoveryObservation>(
+            recovery.Observation);
+        var receipt = Assert.IsType<
+            StickyCommentPublisher.StickyPublicationReceipt>(
+                recovery.ExactReadbackReceipt);
+        var recoveredResult = await RestrictedStateService
+            .RecoverRetainedCandidateAsync(
+                fixture.Context,
+                CancellationToken.None);
+        var candidate = Assert.IsType<RetainedStatePersistedCandidate>(
+            recoveredResult.Value);
+        var ownershipResult = await RestrictedStateService
+            .RenewRetainedStateOwnershipAsync(
+                fixture.Context,
+                candidate,
+                prior: null,
+                observation.Records,
+                CancellationToken.None);
+        using var ownership = Assert.IsType<RetainedStateOwnership>(
+            ownershipResult.Value);
+        using var evidence = await CreateFinalEvidenceAsync(
+            fixture,
+            candidate,
+            ownership,
+            receipt,
+            observation.Records,
+            existingStickyReadback: observation.StickyReadback);
+        var accepted = await RestrictedStateService.AcceptRetainedStateAsync(
+            fixture.Context,
+            evidence,
+            CancellationToken.None);
+        Assert.Equal(RetainedStateTransactionCodes.Accepted, accepted.Code);
+        return Assert.IsType<VerifiedRetainedStateAcceptance>(accepted.Value);
+    }
+
     private static async Task<RetainedStateAcceptanceEvidence>
         CreateFinalEvidenceAsync(
         TransactionFixture fixture,
