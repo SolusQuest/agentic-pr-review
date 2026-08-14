@@ -122,6 +122,7 @@ internal enum PublicationMarkerObservation
     Incomplete = 0,
     Absent,
     Exact,
+    PreviousAcceptedTarget,
     Ambiguous,
 }
 

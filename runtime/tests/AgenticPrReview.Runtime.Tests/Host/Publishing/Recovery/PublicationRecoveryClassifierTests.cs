@@ -88,6 +88,7 @@ public sealed class PublicationRecoveryClassifierTests
             PublicationMarkerObservation.Ambiguous,
             PublicationMarkerObservation.Absent,
             PublicationMarkerObservation.Exact,
+            PublicationMarkerObservation.PreviousAcceptedTarget,
         })
         {
             Assert.Equal(
@@ -212,7 +213,7 @@ public sealed class PublicationRecoveryClassifierTests
             .CreateFixtureAsync(
                 route: ActionHostAuthorizationRoute.WorkflowDispatch);
         var acceptedHead = fixture.Invocation.PullRequest.HeadSha;
-        _ = await RetainedStateTransactionEndToEndTests
+        var accepted = await RetainedStateTransactionEndToEndTests
             .AcceptGenerationAsync(
                 fixture,
                 commentId: 904,
@@ -354,7 +355,17 @@ public sealed class PublicationRecoveryClassifierTests
                 ancestryPreviousHeadSha: acceptedHead);
         using var processB = fixture.Context;
         var successorFactory = new FakePublisherTransportFactory();
-        successorFactory.Transport.Enqueue();
+        Assert.True(PublicationRecoveryService.TryRestoreRendered(
+            accepted.Publication,
+            out var acceptedRendered));
+        var acceptedComment = StickyPublicationTestData.Comment(
+            904,
+            acceptedRendered!.Comment);
+        successorFactory.Transport.Enqueue(acceptedComment);
+        successorFactory.Transport.Enqueue(acceptedComment);
+        successorFactory.Transport.Enqueue(acceptedComment);
+        successorFactory.Transport.Read = BoundedGitHubHttpResult<
+            BoundedGitHubIssueComment>.Success(acceptedComment);
         using var successor = await new PublicationRecoveryService(
                 new StickyCommentPublisher(successorFactory))
             .ClassifyBeforeProviderAsync(
@@ -366,6 +377,8 @@ public sealed class PublicationRecoveryClassifierTests
         Assert.Equal(
             PublicationRecoveryAction.ResumeBeforeIntent,
             successor.Decision.Action);
+        Assert.Equal(StickyDiscoveryKind.StaleTarget,
+            successor.DiscoveryKind);
         Assert.Empty(successor.Observation!.HistoricalRecords);
         Assert.Empty(successor.Observation.CompletedAnchors);
         var intentResult = await PublicationRecoveryPersistence
@@ -377,6 +390,8 @@ public sealed class PublicationRecoveryClassifierTests
         using var intent = Assert.IsType<PublicationIntentPersistenceResult>(
             intentResult.Value);
         Assert.Single(intent.Observation.Records);
+        Assert.Equal(3, successorFactory.Transport.Lists);
+        Assert.Equal(1, successorFactory.Transport.Reads);
         Assert.Equal(0, successorFactory.Transport.Creates);
         Assert.Equal(0, successorFactory.Transport.Updates);
     }
@@ -556,8 +571,292 @@ public sealed class PublicationRecoveryClassifierTests
             recovery.Decision.Action);
         Assert.Null(recovery.ExactReadbackReceipt);
         Assert.False(recovery.Decision.AllowsProvider);
+        Assert.Equal(1, factory.Transport.Lists);
         Assert.Equal(0, factory.Transport.Creates);
         Assert.Equal(0, factory.Transport.Updates);
+    }
+
+    [Fact]
+    public async Task CopiedAcceptedTargetWithDifferentCommentIdFailsClosed()
+    {
+        var continuation = await CreateContinuationCandidateAsync(
+            acceptedCommentId: 939);
+        using var prepared = continuation.Prepared;
+        using var context = continuation.Fixture.Context;
+        var copied = StickyPublicationTestData.Comment(
+            1939,
+            continuation.PreviousAcceptedComment.Body);
+        var factory = new FakePublisherTransportFactory();
+        factory.Transport.Enqueue(copied);
+        factory.Transport.Enqueue(copied);
+
+        using var recovery = await new PublicationRecoveryService(
+                new StickyCommentPublisher(factory))
+            .ClassifyBeforeProviderAsync(
+                continuation.Fixture.Launch.Inputs.GitHubToken!,
+                continuation.Fixture.Invocation,
+                continuation.Fixture.PublicationScope,
+                context,
+                CancellationToken.None);
+
+        Assert.Equal(PublicationRecoveryAction.Conflict,
+            recovery.Decision.Action);
+        Assert.Equal(StickyDiscoveryKind.StaleTarget,
+            recovery.DiscoveryKind);
+        Assert.Equal(2, factory.Transport.Lists);
+        Assert.Equal(0, factory.Transport.Reads);
+        Assert.Equal(0, factory.Transport.Creates);
+        Assert.Equal(0, factory.Transport.Updates);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    public async Task ExactAcceptedPredecessorPreservesPendingRecoveryMatrix(
+        int stateValue)
+    {
+        var state = (PreviousAcceptedRecoveryState)stateValue;
+        var expected = state switch
+        {
+            PreviousAcceptedRecoveryState.Intent or
+                PreviousAcceptedRecoveryState.OutcomeUnknown =>
+                    PublicationRecoveryAction.StickyOutcomeUnknown,
+            PreviousAcceptedRecoveryState.KnownNotWritten =>
+                PublicationRecoveryAction.ResumeKnownNotWritten,
+            PreviousAcceptedRecoveryState.CancelledBeforeSend =>
+                PublicationRecoveryAction.CancelledBeforeSend,
+            PreviousAcceptedRecoveryState.AuthorizationFailure =>
+                PublicationRecoveryAction.AuthorizationOrValidationFailure,
+            _ => throw new InvalidOperationException(
+                "Unexpected predecessor recovery state."),
+        };
+        var continuation = await CreateContinuationCandidateAsync(
+            acceptedCommentId: 940 + (int)state);
+        using var prepared = continuation.Prepared;
+        await PersistPreviousAcceptedStateAsync(
+            continuation.Fixture,
+            prepared,
+            continuation.Candidate,
+            continuation.PreviousAcceptedComment,
+            state);
+        continuation.Fixture.Context.Dispose();
+        var fixture = await RetainedStateTransactionEndToEndTests
+            .RestoreFixtureAsync(continuation.Fixture);
+        using var context = fixture.Context;
+        var factory = PreviousAcceptedMarkerFactory(
+            continuation.PreviousAcceptedComment);
+
+        using var recovery = await new PublicationRecoveryService(
+                new StickyCommentPublisher(factory))
+            .ClassifyBeforeProviderAsync(
+                fixture.Launch.Inputs.GitHubToken!,
+                fixture.Invocation,
+                fixture.PublicationScope,
+                context,
+                CancellationToken.None);
+
+        Assert.Equal(expected, recovery.Decision.Action);
+        Assert.Equal(StickyDiscoveryKind.StaleTarget,
+            recovery.DiscoveryKind);
+        Assert.False(recovery.Decision.AllowsProvider);
+        Assert.Equal(
+            state == PreviousAcceptedRecoveryState.KnownNotWritten,
+            recovery.StickyWriteAuthorization is not null);
+        Assert.Equal(3, factory.Transport.Lists);
+        Assert.Equal(1, factory.Transport.Reads);
+        Assert.Equal(0, factory.Transport.Creates);
+        Assert.Equal(0, factory.Transport.Updates);
+    }
+
+    [Fact]
+    public async Task CandidateReadbackRejectsRollbackToAcceptedPredecessor()
+    {
+        var continuation = await CreateContinuationCandidateAsync(
+            acceptedCommentId: 950);
+        using var prepared = continuation.Prepared;
+        await PersistPreviousAcceptedStateAsync(
+            continuation.Fixture,
+            prepared,
+            continuation.Candidate,
+            continuation.PreviousAcceptedComment,
+            PreviousAcceptedRecoveryState.Intent);
+        var intentFactory = PreviousAcceptedMarkerFactory(
+            continuation.PreviousAcceptedComment);
+        using (var intent = await new PublicationRecoveryService(
+                new StickyCommentPublisher(intentFactory))
+            .ClassifyBeforeProviderAsync(
+                continuation.Fixture.Launch.Inputs.GitHubToken!,
+                continuation.Fixture.Invocation,
+                continuation.Fixture.PublicationScope,
+                continuation.Fixture.Context,
+                CancellationToken.None))
+        {
+            Assert.Equal(PublicationRecoveryAction.StickyOutcomeUnknown,
+                intent.Decision.Action);
+            Assert.True(PublicationRecoveryService.TryRestoreRendered(
+                intent.Observation!.StoredPublication,
+                out var rendered));
+            var candidateComment = StickyPublicationTestData.Comment(
+                951,
+                rendered!.Comment);
+            Assert.True(StickyCommentPublisher.StickyPublicationReceipt
+                .TryRehydrate(
+                    StickyPublicationOperation.Observed,
+                    continuation.Fixture.Invocation.PullRequest.RepositoryId,
+                    continuation.Fixture.Invocation.PullRequest.Number,
+                    candidateComment.Id,
+                    candidateComment.HtmlUrl,
+                    rendered.Identity.ScopeSha256,
+                    rendered.Identity.BodySha256,
+                    rendered.Identity.HeadSha,
+                    out var receipt));
+            var ownershipResult = await RestrictedStateService
+                .RenewRetainedStateOwnershipAsync(
+                    continuation.Fixture.Context,
+                    continuation.Candidate,
+                    prior: null,
+                    intent.Observation.Records,
+                    CancellationToken.None);
+            using var ownership = Assert.IsType<RetainedStateOwnership>(
+                ownershipResult.Value);
+            Assert.True(PublicationRecoveryPersistence
+                .TryCreateStickyReadbackWrite(
+                    continuation.Candidate,
+                    receipt!,
+                    continuation.Fixture.Time.UnixSeconds,
+                    prepared.Header.LogicalExpiresAtUnixSeconds,
+                    out _,
+                    out var request));
+            var attemptResult = await RestrictedStateService
+                .PrepareRetainedOpaqueWriteAsync(
+                    continuation.Fixture.Context,
+                    ownership,
+                    request!,
+                    CancellationToken.None);
+            using var attempt = Assert.IsType<RetainedStateOpaqueWriteAttempt>(
+                attemptResult.Value);
+            var persistedResult = await RestrictedStateService
+                .PersistPreparedRetainedOpaqueWriteAsync(
+                    continuation.Fixture.Context,
+                    attempt,
+                    CancellationToken.None);
+            using var persisted = Assert.IsType<RetainedStateOpaqueRecord>(
+                persistedResult.Value);
+            var cleanup = await PublicationRecoveryPersistence
+                .CleanupCompletedWriteAnchorAsync(
+                    continuation.Fixture.Context,
+                    attempt,
+                    CancellationToken.None);
+            Assert.True(cleanup.Completed, cleanup.Code);
+        }
+
+        continuation.Fixture.Context.Dispose();
+        var fixture = await RetainedStateTransactionEndToEndTests
+            .RestoreFixtureAsync(continuation.Fixture);
+        using var context = fixture.Context;
+        var rollbackFactory = new FakePublisherTransportFactory();
+        rollbackFactory.Transport.Enqueue(
+            continuation.PreviousAcceptedComment);
+        using var rollback = await new PublicationRecoveryService(
+                new StickyCommentPublisher(rollbackFactory))
+            .ClassifyBeforeProviderAsync(
+                fixture.Launch.Inputs.GitHubToken!,
+                fixture.Invocation,
+                fixture.PublicationScope,
+                context,
+                CancellationToken.None);
+
+        Assert.Equal(PublicationRecoveryAction.Conflict,
+            rollback.Decision.Action);
+        Assert.Equal(StickyDiscoveryKind.StaleTarget,
+            rollback.DiscoveryKind);
+        Assert.NotNull(rollback.Observation!.StickyReadback);
+        Assert.Equal(1, rollbackFactory.Transport.Lists);
+        Assert.Equal(0, rollbackFactory.Transport.Reads);
+        Assert.Equal(0, rollbackFactory.Transport.Creates);
+        Assert.Equal(0, rollbackFactory.Transport.Updates);
+    }
+
+    [Fact]
+    public async Task StaleCandidateCannotUseAcceptedPredecessorForAbandonment()
+    {
+        var candidateHead = new string('c', 40);
+        var currentHead = new string('d', 40);
+        var fixture = await RetainedStateTransactionEndToEndTests
+            .CreateFixtureAsync(
+                route: ActionHostAuthorizationRoute.WorkflowDispatch);
+        var acceptedHead = fixture.Invocation.PullRequest.HeadSha;
+        var accepted = await RetainedStateTransactionEndToEndTests
+            .AcceptGenerationAsync(fixture, commentId: 960);
+        fixture.Context.Dispose();
+        fixture = await RetainedStateTransactionEndToEndTests
+            .RestoreFixtureAsync(
+                fixture,
+                newWorkflowRun: true,
+                reviewedHeadSha: candidateHead,
+                ancestryPreviousHeadSha: acceptedHead);
+        var cleanupService = new PublicationRecoveryService(
+            new StickyCommentPublisher(new FakePublisherTransportFactory()));
+        using (var cleanupOnly = await cleanupService
+            .ClassifyBeforeProviderAsync(
+                fixture.Launch.Inputs.GitHubToken!,
+                fixture.Invocation,
+                fixture.PublicationScope,
+                fixture.Context,
+                CancellationToken.None))
+        {
+            Assert.Equal(
+                PublicationRecoveryAction.CleanupSupersededRecovery,
+                cleanupOnly.Decision.Action);
+            var cleanup = await PublicationRecoveryService
+                .CleanupHistoricalRecoveryRecordsAsync(
+                    fixture.Invocation,
+                    fixture.Context,
+                    cleanupOnly,
+                    CancellationToken.None);
+            Assert.True(cleanup.Completed, cleanup.Code);
+        }
+        var (prepared, _) = await PersistCandidateAsync(fixture);
+        using (prepared)
+        {
+            fixture.Context.Dispose();
+            fixture = await RetainedStateTransactionEndToEndTests
+                .RestoreFixtureAsync(
+                    fixture,
+                    newWorkflowRun: true,
+                    reviewedHeadSha: currentHead,
+                    ancestryPreviousHeadSha: acceptedHead);
+            using var context = fixture.Context;
+            Assert.True(PublicationRecoveryService.TryRestoreRendered(
+                accepted.Publication,
+                out var acceptedRendered));
+            var acceptedComment = StickyPublicationTestData.Comment(
+                960,
+                acceptedRendered!.Comment);
+            var factory = new FakePublisherTransportFactory();
+            factory.Transport.Enqueue(acceptedComment);
+            using var recovery = await new PublicationRecoveryService(
+                    new StickyCommentPublisher(factory))
+                .ClassifyBeforeProviderAsync(
+                    fixture.Launch.Inputs.GitHubToken!,
+                    fixture.Invocation,
+                    fixture.PublicationScope,
+                    context,
+                    CancellationToken.None);
+
+            Assert.Equal(PublicationRecoveryAction.Conflict,
+                recovery.Decision.Action);
+            Assert.False(recovery.Observation!.CandidateMatchesCurrentHead);
+            Assert.Null(recovery.MarkerAbsenceEvidence);
+            Assert.Equal(StickyDiscoveryKind.StaleTarget,
+                recovery.DiscoveryKind);
+            Assert.Equal(1, factory.Transport.Lists);
+            Assert.Equal(0, factory.Transport.Creates);
+            Assert.Equal(0, factory.Transport.Updates);
+        }
     }
 
     [Theory]
@@ -1268,7 +1567,8 @@ public sealed class PublicationRecoveryClassifierTests
     private static async Task<(
         RetainedStateTransactionEndToEndTests.TransactionFixture Fixture,
         RetainedStatePreparedCandidate Prepared,
-        RetainedStatePersistedCandidate Candidate)>
+        RetainedStatePersistedCandidate Candidate,
+        BoundedGitHubIssueComment PreviousAcceptedComment)>
         CreateContinuationCandidateAsync(long acceptedCommentId)
     {
         var fixture = await RetainedStateTransactionEndToEndTests
@@ -1330,7 +1630,7 @@ public sealed class PublicationRecoveryClassifierTests
                 inventory.CurrentAcceptancePublicationReceipt!.CommentId);
         }
         var (prepared, candidate) = await PersistCandidateAsync(fixture);
-        return (fixture, prepared, candidate);
+        return (fixture, prepared, candidate, acceptedComment);
     }
 
     private static async Task PersistOutcomeUnknownAsync(
@@ -1416,6 +1716,95 @@ public sealed class PublicationRecoveryClassifierTests
         Assert.True(cleanup.Completed, cleanup.Code);
     }
 
+    private static async Task PersistPreviousAcceptedStateAsync(
+        RetainedStateTransactionEndToEndTests.TransactionFixture fixture,
+        RetainedStatePreparedCandidate prepared,
+        RetainedStatePersistedCandidate candidate,
+        BoundedGitHubIssueComment previousAcceptedComment,
+        PreviousAcceptedRecoveryState state)
+    {
+        var beforeFactory = PreviousAcceptedMarkerFactory(
+            previousAcceptedComment);
+        using var before = await new PublicationRecoveryService(
+                new StickyCommentPublisher(beforeFactory))
+            .ClassifyBeforeProviderAsync(
+                fixture.Launch.Inputs.GitHubToken!,
+                fixture.Invocation,
+                fixture.PublicationScope,
+                fixture.Context,
+                CancellationToken.None);
+        Assert.Equal(PublicationRecoveryAction.ResumeBeforeIntent,
+            before.Decision.Action);
+        var intentResult = await PublicationRecoveryPersistence
+            .PersistIntentAndAuthorizeAsync(
+                fixture.Context,
+                before.Observation!,
+                CancellationToken.None);
+        Assert.True(intentResult.Succeeded, intentResult.Code);
+        using var intent = Assert.IsType<PublicationIntentPersistenceResult>(
+            intentResult.Value);
+        if (state == PreviousAcceptedRecoveryState.Intent)
+        {
+            return;
+        }
+
+        var (outcome, reason) = state switch
+        {
+            PreviousAcceptedRecoveryState.KnownNotWritten => (
+                BoundedGitHubPublisherOutcome.KnownNotWritten,
+                StickyPublicationReason.Deadline),
+            PreviousAcceptedRecoveryState.OutcomeUnknown => (
+                BoundedGitHubPublisherOutcome.OutcomeUnknown,
+                StickyPublicationReason.ReconciliationIncomplete),
+            PreviousAcceptedRecoveryState.CancelledBeforeSend => (
+                BoundedGitHubPublisherOutcome.CancelledBeforeSend,
+                StickyPublicationReason.Cancelled),
+            PreviousAcceptedRecoveryState.AuthorizationFailure => (
+                BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure,
+                StickyPublicationReason.AdmissionInvalid),
+            _ => throw new InvalidOperationException(
+                "Unexpected predecessor recovery state."),
+        };
+        var ownershipResult = await RestrictedStateService
+            .RenewRetainedStateOwnershipAsync(
+                fixture.Context,
+                candidate,
+                prior: null,
+                intent.Observation.Records,
+                CancellationToken.None);
+        using var ownership = Assert.IsType<RetainedStateOwnership>(
+            ownershipResult.Value);
+        Assert.True(PublicationRecoveryPersistence.TryCreateFailureWrite(
+            candidate,
+            outcome,
+            reason,
+            fixture.Time.UnixSeconds,
+            prepared.Header.LogicalExpiresAtUnixSeconds,
+            out _,
+            out var request));
+        var attemptResult = await RestrictedStateService
+            .PrepareRetainedOpaqueWriteAsync(
+                fixture.Context,
+                ownership,
+                request!,
+                CancellationToken.None);
+        using var attempt = Assert.IsType<RetainedStateOpaqueWriteAttempt>(
+            attemptResult.Value);
+        var persistedResult = await RestrictedStateService
+            .PersistPreparedRetainedOpaqueWriteAsync(
+                fixture.Context,
+                attempt,
+                CancellationToken.None);
+        using var persisted = Assert.IsType<RetainedStateOpaqueRecord>(
+            persistedResult.Value);
+        var cleanup = await PublicationRecoveryPersistence
+            .CleanupCompletedWriteAnchorAsync(
+                fixture.Context,
+                attempt,
+                CancellationToken.None);
+        Assert.True(cleanup.Completed, cleanup.Code);
+    }
+
     private static (FakePublisherTransportFactory Factory,
         BoundedGitHubIssueComment Comment) MarkerFactory(
         RetainedStatePreparedCandidate prepared,
@@ -1436,6 +1825,18 @@ public sealed class PublicationRecoveryClassifierTests
         BoundedGitHubIssueComment comment)
     {
         var factory = new FakePublisherTransportFactory();
+        factory.Transport.Enqueue(comment);
+        factory.Transport.Enqueue(comment);
+        factory.Transport.Read = BoundedGitHubHttpResult<
+            BoundedGitHubIssueComment>.Success(comment);
+        return factory;
+    }
+
+    private static FakePublisherTransportFactory PreviousAcceptedMarkerFactory(
+        BoundedGitHubIssueComment comment)
+    {
+        var factory = new FakePublisherTransportFactory();
+        factory.Transport.Enqueue(comment);
         factory.Transport.Enqueue(comment);
         factory.Transport.Enqueue(comment);
         factory.Transport.Read = BoundedGitHubHttpResult<
@@ -1873,6 +2274,15 @@ public sealed class PublicationRecoveryClassifierTests
         AuthorizationFailure,
         ExactMarker,
         Terminal,
+    }
+
+    private enum PreviousAcceptedRecoveryState
+    {
+        Intent = 1,
+        KnownNotWritten,
+        OutcomeUnknown,
+        CancelledBeforeSend,
+        AuthorizationFailure,
     }
 
     private sealed record RecoveryProbe(

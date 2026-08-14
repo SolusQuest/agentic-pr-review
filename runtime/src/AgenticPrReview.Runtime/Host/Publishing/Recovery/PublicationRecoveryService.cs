@@ -178,6 +178,17 @@ internal sealed class PublicationRecoveryService
         {
             marker = PublicationMarkerObservation.Ambiguous;
         }
+        else if (marker == PublicationMarkerObservation.Ambiguous &&
+            discovered.Kind == StickyDiscoveryKind.StaleTarget &&
+            await IsPreviousAcceptedTargetAsync(
+                token,
+                authorization,
+                scope,
+                observation,
+                cancellationToken).ConfigureAwait(false))
+        {
+            marker = PublicationMarkerObservation.PreviousAcceptedTarget;
+        }
         var classified = PublicationRecoveryClassifier.Classify(
             observation,
             marker);
@@ -1145,6 +1156,46 @@ internal sealed class PublicationRecoveryService
         {
             return false;
         }
+    }
+
+    private async Task<bool> IsPreviousAcceptedTargetAsync(
+        ActionHostGitHubToken token,
+        ActionHostAuthorizer.AuthorizedInvocation authorization,
+        R4PublicationScopeV1 scope,
+        PublicationRecoveryObservation observation,
+        CancellationToken cancellationToken)
+    {
+        var inventory = observation.Inventory;
+        if (observation.Candidate is null ||
+            !observation.CandidateMatchesCurrentHead ||
+            observation.StickyReadback is not null ||
+            observation.Recovery is not null ||
+            inventory?.CurrentAcceptedPublication is not { } accepted ||
+            inventory.CurrentAcceptancePublicationReceipt is not
+                { } durableReceipt ||
+            !TryRestoreRendered(accepted, out var rendered) ||
+            rendered is null ||
+            !AuthorizedStickyReadbackRequest.TryCreateRecovery(
+                authorization,
+                scope,
+                rendered,
+                durableReceipt,
+                out var request) ||
+            request is null)
+        {
+            return false;
+        }
+
+        var discovered = await publisher.DiscoverAsync(
+                token,
+                request,
+                cancellationToken)
+            .ConfigureAwait(false);
+        return discovered.Kind == StickyDiscoveryKind.ExactTarget &&
+            discovered.Receipt is { } freshReceipt &&
+            PublicationReceiptMatcher.IsFreshObservationOf(
+                durableReceipt,
+                freshReceipt);
     }
 
     private static PublicationRecoveryEvaluation Evaluation(

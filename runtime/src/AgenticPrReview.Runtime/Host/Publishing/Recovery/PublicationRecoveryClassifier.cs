@@ -126,6 +126,12 @@ internal static class PublicationRecoveryClassifier
                 : Conflict();
         }
 
+        if (marker is not PublicationMarkerObservation.Absent and
+            not PublicationMarkerObservation.PreviousAcceptedTarget)
+        {
+            return Conflict();
+        }
+
         if (observation.StickyReadback is not null ||
             observation.Recovery is not null ||
             observation.Abandonment is not null)
