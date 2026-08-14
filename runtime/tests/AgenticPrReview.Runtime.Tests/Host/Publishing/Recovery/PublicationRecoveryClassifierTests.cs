@@ -47,11 +47,13 @@ public sealed class PublicationRecoveryClassifierTests
             (await EvaluateAsync(RecoveryState.AuthorizationFailure)).Action);
         var expired = await EvaluateAsync(
             RecoveryState.ExpiredOutcomeUnknown);
-        Assert.Equal(PublicationRecoveryAction.NoPendingWork, expired.Action);
-        Assert.True(expired.AllowsProvider);
-        Assert.False(expired.CandidatePresent);
-        Assert.False(expired.IntentPresent);
-        Assert.Null(expired.FailureOutcome);
+        Assert.Equal(PublicationRecoveryAction.StickyOutcomeUnknown,
+            expired.Action);
+        Assert.False(expired.AllowsProvider);
+        Assert.True(expired.CandidatePresent);
+        Assert.True(expired.IntentPresent);
+        Assert.Equal(BoundedGitHubPublisherOutcome.OutcomeUnknown,
+            expired.FailureOutcome);
     }
 
     [Fact]
@@ -140,6 +142,56 @@ public sealed class PublicationRecoveryClassifierTests
         Assert.Equal(PublicationRecoveryLifecycleState.None,
             noPending.Lifecycle);
         Assert.True(noPending.AllowsProvider);
+    }
+
+    [Fact]
+    public async Task AcceptedOutcomeUnknownConvergesOnExactMarkerAfterRestart()
+    {
+        var fixture = await RetainedStateTransactionEndToEndTests
+            .CreateFixtureAsync();
+        var accepted = await RetainedStateTransactionEndToEndTests
+            .AcceptGenerationAsync(
+                fixture,
+                commentId: 903,
+                persistOutcomeUnknownFailure: true);
+        fixture.Context.Dispose();
+        fixture = await RetainedStateTransactionEndToEndTests
+            .RestoreFixtureAsync(fixture);
+        using var processB = fixture.Context;
+        Assert.True(PublicationRecoveryService.TryRestoreRendered(
+            accepted.Publication,
+            out var rendered));
+        var exact = StickyPublicationTestData.Comment(903, rendered!.Comment);
+        var factory = new FakePublisherTransportFactory();
+        factory.Transport.Enqueue(exact);
+        factory.Transport.Enqueue(exact);
+        factory.Transport.Read = BoundedGitHubHttpResult<
+            BoundedGitHubIssueComment>.Success(exact);
+
+        using var recovery = await new PublicationRecoveryService(
+                new StickyCommentPublisher(factory))
+            .ClassifyBeforeProviderAsync(
+                fixture.Launch.Inputs.GitHubToken!,
+                fixture.Invocation,
+                fixture.PublicationScope,
+                processB,
+                CancellationToken.None);
+
+        Assert.Equal(PublicationRecoveryAction.ReturnCommitted,
+            recovery.Decision.Action);
+        Assert.False(recovery.Decision.AllowsProvider);
+        Assert.Equal(BoundedGitHubPublisherOutcome.OutcomeUnknown,
+            recovery.Observation!.Failure!.Outcome);
+        var receipt = Assert.IsType<
+            StickyCommentPublisher.StickyPublicationReceipt>(
+                recovery.Observation.Inventory!
+                    .CurrentAcceptancePublicationReceipt);
+        Assert.Equal(903, receipt.CommentId);
+        Assert.Equal(accepted.Publication.ScopeSha256, receipt.ScopeSha256);
+        Assert.Equal(accepted.Publication.BodySha256, receipt.BodySha256);
+        Assert.Equal(accepted.Publication.ReviewedHeadSha, receipt.HeadSha);
+        Assert.Equal(0, factory.Transport.Creates);
+        Assert.Equal(0, factory.Transport.Updates);
     }
 
     [Theory]
@@ -1151,8 +1203,8 @@ public sealed class PublicationRecoveryClassifierTests
                         CancellationToken.None);
                 using var inventory = inventoryResult.Value;
                 Assert.True(inventoryResult.Succeeded, inventoryResult.Code);
-                Assert.Null(inventory!.Candidate);
-                Assert.Empty(inventory.Records);
+                Assert.NotNull(inventory!.Candidate);
+                Assert.Equal(2, inventory.Records.Length);
                 Assert.Empty(inventory.Anchors);
                 Assert.Empty(inventory.CleanupRecords);
             }

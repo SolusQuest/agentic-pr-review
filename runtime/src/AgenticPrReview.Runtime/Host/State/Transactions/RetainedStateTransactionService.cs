@@ -265,6 +265,7 @@ internal sealed class RetainedStateTransactionService
                     before,
                     authority,
                     binding,
+                    trustedNow,
                     prepared,
                     envelopeBytes,
                     out var existingMetadata,
@@ -285,6 +286,7 @@ internal sealed class RetainedStateTransactionService
                     before,
                     authority,
                     binding,
+                    trustedNow,
                     expected: null))
             {
                 return RetainedStateTransactionResult<
@@ -379,11 +381,17 @@ internal sealed class RetainedStateTransactionService
         using var observed = observedResult.Value;
         if (!observedResult.Succeeded ||
             observed is null ||
-            !CanAppendCandidate(observed, authority, binding, candidate) ||
+            !CanAppendCandidate(
+                observed,
+                authority,
+                binding,
+                trustedNow,
+                candidate) ||
             !MatchesOpaqueEvidence(
                 observed,
                 authority,
                 binding,
+                trustedNow,
                 expectedP5Records) ||
             !RetainedStateRetention.CoversPreSticky(
                 candidate.Metadata.ExpiresAtUnixSeconds,
@@ -498,6 +506,7 @@ internal sealed class RetainedStateTransactionService
                 observed,
                 authority,
                 binding,
+                trustedNow,
                 ownership.Candidate) ||
             !StringComparer.Ordinal.Equals(
                 observed.InventoryDigest,
@@ -807,6 +816,7 @@ internal sealed class RetainedStateTransactionService
                     observed,
                     authority,
                     binding,
+                    trustedNow,
                     candidate) ||
                 observed.Snapshot is not { } snapshot ||
                 !HasExactOpaqueWriteAnchor(
@@ -995,6 +1005,7 @@ internal sealed class RetainedStateTransactionService
                     observed,
                     authority,
                     binding,
+                    trustedNow,
                     candidate) ||
                 observed.InventoryDigest is not { } inventoryDigest ||
                 observed.Snapshot is not { } snapshot)
@@ -1141,6 +1152,7 @@ internal sealed class RetainedStateTransactionService
                 observed,
                 authority,
                 binding,
+                trustedNow,
                 candidate) ||
             observed.InventoryDigest is not { } inventoryDigest ||
             observed.Snapshot is not { } snapshot ||
@@ -1365,7 +1377,12 @@ internal sealed class RetainedStateTransactionService
         {
             if (!initialResult.Succeeded ||
                 initial is null ||
-                !CanAppendCandidate(initial, authority, binding, candidate) ||
+                !CanAppendCandidate(
+                    initial,
+                    authority,
+                    binding,
+                    acceptedAt,
+                    candidate) ||
                 !StringComparer.Ordinal.Equals(
                     initial.InventoryDigest,
                     ownership.InventoryDigest))
@@ -1430,7 +1447,12 @@ internal sealed class RetainedStateTransactionService
         using var before = beforeResult.Value;
         if (!beforeResult.Succeeded ||
             before is null ||
-            !CanAppendCandidate(before, authority, binding, candidate) ||
+            !CanAppendCandidate(
+                before,
+                authority,
+                binding,
+                acceptedAt,
+                candidate) ||
             (predecessorCopy is null
                 ? !PredecessorCovers(before, binding, logicalExpiry)
                 : before.AcceptedState.Selection?.Current is not { } current ||
@@ -1655,6 +1677,7 @@ internal sealed class RetainedStateTransactionService
                 durabilityObserved,
                 authority,
                 binding,
+                observedAt,
                 candidate) ||
             durabilityObserved.Snapshot is not { } durabilitySnapshot ||
             durabilityObserved.InventoryDigest is not { }
@@ -1706,7 +1729,12 @@ internal sealed class RetainedStateTransactionService
         using var observed = observedResult.Value;
         if (!observedResult.Succeeded ||
             observed is null ||
-            !CanAppendCandidate(observed, authority, binding, candidate) ||
+            !CanAppendCandidate(
+                observed,
+                authority,
+                binding,
+                observedAt,
+                candidate) ||
             !PredecessorCovers(
                 observed,
                 binding,
@@ -1781,7 +1809,12 @@ internal sealed class RetainedStateTransactionService
         using var observed = observedResult.Value;
         if (!observedResult.Succeeded ||
             observed is null ||
-            !CanAppendCandidate(observed, authority, binding, candidate) ||
+            !CanAppendCandidate(
+                observed,
+                authority,
+                binding,
+                observationTime,
+                candidate) ||
             !PredecessorCovers(
                 observed,
                 binding,
@@ -1987,6 +2020,7 @@ internal sealed class RetainedStateTransactionService
                     before,
                     authority,
                     binding,
+                    observedAt,
                     candidate) ||
                 !PredecessorCovers(before, binding, logicalExpiry) ||
                 !StringComparer.Ordinal.Equals(
@@ -2354,9 +2388,12 @@ internal sealed class RetainedStateTransactionService
                         : observedResult.Code);
         }
 
-        var pending = snapshot.Authenticated.Where(item =>
-                item.Header.ObjectClass == StateObjectClass.Candidate &&
-                ActiveAt(item, binding, trustedNow) &&
+        var pending = SelectLivePublicationCandidateFamilies(
+                snapshot.Authenticated,
+                snapshot.Authenticated,
+                binding,
+                trustedNow)
+            .Where(item =>
                 StringComparer.Ordinal.Equals(
                     item.Header.PredecessorIdentity,
                     binding.CurrentAcceptanceReceiptIdentity))
@@ -2604,11 +2641,13 @@ internal sealed class RetainedStateTransactionService
                         : observedResult.Code);
         }
 
-        var pending = snapshot.Authenticated
-            .Concat(snapshot.UnderRetained)
+        var visible = snapshot.Authenticated.Concat(snapshot.UnderRetained);
+        var pending = SelectLivePublicationCandidateFamilies(
+                visible,
+                visible,
+                binding,
+                trustedNow)
             .Where(item =>
-                item.Header.ObjectClass == StateObjectClass.Candidate &&
-                ActiveAt(item, binding, trustedNow) &&
                 StringComparer.Ordinal.Equals(
                     item.Header.PredecessorIdentity,
                     binding.CurrentAcceptanceReceiptIdentity))
@@ -2726,10 +2765,12 @@ internal sealed class RetainedStateTransactionService
                         : observedResult.Code);
         }
 
-        var pending = snapshot.Authenticated
+        var pending = SelectLivePublicationCandidateFamilies(
+                snapshot.Authenticated,
+                snapshot.Authenticated,
+                binding,
+                trustedNow)
             .Where(item =>
-                item.Header.ObjectClass == StateObjectClass.Candidate &&
-                ActiveAt(item, binding, trustedNow) &&
                 StringComparer.Ordinal.Equals(
                     item.Header.PredecessorIdentity,
                     binding.CurrentAcceptanceReceiptIdentity))
@@ -2833,19 +2874,12 @@ internal sealed class RetainedStateTransactionService
                         : observedResult.Code);
         }
 
-        var scopedCandidates = snapshot.Authenticated
+        var pending = SelectLivePublicationCandidateFamilies(
+                snapshot.Authenticated,
+                snapshot.Authenticated,
+                binding,
+                trustedNow)
             .Where(item =>
-                item.Header.ObjectClass == StateObjectClass.Candidate &&
-                Active(item, binding))
-            .ToArray();
-        var expiredCandidateIdentities = scopedCandidates
-            .Where(item =>
-                item.Header.LogicalExpiresAtUnixSeconds < trustedNow)
-            .Select(item => item.Header.ObjectIdentity)
-            .ToHashSet(StringComparer.Ordinal);
-        var pending = scopedCandidates
-            .Where(item =>
-                item.Header.LogicalExpiresAtUnixSeconds >= trustedNow &&
                 StringComparer.Ordinal.Equals(
                     item.Header.PredecessorIdentity,
                     binding.CurrentAcceptanceReceiptIdentity))
@@ -2920,9 +2954,7 @@ internal sealed class RetainedStateTransactionService
                         StateObjectClass.PublicationIntent or
                         StateObjectClass.PublicationFailure or
                         StateObjectClass.Abandonment &&
-                    ActiveAt(item, binding, trustedNow) &&
-                    (item.Header.PredecessorIdentity is not { } predecessor ||
-                        !expiredCandidateIdentities.Contains(predecessor)))
+                    ActiveAt(item, binding, trustedNow))
                 .ToArray();
             records = activeRecords.Select(item =>
                     RetainedStateOpaqueRecord.Create(
@@ -2938,9 +2970,7 @@ internal sealed class RetainedStateTransactionService
             var cleanup = snapshot.Authenticated
                 .Where(item =>
                     item.Header.ObjectClass == StateObjectClass.Cleanup &&
-                    ActiveAt(item, binding, trustedNow) &&
-                    (item.Header.PredecessorIdentity is not { } predecessor ||
-                        !expiredCandidateIdentities.Contains(predecessor)))
+                    ActiveAt(item, binding, trustedNow))
                 .ToArray();
             var anchors = ImmutableArray.CreateBuilder<
                 RetainedStatePublicationRecoveryAnchorEvidence>();
@@ -3412,6 +3442,7 @@ internal sealed class RetainedStateTransactionService
                 observed,
                 authority,
                 binding,
+                trustedNow,
                 preparation.Candidate) ||
             observed.Snapshot is not { } snapshot ||
             observed.InventoryDigest is not { } inventoryDigest ||
@@ -3680,6 +3711,7 @@ internal sealed class RetainedStateTransactionService
                         observed,
                         authority,
                         binding,
+                        observedAt,
                         candidate) &&
                     !MatchesVisibleAcceptance(
                         observed,
@@ -5346,6 +5378,7 @@ internal sealed class RetainedStateTransactionService
         RetainedStateObservation observation,
         RetainedStateTransactionAuthority authority,
         RetainedStateTransactionBinding binding,
+        long trustedNowUnixSeconds,
         RetainedStatePersistedCandidate? expected)
     {
         var snapshot = observation.Snapshot;
@@ -5360,14 +5393,12 @@ internal sealed class RetainedStateTransactionService
             return false;
         }
 
-        var activeCandidates = snapshot.Authenticated.Where(item =>
-                item.Header.ObjectClass == StateObjectClass.Candidate &&
-                StringComparer.Ordinal.Equals(
-                    item.Header.Epoch,
-                    binding.SelectedLineage.Epoch) &&
-                StringComparer.Ordinal.Equals(
-                    item.Header.SessionId,
-                    binding.SelectedLineage.SessionId) &&
+        var activeCandidates = SelectLivePublicationCandidateFamilies(
+                snapshot.Authenticated,
+                snapshot.Authenticated,
+                binding,
+                trustedNowUnixSeconds)
+            .Where(item =>
                 StringComparer.Ordinal.Equals(
                     item.Header.PredecessorIdentity,
                     binding.CurrentAcceptanceReceiptIdentity))
@@ -5432,6 +5463,7 @@ internal sealed class RetainedStateTransactionService
         RetainedStateObservation observation,
         RetainedStateTransactionAuthority authority,
         RetainedStateTransactionBinding binding,
+        long trustedNowUnixSeconds,
         RetainedStatePreparedCandidate prepared,
         ReadOnlyMemory<byte> immutableEnvelope,
         out OpaqueStoreObjectMetadata? metadata,
@@ -5461,9 +5493,12 @@ internal sealed class RetainedStateTransactionService
             return false;
         }
 
-        var active = snapshot.Authenticated.Where(item =>
-                item.Header.ObjectClass == StateObjectClass.Candidate &&
-                Active(item, binding) &&
+        var active = SelectLivePublicationCandidateFamilies(
+                snapshot.Authenticated,
+                snapshot.Authenticated,
+                binding,
+                trustedNowUnixSeconds)
+            .Where(item =>
                 StringComparer.Ordinal.Equals(
                     item.Header.PredecessorIdentity,
                     binding.CurrentAcceptanceReceiptIdentity))
@@ -6080,6 +6115,7 @@ internal sealed class RetainedStateTransactionService
         RetainedStateObservation observed,
         RetainedStateTransactionAuthority authority,
         RetainedStateTransactionBinding binding,
+        long trustedNowUnixSeconds,
         ImmutableArray<RetainedStateOpaqueRecord> expected)
     {
         if (expected.IsDefault ||
@@ -6096,7 +6132,7 @@ internal sealed class RetainedStateTransactionService
                     StateObjectClass.PublicationIntent or
                     StateObjectClass.PublicationFailure or
                     StateObjectClass.Abandonment &&
-                Active(item, binding))
+                ActiveAt(item, binding, trustedNowUnixSeconds))
             .ToArray();
         if (active.Length != expected.Length)
         {
@@ -6106,6 +6142,19 @@ internal sealed class RetainedStateTransactionService
         return expected.All(record => active.Count(item =>
             record.MatchesAuthenticated(authority, item)) == 1);
     }
+
+    private static AuthenticatedStateObject[]
+        SelectLivePublicationCandidateFamilies(
+        IEnumerable<AuthenticatedStateObject> candidates,
+        IEnumerable<AuthenticatedStateObject> familyEvidence,
+        RetainedStateTransactionBinding binding,
+        long trustedNowUnixSeconds) =>
+        PublicationCandidateFamilySelector.SelectLive(
+            candidates,
+            familyEvidence,
+            binding.SelectedLineage.Epoch,
+            binding.SelectedLineage.SessionId,
+            trustedNowUnixSeconds);
 
     private static bool Active(
         AuthenticatedStateObject item,

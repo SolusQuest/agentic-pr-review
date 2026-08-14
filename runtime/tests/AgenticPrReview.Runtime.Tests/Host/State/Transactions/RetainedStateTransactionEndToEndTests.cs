@@ -296,6 +296,162 @@ public sealed class RetainedStateTransactionEndToEndTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExpiredPublicationFamilyAllowsSuccessorPossibleCommit(
+        bool includeP5Descendants)
+    {
+        var fixture = await CreateFixtureAsync();
+        var firstRun = await CompleteRunAsync(fixture, "expired family");
+        Assert.True(R4PreparedPublication.TryCreate(
+            firstRun.Outcome,
+            fixture.PublicationScope,
+            out var firstPublication));
+        var firstPreparedResult = await RestrictedStateService
+            .PrepareRetainedCandidateAsync(
+                fixture.Context,
+                firstRun.Run,
+                firstPublication!,
+                CancellationToken.None);
+        using var firstPrepared = Assert.IsType<RetainedStatePreparedCandidate>(
+            firstPreparedResult.Value);
+        var firstPersistedResult = await RestrictedStateService
+            .PersistRetainedCandidateAsync(
+                fixture.Context,
+                firstPrepared,
+                CancellationToken.None);
+        var firstCandidate = Assert.IsType<RetainedStatePersistedCandidate>(
+            firstPersistedResult.Value);
+        OpaqueStoreObjectMetadata? intentMetadata = null;
+        OpaqueStoreObjectMetadata? failureMetadata = null;
+        if (includeP5Descendants)
+        {
+            var intentOwnershipResult = await RestrictedStateService
+                .RenewRetainedStateOwnershipAsync(
+                    fixture.Context,
+                    firstCandidate,
+                    prior: null,
+                    expectedP5Records: [],
+                    CancellationToken.None);
+            using var intentOwnership = Assert.IsType<RetainedStateOwnership>(
+                intentOwnershipResult.Value);
+            Assert.True(PublicationRecoveryPersistence.TryCreateIntentWrite(
+                firstCandidate,
+                fixture.Time.UnixSeconds,
+                firstPrepared.Header.LogicalExpiresAtUnixSeconds,
+                out _,
+                out var intentRequest));
+            using var intent = await PersistP5AndCleanupAnchorAsync(
+                fixture,
+                intentOwnership,
+                intentRequest!);
+            intentMetadata = intent.Metadata;
+
+            var failureOwnershipResult = await RestrictedStateService
+                .RenewRetainedStateOwnershipAsync(
+                    fixture.Context,
+                    firstCandidate,
+                    prior: null,
+                    expectedP5Records: [intent],
+                    CancellationToken.None);
+            using var failureOwnership = Assert.IsType<RetainedStateOwnership>(
+                failureOwnershipResult.Value);
+            Assert.True(PublicationRecoveryPersistence.TryCreateFailureWrite(
+                firstCandidate,
+                BoundedGitHubPublisherOutcome.OutcomeUnknown,
+                StickyPublicationReason.ReconciliationIncomplete,
+                fixture.Time.UnixSeconds,
+                firstPrepared.Header.LogicalExpiresAtUnixSeconds,
+                out _,
+                out var failureRequest));
+            using var failure = await PersistP5AndCleanupAnchorAsync(
+                fixture,
+                failureOwnership,
+                failureRequest!);
+            failureMetadata = failure.Metadata;
+        }
+
+        fixture.Time.UnixSeconds =
+            firstPrepared.Header.LogicalExpiresAtUnixSeconds +
+            (includeP5Descendants
+                ? PublicationRecoveryRetention.PreStickyBudgetSeconds + 1
+                : 1);
+        fixture.Context.Dispose();
+        fixture = await RestoreFixtureAsync(fixture, newWorkflowRun: true);
+        using var processB = fixture.Context;
+        var secondRun = await CompleteRunAsync(fixture, "successor");
+        Assert.True(R4PreparedPublication.TryCreate(
+            secondRun.Outcome,
+            fixture.PublicationScope,
+            out var secondPublication));
+        var secondPreparedResult = await RestrictedStateService
+            .PrepareRetainedCandidateAsync(
+                processB,
+                secondRun.Run,
+                secondPublication!,
+                CancellationToken.None);
+        using var secondPrepared = Assert.IsType<RetainedStatePreparedCandidate>(
+            secondPreparedResult.Value);
+        var uploadsBefore = fixture.Store.UploadCalls;
+        fixture.Store.NextUploadFailure = OpaqueStoreFailure.OutcomeUnknown;
+        fixture.Store.NextUploadMutationState =
+            OpaqueStoreMutationState.OutcomeUnknown;
+        fixture.Store.PersistFailedUpload = true;
+
+        var secondPersistedResult = await RestrictedStateService
+            .PersistRetainedCandidateAsync(
+                processB,
+                secondPrepared,
+                CancellationToken.None);
+        var secondCandidate = Assert.IsType<RetainedStatePersistedCandidate>(
+            secondPersistedResult.Value);
+        Assert.Equal(uploadsBefore + 1, fixture.Store.UploadCalls);
+        Assert.Equal(2, fixture.Store.Objects.Count(item =>
+            item.Reference.Name == firstPrepared.Name));
+        var recoveredResult = await RestrictedStateService
+            .RecoverRetainedCandidateAsync(
+                processB,
+                CancellationToken.None);
+        Assert.True(recoveredResult.Succeeded, recoveredResult.Code);
+        using var recoveredPrepared = recoveredResult.Value!.Prepared;
+        Assert.Equal(secondPrepared.Header, recoveredPrepared.Header);
+        var inventoryResult = await RestrictedStateService
+            .ObserveRetainedPublicationRecoveryInventoryAsync(
+                processB,
+                CancellationToken.None);
+        Assert.True(inventoryResult.Succeeded, inventoryResult.Code);
+        using (var inventory = Assert.IsType<
+            RetainedStatePublicationRecoveryInventory>(inventoryResult.Value))
+        {
+            Assert.Equal(secondPrepared.Header, inventory.Candidate!.Header);
+        }
+        var retried = await RestrictedStateService
+            .PersistRetainedCandidateAsync(
+                processB,
+                secondPrepared,
+                CancellationToken.None);
+        Assert.True(retried.Succeeded, retried.Code);
+        Assert.Equal(uploadsBefore + 1, fixture.Store.UploadCalls);
+        Assert.Equal(secondCandidate.Metadata, retried.Value!.Metadata);
+        var owned = await RestrictedStateService
+            .RenewRetainedStateOwnershipAsync(
+                processB,
+                secondCandidate,
+                prior: null,
+                expectedP5Records: [],
+                CancellationToken.None);
+        using var ownership = Assert.IsType<RetainedStateOwnership>(
+            owned.Value);
+        Assert.Equal(2, fixture.Store.Objects.Count(item =>
+            item.Reference.Name == firstPrepared.Name));
+        if (includeP5Descendants)
+        {
+            Assert.Contains(intentMetadata!, fixture.Store.Objects);
+            Assert.Contains(failureMetadata!, fixture.Store.Objects);
+        }
+    }
+
+    [Theory]
     [MemberData(nameof(R4StickyPublicationByteVectors.Names),
         MemberType = typeof(R4StickyPublicationByteVectors))]
     public async Task FrozenP1VectorPersistsAndRecoversByteExactlyThroughS6(
@@ -2585,7 +2741,8 @@ public sealed class RetainedStateTransactionEndToEndTests
     internal static async Task<AcceptedGeneration> AcceptGenerationAsync(
         TransactionFixture fixture,
         long commentId,
-        bool exercisePredecessorCopyPossibleCommit = false)
+        bool exercisePredecessorCopyPossibleCommit = false,
+        bool persistOutcomeUnknownFailure = false)
     {
         var run = await CompleteRunAsync(
             fixture,
@@ -2611,6 +2768,51 @@ public sealed class RetainedStateTransactionEndToEndTests
                 CancellationToken.None);
         var candidate = Assert.IsType<RetainedStatePersistedCandidate>(
             persisted.Value);
+        if (persistOutcomeUnknownFailure)
+        {
+            var intentOwnershipResult = await RestrictedStateService
+                .RenewRetainedStateOwnershipAsync(
+                    fixture.Context,
+                    candidate,
+                    prior: null,
+                    expectedP5Records: [],
+                    CancellationToken.None);
+            using var intentOwnership = Assert.IsType<RetainedStateOwnership>(
+                intentOwnershipResult.Value);
+            Assert.True(PublicationRecoveryPersistence.TryCreateIntentWrite(
+                candidate,
+                fixture.Time.UnixSeconds,
+                preparedCandidate.Header.LogicalExpiresAtUnixSeconds,
+                out _,
+                out var intentRequest));
+            using var intentRecord = await PersistP5AndCleanupAnchorAsync(
+                fixture,
+                intentOwnership,
+                intentRequest!);
+
+            var failureOwnershipResult = await RestrictedStateService
+                .RenewRetainedStateOwnershipAsync(
+                    fixture.Context,
+                    candidate,
+                    prior: null,
+                    expectedP5Records: [intentRecord],
+                    CancellationToken.None);
+            using var failureOwnership = Assert.IsType<RetainedStateOwnership>(
+                failureOwnershipResult.Value);
+            Assert.True(PublicationRecoveryPersistence.TryCreateFailureWrite(
+                candidate,
+                BoundedGitHubPublisherOutcome.OutcomeUnknown,
+                StickyPublicationReason.ReconciliationIncomplete,
+                fixture.Time.UnixSeconds,
+                preparedCandidate.Header.LogicalExpiresAtUnixSeconds,
+                out _,
+                out var failureRequest));
+            using var failureRecord = await PersistP5AndCleanupAnchorAsync(
+                fixture,
+                failureOwnership,
+                failureRequest!);
+        }
+
         var existingP5Result = await RestrictedStateService
             .QueryRetainedOpaqueRecordsAsync(
                 fixture.Context,
@@ -2618,12 +2820,27 @@ public sealed class RetainedStateTransactionEndToEndTests
                 CancellationToken.None);
         using var existingP5 = Assert.IsType<RetainedStateOpaqueRecordSet>(
             existingP5Result.Value);
+        RetainedStateOpaqueRecordSet? existingFailures = null;
+        if (persistOutcomeUnknownFailure)
+        {
+            var failureResult = await RestrictedStateService
+                .QueryRetainedOpaqueRecordsAsync(
+                    fixture.Context,
+                    StateObjectClass.PublicationFailure,
+                    CancellationToken.None);
+            existingFailures = Assert.IsType<RetainedStateOpaqueRecordSet>(
+                failureResult.Value);
+        }
+        using var existingFailureLifetime = existingFailures;
+        var existingP5Records = existingFailures is null
+            ? existingP5.Records
+            : existingP5.Records.AddRange(existingFailures.Records);
         var owned = await RestrictedStateService
             .RenewRetainedStateOwnershipAsync(
                 fixture.Context,
                 candidate,
                 prior: null,
-                existingP5.Records,
+                existingP5Records,
                 CancellationToken.None);
         using var ownership = Assert.IsType<RetainedStateOwnership>(
             owned.Value);
@@ -2659,7 +2876,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             candidate,
             acceptanceOwnership,
             sticky!,
-            existingP5.Records);
+            existingP5Records);
         var accepted = await RestrictedStateService.AcceptRetainedStateAsync(
             fixture.Context,
             evidence,
@@ -2838,6 +3055,39 @@ public sealed class RetainedStateTransactionEndToEndTests
                     context,
                     attempt,
                     cancellationToken);
+    }
+
+    private static async Task<RetainedStateOpaqueRecord>
+        PersistP5AndCleanupAnchorAsync(
+        TransactionFixture fixture,
+        RetainedStateOwnership ownership,
+        RetainedStateOpaqueWriteRequest request)
+    {
+        var prepared = await RestrictedStateService
+            .PrepareRetainedOpaqueWriteAsync(
+                fixture.Context,
+                ownership,
+                request,
+                CancellationToken.None);
+        using var attempt = Assert.IsType<RetainedStateOpaqueWriteAttempt>(
+            prepared.Value);
+        var persisted = await RestrictedStateService
+            .PersistPreparedRetainedOpaqueWriteAsync(
+                fixture.Context,
+                attempt,
+                CancellationToken.None);
+        var record = Assert.IsType<RetainedStateOpaqueRecord>(persisted.Value);
+        var cleanup = await PublicationRecoveryPersistence
+            .CleanupCompletedWriteAnchorAsync(
+                fixture.Context,
+                attempt,
+                CancellationToken.None);
+        if (!cleanup.Completed)
+        {
+            record.Dispose();
+        }
+        Assert.True(cleanup.Completed, cleanup.Code);
+        return record;
     }
 
     private static async Task<RetainedStateAcceptanceRecoveryDurability>

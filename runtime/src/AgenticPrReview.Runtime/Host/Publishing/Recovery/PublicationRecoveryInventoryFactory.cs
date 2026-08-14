@@ -145,10 +145,15 @@ internal static class PublicationRecoveryInventoryFactory
             MatchedRetainedStateRecoveryAcceptance? matched = null;
             if (acceptedRecordCount > 0)
             {
+                var failureIsResolvedOutcomeUnknown =
+                    acceptedSet.Failure is null ||
+                    acceptedSet.Failure.Outcome ==
+                        BoundedGitHubPublisherOutcome.OutcomeUnknown &&
+                    acceptedSet.Intent is not null;
                 if (inventory.CurrentAcceptance is null ||
                     acceptedIdentity is null ||
                     acceptedSet.Recovery is null ||
-                    acceptedSet.Failure is not null ||
+                    !failureIsResolvedOutcomeUnknown ||
                     acceptedSet.Abandonment is not null ||
                     acceptedSet.StickyReadback is not null &&
                         acceptedSet.StickyReadback !=
