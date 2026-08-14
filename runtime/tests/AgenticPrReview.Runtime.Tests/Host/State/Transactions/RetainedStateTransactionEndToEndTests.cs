@@ -46,7 +46,17 @@ public sealed class RetainedStateTransactionEndToEndTests
     {
         var fixture = await CreateFixtureAsync();
         using var context = fixture.Context;
+        Assert.True(RestrictedStateService.TryGetCanonicalAgentRunRequest(
+            context,
+            out var canonicalRun));
+        Assert.NotNull(canonicalRun);
+        Assert.Equal(
+            fixture.Selected.SessionId,
+            canonicalRun.SessionId);
+        Assert.Same(fixture.CurrentReview, canonicalRun.InitialMessages[^1]);
         var run = await CompleteRunAsync(fixture);
+        Assert.Equal(canonicalRun.ReviewedIdentity, run.Run.ReviewedIdentity);
+        Assert.Equal(canonicalRun.SessionId, run.Run.SessionId);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             fixture.PublicationScope,
@@ -77,6 +87,13 @@ public sealed class RetainedStateTransactionEndToEndTests
         Assert.Equal(
             RetainedStateTransactionCodes.Persisted,
             persisted.Code);
+        Assert.True(RestrictedStateService.TryGetCurrentReviewProjection(
+            context,
+            candidate,
+            out var candidateProjection));
+        Assert.NotNull(candidateProjection);
+        Assert.Equal(run.Run.ReviewedIdentity, candidateProjection.ReviewedIdentity);
+        Assert.Empty(candidateProjection.OrderedFindings);
         Assert.Single(fixture.Store.Objects.Where(item =>
             item.Reference.Name == preparedCandidate.Name));
 
@@ -181,7 +198,8 @@ public sealed class RetainedStateTransactionEndToEndTests
             ownershipC,
             sticky!,
             [intentRecord],
-            exactHead);
+            exactHead,
+            attemptIntentRecordIdentity: intentBody!.RecordIdentity);
         Assert.False(ownershipC.IsUsable);
 
         var accepted = await RestrictedStateService
@@ -199,6 +217,13 @@ public sealed class RetainedStateTransactionEndToEndTests
             fixture.Time.UnixSeconds +
                 StateRetentionRequirements.LogicalWindowSeconds,
             verified.LogicalExpiresAtUnixSeconds);
+        Assert.True(RestrictedStateService.TryGetCurrentReviewProjection(
+            context,
+            verified,
+            out var acceptedProjection));
+        Assert.NotNull(acceptedProjection);
+        Assert.Equal(run.Run.ReviewedIdentity, acceptedProjection.ReviewedIdentity);
+        Assert.Empty(acceptedProjection.OrderedFindings);
         Assert.True(
             verified.ReceiptMetadata.ExpiresAtUnixSeconds >=
                 fixture.Time.UnixSeconds +
@@ -214,6 +239,51 @@ public sealed class RetainedStateTransactionEndToEndTests
             dependency.Kind == LocatorDependencyKind.RestrictedState);
         Assert.Contains(report.RequiredDependencies, dependency =>
             dependency.Kind == LocatorDependencyKind.Transaction);
+    }
+
+    [Fact]
+    public async Task RecoveredCandidateRebindsCurrentReviewInsideNewAuthority()
+    {
+        var fixture = await CreateFixtureAsync();
+        var run = await CompleteRunAsync(fixture);
+        Assert.True(R4PreparedPublication.TryCreate(
+            run.Outcome,
+            fixture.PublicationScope,
+            out var publication));
+        using (fixture.Context)
+        {
+            var prepared = await RestrictedStateService
+                .PrepareRetainedCandidateAsync(
+                    fixture.Context,
+                    run.Run,
+                    publication!,
+                    CancellationToken.None);
+            using var candidate = Assert.IsType<RetainedStatePreparedCandidate>(
+                prepared.Value);
+            var persisted = await RestrictedStateService
+                .PersistRetainedCandidateAsync(
+                    fixture.Context,
+                    candidate,
+                    CancellationToken.None);
+            Assert.True(persisted.Succeeded, persisted.Code);
+        }
+
+        fixture = await RestoreFixtureAsync(fixture);
+        using var restoredContext = fixture.Context;
+        var recovered = await RestrictedStateService
+            .RecoverRetainedCandidateAsync(
+                restoredContext,
+                CancellationToken.None);
+        var recoveredCandidate = Assert.IsType<
+            RetainedStatePersistedCandidate>(recovered.Value);
+        using var recoveredPrepared = recoveredCandidate.Prepared;
+        Assert.True(RestrictedStateService.TryGetCurrentReviewProjection(
+            restoredContext,
+            recoveredCandidate,
+            out var projection));
+        Assert.NotNull(projection);
+        Assert.Equal(run.Run.ReviewedIdentity, projection.ReviewedIdentity);
+        Assert.Empty(projection.OrderedFindings);
     }
 
     [Fact]
@@ -339,7 +409,7 @@ public sealed class RetainedStateTransactionEndToEndTests
                 firstCandidate,
                 fixture.Time.UnixSeconds,
                 firstPrepared.Header.LogicalExpiresAtUnixSeconds,
-                out _,
+                out var intentBody,
                 out var intentRequest));
             using var intent = await PersistP5AndCleanupAnchorAsync(
                 fixture,
@@ -358,6 +428,7 @@ public sealed class RetainedStateTransactionEndToEndTests
                 failureOwnershipResult.Value);
             Assert.True(PublicationRecoveryPersistence.TryCreateFailureWrite(
                 firstCandidate,
+                intentBody!.RecordIdentity,
                 BoundedGitHubPublisherOutcome.OutcomeUnknown,
                 StickyPublicationReason.ReconciliationIncomplete,
                 fixture.Time.UnixSeconds,
@@ -1136,6 +1207,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             ownershipResult.Value);
         Assert.True(PublicationRecoveryPersistence.TryCreateFailureWrite(
             candidate,
+            new string('0', 64),
             BoundedGitHubPublisherOutcome.KnownNotWritten,
             StickyPublicationReason.Deadline,
             fixture.Time.UnixSeconds,
@@ -2608,6 +2680,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         Assert.True(PublicationRecoveryPersistence
             .TryCreateStickyReadbackWrite(
                 candidate,
+                intent.Intent.RecordIdentity,
                 durableReceipt,
                 fixture.Time.UnixSeconds,
                 prepared.Header.LogicalExpiresAtUnixSeconds,
@@ -2662,7 +2735,10 @@ public sealed class RetainedStateTransactionEndToEndTests
                 canonicalReceipt,
                 readback.Observation.Records,
                 existingStickyReadback:
-                    readback.Observation.StickyReadback);
+                    readback.Observation.StickyReadback,
+                attemptIntentRecordIdentity:
+                    readback.Observation.RetryIntent?.RecordIdentity ??
+                    readback.Observation.Intent?.RecordIdentity);
             var acceptedResult = await RestrictedStateService
                 .AcceptRetainedStateAsync(
                     fixture.Context,
@@ -2988,6 +3064,7 @@ public sealed class RetainedStateTransactionEndToEndTests
                 CancellationToken.None);
         var candidate = Assert.IsType<RetainedStatePersistedCandidate>(
             persisted.Value);
+        string? attemptIntentRecordIdentity = null;
         if (persistOutcomeUnknownFailure)
         {
             var intentOwnershipResult = await RestrictedStateService
@@ -3003,7 +3080,7 @@ public sealed class RetainedStateTransactionEndToEndTests
                 candidate,
                 fixture.Time.UnixSeconds,
                 preparedCandidate.Header.LogicalExpiresAtUnixSeconds,
-                out _,
+                out var intentBody,
                 out var intentRequest));
             using var intentRecord = await PersistP5AndCleanupAnchorAsync(
                 fixture,
@@ -3021,12 +3098,14 @@ public sealed class RetainedStateTransactionEndToEndTests
                 failureOwnershipResult.Value);
             Assert.True(PublicationRecoveryPersistence.TryCreateFailureWrite(
                 candidate,
+                intentBody!.RecordIdentity,
                 BoundedGitHubPublisherOutcome.OutcomeUnknown,
                 StickyPublicationReason.ReconciliationIncomplete,
                 fixture.Time.UnixSeconds,
                 preparedCandidate.Header.LogicalExpiresAtUnixSeconds,
                 out _,
                 out var failureRequest));
+            attemptIntentRecordIdentity = intentBody.RecordIdentity;
             using var failureRecord = await PersistP5AndCleanupAnchorAsync(
                 fixture,
                 failureOwnership,
@@ -3096,7 +3175,9 @@ public sealed class RetainedStateTransactionEndToEndTests
             candidate,
             acceptanceOwnership,
             sticky!,
-            existingP5Records);
+            existingP5Records,
+            attemptIntentRecordIdentity:
+                attemptIntentRecordIdentity);
         var accepted = await RestrictedStateService.AcceptRetainedStateAsync(
             fixture.Context,
             evidence,
@@ -3153,7 +3234,10 @@ public sealed class RetainedStateTransactionEndToEndTests
             ownership,
             receipt,
             observation.Records,
-            existingStickyReadback: observation.StickyReadback);
+            existingStickyReadback: observation.StickyReadback,
+            attemptIntentRecordIdentity:
+                observation.RetryIntent?.RecordIdentity ??
+                observation.Intent?.RecordIdentity);
         var accepted = await RestrictedStateService.AcceptRetainedStateAsync(
             fixture.Context,
             evidence,
@@ -3170,7 +3254,8 @@ public sealed class RetainedStateTransactionEndToEndTests
         StickyCommentPublisher.StickyPublicationReceipt sticky,
         ImmutableArray<RetainedStateOpaqueRecord> existingP5Records = default,
         ExactHeadRevalidationResult? exactHead = null,
-        StickyReadbackRecordV1? existingStickyReadback = null)
+        StickyReadbackRecordV1? existingStickyReadback = null,
+        string? attemptIntentRecordIdentity = null)
     {
         if (existingP5Records.IsDefault)
         {
@@ -3187,6 +3272,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             Assert.True(PublicationRecoveryPersistence
                 .TryCreateStickyReadbackWrite(
                     candidate,
+                    attemptIntentRecordIdentity ?? new string('0', 64),
                     sticky,
                     fixture.Time.UnixSeconds,
                     candidate.Prepared.Header.LogicalExpiresAtUnixSeconds,
@@ -3195,7 +3281,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             stickyBody = createdStickyBody!;
             var stickyPersistedResult = await PersistOpaqueRecordAsync(
                     fixture.Context,
-                    ownership,
+                    acceptanceOwnership,
                     stickyRequest!,
                     CancellationToken.None);
             persistedStickyRecord = Assert.IsType<RetainedStateOpaqueRecord>(

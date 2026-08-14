@@ -193,19 +193,17 @@ internal sealed class PublicationRecoveryService
             observation,
             marker);
         PublicationStickyWriteAuthorization? stickyAuthorization = null;
+        PublicationRetryTransitionAuthorization? retryAuthorization = null;
         PublicationMarkerAbsenceEvidence? absenceEvidence = null;
         if (classified.Action ==
                 PublicationRecoveryAction.ResumeKnownNotWritten &&
-            observation.Failure is { } failure)
+            observation.Failure is not null)
         {
             if (!PublicationRecoveryInventoryFactory
-                .TryCreateStickyWriteAuthorization(
+                .TryCreateRetryTransitionAuthorization(
                     observation,
-                    failure.RecordIdentity,
-                    PublicationStickyWriteTransition
-                        .KnownNotWrittenRetry,
-                    out stickyAuthorization) ||
-                stickyAuthorization is null)
+                    out retryAuthorization) ||
+                retryAuthorization is null)
             {
                 classified = PublicationRecoveryClassifier.Classify(
                     null,
@@ -231,6 +229,7 @@ internal sealed class PublicationRecoveryService
             discovered.Reason,
             observation,
             stickyAuthorization,
+            retryAuthorization,
             absenceEvidence);
     }
 
@@ -1112,6 +1111,31 @@ internal sealed class PublicationRecoveryService
             left.TargetPayloadSha256,
             right.TargetPayloadSha256);
 
+    internal static bool TryTerminalizeFreshKnownNotWritten(
+        PublicationRecoveryEvaluation evaluation,
+        out PublicationRecoveryDecision? decision)
+    {
+        decision = null;
+        if (evaluation is null ||
+            evaluation.Decision.Action !=
+                PublicationRecoveryAction.ResumeKnownNotWritten ||
+            evaluation.Observation is not { } observation ||
+            evaluation.RetryTransitionAuthorization is not { } authorization ||
+            !PublicationRecoveryInventoryFactory
+                .TryConsumeRetryTransitionAuthorization(
+                    observation,
+                    authorization))
+        {
+            return false;
+        }
+
+        decision = new PublicationRecoveryDecision(
+            PublicationRecoveryAction.KnownNotWrittenTerminal,
+            PublicationRecoveryCodes.KnownNotWrittenTerminal,
+            PublicationRecoveryLifecycleState.PendingCurrentTransaction);
+        return true;
+    }
+
     internal static bool TryRestoreRendered(
         ValidatedPublicationPayloadV1? stored,
         out R4RenderedStickyComment? rendered)
@@ -1205,6 +1229,7 @@ internal sealed class PublicationRecoveryService
         StickyPublicationReason reason,
         PublicationRecoveryObservation? observation,
         PublicationStickyWriteAuthorization? stickyAuthorization = null,
+        PublicationRetryTransitionAuthorization? retryAuthorization = null,
         PublicationMarkerAbsenceEvidence? absenceEvidence = null) =>
         new(
             decision,
@@ -1213,6 +1238,7 @@ internal sealed class PublicationRecoveryService
             reason,
             observation,
             stickyAuthorization,
+            retryAuthorization,
             absenceEvidence);
 
     private static RetainedStateCleanupResult CleanupFailure(string code) =>

@@ -1,6 +1,9 @@
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
+using AgenticPrReview.Runtime.ActionHost;
+using AgenticPrReview.Runtime.ActionHost.Contracts;
+using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.LiveAgentVerifierFixture;
 
@@ -264,6 +267,13 @@ public sealed partial class AgentCapabilityArchitectureTests
             typeof(R3LiveAgentTransportFactory),
             nameof(R3LiveAgentTransportFactory.Create),
             typeof(DeepSeekCredential));
+        var actionHostTransportFactoryCreate = GetMethod(
+            typeof(ActionHostDeepSeekProviderRunnerFactory),
+            nameof(ActionHostDeepSeekProviderRunnerFactory.Create),
+            typeof(ActionHostProviderPolicy),
+            typeof(ActionHostProviderApiKey),
+            typeof(ReviewedSnapshot),
+            typeof(TimeProvider));
         var transportCreate = GetMethod(
             typeof(DeepSeekTransport),
             nameof(DeepSeekTransport.Create),
@@ -304,7 +314,16 @@ public sealed partial class AgentCapabilityArchitectureTests
                 ],
                 StringComparer.Ordinal) &&
             value.RealTransportCalls.SequenceEqual(
-                [ExpectedCall(transportFactoryCreate, transportCreate, OpCodes.Call)]);
+                [
+                    ExpectedCall(
+                        actionHostTransportFactoryCreate,
+                        transportCreate,
+                        OpCodes.Call),
+                    ExpectedCall(
+                        transportFactoryCreate,
+                        transportCreate,
+                        OpCodes.Call),
+                ]);
     }
 
     private static MethodInfo GetMethod(

@@ -1,4 +1,5 @@
 using System.Reflection;
+using AgenticPrReview.Runtime.ActionHost;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
@@ -38,7 +39,7 @@ public sealed class ActionHostTrustedPolicyArchitectureTests
     }
 
     [Fact]
-    public void ExistingGitHubFactoryRemainsSoleCredentialExporter()
+    public void OnlyApprovedProductionFactoriesExportActionHostCredentials()
     {
         var export = typeof(ActionHostOpaqueSecret).GetMethod(
             "ExportForPrivateLaunch",
@@ -57,10 +58,14 @@ public sealed class ActionHostTrustedPolicyArchitectureTests
             .Where(method => Calls(method, export.MetadataToken))
             .Select(method => method.DeclaringType)
             .Distinct()
+            .OrderBy(type => type!.FullName, StringComparer.Ordinal)
             .ToArray();
 
         Assert.Equal(
-            [typeof(ActionHostGitHubAuthorizationTransportFactory)],
+            [
+                typeof(ActionHostDeepSeekProviderRunnerFactory),
+                typeof(ActionHostGitHubAuthorizationTransportFactory),
+            ],
             callers);
         Assert.IsAssignableFrom<IActionHostGitHubAuthorizationTransportFactory>(
             new ActionHostGitHubAuthorizationTransportFactory());

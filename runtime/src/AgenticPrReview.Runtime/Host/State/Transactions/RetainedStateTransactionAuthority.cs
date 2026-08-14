@@ -31,6 +31,9 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
     private readonly ProjectChatMessage currentReviewContext;
     private readonly IAgentContinuationCodec continuationCodec;
     private readonly string initialInventoryDigest;
+    private readonly object currentReviewGate = new();
+    private readonly Dictionary<string, RetainedStateCurrentReviewProjection>
+        currentReviews = new(StringComparer.Ordinal);
     private AuthorizedLocatorAccess? locatorAccess;
     private LocatorStateKeyRing? keys;
     private LocatorContext? locator;
@@ -251,6 +254,206 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
         return IsLive &&
             Volatile.Read(ref accepted)?.TryGetAdmittedValue(out value) ==
                 true;
+    }
+
+    internal bool TryGetCanonicalRunRequest(out AgentRunRequest? run)
+    {
+        run = null;
+        if (!IsLive)
+        {
+            return false;
+        }
+
+        if (Volatile.Read(ref accepted)?.TryGetAdmittedValue(
+                out var admitted) == true &&
+            admitted is not null)
+        {
+            run = admitted.RunRequest;
+            return SameIdentity(
+                    run.ReviewedIdentity,
+                    currentReviewedIdentity) &&
+                run.InitialMessages.Length > 0 &&
+                SameMessage(
+                    run.InitialMessages[^1],
+                    currentReviewContext);
+        }
+
+        if (!AgentStableRequestMaterializer.TryMaterialize(
+                trustedRequest,
+                priorSessionSha256: null,
+                out var stable) ||
+            stable is null)
+        {
+            return false;
+        }
+
+        var messages = stable.ControlMessages
+            .Append(currentReviewContext)
+            .ToArray();
+        var candidate = new AgentRunRequest(
+            currentReviewedIdentity,
+            stable.StablePlan,
+            stateAccess.Scope.SessionId,
+            messages);
+        if (!candidate.ReviewedIdentity.IsValid() ||
+            candidate.InitialMessages.Length == 0 ||
+            !SameMessage(
+                candidate.InitialMessages[^1],
+                currentReviewContext))
+        {
+            return false;
+        }
+
+        run = candidate;
+        return true;
+    }
+
+    internal bool TryCreateCurrentReviewProjection(
+        AgentSessionArtifact artifact,
+        out RetainedStateCurrentReviewProjection? projection)
+    {
+        projection = null;
+        if (!IsLive ||
+            artifact is null ||
+            !AgentSessionValidation.TryProjectCurrentReview(
+                artifact,
+                out var reviewedIdentity,
+                out var review) ||
+            reviewedIdentity is null ||
+            review is null ||
+            !SameIdentity(reviewedIdentity, currentReviewedIdentity) ||
+            !R4ValidatedPublicationReview.TryCreateProjection(
+                review,
+                reviewedIdentity,
+                publication.Scope,
+                out var validated) ||
+            validated is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            projection = new RetainedStateCurrentReviewProjection(
+                reviewedIdentity,
+                R4PublicationIdentityV1.IdentifyAndOrder(validated));
+            return true;
+        }
+        catch (R4PublicationException)
+        {
+            return false;
+        }
+    }
+
+    internal bool TryGetCurrentReviewProjection(
+        RetainedStatePersistedCandidate candidate,
+        out RetainedStateCurrentReviewProjection? projection)
+    {
+        projection = null;
+        if (!IsLive || candidate is null || !candidate.IsIssuedBy(this))
+        {
+            return false;
+        }
+
+        return TryGetBoundCurrentReview(
+            candidate.Prepared.LogicalGenerationIdentity,
+            out projection);
+    }
+
+    internal bool TryBindCurrentReviewProjection(
+        RetainedStateAuthorityLease lease,
+        string logicalGenerationIdentity,
+        RetainedStateCurrentReviewProjection projection)
+    {
+        if (!Allows(lease) ||
+            !LineageValidation.IsSha256(logicalGenerationIdentity) ||
+            projection is null ||
+            !SameIdentity(
+                projection.ReviewedIdentity,
+                currentReviewedIdentity) ||
+            projection.OrderedFindings.IsDefault)
+        {
+            return false;
+        }
+
+        lock (currentReviewGate)
+        {
+            if (!IsLive)
+            {
+                return false;
+            }
+
+            if (currentReviews.TryGetValue(
+                    logicalGenerationIdentity,
+                    out var existing))
+            {
+                return SameIdentity(
+                        existing.ReviewedIdentity,
+                        projection.ReviewedIdentity) &&
+                    existing.OrderedFindings.SequenceEqual(
+                        projection.OrderedFindings);
+            }
+
+            currentReviews.Add(logicalGenerationIdentity, projection);
+            return true;
+        }
+    }
+
+    internal bool TryGetCurrentReviewProjection(
+        VerifiedRetainedStateAcceptance acceptanceCapability,
+        out RetainedStateCurrentReviewProjection? projection)
+    {
+        projection = null;
+        if (!IsLive ||
+            acceptanceCapability is null ||
+            !acceptanceCapability.IsIssuedBy(this))
+        {
+            return false;
+        }
+
+        if (ReferenceEquals(
+                Volatile.Read(ref terminalAcceptance),
+                acceptanceCapability) &&
+            TryGetBoundCurrentReview(
+                acceptanceCapability.LogicalGenerationIdentity,
+                out projection))
+        {
+            return true;
+        }
+
+        var selection = Volatile.Read(ref acceptedSelection)?.Current;
+        if (selection is null ||
+            !StringComparer.Ordinal.Equals(
+                selection.LogicalGenerationIdentity,
+                acceptanceCapability.LogicalGenerationIdentity) ||
+            Volatile.Read(ref accepted)?.TryGetAdmittedValue(
+                out var admitted) != true ||
+            admitted is null)
+        {
+            return false;
+        }
+
+        return TryCreateCurrentReviewProjection(
+            admitted.Artifact,
+            out projection);
+    }
+
+    private bool TryGetBoundCurrentReview(
+        string logicalGenerationIdentity,
+        out RetainedStateCurrentReviewProjection? projection)
+    {
+        projection = null;
+        lock (currentReviewGate)
+        {
+            return currentReviews.TryGetValue(
+                    logicalGenerationIdentity,
+                    out projection) &&
+                projection is not null &&
+                SameIdentity(
+                    projection.ReviewedIdentity,
+                    currentReviewedIdentity) &&
+                !projection.OrderedFindings.IsDefault;
+        }
     }
 
     internal bool TryGetBinding(
@@ -476,8 +679,10 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
     internal bool TryValidateRecoveredGeneration(
         RetainedStateAuthorityLease lease,
         StateGenerationRecordV1 generation,
+        out RetainedStateCurrentReviewProjection? currentReview,
         out string code)
     {
+        currentReview = null;
         code = RetainedStateTransactionCodes.Invalid;
         if (!Allows(lease) ||
             generation is null ||
@@ -579,7 +784,11 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
                     generation.PredecessorEnvelopeSha256) ||
                 !StringComparer.Ordinal.Equals(
                     document.PriorSessionSha256,
-                    predecessor?.SessionSha256))
+                    predecessor?.SessionSha256) ||
+                !TryCreateCurrentReviewProjection(
+                    admittedSession.Value.Artifact,
+                    out currentReview) ||
+                currentReview is null)
             {
                 return false;
             }
@@ -909,6 +1118,10 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
 
         CryptographicOperations.ZeroMemory(
             trustedRequest.TrustedPolicyBytes);
+        lock (currentReviewGate)
+        {
+            currentReviews.Clear();
+        }
         Interlocked.Exchange(ref predecessorCopyAttempt, null)?.Dispose();
         ClearSelection(Interlocked.Exchange(ref acceptedSelection, null));
         Interlocked.Exchange(ref accepted, null)?.Dispose();

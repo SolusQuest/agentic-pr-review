@@ -75,7 +75,11 @@ internal sealed class RetainedStateTransactionService
         var envelopeCode = RetainedStateTransactionCodes.Invalid;
         try
         {
-            if (!authority.TryReadTrustedTime(lease, out var preparedAt) ||
+            if (!authority.TryCreateCurrentReviewProjection(
+                    artifact,
+                    out var currentReview) ||
+                currentReview is null ||
+                !authority.TryReadTrustedTime(lease, out var preparedAt) ||
                 !RetainedStateRetention.TryCandidate(
                     preparedAt,
                     out var logicalExpiry,
@@ -160,6 +164,16 @@ internal sealed class RetainedStateTransactionService
                         outerEnvelope.Length == 0
                             ? RetainedStateTransactionCodes.RetentionFailed
                             : envelopeCode);
+            }
+
+            if (!authority.TryBindCurrentReviewProjection(
+                    lease,
+                    logicalIdentity,
+                    currentReview))
+            {
+                return RetainedStateTransactionResult<
+                    RetainedStatePreparedCandidate>.Fail(
+                        RetainedStateTransactionCodes.Invalid);
             }
 
             var prepared = RetainedStatePreparedCandidate.Create(
@@ -2422,7 +2436,9 @@ internal sealed class RetainedStateTransactionService
             !authority.TryValidateRecoveredGeneration(
                 lease,
                 generation,
+                out var currentReview,
                 out _) ||
+            currentReview is null ||
             !AcceptedStateIdentity.TryComputeLogicalGeneration(
                 pending[0].Payload,
                 binding.SelectedLineage.BaseScopeDigest,
@@ -2430,6 +2446,16 @@ internal sealed class RetainedStateTransactionService
                 binding.SelectedLineage.SessionId,
                 binding.CurrentAcceptanceReceiptIdentity,
                 out var logicalIdentity))
+        {
+            return RetainedStateTransactionResult<
+                RetainedStatePersistedCandidate>.Fail(
+                    RetainedStateTransactionCodes.Conflict);
+        }
+
+        if (!authority.TryBindCurrentReviewProjection(
+                lease,
+                logicalIdentity,
+                currentReview))
         {
             return RetainedStateTransactionResult<
                 RetainedStatePersistedCandidate>.Fail(

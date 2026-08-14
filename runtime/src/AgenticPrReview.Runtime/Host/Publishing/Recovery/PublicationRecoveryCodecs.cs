@@ -14,6 +14,8 @@ internal enum PublicationRecoveryRecordKind : ushort
     PublicationFailure,
     Abandonment,
     Recovery,
+    PublicationRetryIntent,
+    PublicationRetryFailure,
 }
 
 internal static class PublicationIntentV1Codec
@@ -40,11 +42,13 @@ internal static class StickyReadbackRecordV1Codec
 {
     internal static bool TryCreate(
         PublicationRecoveryPublicationV1 publication,
+        string attemptIntentRecordIdentity,
         StickyCommentPublisher.StickyPublicationReceipt receipt,
         long observedAtUnixSeconds,
         out StickyReadbackRecordV1? value) =>
         PublicationRecoveryPayloadCodec.TryCreateReadback(
             publication,
+            attemptIntentRecordIdentity,
             receipt,
             observedAtUnixSeconds,
             out value);
@@ -64,12 +68,14 @@ internal static class PublicationFailureV1Codec
 {
     internal static bool TryCreate(
         PublicationRecoveryPublicationV1 publication,
+        string attemptIntentRecordIdentity,
         BoundedGitHubPublisherOutcome outcome,
         StickyPublicationReason reason,
         long failedAtUnixSeconds,
         out PublicationFailureV1? value) =>
         PublicationRecoveryPayloadCodec.TryCreateFailure(
             publication,
+            attemptIntentRecordIdentity,
             outcome,
             reason,
             failedAtUnixSeconds,
@@ -83,6 +89,60 @@ internal static class PublicationFailureV1Codec
     internal static bool TryDecode(
         ReadOnlySpan<byte> bytes,
         out PublicationFailureV1? value) =>
+        PublicationRecoveryPayloadCodec.TryDecode(bytes, out value);
+}
+
+internal static class PublicationRetryIntentV1Codec
+{
+    internal static bool TryCreate(
+        PublicationRecoveryPublicationV1 publication,
+        string initialIntentRecordIdentity,
+        string initialFailureRecordIdentity,
+        long createdAtUnixSeconds,
+        out PublicationRetryIntentV1? value) =>
+        PublicationRecoveryPayloadCodec.TryCreateRetryIntent(
+            publication,
+            initialIntentRecordIdentity,
+            initialFailureRecordIdentity,
+            createdAtUnixSeconds,
+            out value);
+
+    internal static bool TryEncode(
+        PublicationRetryIntentV1? value,
+        out byte[] bytes) =>
+        PublicationRecoveryPayloadCodec.TryEncode(value, out bytes);
+
+    internal static bool TryDecode(
+        ReadOnlySpan<byte> bytes,
+        out PublicationRetryIntentV1? value) =>
+        PublicationRecoveryPayloadCodec.TryDecode(bytes, out value);
+}
+
+internal static class PublicationRetryFailureV1Codec
+{
+    internal static bool TryCreate(
+        PublicationRecoveryPublicationV1 publication,
+        string retryIntentRecordIdentity,
+        BoundedGitHubPublisherOutcome outcome,
+        StickyPublicationReason reason,
+        long failedAtUnixSeconds,
+        out PublicationRetryFailureV1? value) =>
+        PublicationRecoveryPayloadCodec.TryCreateRetryFailure(
+            publication,
+            retryIntentRecordIdentity,
+            outcome,
+            reason,
+            failedAtUnixSeconds,
+            out value);
+
+    internal static bool TryEncode(
+        PublicationRetryFailureV1? value,
+        out byte[] bytes) =>
+        PublicationRecoveryPayloadCodec.TryEncode(value, out bytes);
+
+    internal static bool TryDecode(
+        ReadOnlySpan<byte> bytes,
+        out PublicationRetryFailureV1? value) =>
         PublicationRecoveryPayloadCodec.TryDecode(bytes, out value);
 }
 
@@ -175,12 +235,14 @@ internal static class PublicationRecoveryPayloadCodec
 
     internal static bool TryCreateReadback(
         PublicationRecoveryPublicationV1 publication,
+        string attemptIntentRecordIdentity,
         StickyCommentPublisher.StickyPublicationReceipt receipt,
         long observedAt,
         out StickyReadbackRecordV1? value)
     {
         value = null;
-        if (receipt is null ||
+        if (!LineageValidation.IsSha256(attemptIntentRecordIdentity) ||
+            receipt is null ||
             !StringComparer.Ordinal.Equals(
                 receipt.ScopeSha256,
                 publication.ScopeSha256) ||
@@ -196,6 +258,7 @@ internal static class PublicationRecoveryPayloadCodec
 
         var provisional = new StickyReadbackRecordV1(
             publication,
+            attemptIntentRecordIdentity,
             receipt.Operation,
             receipt.RepositoryId,
             receipt.PullRequestNumber,
@@ -215,14 +278,79 @@ internal static class PublicationRecoveryPayloadCodec
 
     internal static bool TryCreateFailure(
         PublicationRecoveryPublicationV1 publication,
+        string attemptIntentRecordIdentity,
         BoundedGitHubPublisherOutcome outcome,
         StickyPublicationReason reason,
         long failedAt,
         out PublicationFailureV1? value)
     {
         value = null;
+        if (!LineageValidation.IsSha256(attemptIntentRecordIdentity))
+        {
+            return false;
+        }
         var provisional = new PublicationFailureV1(
             publication,
+            attemptIntentRecordIdentity,
+            outcome,
+            reason,
+            failedAt,
+            Zeros());
+        if (!TryIdentity(provisional, out var identity))
+        {
+            return false;
+        }
+
+        value = provisional with { RecordIdentity = identity };
+        return true;
+    }
+
+    internal static bool TryCreateRetryIntent(
+        PublicationRecoveryPublicationV1 publication,
+        string initialIntentRecordIdentity,
+        string initialFailureRecordIdentity,
+        long createdAt,
+        out PublicationRetryIntentV1? value)
+    {
+        value = null;
+        if (!LineageValidation.IsSha256(initialIntentRecordIdentity) ||
+            !LineageValidation.IsSha256(initialFailureRecordIdentity))
+        {
+            return false;
+        }
+
+        var provisional = new PublicationRetryIntentV1(
+            publication,
+            initialIntentRecordIdentity,
+            initialFailureRecordIdentity,
+            createdAt,
+            Zeros());
+        if (!TryIdentity(provisional, out var identity))
+        {
+            return false;
+        }
+
+        value = provisional with { RecordIdentity = identity };
+        return true;
+    }
+
+    internal static bool TryCreateRetryFailure(
+        PublicationRecoveryPublicationV1 publication,
+        string retryIntentRecordIdentity,
+        BoundedGitHubPublisherOutcome outcome,
+        StickyPublicationReason reason,
+        long failedAt,
+        out PublicationRetryFailureV1? value)
+    {
+        value = null;
+        if (!LineageValidation.IsSha256(retryIntentRecordIdentity))
+        {
+            return false;
+        }
+
+        var provisional = new PublicationRetryFailureV1(
+            publication,
+            retryIntentRecordIdentity,
             outcome,
             reason,
             failedAt,
@@ -303,6 +431,16 @@ internal static class PublicationRecoveryPayloadCodec
         TryEncodeCore(value, includeIdentity: true, out bytes, out _, out _);
 
     internal static bool TryEncode(
+        PublicationRetryIntentV1? value,
+        out byte[] bytes) =>
+        TryEncodeCore(value, includeIdentity: true, out bytes, out _, out _);
+
+    internal static bool TryEncode(
+        PublicationRetryFailureV1? value,
+        out byte[] bytes) =>
+        TryEncodeCore(value, includeIdentity: true, out bytes, out _, out _);
+
+    internal static bool TryEncode(
         AbandonmentV1? value,
         out byte[] bytes) =>
         TryEncodeCore(value, includeIdentity: true, out bytes, out _, out _);
@@ -359,6 +497,7 @@ internal static class PublicationRecoveryPayloadCodec
             !reader.TryReadInt64(out var commentId) ||
             !reader.TryReadString(MaximumUrlBytes, out var commentUrl) ||
             !reader.TryReadInt64(out var observedAt) ||
+            !reader.TryReadString(64, out var attemptIntentIdentity) ||
             !reader.TryReadString(64, out var identity) ||
             !reader.IsComplete ||
             !StickyCommentPublisher.StickyPublicationReceipt.TryRehydrate(
@@ -374,6 +513,7 @@ internal static class PublicationRecoveryPayloadCodec
             receipt is null ||
             !TryCreateReadback(
                 publication,
+                attemptIntentIdentity,
                 receipt,
                 observedAt,
                 out var canonical) ||
@@ -407,10 +547,84 @@ internal static class PublicationRecoveryPayloadCodec
                 typeof(StickyPublicationReason),
                 (int)reasonValue) ||
             !reader.TryReadInt64(out var failedAt) ||
+            !reader.TryReadString(64, out var attemptIntentIdentity) ||
             !reader.TryReadString(64, out var identity) ||
             !reader.IsComplete ||
             !TryCreateFailure(
                 publication!,
+                attemptIntentIdentity,
+                (BoundedGitHubPublisherOutcome)outcomeValue,
+                (StickyPublicationReason)reasonValue,
+                failedAt,
+                out var canonical) ||
+            canonical is null ||
+            !StringComparer.Ordinal.Equals(
+                canonical.RecordIdentity,
+                identity))
+        {
+            return false;
+        }
+
+        return Canonical(bytes, canonical, TryEncode, out value);
+    }
+
+    internal static bool TryDecode(
+        ReadOnlySpan<byte> bytes,
+        out PublicationRetryIntentV1? value)
+    {
+        value = null;
+        if (!TryReadHeader(
+                bytes,
+                PublicationRecoveryRecordKind.PublicationRetryIntent,
+                out var reader,
+                out var publication) ||
+            !reader.TryReadString(64, out var initialIntentIdentity) ||
+            !reader.TryReadString(64, out var initialFailureIdentity) ||
+            !reader.TryReadInt64(out var createdAt) ||
+            !reader.TryReadString(64, out var identity) ||
+            !reader.IsComplete ||
+            !TryCreateRetryIntent(
+                publication!,
+                initialIntentIdentity,
+                initialFailureIdentity,
+                createdAt,
+                out var canonical) ||
+            canonical is null ||
+            !StringComparer.Ordinal.Equals(
+                canonical.RecordIdentity,
+                identity))
+        {
+            return false;
+        }
+
+        return Canonical(bytes, canonical, TryEncode, out value);
+    }
+
+    internal static bool TryDecode(
+        ReadOnlySpan<byte> bytes,
+        out PublicationRetryFailureV1? value)
+    {
+        value = null;
+        if (!TryReadHeader(
+                bytes,
+                PublicationRecoveryRecordKind.PublicationRetryFailure,
+                out var reader,
+                out var publication) ||
+            !reader.TryReadUInt16(out var outcomeValue) ||
+            !Enum.IsDefined(
+                typeof(BoundedGitHubPublisherOutcome),
+                (int)outcomeValue) ||
+            !reader.TryReadUInt16(out var reasonValue) ||
+            !Enum.IsDefined(
+                typeof(StickyPublicationReason),
+                (int)reasonValue) ||
+            !reader.TryReadInt64(out var failedAt) ||
+            !reader.TryReadString(64, out var retryIntentIdentity) ||
+            !reader.TryReadString(64, out var identity) ||
+            !reader.IsComplete ||
+            !TryCreateRetryFailure(
+                publication!,
+                retryIntentIdentity,
                 (BoundedGitHubPublisherOutcome)outcomeValue,
                 (StickyPublicationReason)reasonValue,
                 failedAt,
@@ -482,6 +696,7 @@ internal static class PublicationRecoveryPayloadCodec
                 !reader.TryReadInt64(out var commentId) ||
                 !reader.TryReadString(MaximumUrlBytes, out var commentUrl) ||
                 !reader.TryReadInt64(out var observedAt) ||
+                !reader.TryReadString(64, out var attemptIntentIdentity) ||
                 !reader.TryReadString(64, out var stickyIdentity) ||
                 !StickyCommentPublisher.StickyPublicationReceipt.TryRehydrate(
                     (StickyPublicationOperation)operationValue,
@@ -496,6 +711,7 @@ internal static class PublicationRecoveryPayloadCodec
                 receipt is null ||
                 !TryCreateReadback(
                     publication,
+                    attemptIntentIdentity,
                     receipt,
                     observedAt,
                     out var stickyReadback) ||
@@ -637,6 +853,8 @@ internal static class PublicationRecoveryPayloadCodec
                 case StickyReadbackRecordV1 readback
                     when LineageValidation.IsTime(
                             readback.ObservedAtUnixSeconds) &&
+                        LineageValidation.IsSha256(
+                            readback.AttemptIntentRecordIdentity) &&
                         readback.TryRehydrate(out _):
                     writer.WriteUInt16((ushort)readback.Operation);
                     writer.WriteInt64(readback.RepositoryId);
@@ -644,12 +862,42 @@ internal static class PublicationRecoveryPayloadCodec
                     writer.WriteInt64(readback.CommentId);
                     writer.WriteString(readback.CommentUrl);
                     writer.WriteInt64(readback.ObservedAtUnixSeconds);
+                    writer.WriteString(
+                        readback.AttemptIntentRecordIdentity);
                     break;
                 case PublicationFailureV1 failure
                     when ValidFailure(failure):
                     writer.WriteUInt16((ushort)failure.Outcome);
                     writer.WriteUInt16((ushort)failure.Reason);
                     writer.WriteInt64(failure.FailedAtUnixSeconds);
+                    writer.WriteString(
+                        failure.AttemptIntentRecordIdentity);
+                    break;
+                case PublicationRetryIntentV1 retryIntent
+                    when LineageValidation.IsSha256(
+                            retryIntent.InitialIntentRecordIdentity) &&
+                        LineageValidation.IsSha256(
+                            retryIntent.InitialFailureRecordIdentity) &&
+                        LineageValidation.IsTime(
+                            retryIntent.CreatedAtUnixSeconds):
+                    writer.WriteString(
+                        retryIntent.InitialIntentRecordIdentity);
+                    writer.WriteString(
+                        retryIntent.InitialFailureRecordIdentity);
+                    writer.WriteInt64(retryIntent.CreatedAtUnixSeconds);
+                    break;
+                case PublicationRetryFailureV1 retryFailure
+                    when ValidFailure(
+                            retryFailure.Outcome,
+                            retryFailure.Reason,
+                            retryFailure.FailedAtUnixSeconds) &&
+                        LineageValidation.IsSha256(
+                            retryFailure.RetryIntentRecordIdentity):
+                    writer.WriteUInt16((ushort)retryFailure.Outcome);
+                    writer.WriteUInt16((ushort)retryFailure.Reason);
+                    writer.WriteInt64(retryFailure.FailedAtUnixSeconds);
+                    writer.WriteString(
+                        retryFailure.RetryIntentRecordIdentity);
                     break;
                 case AbandonmentV1 abandonment
                     when LineageValidation.IsSha256(
@@ -786,6 +1034,7 @@ internal static class PublicationRecoveryPayloadCodec
         writer.WriteInt64(readback.CommentId);
         writer.WriteString(readback.CommentUrl);
         writer.WriteInt64(readback.ObservedAtUnixSeconds);
+        writer.WriteString(readback.AttemptIntentRecordIdentity);
         writer.WriteString(readback.RecordIdentity);
     }
 
@@ -809,6 +1058,14 @@ internal static class PublicationRecoveryPayloadCodec
                 PublicationRecoveryRecordKind.PublicationFailure,
                 item.Publication,
                 item.RecordIdentity),
+            PublicationRetryIntentV1 item => (
+                PublicationRecoveryRecordKind.PublicationRetryIntent,
+                item.Publication,
+                item.RecordIdentity),
+            PublicationRetryFailureV1 item => (
+                PublicationRecoveryRecordKind.PublicationRetryFailure,
+                item.Publication,
+                item.RecordIdentity),
             AbandonmentV1 item => (
                 PublicationRecoveryRecordKind.Abandonment,
                 item.Publication,
@@ -830,20 +1087,30 @@ internal static class PublicationRecoveryPayloadCodec
         LineageValidation.IsSha256(value.BodySha256);
 
     private static bool ValidFailure(PublicationFailureV1 value) =>
-        LineageValidation.IsTime(value.FailedAtUnixSeconds) &&
-        value.Outcome switch
+        LineageValidation.IsSha256(value.AttemptIntentRecordIdentity) &&
+        ValidFailure(
+            value.Outcome,
+            value.Reason,
+            value.FailedAtUnixSeconds);
+
+    private static bool ValidFailure(
+        BoundedGitHubPublisherOutcome outcome,
+        StickyPublicationReason reason,
+        long failedAtUnixSeconds) =>
+        LineageValidation.IsTime(failedAtUnixSeconds) &&
+        outcome switch
         {
             BoundedGitHubPublisherOutcome.KnownNotWritten =>
-                value.Reason is StickyPublicationReason.RequestInvalid or
+                reason is StickyPublicationReason.RequestInvalid or
                     StickyPublicationReason.Deadline,
             BoundedGitHubPublisherOutcome.OutcomeUnknown =>
-                value.Reason is
+                reason is
                     StickyPublicationReason.ReconciliationIncomplete or
                     StickyPublicationReason.Deadline,
             BoundedGitHubPublisherOutcome.CancelledBeforeSend =>
-                value.Reason == StickyPublicationReason.Cancelled,
+                reason == StickyPublicationReason.Cancelled,
             BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure =>
-                value.Reason is StickyPublicationReason.AdmissionInvalid or
+                reason is StickyPublicationReason.AdmissionInvalid or
                     StickyPublicationReason.DiscoveryIncomplete or
                     StickyPublicationReason.TargetConflict or
                     StickyPublicationReason.AuthorizationDenied,

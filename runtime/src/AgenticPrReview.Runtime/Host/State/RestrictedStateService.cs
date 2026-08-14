@@ -47,6 +47,51 @@ internal sealed class RestrictedStateService
     internal static bool IsRetainedStateIssuer(object? value) =>
         ReferenceEquals(value, RetainedStateIssuer);
 
+    internal static bool TryGetCanonicalAgentRunRequest(
+        AuthorizedAcceptedStateRestoreContext context,
+        out AgentRunRequest? run)
+    {
+        run = null;
+        return context is not null &&
+            context.TryGetTransactionAuthority(
+                RetainedStateIssuer,
+                out var authority) &&
+            authority is not null &&
+            authority.TryGetCanonicalRunRequest(out run);
+    }
+
+    internal static bool TryGetCurrentReviewProjection(
+        AuthorizedAcceptedStateRestoreContext context,
+        RetainedStatePersistedCandidate candidate,
+        out RetainedStateCurrentReviewProjection? projection)
+    {
+        projection = null;
+        return context is not null &&
+            context.TryGetTransactionAuthority(
+                RetainedStateIssuer,
+                out var authority) &&
+            authority is not null &&
+            authority.TryGetCurrentReviewProjection(
+                candidate,
+                out projection);
+    }
+
+    internal static bool TryGetCurrentReviewProjection(
+        AuthorizedAcceptedStateRestoreContext context,
+        VerifiedRetainedStateAcceptance acceptance,
+        out RetainedStateCurrentReviewProjection? projection)
+    {
+        projection = null;
+        return context is not null &&
+            context.TryGetTransactionAuthority(
+                RetainedStateIssuer,
+                out var authority) &&
+            authority is not null &&
+            authority.TryGetCurrentReviewProjection(
+                acceptance,
+                out projection);
+    }
+
     internal static Task<RetainedStateTransactionResult<
         RetainedStatePreparedCandidate>> PrepareRetainedCandidateAsync(
         AuthorizedAcceptedStateRestoreContext context,

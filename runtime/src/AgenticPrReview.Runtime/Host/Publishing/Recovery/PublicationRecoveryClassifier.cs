@@ -90,8 +90,10 @@ internal static class PublicationRecoveryClassifier
         if (!observation.CandidateMatchesCurrentHead)
         {
             if (observation.Intent is null &&
+                observation.RetryIntent is null &&
                 observation.StickyReadback is null &&
                 observation.Failure is null &&
+                observation.RetryFailure is null &&
                 observation.Recovery is null &&
                 marker == PublicationMarkerObservation.Absent &&
                 observation.Anchors == PublicationRecoveryAnchorState.None)
@@ -114,9 +116,15 @@ internal static class PublicationRecoveryClassifier
 
         if (marker == PublicationMarkerObservation.Exact)
         {
-            return (observation.Failure is null ||
+            var initialAllowsAcceptance = observation.RetryIntent is null &&
+                (observation.Failure is null ||
                     observation.Failure.Outcome ==
-                        BoundedGitHubPublisherOutcome.OutcomeUnknown) &&
+                        BoundedGitHubPublisherOutcome.OutcomeUnknown);
+            var retryAllowsAcceptance = observation.RetryIntent is not null &&
+                (observation.RetryFailure is null ||
+                    observation.RetryFailure.Outcome ==
+                        BoundedGitHubPublisherOutcome.OutcomeUnknown);
+            return (initialAllowsAcceptance || retryAllowsAcceptance) &&
                 observation.Abandonment is null
                 ? Decision(
                     PublicationRecoveryAction.CompleteAcceptance,
@@ -137,6 +145,39 @@ internal static class PublicationRecoveryClassifier
             observation.Abandonment is not null)
         {
             return Conflict();
+        }
+
+        if (observation.RetryFailure is { } retryFailure)
+        {
+            return retryFailure.Outcome switch
+            {
+                BoundedGitHubPublisherOutcome.KnownNotWritten =>
+                    Decision(
+                        PublicationRecoveryAction.KnownNotWrittenTerminal,
+                        PublicationRecoveryCodes.KnownNotWrittenTerminal),
+                BoundedGitHubPublisherOutcome.OutcomeUnknown =>
+                    Decision(
+                        PublicationRecoveryAction.StickyOutcomeUnknown,
+                        PublicationRecoveryCodes.StickyOutcomeUnknown),
+                BoundedGitHubPublisherOutcome.CancelledBeforeSend =>
+                    Decision(
+                        PublicationRecoveryAction.CancelledBeforeSend,
+                        PublicationRecoveryCodes.CancelledBeforeSend),
+                BoundedGitHubPublisherOutcome
+                    .AuthorizationOrValidationFailure => Decision(
+                        PublicationRecoveryAction
+                            .AuthorizationOrValidationFailure,
+                        PublicationRecoveryCodes
+                            .AuthorizationOrValidationFailure),
+                _ => Conflict(),
+            };
+        }
+
+        if (observation.RetryIntent is not null)
+        {
+            return Decision(
+                PublicationRecoveryAction.StickyOutcomeUnknown,
+                PublicationRecoveryCodes.StickyOutcomeUnknown);
         }
 
         if (observation.Failure is { } failure)

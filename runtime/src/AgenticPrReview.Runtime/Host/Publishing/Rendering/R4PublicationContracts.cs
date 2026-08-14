@@ -80,6 +80,35 @@ internal sealed class R4ValidatedPublicationReview
         return true;
     }
 
+    internal static bool TryCreateProjection(
+        AgentTerminalReview? terminal,
+        ReviewedIdentity? reviewedIdentity,
+        R4PublicationScopeV1? scope,
+        out R4ValidatedPublicationReview? review)
+    {
+        review = null;
+        if (terminal is null ||
+            reviewedIdentity is null ||
+            scope is null ||
+            !reviewedIdentity.IsValid() ||
+            !R4PublicationIdentityV1.IsValidScope(scope) ||
+            !TryReadCanonicalRepositoryId(
+                reviewedIdentity.RepositoryId,
+                out var repositoryId) ||
+            repositoryId != scope.RepositoryId ||
+            reviewedIdentity.ReviewTarget < 1 ||
+            (ulong)reviewedIdentity.ReviewTarget != scope.PullRequestNumber)
+        {
+            return false;
+        }
+
+        review = new R4ValidatedPublicationReview(
+            terminal,
+            reviewedIdentity,
+            scope);
+        return true;
+    }
+
     private static bool TryReadCanonicalRepositoryId(
         string value,
         out ulong repositoryId)

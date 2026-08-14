@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using AgenticPrReview.Runtime.ActionHost.Snapshot;
+using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
@@ -203,6 +204,10 @@ internal sealed record RetainedStateTransactionBinding(
     string? CurrentLogicalGenerationIdentity,
     string? CurrentAcceptanceReceiptIdentity,
     string InitialInventoryDigest);
+
+internal sealed record RetainedStateCurrentReviewProjection(
+    ReviewedIdentity ReviewedIdentity,
+    ImmutableArray<R4FindingIdentityV1> OrderedFindings);
 
 internal sealed class RetainedStatePreparedCandidate : IDisposable
 {

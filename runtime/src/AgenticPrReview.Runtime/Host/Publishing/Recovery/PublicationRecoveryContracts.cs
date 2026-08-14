@@ -20,6 +20,7 @@ internal sealed record PublicationIntentV1(
 
 internal sealed record StickyReadbackRecordV1(
     PublicationRecoveryPublicationV1 Publication,
+    string AttemptIntentRecordIdentity,
     StickyPublicationOperation Operation,
     long RepositoryId,
     long PullRequestNumber,
@@ -44,6 +45,22 @@ internal sealed record StickyReadbackRecordV1(
 
 internal sealed record PublicationFailureV1(
     PublicationRecoveryPublicationV1 Publication,
+    string AttemptIntentRecordIdentity,
+    BoundedGitHubPublisherOutcome Outcome,
+    StickyPublicationReason Reason,
+    long FailedAtUnixSeconds,
+    string RecordIdentity);
+
+internal sealed record PublicationRetryIntentV1(
+    PublicationRecoveryPublicationV1 Publication,
+    string InitialIntentRecordIdentity,
+    string InitialFailureRecordIdentity,
+    long CreatedAtUnixSeconds,
+    string RecordIdentity);
+
+internal sealed record PublicationRetryFailureV1(
+    PublicationRecoveryPublicationV1 Publication,
+    string RetryIntentRecordIdentity,
     BoundedGitHubPublisherOutcome Outcome,
     StickyPublicationReason Reason,
     long FailedAtUnixSeconds,
@@ -145,8 +162,10 @@ internal sealed class PublicationRecoveryObservation : IDisposable
         string? candidateObjectIdentity,
         ValidatedPublicationPayloadV1? storedPublication,
         PublicationIntentV1? intent,
+        PublicationRetryIntentV1? retryIntent,
         StickyReadbackRecordV1? stickyReadback,
         PublicationFailureV1? failure,
+        PublicationRetryFailureV1? retryFailure,
         AbandonmentV1? abandonment,
         RecoveryRecordV1? recovery,
         MatchedRetainedStateRecoveryAcceptance? matchedAcceptance,
@@ -166,8 +185,10 @@ internal sealed class PublicationRecoveryObservation : IDisposable
         CandidateObjectIdentity = candidateObjectIdentity;
         StoredPublication = storedPublication;
         Intent = intent;
+        RetryIntent = retryIntent;
         StickyReadback = stickyReadback;
         Failure = failure;
+        RetryFailure = retryFailure;
         Abandonment = abandonment;
         Recovery = recovery;
         MatchedAcceptance = matchedAcceptance;
@@ -194,8 +215,10 @@ internal sealed class PublicationRecoveryObservation : IDisposable
     internal string? CandidateObjectIdentity { get; }
     internal ValidatedPublicationPayloadV1? StoredPublication { get; }
     internal PublicationIntentV1? Intent { get; }
+    internal PublicationRetryIntentV1? RetryIntent { get; }
     internal StickyReadbackRecordV1? StickyReadback { get; }
     internal PublicationFailureV1? Failure { get; }
+    internal PublicationRetryFailureV1? RetryFailure { get; }
     internal AbandonmentV1? Abandonment { get; }
     internal RecoveryRecordV1? Recovery { get; }
     internal MatchedRetainedStateRecoveryAcceptance? MatchedAcceptance
@@ -241,6 +264,7 @@ internal enum PublicationRecoveryAction
     ReturnCommitted,
     ResumeBeforeIntent,
     ResumeKnownNotWritten,
+    KnownNotWrittenTerminal,
     CompleteAcceptance,
     StickyOutcomeUnknown,
     AbandonStaleCandidate,
@@ -275,12 +299,14 @@ internal sealed record PublicationRecoveryEvaluation(
     StickyPublicationReason DiscoveryReason,
     PublicationRecoveryObservation? Observation,
     PublicationStickyWriteAuthorization? StickyWriteAuthorization = null,
+    PublicationRetryTransitionAuthorization? RetryTransitionAuthorization = null,
     PublicationMarkerAbsenceEvidence? MarkerAbsenceEvidence = null) :
     IDisposable
 {
     public void Dispose()
     {
         StickyWriteAuthorization?.Dispose();
+        RetryTransitionAuthorization?.Dispose();
         MarkerAbsenceEvidence?.Dispose();
         Observation?.Dispose();
     }
@@ -328,7 +354,57 @@ internal sealed class PublicationMarkerAbsenceEvidence : IDisposable
 internal enum PublicationStickyWriteTransition
 {
     InitialIntent = 1,
-    KnownNotWrittenRetry,
+    RetryIntent,
+}
+
+internal sealed class PublicationRetryTransitionAuthorization : IDisposable
+{
+    private int usable = 1;
+    private readonly object issuer;
+
+    internal PublicationRetryTransitionAuthorization(
+        object issuer,
+        string candidateObjectIdentity,
+        string inventoryDigest,
+        string initialIntentRecordIdentity,
+        string initialFailureRecordIdentity)
+    {
+        PublicationRecoveryInventoryFactory.RequireIssuer(issuer);
+        this.issuer = issuer;
+        CandidateObjectIdentity = candidateObjectIdentity;
+        InventoryDigest = inventoryDigest;
+        InitialIntentRecordIdentity = initialIntentRecordIdentity;
+        InitialFailureRecordIdentity = initialFailureRecordIdentity;
+    }
+
+    internal string CandidateObjectIdentity { get; }
+    internal string InventoryDigest { get; }
+    internal string InitialIntentRecordIdentity { get; }
+    internal string InitialFailureRecordIdentity { get; }
+
+    internal bool TryConsume(
+        object expectedIssuer,
+        string candidateObjectIdentity,
+        string inventoryDigest,
+        string initialIntentRecordIdentity,
+        string initialFailureRecordIdentity) =>
+        PublicationRecoveryInventoryFactory.IsIssuer(expectedIssuer) &&
+        ReferenceEquals(issuer, expectedIssuer) &&
+        StringComparer.Ordinal.Equals(
+            CandidateObjectIdentity,
+            candidateObjectIdentity) &&
+        StringComparer.Ordinal.Equals(InventoryDigest, inventoryDigest) &&
+        StringComparer.Ordinal.Equals(
+            InitialIntentRecordIdentity,
+            initialIntentRecordIdentity) &&
+        StringComparer.Ordinal.Equals(
+            InitialFailureRecordIdentity,
+            initialFailureRecordIdentity) &&
+        Interlocked.CompareExchange(ref usable, 0, 1) == 1;
+
+    public void Dispose() => Interlocked.Exchange(ref usable, 0);
+
+    public override string ToString() => "[PRIVATE]";
 }
 
 internal sealed class PublicationStickyWriteAuthorization : IDisposable
@@ -486,6 +562,20 @@ internal sealed record PublicationIntentPersistenceResult(
     }
 }
 
+internal sealed record PublicationRetryIntentPersistenceResult(
+    PublicationRetryIntentV1 RetryIntent,
+    string InventoryDigest,
+    PublicationRecoveryObservation Observation,
+    PublicationStickyWriteAuthorization StickyWriteAuthorization) :
+    IDisposable
+{
+    public void Dispose()
+    {
+        StickyWriteAuthorization.Dispose();
+        Observation.Dispose();
+    }
+}
+
 internal static class PublicationRecoveryCodes
 {
     internal const string NoPendingWork = "publication_recovery_no_pending";
@@ -496,6 +586,8 @@ internal static class PublicationRecoveryCodes
         "publication_recovery_resume_before_intent";
     internal const string ResumeKnownNotWritten =
         "publication_recovery_resume_known_not_written";
+    internal const string KnownNotWrittenTerminal =
+        "publication_recovery_known_not_written_terminal";
     internal const string CompleteAcceptance =
         "publication_recovery_complete_acceptance";
     internal const string StickyOutcomeUnknown =
