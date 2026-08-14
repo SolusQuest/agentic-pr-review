@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Security.Cryptography;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
@@ -390,7 +391,8 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
                 return SameIdentity(
                         existing.ReviewedIdentity,
                         projection.ReviewedIdentity) &&
-                    existing.OrderedFindings.SequenceEqual(
+                    SameFindingIdentities(
+                        existing.OrderedFindings,
                         projection.OrderedFindings);
             }
 
@@ -1225,6 +1227,30 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
         actual.ReviewTarget == expected.ReviewTarget &&
         StringComparer.Ordinal.Equals(actual.BaseSha, expected.BaseSha) &&
         StringComparer.Ordinal.Equals(actual.HeadSha, expected.HeadSha);
+
+    private static bool SameFindingIdentities(
+        ImmutableArray<R4FindingIdentityV1> actual,
+        ImmutableArray<R4FindingIdentityV1> expected)
+    {
+        if (actual.IsDefault ||
+            expected.IsDefault ||
+            actual.Length != expected.Length)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < actual.Length; index++)
+        {
+            if (!StringComparer.Ordinal.Equals(
+                    actual[index].FingerprintSha256,
+                    expected[index].FingerprintSha256))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     private static bool SameMessage(
         ProjectChatMessage actual,

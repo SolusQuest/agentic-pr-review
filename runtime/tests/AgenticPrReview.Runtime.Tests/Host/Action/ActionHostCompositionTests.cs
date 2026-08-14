@@ -1,17 +1,349 @@
+using System.Collections.Immutable;
+using System.Text;
 using AgenticPrReview.Runtime.ActionHost;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
+using AgenticPrReview.Runtime.ActionHost.Policy;
+using AgenticPrReview.Runtime.Agent.Chat;
+using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent.Loop;
+using AgenticPrReview.Runtime.Agent.Tools;
+using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
+using AgenticPrReview.Runtime.Host.State.Locator;
+using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 using AgenticPrReview.Runtime.Host.State.Restore;
 using AgenticPrReview.Runtime.Tests.Host.Action.Authorization;
+using AgenticPrReview.Runtime.Tests.Host.Publishing.GitHub.Sticky;
+using AgenticPrReview.Runtime.Tests.Host.State.Locator;
 using Xunit;
 
 namespace AgenticPrReview.Runtime.Tests.Host.Action;
 
 public sealed class ActionHostCompositionTests
 {
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task PreObservedCancellationDoesNotStartAnyProducer(
+        bool launchCancellation,
+        bool callerCancellation)
+    {
+        var authorization = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowDispatch);
+        var launch = WithCancellation(
+            FullLaunch(authorization.Launch),
+            launchCancellation
+                ? ActionHostCancellationState.Requested
+                : ActionHostCancellationState.Active);
+        var github = new FullPathGitHubFactory(
+            authorization.Transport.PullRequest);
+        var store = new ScriptedLocatorStore();
+        var publisher = new FakePublisherTransportFactory();
+        var provider = new FullPathProviderFactory();
+        var stagingCalls = 0;
+        var composition = new ActionHostComposition(
+            new ActionHostCompositionDependencies(
+                authorization.EventReader,
+                authorization.Factory,
+                github,
+                github,
+                new FullPathStateDependencies(store, github),
+                publisher,
+                provider,
+                new FrozenLocatorTimeProvider(LocatorTestData.Now),
+                () =>
+                {
+                    stagingCalls++;
+                    throw new InvalidOperationException("must not stage");
+                }));
+
+        var completion = await composition.RunAsync(
+            launch,
+            new CancellationToken(callerCancellation));
+
+        Assert.Equal(ActionHostStatus.Cancelled, completion.Status);
+        Assert.Equal(ActionHostStateDisposition.NotCommitted,
+            completion.Summary.StateDisposition);
+        Assert.Equal(0, authorization.Factory.Calls);
+        Assert.Equal(0, github.CurrentPullRequestCalls);
+        Assert.Empty(store.Objects);
+        Assert.Equal(0, provider.Creates);
+        Assert.Equal(0, provider.Runs);
+        Assert.Empty(publisher.Transport.Bodies);
+        Assert.Equal(0, stagingCalls);
+    }
+
+    [Fact]
+    public async Task ExecutesTheCompleteStickyTransactionThroughAcceptance()
+    {
+        var authorization = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowDispatch);
+        var launch = FullLaunch(authorization.Launch);
+        var github = new FullPathGitHubFactory(
+            authorization.Transport.PullRequest);
+        var store = new ScriptedLocatorStore
+        {
+            FilterListsByName = true,
+            UseNumericObjectIds = true,
+            ProducingRunIdentity = launch.RunId.ToString(
+                System.Globalization.CultureInfo.InvariantCulture),
+            ProducingRunAttempt = launch.RunAttempt,
+        };
+        var publisher = new FakePublisherTransportFactory();
+        for (var index = 0; index < 32; index++)
+        {
+            publisher.Transport.Enqueue();
+        }
+
+        publisher.Transport.OnMutation = () =>
+        {
+            var request = Assert.IsType<AuthorizedStickyPublicationRequest>(
+                publisher.Transport.Request);
+            var comment = StickyPublicationTestData.Comment(
+                701,
+                request.Rendered.Comment);
+            publisher.Transport.Mutation =
+                BoundedGitHubHttpResult<BoundedGitHubIssueComment>.Success(
+                    comment);
+            publisher.Transport.Read =
+                BoundedGitHubHttpResult<BoundedGitHubIssueComment>.Success(
+                    comment);
+            publisher.Transport.Pages.Clear();
+            for (var index = 0; index < 32; index++)
+            {
+                publisher.Transport.Enqueue(comment);
+            }
+        };
+        var provider = new FullPathProviderFactory();
+        var time = new FrozenLocatorTimeProvider(LocatorTestData.Now);
+        var staging = Path.Join(
+            Path.GetTempPath(),
+            "agentic-pr-review-r4-tests",
+            Guid.NewGuid().ToString("N"));
+        var composition = new ActionHostComposition(
+            new ActionHostCompositionDependencies(
+                authorization.EventReader,
+                authorization.Factory,
+                github,
+                github,
+                new FullPathStateDependencies(store, github),
+                publisher,
+                provider,
+                time,
+                () => staging));
+
+        var completion = await composition.RunAsync(
+            launch,
+            CancellationToken.None);
+
+        Assert.True(
+            completion.Status == ActionHostStatus.Reviewed,
+            $"status={completion.Status}; provider={provider.Runs}; " +
+            $"creates={publisher.Transport.Creates}; " +
+            $"updates={publisher.Transport.Updates}; " +
+            $"reads={publisher.Transport.Reads}; " +
+            $"lists={publisher.Transport.Lists}; " +
+            $"publisherTransports={publisher.Creates}; " +
+            $"uploads={store.UploadCalls}; readbacks={store.ReadBackCalls}; " +
+            $"deletes={store.DeleteCalls}; objects={store.Objects.Length}; " +
+            $"names={string.Join(',', store.Objects.Select(item =>
+                item.Reference.Name.Value))}");
+        Assert.Equal(
+            ActionHostStateDisposition.Accepted,
+            completion.Summary.StateDisposition);
+        Assert.Equal(ActionHostAuthorizationScenario.HeadSha,
+            completion.Summary.ReviewedSha);
+        Assert.Equal(0, completion.Summary.FindingCount);
+        Assert.Equal(1, provider.Creates);
+        Assert.Equal(1, provider.Runs);
+        Assert.Equal(1, publisher.Transport.Creates);
+        Assert.True(publisher.Transport.Reads > 0);
+        Assert.True(store.UploadCalls > 0);
+        Assert.False(Directory.Exists(staging));
+
+        var providerRuns = provider.Runs;
+        var stickyMutations = publisher.Transport.Bodies.Count;
+        var resumedStaging = Path.Join(
+            Path.GetTempPath(),
+            "agentic-pr-review-r4-tests",
+            Guid.NewGuid().ToString("N"));
+        var resumed = await new ActionHostComposition(
+                new ActionHostCompositionDependencies(
+                    authorization.EventReader,
+                    authorization.Factory,
+                    github,
+                    github,
+                    new FullPathStateDependencies(store, github),
+                    publisher,
+                    provider,
+                    time,
+                    () => resumedStaging))
+            .RunAsync(launch, CancellationToken.None);
+
+        Assert.Equal(ActionHostStatus.Reviewed, resumed.Status);
+        Assert.Equal(ActionHostStateDisposition.Accepted,
+            resumed.Summary.StateDisposition);
+        Assert.Equal(providerRuns, provider.Runs);
+        Assert.Equal(stickyMutations, publisher.Transport.Bodies.Count);
+        Assert.False(Directory.Exists(resumedStaging));
+    }
+
+    [Fact]
+    public async Task OwnershipDriftDuringTheSecondH5BlocksStickyMutation()
+    {
+        var authorization = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowDispatch);
+        var launch = FullLaunch(authorization.Launch);
+        var github = new FullPathGitHubFactory(
+            authorization.Transport.PullRequest);
+        var store = new ScriptedLocatorStore
+        {
+            FilterListsByName = true,
+            UseNumericObjectIds = true,
+            ProducingRunIdentity = launch.RunId.ToString(
+                System.Globalization.CultureInfo.InvariantCulture),
+            ProducingRunAttempt = launch.RunAttempt,
+        };
+        var publisher = new FakePublisherTransportFactory();
+        for (var index = 0; index < 32; index++)
+        {
+            publisher.Transport.Enqueue();
+        }
+
+        var provider = new FullPathProviderFactory();
+        var injected = false;
+        github.OnCurrentPullRequest = () =>
+        {
+            if (injected || provider.Runs != 1 ||
+                publisher.Transport.Bodies.Count != 0 ||
+                store.Objects.Length < 3)
+            {
+                return;
+            }
+
+            var latest = store.Objects
+                .OrderBy(item => long.Parse(
+                    item.Reference.ObjectId.Value,
+                    System.Globalization.CultureInfo.InvariantCulture))
+                .Last();
+            _ = store.Add(
+                store.Bytes(latest),
+                latest.ExpiresAtUnixSeconds,
+                name: latest.Reference.Name);
+            injected = true;
+        };
+        var staging = Path.Join(
+            Path.GetTempPath(),
+            "agentic-pr-review-r4-tests",
+            Guid.NewGuid().ToString("N"));
+        var completion = await new ActionHostComposition(
+                new ActionHostCompositionDependencies(
+                    authorization.EventReader,
+                    authorization.Factory,
+                    github,
+                    github,
+                    new FullPathStateDependencies(store, github),
+                    publisher,
+                    provider,
+                    new FrozenLocatorTimeProvider(LocatorTestData.Now),
+                    () => staging))
+            .RunAsync(launch, CancellationToken.None);
+
+        Assert.True(injected);
+        Assert.Equal(ActionHostStatus.StateConflict, completion.Status);
+        Assert.Equal(1, provider.Runs);
+        Assert.Empty(publisher.Transport.Bodies);
+        Assert.Equal(0, publisher.Transport.Creates);
+        Assert.False(Directory.Exists(staging));
+    }
+
+    [Fact]
+    public async Task InlineCapabilityIsMintedAfterAcceptanceAndConsumedOnce()
+    {
+        var authorization = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowDispatch);
+        var launch = FullLaunch(authorization.Launch);
+        var github = new FullPathGitHubFactory(
+            authorization.Transport.PullRequest,
+            withInlineFile: true);
+        var store = new ScriptedLocatorStore
+        {
+            FilterListsByName = true,
+            UseNumericObjectIds = true,
+            ProducingRunIdentity = launch.RunId.ToString(
+                System.Globalization.CultureInfo.InvariantCulture),
+            ProducingRunAttempt = launch.RunAttempt,
+        };
+        var publisher = new FakePublisherTransportFactory();
+        for (var index = 0; index < 32; index++)
+        {
+            publisher.Transport.Enqueue();
+        }
+
+        publisher.Transport.OnMutation = () =>
+        {
+            var request = Assert.IsType<AuthorizedStickyPublicationRequest>(
+                publisher.Transport.Request);
+            var comment = StickyPublicationTestData.Comment(
+                771,
+                request.Rendered.Comment);
+            publisher.Transport.Mutation =
+                BoundedGitHubHttpResult<BoundedGitHubIssueComment>.Success(
+                    comment);
+            publisher.Transport.Read =
+                BoundedGitHubHttpResult<BoundedGitHubIssueComment>.Success(
+                    comment);
+            publisher.Transport.Pages.Clear();
+            for (var index = 0; index < 32; index++)
+            {
+                publisher.Transport.Enqueue(comment);
+            }
+        };
+        var provider = new FullPathProviderFactory(withFinding: true);
+        var inline = new ConsumingInlineHook();
+        var staging = Path.Join(
+            Path.GetTempPath(),
+            "agentic-pr-review-r4-tests",
+            Guid.NewGuid().ToString("N"));
+        var completion = await new ActionHostComposition(
+                new ActionHostCompositionDependencies(
+                    authorization.EventReader,
+                    authorization.Factory,
+                    github,
+                    github,
+                    new FullPathStateDependencies(store, github),
+                    publisher,
+                    provider,
+                    new FrozenLocatorTimeProvider(LocatorTestData.Now),
+                    () => staging,
+                    inline))
+            .RunAsync(launch, CancellationToken.None);
+
+        Assert.True(
+            completion.Status == ActionHostStatus.Reviewed,
+            $"status={completion.Status}; github={github.CurrentPullRequestCalls}; " +
+            $"git={github.GitCommitCalls}/{github.GitTreeCalls}/" +
+            $"{github.GitBlobCalls}; " +
+            $"provider={provider.Runs}/" +
+            $"{provider.LastOutcome?.Succeeded}/" +
+            $"{provider.LastOutcome?.Review?.Findings.Length}/" +
+            $"{provider.LastOutcome?.Diagnostic?.Code}; " +
+            $"store={store.Objects.Length}/u{store.UploadCalls}/" +
+            $"l{store.ListCalls}/r{store.ReadBackCalls}; " +
+            $"objects={string.Join(',', store.Objects.Select(item =>
+                item.Reference.Name.Value))}; " +
+            $"p2={publisher.Transport.Bodies.Count}; inline={inline.Calls}");
+        Assert.Equal(1, completion.Summary.FindingCount);
+        Assert.Equal(1, inline.Calls);
+        Assert.Equal(1, inline.CandidateCount);
+        Assert.True(inline.FirstConsumption);
+        Assert.False(inline.ReplayConsumption);
+        Assert.False(Directory.Exists(staging));
+    }
+
     [Fact]
     public async Task MissingGitHubCredentialClosesBeforeAnyLaterProducer()
     {
@@ -101,5 +433,528 @@ public sealed class ActionHostCompositionTests
             new ActionHostDeepSeekProviderRunnerFactory(),
             TimeProvider.System,
             stagingParentFactory);
+    }
+
+    private static ActionHostLaunchContract FullLaunch(
+        ActionHostLaunchContract launch)
+    {
+        Assert.True(ActionHostProviderApiKey.TryCreate(
+            "provider-key-canary",
+            out var providerKey));
+        Assert.True(ActionHostStateKey.TryCreate(
+            Convert.ToBase64String(Enumerable.Repeat((byte)7, 32).ToArray()),
+            out var stateKey));
+        Assert.True(ActionHostInputs.TryCreate(
+            launch.Inputs.GitHubToken,
+            providerKey,
+            stateKey,
+            previousStateKey: null,
+            launch.Inputs.ConfigPath,
+            launch.Inputs.PullRequestNumber,
+            launch.Inputs.StateMode,
+            out var inputs));
+        Assert.True(ActionHostLaunchContract.TryCreate(
+            inputs,
+            launch.EventJsonPath,
+            launch.EventJsonSha256,
+            launch.RepositoryName,
+            launch.RepositoryId,
+            launch.RunId,
+            launch.RunAttempt,
+            launch.WorkflowPath,
+            launch.WorkflowRef,
+            launch.WorkflowSha,
+            launch.ActionSourceSha,
+            launch.PayloadSha256,
+            launch.BuildDiscriminator,
+            launch.Cancellation,
+            launch.ArtifactBridgeEndpoint,
+            out var full));
+        return full!;
+    }
+
+    private static ActionHostLaunchContract WithCancellation(
+        ActionHostLaunchContract launch,
+        ActionHostCancellationState cancellation)
+    {
+        Assert.True(ActionHostLaunchContract.TryCreate(
+            launch.Inputs,
+            launch.EventJsonPath,
+            launch.EventJsonSha256,
+            launch.RepositoryName,
+            launch.RepositoryId,
+            launch.RunId,
+            launch.RunAttempt,
+            launch.WorkflowPath,
+            launch.WorkflowRef,
+            launch.WorkflowSha,
+            launch.ActionSourceSha,
+            launch.PayloadSha256,
+            launch.BuildDiscriminator,
+            cancellation,
+            launch.ArtifactBridgeEndpoint,
+            out var cancelled));
+        return cancelled!;
+    }
+
+    private sealed class FullPathStateDependencies(
+        IRestrictedStateStore store,
+        IActionHostGitObjectTransportFactory github) :
+        IAcceptedStateProductionDependencies
+    {
+        public IRestrictedStateStore CreateArtifactStore(
+            ActionHostLaunchContract launch) => store;
+
+        public IActionHostGitObjectTransport CreateAncestryTransport(
+            ActionHostGitHubToken token) =>
+            github.CreateExactObjectTransport(token);
+    }
+
+    private sealed class FullPathProviderFactory(bool withFinding = false) :
+        IActionHostProviderRunnerFactory
+    {
+        private readonly bool withFinding = withFinding;
+        internal int Creates { get; private set; }
+        internal int Runs { get; private set; }
+        internal AgentRunOutcome? LastOutcome { get; private set; }
+
+        public IActionHostProviderRunner Create(
+            ActionHostProviderPolicy policy,
+            ActionHostProviderApiKey key,
+            ReviewedSnapshot snapshot,
+            TimeProvider timeProvider)
+        {
+            Creates++;
+            return new Runner(this, snapshot, timeProvider);
+        }
+
+        private sealed class Runner(
+            FullPathProviderFactory owner,
+            ReviewedSnapshot snapshot,
+            TimeProvider timeProvider) :
+            IActionHostProviderRunner
+        {
+            public async Task<AgentRunOutcome> RunAsync(
+                AgentRunRequest request,
+                CancellationToken cancellationToken)
+            {
+                owner.Runs++;
+                var executor = owner.withFinding
+                    ? new SnapshotToolExecutor(
+                        snapshot,
+                        new VerifiedReviewedFileAccess())
+                    : null;
+                AgentFinding? finding = null;
+                AgentToolExecution? scriptedExecution = null;
+                if (executor is not null)
+                {
+                    Assert.True(AgentToolArguments.TryReadFile(
+                        "{\"path\":\"file.txt\",\"start_line\":1," +
+                        "\"line_count\":20}",
+                        out var arguments));
+                    scriptedExecution = await executor.ExecuteAsync(
+                        new PreparedReadFileCall("read-file", arguments!),
+                        cancellationToken);
+                    var observation = Assert.IsType<AgentObservation>(
+                        scriptedExecution.Observation);
+                    finding = new AgentFinding(
+                        "high",
+                        "Synthetic inline finding",
+                        "The changed line is covered by the integration proof.",
+                        [new AgentEvidence(
+                            observation.ObservationId,
+                            "file.txt",
+                            1,
+                            1)]);
+                }
+
+                var terminal = AgentToolArguments.WriteFinishReview(
+                    "Synthetic full transaction completed.",
+                    finding is null
+                        ? ImmutableArray<AgentFinding>.Empty
+                        : [finding]);
+                IAgentToolExecutor toolExecutor = executor is null
+                    ? new NoToolExecutor()
+                    : new SingleExecutionToolExecutor(scriptedExecution!);
+                var outcome = await new AgentLoop(
+                        new TerminalChatClient(
+                            request,
+                            terminal,
+                            readFileFirst: executor is not null),
+                        toolExecutor,
+                        timeProvider)
+                    .RunAsync(request, cancellationToken);
+                owner.LastOutcome = outcome;
+                return outcome;
+            }
+
+            public void Dispose() { }
+        }
+    }
+
+    private sealed class TerminalChatClient(
+        AgentRunRequest run,
+        byte[] terminal,
+        bool readFileFirst = false) : IProjectChatClient
+    {
+        private int calls;
+
+        public Task<ProjectChatResponse> GetResponseAsync(
+            ProjectChatRequest request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var messagePosition = request.Messages.Length;
+            var reasoning = new ProjectReasoningContent(
+                "synthetic terminal",
+                string.Empty,
+                DeepSeekReasoningContinuationCodec.FramingName,
+                AssociatedCallId: null,
+                messagePosition,
+                Position: 0);
+            var message = new ProjectChatMessage(
+                "assistant",
+                [
+                    reasoning,
+                    readFileFirst && Interlocked.Increment(ref calls) == 1
+                        ? new ProjectToolCallContent(
+                            "read-file",
+                            AgentToolRegistry.ReadFileName,
+                            "{\"path\":\"file.txt\",\"start_line\":1," +
+                            "\"line_count\":20}")
+                        : new ProjectToolCallContent(
+                            "finish-review",
+                            AgentToolRegistry.FinishReviewName,
+                            Encoding.UTF8.GetString(terminal)),
+                ]);
+            var continuation = new ProjectContinuation(
+                run.StablePlan.ProviderId,
+                run.StablePlan.ModelId,
+                run.StablePlan.AdapterId,
+                run.SessionId,
+                [
+                    new ProjectContinuationItem(
+                        reasoning.Text,
+                        reasoning.Opaque,
+                        reasoning.Framing,
+                        reasoning.AssociatedCallId,
+                        reasoning.MessagePosition,
+                        reasoning.Position),
+                ]);
+            return Task.FromResult(new ProjectChatResponse(
+                message,
+                new ProjectChatUsage(1, 1),
+                CapturedResponseBodyBytes: 1,
+                continuation));
+        }
+    }
+
+    private sealed class ConsumingInlineHook :
+        IActionHostPostAcceptanceInlineHook
+    {
+        internal int Calls { get; private set; }
+        internal int CandidateCount { get; private set; }
+        internal bool FirstConsumption { get; private set; }
+        internal bool ReplayConsumption { get; private set; }
+
+        public Task<ActionHostInlineHookResult> PublishAsync(
+            ActionHostCoordinator.PostAcceptanceInlineRequest request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls++;
+            CandidateCount = request.CandidateMap.Candidates.Length;
+            FirstConsumption = request.TryConsume();
+            ReplayConsumption = request.TryConsume();
+            return Task.FromResult(ActionHostInlineHookResult.Complete);
+        }
+    }
+
+    private sealed class NoToolExecutor : IAgentToolExecutor
+    {
+        public string? Preflight(PreparedAgentToolCall call) =>
+            "unexpected_tool_call";
+
+        public ValueTask<AgentToolExecution> ExecuteAsync(
+            PreparedAgentToolCall call,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("No tool call is expected.");
+    }
+
+    private sealed class SingleExecutionToolExecutor(
+        AgentToolExecution execution) : IAgentToolExecutor
+    {
+        private int calls;
+
+        public string? Preflight(PreparedAgentToolCall call) =>
+            call is PreparedReadFileCall
+                ? null
+                : "unexpected_tool_call";
+
+        public ValueTask<AgentToolExecution> ExecuteAsync(
+            PreparedAgentToolCall call,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (call is not PreparedReadFileCall ||
+                Interlocked.Increment(ref calls) != 1)
+            {
+                throw new InvalidOperationException(
+                    "Exactly one scripted read_file call is expected.");
+            }
+
+            return ValueTask.FromResult(execution);
+        }
+    }
+
+    private sealed class FullPathGitHubFactory :
+        IActionHostGitObjectTransportFactory,
+        IActionHostReviewedSnapshotTransportFactory
+    {
+        private static readonly string WorkflowRoot = new('1', 40);
+        private static readonly string GitHubTree = new('2', 40);
+        private static readonly string InstructionsTree = new('3', 40);
+        private static readonly string ConfigBlob = new('4', 40);
+        private static readonly string InstructionsBlob = new('5', 40);
+        private static readonly string ReviewedRoot = new('6', 40);
+        private const string FileBlob =
+            "acff1efca38bb0f23c265ddb8aa37f337eb8e89d";
+        private static readonly string BaseRoot = new('8', 40);
+        private static readonly byte[] FileBytes =
+            Encoding.UTF8.GetBytes("changed line\n");
+        private static readonly byte[] Instructions =
+            Encoding.UTF8.GetBytes("Review the exact snapshot.");
+        private readonly ActionHostGitHubPullRequestFact pullRequest;
+        private readonly bool withInlineFile;
+        private readonly byte[] config;
+
+        internal int CurrentPullRequestCalls { get; private set; }
+        internal int GitCommitCalls { get; private set; }
+        internal int GitTreeCalls { get; private set; }
+        internal int GitBlobCalls { get; private set; }
+        internal System.Action? OnCurrentPullRequest { get; set; }
+
+        internal FullPathGitHubFactory(
+            ActionHostGitHubPullRequestFact pullRequest,
+            bool withInlineFile = false)
+        {
+            this.pullRequest = pullRequest;
+            this.withInlineFile = withInlineFile;
+            config = Encoding.UTF8.GetBytes(
+                "{\"schema\":\"agentic-pr-review.config.v1\"," +
+                "\"instructionsPath\":\".github/agentic-pr-review/" +
+                "instructions.md\",\"publication\":{\"mode\":\"" +
+                (withInlineFile ? "sticky_and_inline" : "sticky") +
+                "\"" + (withInlineFile
+                    ? ",\"inlineMinSeverity\":\"high\""
+                    : string.Empty) + "}}");
+        }
+
+        public IActionHostGitObjectTransport CreateExactObjectTransport(
+            ActionHostGitHubToken token) => new GitObjectTransport(this);
+
+        public IActionHostReviewedSnapshotTransport
+            CreateReviewedSnapshotTransport(ActionHostGitHubToken token) =>
+            new SnapshotTransport(this);
+
+        private sealed class GitObjectTransport(FullPathGitHubFactory owner) :
+            IActionHostGitObjectTransport
+        {
+            public Task<ActionHostGitObjectResult<ActionHostGitCommitObject>>
+                GetCommitObjectAsync(
+                    string repositoryName,
+                    string commitSha,
+                    CancellationToken cancellationToken)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                owner.GitCommitCalls++;
+                var value = commitSha ==
+                        ActionHostAuthorizationScenario.WorkflowSha
+                    ? new ActionHostGitCommitObject(commitSha, WorkflowRoot)
+                    : new ActionHostGitCommitObject(
+                        commitSha,
+                        commitSha == owner.pullRequest.BaseSha
+                            ? BaseRoot
+                            : ReviewedRoot);
+                return Task.FromResult(ActionHostGitObjectResult<
+                    ActionHostGitCommitObject>.Success(value, 64));
+            }
+
+            public Task<ActionHostGitObjectResult<ActionHostGitTreeObject>>
+                GetTreeObjectAsync(
+                    string repositoryName,
+                    string treeSha,
+                    CancellationToken cancellationToken)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                owner.GitTreeCalls++;
+                var value = treeSha switch
+                {
+                    var sha when sha == WorkflowRoot => new(
+                        sha,
+                        [new(".github", "040000", "tree", GitHubTree)]),
+                    var sha when sha == GitHubTree => new(
+                        sha,
+                        [
+                            new(
+                                "agentic-pr-review.json",
+                                "100644",
+                                "blob",
+                                ConfigBlob),
+                            new(
+                                "agentic-pr-review",
+                                "040000",
+                                "tree",
+                                InstructionsTree),
+                        ]),
+                    var sha when sha == InstructionsTree => new(
+                        sha,
+                        [new(
+                            "instructions.md",
+                            "100644",
+                            "blob",
+                            InstructionsBlob)]),
+                    var sha when sha == BaseRoot => new(
+                        sha,
+                        []),
+                    _ => new ActionHostGitTreeObject(
+                        ReviewedRoot,
+                        owner.withInlineFile
+                            ? [new(
+                                "file.txt",
+                                "100644",
+                                "blob",
+                                FileBlob,
+                                FileBytes.LongLength)]
+                            : []),
+                };
+                return Task.FromResult(ActionHostGitObjectResult<
+                    ActionHostGitTreeObject>.Success(value, 64));
+            }
+
+            public Task<ActionHostGitObjectResult<ActionHostGitBlobObject>>
+                GetBlobObjectAsync(
+                    string repositoryName,
+                    string blobSha,
+                    ActionHostGitBlobReadBudget budget,
+                    CancellationToken cancellationToken)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                owner.GitBlobCalls++;
+                var value = new ActionHostGitBlobObject(
+                    blobSha,
+                    blobSha == ConfigBlob
+                        ? (byte[])owner.config.Clone()
+                        : blobSha == FileBlob
+                            ? (byte[])FileBytes.Clone()
+                            : (byte[])Instructions.Clone());
+                return Task.FromResult(ActionHostGitObjectResult<
+                    ActionHostGitBlobObject>.Success(value, value.Bytes.Length));
+            }
+
+            public void Dispose() { }
+        }
+
+        private sealed class SnapshotTransport(
+            FullPathGitHubFactory owner) :
+            IActionHostReviewedSnapshotTransport
+        {
+            public Task<ActionHostGitObjectResult<
+                ActionHostGitHubPullRequestFact>> GetCurrentPullRequestAsync(
+                    string repositoryName,
+                    long pullRequestNumber,
+                    CancellationToken cancellationToken)
+            {
+                owner.CurrentPullRequestCalls++;
+                owner.OnCurrentPullRequest?.Invoke();
+                return Task.FromResult(ActionHostGitObjectResult<
+                    ActionHostGitHubPullRequestFact>.Success(
+                        owner.pullRequest,
+                        64));
+            }
+
+            public Task<ActionHostGitObjectResult<
+                ActionHostPullRequestFilePageObject>>
+                GetPullRequestFilesAsync(
+                    string repositoryName,
+                    long pullRequestNumber,
+                    int page,
+                    int perPage,
+                CancellationToken cancellationToken) =>
+                Task.FromResult(ActionHostGitObjectResult<
+                    ActionHostPullRequestFilePageObject>.Success(
+                        new(
+                            owner.withInlineFile
+                                ? [new ActionHostPullRequestFileObject(
+                                    FileBlob,
+                                    "file.txt",
+                                    null,
+                                    "added",
+                                    1,
+                                    0,
+                                    1,
+                                    "@@ -0,0 +1 @@\n+changed line")]
+                                : [],
+                            IsComplete: true),
+                        64));
+
+            public Task<ActionHostGitObjectResult<ActionHostGitCommitObject>>
+                GetCommitObjectAsync(
+                    string repositoryName,
+                    string commitSha,
+                CancellationToken cancellationToken) =>
+                Task.FromResult(ActionHostGitObjectResult<
+                    ActionHostGitCommitObject>.Success(
+                        new(
+                            commitSha,
+                            commitSha == owner.pullRequest.BaseSha
+                                ? BaseRoot
+                                : ReviewedRoot),
+                        64));
+
+            public Task<ActionHostGitObjectResult<ActionHostGitTreeObject>>
+                GetTreeObjectAsync(
+                    string repositoryName,
+                    string treeSha,
+                CancellationToken cancellationToken) =>
+                Task.FromResult(ActionHostGitObjectResult<
+                    ActionHostGitTreeObject>.Success(
+                        new(
+                            treeSha,
+                            owner.withInlineFile && treeSha != BaseRoot
+                                ? [new(
+                                    "file.txt",
+                                    "100644",
+                                    "blob",
+                                    FileBlob,
+                                    FileBytes.LongLength)]
+                                : []),
+                        64));
+
+            public async Task<ActionHostGitObjectResult<
+                ActionHostStreamedBlobObject>> CopyBlobObjectAsync(
+                    string repositoryName,
+                    string blobSha,
+                    long declaredSize,
+                    Stream destination,
+                    CancellationToken cancellationToken)
+            {
+                if (!owner.withInlineFile || blobSha != FileBlob ||
+                    declaredSize != FileBytes.LongLength)
+                {
+                    return ActionHostGitObjectResult<
+                        ActionHostStreamedBlobObject>.Failed(
+                            ActionHostGitObjectFailure.InvalidRequest);
+                }
+
+                await destination.WriteAsync(FileBytes, cancellationToken);
+                return ActionHostGitObjectResult<
+                    ActionHostStreamedBlobObject>.Success(
+                        new(FileBlob, FileBytes.LongLength),
+                        checked((int)FileBytes.LongLength));
+            }
+
+            public void Dispose() { }
+        }
     }
 }

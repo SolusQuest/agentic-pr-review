@@ -11,9 +11,258 @@ using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.State;
+using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 using AgenticPrReview.Runtime.Host.State.Restore;
 
 namespace AgenticPrReview.Runtime.ActionHost;
+
+internal enum ActionHostOperationResolution
+{
+    ResolvedNoCommit = 1,
+    ResolvedCommitted,
+    Unresolved,
+}
+
+internal enum ActionHostExecutionMode
+{
+    Normal = 1,
+    ReconciliationOnly,
+}
+
+internal sealed class ActionHostTransactionJournal
+{
+    private int cancellationObserved;
+    private int currentRunMutationDispatched;
+    private int currentRunTransactionAdvanced;
+    private int executionMode = (int)ActionHostExecutionMode.Normal;
+    private int latestResolution =
+        (int)ActionHostOperationResolution.ResolvedNoCommit;
+
+    internal ActionHostTransactionJournal(
+        ActionHostCancellationState cancellation)
+    {
+        if (cancellation == ActionHostCancellationState.Requested)
+        {
+            cancellationObserved = 1;
+            executionMode =
+                (int)ActionHostExecutionMode.ReconciliationOnly;
+        }
+    }
+
+    internal bool HasCurrentRunMutation =>
+        Volatile.Read(ref currentRunMutationDispatched) != 0;
+
+    internal bool HasCurrentRunActivity => HasCurrentRunMutation ||
+        Volatile.Read(ref currentRunTransactionAdvanced) != 0;
+
+    internal ActionHostOperationResolution LatestResolution =>
+        (ActionHostOperationResolution)Volatile.Read(ref latestResolution);
+
+    internal ActionHostExecutionMode ExecutionMode =>
+        (ActionHostExecutionMode)Volatile.Read(ref executionMode);
+
+    internal bool ObserveCancellation(CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            Interlocked.Exchange(ref cancellationObserved, 1);
+            Interlocked.Exchange(
+                ref executionMode,
+                (int)ActionHostExecutionMode.ReconciliationOnly);
+        }
+
+        return Volatile.Read(ref cancellationObserved) != 0;
+    }
+
+    internal void BeforeMutationDispatch(CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            _ = ObserveCancellation(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+
+        Interlocked.Exchange(ref currentRunMutationDispatched, 1);
+        Interlocked.Exchange(
+            ref latestResolution,
+            (int)ActionHostOperationResolution.Unresolved);
+    }
+
+    internal void Resolve(OpaqueStoreMutationState state) => Resolve(
+        state switch
+        {
+            OpaqueStoreMutationState.NotCommitted =>
+                ActionHostOperationResolution.ResolvedNoCommit,
+            OpaqueStoreMutationState.Committed =>
+                ActionHostOperationResolution.ResolvedCommitted,
+            _ => ActionHostOperationResolution.Unresolved,
+        });
+
+    internal void Resolve(BoundedGitHubHttpOutcome outcome) => Resolve(
+        outcome switch
+        {
+            BoundedGitHubHttpOutcome.Success =>
+                ActionHostOperationResolution.ResolvedCommitted,
+            BoundedGitHubHttpOutcome.CancelledBeforeSend or
+            BoundedGitHubHttpOutcome.KnownNotSent or
+            BoundedGitHubHttpOutcome.AuthorizationOrValidationFailure =>
+                ActionHostOperationResolution.ResolvedNoCommit,
+            _ => ActionHostOperationResolution.Unresolved,
+        });
+
+    internal void RecordTransactionAdvance() =>
+        Interlocked.Exchange(ref currentRunTransactionAdvanced, 1);
+
+    internal ActionHostStatus CancellationStatus => !HasCurrentRunActivity
+        ? ActionHostStatus.Cancelled
+        : LatestResolution == ActionHostOperationResolution.Unresolved
+            ? ActionHostStatus.OutcomeAmbiguous
+            : ActionHostStatus.ProviderFailed;
+
+    private void Resolve(ActionHostOperationResolution resolution) =>
+        Interlocked.Exchange(ref latestResolution, (int)resolution);
+}
+
+internal sealed class JournaledAcceptedStateProductionDependencies(
+    IAcceptedStateProductionDependencies inner,
+    ActionHostTransactionJournal journal) :
+    IAcceptedStateProductionDependencies
+{
+    public IRestrictedStateStore CreateArtifactStore(
+        ActionHostLaunchContract launch) => new JournaledRestrictedStateStore(
+            inner.CreateArtifactStore(launch),
+            journal);
+
+    public IActionHostGitObjectTransport CreateAncestryTransport(
+        ActionHostGitHubToken token) =>
+        inner.CreateAncestryTransport(token);
+}
+
+internal sealed class JournaledRestrictedStateStore(
+    IRestrictedStateStore inner,
+    ActionHostTransactionJournal journal) : IRestrictedStateStore
+{
+    public Task<OpaqueStoreListResult> ListExactAsync(
+        OpaqueStoreListRequest request,
+        CancellationToken cancellationToken) =>
+        inner.ListExactAsync(request, cancellationToken);
+
+    public Task<OpaqueStoreMetadataResult> ReadMetadataAsync(
+        OpaqueStoreMetadataRequest request,
+        CancellationToken cancellationToken) =>
+        inner.ReadMetadataAsync(request, cancellationToken);
+
+    public Task<OpaqueStoreDownloadResult> DownloadAsync(
+        OpaqueStoreDownloadRequest request,
+        CancellationToken cancellationToken) =>
+        inner.DownloadAsync(request, cancellationToken);
+
+    public async Task<OpaqueStoreUploadResult> UploadImmutableAsync(
+        OpaqueStoreUploadRequest request,
+        CancellationToken cancellationToken)
+    {
+        journal.BeforeMutationDispatch(cancellationToken);
+        try
+        {
+            var result = await inner.UploadImmutableAsync(
+                    request,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            journal.Resolve(result.MutationState);
+            return result;
+        }
+        catch
+        {
+            journal.Resolve(OpaqueStoreMutationState.OutcomeUnknown);
+            throw;
+        }
+    }
+
+    public Task<OpaqueStoreReadBackResult> ReadBackExactAsync(
+        OpaqueStoreReadBackRequest request,
+        CancellationToken cancellationToken) =>
+        inner.ReadBackExactAsync(request, cancellationToken);
+
+    public async Task<OpaqueStoreDeleteResult> DeleteExactAsync(
+        OpaqueStoreDeleteRequest request,
+        CancellationToken cancellationToken)
+    {
+        journal.BeforeMutationDispatch(cancellationToken);
+        try
+        {
+            var result = await inner.DeleteExactAsync(
+                    request,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            journal.Resolve(result.MutationState);
+            return result;
+        }
+        catch
+        {
+            journal.Resolve(OpaqueStoreMutationState.OutcomeUnknown);
+            throw;
+        }
+    }
+}
+
+internal sealed class JournaledStickyPublisherTransportFactory(
+    IStickyGitHubPublisherTransportFactory inner,
+    ActionHostTransactionJournal journal) :
+    IStickyGitHubPublisherTransportFactory
+{
+    public IStickyGitHubPublisherTransport Create(
+        ActionHostGitHubToken token,
+        AuthorizedStickyPublicationRequest request) =>
+        new JournaledStickyPublisherTransport(
+            inner.Create(token, request),
+            journal);
+
+    public IStickyGitHubReadbackTransport CreateReadback(
+        ActionHostGitHubToken token,
+        AuthorizedStickyReadbackRequest request) =>
+        inner.CreateReadback(token, request);
+}
+
+internal sealed class JournaledStickyPublisherTransport(
+    IStickyGitHubPublisherTransport inner,
+    ActionHostTransactionJournal journal) :
+    IStickyGitHubPublisherTransport
+{
+    public bool IsWithinOverallDeadline => inner.IsWithinOverallDeadline;
+
+    public Task<BoundedGitHubHttpResult<BoundedGitHubIssueCommentPage>>
+        ListIssueCommentsAsync(
+            int page,
+            CancellationToken cancellationToken) =>
+        inner.ListIssueCommentsAsync(page, cancellationToken);
+
+    public Task<BoundedGitHubHttpResult<BoundedGitHubIssueComment>>
+        GetIssueCommentAsync(
+            long commentId,
+            CancellationToken cancellationToken) =>
+        inner.GetIssueCommentAsync(commentId, cancellationToken);
+
+    public async Task<BoundedGitHubHttpResult<BoundedGitHubIssueComment>>
+        MutateStickyCommentAsync(CancellationToken cancellationToken)
+    {
+        journal.BeforeMutationDispatch(cancellationToken);
+        try
+        {
+            var result = await inner.MutateStickyCommentAsync(
+                    cancellationToken)
+                .ConfigureAwait(false);
+            journal.Resolve(result.Outcome);
+            return result;
+        }
+        catch
+        {
+            journal.Resolve(BoundedGitHubHttpOutcome.OutcomeUnknown);
+            throw;
+        }
+    }
+
+    public void Dispose() => inner.Dispose();
+}
 
 internal sealed class ActionHostCompositionDependencies
 {
@@ -78,7 +327,7 @@ internal sealed class ActionHostCompositionDependencies
             TimeProvider.System);
     }
 
-    private static string CreateStagingParent() => Path.Combine(
+    private static string CreateStagingParent() => Path.Join(
         Path.GetTempPath(),
         "agentic-pr-review-r4",
         Guid.NewGuid().ToString("N"));
@@ -103,18 +352,48 @@ internal sealed class ActionHostComposition
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(launch);
-        var authorization = await new ActionHostAuthorizer(
-                dependencies.EventReader,
-                dependencies.AuthorizationFactory,
-                ActionHostAuthorizationPolicy.TrustedProof)
-            .AuthorizeAsync(launch, cancellationToken)
-            .ConfigureAwait(false);
+        var journal = new ActionHostTransactionJournal(launch.Cancellation);
+        if (journal.ObserveCancellation(cancellationToken))
+        {
+            return Completion(
+                launch,
+                journal.CancellationStatus,
+                StateWasAccessed: false);
+        }
+
+        ActionHostAuthorizationResult authorization;
+        try
+        {
+            authorization = await new ActionHostAuthorizer(
+                    dependencies.EventReader,
+                    dependencies.AuthorizationFactory,
+                    ActionHostAuthorizationPolicy.TrustedProof)
+                .AuthorizeAsync(launch, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            _ = journal.ObserveCancellation(cancellationToken);
+            return Completion(
+                launch,
+                journal.CancellationStatus,
+                StateWasAccessed: false);
+        }
+
         if (authorization.Invocation is not { } invocation)
         {
             return Completion(
                 launch,
                 authorization.RejectionStatus ??
                     ActionHostStatus.InternalFailure,
+                StateWasAccessed: false);
+        }
+
+        if (journal.ObserveCancellation(cancellationToken))
+        {
+            return Completion(
+                launch,
+                journal.CancellationStatus,
                 StateWasAccessed: false);
         }
 
@@ -142,6 +421,14 @@ internal sealed class ActionHostComposition
                     cancellationToken)
                 .ConfigureAwait(false);
         }
+        catch (OperationCanceledException)
+        {
+            _ = journal.ObserveCancellation(cancellationToken);
+            return Completion(
+                launch,
+                journal.CancellationStatus,
+                StateWasAccessed: false);
+        }
         catch (Exception exception) when (IsNonFatal(exception))
         {
             return Completion(
@@ -159,11 +446,20 @@ internal sealed class ActionHostComposition
                 StateWasAccessed: false);
         }
 
-        var stagingParent = dependencies.StagingParentFactory();
+        if (journal.ObserveCancellation(cancellationToken))
+        {
+            return Completion(
+                launch,
+                journal.CancellationStatus,
+                StateWasAccessed: false);
+        }
+
+        string? stagingParent = null;
         ReviewedTreeSnapshot? tree = null;
         BoundedReviewedSnapshotLease? snapshot = null;
         try
         {
+            stagingParent = dependencies.StagingParentFactory();
             Directory.CreateDirectory(stagingParent);
             var treeResult = await new ReviewedTreeReader(
                     new ReviewedGitObjectTransportFactory(
@@ -181,6 +477,14 @@ internal sealed class ActionHostComposition
                 return Completion(
                     launch,
                     TreeStatus(treeResult.Failure),
+                    StateWasAccessed: false);
+            }
+
+            if (journal.ObserveCancellation(cancellationToken))
+            {
+                return Completion(
+                    launch,
+                    journal.CancellationStatus,
                     StateWasAccessed: false);
             }
 
@@ -202,6 +506,14 @@ internal sealed class ActionHostComposition
                     StateWasAccessed: false);
             }
 
+            if (journal.ObserveCancellation(cancellationToken))
+            {
+                return Completion(
+                    launch,
+                    journal.CancellationStatus,
+                    StateWasAccessed: false);
+            }
+
             if (!ActionHostReviewContextFactory.TryCreate(
                     invocation,
                     snapshot.Identities,
@@ -211,6 +523,14 @@ internal sealed class ActionHostComposition
                 return Completion(
                     launch,
                     ActionHostStatus.InternalFailure,
+                    StateWasAccessed: false);
+            }
+
+            if (journal.ObserveCancellation(cancellationToken))
+            {
+                return Completion(
+                    launch,
+                    journal.CancellationStatus,
                     StateWasAccessed: false);
             }
 
@@ -230,7 +550,9 @@ internal sealed class ActionHostComposition
                         policy,
                         reviewContext,
                         DeepSeekReasoningContinuationCodec.Instance,
-                        dependencies.StateDependencies,
+                        new JournaledAcceptedStateProductionDependencies(
+                            dependencies.StateDependencies,
+                            journal),
                         dependencies.TimeProvider),
                     cancellationToken)
                 .ConfigureAwait(false);
@@ -239,7 +561,9 @@ internal sealed class ActionHostComposition
             {
                 return Completion(
                     launch,
-                    StateStatus(restored.Code),
+                    journal.ObserveCancellation(cancellationToken)
+                        ? journal.CancellationStatus
+                        : StateStatus(restored.Code),
                     StateWasAccessed: true);
             }
 
@@ -253,9 +577,12 @@ internal sealed class ActionHostComposition
                 AuthorizedAcceptedStateComposer.PayloadBuildIdentity(policy));
             return await new ActionHostCoordinator(
                     new StickyCommentPublisher(
-                        dependencies.PublisherFactory),
+                        new JournaledStickyPublisherTransportFactory(
+                            dependencies.PublisherFactory,
+                            journal)),
                     dependencies.SnapshotFactory,
                     dependencies.ProviderFactory,
+                    journal,
                     dependencies.TimeProvider,
                     dependencies.InlineHook)
                 .RunAsync(
@@ -268,12 +595,23 @@ internal sealed class ActionHostComposition
                     cancellationToken)
                 .ConfigureAwait(false);
         }
+        catch (OperationCanceledException)
+        {
+            return Completion(
+                launch,
+                journal.CancellationStatus,
+                StateWasAccessed: journal.HasCurrentRunActivity);
+        }
         catch (Exception exception) when (IsNonFatal(exception))
         {
             return Completion(
                 launch,
-                ActionHostStatus.InternalFailure,
-                StateWasAccessed: false);
+                journal.HasCurrentRunActivity &&
+                    journal.LatestResolution ==
+                        ActionHostOperationResolution.Unresolved
+                    ? ActionHostStatus.OutcomeAmbiguous
+                    : ActionHostStatus.InternalFailure,
+                StateWasAccessed: journal.HasCurrentRunActivity);
         }
         finally
         {
@@ -289,7 +627,8 @@ internal sealed class ActionHostComposition
 
             try
             {
-                if (Directory.Exists(stagingParent))
+                if (stagingParent is not null &&
+                    Directory.Exists(stagingParent))
                 {
                     Directory.Delete(stagingParent, recursive: true);
                 }
@@ -328,6 +667,7 @@ internal sealed class ActionHostComposition
                 ActionHostStatus.SnapshotIncomplete,
             ActionHostTrustedPolicyFailure.Cancelled =>
                 ActionHostStatus.Cancelled,
+            _ => ActionHostStatus.InternalFailure,
         };
 
     private static ActionHostStatus TreeStatus(ReviewedTreeFailure failure) =>
@@ -343,6 +683,7 @@ internal sealed class ActionHostComposition
             ReviewedTreeFailure.MissingObject or
             ReviewedTreeFailure.IdentityMismatch =>
                 ActionHostStatus.SnapshotIncomplete,
+            _ => ActionHostStatus.InternalFailure,
         };
 
     private static ActionHostStatus SnapshotStatus(
@@ -364,6 +705,7 @@ internal sealed class ActionHostComposition
             ReviewedSnapshotReadFailure.TransportFailure or
             ReviewedSnapshotReadFailure.StagingFailure =>
                 ActionHostStatus.SnapshotIncomplete,
+            _ => ActionHostStatus.InternalFailure,
         };
 
     private static ActionHostStatus StateStatus(string code) => code switch
@@ -380,9 +722,9 @@ internal sealed class ActionHostComposition
         AcceptedStateCodes.ScopeMismatch or
         AcceptedStateCodes.AncestryFailed or
         AcceptedStateCodes.Overflow or
-        AcceptedStateCodes.Conflict or
+        AcceptedStateCodes.Conflict => ActionHostStatus.StateConflict,
         AcceptedStateCodes.Absent or
-        AcceptedStateCodes.Expired => ActionHostStatus.StateConflict,
+        AcceptedStateCodes.Expired => ActionHostStatus.InternalFailure,
         _ => ActionHostStatus.InternalFailure,
     };
 

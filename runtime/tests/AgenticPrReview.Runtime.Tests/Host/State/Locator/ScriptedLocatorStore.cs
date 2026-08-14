@@ -85,7 +85,8 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
     internal OpaqueStoreObjectMetadata Add(
         byte[] bytes,
         long expiresAtUnixSeconds,
-        string? objectId = null)
+        string? objectId = null,
+        OpaqueStoreName? name = null)
     {
         lock (gate)
         {
@@ -93,9 +94,11 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
             var digest = OpaqueStoreHash.Sha256(bytes);
             var metadata = new OpaqueStoreObjectMetadata(
                 new OpaqueStoreObjectReference(
-                    new OpaqueStoreName(LocatorRootFormat.StoreName),
+                    name ?? new OpaqueStoreName(LocatorRootFormat.StoreName),
                     new OpaqueStoreObjectId(id)),
-                new OpaqueStoreProducingRun("scripted", 1),
+                new OpaqueStoreProducingRun(
+                    ProducingRunIdentity,
+                    ProducingRunAttempt ?? 1),
                 new OpaqueStoreArchiveDigest(digest),
                 new OpaqueStoreEncryptedObjectDigest(digest),
                 expiresAtUnixSeconds,

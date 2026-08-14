@@ -138,11 +138,13 @@ internal sealed class ActionHostCoordinator
     private const int MaximumConvergenceIterations = 16;
     private const string InlineMapDomain =
         "agentic-pr-review/r4/post-acceptance-inline-map/v1";
+    private static readonly object PostAcceptanceIssuer = new();
 
     private readonly StickyCommentPublisher publisher;
     private readonly IActionHostReviewedSnapshotTransportFactory
         revalidationFactory;
     private readonly IActionHostProviderRunnerFactory providerFactory;
+    private readonly ActionHostTransactionJournal journal;
     private readonly IActionHostPostAcceptanceInlineHook? inlineHook;
     private readonly TimeProvider timeProvider;
 
@@ -150,6 +152,7 @@ internal sealed class ActionHostCoordinator
         StickyCommentPublisher publisher,
         IActionHostReviewedSnapshotTransportFactory revalidationFactory,
         IActionHostProviderRunnerFactory providerFactory,
+        ActionHostTransactionJournal journal,
         TimeProvider timeProvider,
         IActionHostPostAcceptanceInlineHook? inlineHook = null)
     {
@@ -159,6 +162,8 @@ internal sealed class ActionHostCoordinator
             throw new ArgumentNullException(nameof(revalidationFactory));
         this.providerFactory = providerFactory ??
             throw new ArgumentNullException(nameof(providerFactory));
+        this.journal = journal ??
+            throw new ArgumentNullException(nameof(journal));
         this.timeProvider = timeProvider ??
             throw new ArgumentNullException(nameof(timeProvider));
         this.inlineHook = inlineHook;
@@ -183,6 +188,7 @@ internal sealed class ActionHostCoordinator
         var recovery = new PublicationRecoveryService(publisher);
         var progress = new HashSet<string>(StringComparer.Ordinal);
         var candidateCommittedThisRun = false;
+        var initialResultCommittedThisRun = false;
         for (var iteration = 0;
             iteration < MaximumConvergenceIterations;
             iteration++)
@@ -221,9 +227,9 @@ internal sealed class ActionHostCoordinator
 
                 case PublicationRecoveryAction.NoPendingWork:
                 {
-                    if (cancellationToken.IsCancellationRequested)
+                    if (journal.ObserveCancellation(cancellationToken))
                     {
-                        return Failure(launch, ActionHostStatus.Cancelled);
+                        return Failure(launch, journal.CancellationStatus);
                     }
 
                     if (launch.Inputs.ProviderApiKey is null)
@@ -265,11 +271,17 @@ internal sealed class ActionHostCoordinator
                             ActionHostStatus.ProviderFailed);
                     }
 
+                    if (journal.ObserveCancellation(cancellationToken) &&
+                        outcome.CompletedSessionEligible)
+                    {
+                        return Failure(launch, journal.CancellationStatus);
+                    }
+
                     if (!outcome.CompletedSessionEligible)
                     {
                         return Failure(
                             launch,
-                            AgentFailureStatus(outcome, candidateCommittedThisRun));
+                            AgentFailureStatus(outcome));
                     }
 
                     if (!R4PreparedPublication.TryCreate(
@@ -307,7 +319,7 @@ internal sealed class ActionHostCoordinator
                     {
                         return Failure(
                             launch,
-                            TransactionStatus(preparedResult.Code));
+                            CandidatePreparationStatus(preparedResult.Code));
                     }
 
                     var persisted = await RestrictedStateService
@@ -320,19 +332,22 @@ internal sealed class ActionHostCoordinator
                     {
                         return Failure(
                             launch,
-                            TransactionStatus(persisted.Code));
+                            CandidatePersistenceStatus(persisted.Code));
                     }
 
                     candidateCommittedThisRun = true;
+                    journal.RecordTransactionAdvance();
                     break;
                 }
 
                 case PublicationRecoveryAction.CleanupSupersededRecovery:
                 {
-                    if (cancellationToken.IsCancellationRequested &&
+                    var cancellingBeforeIntent =
+                        journal.ObserveCancellation(cancellationToken);
+                    if (cancellingBeforeIntent &&
                         !candidateCommittedThisRun)
                     {
-                        return Failure(launch, ActionHostStatus.Cancelled);
+                        return Failure(launch, journal.CancellationStatus);
                     }
 
                     var cleanup = await PublicationRecoveryService
@@ -346,7 +361,7 @@ internal sealed class ActionHostCoordinator
                     {
                         return Failure(
                             launch,
-                            TransactionStatus(cleanup.Code));
+                            CleanupStatus(cleanup.Code));
                     }
 
                     break;
@@ -373,29 +388,33 @@ internal sealed class ActionHostCoordinator
                             ActionHostStatus.StateConflict);
                     }
 
-                    if (evaluation.Decision.Action ==
-                            PublicationRecoveryAction.AbandonStaleCandidate &&
-                        cancellationToken.IsCancellationRequested &&
+                    var cancellingBeforeIntent =
+                        journal.ObserveCancellation(cancellationToken);
+                    if (cancellingBeforeIntent &&
                         !candidateCommittedThisRun)
                     {
-                        return Failure(launch, ActionHostStatus.Cancelled);
+                        return Failure(launch, journal.CancellationStatus);
                     }
 
                     var intentResult = await PublicationRecoveryPersistence
                         .PersistIntentAndAuthorizeAsync(
                             state,
                             observation,
-                            CancellationToken.None)
+                            cancellingBeforeIntent
+                                ? CancellationToken.None
+                                : cancellationToken)
                         .ConfigureAwait(false);
                     using var intent = intentResult.Value;
                     if (!intentResult.Succeeded || intent is null)
                     {
                         return Failure(
                             launch,
-                            TransactionStatus(intentResult.Code));
+                            P5WriteStatus(intentResult.Code));
                     }
 
-                    if (cancellationToken.IsCancellationRequested)
+                    journal.RecordTransactionAdvance();
+
+                    if (journal.ObserveCancellation(cancellationToken))
                     {
                         var failureResult = await PersistResultAsync(
                                 state,
@@ -412,9 +431,11 @@ internal sealed class ActionHostCoordinator
                         {
                             return Failure(
                                 launch,
-                                PublicationPersistenceStatus(
+                                P5WriteStatus(
                                     failureResult.Code));
                         }
+
+                        journal.RecordTransactionAdvance();
 
                         break;
                     }
@@ -423,10 +444,18 @@ internal sealed class ActionHostCoordinator
                             launch,
                             invocation,
                             scope,
+                            state,
                             intent.Observation,
                             intent.StickyWriteAuthorization,
                             cancellationToken)
                         .ConfigureAwait(false);
+                    if (sticky.StateCode is { } stateCode)
+                    {
+                        return Failure(
+                            launch,
+                            OwnershipStatus(stateCode));
+                    }
+
                     if (sticky.RevalidationStatus is { } revalidationStatus)
                     {
                         if (revalidationStatus ==
@@ -447,9 +476,11 @@ internal sealed class ActionHostCoordinator
                             {
                                 return Failure(
                                     launch,
-                                    PublicationPersistenceStatus(
+                                    P5WriteStatus(
                                         failureResult.Code));
                             }
+
+                            journal.RecordTransactionAdvance();
 
                             break;
                         }
@@ -476,8 +507,12 @@ internal sealed class ActionHostCoordinator
                     {
                         return Failure(
                             launch,
-                            PublicationPersistenceStatus(persistence.Code));
+                            P5WriteStatus(persistence.Code));
                     }
+
+                    journal.RecordTransactionAdvance();
+                    initialResultCommittedThisRun = sticky.Result?.Outcome ==
+                        BoundedGitHubPublisherOutcome.KnownNotWritten;
 
                     break;
                 }
@@ -492,13 +527,16 @@ internal sealed class ActionHostCoordinator
                             ActionHostStatus.StateConflict);
                     }
 
-                    if (cancellationToken.IsCancellationRequested &&
-                        !candidateCommittedThisRun)
+                    var cancellingBeforeRetry =
+                        journal.ObserveCancellation(cancellationToken);
+                    if (cancellingBeforeRetry &&
+                        !candidateCommittedThisRun &&
+                        !initialResultCommittedThisRun)
                     {
-                        return Failure(launch, ActionHostStatus.Cancelled);
+                        return Failure(launch, journal.CancellationStatus);
                     }
 
-                    if (cancellationToken.IsCancellationRequested)
+                    if (journal.ObserveCancellation(cancellationToken))
                     {
                         return PublicationRecoveryService
                                 .TryTerminalizeFreshKnownNotWritten(
@@ -519,17 +557,21 @@ internal sealed class ActionHostCoordinator
                             state,
                             observation,
                             evaluation.RetryTransitionAuthorization,
-                            CancellationToken.None)
+                            cancellingBeforeRetry
+                                ? CancellationToken.None
+                                : cancellationToken)
                         .ConfigureAwait(false);
                     using var retry = retryResult.Value;
                     if (!retryResult.Succeeded || retry is null)
                     {
                         return Failure(
                             launch,
-                            TransactionStatus(retryResult.Code));
+                            P5WriteStatus(retryResult.Code));
                     }
 
-                    if (cancellationToken.IsCancellationRequested)
+                    journal.RecordTransactionAdvance();
+
+                    if (journal.ObserveCancellation(cancellationToken))
                     {
                         var failureResult = await PersistResultAsync(
                                 state,
@@ -546,9 +588,11 @@ internal sealed class ActionHostCoordinator
                         {
                             return Failure(
                                 launch,
-                                PublicationPersistenceStatus(
+                                P5WriteStatus(
                                     failureResult.Code));
                         }
+
+                        journal.RecordTransactionAdvance();
 
                         break;
                     }
@@ -557,10 +601,18 @@ internal sealed class ActionHostCoordinator
                             launch,
                             invocation,
                             scope,
+                            state,
                             retry.Observation,
                             retry.StickyWriteAuthorization,
                             cancellationToken)
                         .ConfigureAwait(false);
+                    if (sticky.StateCode is { } stateCode)
+                    {
+                        return Failure(
+                            launch,
+                            OwnershipStatus(stateCode));
+                    }
+
                     if (sticky.RevalidationStatus is { } revalidationStatus)
                     {
                         if (revalidationStatus ==
@@ -581,9 +633,11 @@ internal sealed class ActionHostCoordinator
                             {
                                 return Failure(
                                     launch,
-                                    PublicationPersistenceStatus(
+                                    P5WriteStatus(
                                         failureResult.Code));
                             }
+
+                            journal.RecordTransactionAdvance();
 
                             break;
                         }
@@ -610,8 +664,10 @@ internal sealed class ActionHostCoordinator
                     {
                         return Failure(
                             launch,
-                            PublicationPersistenceStatus(persistence.Code));
+                            P5WriteStatus(persistence.Code));
                     }
+
+                    journal.RecordTransactionAdvance();
 
                     break;
                 }
@@ -642,10 +698,12 @@ internal sealed class ActionHostCoordinator
                 case PublicationRecoveryAction.AbandonStaleCandidate:
                 case PublicationRecoveryAction.ResumeStaleCleanup:
                 {
-                    if (cancellationToken.IsCancellationRequested &&
+                    if (evaluation.Decision.Action ==
+                            PublicationRecoveryAction.AbandonStaleCandidate &&
+                        journal.ObserveCancellation(cancellationToken) &&
                         !candidateCommittedThisRun)
                     {
-                        return Failure(launch, ActionHostStatus.Cancelled);
+                        return Failure(launch, journal.CancellationStatus);
                     }
 
                     var cleanup = await recovery
@@ -661,7 +719,7 @@ internal sealed class ActionHostCoordinator
                     {
                         return Failure(
                             launch,
-                            TransactionStatus(cleanup.Code));
+                            CleanupStatus(cleanup.Code));
                     }
 
                     break;
@@ -680,7 +738,7 @@ internal sealed class ActionHostCoordinator
                     {
                         return Failure(
                             launch,
-                            PublicationPersistenceStatus(
+                            P5WriteStatus(
                                 resumedResult.Code));
                     }
 
@@ -699,7 +757,7 @@ internal sealed class ActionHostCoordinator
                     {
                         return Failure(
                             launch,
-                            TransactionStatus(cleanup.Code));
+                            CleanupStatus(cleanup.Code));
                     }
 
                     break;
@@ -709,21 +767,25 @@ internal sealed class ActionHostCoordinator
                     .AuthorizationOrValidationFailure:
                     return Failure(
                         launch,
-                        evaluation.DiscoveryReason ==
-                            StickyPublicationReason.AuthorizationDenied
-                            ? ActionHostStatus.AuthorizationFailed
-                            : ActionHostStatus.StickyPublicationFailed);
+                        DurablePublicationFailureStatus(
+                            observation?.RetryFailure?.Reason ??
+                            observation?.Failure?.Reason));
             }
         }
 
         return Failure(launch, ActionHostStatus.StateConflict);
     }
 
-    private async Task<(StickyCommentPublisher.StickyPublicationResult? Result,
-        ExactHeadRevalidationStatus? RevalidationStatus)> PublishAsync(
+    private sealed record StickyDispatchResult(
+        StickyCommentPublisher.StickyPublicationResult? Result,
+        ExactHeadRevalidationStatus? RevalidationStatus,
+        string? StateCode);
+
+    private async Task<StickyDispatchResult> PublishAsync(
         ActionHostLaunchContract launch,
         ActionHostAuthorizer.AuthorizedInvocation invocation,
         R4PublicationScopeV1 scope,
+        AuthorizedAcceptedStateRestoreContext state,
         PublicationRecoveryObservation observation,
         PublicationStickyWriteAuthorization authorization,
         CancellationToken cancellationToken)
@@ -735,7 +797,19 @@ internal sealed class ActionHostCoordinator
             .ConfigureAwait(false);
         if (!exact.MayMutate)
         {
-            return (null, exact.Status);
+            return new(null, exact.Status, null);
+        }
+
+        var ownershipCode = await RevalidateStickyOwnershipAsync(
+                state,
+                observation,
+                authorization)
+            .ConfigureAwait(false);
+        if (!StringComparer.Ordinal.Equals(
+                ownershipCode,
+                RetainedStateTransactionCodes.Owned))
+        {
+            return new(null, null, ownershipCode);
         }
 
         if (!PublicationRecoveryService.TryRestoreRendered(
@@ -751,14 +825,77 @@ internal sealed class ActionHostCoordinator
                 out var request) ||
             request is null)
         {
-            return (null, ExactHeadRevalidationStatus.InvalidResponse);
+            return new(
+                null,
+                ExactHeadRevalidationStatus.InvalidResponse,
+                null);
         }
 
-        return (await publisher.PublishAsync(
-                launch.Inputs.GitHubToken!,
-                request,
-                cancellationToken)
-            .ConfigureAwait(false), null);
+        return new(
+            await publisher.PublishAsync(
+                    launch.Inputs.GitHubToken!,
+                    request,
+                    cancellationToken)
+                .ConfigureAwait(false),
+            null,
+            null);
+    }
+
+    private static async Task<string> RevalidateStickyOwnershipAsync(
+        AuthorizedAcceptedStateRestoreContext state,
+        PublicationRecoveryObservation observation,
+        PublicationStickyWriteAuthorization authorization)
+    {
+        var observedCandidate = observation.Candidate;
+        if (observedCandidate is null ||
+            !StringComparer.Ordinal.Equals(
+                authorization.CandidateObjectIdentity,
+                observedCandidate.Header.ObjectIdentity) ||
+            !StringComparer.Ordinal.Equals(
+                authorization.InventoryDigest,
+                observation.InventoryDigest))
+        {
+            return RetainedStateTransactionCodes.Invalid;
+        }
+
+        var recoveredResult = await RestrictedStateService
+            .RecoverRetainedCandidateAsync(state, CancellationToken.None)
+            .ConfigureAwait(false);
+        var candidate = recoveredResult.Value;
+        if (!recoveredResult.Succeeded || candidate is null)
+        {
+            candidate?.Prepared.Dispose();
+            return recoveredResult.Code;
+        }
+
+        using var prepared = candidate.Prepared;
+        if (candidate.Metadata != observedCandidate.Metadata ||
+            candidate.Prepared.Header != observedCandidate.Header ||
+            !StringComparer.Ordinal.Equals(
+                candidate.Prepared.LogicalGenerationIdentity,
+                observedCandidate.LogicalGenerationIdentity))
+        {
+            return RetainedStateTransactionCodes.Conflict;
+        }
+
+        var ownershipResult = await RestrictedStateService
+            .RenewRetainedStateOwnershipAsync(
+                state,
+                candidate,
+                prior: null,
+                observation.Records,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+        using var ownership = ownershipResult.Value;
+        return ownershipResult.Succeeded &&
+            ownership is not null &&
+            StringComparer.Ordinal.Equals(
+                ownership.InventoryDigest,
+                authorization.InventoryDigest)
+            ? RetainedStateTransactionCodes.Owned
+            : ownershipResult.Succeeded
+                ? RetainedStateTransactionCodes.Conflict
+                : ownershipResult.Code;
     }
 
     private sealed record PublicationResultPersistence(
@@ -923,7 +1060,7 @@ internal sealed class ActionHostCoordinator
             return persisted is null
                 ? Failure(
                     launch,
-                    PublicationPersistenceStatus(persistence.Code))
+                    P5WriteStatus(persistence.Code))
                 : await RunAsync(
                         launch,
                         invocation,
@@ -931,7 +1068,7 @@ internal sealed class ActionHostCoordinator
                         snapshot,
                         state,
                         scope,
-                        CancellationToken.None)
+                        callerCancellationToken)
                     .ConfigureAwait(false);
         }
 
@@ -944,7 +1081,7 @@ internal sealed class ActionHostCoordinator
             candidate?.Prepared.Dispose();
             return Failure(
                 launch,
-                TransactionStatus(recoveredResult.Code));
+                CandidatePersistenceStatus(recoveredResult.Code));
         }
 
         using var preparedCandidate = candidate.Prepared;
@@ -975,7 +1112,7 @@ internal sealed class ActionHostCoordinator
         {
             return Failure(
                 launch,
-                TransactionStatus(ownershipResult.Code));
+                OwnershipStatus(ownershipResult.Code));
         }
 
         var preparationResult = await RestrictedStateService
@@ -996,7 +1133,7 @@ internal sealed class ActionHostCoordinator
         {
             return Failure(
                 launch,
-                TransactionStatus(preparationResult.Code));
+                AcceptancePreparationStatus(preparationResult.Code));
         }
 
         var attemptResult = await RestrictedStateService
@@ -1011,7 +1148,7 @@ internal sealed class ActionHostCoordinator
         {
             return Failure(
                 launch,
-                TransactionStatus(attemptResult.Code));
+                P5WriteStatus(attemptResult.Code));
         }
 
         var persistedResult = await RestrictedStateService
@@ -1025,7 +1162,7 @@ internal sealed class ActionHostCoordinator
         {
             return Failure(
                 launch,
-                TransactionStatus(persistedResult.Code));
+                P5WriteStatus(persistedResult.Code));
         }
 
         using var extraction = PublicationRecoveryPersistence
@@ -1047,7 +1184,7 @@ internal sealed class ActionHostCoordinator
         {
             return Failure(
                 launch,
-                TransactionStatus(durabilityResult.Code));
+                AcceptancePreparationStatus(durabilityResult.Code));
         }
 
         var predecessorCode = await RestrictedStateService
@@ -1078,7 +1215,7 @@ internal sealed class ActionHostCoordinator
         {
             return Failure(
                 launch,
-                TransactionStatus(predecessorCode));
+                AcceptancePersistenceStatus(predecessorCode));
         }
 
         var allP5 = observation.Records.Add(recoveryRecord);
@@ -1095,7 +1232,7 @@ internal sealed class ActionHostCoordinator
         {
             return Failure(
                 launch,
-                TransactionStatus(finalOwnershipResult.Code));
+                OwnershipStatus(finalOwnershipResult.Code));
         }
 
         var exact = await RevalidateAsync(
@@ -1128,7 +1265,7 @@ internal sealed class ActionHostCoordinator
         {
             return Failure(
                 launch,
-                TransactionStatus(evidenceResult.Code));
+                AcceptancePreparationStatus(evidenceResult.Code));
         }
 
         var acceptedResult = await RestrictedStateService
@@ -1142,8 +1279,10 @@ internal sealed class ActionHostCoordinator
         {
             return Failure(
                 launch,
-                TransactionStatus(acceptedResult.Code));
+                AcceptancePersistenceStatus(acceptedResult.Code));
         }
+
+        journal.RecordTransactionAdvance();
 
         return await FinishAcceptedAsync(
                 launch,
@@ -1174,8 +1313,35 @@ internal sealed class ActionHostCoordinator
     {
         var observation = evaluation.Observation;
         var receipt = evaluation.ExactReadbackReceipt;
-        if (observation?.MatchedAcceptance is not { } matched ||
-            receipt is null)
+        var inventory = observation?.Inventory;
+        if (observation is null || inventory is null || receipt is null)
+        {
+            return Failure(launch, ActionHostStatus.StateConflict);
+        }
+
+        var matched = observation.MatchedAcceptance;
+        var candidateIdentity = matched?.CandidateObjectIdentity ??
+            inventory.CurrentAcceptanceCandidateObjectIdentity;
+        var expectedAcceptance = inventory.CurrentAcceptance;
+        var expectedReceipt = matched?.Receipt ??
+            inventory.CurrentAcceptancePublicationReceipt;
+        if (candidateIdentity is null ||
+            expectedAcceptance is null ||
+            expectedReceipt is null ||
+            !LineageValidation.IsSha256(candidateIdentity) ||
+            !PublicationReceiptMatcher.AreDurablyEqual(
+                expectedReceipt,
+                receipt) ||
+            matched is not null &&
+            (!StringComparer.Ordinal.Equals(
+                    matched.CandidateObjectIdentity,
+                    candidateIdentity) ||
+                !StringComparer.Ordinal.Equals(
+                    matched.LogicalGenerationIdentity,
+                    expectedAcceptance.LogicalGenerationIdentity) ||
+                !StringComparer.Ordinal.Equals(
+                    matched.AcceptanceReceiptIdentity,
+                    expectedAcceptance.AcceptanceReceiptIdentity)))
         {
             return Failure(launch, ActionHostStatus.StateConflict);
         }
@@ -1189,7 +1355,10 @@ internal sealed class ActionHostCoordinator
         if (!acceptedResult.Succeeded || acceptance is null ||
             !StringComparer.Ordinal.Equals(
                 acceptance.LogicalGenerationIdentity,
-                matched.LogicalGenerationIdentity) ||
+                expectedAcceptance.LogicalGenerationIdentity) ||
+            !StringComparer.Ordinal.Equals(
+                acceptance.AcceptanceReceiptIdentity,
+                expectedAcceptance.AcceptanceReceiptIdentity) ||
             !RestrictedStateService.TryGetCurrentReviewProjection(
                 state,
                 acceptance,
@@ -1212,7 +1381,7 @@ internal sealed class ActionHostCoordinator
                 state,
                 scope,
                 acceptance,
-                matched.CandidateObjectIdentity,
+                candidateIdentity,
                 projection,
                 map,
                 receipt,
@@ -1241,13 +1410,33 @@ internal sealed class ActionHostCoordinator
         var inlineWarning = inlineProjectionUnavailable;
         if (map is { Candidates.Length: > 0 })
         {
-            if (callerCancellationToken.IsCancellationRequested)
+            if (journal.ObserveCancellation(callerCancellationToken))
             {
                 inlineWarning = true;
             }
             else
             {
-                var authorization = PostAcceptanceInlineAuthorization.Mint(
+                var transaction = new PostAcceptanceInlineTransactionIdentity(
+                    invocation.PullRequest.RepositoryId,
+                    invocation.PullRequest.Number,
+                    invocation.PullRequest.HeadSha,
+                    receipt.Operation,
+                    receipt.RepositoryId,
+                    receipt.PullRequestNumber,
+                    receipt.CommentId,
+                    receipt.CommentUrl,
+                    receipt.ScopeSha256,
+                    receipt.BodySha256,
+                    receipt.HeadSha,
+                    candidateIdentity,
+                    acceptance.LogicalGenerationIdentity,
+                    acceptance.AcceptanceReceiptIdentity,
+                    policy.PolicySha256,
+                    policy.PayloadSha256,
+                    policy.BuildDiscriminator,
+                    snapshot.Identities.DiffSha256,
+                    ComputeMapIdentity(map));
+                var authorization = MintPostAcceptanceInlineAuthorization(
                     invocation,
                     policy,
                     snapshot,
@@ -1256,8 +1445,10 @@ internal sealed class ActionHostCoordinator
                     candidateIdentity,
                     receipt,
                     map);
-                var request = new PostAcceptanceInlineRequest(
+                var request = PostAcceptanceInlineRequest.Create(
+                    PostAcceptanceIssuer,
                     authorization,
+                    transaction,
                     map);
                 if (inlineHook is null)
                 {
@@ -1269,7 +1460,7 @@ internal sealed class ActionHostCoordinator
                     {
                         var result = await inlineHook.PublishAsync(
                                 request,
-                                CancellationToken.None)
+                                callerCancellationToken)
                             .ConfigureAwait(false);
                         inlineWarning = result !=
                                 ActionHostInlineHookResult.Complete ||
@@ -1283,7 +1474,7 @@ internal sealed class ActionHostCoordinator
             }
         }
 
-        if (!callerCancellationToken.IsCancellationRequested)
+        if (!journal.ObserveCancellation(callerCancellationToken))
         {
             if (existingEvaluation is not null)
             {
@@ -1397,7 +1588,7 @@ internal sealed class ActionHostCoordinator
             revalidationFactory,
             cancellationToken);
 
-    private static ActionHostStatus RevalidationStatus(
+    private ActionHostStatus RevalidationStatus(
         ExactHeadRevalidationStatus status) => status switch
         {
             ExactHeadRevalidationStatus.Exact =>
@@ -1416,54 +1607,200 @@ internal sealed class ActionHostCoordinator
             ExactHeadRevalidationStatus.DeadlineExceeded =>
                 ActionHostStatus.SnapshotIncomplete,
             ExactHeadRevalidationStatus.Cancelled =>
-                ActionHostStatus.Cancelled,
+                journal.CancellationStatus,
+            _ => ActionHostStatus.InternalFailure,
         };
 
-    private static ActionHostStatus AgentFailureStatus(
-        AgentRunOutcome outcome,
-        bool stateCommittedThisRun)
+    private ActionHostStatus AgentFailureStatus(AgentRunOutcome outcome)
     {
         var code = outcome.Diagnostic?.Code;
         if (StringComparer.Ordinal.Equals(code, AgentFailureCodes.Cancelled))
         {
-            return stateCommittedThisRun
-                ? ActionHostStatus.ProviderFailed
-                : ActionHostStatus.Cancelled;
+            return journal.CancellationStatus;
         }
 
         return code is AgentFailureCodes.ChatFailed or
-            AgentFailureCodes.DeadlineExceeded or
-            AgentFailureCodes.ModelLimit or
-            AgentFailureCodes.TokenLimit or
-            AgentFailureCodes.RequestTooLarge or
-            AgentFailureCodes.ResponseTooLarge
+            AgentFailureCodes.DeadlineExceeded
             ? ActionHostStatus.ProviderFailed
             : ActionHostStatus.AgentResultInvalid;
     }
 
-    private static ActionHostStatus TransactionStatus(string code) =>
+    private ActionHostStatus CandidatePreparationStatus(string code) =>
         code switch
         {
-            AcceptedStateCodes.AccessDenied or
-            RetainedStateTransactionCodes.AccessDenied =>
-                ActionHostStatus.AuthorizationFailed,
-            AcceptedStateCodes.KeyUnavailable or
-            RetainedStateTransactionCodes.KeyUnavailable =>
-                ActionHostStatus.CredentialsMissing,
-            AcceptedStateCodes.OutcomeUnknown or
+            RetainedStateTransactionCodes.Conflict or
+            RetainedStateTransactionCodes.Stale or
+            RetainedStateTransactionCodes.RetentionFailed or
+            RetainedStateTransactionCodes.CleanupDebt =>
+                ActionHostStatus.StateConflict,
             RetainedStateTransactionCodes.OutcomeUnknown =>
                 ActionHostStatus.OutcomeAmbiguous,
             RetainedStateTransactionCodes.Cancelled =>
-                ActionHostStatus.Cancelled,
-            _ => ActionHostStatus.StateConflict,
+                journal.CancellationStatus,
+            RetainedStateTransactionCodes.AccessDenied or
+            RetainedStateTransactionCodes.Invalid or
+            RetainedStateTransactionCodes.KeyUnavailable or
+            RetainedStateTransactionCodes.Ready or
+            RetainedStateTransactionCodes.Prepared or
+            RetainedStateTransactionCodes.Persisted or
+            RetainedStateTransactionCodes.Owned or
+            RetainedStateTransactionCodes.Accepted =>
+                ActionHostStatus.InternalFailure,
+            _ => ActionHostStatus.InternalFailure,
         };
 
-    private static ActionHostStatus PublicationPersistenceStatus(
-        string code) => StringComparer.Ordinal.Equals(
-            code,
-            RetainedStateTransactionCodes.Invalid)
-            ? ActionHostStatus.InternalFailure
-            : TransactionStatus(code);
+    private ActionHostStatus CandidatePersistenceStatus(string code) =>
+        code switch
+        {
+            RetainedStateTransactionCodes.Conflict or
+            RetainedStateTransactionCodes.Stale or
+            RetainedStateTransactionCodes.RetentionFailed or
+            RetainedStateTransactionCodes.CleanupDebt =>
+                ActionHostStatus.StateConflict,
+            RetainedStateTransactionCodes.OutcomeUnknown =>
+                ActionHostStatus.OutcomeAmbiguous,
+            RetainedStateTransactionCodes.Cancelled =>
+                journal.CancellationStatus,
+            RetainedStateTransactionCodes.AccessDenied or
+            RetainedStateTransactionCodes.Invalid or
+            RetainedStateTransactionCodes.KeyUnavailable or
+            RetainedStateTransactionCodes.Ready or
+            RetainedStateTransactionCodes.Prepared or
+            RetainedStateTransactionCodes.Persisted or
+            RetainedStateTransactionCodes.Owned or
+            RetainedStateTransactionCodes.Accepted =>
+                ActionHostStatus.InternalFailure,
+            _ => ActionHostStatus.InternalFailure,
+        };
+
+    private ActionHostStatus OwnershipStatus(string code) => code switch
+    {
+        RetainedStateTransactionCodes.Conflict or
+        RetainedStateTransactionCodes.Stale or
+        RetainedStateTransactionCodes.RetentionFailed or
+        RetainedStateTransactionCodes.CleanupDebt =>
+            ActionHostStatus.StateConflict,
+        RetainedStateTransactionCodes.OutcomeUnknown =>
+            ActionHostStatus.OutcomeAmbiguous,
+        RetainedStateTransactionCodes.Cancelled =>
+            journal.CancellationStatus,
+        RetainedStateTransactionCodes.AccessDenied or
+        RetainedStateTransactionCodes.Invalid or
+        RetainedStateTransactionCodes.KeyUnavailable or
+        RetainedStateTransactionCodes.Ready or
+        RetainedStateTransactionCodes.Prepared or
+        RetainedStateTransactionCodes.Persisted or
+        RetainedStateTransactionCodes.Owned or
+        RetainedStateTransactionCodes.Accepted =>
+            ActionHostStatus.InternalFailure,
+        _ => ActionHostStatus.InternalFailure,
+    };
+
+    private ActionHostStatus P5WriteStatus(string code) => code switch
+    {
+        RetainedStateTransactionCodes.Conflict or
+        RetainedStateTransactionCodes.Stale or
+        RetainedStateTransactionCodes.RetentionFailed or
+        RetainedStateTransactionCodes.CleanupDebt =>
+            ActionHostStatus.StateConflict,
+        RetainedStateTransactionCodes.OutcomeUnknown =>
+            ActionHostStatus.OutcomeAmbiguous,
+        RetainedStateTransactionCodes.Cancelled =>
+            journal.CancellationStatus,
+        RetainedStateTransactionCodes.AccessDenied or
+        RetainedStateTransactionCodes.Invalid or
+        RetainedStateTransactionCodes.KeyUnavailable or
+        RetainedStateTransactionCodes.Ready or
+        RetainedStateTransactionCodes.Prepared or
+        RetainedStateTransactionCodes.Persisted or
+        RetainedStateTransactionCodes.Owned or
+        RetainedStateTransactionCodes.Accepted =>
+            ActionHostStatus.InternalFailure,
+        _ => ActionHostStatus.InternalFailure,
+    };
+
+    private ActionHostStatus AcceptancePreparationStatus(string code) =>
+        code switch
+        {
+            RetainedStateTransactionCodes.Conflict or
+            RetainedStateTransactionCodes.Stale or
+            RetainedStateTransactionCodes.RetentionFailed or
+            RetainedStateTransactionCodes.CleanupDebt =>
+                ActionHostStatus.StateConflict,
+            RetainedStateTransactionCodes.OutcomeUnknown =>
+                ActionHostStatus.OutcomeAmbiguous,
+            RetainedStateTransactionCodes.Cancelled =>
+                journal.CancellationStatus,
+            RetainedStateTransactionCodes.AccessDenied or
+            RetainedStateTransactionCodes.Invalid or
+            RetainedStateTransactionCodes.KeyUnavailable or
+            RetainedStateTransactionCodes.Ready or
+            RetainedStateTransactionCodes.Prepared or
+            RetainedStateTransactionCodes.Persisted or
+            RetainedStateTransactionCodes.Owned or
+            RetainedStateTransactionCodes.Accepted =>
+                ActionHostStatus.InternalFailure,
+            _ => ActionHostStatus.InternalFailure,
+        };
+
+    private ActionHostStatus AcceptancePersistenceStatus(string code) =>
+        code switch
+        {
+            RetainedStateTransactionCodes.Conflict or
+            RetainedStateTransactionCodes.Stale or
+            RetainedStateTransactionCodes.RetentionFailed or
+            RetainedStateTransactionCodes.CleanupDebt =>
+                ActionHostStatus.StateConflict,
+            RetainedStateTransactionCodes.OutcomeUnknown =>
+                ActionHostStatus.OutcomeAmbiguous,
+            RetainedStateTransactionCodes.Cancelled =>
+                journal.CancellationStatus,
+            RetainedStateTransactionCodes.AccessDenied or
+            RetainedStateTransactionCodes.Invalid or
+            RetainedStateTransactionCodes.KeyUnavailable or
+            RetainedStateTransactionCodes.Ready or
+            RetainedStateTransactionCodes.Prepared or
+            RetainedStateTransactionCodes.Persisted or
+            RetainedStateTransactionCodes.Owned or
+            RetainedStateTransactionCodes.Accepted =>
+                ActionHostStatus.InternalFailure,
+            _ => ActionHostStatus.InternalFailure,
+        };
+
+    private ActionHostStatus CleanupStatus(string code) => code switch
+    {
+        RetainedStateTransactionCodes.Conflict or
+        RetainedStateTransactionCodes.Stale or
+        RetainedStateTransactionCodes.RetentionFailed or
+        RetainedStateTransactionCodes.CleanupDebt =>
+            ActionHostStatus.StateConflict,
+        RetainedStateTransactionCodes.OutcomeUnknown =>
+            ActionHostStatus.OutcomeAmbiguous,
+        RetainedStateTransactionCodes.Cancelled =>
+            journal.CancellationStatus,
+        RetainedStateTransactionCodes.AccessDenied or
+        RetainedStateTransactionCodes.Invalid or
+        RetainedStateTransactionCodes.KeyUnavailable or
+        RetainedStateTransactionCodes.Ready or
+        RetainedStateTransactionCodes.Prepared or
+        RetainedStateTransactionCodes.Persisted or
+        RetainedStateTransactionCodes.Owned or
+        RetainedStateTransactionCodes.Accepted =>
+            ActionHostStatus.InternalFailure,
+        _ => ActionHostStatus.InternalFailure,
+    };
+
+    private static ActionHostStatus DurablePublicationFailureStatus(
+        StickyPublicationReason? reason) => reason switch
+        {
+            StickyPublicationReason.AuthorizationDenied =>
+                ActionHostStatus.AuthorizationFailed,
+            StickyPublicationReason.AdmissionInvalid or
+            StickyPublicationReason.DiscoveryIncomplete or
+            StickyPublicationReason.TargetConflict =>
+                ActionHostStatus.StickyPublicationFailed,
+            _ => ActionHostStatus.InternalFailure,
+        };
 
     private static ActionHostCompletion Failure(
         ActionHostLaunchContract launch,
@@ -1556,43 +1893,72 @@ internal sealed class ActionHostCoordinator
         not StackOverflowException and
         not AccessViolationException;
 
+    private sealed record PostAcceptanceInlineTransactionIdentity(
+        long RepositoryId,
+        long PullRequestNumber,
+        string ReviewedHeadSha,
+        StickyPublicationOperation StickyOperation,
+        long StickyRepositoryId,
+        long StickyPullRequestNumber,
+        long CommentId,
+        string CommentUrl,
+        string ScopeSha256,
+        string BodySha256,
+        string StickyHeadSha,
+        string CandidateIdentity,
+        string LogicalGenerationIdentity,
+        string AcceptanceIdentity,
+        string PolicySha256,
+        string PayloadSha256,
+        string BuildDiscriminator,
+        string DiffSha256,
+        string MapSha256);
+
     internal sealed class PostAcceptanceInlineRequest
     {
         private readonly PostAcceptanceInlineAuthorization authorization;
+        private readonly PostAcceptanceInlineTransactionIdentity transaction;
 
-        internal PostAcceptanceInlineRequest(
+        private PostAcceptanceInlineRequest(
             PostAcceptanceInlineAuthorization authorization,
+            PostAcceptanceInlineTransactionIdentity transaction,
             InlineCandidateMap candidateMap)
         {
             this.authorization = authorization;
+            this.transaction = transaction;
             CandidateMap = candidateMap;
+        }
+
+        internal static PostAcceptanceInlineRequest Create(
+            object issuer,
+            object authorization,
+            object transaction,
+            InlineCandidateMap candidateMap)
+        {
+            if (!ReferenceEquals(issuer, PostAcceptanceIssuer) ||
+                authorization is not PostAcceptanceInlineAuthorization issued ||
+                transaction is not PostAcceptanceInlineTransactionIdentity bound)
+            {
+                throw new InvalidOperationException();
+            }
+
+            return new(issued, bound, candidateMap);
         }
 
         internal InlineCandidateMap CandidateMap { get; }
 
-        internal bool TryConsume() => authorization.TryConsume(CandidateMap);
+        internal bool TryConsume() => authorization.TryConsume(
+            transaction,
+            CandidateMap);
     }
 
-    internal sealed class PostAcceptanceInlineAuthorization
+    private sealed class PostAcceptanceInlineAuthorization
     {
-        private readonly long repositoryId;
-        private readonly long pullRequestNumber;
-        private readonly string reviewedHeadSha;
-        private readonly long commentId;
-        private readonly string scopeSha256;
-        private readonly string bodySha256;
-        private readonly string candidateIdentity;
-        private readonly string logicalGenerationIdentity;
-        private readonly string acceptanceIdentity;
-        private readonly string policySha256;
-        private readonly string payloadSha256;
-        private readonly string buildDiscriminator;
-        private readonly string diffSha256;
-        private readonly string mapSha256;
+        private readonly PostAcceptanceInlineTransactionIdentity transaction;
         private int usable = 1;
         private int consumed;
 
-        private PostAcceptanceInlineAuthorization(
+        internal PostAcceptanceInlineAuthorization(
             ActionHostAuthorizer.AuthorizedInvocation invocation,
             ActionHostTrustedPolicy policy,
             BoundedReviewedSnapshotLease snapshot,
@@ -1602,76 +1968,88 @@ internal sealed class ActionHostCoordinator
             StickyCommentPublisher.StickyPublicationReceipt receipt,
             InlineCandidateMap map)
         {
-            repositoryId = invocation.PullRequest.RepositoryId;
-            pullRequestNumber = invocation.PullRequest.Number;
-            reviewedHeadSha = invocation.PullRequest.HeadSha;
-            commentId = receipt.CommentId;
-            scopeSha256 = receipt.ScopeSha256;
-            bodySha256 = receipt.BodySha256;
-            this.candidateIdentity = candidateIdentity;
-            logicalGenerationIdentity = acceptance.LogicalGenerationIdentity;
-            acceptanceIdentity = acceptance.AcceptanceReceiptIdentity;
-            policySha256 = policy.PolicySha256;
-            payloadSha256 = policy.PayloadSha256;
-            buildDiscriminator = policy.BuildDiscriminator;
-            diffSha256 = snapshot.Identities.DiffSha256;
-            mapSha256 = ComputeMapIdentity(map);
+            transaction = new(
+                invocation.PullRequest.RepositoryId,
+                invocation.PullRequest.Number,
+                invocation.PullRequest.HeadSha,
+                receipt.Operation,
+                receipt.RepositoryId,
+                receipt.PullRequestNumber,
+                receipt.CommentId,
+                receipt.CommentUrl,
+                receipt.ScopeSha256,
+                receipt.BodySha256,
+                receipt.HeadSha,
+                candidateIdentity,
+                acceptance.LogicalGenerationIdentity,
+                acceptance.AcceptanceReceiptIdentity,
+                policy.PolicySha256,
+                policy.PayloadSha256,
+                policy.BuildDiscriminator,
+                snapshot.Identities.DiffSha256,
+                ComputeMapIdentity(map));
 
             if (!StringComparer.Ordinal.Equals(
-                    scopeSha256,
-                    R4PublicationIdentityV1.ComputeScopeSha256(scope)))
+                    transaction.ScopeSha256,
+                    R4PublicationIdentityV1.ComputeScopeSha256(scope)) ||
+                transaction.StickyRepositoryId != transaction.RepositoryId ||
+                transaction.StickyPullRequestNumber !=
+                    transaction.PullRequestNumber ||
+                !StringComparer.Ordinal.Equals(
+                    transaction.StickyHeadSha,
+                    transaction.ReviewedHeadSha))
             {
                 usable = 0;
             }
         }
 
-        internal static PostAcceptanceInlineAuthorization Mint(
-            ActionHostAuthorizer.AuthorizedInvocation invocation,
-            ActionHostTrustedPolicy policy,
-            BoundedReviewedSnapshotLease snapshot,
-            R4PublicationScopeV1 scope,
-            VerifiedRetainedStateAcceptance acceptance,
-            string candidateIdentity,
-            StickyCommentPublisher.StickyPublicationReceipt receipt,
-            InlineCandidateMap map) => new(
-                invocation,
-                policy,
-                snapshot,
-                scope,
-                acceptance,
-                candidateIdentity,
-                receipt,
-                map);
-
         internal bool WasConsumed => Volatile.Read(ref consumed) == 1;
 
-        internal bool TryConsume(InlineCandidateMap map)
+        internal bool TryConsume(
+            PostAcceptanceInlineTransactionIdentity presented,
+            InlineCandidateMap map)
         {
-            var matches = map is not null &&
-            long.TryParse(
-                map.ReviewedIdentity.RepositoryId,
-                NumberStyles.None,
-                CultureInfo.InvariantCulture,
-                out var mapRepositoryId) &&
-            mapRepositoryId == repositoryId &&
-            map.ReviewedIdentity.ReviewTarget == pullRequestNumber &&
-            StringComparer.Ordinal.Equals(
-                map.ReviewedIdentity.HeadSha,
-                reviewedHeadSha) &&
-            StringComparer.Ordinal.Equals(map.PolicySha256, policySha256) &&
-            StringComparer.Ordinal.Equals(map.DiffSha256, diffSha256) &&
-            StringComparer.Ordinal.Equals(
-                ComputeMapIdentity(map),
-                mapSha256) &&
-            commentId > 0 &&
-            LineageValidation.IsSha256(scopeSha256) &&
-            LineageValidation.IsSha256(bodySha256) &&
-            LineageValidation.IsSha256(candidateIdentity) &&
-            LineageValidation.IsSha256(logicalGenerationIdentity) &&
-            LineageValidation.IsSha256(acceptanceIdentity) &&
-            LineageValidation.IsSha256(payloadSha256) &&
-            !string.IsNullOrWhiteSpace(buildDiscriminator) &&
-            Interlocked.CompareExchange(ref usable, 0, 1) == 1;
+            var matches = presented is not null &&
+                presented == transaction &&
+                map is not null &&
+                long.TryParse(
+                    map.ReviewedIdentity.RepositoryId,
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out var mapRepositoryId) &&
+                mapRepositoryId == transaction.RepositoryId &&
+                map.ReviewedIdentity.ReviewTarget ==
+                    transaction.PullRequestNumber &&
+                StringComparer.Ordinal.Equals(
+                    map.ReviewedIdentity.HeadSha,
+                    transaction.ReviewedHeadSha) &&
+                StringComparer.Ordinal.Equals(
+                    map.PolicySha256,
+                    transaction.PolicySha256) &&
+                StringComparer.Ordinal.Equals(
+                    map.DiffSha256,
+                    transaction.DiffSha256) &&
+                StringComparer.Ordinal.Equals(
+                    ComputeMapIdentity(map),
+                    transaction.MapSha256) &&
+                transaction.StickyOperation is
+                    StickyPublicationOperation.Create or
+                    StickyPublicationOperation.Update or
+                    StickyPublicationOperation.Observed &&
+                transaction.CommentId > 0 &&
+                Uri.TryCreate(
+                    transaction.CommentUrl,
+                    UriKind.Absolute,
+                    out _) &&
+                LineageValidation.IsSha256(transaction.ScopeSha256) &&
+                LineageValidation.IsSha256(transaction.BodySha256) &&
+                LineageValidation.IsSha256(transaction.CandidateIdentity) &&
+                LineageValidation.IsSha256(
+                    transaction.LogicalGenerationIdentity) &&
+                LineageValidation.IsSha256(transaction.AcceptanceIdentity) &&
+                LineageValidation.IsSha256(transaction.PayloadSha256) &&
+                !string.IsNullOrWhiteSpace(transaction.BuildDiscriminator) &&
+                Interlocked.CompareExchange(ref usable, 0, 1) == 1;
             if (matches)
             {
                 Volatile.Write(ref consumed, 1);
@@ -1680,6 +2058,26 @@ internal sealed class ActionHostCoordinator
             return matches;
         }
     }
+
+    private static PostAcceptanceInlineAuthorization
+        MintPostAcceptanceInlineAuthorization(
+            ActionHostAuthorizer.AuthorizedInvocation invocation,
+            ActionHostTrustedPolicy policy,
+            BoundedReviewedSnapshotLease snapshot,
+            R4PublicationScopeV1 scope,
+            VerifiedRetainedStateAcceptance acceptance,
+            string candidateIdentity,
+            StickyCommentPublisher.StickyPublicationReceipt receipt,
+            InlineCandidateMap map)
+        => new(
+                invocation,
+                policy,
+                snapshot,
+                scope,
+                acceptance,
+                candidateIdentity,
+                receipt,
+                map);
 
     private static string ComputeMapIdentity(InlineCandidateMap map)
     {
