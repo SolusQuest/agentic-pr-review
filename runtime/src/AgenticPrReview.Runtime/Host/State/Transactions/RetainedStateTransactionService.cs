@@ -3996,6 +3996,37 @@ internal sealed class RetainedStateTransactionService
             (opaqueRecord is null ? 0 : 1) +
             (opaqueWrite is null ? 0 : 1) +
             (recoveryInventory is null && recoveryAnchor is null ? 0 : 1);
+        var staleCandidate = recoveryInventory?.Candidate;
+        var staleAbandonmentRecords = recoveryInventory?.Records
+            .Where(record =>
+                record.ObjectClass == StateObjectClass.Abandonment &&
+                recoveryAnchor is not null &&
+                StringComparer.Ordinal.Equals(
+                    record.Header.ObjectIdentity,
+                    recoveryAnchor.TargetObjectIdentity) &&
+                StringComparer.Ordinal.Equals(
+                    record.Header.PredecessorIdentity,
+                    recoveryAnchor.CandidateObjectIdentity))
+            .ToArray() ?? [];
+        var staleAbandonmentAnchorPair = decision?.Classification ==
+                RetainedStateP5CleanupClassification
+                    .CompletedOpaqueWriteAnchor &&
+            recoveryInventory is not null &&
+            recoveryAnchor is not null &&
+            recoveryInventory.IsIssuedBy(authority) &&
+            staleCandidate is not null &&
+            staleCandidate.IsIssuedBy(authority) &&
+            !staleCandidate.MatchesCurrentReviewedHead &&
+            recoveryInventory.Records.Length == 1 &&
+            recoveryInventory.Anchors.Length == 1 &&
+            recoveryInventory.CleanupRecords.IsEmpty &&
+            recoveryInventory.Anchors[0] == recoveryAnchor &&
+            recoveryAnchor.TargetIsPresent &&
+            recoveryAnchor.ObjectClass == StateObjectClass.Abandonment &&
+            StringComparer.Ordinal.Equals(
+                recoveryAnchor.CandidateObjectIdentity,
+                staleCandidate.Header.ObjectIdentity) &&
+            staleAbandonmentRecords.Length == 1;
         var stalePair = decision?.Classification ==
                 RetainedStateP5CleanupClassification
                     .StaleCandidateAbandonment &&
@@ -4082,11 +4113,12 @@ internal sealed class RetainedStateTransactionService
             recoveryInventory is not null &&
             recoveryAnchor is not null &&
             recoveryInventory.IsIssuedBy(authority) &&
-            StringComparer.Ordinal.Equals(
-                recoveryInventory
-                    .CurrentAcceptanceCandidateObjectIdentity,
-                recoveryAnchor.CandidateObjectIdentity) &&
-            recoveryInventory.Anchors.Contains(recoveryAnchor))
+            (StringComparer.Ordinal.Equals(
+                    recoveryInventory
+                        .CurrentAcceptanceCandidateObjectIdentity,
+                    recoveryAnchor.CandidateObjectIdentity) &&
+                recoveryInventory.Anchors.Contains(recoveryAnchor) ||
+                staleAbandonmentAnchorPair))
         {
             targets = [recoveryAnchor.AnchorMetadata];
             sourceInventoryDigest = recoveryInventory.InventoryDigest;
@@ -4172,7 +4204,24 @@ internal sealed class RetainedStateTransactionService
                                 recoveryAnchor.TargetName &&
                             StringComparer.Ordinal.Equals(
                                 decodedAnchor.TargetObjectIdentity,
-                                recoveryAnchor.TargetObjectIdentity),
+                                recoveryAnchor.TargetObjectIdentity) &&
+                            (!staleAbandonmentAnchorPair ||
+                                staleCandidate is not null &&
+                                staleAbandonmentRecords.Length == 1 &&
+                                snapshot.Authenticated
+                                    .Concat(snapshot.UnderRetained)
+                                    .Count(item =>
+                                        item.Metadata ==
+                                            staleCandidate.Metadata &&
+                                        item.Header ==
+                                            staleCandidate.Header) == 1 &&
+                                snapshot.Authenticated
+                                    .Concat(snapshot.UnderRetained)
+                                    .Count(item =>
+                                        staleAbandonmentRecords[0]
+                                            .MatchesAuthenticated(
+                                                authority,
+                                                item)) == 1),
                 _ => false,
             };
         if (!validTarget)

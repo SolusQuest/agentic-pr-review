@@ -135,6 +135,11 @@ internal static class PublicationRecoveryInventoryFactory
             {
                 return Fail();
             }
+            if (pendingSet.Failure is not null &&
+                pendingSet.Intent is null)
+            {
+                return Fail();
+            }
 
             var acceptedRecordCount = acceptedSet.Count;
             MatchedRetainedStateRecoveryAcceptance? matched = null;
@@ -309,23 +314,44 @@ internal static class PublicationRecoveryInventoryFactory
         string evidenceRecordIdentity,
         PublicationStickyWriteTransition transition)
     {
-        if (observation is null ||
-            !observation.IsLive ||
-            observation.CandidateObjectIdentity is not { } candidate ||
-            !LineageValidation.IsSha256(evidenceRecordIdentity) ||
-            !CanAuthorizeSticky(observation, evidenceRecordIdentity, transition))
+        if (!TryCreateStickyWriteAuthorization(
+                observation,
+                evidenceRecordIdentity,
+                transition,
+                out var authorization) ||
+            authorization is null)
         {
             throw new ArgumentException(
                 "A live exact recovery observation is required.",
                 nameof(observation));
         }
 
-        return new PublicationStickyWriteAuthorization(
+        return authorization;
+    }
+
+    internal static bool TryCreateStickyWriteAuthorization(
+        PublicationRecoveryObservation? observation,
+        string evidenceRecordIdentity,
+        PublicationStickyWriteTransition transition,
+        out PublicationStickyWriteAuthorization? authorization)
+    {
+        authorization = null;
+        if (observation is null ||
+            !observation.IsLive ||
+            observation.CandidateObjectIdentity is not { } candidate ||
+            !LineageValidation.IsSha256(evidenceRecordIdentity) ||
+            !CanAuthorizeSticky(observation, evidenceRecordIdentity, transition))
+        {
+            return false;
+        }
+
+        authorization = new PublicationStickyWriteAuthorization(
             CapabilityIssuer,
             candidate,
             observation.InventoryDigest,
             evidenceRecordIdentity,
             transition);
+        return true;
     }
 
     internal static bool TryConsumeStickyWriteAuthorization(
@@ -453,6 +479,83 @@ internal static class PublicationRecoveryInventoryFactory
             candidate,
             observation.InventoryDigest,
             abandonment.RecordIdentity);
+
+    internal static bool TryGetStaleAbandonmentAnchor(
+        PublicationRecoveryObservation? observation,
+        out RetainedStatePublicationRecoveryAnchorEvidence? anchor,
+        out RetainedStateOpaqueRecord? abandonmentRecord)
+    {
+        anchor = null;
+        abandonmentRecord = null;
+        var candidate = observation?.Candidate;
+        var inventory = observation?.Inventory;
+        if (observation is null ||
+            !observation.IsLive ||
+            candidate is null ||
+            candidate.MatchesCurrentReviewedHead ||
+            observation.Abandonment is null ||
+            observation.Intent is not null ||
+            observation.StickyReadback is not null ||
+            observation.Failure is not null ||
+            observation.Recovery is not null ||
+            observation.Anchors !=
+                PublicationRecoveryAnchorState.RecoverableWrite ||
+            !observation.HistoricalRecords.IsEmpty ||
+            !observation.CompletedAnchors.IsEmpty ||
+            !observation.CleanupRecords.IsEmpty ||
+            inventory is null ||
+            inventory.Anchors.Length != 1 ||
+            observation.Records.Length != 1)
+        {
+            return false;
+        }
+
+        var selectedAnchor = inventory.Anchors[0];
+        var selectedRecord = observation.Records[0];
+        if (!selectedAnchor.TargetIsPresent ||
+            selectedAnchor.ObjectClass != StateObjectClass.Abandonment ||
+            selectedRecord.ObjectClass != StateObjectClass.Abandonment ||
+            !StringComparer.Ordinal.Equals(
+                selectedAnchor.CandidateObjectIdentity,
+                candidate.Header.ObjectIdentity) ||
+            !StringComparer.Ordinal.Equals(
+                selectedAnchor.TargetObjectIdentity,
+                selectedRecord.Header.ObjectIdentity) ||
+            !StringComparer.Ordinal.Equals(
+                selectedRecord.Header.PredecessorIdentity,
+                candidate.Header.ObjectIdentity))
+        {
+            return false;
+        }
+
+        anchor = selectedAnchor;
+        abandonmentRecord = selectedRecord;
+        return true;
+    }
+
+    internal static string StaleAbandonmentAnchorCleanupClassificationIdentity(
+        PublicationRecoveryObservation observation,
+        RetainedStatePublicationRecoveryAnchorEvidence anchor,
+        RetainedStateOpaqueRecord abandonmentRecord)
+    {
+        if (!TryGetStaleAbandonmentAnchor(
+                observation,
+                out var expectedAnchor,
+                out var expectedRecord) ||
+            expectedAnchor != anchor ||
+            expectedRecord != abandonmentRecord)
+        {
+            throw new ArgumentException(
+                "An exact stale abandonment anchor is required.",
+                nameof(anchor));
+        }
+
+        return CleanupIdentity(
+            "publication-stale-abandonment-anchor-cleanup-v1",
+            observation.InventoryDigest,
+            observation.CandidateObjectIdentity!,
+            anchor.AnchorHeader.ObjectIdentity);
+    }
 
     private static bool CanAuthorizeSticky(
         PublicationRecoveryObservation observation,

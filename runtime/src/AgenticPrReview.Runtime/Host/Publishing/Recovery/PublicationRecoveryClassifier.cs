@@ -30,7 +30,13 @@ internal static class PublicationRecoveryClassifier
         if (observation.Anchors ==
             PublicationRecoveryAnchorState.RecoverableWrite)
         {
-            return observation.Candidate is not null
+            return observation.Candidate is not null &&
+                (observation.Candidate.MatchesCurrentReviewedHead ||
+                    PublicationRecoveryInventoryFactory
+                        .TryGetStaleAbandonmentAnchor(
+                            observation,
+                            out _,
+                            out _))
                 ? Decision(
                     PublicationRecoveryAction.ResumeAnchoredWrite,
                     PublicationRecoveryCodes.ResumeAnchoredWrite)

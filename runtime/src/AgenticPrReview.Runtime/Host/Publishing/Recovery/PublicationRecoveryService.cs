@@ -185,12 +185,19 @@ internal sealed class PublicationRecoveryService
                 PublicationRecoveryAction.ResumeKnownNotWritten &&
             observation.Failure is { } failure)
         {
-            stickyAuthorization = PublicationRecoveryInventoryFactory
-                .CreateStickyWriteAuthorization(
+            if (!PublicationRecoveryInventoryFactory
+                .TryCreateStickyWriteAuthorization(
                     observation,
                     failure.RecordIdentity,
                     PublicationStickyWriteTransition
-                        .KnownNotWrittenRetry);
+                        .KnownNotWrittenRetry,
+                    out stickyAuthorization) ||
+                stickyAuthorization is null)
+            {
+                classified = PublicationRecoveryClassifier.Classify(
+                    null,
+                    PublicationMarkerObservation.Incomplete);
+            }
         }
         else if (classified.Action is
             PublicationRecoveryAction.AbandonStaleCandidate or
@@ -475,6 +482,15 @@ internal sealed class PublicationRecoveryService
                     RetainedStateTransactionCodes.AccessDenied);
         }
 
+        if (!candidate.MatchesCurrentReviewedHead)
+        {
+            return await ResumeStaleAbandonmentAnchorAsync(
+                    context,
+                    observation,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         var recoveredResult = await RestrictedStateService
             .RecoverRetainedCandidateAsync(context, cancellationToken)
             .ConfigureAwait(false);
@@ -539,6 +555,75 @@ internal sealed class PublicationRecoveryService
         }
 
         return persistedResult;
+    }
+
+    private static async Task<RetainedStateTransactionResult<
+        RetainedStateOpaqueRecord>> ResumeStaleAbandonmentAnchorAsync(
+        AuthorizedAcceptedStateRestoreContext context,
+        PublicationRecoveryObservation observation,
+        CancellationToken cancellationToken)
+    {
+        if (!PublicationRecoveryInventoryFactory
+                .TryGetStaleAbandonmentAnchor(
+                    observation,
+                    out var anchor,
+                    out var abandonmentRecord) ||
+            anchor is null ||
+            abandonmentRecord is null ||
+            observation.Inventory is not { } inventory ||
+            !PublicationRecoveryRetention.TryCompute(
+                observation.ObservedAtUnixSeconds,
+                anchor.AnchorHeader.LogicalExpiresAtUnixSeconds,
+                out var semanticExpiry,
+                out _))
+        {
+            return RetainedStateTransactionResult<
+                RetainedStateOpaqueRecord>.Fail(
+                    RetainedStateTransactionCodes.Conflict);
+        }
+
+        var classificationIdentity = PublicationRecoveryInventoryFactory
+            .StaleAbandonmentAnchorCleanupClassificationIdentity(
+                observation,
+                anchor,
+                abandonmentRecord);
+        var authorizationResult = await RestrictedStateService
+            .AuthorizeRetainedP5CleanupAsync(
+                context,
+                new RetainedStateP5CleanupDecision(
+                    RetainedStateP5CleanupClassification
+                        .CompletedOpaqueWriteAnchor,
+                    classificationIdentity,
+                    MarkerEvidenceIdentity: null),
+                pendingCandidate: null,
+                opaqueRecord: null,
+                opaqueWrite: null,
+                inventory,
+                anchor,
+                cancellationToken)
+            .ConfigureAwait(false);
+        using var cleanupAuthorization = authorizationResult.Value;
+        if (!authorizationResult.Succeeded || cleanupAuthorization is null)
+        {
+            return RetainedStateTransactionResult<
+                RetainedStateOpaqueRecord>.Fail(authorizationResult.Code);
+        }
+
+        var cleanup = await RestrictedStateService
+            .CleanupRetainedP5AuthorizedAsync(
+                context,
+                new RetainedStateP5CleanupRequest(
+                    cleanupAuthorization,
+                    semanticExpiry),
+                CancellationToken.None)
+            .ConfigureAwait(false);
+        return cleanup.Completed
+            ? RetainedStateTransactionResult<RetainedStateOpaqueRecord>
+                .Success(
+                    RetainedStateTransactionCodes.Ready,
+                    abandonmentRecord)
+            : RetainedStateTransactionResult<RetainedStateOpaqueRecord>
+                .Fail(cleanup.Code);
     }
 
     internal static Task<RetainedStateCleanupResult>
