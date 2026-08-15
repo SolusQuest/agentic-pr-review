@@ -249,6 +249,7 @@ function syntheticHostSource(markerPath: string) {
   return `#!${process.execPath}
 const fs = require('node:fs');
 const net = require('node:net');
+const path = require('node:path');
 const chunks = [];
 process.stdin.on('data', (chunk) => chunks.push(chunk));
 process.stdin.on('end', async () => {
@@ -256,13 +257,14 @@ process.stdin.on('end', async () => {
     const frame = Buffer.concat(chunks);
     const length = frame.readUInt32BE(0);
     const launch = JSON.parse(frame.subarray(4, 4 + length).toString('utf8'));
+    fs.writeFileSync(path.join(process.env.TMPDIR, 'artifact-staging', 'proof.bin'), 'proof');
     const result = await exchange(launch.artifact_bridge_endpoint, {
       build_discriminator: launch.build_discriminator,
       payload: {
         operation: 'upload_immutable',
         correlation_id: 'isolated-proof',
         name: 'proof',
-        source_relative_path: 'missing.bin',
+        source_relative_path: 'proof.bin',
         encrypted_object_digest: '0'.repeat(64),
         minimum_expires_at_unix_seconds: '4102444800'
       }
