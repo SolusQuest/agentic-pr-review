@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import {
   access,
   chmod,
+  copyFile,
   mkdtemp,
   open,
   readFile,
@@ -201,8 +202,8 @@ setInterval(() => {}, 1000);
 
   it('executes the verified opened identity after the admitted pathname is replaced', async () => {
     const root = await fixtureRoot();
-    const script = await executable(root, framedIdentity('verified'), 'verified-host');
-    const replacement = await executable(root, framedIdentity('replacement'), 'replacement-host');
+    const script = await copiedExecutable(root, '/usr/bin/cat', 'verified-host');
+    const replacement = await copiedExecutable(root, '/usr/bin/false', 'replacement-host');
     const bytes = await readFile(script);
     const prepared = await verifyPreparedPayload({
       trustedRoot: root,
@@ -214,15 +215,16 @@ setInterval(() => {}, 1000);
     });
     handles.push(prepared.executableHandle);
     await rename(replacement, script);
+    const launchBytes = Buffer.from('{"identity":"verified"}');
 
     const result = await runHostProcess({
       executableHandle: prepared.executableHandle,
-      launchBytes: Buffer.from('{}'),
+      launchBytes,
       tempRoot: root,
       signal: new AbortController().signal,
     });
 
-    expect(JSON.parse(result.completionBytes.toString('utf8'))).toEqual({ identity: 'verified' });
+    expect(result).toEqual({ completionBytes: launchBytes, exitCode: 0 });
   });
 });
 
@@ -245,15 +247,11 @@ async function opened(executablePath: string): Promise<FileHandle> {
   return handle;
 }
 
-function framedIdentity(identity: string): string {
-  return `
-for await (const _chunk of process.stdin) {}
-const body = Buffer.from(${JSON.stringify(JSON.stringify({ identity }))});
-const output = Buffer.alloc(4 + body.length);
-output.writeUInt32BE(body.length, 0);
-body.copy(output, 4);
-process.stdout.write(output);
-`;
+async function copiedExecutable(root: string, source: string, name: string): Promise<string> {
+  const target = path.join(root, name);
+  await copyFile(source, target);
+  await chmod(target, 0o700);
+  return target;
 }
 
 async function waitForFile(filePath: string): Promise<void> {
