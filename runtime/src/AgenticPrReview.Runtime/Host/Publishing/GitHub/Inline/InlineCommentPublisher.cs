@@ -288,14 +288,16 @@ internal sealed class InlineCommentPublisher
                         BoundedGitHubHttpOutcome.OutcomeUnknown or
                         BoundedGitHubHttpOutcome.CancelledBeforeSend ||
                     created.Reason == BoundedGitHubPublisherReason.Deadline;
-                var failure = unknown
-                    ? InlineFailureKind.IndividualOutcomeUnknown
-                    : InlineFailureKind.IndividualKnownFailure;
-                result.Fail(stillAbsent.Count - index, failure);
-                return result.Build(unknown
-                    ? BoundedGitHubPublisherOutcome.OutcomeUnknown
-                    : BoundedGitHubPublisherOutcome
-                        .AuthorizationOrValidationFailure);
+                if (unknown)
+                {
+                    result.Fail(stillAbsent.Count - index,
+                        InlineFailureKind.IndividualOutcomeUnknown);
+                    return result.Build(BoundedGitHubPublisherOutcome
+                        .OutcomeUnknown);
+                }
+
+                result.Fail(1, InlineFailureKind.IndividualKnownFailure);
+                continue;
             }
 
             if (!IsExact(request, comment, created.Value))
@@ -321,7 +323,9 @@ internal sealed class InlineCommentPublisher
             result.IndividualPublished++;
         }
 
-        return result.Build(BoundedGitHubPublisherOutcome.WrittenAndReadBack);
+        return result.Build(result.HasFailures
+            ? BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure
+            : BoundedGitHubPublisherOutcome.WrittenAndReadBack);
     }
 
     private static Task<ExactHeadRevalidationResult> RevalidateHeadAsync(

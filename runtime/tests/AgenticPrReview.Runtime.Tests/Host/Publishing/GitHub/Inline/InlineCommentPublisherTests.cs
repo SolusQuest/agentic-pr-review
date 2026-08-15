@@ -724,6 +724,57 @@ public sealed class InlineCommentPublisherTests
     }
 
     [Fact]
+    public async Task KnownIndividualRejectionsContinueBoundedFanout()
+    {
+        var evidence = new BoundedGitHubValidationEvidence(
+            422, false, "bounded", null, []);
+        var knownRejections = new[]
+        {
+            BoundedGitHubHttpResult<BoundedGitHubReviewComment>.Failed(
+                BoundedGitHubHttpOutcome.KnownNotSent,
+                BoundedGitHubPublisherReason.InvalidRequest),
+            BoundedGitHubHttpResult<BoundedGitHubReviewComment>.Failed(
+                BoundedGitHubHttpOutcome.AuthorizationOrValidationFailure,
+                BoundedGitHubPublisherReason.ValidationRejected,
+                evidence),
+        };
+
+        foreach (var rejection in knownRejections)
+        {
+            var data = await CreateAsync(candidateCount: 2);
+            var rendered = Render(data.Request);
+            var later = Comment(data.Request, rendered[1], 35);
+            var transport = new FakeInlineTransport
+            {
+                Batch = BoundedGitHubHttpResult<BoundedGitHubPullRequestReview>
+                    .Failed(BoundedGitHubHttpOutcome.KnownNotSent,
+                        BoundedGitHubPublisherReason.BatchValidationRejected),
+            };
+            transport.EnqueuePage();
+            transport.EnqueuePage();
+            transport.Creates.Enqueue(rejection);
+            transport.Creates.Enqueue(BoundedGitHubHttpResult<
+                BoundedGitHubReviewComment>.Success(later));
+            transport.Reads.Enqueue(BoundedGitHubHttpResult<
+                BoundedGitHubReviewComment>.Success(later));
+
+            var result = await new InlineCommentPublisher(
+                    new FakeInlineFactory(transport))
+                .PublishAsync(data.Request, CancellationToken.None);
+
+            Assert.False(result.IsComplete);
+            Assert.Equal(
+                BoundedGitHubPublisherOutcome.AuthorizationOrValidationFailure,
+                result.Outcome);
+            Assert.Equal(1, result.Reasons.IndividualKnownFailure);
+            Assert.Equal(1, result.Reasons.IndividualPublished);
+            Assert.Equal(2, result.IndividualAttempts);
+            Assert.Equal(2, transport.IndividualCalls);
+            Assert.Equal(1, transport.ReadCalls);
+        }
+    }
+
+    [Fact]
     public async Task SuccessfulIndividualReadbackIsSuppressedOnNextRun()
     {
         var data = await CreateAsync();
