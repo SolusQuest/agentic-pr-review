@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import path from 'node:path';
+import type { FileHandle } from 'node:fs/promises';
 import type { Readable } from 'node:stream';
 import { finished } from 'node:stream/promises';
 
@@ -8,6 +8,7 @@ import { fail } from './validation.js';
 
 export const HOST_CANCELLATION_RECONCILIATION_GRACE_MS = 130_000;
 export const HOST_POST_KILL_CLOSE_GRACE_MS = 5_000;
+const HOST_EXECUTABLE_FD = 3;
 
 export class HostProcessTerminationUnconfirmedError extends Error {
   constructor() {
@@ -22,7 +23,7 @@ export interface HostProcessResult {
 }
 
 export interface HostProcessRequest {
-  readonly executablePath: string;
+  readonly executableHandle: FileHandle;
   readonly launchBytes: Uint8Array;
   readonly tempRoot: string;
   readonly signal: AbortSignal;
@@ -42,12 +43,12 @@ export async function runHostProcess(request: HostProcessRequest): Promise<HostP
   );
   let child: ReturnType<typeof spawn>;
   try {
-    child = spawn(request.executablePath, [], {
-      cwd: path.dirname(request.executablePath),
+    child = spawn(`/proc/self/fd/${HOST_EXECUTABLE_FD}`, [], {
+      cwd: request.tempRoot,
       env: closedChildEnvironment(request.tempRoot),
       shell: false,
       windowsHide: true,
-      stdio: ['pipe', 'pipe', 'ignore'],
+      stdio: ['pipe', 'pipe', 'ignore', request.executableHandle.fd],
     });
   } catch {
     return fail('wrapper_host_process_failed');

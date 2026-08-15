@@ -17,12 +17,17 @@ afterEach(async () => {
 describe('W1 prepared payload proof', () => {
   it('verifies one absolute regular executable by stable identity and digest', async () => {
     const fixture = await createFixture();
-    await expect(verifyPreparedPayload(fixture.proof)).resolves.toEqual({
-      executablePath: fixture.executable,
-      actionSourceSha: 'a'.repeat(40),
-      payloadSha256: fixture.digest,
-      buildDiscriminator: 'r4-h1',
-    });
+    const verified = await verifyPreparedPayload(fixture.proof);
+    try {
+      expect(verified).toMatchObject({
+        actionSourceSha: 'a'.repeat(40),
+        payloadSha256: fixture.digest,
+        buildDiscriminator: 'r4-h1',
+      });
+      expect(verified.executableHandle.fd).toBeGreaterThanOrEqual(0);
+    } finally {
+      await verified.executableHandle.close();
+    }
   });
 
   it('rejects digest, build, source, escape, and post-proof identity mismatches', async () => {

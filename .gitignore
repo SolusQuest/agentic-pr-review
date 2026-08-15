@@ -1,5 +1,7 @@
 node_modules/
 dist/
+!.github/actions/agentic-pr-review/dist/
+!.github/actions/agentic-pr-review/dist/index.js
 *.tsbuildinfo
 .agentic-pr-review-local/
 .local/
@@ -9,4 +11,3 @@ runtime/**/obj/
 
 .scratch/
 .relay-*.txt
-

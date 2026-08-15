@@ -1,0 +1,29 @@
+name: Agentic PR Review
+description: Run the repository-controlled R4 review wrapper with an explicitly prepared payload.
+inputs:
+  github-token:
+    description: GitHub token supplied only to supported trusted routes.
+    required: false
+  provider-api-key:
+    description: DeepSeek API key supplied only to the provider transport on supported trusted routes.
+    required: false
+  state-key:
+    description: Current downstream-owned state encryption key for supported trusted routes.
+    required: false
+  previous-state-key:
+    description: Optional previous state encryption key used only during an authorized rotation window.
+    required: false
+  config-path:
+    description: Trusted-source path to the repository review configuration.
+    required: false
+    default: .github/agentic-pr-review.json
+  pr-number:
+    description: Pull request number required only for an authorized workflow_dispatch route.
+    required: false
+  state-mode:
+    description: State selection mode; reset is accepted only for an authorized workflow_dispatch route.
+    required: false
+    default: auto
+runs:
+  using: node24
+  main: dist/index.js

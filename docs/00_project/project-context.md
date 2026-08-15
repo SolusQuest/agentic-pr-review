@@ -42,7 +42,7 @@ The engineering goals are to:
 - publish pinned, verifiable, self-contained runtime payloads;
 - keep compatibility machinery proportional to actual independently released or durable boundaries.
 
-Cross-language contract implementation is no longer an objective by itself. During the R1 no-public-Action interval, TypeScript remains only as narrow runtime, state, publisher, migration, and conformance evidence. R4 may reintroduce a thin wrapper and artifact bridge after the Host is selected and proven.
+Cross-language contract implementation is no longer an objective by itself. TypeScript remains as narrow runtime, state, publisher, migration, and conformance evidence plus the R4 thin wrapper and official artifact bridge. Business decisions remain in the C# Host.
 
 C# and Native AOT are architecture commitments, not product success criteria. Review quality, grounded evidence, safety, resumability, cache economics, and operational reliability decide whether the runtime succeeds.
 
@@ -50,7 +50,8 @@ C# and Native AOT are architecture commitments, not product success criteria. Re
 
 The current implementation contains:
 
-- no public GitHub Action and no legacy TypeScript coordinator, Claude Code CLI, or superseded single-request C# product route;
+- one nested, generated Node 24 Action wrapper for repository-controlled prepared-payload proof, with no downstream release/default claim or stable outputs;
+- no legacy TypeScript coordinator, Claude Code CLI, or superseded single-request C# product route;
 - one project-owned C# Agent with the six bounded read-only tools `list_changed_files`, `read_diff`, `list_files`, `search_text`, `read_file`, and `finish_review`;
 - a bounded multi-turn tool loop whose validated tool results become canonical SESSION history and whose terminal findings are grounded in admitted evidence;
 - a project-owned DeepSeek thinking adapter with exact continuation reconstruction across two fresh Host processes;
@@ -59,7 +60,7 @@ The current implementation contains:
 - a protected, default-branch, no-publication live-provider proof at the final R3 commit;
 - retained internal TypeScript state, publisher, invocation, protocol, prefix, and metadata families only as named R4 replacement evidence.
 
-R3 is complete. The development head proves the target review Agent and continuation core, but it does not yet provide production GitHub event authorization, immutable GitHub snapshot acquisition, downstream artifact-backed encrypted state, deterministic GitHub publication through C# ActionHost, or a restored public Action wrapper.
+R3 is complete. R4 has restored the bounded wrapper and its official artifact bridge over an explicitly prepared payload. The development head is still not a supported downstream Action and does not yet provide the complete trusted two-run proof, release payload delivery, or R7 public default.
 
 The selected next direction is R4:
 
@@ -67,7 +68,7 @@ The selected next direction is R4:
 - add trusted GitHub event/configuration authorization and exact-SHA snapshot materialization in C# ActionHost;
 - add downstream-repository-owned encrypted artifact state behind the internal asynchronous state-store seam;
 - move deterministic sticky/inline publication and transaction recovery into C# Host code;
-- restore only a thin Node Action wrapper and private artifact bridge after equivalent Host behavior is proven;
+- integrate the thin Node Action wrapper and private artifact bridge with the remaining trusted Host proof work;
 - delete retained TypeScript business families only through named replacement gates;
 - keep downstream release/payload delivery and broad cost graduation in their later milestones.
 

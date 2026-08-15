@@ -1,4 +1,16 @@
-import { access, chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import {
+  access,
+  chmod,
+  copyFile,
+  mkdtemp,
+  open,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+  type FileHandle,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -12,10 +24,13 @@ import {
   readSingleFrame,
   runHostProcess,
 } from './host-process.js';
+import { verifyPreparedPayload } from './prepared-payload.js';
 
 const roots: string[] = [];
+const handles: FileHandle[] = [];
 
 afterEach(async () => {
+  await Promise.all(handles.splice(0).map(async (handle) => await handle.close()));
   await Promise.all(
     roots.splice(0).map(async (root) => await rm(root, { recursive: true, force: true })),
   );
@@ -84,7 +99,7 @@ process.stdout.write(output);
 `,
     );
     const result = await runHostProcess({
-      executablePath: script,
+      executableHandle: await opened(script),
       launchBytes: Buffer.from(JSON.stringify({ build_discriminator: 'r4-h1' })),
       tempRoot: root,
       signal: new AbortController().signal,
@@ -105,7 +120,7 @@ setInterval(() => {}, 1000);
     );
     const controller = new AbortController();
     const running = runHostProcess({
-      executablePath: script,
+      executableHandle: await opened(script),
       launchBytes: Buffer.from('{}'),
       tempRoot: root,
       signal: controller.signal,
@@ -138,7 +153,7 @@ setInterval(() => {}, 1000);
     const controller = new AbortController();
     const started = Date.now();
     const running = runHostProcess({
-      executablePath: script,
+      executableHandle: await opened(script),
       launchBytes: Buffer.from('{}'),
       tempRoot: root,
       signal: controller.signal,
@@ -172,7 +187,7 @@ setInterval(() => {}, 1000);
     const controller = new AbortController();
     const started = Date.now();
     const running = runHostProcess({
-      executablePath: script,
+      executableHandle: await opened(script),
       launchBytes: Buffer.from('{}'),
       tempRoot: root,
       signal: controller.signal,
@@ -184,6 +199,33 @@ setInterval(() => {}, 1000);
     await expect(running).rejects.toBeInstanceOf(HostProcessTerminationUnconfirmedError);
     expect(Date.now() - started).toBeLessThan(500);
   });
+
+  it('executes the verified opened identity after the admitted pathname is replaced', async () => {
+    const root = await fixtureRoot();
+    const script = await copiedExecutable(root, '/usr/bin/cat', 'verified-host');
+    const replacement = await copiedExecutable(root, '/usr/bin/false', 'replacement-host');
+    const bytes = await readFile(script);
+    const prepared = await verifyPreparedPayload({
+      trustedRoot: root,
+      executableRelativePath: path.basename(script),
+      payloadSha256: createHash('sha256').update(bytes).digest('hex'),
+      actionSourceSha: 'a'.repeat(40),
+      buildDiscriminator: 'r4-h1',
+      wrapperBuildDiscriminator: 'r4-h1',
+    });
+    handles.push(prepared.executableHandle);
+    await rename(replacement, script);
+    const launchBytes = Buffer.from('{"identity":"verified"}');
+
+    const result = await runHostProcess({
+      executableHandle: prepared.executableHandle,
+      launchBytes,
+      tempRoot: root,
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toEqual({ completionBytes: launchBytes, exitCode: 0 });
+  });
 });
 
 async function fixtureRoot(): Promise<string> {
@@ -192,11 +234,24 @@ async function fixtureRoot(): Promise<string> {
   return root;
 }
 
-async function executable(root: string, body: string): Promise<string> {
-  const script = path.join(root, 'host-fixture');
+async function executable(root: string, body: string, name = 'host-fixture'): Promise<string> {
+  const script = path.join(root, name);
   await writeFile(script, `#!${process.execPath}\n${body}`);
   await chmod(script, 0o700);
   return script;
+}
+
+async function opened(executablePath: string): Promise<FileHandle> {
+  const handle = await open(executablePath, 'r');
+  handles.push(handle);
+  return handle;
+}
+
+async function copiedExecutable(root: string, source: string, name: string): Promise<string> {
+  const target = path.join(root, name);
+  await copyFile(source, target);
+  await chmod(target, 0o700);
+  return target;
 }
 
 async function waitForFile(filePath: string): Promise<void> {

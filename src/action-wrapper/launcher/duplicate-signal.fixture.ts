@@ -1,4 +1,4 @@
-import { chmod, readFile, writeFile } from 'node:fs/promises';
+import { chmod, open, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { createTerminationSignal } from '../index.js';
@@ -36,14 +36,16 @@ await chmod(executable, 0o700);
 process.removeAllListeners('SIGTERM');
 process.removeAllListeners('SIGINT');
 const termination = createTerminationSignal();
+const executableHandle = await open(executable, 'r');
 try {
   const result = await runHostProcess({
-    executablePath: executable,
+    executableHandle,
     launchBytes: Buffer.from('{}'),
     tempRoot: root,
     signal: termination.signal,
   });
   if (result.exitCode !== 0 || (await readFile(signalCount, 'utf8')) !== 'x') process.exit(97);
 } finally {
+  await executableHandle.close();
   termination.dispose();
 }

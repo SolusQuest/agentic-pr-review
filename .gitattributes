@@ -1,2 +1,4 @@
 protocol/fixtures/v1/cases/** -text
 runtime/scripts/*.sh text eol=lf
+.github/actions/agentic-pr-review/action.yml text eol=lf
+.github/actions/agentic-pr-review/dist/index.js text eol=lf whitespace=-trailing-space

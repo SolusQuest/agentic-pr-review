@@ -34,12 +34,10 @@ For code changes, the default local validation is:
 npm run check
 ```
 
-During the R1-R3 no-public-Action interval, packaging, workflow, README, and
-distribution changes also run:
+Packaging, workflow, README, and distribution changes also run:
 
 ```bash
 npm run dist:check
 ```
 
-This command currently verifies that the retired Action surface remains absent.
-R4 restores generated-wrapper reproducibility semantics.
+This command verifies the nested R4 metadata, checked generated bundle, package ownership, and retired-surface drift without mutating the bundle.

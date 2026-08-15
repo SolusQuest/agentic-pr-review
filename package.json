@@ -4,8 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "build:action": "node scripts/build-action.mjs",
     "check": "npm run format:check && npm run typecheck && npm test",
-    "dist:check": "node scripts/check-no-public-action.mjs",
+    "dist:check": "node scripts/check-action-distribution.mjs",
     "format:check": "prettier --check .",
     "format": "prettier --write .",
     "r3:live:policy": "node scripts/check-r3-live-proof.mjs",
