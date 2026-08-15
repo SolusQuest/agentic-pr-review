@@ -1,0 +1,25 @@
+{
+  "schema": "apr.action-host.framework-evidence.v1",
+  "scenarios": [
+    { "name": "dispatch-bootstrap", "status": "wrapper_failure" },
+    { "name": "dispatch-continuation", "status": "reviewed" },
+    { "name": "workflow-run", "status": "reviewed" },
+    { "name": "inline", "status": "reviewed" },
+    { "name": "inline-warning", "status": "reviewed_with_inline_warnings" },
+    { "name": "unsupported", "status": "skipped_untrusted_event" },
+    { "name": "fork", "status": "skipped_fork" },
+    { "name": "permission", "status": "authorization_failed" },
+    { "name": "wrong-action", "status": "authorization_failed" },
+    { "name": "concurrency", "status": "authorization_failed" },
+    { "name": "provider-malformed", "status": "agent_result_invalid" },
+    { "name": "public-result", "status": "agent_result_invalid" },
+    { "name": "credentials-missing", "status": "credentials_missing" },
+    { "name": "cancellation", "status": "cancelled" },
+    { "name": "host-crash", "status": "wrapper_failure" }
+  ],
+  "two_fresh_host_processes": true,
+  "official_upload_download_delete": true,
+  "exact_child_environment": true,
+  "output_file_unchanged": true,
+  "canary_oracle_passed": true
+}

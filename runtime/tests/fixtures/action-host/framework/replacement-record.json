@@ -1,0 +1,79 @@
+{
+  "schema": "apr.action-host.replacement-record.v1",
+  "issue": 178,
+  "framework_verifier": "runtime/scripts/verify-action-host.sh framework",
+  "entries": [
+    {
+      "work_package": "W3",
+      "issue": 165,
+      "superseded_surface": "src/runtime-invocation/**, src/live-runtime-invocation/**, and live-runtime-invocation-context.v1",
+      "retained_owner": "R4 framework Host route and retained C# review contracts"
+    },
+    {
+      "work_package": "W4",
+      "issue": 166,
+      "superseded_surface": "src/live-provider/**",
+      "retained_owner": "ActionHostDeepSeekProviderRunnerFactory through the real R3 runner and parser"
+    },
+    {
+      "work_package": "W5",
+      "issue": 167,
+      "superseded_surface": "src/state-v2/** and state-manifest-v2 fixtures",
+      "retained_owner": "authorized accepted-state composition and private artifact bridge"
+    },
+    {
+      "work_package": "W6",
+      "issue": 168,
+      "superseded_surface": "src/state-acceptance/** and legacy state acceptance schemas",
+      "retained_owner": "R4 accepted-state transaction and recovery path"
+    },
+    {
+      "work_package": "W7",
+      "issue": 169,
+      "superseded_surface": "legacy TypeScript ledger C# mirror and pre-acceptance tests",
+      "retained_owner": "C# Agent session ledger and framework continuation proof"
+    },
+    {
+      "work_package": "W8",
+      "issue": 170,
+      "superseded_surface": "src/comments.ts and its tests",
+      "retained_owner": "bounded C# sticky publication and readback"
+    },
+    {
+      "work_package": "W9",
+      "issue": 171,
+      "superseded_surface": "legacy TypeScript inline-comments and target modules",
+      "retained_owner": "post-acceptance C# inline publication and exact-head revalidation"
+    },
+    {
+      "work_package": "W10",
+      "issue": 172,
+      "superseded_surface": "legacy TypeScript protocol mappers and structured review modules",
+      "retained_owner": "C# review input, result, and trace contracts plus public schemas"
+    },
+    {
+      "work_package": "W11",
+      "issue": 173,
+      "superseded_surface": "src/prefix-contract/**",
+      "retained_owner": "C# prefix contract with byte-identical retained public fixtures"
+    },
+    {
+      "work_package": "W12",
+      "issue": 174,
+      "superseded_surface": "src/provider-metadata/** and its legacy public fixtures after consumer removal",
+      "retained_owner": "C# provider run metadata at the R4 Host boundary"
+    },
+    {
+      "work_package": "W14",
+      "issue": 176,
+      "superseded_surface": "src/canonical-json/**",
+      "retained_owner": "C# canonicalization implementations exercised by framework proof"
+    },
+    {
+      "work_package": "W15",
+      "issue": 177,
+      "superseded_surface": "root src/types.ts and src/utils.ts after their consumers are gone",
+      "retained_owner": "typed C# contracts and narrow action-wrapper contracts"
+    }
+  ]
+}

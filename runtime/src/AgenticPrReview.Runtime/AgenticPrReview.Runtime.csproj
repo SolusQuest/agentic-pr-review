@@ -12,6 +12,16 @@
     <InformationalVersion>0.1.0-dev</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(ActionHostVerifierFrameworkReference)' == 'true'">
+    <OutputType>Library</OutputType>
+    <PublishAot>false</PublishAot>
+    <SelfContained>false</SelfContained>
+    <IntermediateOutputPath>obj\$(Configuration)\$(TargetFramework)\action-host-verifier\</IntermediateOutputPath>
+    <OutputPath>bin\$(Configuration)\$(TargetFramework)\action-host-verifier\</OutputPath>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(ActionHostVerifierFrameworkReference)' == 'true'">
+    <Compile Remove="Cli\Program.cs" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="JsonSchema.Net" Version="9.2.2" />
   </ItemGroup>

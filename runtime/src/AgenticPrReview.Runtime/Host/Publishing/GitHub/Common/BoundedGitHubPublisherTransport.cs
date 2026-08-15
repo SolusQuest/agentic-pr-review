@@ -15,13 +15,29 @@ internal sealed class BoundedGitHubPublisherTransportFactory :
     IStickyGitHubPublisherTransportFactory,
     IInlineGitHubPublisherTransportFactory
 {
+    private readonly Func<HttpMessageHandler>? handlerFactory;
+
+    internal BoundedGitHubPublisherTransportFactory()
+    {
+    }
+
+    internal BoundedGitHubPublisherTransportFactory(
+        Func<HttpMessageHandler> handlerFactory) =>
+        this.handlerFactory = handlerFactory ??
+            throw new ArgumentNullException(nameof(handlerFactory));
+
     public IStickyGitHubPublisherTransport Create(ActionHostGitHubToken token,
         AuthorizedStickyPublicationRequest request)
     {
         ArgumentNullException.ThrowIfNull(token);
         ArgumentNullException.ThrowIfNull(request);
-        return BoundedGitHubPublisherTransport.Create(
-            token.ExportForPrivateLaunch(), request);
+        var exported = token.ExportForPrivateLaunch();
+        return handlerFactory is null
+            ? BoundedGitHubPublisherTransport.Create(exported, request)
+            : BoundedGitHubPublisherTransport.CreateForTesting(
+                exported,
+                request,
+                handlerFactory());
     }
 
     public IStickyGitHubReadbackTransport CreateReadback(
@@ -29,16 +45,28 @@ internal sealed class BoundedGitHubPublisherTransportFactory :
     {
         ArgumentNullException.ThrowIfNull(token);
         ArgumentNullException.ThrowIfNull(request);
-        return BoundedGitHubPublisherTransport.CreateReadback(
-            token.ExportForPrivateLaunch(), request);
+        var exported = token.ExportForPrivateLaunch();
+        return handlerFactory is null
+            ? BoundedGitHubPublisherTransport.CreateReadback(
+                exported,
+                request)
+            : BoundedGitHubPublisherTransport.CreateReadbackForTesting(
+                exported,
+                request,
+                handlerFactory());
     }
 
     public IInlineGitHubPublisherTransport Create(
         AuthorizedInlinePublicationRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return BoundedGitHubPublisherTransport.CreateInline(
-            request.Token.ExportForPrivateLaunch(), request);
+        var exported = request.Token.ExportForPrivateLaunch();
+        return handlerFactory is null
+            ? BoundedGitHubPublisherTransport.CreateInline(exported, request)
+            : BoundedGitHubPublisherTransport.CreateInlineForTesting(
+                exported,
+                request,
+                handlerFactory());
     }
 }
 
@@ -141,6 +169,23 @@ internal sealed class BoundedGitHubPublisherTransport :
             BoundedGitHubPublisherPolicy.RequestTimeout,
             BoundedGitHubPublisherPolicy.OverallTimeout,
             new StopwatchBoundedGitHubOperationClock()));
+
+    internal static IStickyGitHubReadbackTransport CreateReadbackForTesting(
+        string token,
+        AuthorizedStickyReadbackRequest request,
+        HttpMessageHandler handler,
+        TimeSpan? requestTimeout = null,
+        TimeSpan? overallTimeout = null,
+        IBoundedGitHubOperationClock? operation = null) =>
+        new ReadbackTransport(new(
+            token,
+            request.Authorization,
+            request.ExpectedIdentity,
+            null,
+            handler,
+            requestTimeout ?? BoundedGitHubPublisherPolicy.RequestTimeout,
+            overallTimeout ?? BoundedGitHubPublisherPolicy.OverallTimeout,
+            operation ?? new StopwatchBoundedGitHubOperationClock()));
 
     internal static BoundedGitHubPublisherTransport CreateForTesting(
         string token, AuthorizedStickyPublicationRequest request,

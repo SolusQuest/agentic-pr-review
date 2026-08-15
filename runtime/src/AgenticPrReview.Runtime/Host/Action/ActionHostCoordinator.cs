@@ -46,6 +46,18 @@ internal interface IActionHostProviderRunner : IDisposable
 internal sealed class ActionHostDeepSeekProviderRunnerFactory :
     IActionHostProviderRunnerFactory
 {
+    private readonly Func<DeepSeekCredential, DeepSeekTransport>?
+        transportFactory;
+
+    internal ActionHostDeepSeekProviderRunnerFactory()
+    {
+    }
+
+    internal ActionHostDeepSeekProviderRunnerFactory(
+        Func<DeepSeekCredential, DeepSeekTransport> transportFactory) =>
+        this.transportFactory = transportFactory ??
+            throw new ArgumentNullException(nameof(transportFactory));
+
     public IActionHostProviderRunner Create(
         ActionHostProviderPolicy policy,
         ActionHostProviderApiKey key,
@@ -59,7 +71,9 @@ internal sealed class ActionHostDeepSeekProviderRunnerFactory :
 
         var credential = DeepSeekCredential.Create(
             key.ExportForPrivateLaunch());
-        var transport = DeepSeekTransport.Create(credential);
+        var transport = transportFactory is null
+            ? DeepSeekTransport.Create(credential)
+            : transportFactory(credential);
         try
         {
             return new Runner(policy, snapshot, timeProvider, transport);

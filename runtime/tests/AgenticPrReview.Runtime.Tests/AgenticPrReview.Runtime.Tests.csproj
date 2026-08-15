@@ -16,6 +16,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\AgenticPrReview.Runtime\AgenticPrReview.Runtime.csproj" />
     <ProjectReference Include="..\LiveAgentVerifierFixture\AgenticPrReview.Runtime.LiveAgentVerifierFixture.csproj" />
+    <ProjectReference Include="..\ActionHostVerifierFixture\AgenticPrReview.Runtime.ActionHostVerifierFixture.csproj" />
     <None Include="..\..\..\protocol\fixtures\v1\**\*" Link="protocol\fixtures\v1\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\..\protocol\fixtures\prefix-contract\**\*" Link="protocol\fixtures\prefix-contract\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\fixtures\deterministic\**\*" Link="fixtures\deterministic\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />

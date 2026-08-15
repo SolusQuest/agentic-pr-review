@@ -13,28 +13,66 @@ internal sealed class ActionHostGitHubAuthorizationTransportFactory :
     IActionHostGitObjectTransportFactory,
     IActionHostReviewedSnapshotTransportFactory
 {
+    private readonly Func<HttpMessageHandler>? handlerFactory;
+
+    internal ActionHostGitHubAuthorizationTransportFactory()
+    {
+    }
+
+    internal ActionHostGitHubAuthorizationTransportFactory(
+        Func<HttpMessageHandler> handlerFactory) =>
+        this.handlerFactory = handlerFactory ??
+            throw new ArgumentNullException(nameof(handlerFactory));
+
     public IActionHostGitHubAuthorizationTransport Create(
         ActionHostGitHubToken token)
     {
         ArgumentNullException.ThrowIfNull(token);
-        return ActionHostGitHubAuthorizationTransport.Create(
-            token.ExportForPrivateLaunch());
+        var exported = token.ExportForPrivateLaunch();
+        return handlerFactory is null
+            ? ActionHostGitHubAuthorizationTransport.Create(exported)
+            : ActionHostGitHubAuthorizationTransport.CreateForTesting(
+                exported,
+                handlerFactory());
     }
 
     public IActionHostGitObjectTransport CreateExactObjectTransport(
         ActionHostGitHubToken token)
     {
         ArgumentNullException.ThrowIfNull(token);
-        return ActionHostGitObjectTransport.Create(
-            token.ExportForPrivateLaunch());
+        var exported = token.ExportForPrivateLaunch();
+        return handlerFactory is null
+            ? ActionHostGitObjectTransport.Create(exported)
+            : ActionHostGitObjectTransport.CreateForTesting(
+                exported,
+                handlerFactory());
     }
 
     public IActionHostReviewedSnapshotTransport
         CreateReviewedSnapshotTransport(ActionHostGitHubToken token)
     {
         ArgumentNullException.ThrowIfNull(token);
-        return ActionHostReviewedSnapshotTransport.Create(
-            token.ExportForPrivateLaunch());
+        var exported = token.ExportForPrivateLaunch();
+        if (handlerFactory is null)
+        {
+            return ActionHostReviewedSnapshotTransport.Create(exported);
+        }
+
+        var objects = ActionHostGitObjectTransport.CreateForTesting(
+            exported,
+            handlerFactory());
+        try
+        {
+            return ActionHostReviewedSnapshotTransport.CreateForTesting(
+                exported,
+                handlerFactory(),
+                objects);
+        }
+        catch
+        {
+            objects.Dispose();
+            throw;
+        }
     }
 }
 
