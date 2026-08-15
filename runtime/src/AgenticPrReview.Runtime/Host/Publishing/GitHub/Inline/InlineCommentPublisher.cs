@@ -287,7 +287,8 @@ internal sealed class InlineCommentPublisher
                 var unknown = created.Outcome is
                         BoundedGitHubHttpOutcome.OutcomeUnknown or
                         BoundedGitHubHttpOutcome.CancelledBeforeSend ||
-                    created.Reason == BoundedGitHubPublisherReason.Deadline;
+                    created.Reason == BoundedGitHubPublisherReason.Deadline ||
+                    created.ValidationEvidence?.ReviewIdentityReturned == true;
                 if (unknown)
                 {
                     result.Fail(stillAbsent.Count - index,

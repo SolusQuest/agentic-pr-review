@@ -775,6 +775,44 @@ public sealed class InlineCommentPublisherTests
     }
 
     [Fact]
+    public async Task IdentityBearingIndividualRejectionStopsFanout()
+    {
+        var data = await CreateAsync(candidateCount: 2);
+        var rendered = Render(data.Request);
+        var later = Comment(data.Request, rendered[1], 36);
+        var transport = new FakeInlineTransport
+        {
+            Batch = BoundedGitHubHttpResult<BoundedGitHubPullRequestReview>
+                .Failed(BoundedGitHubHttpOutcome.KnownNotSent,
+                    BoundedGitHubPublisherReason.BatchValidationRejected),
+        };
+        transport.EnqueuePage();
+        transport.EnqueuePage();
+        transport.Creates.Enqueue(BoundedGitHubHttpResult<
+            BoundedGitHubReviewComment>.Failed(
+                BoundedGitHubHttpOutcome.AuthorizationOrValidationFailure,
+                BoundedGitHubPublisherReason.ValidationRejected,
+                new BoundedGitHubValidationEvidence(
+                    422, true, "bounded", null, [])));
+        transport.Creates.Enqueue(BoundedGitHubHttpResult<
+            BoundedGitHubReviewComment>.Success(later));
+
+        var result = await new InlineCommentPublisher(
+                new FakeInlineFactory(transport))
+            .PublishAsync(data.Request, CancellationToken.None);
+
+        Assert.False(result.IsComplete);
+        Assert.Equal(BoundedGitHubPublisherOutcome.OutcomeUnknown,
+            result.Outcome);
+        Assert.Equal(2, result.Reasons.IndividualOutcomeUnknown);
+        Assert.Equal(0, result.Reasons.IndividualKnownFailure);
+        Assert.Equal(0, result.Reasons.IndividualPublished);
+        Assert.Equal(1, result.IndividualAttempts);
+        Assert.Equal(1, transport.IndividualCalls);
+        Assert.Equal(0, transport.ReadCalls);
+    }
+
+    [Fact]
     public async Task SuccessfulIndividualReadbackIsSuppressedOnNextRun()
     {
         var data = await CreateAsync();
