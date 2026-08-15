@@ -114,42 +114,46 @@ export async function runPrivateActionWrapperWithSeams(
     validateRuntimeFacts(runtimeFacts);
     if (seams.signal.aborted) fail('wrapper_cancelled_before_spawn');
     const prepared = await verifyPreparedPayload(seams.preparedPayload);
-    const eventJsonSha256 = await digestEventJson(runtimeFacts.eventJsonPath);
-    tracker = new OfficialCallTracker();
-    bridge = await seams.bridgeRuntime({
-      buildDiscriminator: prepared.buildDiscriminator,
-      executorFactory: async (stagingRoot) =>
-        await seams.createArtifactExecutor(
-          {
-            githubToken: inputs.github_token,
-            repositoryName: runtimeFacts.repositoryName,
-            runId: runtimeFacts.runId,
-            runAttempt: runtimeFacts.runAttempt,
-            stagingRoot,
-          },
-          tracker!,
-        ),
-    });
-    const launch = buildLaunchDocument({
-      inputs,
-      runtimeFacts,
-      eventJsonSha256,
-      prepared,
-      artifactBridgeEndpoint: bridge.endpoint,
-      cancellation: 'active',
-    });
-    if (seams.signal.aborted) fail('wrapper_cancelled_before_spawn');
-    const host = await seams.hostProcessRunner({
-      executablePath: prepared.executablePath,
-      launchBytes: serializeLaunchDocument(launch),
-      tempRoot: bridge.tempRoot,
-      signal: seams.signal,
-    });
-    completion = parseCompletionDocument(
-      host.completionBytes,
-      prepared.buildDiscriminator,
-      host.exitCode,
-    );
+    try {
+      const eventJsonSha256 = await digestEventJson(runtimeFacts.eventJsonPath);
+      tracker = new OfficialCallTracker();
+      bridge = await seams.bridgeRuntime({
+        buildDiscriminator: prepared.buildDiscriminator,
+        executorFactory: async (stagingRoot) =>
+          await seams.createArtifactExecutor(
+            {
+              githubToken: inputs.github_token,
+              repositoryName: runtimeFacts.repositoryName,
+              runId: runtimeFacts.runId,
+              runAttempt: runtimeFacts.runAttempt,
+              stagingRoot,
+            },
+            tracker!,
+          ),
+      });
+      const launch = buildLaunchDocument({
+        inputs,
+        runtimeFacts,
+        eventJsonSha256,
+        prepared,
+        artifactBridgeEndpoint: bridge.endpoint,
+        cancellation: 'active',
+      });
+      if (seams.signal.aborted) fail('wrapper_cancelled_before_spawn');
+      const host = await seams.hostProcessRunner({
+        executableHandle: prepared.executableHandle,
+        launchBytes: serializeLaunchDocument(launch),
+        tempRoot: bridge.tempRoot,
+        signal: seams.signal,
+      });
+      completion = parseCompletionDocument(
+        host.completionBytes,
+        prepared.buildDiscriminator,
+        host.exitCode,
+      );
+    } finally {
+      await prepared.executableHandle.close();
+    }
   } catch (error) {
     if (error instanceof HostProcessTerminationUnconfirmedError) {
       hostTerminationUnconfirmed = true;

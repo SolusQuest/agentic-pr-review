@@ -12,7 +12,7 @@ export interface PreparedPayloadProof extends PreparedPayloadIdentity {
 }
 
 export interface VerifiedPreparedPayload extends PreparedPayloadIdentity {
-  readonly executablePath: string;
+  readonly executableHandle: FileHandle;
 }
 
 export async function verifyPreparedPayload(
@@ -58,6 +58,7 @@ export async function verifyPreparedPayload(
       fail('wrapper_prepared_payload_invalid');
     }
     const handle = await open(candidate, 'r');
+    let retainHandle = false;
     try {
       const openedBefore = await handle.stat();
       if (!sameFile(namedBefore, openedBefore)) fail('wrapper_prepared_payload_invalid');
@@ -73,15 +74,16 @@ export async function verifyPreparedPayload(
       ) {
         fail('wrapper_prepared_payload_invalid');
       }
+      retainHandle = true;
+      return {
+        executableHandle: handle,
+        actionSourceSha: proof.actionSourceSha,
+        payloadSha256: proof.payloadSha256,
+        buildDiscriminator: proof.buildDiscriminator,
+      };
     } finally {
-      await handle.close();
+      if (!retainHandle) await handle.close();
     }
-    return {
-      executablePath: candidate,
-      actionSourceSha: proof.actionSourceSha,
-      payloadSha256: proof.payloadSha256,
-      buildDiscriminator: proof.buildDiscriminator,
-    };
   } catch (error) {
     if (error instanceof Error && error.name === 'ActionWrapperContractError') throw error;
     fail('wrapper_prepared_payload_invalid');

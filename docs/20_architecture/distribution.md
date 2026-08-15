@@ -98,7 +98,7 @@ The wrapper must not:
 
 Local override paths bypass download but not executable, platform, payload-manifest, or exact build validation.
 
-R4 proves the thin wrapper and two-run workflow behavior using an explicitly prepared trusted local payload path. Automatic release-asset download, exact default Action-to-payload resolution, and public release mapping belong to R7.
+R4 proves the thin wrapper and two-run workflow behavior using an explicitly prepared trusted local payload path. The wrapper holds the verified executable's opened identity through Linux process creation and executes that inherited descriptor, so replacing the admitted pathname after hashing cannot substitute another executable. Automatic release-asset download, exact default Action-to-payload resolution, and public release mapping belong to R7.
 
 ## Version Mapping
 

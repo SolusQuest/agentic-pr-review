@@ -1,6 +1,15 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  access,
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+  type FileHandle,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -74,6 +83,7 @@ describe('W1 production composition', () => {
     const fixture = await wrapperFixture();
     const presentation = recordingToolkit({ 'github-token': 'github-canary' });
     const events = presentation.events;
+    let admittedHandle: FileHandle | undefined;
     const exit = await runPrivateActionWrapperWithSeams({
       toolkit: presentation.toolkit,
       preparedPayload: fixture.proof,
@@ -100,12 +110,14 @@ describe('W1 production composition', () => {
       },
       hostProcessRunner: async (request) => {
         events.push('host:run');
+        admittedHandle = request.executableHandle;
         expect(Object.keys(request).sort()).toEqual([
-          'executablePath',
+          'executableHandle',
           'launchBytes',
           'signal',
           'tempRoot',
         ]);
+        expect(request.executableHandle.fd).toBeGreaterThanOrEqual(0);
         const launch = parseLaunchDocument(request.launchBytes);
         expect(launch.workflow_ref).toBe(fullWorkflowRef);
         expect(launch.inputs.github_token).toBe('github-canary');
@@ -118,6 +130,7 @@ describe('W1 production composition', () => {
     expect(events).toContain('bridge:drain');
     expect(events).toContain('bridge:cleanup');
     expect(events.at(-1)).toBe('summary');
+    expect(admittedHandle?.fd).toBe(-1);
     expect(presentation.summaries[0]).not.toContain('github-canary');
   });
 
