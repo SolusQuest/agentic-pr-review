@@ -214,10 +214,12 @@ internal static class FrameworkCanaryCapture
             foreach (var entryStream in zip.Entries
                          .Select(entry => entry.Open()))
             {
-                using var ownedEntryStream = entryStream;
-                using var content = new MemoryStream();
-                ownedEntryStream.CopyTo(content);
-                passed &= AssertAbsent(evidenceRoot, sink, content.ToArray());
+                using (entryStream)
+                {
+                    using var content = new MemoryStream();
+                    entryStream.CopyTo(content);
+                    passed &= AssertAbsent(evidenceRoot, sink, content.ToArray());
+                }
             }
 
             return passed;
