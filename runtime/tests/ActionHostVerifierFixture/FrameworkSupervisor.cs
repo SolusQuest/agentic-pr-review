@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
@@ -373,7 +374,7 @@ internal static class FrameworkSupervisor
             var checkpoint = await WaitForFileAsync(
                 Path.Join(scenario, "provider-checkpoint-ready"),
                 TimeSpan.FromSeconds(30)).ConfigureAwait(false);
-            if (checkpoint) _ = Kill(hostPid, 9);
+            if (checkpoint) _ = KillProcess(hostPid);
         }
         else if (spec.SignalAfterHostStart && hostPid > 0)
         {
@@ -384,7 +385,7 @@ internal static class FrameworkSupervisor
             var environmentRecorded = await WaitForFileAsync(
                 Path.Join(scenario, "host-environment.keys"),
                 TimeSpan.FromSeconds(10)).ConfigureAwait(false);
-            if (environmentRecorded) _ = Kill(hostPid, 9);
+            if (environmentRecorded) _ = KillProcess(hostPid);
         }
 
         var exited = await WaitForExitAsync(process, ProcessTimeout)
@@ -809,6 +810,28 @@ internal static class FrameworkSupervisor
         }
 
         return false;
+    }
+
+    private static bool KillProcess(int processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            process.Kill();
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+        catch (Win32Exception)
+        {
+            return false;
+        }
     }
 
     private static async Task<bool> WaitForPlatformQuietAsync(
