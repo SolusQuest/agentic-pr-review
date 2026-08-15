@@ -735,17 +735,12 @@ internal static class FrameworkSupervisor
 
     private static string? ParseStatus(string summary)
     {
-        foreach (var line in summary.Replace("\r\n", "\n",
-                     StringComparison.Ordinal).Split('\n'))
-        {
-            if (line.StartsWith("| Status | ", StringComparison.Ordinal) &&
-                line.EndsWith(" |", StringComparison.Ordinal))
-            {
-                return line[11..^2];
-            }
-        }
-
-        return null;
+        var line = summary.Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Split('\n')
+            .FirstOrDefault(value =>
+                value.StartsWith("| Status | ", StringComparison.Ordinal) &&
+                value.EndsWith(" |", StringComparison.Ordinal));
+        return line is null ? null : line[11..^2];
     }
 
     private static async Task<int> WaitForHostPidAsync(

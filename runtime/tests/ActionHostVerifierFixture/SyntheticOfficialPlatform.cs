@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.IO.Compression;
 using System.Net;
@@ -110,9 +111,11 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             }
             catch (HttpListenerException) when (shutdown.IsCancellationRequested)
             {
+                Debug.Assert(shutdown.IsCancellationRequested);
             }
             catch (ObjectDisposedException) when (shutdown.IsCancellationRequested)
             {
+                Debug.Assert(shutdown.IsCancellationRequested);
             }
         }
 
