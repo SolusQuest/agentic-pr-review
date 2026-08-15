@@ -958,11 +958,11 @@ internal static class FrameworkSupervisor
         }
 
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var item in items.EnumerateArray())
+        foreach (var text in items.EnumerateArray().Select(item =>
+                     item.ValueKind == JsonValueKind.String
+                         ? item.GetString()
+                         : null))
         {
-            var text = item.ValueKind == JsonValueKind.String
-                ? item.GetString()
-                : null;
             if (string.IsNullOrWhiteSpace(text) || !seen.Add(text) ||
                 predicate is not null && !predicate(text))
             {
