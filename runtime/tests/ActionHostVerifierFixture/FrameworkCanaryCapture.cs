@@ -211,11 +211,12 @@ internal static class FrameworkCanaryCapture
             using var stream = new MemoryStream(archive, writable: false);
             using var zip = new ZipArchive(stream, ZipArchiveMode.Read);
             var passed = AssertAbsent(evidenceRoot, sink, archive);
-            foreach (var entry in zip.Entries)
+            foreach (var entryStream in zip.Entries
+                         .Select(entry => entry.Open()))
             {
-                using var entryStream = entry.Open();
+                using var ownedEntryStream = entryStream;
                 using var content = new MemoryStream();
-                entryStream.CopyTo(content);
+                ownedEntryStream.CopyTo(content);
                 passed &= AssertAbsent(evidenceRoot, sink, content.ToArray());
             }
 
