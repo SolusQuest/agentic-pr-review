@@ -1,6 +1,6 @@
 {
   "schema": "apr.action-host.framework-evidence.v3",
-  "source_inventory_digest": "8dd1037cf25f8d6f995986451f4d4b18101eae5b7ccc0e90b31d551bc3c0f799",
+  "source_inventory_digest": "89e7977213b5c5a145d6c986b3970893abba77df0dfd6648804894e62e2a8426",
   "replacement_record_digest": "958074d1bd265641353cac02cbf63a362e96647ff29dd99eb37dc100233e282a",
   "base_inventory_digest": "7eacf6e0aacac15a99330e1c54050d4d259688f60ab729c9b0d6383b1f584b6d",
   "canary_table_digest": "e66aaf2ab5881094a6c7425b579c65d4fd4989b3486b0e5464105355837acd4b",
@@ -435,6 +435,6 @@
   "output_file_unchanged": true,
   "canary_oracle_passed": true,
   "canary_route_coverage_digest": "0ed17cb12269bedc80a2b993db7897fd8a1308afb362c8b6fa44d0eb91acfa1a",
-  "canary_negative_injection_count": 14,
+  "canary_negative_injection_count": 59,
   "normalized_exact_delete_identity_digest": "5eae351c0e7aa85b915d463b250db1e659eea77e0f240963bf33fb3e65d1d671"
 }

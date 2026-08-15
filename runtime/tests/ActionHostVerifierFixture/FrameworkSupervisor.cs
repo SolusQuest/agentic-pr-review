@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -1243,7 +1244,8 @@ internal static class FrameworkSupervisor
         {
             if (route.ForbiddenSinks.Count == 0 ||
                 route.ForbiddenSinks.Any(pattern =>
-                    !RejectsNegativeInjection(route, pattern)))
+                    !SinkMatches(pattern, NegativeSink(pattern)) ||
+                    RouteAllows(route, NegativeSink(pattern))))
             {
                 return false;
             }
@@ -1279,8 +1281,10 @@ internal static class FrameworkSupervisor
             }
         }
 
+        var negativeInjectionCount = RunNegativeInjectionMatrix(root, routes);
+        if (negativeInjectionCount < 1) return false;
         File.WriteAllText(Path.Join(root, "canary-negative-injection-count"),
-            routes.Count.ToString(CultureInfo.InvariantCulture));
+            negativeInjectionCount.ToString(CultureInfo.InvariantCulture));
         return true;
     }
 
@@ -1297,12 +1301,150 @@ internal static class FrameworkSupervisor
     private static string NegativeSink(string pattern) =>
         pattern.EndsWith('*') ? pattern[..^1] + "negative-injection" : pattern;
 
-    private static bool RejectsNegativeInjection(
-        CanaryRoute route,
-        string pattern)
+    private static int RunNegativeInjectionMatrix(
+        string root,
+        IReadOnlyDictionary<string, CanaryRoute> routes)
     {
-        var sink = NegativeSink(pattern);
-        return SinkMatches(pattern, sink) && !RouteAllows(route, sink);
+        var workRoot = Path.Join(root, "canary-negative-work");
+        var receipts = new List<string>();
+        Directory.CreateDirectory(workRoot);
+        try
+        {
+            foreach (var (canaryClass, route) in routes
+                         .OrderBy(value => value.Key, StringComparer.Ordinal))
+            {
+                var forbiddenPattern = route.ForbiddenSinks
+                    .Order(StringComparer.Ordinal).First();
+                var sink = NegativeSink(forbiddenPattern);
+                if (!SinkMatches(forbiddenPattern, sink) ||
+                    RouteAllows(route, sink))
+                {
+                    return -1;
+                }
+
+                var canary = canaryClass == "artifact-ciphertext"
+                    ? ArtifactCiphertextCanary(root)
+                    : FrameworkCanaryCapture.RequiredCanaryValue(canaryClass);
+                (string Name, byte[] Capture, bool Archive)[] captures =
+                [
+                    ("raw", Encoding.UTF8.GetBytes(canary), false),
+                    ("url", JsonStringCapture(PercentEncodeAll(canary)), false),
+                    ("base64", JsonStringCapture(DoubleBase64(canary)), false),
+                    ("nested-json", NestedJsonCapture(canary), false),
+                ];
+                foreach (var capture in captures)
+                {
+                    if (!RunNegativeInjectionCase(workRoot, receipts,
+                            canaryClass, canary, sink, capture.Name,
+                            capture.Capture, capture.Archive))
+                    {
+                        return -1;
+                    }
+                }
+
+                if ((canaryClass is "state-key-current" or
+                    "state-key-previous" or "artifact-ciphertext") &&
+                    !RunNegativeInjectionCase(workRoot, receipts,
+                        canaryClass, canary, sink, "artifact-envelope",
+                        ArtifactEnvelopeCapture(canary), true))
+                {
+                    return -1;
+                }
+            }
+
+            File.WriteAllLines(
+                Path.Join(root, "canary-negative-injections.tsv"), receipts);
+            return receipts.Count;
+        }
+        finally
+        {
+            Directory.Delete(workRoot, recursive: true);
+        }
+    }
+
+    private static bool RunNegativeInjectionCase(
+        string workRoot,
+        ICollection<string> receipts,
+        string canaryClass,
+        string canary,
+        string sink,
+        string representation,
+        byte[] capture,
+        bool archive)
+    {
+        var caseRoot = Path.Join(workRoot,
+            receipts.Count.ToString("D3", CultureInfo.InvariantCulture) + "-" +
+            canaryClass + "-" + representation);
+        Directory.CreateDirectory(caseRoot);
+        var absent = archive
+            ? FrameworkCanaryCapture.ArchiveHasNoCanary(caseRoot, canaryClass,
+                canary, capture, sink)
+            : FrameworkCanaryCapture.AssertCanaryAbsent(caseRoot, canaryClass,
+                canary, sink, capture);
+        var expectedViolation = canaryClass + "\t" + sink +
+            "\tforbidden_present";
+        var violationPath = Path.Join(caseRoot, "canary-route-violation");
+        var observationsPath = Path.Join(caseRoot, "canary-observations.tsv");
+        var violations = File.Exists(violationPath)
+            ? File.ReadAllLines(violationPath)
+            : [];
+        if (absent || File.Exists(observationsPath) ||
+            violations.Length == 0 ||
+            violations.Any(line => line != expectedViolation))
+        {
+            return false;
+        }
+
+        receipts.Add(canaryClass + "\t" + representation + "\t" + sink);
+        return true;
+    }
+
+    private static string ArtifactCiphertextCanary(string root) =>
+        Directory.EnumerateFiles(root, "artifact-ciphertext-proof.tsv",
+                SearchOption.AllDirectories)
+            .SelectMany(File.ReadAllLines)
+            .Select(line => line.Split('\t'))
+            .Where(fields => fields.Length == 3 && IsLowerHex(fields[0], 64))
+            .Select(fields => fields[0])
+            .Order(StringComparer.Ordinal)
+            .FirstOrDefault() ??
+        throw new InvalidOperationException("ciphertext canary evidence missing");
+
+    private static string PercentEncodeAll(string value) => string.Concat(
+        Encoding.UTF8.GetBytes(value).Select(value => "%" +
+            value.ToString("X2", CultureInfo.InvariantCulture)));
+
+    private static string DoubleBase64(string value) => Convert.ToBase64String(
+        Encoding.UTF8.GetBytes(Convert.ToBase64String(
+            Encoding.UTF8.GetBytes(value))));
+
+    private static byte[] JsonStringCapture(string value) =>
+        JsonSerializer.SerializeToUtf8Bytes(new { value });
+
+    private static byte[] NestedJsonCapture(string value)
+    {
+        var escaped = string.Concat(value.Select(character => "\\u" +
+            ((int)character).ToString("x4", CultureInfo.InvariantCulture)));
+        return Encoding.UTF8.GetBytes(
+            "{\"outer\":{\"value\":\"" + escaped + "\"}}");
+    }
+
+    private static byte[] ArtifactEnvelopeCapture(string value)
+    {
+        using var archive = new MemoryStream();
+        using (var zip = new ZipArchive(archive, ZipArchiveMode.Create,
+                   leaveOpen: true))
+        {
+            var entry = zip.CreateEntry("artifact-envelope.json",
+                CompressionLevel.SmallestSize);
+            using var writer = new StreamWriter(entry.Open(),
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            writer.Write("{\"encrypted_object_base64\":\"");
+            writer.Write(DoubleBase64(value));
+            writer.Write("\"}");
+        }
+
+        return archive.ToArray();
     }
 
     private static int SumScenarioCounter(string root, string name) =>

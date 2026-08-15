@@ -104,18 +104,32 @@ internal static class FrameworkCanaryCapture
         var passed = true;
         foreach (var definition in Definitions)
         {
-            if (!captures.Any(capture =>
-                    CaptureContains(capture, definition.Value)))
-            {
-                continue;
-            }
-
-            Violation(evidenceRoot, definition.Name, sink, "forbidden_present");
-            passed = false;
+            passed &= AssertCanaryAbsent(evidenceRoot, definition.Name,
+                definition.Value, sink, captures);
         }
 
         return passed;
     }
+
+    internal static bool AssertCanaryAbsent(
+        string evidenceRoot,
+        string canaryClass,
+        string canary,
+        string sink,
+        params object?[] captures)
+    {
+        if (!captures.Any(capture => CaptureContains(capture, canary)))
+        {
+            return true;
+        }
+
+        Violation(evidenceRoot, canaryClass, sink, "forbidden_present");
+        return false;
+    }
+
+    internal static string RequiredCanaryValue(string canaryClass) =>
+        Definitions.SingleOrDefault(value => value.Name == canaryClass)?.Value ??
+        throw new InvalidOperationException("unknown framework canary class");
 
     internal static bool ObserveCiphertextArchive(
         string evidenceRoot,
@@ -227,6 +241,40 @@ internal static class FrameworkCanaryCapture
         catch (InvalidDataException)
         {
             Violation(evidenceRoot, "archive", sink, "zip_decode_invalid");
+            return false;
+        }
+    }
+
+    internal static bool ArchiveHasNoCanary(
+        string evidenceRoot,
+        string canaryClass,
+        string canary,
+        byte[] archive,
+        string sink)
+    {
+        try
+        {
+            using var stream = new MemoryStream(archive, writable: false);
+            using var zip = new ZipArchive(stream, ZipArchiveMode.Read);
+            var passed = AssertCanaryAbsent(evidenceRoot, canaryClass, canary,
+                sink, archive);
+            foreach (var entryStream in zip.Entries
+                         .Select(entry => entry.Open()))
+            {
+                using (entryStream)
+                {
+                    using var content = new MemoryStream();
+                    entryStream.CopyTo(content);
+                    passed &= AssertCanaryAbsent(evidenceRoot, canaryClass,
+                        canary, sink, content.ToArray());
+                }
+            }
+
+            return passed;
+        }
+        catch (InvalidDataException)
+        {
+            Violation(evidenceRoot, canaryClass, sink, "zip_decode_invalid");
             return false;
         }
     }
