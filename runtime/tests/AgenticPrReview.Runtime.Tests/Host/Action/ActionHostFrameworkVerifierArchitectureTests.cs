@@ -93,7 +93,7 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             inventory.RootElement.GetProperty("base_sha").GetString());
         Assert.Equal("apr.action-host.replacement-record.v2",
             replacement.RootElement.GetProperty("schema").GetString());
-        Assert.Equal(339, inventory.RootElement.GetProperty("files")
+        Assert.Equal(349, inventory.RootElement.GetProperty("files")
             .GetArrayLength());
 
         var framing = new StringBuilder();

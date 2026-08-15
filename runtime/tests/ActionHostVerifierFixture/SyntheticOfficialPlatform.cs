@@ -17,6 +17,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
         string name,
         byte[] archive,
         string digest,
+        string envelopeDigest,
         DateTimeOffset expiresAt,
         long producingRunId,
         int producingRunAttempt)
@@ -25,6 +26,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
         internal string Name { get; } = name;
         internal byte[] Archive { get; } = archive;
         internal string Digest { get; } = digest;
+        internal string EnvelopeDigest { get; } = envelopeDigest;
         internal DateTimeOffset ExpiresAt { get; } = expiresAt;
         internal long ProducingRunId { get; } = producingRunId;
         internal int ProducingRunAttempt { get; } = producingRunAttempt;
@@ -199,7 +201,8 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     private async Task HandleTwirpAsync(HttpListenerContext context)
     {
         Increment("official-twirp-count");
-        RecordObservation("actions-runtime-jwt", "results.authorization");
+        FrameworkCanaryCapture.CaptureAll(evidenceRoot,
+            "results.authorization", context.Request.Headers["Authorization"]);
         if (!HasBearer(context.Request, FrameworkSupervisor.RuntimeToken))
         {
             await WriteJsonAsync(context.Response,
@@ -228,6 +231,9 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             lock (gate) blocks.Clear();
             var signed = BaseUrl + "/blob/upload?sig=" +
                 Uri.EscapeDataString(FrameworkCanaries.SignedUrl);
+            Increment("official-create-count");
+            FrameworkCanaryCapture.CaptureAll(evidenceRoot,
+                "results.create-response", signed);
             await WriteJsonAsync(context.Response, HttpStatusCode.OK,
                 JsonSerializer.Serialize(new
                 {
@@ -255,7 +261,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             }
 
             if (!TryEnvelopeIdentity(archive, out var producingRunId,
-                    out var producingRunAttempt))
+                    out var producingRunAttempt, out var envelopeDigest))
             {
                 await WriteJsonAsync(context.Response,
                     HttpStatusCode.BadRequest, "{}").ConfigureAwait(false);
@@ -272,19 +278,23 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                     pendingName,
                     archive,
                     digest,
+                    envelopeDigest,
                     pendingExpiry,
                     producingRunId,
                     producingRunAttempt);
                 artifactNames.Add(pendingName);
             }
 
-            if (!CanariesAbsent(archive))
+            if (!FrameworkCanaryCapture.ArchiveHasNoPrivateCanary(
+                    evidenceRoot, archive, "artifact.archive") ||
+                !FrameworkCanaryCapture.ObserveCiphertextArchive(
+                    evidenceRoot, archive, out _))
             {
-                File.WriteAllText(
+                File.AppendAllText(
                     Path.Join(evidenceRoot, "canary-route-violation"),
-                    "plaintext_in_artifact_archive");
+                    "artifact-ciphertext\tartifact.archive\t" +
+                    "plaintext_in_artifact_archive\n");
             }
-            RecordObservation("artifact-ciphertext", "artifact.archive");
 
             Increment("official-finalize-count");
             if (Mode() == "artifact-upload-outcome-unknown")
@@ -313,7 +323,8 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     private async Task HandleUploadAsync(HttpListenerContext context)
     {
         Increment("official-blob-count");
-        RecordObservation("signed-url-sig", "blob.query");
+        FrameworkCanaryCapture.CaptureAll(evidenceRoot,
+            "blob.query", context.Request.Url?.Query);
         if (context.Request.QueryString["sig"] != FrameworkCanaries.SignedUrl ||
             context.Request.Headers["Authorization"] is not null)
         {
@@ -365,7 +376,8 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     private async Task HandleSignedDownloadAsync(HttpListenerContext context)
     {
         Increment("official-signed-download-count");
-        RecordObservation("signed-url-sig", "blob.query");
+        FrameworkCanaryCapture.CaptureAll(evidenceRoot,
+            "blob.query", context.Request.Url?.Query);
         if (context.Request.QueryString["sig"] != FrameworkCanaries.SignedUrl ||
             context.Request.Headers["Authorization"] is not null ||
             !long.TryParse(
@@ -391,7 +403,9 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     private async Task HandleRestAsync(HttpListenerContext context)
     {
         Increment("official-rest-count");
-        RecordObservation("github-token", "artifact-rest.authorization");
+        FrameworkCanaryCapture.CaptureAll(evidenceRoot,
+            "artifact-rest.authorization",
+            context.Request.Headers["Authorization"]);
         var path = context.Request.Url!.AbsolutePath;
         var prefix = "/repos/" + FrameworkCanaries.Repository +
             "/actions/artifacts";
@@ -499,23 +513,43 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
         {
             if (context.Request.HttpMethod == "DELETE")
             {
-                int before;
-                int after;
+                ArtifactIdentity[] before;
+                ArtifactIdentity[] after;
+                ArtifactIdentity? target;
+                bool removed;
                 lock (gate)
                 {
-                    before = artifacts.Count;
-                    artifacts.Remove(id);
-                    after = artifacts.Count;
+                    before = SnapshotArtifacts();
+                    target = before.SingleOrDefault(value => value.Id == id);
+                    removed = artifacts.Remove(id);
+                    after = SnapshotArtifacts();
                 }
                 Increment("official-delete-count");
                 if (Mode() == "delete-exact" &&
-                    before > 1 && after == before - 1 &&
-                    !TryArtifact(id, out _))
+                    removed && target is not null && before.Length > 1 &&
+                    after.Length == before.Length - 1 &&
+                    after.All(value => value.Id != id) &&
+                    after.SequenceEqual(before.Where(value => value.Id != id)))
                 {
+                    var preDigest = IdentityDigest(before);
+                    var postDigest = IdentityDigest(after);
+                    var targetDigest = IdentityDigest([target]);
                     File.WriteAllText(
                         Path.Join(evidenceRoot, "exact-delete-proof"),
-                        before.ToString(CultureInfo.InvariantCulture) + "\t" +
-                        after.ToString(CultureInfo.InvariantCulture));
+                        JsonSerializer.Serialize(new
+                        {
+                            requested_id = id,
+                            target,
+                            target_identity_digest = targetDigest,
+                            complete_pre_map = before,
+                            complete_pre_map_digest = preDigest,
+                            complete_post_map = after,
+                            complete_post_map_digest = postDigest,
+                            preserved_non_target_count = after.Length,
+                            target_absent = true,
+                            non_targets_byte_identical = true,
+                            operation_response = "no_content",
+                        }, new JsonSerializerOptions { WriteIndented = true }));
                 }
                 if (Mode() == "artifact-delete-outcome-unknown")
                 {
@@ -593,10 +627,12 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     private static bool TryEnvelopeIdentity(
         byte[] archive,
         out long runId,
-        out int runAttempt)
+        out int runAttempt,
+        out string envelopeDigest)
     {
         runId = 0;
         runAttempt = 0;
+        envelopeDigest = "";
         try
         {
             using var stream = new MemoryStream(archive, writable: false);
@@ -604,8 +640,13 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             var entry = zip.GetEntry("artifact-envelope.json");
             if (entry is null) return false;
             using var entryStream = entry.Open();
-            using var document = JsonDocument.Parse(entryStream);
+            using var content = new MemoryStream();
+            entryStream.CopyTo(content);
+            var envelopeBytes = content.ToArray();
+            using var document = JsonDocument.Parse(envelopeBytes);
             var root = document.RootElement;
+            envelopeDigest = Convert.ToHexString(SHA256.HashData(envelopeBytes))
+                .ToLowerInvariant();
             return long.TryParse(PropertyString(root, "producing_run_id"),
                     NumberStyles.None, CultureInfo.InvariantCulture,
                     out runId) && runId > 0 &&
@@ -643,6 +684,23 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     {
         lock (gate) return artifacts.TryGetValue(id, out artifact);
     }
+
+    private ArtifactIdentity[] SnapshotArtifacts() => artifacts.Values
+        .OrderBy(value => value.Id)
+        .Select(value => new ArtifactIdentity(
+            value.Id,
+            value.Name,
+            value.Digest,
+            value.EnvelopeDigest,
+            value.ExpiresAt.UtcDateTime.ToString("O", CultureInfo.InvariantCulture),
+            value.ProducingRunId,
+            value.ProducingRunAttempt))
+        .ToArray();
+
+    private static string IdentityDigest(
+        IReadOnlyCollection<ArtifactIdentity> values) => Convert.ToHexString(
+            SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(values)))
+        .ToLowerInvariant();
 
     private static bool TryTrailingId(
         string path,
@@ -738,45 +796,22 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
         }
     }
 
-    private void RecordObservation(string canaryClass, string sink)
-    {
-        lock (gate)
-        {
-            File.AppendAllText(
-                Path.Join(evidenceRoot, "canary-observations.tsv"),
-                canaryClass + "\t" + sink + "\n");
-        }
-    }
-
     private string Mode()
     {
         lock (gate) return activeMode;
-    }
-
-    private static bool CanariesAbsent(byte[] bytes)
-    {
-        var text = Encoding.UTF8.GetString(bytes);
-        string[] forbidden =
-        [
-            FrameworkCanaries.ProviderKey,
-            FrameworkCanaries.GitHubToken,
-            FrameworkCanaries.StateKey,
-            FrameworkCanaries.PreviousStateKey,
-            FrameworkCanaries.Prompt,
-            FrameworkCanaries.ToolData,
-            FrameworkCanaries.ContinuationMarker,
-            FrameworkCanaries.PublicResult,
-        ];
-        return forbidden.All(value =>
-            !text.Contains(value, StringComparison.Ordinal) &&
-            !text.Contains(Convert.ToBase64String(Encoding.UTF8.GetBytes(value)),
-                StringComparison.Ordinal) &&
-            !text.Contains(Uri.EscapeDataString(value),
-                StringComparison.Ordinal));
     }
 
     private static bool IsNonFatal(Exception error) =>
         error is not OutOfMemoryException and
         not StackOverflowException and
         not AccessViolationException;
+
+    private sealed record ArtifactIdentity(
+        long Id,
+        string Name,
+        string ArchiveDigest,
+        string EnvelopeDigest,
+        string ExpiresAt,
+        long ProducingRunId,
+        int ProducingRunAttempt);
 }

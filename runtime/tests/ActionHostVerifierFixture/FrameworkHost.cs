@@ -62,17 +62,33 @@ internal static class FrameworkHost
             Path.Join(scenarioRoot, "host-environment.keys"),
             ExpectedEnvironment,
             CancellationToken.None).ConfigureAwait(false);
-        RecordObservation(scenarioRoot, "repository", "host.launch");
-        RecordObservation(scenarioRoot, "workflow-source", "host.launch");
+        FrameworkCanaryCapture.CaptureAll(
+            scenarioRoot, "host.launch", launch.RepositoryName,
+            launch.WorkflowPath, launch.WorkflowRef);
+        FrameworkCanaryCapture.CaptureAll(scenarioRoot, "host.credential",
+            launch.Inputs.ProviderApiKey?.ExportForPrivateLaunch(),
+            launch.Inputs.GitHubToken?.ExportForPrivateLaunch());
+        if (launch.Inputs.ProviderApiKey is not null)
+        {
+            File.WriteAllText(Path.Join(scenarioRoot,
+                "host-provider-credential-count"), "1");
+        }
+        if (launch.Inputs.GitHubToken is not null)
+        {
+            File.WriteAllText(Path.Join(scenarioRoot,
+                "host-github-credential-count"), "1");
+        }
         if (launch.Inputs.StateKey is not null)
         {
-            RecordObservation(scenarioRoot, "state-key-current",
-                "state.cryptographic-memory");
+            FrameworkCanaryCapture.CaptureAll(scenarioRoot,
+                "state.cryptographic-memory",
+                launch.Inputs.StateKey.ExportForPrivateLaunch());
         }
         if (launch.Inputs.PreviousStateKey is not null)
         {
-            RecordObservation(scenarioRoot, "state-key-previous",
-                "state.cryptographic-memory");
+            FrameworkCanaryCapture.CaptureAll(scenarioRoot,
+                "state.cryptographic-memory",
+                launch.Inputs.PreviousStateKey.ExportForPrivateLaunch());
         }
 
         var mode = File.ReadAllText(Path.Join(scenarioRoot, "mode")).Trim();
@@ -243,13 +259,6 @@ internal static class FrameworkHost
             completion);
         await completion.Task.ConfigureAwait(false);
     }
-
-    private static void RecordObservation(
-        string scenarioRoot,
-        string canaryClass,
-        string sink) => File.AppendAllText(
-            Path.Join(scenarioRoot, "canary-observations.tsv"),
-            canaryClass + "\t" + sink + "\n");
 
     private sealed class FrameworkTimeProvider : TimeProvider
     {

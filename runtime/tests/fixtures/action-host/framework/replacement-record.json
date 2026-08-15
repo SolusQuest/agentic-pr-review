@@ -9,19 +9,36 @@
       "owned_paths": [
         "src/runtime-invocation/",
         "src/live-runtime-invocation/",
-        "protocol/schemas/live-runtime-invocation-context.v1.json"
+        "protocol/schemas/live-runtime-invocation-context.v1.json",
+        "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj"
       ],
-      "retained_paths": [
-        "runtime/src/AgenticPrReview.Runtime/Host/Action/",
-        "runtime/src/AgenticPrReview.Runtime/Host/Process/"
-      ],
+      "retained_paths": ["src/action-wrapper/", "runtime/src/AgenticPrReview.Runtime/Host/Action/"],
       "classification": "remove_after_framework_gate",
       "protective_behaviors": [
         "command and frame rejection",
         "bounded child lifecycle and signal escalation",
         "closed child environment and secret isolation"
       ],
-      "csharp_owners": ["ActionHostComposition", "ActionHostProcessLauncher"],
+      "csharp_owners": ["ActionHostComposition", "ActionHostLaunchContract"],
+      "owned_csharp_members": [
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs#SchemaKind.LiveContext",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs#ReadSchema(assembly, \"AgenticPrReview.Protocol.live-runtime-invocation-context.v1.json\")",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs#SchemaKind.LiveContext => liveContext",
+        "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj#EmbeddedResource Include=\"..\\..\\..\\protocol\\schemas\\live-runtime-invocation-context.v1.json\""
+      ],
+      "referenced_tests_and_docs": [
+        ".github/workflows/ci.yml",
+        "src/ledger-csharp.test.ts",
+        "src/runtime-integration/runtime-integration.test.ts",
+        "src/prefix-contract/import-boundary.test.ts",
+        "src/state-v2/import-boundary.test.ts",
+        "src/residual-reference-allowlist.ts",
+        "docs/20_architecture/agent-runtime-rebaseline.md",
+        "docs/20_architecture/r1-legacy-removal-handoff.md",
+        "docs/20_architecture/r3-single-shot-removal-handoff.md",
+        "docs/20_architecture/r4-actionhost-wrapper-plan.md",
+        "docs/50_ai/agent-context.md"
+      ],
       "framework_scenario_ids": [
         "dispatch-bootstrap",
         "cancel-before-side-effect",
@@ -244,7 +261,7 @@
         "invalid Unicode and number rejection",
         "canonical bounds and canary behavior"
       ],
-      "csharp_owners": ["CanonicalJson", "PrefixGoldenVectorTests"],
+      "csharp_owners": ["CanonicalJsonWriter", "PrefixGoldenVectorTests"],
       "framework_scenario_ids": ["dispatch-continuation"],
       "deletion_prerequisites": [
         "W3 W4 W5 W6 W11 and W12 merged",
@@ -257,14 +274,19 @@
       "leaf_id": "W15",
       "issue_number": 177,
       "owned_paths": ["src/types.ts", "src/utils.ts"],
-      "retained_paths": ["runtime/src/AgenticPrReview.Runtime/"],
+      "retained_paths": [
+        "runtime/src/AgenticPrReview.Runtime/Application/",
+        "runtime/src/AgenticPrReview.Runtime/Cli/",
+        "runtime/src/AgenticPrReview.Runtime/Storage/",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/RuntimeJson.cs"
+      ],
       "classification": "remove_after_root_consumer_gate",
       "protective_behaviors": [
         "safe path normalization and SHA-256",
         "bounded truncation and review DTOs",
         "target usage and lineage behavior"
       ],
-      "csharp_owners": ["ActionHost contracts", "RuntimeJson", "AgentLoop"],
+      "csharp_owners": ["RuntimeApplication", "RuntimeJson", "AgentLoop"],
       "framework_scenario_ids": ["workflow-run", "inline", "dispatch-continuation"],
       "deletion_prerequisites": [
         "W7 W8 W9 and W10 merged",

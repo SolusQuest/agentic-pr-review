@@ -968,7 +968,9 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
                 new FrozenTimeProvider(trustedNowUnixSeconds))
             .RefreshSelectedHeadAsync(
                 context,
-                ResolveRequest(access, requiredLogicalExpiresAtUnixSeconds),
+                ResolveRefreshRequest(
+                    access,
+                    requiredLogicalExpiresAtUnixSeconds),
                 expected,
                 cancellationToken)
             .ConfigureAwait(false);
@@ -1146,6 +1148,21 @@ internal sealed class RetainedStateTransactionAuthority : IDisposable
             producingRunAttempt,
             requiredLogicalExpiresAtUnixSeconds,
             Reset: null);
+
+    private LineageResolveRequest ResolveRefreshRequest(
+        AuthorizedLocatorAccess access,
+        long requiredLogicalExpiresAtUnixSeconds)
+    {
+        var selection = Volatile.Read(ref acceptedSelection);
+        return new LineageResolveRequest(
+            access,
+            baseScope,
+            selection?.LineageHead.Head.Reviewed ?? reviewed,
+            producingRunIdentity,
+            producingRunAttempt,
+            requiredLogicalExpiresAtUnixSeconds,
+            Reset: null);
+    }
 
     private static bool MatchesStateScope(
         RestrictedStateScope state,

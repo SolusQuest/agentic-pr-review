@@ -1,8 +1,9 @@
 {
-  "schema": "apr.action-host.framework-evidence.v2",
-  "source_inventory_digest": "2999dc176269a68f6b4bc82632c9d02aa39a36a0438bf620dc51e3d10e0141bc",
-  "replacement_record_digest": "05d8642bba31a2a69b5d322bf163de17f0837c0e6b185b81607abfb892d902e0",
-  "base_inventory_digest": "804927c350fbf57ce08c477196c99c42b5c72781be4a81a532f0c45fdfc01dfe",
+  "schema": "apr.action-host.framework-evidence.v3",
+  "source_inventory_digest": "f858d25ee2739be57037c5340adacd9dc80e9bd520f7a1df41edd28efe0f6f9f",
+  "replacement_record_digest": "958074d1bd265641353cac02cbf63a362e96647ff29dd99eb37dc100233e282a",
+  "base_inventory_digest": "7eacf6e0aacac15a99330e1c54050d4d259688f60ab729c9b0d6383b1f584b6d",
+  "canary_table_digest": "e66aaf2ab5881094a6c7425b579c65d4fd4989b3486b0e5464105355837acd4b",
   "scenarios": [
     {
       "name": "dispatch-bootstrap",
@@ -19,13 +20,26 @@
     },
     {
       "name": "dispatch-continuation",
-      "status": "state_conflict",
-      "ExitCode": 1,
+      "status": "reviewed",
+      "ExitCode": 0,
       "ProviderRequests": 3,
       "ToolSequence": 3,
-      "GitHubRequests": 35,
-      "StateOperations": 1371,
+      "GitHubRequests": 36,
+      "StateOperations": 2042,
       "StickyMutations": 1,
+      "InlineMutations": 0,
+      "CanarySafe": true,
+      "ContinuationObserved": true
+    },
+    {
+      "name": "dispatch-cross-head-conflict",
+      "status": "state_conflict",
+      "ExitCode": 1,
+      "ProviderRequests": 0,
+      "ToolSequence": 0,
+      "GitHubRequests": 23,
+      "StateOperations": 30,
+      "StickyMutations": 0,
       "InlineMutations": 0,
       "CanarySafe": true,
       "ContinuationObserved": true
@@ -395,20 +409,32 @@
       "ContinuationObserved": true
     }
   ],
+  "continuation": {
+    "second_process_status": "reviewed",
+    "successor_accepted": true,
+    "reviewed_head_advanced": true,
+    "state_identity_digest": "03fd8aa23f11f9f2c61173e07c6d82f45317d27d6a54824d891fb196b4fb5b2e",
+    "sticky_lineage_digest": "7a56ff8b50792ba129927078ff20d09397dba4e73b123165772df1ccc1224051",
+    "prior_marker_first_request_exact": true,
+    "prior_marker_carried_without_reinjection": true,
+    "exact_tool_exchange_relations": true
+  },
   "process": {
     "distinct_host_processes": true,
     "all_process_groups_quiet": true
   },
   "official_bridge": {
-    "twirp": 292,
-    "blob": 288,
-    "rest": 21216,
-    "finalize": 148,
-    "signed_download": 5259,
-    "delete": 65
+    "twirp": 304,
+    "blob": 300,
+    "rest": 22841,
+    "finalize": 154,
+    "signed_download": 5718,
+    "delete": 68
   },
   "exact_child_environment": true,
   "output_file_unchanged": true,
   "canary_oracle_passed": true,
-  "canary_observation_digest": "d1a630689233e03fdeaa78d11b6cbdb1cd9bee639a3b716885b38ec1f0e53c1c"
+  "canary_route_coverage_digest": "0ed17cb12269bedc80a2b993db7897fd8a1308afb362c8b6fa44d0eb91acfa1a",
+  "canary_negative_injection_count": 14,
+  "normalized_exact_delete_identity_digest": "5eae351c0e7aa85b915d463b250db1e659eea77e0f240963bf33fb3e65d1d671"
 }

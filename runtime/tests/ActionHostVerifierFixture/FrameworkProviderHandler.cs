@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -28,28 +29,33 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot) :
         var body = await request.Content.ReadAsByteArrayAsync(
             cancellationToken).ConfigureAwait(false);
         var mode = ReadMode();
-        Record("provider-request-count", Increment("provider-request-count"));
+        var requestOrdinal = Increment("provider-request-count");
+        Record("provider-request-count", requestOrdinal);
         Record("provider-auth-count", Increment("provider-auth-count"));
-        RecordObservation("provider-key", "provider.authorization");
+        FrameworkCanaryCapture.CaptureAll(scenarioRoot,
+            "provider.authorization", request.Headers.Authorization.ToString());
+        FrameworkCanaryCapture.CaptureAll(scenarioRoot,
+            "provider.request", body);
         if (Contains(body, FrameworkCanaries.Prompt))
         {
             Record("provider-prompt-observed", 1);
-            RecordObservation("prompt", "provider.request");
         }
 
         if (Contains(body, FrameworkCanaries.ToolData))
         {
             Record("provider-tool-data-observed", 1);
-            RecordObservation("tool-data", "provider.request");
         }
 
-        if (File.Exists(Path.Join(scenarioRoot, "expect-continuation")) &&
-            Contains(body, FrameworkCanaries.ContinuationMarker) &&
-            !File.Exists(Path.Join(scenarioRoot,
-                "provider-continuation-observed")))
+        if (Contains(body, FrameworkCanaries.ContinuationMarker))
         {
-            Record("provider-continuation-observed", 1);
-            RecordObservation("session-plaintext", "provider.continuation");
+            Record(
+                "provider-session-plaintext-request-count",
+                Increment("provider-session-plaintext-request-count"));
+        }
+
+        if (File.Exists(Path.Join(scenarioRoot, "expect-continuation")))
+        {
+            ValidateContinuationRequest(body, requestOrdinal);
         }
 
         if (mode == "provider-error")
@@ -143,6 +149,126 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot) :
         _ => Encoding.UTF8.GetBytes("{\"choices\":[]}"),
     };
 
+    private void ValidateContinuationRequest(byte[] body, int ordinal)
+    {
+        var markerCount = Count(body, FrameworkCanaries.ContinuationMarker);
+        var carrierPath = Path.Join(
+            scenarioRoot,
+            "provider-continuation-marker-carrier.sha256");
+        if (ordinal == 1 && markerCount == 1 &&
+            TryMarkerCarrierDigest(body, out var carrierDigest))
+        {
+            File.WriteAllText(carrierPath, carrierDigest);
+            Record("provider-continuation-observed", 1);
+            Record("provider-continuation-first-request-exact", 1);
+        }
+        else if (ordinal == 1)
+        {
+            Record("provider-continuation-order-violation", 1);
+        }
+        else if (markerCount == 1 && File.Exists(carrierPath) &&
+            TryMarkerCarrierDigest(body, out carrierDigest) &&
+            StringComparer.Ordinal.Equals(
+                File.ReadAllText(carrierPath),
+                carrierDigest))
+        {
+            Record("provider-continuation-carried-history-" + ordinal, 1);
+        }
+        else
+        {
+            Record("provider-continuation-order-violation", 1);
+        }
+
+        var priorCall = ordinal switch
+        {
+            2 => "continuation-read-file",
+            3 => "continuation-search-text",
+            _ => null,
+        };
+        if (priorCall is null)
+        {
+            return;
+        }
+
+        if (HasExactToolExchange(body, priorCall))
+        {
+            Record("provider-continuation-relation-" + ordinal, 1);
+        }
+        else
+        {
+            Record("provider-continuation-order-violation", 1);
+        }
+    }
+
+    private static bool TryMarkerCarrierDigest(
+        byte[] body,
+        out string digest)
+    {
+        digest = string.Empty;
+        using var document = JsonDocument.Parse(body);
+        if (!document.RootElement.TryGetProperty("messages", out var messages) ||
+            messages.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        var carriers = messages.EnumerateArray()
+            .Select(message => message.GetRawText())
+            .Where(message => message.Contains(
+                FrameworkCanaries.ContinuationMarker,
+                StringComparison.Ordinal))
+            .ToArray();
+        if (carriers.Length != 1 || Count(
+                Encoding.UTF8.GetBytes(carriers[0]),
+                FrameworkCanaries.ContinuationMarker) != 1)
+        {
+            return false;
+        }
+
+        digest = Convert.ToHexString(SHA256.HashData(
+                Encoding.UTF8.GetBytes(carriers[0])))
+            .ToLowerInvariant();
+        return true;
+    }
+
+    private static bool HasExactToolExchange(byte[] body, string callId)
+    {
+        using var document = JsonDocument.Parse(body);
+        if (!document.RootElement.TryGetProperty("messages", out var messages) ||
+            messages.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        var calls = 0;
+        var results = 0;
+        foreach (var message in messages.EnumerateArray())
+        {
+            if (message.TryGetProperty("role", out var role) &&
+                role.GetString() == "assistant" &&
+                message.TryGetProperty("tool_calls", out var toolCalls) &&
+                toolCalls.ValueKind == JsonValueKind.Array)
+            {
+                calls += toolCalls.EnumerateArray().Count(call =>
+                    call.TryGetProperty("id", out var id) &&
+                    id.GetString() == callId);
+            }
+
+            if (message.TryGetProperty("role", out role) &&
+                role.GetString() == "tool" &&
+                message.TryGetProperty("tool_call_id", out var resultId) &&
+                resultId.GetString() == callId &&
+                message.TryGetProperty("content", out var content) &&
+                content.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(content.GetString()))
+            {
+                results++;
+            }
+        }
+
+        return calls == 1 && results == 1;
+    }
+
     private byte[] Finish(
         byte[] requestBody,
         string mode,
@@ -152,7 +278,6 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot) :
         string arguments;
         if (mode == "public-result")
         {
-            RecordObservation("public-result", "agent.validation");
             arguments = "{\"summary\":\"rejected\",\"findings\":[{" +
                 "\"severity\":\"high\",\"title\":\"" +
                 FrameworkCanaries.PublicResult +
@@ -178,6 +303,12 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot) :
         {
             arguments = "{\"summary\":\"Bounded review complete.\"," +
                 "\"findings\":[]}";
+        }
+
+        if (mode == "public-result")
+        {
+            FrameworkCanaryCapture.CaptureAll(scenarioRoot,
+                "agent.validation", arguments);
         }
 
         return Tool(callId, "finish_review", arguments, call);
@@ -294,13 +425,23 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot) :
         Path.Join(scenarioRoot, name),
         value.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
-    private void RecordObservation(string canaryClass, string sink) =>
-        File.AppendAllText(
-            Path.Join(scenarioRoot, "canary-observations.tsv"),
-            canaryClass + "\t" + sink + "\n");
-
     private static bool Contains(byte[] bytes, string value) =>
         Encoding.UTF8.GetString(bytes).Contains(value, StringComparison.Ordinal);
+
+    private static int Count(byte[] bytes, string value)
+    {
+        var text = Encoding.UTF8.GetString(bytes);
+        var count = 0;
+        var offset = 0;
+        while ((offset = text.IndexOf(value, offset,
+                   StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            offset += value.Length;
+        }
+
+        return count;
+    }
 
     private static HttpResponseMessage Json(
         HttpStatusCode status,

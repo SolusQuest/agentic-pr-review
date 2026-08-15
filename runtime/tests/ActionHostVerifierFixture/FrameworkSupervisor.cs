@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace AgenticPrReview.Runtime.ActionHostVerifierFixture;
 
@@ -45,7 +46,7 @@ internal static class FrameworkSupervisor
             ["single-file"] = File.Exists(payload) &&
                 ValidateSingleFile(payload),
             ["replacement-record"] = File.Exists(record) &&
-                ValidateReplacementRecord(record),
+                ValidateReplacementRecord(record, repository, inventory),
             ["base-inventory"] = Directory.Exists(repository) &&
                 File.Exists(inventory) && ValidateInventory(inventory),
             ["canary-table"] = File.Exists(canaries) &&
@@ -68,10 +69,16 @@ internal static class FrameworkSupervisor
             root, repository, payload,
             bundle, node, platform).ConfigureAwait(false));
         cases.Add(await RunCaseAsync(new CaseSpec("dispatch-continuation",
-            "continuation", "state_conflict", ExpectContinuation: true,
-            ExpectedProviderRequests: 3),
+            "continuation", "reviewed", ExpectContinuation: true,
+            ExpectedProviderRequests: 3, ExpectedStickyMutations: 1,
+            RequireSuccessfulContinuation: true),
             root, repository, payload, bundle, node, platform)
             .ConfigureAwait(false));
+        cases.Add(await RunCaseAsync(new CaseSpec(
+            "dispatch-cross-head-conflict", "cross-head-conflict",
+            "state_conflict", ExpectedProviderRequests: 0,
+            ExpectedStickyMutations: 0), root, repository, payload, bundle,
+            node, platform).ConfigureAwait(false));
         cases.Add(await RunCaseAsync(new CaseSpec("artifact-pagination-changed",
             "artifact-pagination-changed", "state_conflict"), root,
             repository, payload, bundle, node, platform).ConfigureAwait(false));
@@ -111,7 +118,8 @@ internal static class FrameworkSupervisor
         platform.ResetArtifacts();
         cases.Add(await RunCaseAsync(new CaseSpec("delete-exact",
             "delete-exact", "reviewed",
-            RequiredGlobalEvidence: "exact-delete-proof"), root, repository,
+            RequiredGlobalEvidence: "exact-delete-proof",
+            RequiredStateOperation: "delete\tNone\t1"), root, repository,
             payload, bundle, node, platform).ConfigureAwait(false));
         platform.ResetArtifacts();
         cases.Add(await RunCaseAsync(new CaseSpec("inline", "inline",
@@ -221,11 +229,12 @@ internal static class FrameworkSupervisor
 
         var normalized = new
         {
-            schema = "apr.action-host.framework-evidence.v2",
+            schema = "apr.action-host.framework-evidence.v3",
             source_inventory_digest = SourceInventoryDigest(repository),
             replacement_record_digest = Sha256(record),
             base_inventory_digest = JsonProperty(inventory,
                 "aggregate_sha256"),
+            canary_table_digest = Sha256(canaries),
             scenarios = cases.Select(result => new
             {
                 name = result.Name,
@@ -240,6 +249,31 @@ internal static class FrameworkSupervisor
                 result.CanarySafe,
                 result.ContinuationObserved,
             }),
+            continuation = new
+            {
+                second_process_status = cases.Single(result =>
+                    result.Name == "dispatch-continuation").ActualStatus,
+                successor_accepted = cases.Single(result =>
+                    result.Name == "dispatch-continuation").Passed,
+                reviewed_head_advanced = ContinuationHeadAdvanced(root),
+                state_identity_digest = CanonicalizedIdentityDigest(Path.Join(root,
+                    "dispatch-continuation",
+                    "state-operation-identities.tsv")),
+                sticky_lineage_digest = ContinuationStickyDigest(root),
+                prior_marker_first_request_exact = File.Exists(Path.Join(
+                    root, "dispatch-continuation",
+                    "provider-continuation-first-request-exact")),
+                prior_marker_carried_without_reinjection =
+                    File.Exists(Path.Join(root, "dispatch-continuation",
+                        "provider-continuation-carried-history-2")) &&
+                    File.Exists(Path.Join(root, "dispatch-continuation",
+                        "provider-continuation-carried-history-3")),
+                exact_tool_exchange_relations =
+                    File.Exists(Path.Join(root, "dispatch-continuation",
+                        "provider-continuation-relation-2")) &&
+                    File.Exists(Path.Join(root, "dispatch-continuation",
+                        "provider-continuation-relation-3")),
+            },
             process = new
             {
                 distinct_host_processes = cases.Select(result => result.HostPid)
@@ -263,10 +297,23 @@ internal static class FrameworkSupervisor
             output_file_unchanged = cases.All(result =>
                 result.OutputUnchanged),
             canary_oracle_passed = canaryRoutesPassed,
-            canary_observation_digest = CanaryObservationDigest(root),
+            canary_route_coverage_digest = CanaryRouteCoverageDigest(root),
+            canary_negative_injection_count = ReadInt(root,
+                "canary-negative-injection-count"),
+            normalized_exact_delete_identity_digest =
+                CanonicalizedIdentityDigest(
+                Path.Join(root, "exact-delete-proof")),
         };
-        var normalizedBytes = JsonSerializer.SerializeToUtf8Bytes(normalized,
-            new JsonSerializerOptions { WriteIndented = true });
+        var normalizedBytes = Encoding.UTF8.GetBytes(
+            JsonSerializer.Serialize(normalized,
+                new JsonSerializerOptions { WriteIndented = true }) + "\n");
+        if (!FrameworkCanaryCapture.AssertPublicSafe(
+                root, "evidence.normalized", normalizedBytes))
+        {
+            await WriteEvidenceAsync(root, payload, platform, cases, false)
+                .ConfigureAwait(false);
+            return 1;
+        }
         await File.WriteAllBytesAsync(
             Path.Join(root, "normalized-evidence.json"), normalizedBytes)
             .ConfigureAwait(false);
@@ -416,7 +463,14 @@ internal static class FrameworkSupervisor
         var publicBodies = ReadOptionalText(scenario, "sticky-comment.json") +
             ReadOptionalText(scenario, "inline-comments.json");
         var noLeak = PublicCanaryOracle(
-            sanitized + stderr + summary + output + publicBodies);
+                sanitized + stderr + summary + output + publicBodies) &&
+            FrameworkCanaryCapture.AssertPublicSafe(
+                scenario, "public.output",
+                sanitized, stderr, summary, output, publicBodies) &&
+            FrameworkCanaryCapture.AssertPublicSafe(
+                scenario, "command.state-evidence",
+                ReadOptionalText(scenario, "state-operations.tsv"),
+                ReadOptionalText(scenario, "host-environment.keys"));
         var closedEnvironment = hostPid < 1 ||
             File.Exists(Path.Join(scenario, "host-environment.keys"));
         var outputUnchanged = output == FrameworkCanaries.OutputSentinel;
@@ -440,12 +494,34 @@ internal static class FrameworkSupervisor
                     "skipped_untrusted_event" or "skipped_fork" ? 0 : 1);
         var continuation = !spec.ExpectContinuation || File.Exists(
             Path.Join(scenario, "provider-continuation-observed"));
+        var successfulContinuation = !spec.RequireSuccessfulContinuation ||
+            File.Exists(Path.Join(scenario,
+                "provider-continuation-first-request-exact")) &&
+            File.Exists(Path.Join(scenario,
+                "provider-continuation-relation-2")) &&
+            File.Exists(Path.Join(scenario,
+                "provider-continuation-relation-3")) &&
+            File.Exists(Path.Join(scenario,
+                "provider-continuation-carried-history-2")) &&
+            File.Exists(Path.Join(scenario,
+                "provider-continuation-carried-history-3")) &&
+            !File.Exists(Path.Join(scenario,
+                "provider-continuation-order-violation")) &&
+            ReadInt(scenario, "sticky-create-count") == 0 &&
+            ReadInt(scenario, "sticky-update-count") == 1 &&
+            ReadOptionalText(scenario, "sticky-update-comment-id") == "701" &&
+            ReadOptionalText(scenario, "sticky-readback-comment-id") == "701" &&
+            summary.Contains("| State disposition | accepted |",
+                StringComparison.Ordinal) &&
+            ValidateContinuationStateTrace(scenario) &&
+            ContinuationHeadAdvanced(root);
         var sixTools = spec.ExpectContinuation || spec.ExpectNoProvider ||
             spec.ExpectedStatus != "reviewed" &&
                 spec.ExpectedStatus != "reviewed_with_inline_warnings" ||
             ReadInt(scenario, "provider-sequence") >= 6;
         var passed = exited && expected && noLeak && closedEnvironment &&
             outputUnchanged && groupQuiet && platformQuiet && continuation &&
+            successfulContinuation &&
             sixTools && signalGateReached &&
             (!spec.ExpectNoProvider || ReadInt(
                 scenario, "provider-request-count") == 0) &&
@@ -579,6 +655,7 @@ internal static class FrameworkSupervisor
     {
         "dispatch-bootstrap" => 900,
         "dispatch-continuation" => 901,
+        "dispatch-cross-head-conflict" => 930,
         "artifact-pagination-changed" => 902,
         "artifact-pagination-late" => 903,
         "artifact-list-duplicate" => 904,
@@ -857,7 +934,10 @@ internal static class FrameworkSupervisor
             !File.Exists(Path.Join(directory, stem + ".runtimeconfig.json"));
     }
 
-    private static bool ValidateReplacementRecord(string path)
+    private static bool ValidateReplacementRecord(
+        string path,
+        string repository,
+        string inventoryPath)
     {
         using var document = JsonDocument.Parse(File.ReadAllBytes(path));
         var root = document.RootElement;
@@ -877,6 +957,19 @@ internal static class FrameworkSupervisor
         [165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 176, 177];
         var entries = root.GetProperty("entries").EnumerateArray().ToArray();
         var owned = new HashSet<string>(StringComparer.Ordinal);
+        var retained = new HashSet<string>(StringComparer.Ordinal);
+        var inventory = InventoryPaths(inventoryPath);
+        var scenarios = FrameworkScenarioIds();
+        var csharp = Directory.EnumerateFiles(
+                Path.Join(repository, "runtime"), "*.cs",
+                SearchOption.AllDirectories)
+            .Where(source => !source.Contains(
+                    Path.DirectorySeparatorChar + "bin" +
+                    Path.DirectorySeparatorChar, StringComparison.Ordinal) &&
+                !source.Contains(Path.DirectorySeparatorChar + "obj" +
+                    Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            .Select(File.ReadAllText)
+            .ToArray();
         for (var index = 0; index < entries.Length; index++)
         {
             var entry = entries[index];
@@ -888,20 +981,131 @@ internal static class FrameworkSupervisor
                 !RequiredText(entry, "classification") ||
                 !RequiredText(entry, "deletion_gate") ||
                 !RequiredTextArray(entry, "owned_paths", pathValue =>
-                    IsClosedPath(pathValue) && owned.Add(pathValue)) ||
-                !RequiredTextArray(entry, "retained_paths", IsClosedPath) ||
+                    IsClosedPath(pathValue) && owned.Add(pathValue) &&
+                    InventoryCovers(inventory, pathValue)) ||
+                !RequiredTextArray(entry, "retained_paths", pathValue =>
+                    IsClosedPath(pathValue) &&
+                    LandingPathExists(repository, pathValue) &&
+                    Remember(retained, pathValue)) ||
                 !RequiredTextArray(entry, "protective_behaviors") ||
-                !RequiredTextArray(entry, "csharp_owners") ||
-                !RequiredTextArray(entry, "framework_scenario_ids") ||
+                !RequiredTextArray(entry, "csharp_owners", owner =>
+                    csharp.Any(source => source.Contains(owner,
+                        StringComparison.Ordinal))) ||
+                !RequiredTextArray(entry, "framework_scenario_ids",
+                    scenarios.Contains) ||
                 !RequiredTextArray(entry, "deletion_prerequisites"))
+            {
+                return false;
+            }
+
+            if (entry.GetProperty("leaf_id").GetString() == "W3" &&
+                !ValidateW3Ownership(entry, repository, owned))
             {
                 return false;
             }
         }
 
         return entries.Length == expectedLeaves.Length &&
+            !owned.Any(ownedPath => retained.Any(retainedPath =>
+                PathsOverlap(ownedPath, retainedPath))) &&
             !File.ReadAllText(path).Contains("W13", StringComparison.Ordinal);
     }
+
+    private static bool ValidateW3Ownership(
+        JsonElement entry,
+        string repository,
+        IReadOnlySet<string> owned)
+    {
+        var inventory = InventoryPaths(Path.Join(repository,
+            "runtime", "tests", "fixtures", "action-host", "framework",
+            "e1-base-inventory.json"));
+        if (!RequiredTextArray(entry, "owned_csharp_members", member =>
+                MemberExists(repository, member) &&
+                InventoryCovers(inventory, member.Split('#', 2)[0])) ||
+            !RequiredTextArray(entry, "referenced_tests_and_docs", value =>
+                IsClosedPath(value) && LandingPathExists(repository, value) &&
+                InventoryCovers(inventory, value)))
+        {
+            return false;
+        }
+
+        var memberPaths = TextArray(entry, "owned_csharp_members")
+            .Select(value => value.Split('#', 2)[0])
+            .ToHashSet(StringComparer.Ordinal);
+        return memberPaths.SetEquals(
+        [
+            "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs",
+            "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj",
+        ]);
+    }
+
+    private static bool MemberExists(string repository, string member)
+    {
+        var parts = member.Split('#', 2);
+        if (parts.Length != 2 || !IsClosedPath(parts[0]) ||
+            string.IsNullOrWhiteSpace(parts[1]))
+        {
+            return false;
+        }
+
+        var path = Path.Join(repository,
+            parts[0].Replace('/', Path.DirectorySeparatorChar));
+        return File.Exists(path) && File.ReadAllText(path)
+            .Contains(parts[1], StringComparison.Ordinal);
+    }
+
+    private static string[] TextArray(JsonElement value, string property) =>
+        value.GetProperty(property).EnumerateArray()
+            .Select(item => item.GetString() ?? "").ToArray();
+
+    private static HashSet<string> InventoryPaths(string path)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+        return document.RootElement.GetProperty("files").EnumerateArray()
+            .Select(entry => entry.GetProperty("path").GetString() ?? "")
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    private static bool InventoryCovers(
+        IReadOnlySet<string> inventory,
+        string ownedPath) => ownedPath.EndsWith('/')
+        ? inventory.Any(path => path.StartsWith(ownedPath,
+            StringComparison.Ordinal))
+        : inventory.Contains(ownedPath);
+
+    private static bool LandingPathExists(string repository, string value)
+    {
+        var path = Path.Join(repository,
+            value.TrimEnd('/').Replace('/', Path.DirectorySeparatorChar));
+        return value.EndsWith('/') ? Directory.Exists(path) : File.Exists(path);
+    }
+
+    private static bool Remember(ISet<string> values, string value)
+    {
+        values.Add(value);
+        return true;
+    }
+
+    private static bool PathsOverlap(string first, string second) =>
+        first == second ||
+        first.EndsWith('/') && second.StartsWith(first, StringComparison.Ordinal) ||
+        second.EndsWith('/') && first.StartsWith(second, StringComparison.Ordinal);
+
+    private static HashSet<string> FrameworkScenarioIds() => new(
+    [
+        "dispatch-bootstrap", "dispatch-continuation",
+        "dispatch-cross-head-conflict",
+        "artifact-pagination-changed", "artifact-pagination-late",
+        "artifact-list-duplicate", "artifact-digest-mismatch",
+        "artifact-expired", "artifact-upload-outcome-unknown",
+        "artifact-delete-outcome-unknown", "workflow-run", "delete-exact",
+        "inline", "inline-warning", "unsupported", "fork", "permission",
+        "wrong-action", "concurrency", "stale-head", "provider-malformed",
+        "public-result", "credentials-missing", "crash-mutation",
+        "crash-recovery", "cancel-before-side-effect",
+        "cancel-before-dispatch", "cancel-known-commit",
+        "cancel-outcome-unknown", "cancel-escalation", "host-crash",
+    ], StringComparer.Ordinal);
 
     private static bool ValidateInventory(string path)
     {
@@ -936,7 +1140,7 @@ internal static class FrameworkSupervisor
 
         var actual = Convert.ToHexString(SHA256.HashData(
             Encoding.UTF8.GetBytes(framing.ToString()))).ToLowerInvariant();
-        return count == 339 && root.GetProperty("aggregate_sha256")
+        return count == 349 && root.GetProperty("aggregate_sha256")
             .GetString() == actual;
     }
 
@@ -1012,8 +1216,12 @@ internal static class FrameworkSupervisor
                 fields => fields[0],
                 fields => new CanaryRoute(
                     fields[2].Split(';', StringSplitOptions.RemoveEmptyEntries)
-                        .Concat(fields[3].Split(';',
-                            StringSplitOptions.RemoveEmptyEntries))
+                        .Where(sink => sink != "-")
+                        .ToHashSet(StringComparer.Ordinal),
+                    fields[3].Split(';', StringSplitOptions.RemoveEmptyEntries)
+                        .Where(sink => sink != "-")
+                        .ToHashSet(StringComparer.Ordinal),
+                    fields[4].Split(';', StringSplitOptions.RemoveEmptyEntries)
                         .Where(sink => sink != "-")
                         .ToHashSet(StringComparer.Ordinal),
                     fields[5]),
@@ -1026,27 +1234,40 @@ internal static class FrameworkSupervisor
             .ToArray();
         if (observations.Any(fields => fields.Length != 2 ||
                 !routes.TryGetValue(fields[0], out var route) ||
-                !route.AllowedSinks.Contains(fields[1])))
+                !RouteAllows(route, fields[1])))
         {
             return false;
         }
 
         foreach (var (canaryClass, route) in routes)
         {
+            if (route.ForbiddenSinks.Count == 0 ||
+                route.ForbiddenSinks.Any(pattern =>
+                    !RejectsNegativeInjection(route, pattern)))
+            {
+                return false;
+            }
+
             var count = observations.Count(fields => fields[0] == canaryClass);
             var expected = route.Cardinality switch
             {
                 "exactly-one" => 1,
-                "equals-provider-requests" => SumScenarioCounter(root,
-                    "provider-request-count"),
-                "equals-github-and-artifact-rest-requests" =>
+                "equals-provider-requests-and-host-credentials" =>
+                    SumScenarioCounter(root, "provider-request-count") +
+                    SumScenarioCounter(root,
+                        "host-provider-credential-count"),
+                "equals-github-rest-and-host-credentials" =>
                     SumScenarioCounter(root, "github-request-count") +
-                    ReadInt(root, "official-rest-count"),
+                    ReadInt(root, "official-rest-count") +
+                    SumScenarioCounter(root, "host-github-credential-count"),
                 "equals-twirp-requests" =>
                     ReadInt(root, "official-twirp-count"),
                 "equals-blob-requests" =>
                     ReadInt(root, "official-blob-count") +
                     ReadInt(root, "official-signed-download-count"),
+                "equals-session-plaintext-provider-requests" =>
+                    SumScenarioCounter(root,
+                        "provider-session-plaintext-request-count"),
                 "at-least-one" => count,
                 _ => -1,
             };
@@ -1058,7 +1279,30 @@ internal static class FrameworkSupervisor
             }
         }
 
+        File.WriteAllText(Path.Join(root, "canary-negative-injection-count"),
+            routes.Count.ToString(CultureInfo.InvariantCulture));
         return true;
+    }
+
+    private static bool RouteAllows(CanaryRoute route, string sink) =>
+        (route.AllowedSinks.Contains(sink) ||
+            route.TerminalSinks.Contains(sink)) &&
+        !route.ForbiddenSinks.Any(pattern => SinkMatches(pattern, sink));
+
+    private static bool SinkMatches(string pattern, string sink) =>
+        pattern.EndsWith('*')
+            ? sink.StartsWith(pattern[..^1], StringComparison.Ordinal)
+            : sink == pattern;
+
+    private static string NegativeSink(string pattern) =>
+        pattern.EndsWith('*') ? pattern[..^1] + "negative-injection" : pattern;
+
+    private static bool RejectsNegativeInjection(
+        CanaryRoute route,
+        string pattern)
+    {
+        var sink = NegativeSink(pattern);
+        return SinkMatches(pattern, sink) && !RouteAllows(route, sink);
     }
 
     private static int SumScenarioCounter(string root, string name) =>
@@ -1142,15 +1386,36 @@ internal static class FrameworkSupervisor
             Encoding.UTF8.GetBytes(framing.ToString()))).ToLowerInvariant();
     }
 
-    private static string CanaryObservationDigest(string root)
+    private static string CanaryRouteCoverageDigest(string root)
     {
         var framing = string.Join('\n', Directory.EnumerateFiles(root,
                     "canary-observations.tsv", SearchOption.AllDirectories)
                 .SelectMany(File.ReadAllLines)
                 .Where(line => line.Length > 0)
+                .Distinct(StringComparer.Ordinal)
                 .Order(StringComparer.Ordinal)) + "\n";
-        return Convert.ToHexString(SHA256.HashData(
-            Encoding.UTF8.GetBytes(framing))).ToLowerInvariant();
+        return Sha256Text(framing);
+    }
+
+    private static string CanonicalizedIdentityDigest(string path)
+    {
+        var identities = new Dictionary<string, string>(StringComparer.Ordinal);
+        var normalized = Regex.Replace(
+            File.ReadAllText(path),
+            "(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])",
+            match =>
+            {
+                if (!identities.TryGetValue(match.Value, out var identity))
+                {
+                    identity = "<identity-" + identities.Count.ToString(
+                        "D3", CultureInfo.InvariantCulture) + ">";
+                    identities.Add(match.Value, identity);
+                }
+
+                return identity;
+            },
+            RegexOptions.CultureInvariant);
+        return Sha256Text(normalized);
     }
 
     private static string JsonProperty(string path, string property)
@@ -1158,6 +1423,61 @@ internal static class FrameworkSupervisor
         using var document = JsonDocument.Parse(File.ReadAllBytes(path));
         return document.RootElement.GetProperty(property).GetString() ?? "";
     }
+
+    private static bool ValidateContinuationStateTrace(string scenario)
+    {
+        var path = Path.Join(scenario, "state-operation-identities.tsv");
+        if (!File.Exists(path)) return false;
+        var lines = File.ReadAllLines(path)
+            .Select(line => line.Split('\t')).Where(parts => parts.Length == 7)
+            .ToArray();
+        var predecessor = lines.Any(parts => parts[0] == "download" &&
+            parts[4] == "None" && parts[6].Split('|') is { Length: 7 } values &&
+            values[4] == "900" && values[5] == "1");
+        var successor = lines.Any(parts => parts[0] == "upload" &&
+            parts[4] == "None" && parts[5] == "Committed" &&
+            parts[6].Split('|') is { Length: 7 } values &&
+            values[2] == parts[3] && values[4] == "901" &&
+            values[5] == "1");
+        var acceptedReadBack = lines.Any(parts => parts[0] == "readback" &&
+            parts[4] == "None" &&
+            parts[6].Split('|') is { Length: 7 } values &&
+            values[0] == parts[2] && values[2] == parts[3] &&
+            values[4] == "901" && values[5] == "1");
+        return predecessor && successor && acceptedReadBack;
+    }
+
+    private static bool ContinuationHeadAdvanced(string root)
+    {
+        var scenario = Path.Join(root, "dispatch-continuation");
+        var predecessor = ReadOptionalText(scenario,
+            "sticky-predecessor-comment.json");
+        var successor = ReadOptionalText(scenario,
+            "sticky-successor-comment.json");
+        return predecessor.Contains(FrameworkGitHubHandler.HeadSha,
+                StringComparison.Ordinal) &&
+            !predecessor.Contains(FrameworkGitHubHandler.ContinuedHeadSha,
+                StringComparison.Ordinal) &&
+            successor.Contains(FrameworkGitHubHandler.ContinuedHeadSha,
+                StringComparison.Ordinal);
+    }
+
+    private static string ContinuationStickyDigest(string root)
+    {
+        var scenario = Path.Join(root, "dispatch-continuation");
+        var framing = ReadOptionalText(scenario,
+            "sticky-predecessor-comment.json") + "\0" +
+            ReadOptionalText(scenario, "sticky-successor-comment.json");
+        var normalized = Regex.Replace(
+            framing,
+            "scope_sha256=[0-9a-f]{64}",
+            "scope_sha256=<prepared-payload-scope>",
+            RegexOptions.CultureInvariant);
+        return Sha256Text(normalized);
+    }
+
+    private static string Sha256Text(string value) => Convert.ToHexString(
+        SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 
     private static string Sha256(string path) => Convert.ToHexString(
         SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
@@ -1205,6 +1525,7 @@ internal static class FrameworkSupervisor
         bool ExpectNoProvider = false,
         int? ExpectedProviderRequests = null,
         int? ExpectedStickyMutations = null,
+        bool RequireSuccessfulContinuation = false,
         string? RequiredScenarioEvidence = null,
         string? RequiredStateOperation = null,
         string? RequiredGlobalEvidence = null);
@@ -1230,5 +1551,7 @@ internal static class FrameworkSupervisor
 
     private sealed record CanaryRoute(
         IReadOnlySet<string> AllowedSinks,
+        IReadOnlySet<string> TerminalSinks,
+        IReadOnlySet<string> ForbiddenSinks,
         string Cardinality);
 }

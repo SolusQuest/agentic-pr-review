@@ -20,6 +20,7 @@ internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
     internal static readonly string BaseSha = new('d', 40);
     internal static readonly string HeadSha = new('e', 40);
     internal static readonly string ContinuedHeadSha = new('f', 40);
+    internal static readonly string ConflictHeadSha = new('7', 40);
 
     private static readonly string WorkflowRoot = new('1', 40);
     private static readonly string GitHubRoot = new('2', 40);
@@ -48,7 +49,8 @@ internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
         }
 
         Increment("github-request-count");
-        RecordObservation("github-token", "github.authorization");
+        FrameworkCanaryCapture.CaptureAll(scenarioRoot,
+            "github.authorization", request.Headers.Authorization.ToString());
         var path = request.RequestUri.AbsolutePath;
         var query = request.RequestUri.Query;
         var mode = ReadMode();
@@ -61,10 +63,12 @@ internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
         var suffix = path[prefix.Length..];
         if (request.Method == HttpMethod.Get && suffix.Length == 0)
         {
-            RecordObservation("repository", "github.repository");
-            return Json(HttpStatusCode.OK, $$"""
+            var response = $$"""
                 {"id":{{RepositoryId}},"full_name":"{{FrameworkCanaries.Repository}}","default_branch":"main"}
-                """);
+                """;
+            FrameworkCanaryCapture.CaptureAll(scenarioRoot,
+                "github.repository", response);
+            return Json(HttpStatusCode.OK, response);
         }
 
         if (request.Method == HttpMethod.Get &&
@@ -81,8 +85,9 @@ internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
         if (request.Method == HttpMethod.Get &&
             suffix == "/contents/.github/workflows/r4-trusted-proof.yml")
         {
-            RecordObservation("workflow-source", "github.workflow-source");
             var workflow = Encoding.UTF8.GetBytes(Workflow(mode));
+            FrameworkCanaryCapture.CaptureAll(scenarioRoot,
+                "github.workflow-source", workflow);
             return Json(HttpStatusCode.OK, JsonSerializer.Serialize(new
             {
                 type = "file",
@@ -150,8 +155,7 @@ internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
         if (request.Method == HttpMethod.Get &&
             suffix == "/pulls/147/files")
         {
-            RecordObservation("reviewed-path", "github.changed-files");
-            return Json(HttpStatusCode.OK, "[" + JsonSerializer.Serialize(new
+            var response = "[" + JsonSerializer.Serialize(new
             {
                 sha = GitBlobSha(FileBytes),
                 filename = FrameworkCanaries.ReviewedPath,
@@ -161,7 +165,10 @@ internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
                 deletions = 0,
                 changes = 1,
                 patch = "@@ -0,0 +1 @@\n+" + FrameworkCanaries.ToolData,
-            }) + "]");
+            }) + "]";
+            FrameworkCanaryCapture.CaptureAll(scenarioRoot,
+                "github.changed-files", response);
+            return Json(HttpStatusCode.OK, response);
         }
 
         if (suffix == "/issues/147/comments" && request.Method == HttpMethod.Get)
@@ -201,6 +208,8 @@ internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
         if (suffix == "/issues/comments/701" && request.Method == HttpMethod.Get)
         {
             Increment("sticky-readback-count");
+            File.WriteAllText(
+                Path.Join(scenarioRoot, "sticky-readback-comment-id"), "701");
             if (mode == "cancel-known-commit")
             {
                 File.WriteAllText(Path.Join(scenarioRoot,
@@ -216,10 +225,26 @@ internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
         if (suffix == "/issues/comments/701" && request.Method == HttpMethod.Patch)
         {
             Increment("sticky-update-count");
+            File.WriteAllText(
+                Path.Join(scenarioRoot, "sticky-update-comment-id"), "701");
             var body = await request.Content!.ReadAsStringAsync(
                 cancellationToken).ConfigureAwait(false);
             var document = IssueComment(701, ExtractString(body, "body"));
+            if (mode == "continuation")
+            {
+                var predecessor = ReadOptional(mode, "sticky-comment.json");
+                if (predecessor is not null)
+                {
+                    File.WriteAllText(Path.Join(scenarioRoot,
+                        "sticky-predecessor-comment.json"), predecessor);
+                }
+            }
             WriteStored(mode, "sticky-comment.json", document);
+            if (mode == "continuation")
+            {
+                File.WriteAllText(Path.Join(scenarioRoot,
+                    "sticky-successor-comment.json"), document);
+            }
             return Json(HttpStatusCode.OK, document);
         }
 
@@ -444,6 +469,7 @@ internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
     }
 
     private string CurrentHead(string mode) =>
+        mode == "cross-head-conflict" ? ConflictHeadSha :
         mode == "continuation" ||
             mode == "stale" && ReadCounter("provider-sequence") >= 6
             ? ContinuedHeadSha
@@ -471,7 +497,8 @@ internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
         var tree = sha == WorkflowSha ? WorkflowRoot :
             sha == BaseSha ? BaseRoot : HeadRoot;
         var parents = sha == HeadSha ? new[] { BaseSha } :
-            sha == ContinuedHeadSha ? new[] { HeadSha } : Array.Empty<string>();
+            sha == ContinuedHeadSha ? new[] { HeadSha } :
+            sha == ConflictHeadSha ? new[] { BaseSha } : Array.Empty<string>();
         return JsonSerializer.Serialize(new
         {
             sha,
@@ -589,7 +616,8 @@ internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
         mode is "mutation-crash" or "mutation-recovery"
             ? Path.Join(Directory.GetParent(scenarioRoot)!.FullName,
                 "shared-github")
-            : mode is "continuation-seed" or "continuation"
+            : mode is "continuation-seed" or "continuation" or
+                "cross-head-conflict"
                 ? Path.Join(Directory.GetParent(scenarioRoot)!.FullName,
                     "shared-continuation-github")
             : scenarioRoot;
@@ -606,11 +634,6 @@ internal sealed class FrameworkGitHubHandler(string scenarioRoot) :
             : 1;
         File.WriteAllText(path, value.ToString(CultureInfo.InvariantCulture));
     }
-
-    private void RecordObservation(string canaryClass, string sink) =>
-        File.AppendAllText(
-            Path.Join(scenarioRoot, "canary-observations.tsv"),
-            canaryClass + "\t" + sink + "\n");
 
     private static string GitBlobSha(byte[] bytes)
     {

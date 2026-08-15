@@ -2,8 +2,32 @@
   "schema": "apr.action-host.e1-base-inventory.v1",
   "base_sha": "e698fb1df6daf49f393e87fac4f00e3a2ec2c716",
   "selection": "W3-W12, W14, and W15 superseded surfaces at the accepted E1 base",
-  "aggregate_sha256": "804927c350fbf57ce08c477196c99c42b5c72781be4a81a532f0c45fdfc01dfe",
+  "aggregate_sha256": "7eacf6e0aacac15a99330e1c54050d4d259688f60ab729c9b0d6383b1f584b6d",
   "files": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "109e2af9f11eb8e501b1200deb9b6c9656d23cf052105996e9119c001d5d2467"
+    },
+    {
+      "path": "docs/20_architecture/agent-runtime-rebaseline.md",
+      "sha256": "75d48440e5ce3de88686339d69ca68a8cc77b876d11283d0d34b352b9ef04936"
+    },
+    {
+      "path": "docs/20_architecture/r1-legacy-removal-handoff.md",
+      "sha256": "99311db50b0d3a00eef2f3c378df2b31e924f96fb01c47c157bc7de4c4cf90e2"
+    },
+    {
+      "path": "docs/20_architecture/r3-single-shot-removal-handoff.md",
+      "sha256": "a64ec9e534b3db3e3739f45649189b2d5b7e19c8be795c65694d2c93e093c2be"
+    },
+    {
+      "path": "docs/20_architecture/r4-actionhost-wrapper-plan.md",
+      "sha256": "96f8cfd4d9b1246b7d8dcdd994789dd2085ba1ccb7ad153afbd78c036779d7ae"
+    },
+    {
+      "path": "docs/50_ai/agent-context.md",
+      "sha256": "7d6ac3a5f6746ccb618b3b299430a407869c4b27664de27b74f8a8ec196e1dab"
+    },
     {
       "path": "protocol/fixtures/prefix-contract/v1/append/bootstrap-continuation.json",
       "sha256": "d3b8929975153570aae34e34c42616dce6e03a811aea833a8d4f3a1cddf03d32"
@@ -741,6 +765,14 @@
       "sha256": "5f59c726a932db1636dcc4f67587f82249e3059d1d7e06196bec4c8009905213"
     },
     {
+      "path": "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj",
+      "sha256": "f5d636811b693218f7f417ca74e80f5b41ddcf1a8e4627191921b594b2cdff5b"
+    },
+    {
+      "path": "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs",
+      "sha256": "d9f0012976ac2c940ce515b5bf75af01622ddd280bc609f3c143bf6593fae453"
+    },
+    {
       "path": "src/canonical-json/edge-cases.test.ts",
       "sha256": "43c890fd59f9d031c1bbb038243b07e3cb470e336da8cf935cbc04a8ed94c5ad"
     },
@@ -1015,6 +1047,14 @@
     {
       "path": "src/provider-metadata/types.ts",
       "sha256": "987c328f516b44f4169af5646cbafe7602d2e3b08006b1ffb42b4c20fa145826"
+    },
+    {
+      "path": "src/residual-reference-allowlist.ts",
+      "sha256": "3547cb851871274ac43deef5d06fa2192a89751b7bba654f92f2ee14219c0316"
+    },
+    {
+      "path": "src/runtime-integration/runtime-integration.test.ts",
+      "sha256": "eceab8415ba63b60bd8409bd792d061e7e72781c31475f22fadfb96f13b11fa7"
     },
     {
       "path": "src/runtime-invocation/__test-fixtures__/fake-runtime.mjs",
