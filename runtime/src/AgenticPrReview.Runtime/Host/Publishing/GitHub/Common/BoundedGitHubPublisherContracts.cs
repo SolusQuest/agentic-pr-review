@@ -146,6 +146,30 @@ internal sealed record BoundedGitHubIssueCommentPage(
     IReadOnlyList<BoundedGitHubIssueComment> Comments, int? NextPage,
     int? LastPage);
 
+internal sealed record BoundedGitHubReviewComment(
+    long Id,
+    long? ReviewId,
+    string ApiUrl,
+    string PullRequestUrl,
+    string HtmlUrl,
+    string Body,
+    string? Path,
+    int? Line,
+    string? Side,
+    string? CommitId);
+
+internal sealed record BoundedGitHubReviewCommentPage(
+    IReadOnlyList<BoundedGitHubReviewComment> Comments,
+    int? NextPage,
+    int? LastPage);
+
+internal sealed record BoundedGitHubPullRequestReview(
+    long Id,
+    string ApiUrl,
+    string PullRequestUrl,
+    string HtmlUrl,
+    string CommitId);
+
 internal interface IBoundedGitHubOperationClock
 {
     TimeSpan Elapsed { get; }
