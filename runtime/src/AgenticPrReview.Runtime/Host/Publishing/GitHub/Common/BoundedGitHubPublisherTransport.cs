@@ -815,20 +815,6 @@ internal sealed class BoundedGitHubPublisherTransport :
             return false;
         }
 
-        var marker = InlineCommentMarker.Inspect(doc.Body);
-        if (marker.Kind == InlineMarkerInspectionKind.Valid &&
-            (doc.PullRequestReviewId is not > 0 || doc.Path is null ||
-                doc.CommitId is null || doc.Line is < 1 ||
-                doc.Side != "RIGHT" ||
-                !AgenticPrReview.Runtime.Agent.Tools.RepositoryPath.IsValid(
-                    doc.Path) ||
-                R4Markdown.ValidateBodyText(doc.Body) !=
-                    R4BodyTextValidation.Valid ||
-                !IsLowerHex(doc.CommitId, 40)))
-        {
-            return false;
-        }
-
         comment = new(doc.Id.Value, doc.PullRequestReviewId, doc.Url,
             doc.PullRequestUrl, doc.HtmlUrl, doc.Body, doc.Path,
             doc.Line, doc.Side, doc.CommitId!);

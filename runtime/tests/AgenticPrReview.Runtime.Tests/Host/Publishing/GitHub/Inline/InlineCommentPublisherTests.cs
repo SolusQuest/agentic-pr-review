@@ -87,6 +87,57 @@ public sealed class InlineCommentPublisherTests
     }
 
     [Fact]
+    public async Task LaterRevisionWithNullLinePreservesDuplicateAcrossRuns()
+    {
+        var data = await CreateAsync();
+        var rendered = Render(data.Request);
+        var published = Comment(data.Request, rendered[0], 8);
+        var transport = new FakeInlineTransport();
+        transport.EnqueuePage();
+        transport.EnqueuePage(published);
+        transport.EnqueuePage(published with { Line = null });
+        var publisher = new InlineCommentPublisher(
+            new FakeInlineFactory(transport));
+
+        var first = await publisher.PublishAsync(
+            data.Request, CancellationToken.None);
+        var laterRevision = await publisher.PublishAsync(
+            data.Request, CancellationToken.None);
+
+        Assert.True(first.IsComplete);
+        Assert.Equal(1, first.Reasons.ReconciledPublished);
+        Assert.True(laterRevision.IsComplete);
+        Assert.Equal(1, laterRevision.Reasons.ExistingDuplicate);
+        Assert.Equal(1, transport.BatchCalls);
+        Assert.Equal(0, transport.IndividualCalls);
+    }
+
+    [Fact]
+    public async Task UnrelatedHistoricalMarkerWithNullLineDoesNotBlockDiscovery()
+    {
+        var data = await CreateAsync();
+        var rendered = Render(data.Request);
+        var historical = Comment(data.Request, rendered[0], 7) with
+        {
+            Body = InlineCommentMarker.Append(
+                "historical", new string('0', 64)),
+            Line = null,
+        };
+        var transport = new FakeInlineTransport();
+        transport.EnqueuePage(historical);
+        transport.EnqueuePage(Comment(data.Request, rendered[0], 8));
+
+        var result = await new InlineCommentPublisher(
+                new FakeInlineFactory(transport))
+            .PublishAsync(data.Request, CancellationToken.None);
+
+        Assert.True(result.IsComplete);
+        Assert.Equal(1, result.Reasons.ReconciledPublished);
+        Assert.Equal(1, transport.BatchCalls);
+        Assert.Equal(0, transport.IndividualCalls);
+    }
+
+    [Fact]
     public async Task PublisherRejectsPageAndRecordCapPlusOne()
     {
         var recordData = await CreateAsync();
@@ -166,6 +217,30 @@ public sealed class InlineCommentPublisherTests
         Assert.Equal(1, result.Reasons.ReconciledPublished);
         Assert.Equal(1, result.BatchAttempts);
         Assert.Equal(0, result.IndividualAttempts);
+    }
+
+    [Fact]
+    public async Task MatchingHistoricalMarkerCannotReconcileBatch()
+    {
+        var data = await CreateAsync();
+        var rendered = Render(data.Request);
+        var transport = new FakeInlineTransport();
+        transport.EnqueuePage();
+        transport.EnqueuePage(Comment(data.Request, rendered[0], 8) with
+        {
+            Line = null,
+        });
+
+        var result = await new InlineCommentPublisher(
+                new FakeInlineFactory(transport))
+            .PublishAsync(data.Request, CancellationToken.None);
+
+        Assert.False(result.IsComplete);
+        Assert.Equal(BoundedGitHubPublisherOutcome.OutcomeUnknown,
+            result.Outcome);
+        Assert.Equal(1, result.Reasons.BatchOutcomeUnknown);
+        Assert.Equal(0, result.IndividualAttempts);
+        Assert.Equal(0, transport.IndividualCalls);
     }
 
     [Fact]
@@ -301,6 +376,35 @@ public sealed class InlineCommentPublisherTests
         Assert.Equal(BoundedGitHubPublisherOutcome.OutcomeUnknown,
             result.Outcome);
         Assert.Equal(1, result.Reasons.ConcurrentDuplicate);
+        Assert.Equal(1, result.Reasons.ReadbackIncomplete);
+        Assert.Equal(0, result.IndividualAttempts);
+        Assert.Equal(0, transport.IndividualCalls);
+    }
+
+    [Fact]
+    public async Task MatchingHistoricalMarkerCannotEnterFallbackFanout()
+    {
+        var data = await CreateAsync();
+        var rendered = Render(data.Request);
+        var transport = new FakeInlineTransport
+        {
+            Batch = BoundedGitHubHttpResult<BoundedGitHubPullRequestReview>
+                .Failed(BoundedGitHubHttpOutcome.KnownNotSent,
+                    BoundedGitHubPublisherReason.BatchValidationRejected),
+        };
+        transport.EnqueuePage();
+        transport.EnqueuePage(Comment(data.Request, rendered[0], 10) with
+        {
+            Line = null,
+        });
+
+        var result = await new InlineCommentPublisher(
+                new FakeInlineFactory(transport))
+            .PublishAsync(data.Request, CancellationToken.None);
+
+        Assert.False(result.IsComplete);
+        Assert.Equal(BoundedGitHubPublisherOutcome.OutcomeUnknown,
+            result.Outcome);
         Assert.Equal(1, result.Reasons.ReadbackIncomplete);
         Assert.Equal(0, result.IndividualAttempts);
         Assert.Equal(0, transport.IndividualCalls);
@@ -793,6 +897,28 @@ public sealed class InlineCommentPublisherTests
     }
 
     [Fact]
+    public async Task HistoricalInlineMarkerAllowsNullLineFromGitHub()
+    {
+        var data = await CreateAsync();
+        var rendered = Render(data.Request);
+        using var transport = BoundedGitHubPublisherTransport
+            .CreateInlineForTesting("token-canary", data.Request,
+                new DelegateHandler(_ => Json(HttpStatusCode.OK,
+                    "[" + HistoricalInlineReviewCommentDocument(
+                        data.Request, rendered[0], 72) + "]")));
+
+        var result = await transport.ListReviewCommentsAsync(
+            1, CancellationToken.None);
+
+        var comment = Assert.Single(Assert.IsType<
+            BoundedGitHubReviewCommentPage>(result.Value).Comments);
+        Assert.Equal(rendered[0].Body, comment.Body);
+        Assert.Equal(rendered[0].Candidate.Path, comment.Path);
+        Assert.Null(comment.Line);
+        Assert.Equal("RIGHT", comment.Side);
+    }
+
+    [Fact]
     public async Task MalformedCurrentMarkerStillClosesBeforeAnyWrite()
     {
         var data = await CreateAsync();
@@ -1224,6 +1350,30 @@ public sealed class InlineCommentPublisherTests
             line = (int?)null,
             side = (string?)null,
             commit_id = (string?)null,
+        });
+
+    private static string HistoricalInlineReviewCommentDocument(
+        AuthorizedInlinePublicationRequest request,
+        RenderedInlineComment rendered,
+        long id) => JsonSerializer.Serialize(new
+        {
+            id,
+            pull_request_review_id = 99,
+            url = $"https://api.github.com/repos/" +
+                $"{ActionHostAuthorizationScenario.RepositoryName}/pulls/" +
+                $"comments/{id}",
+            pull_request_url = $"https://api.github.com/repos/" +
+                $"{ActionHostAuthorizationScenario.RepositoryName}/pulls/" +
+                $"{ActionHostAuthorizationScenario.PullRequestNumber}",
+            html_url = $"https://github.com/" +
+                $"{ActionHostAuthorizationScenario.RepositoryName}/pull/" +
+                $"{ActionHostAuthorizationScenario.PullRequestNumber}" +
+                $"#discussion_r{id}",
+            body = rendered.Body,
+            path = rendered.Candidate.Path,
+            line = (int?)null,
+            side = "RIGHT",
+            commit_id = request.Authorization.PullRequest.HeadSha,
         });
 
     private static async Task<TestData> CreateAsync(
