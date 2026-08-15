@@ -5,13 +5,15 @@ using System.Text.Json;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
+using AgenticPrReview.Runtime.Host.Publishing.GitHub.Inline;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 
 namespace AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 
 internal sealed class BoundedGitHubPublisherTransportFactory :
-    IStickyGitHubPublisherTransportFactory
+    IStickyGitHubPublisherTransportFactory,
+    IInlineGitHubPublisherTransportFactory
 {
     public IStickyGitHubPublisherTransport Create(ActionHostGitHubToken token,
         AuthorizedStickyPublicationRequest request)
@@ -30,6 +32,14 @@ internal sealed class BoundedGitHubPublisherTransportFactory :
         return BoundedGitHubPublisherTransport.CreateReadback(
             token.ExportForPrivateLaunch(), request);
     }
+
+    public IInlineGitHubPublisherTransport Create(
+        AuthorizedInlinePublicationRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return BoundedGitHubPublisherTransport.CreateInline(
+            request.Token.ExportForPrivateLaunch(), request);
+    }
 }
 
 internal sealed class BoundedGitHubPublisherCredentialException : Exception
@@ -39,18 +49,20 @@ internal sealed class BoundedGitHubPublisherCredentialException : Exception
 }
 
 internal sealed class BoundedGitHubPublisherTransport :
-    IStickyGitHubPublisherTransport
+    IStickyGitHubPublisherTransport,
+    IInlineGitHubPublisherTransport
 {
     private readonly string _token;
     private readonly string _repositoryName;
     private readonly string _repositoryPath;
     private readonly long _pullRequestNumber;
+    private readonly string _headSha;
     private readonly HttpClient _client;
     private readonly TimeSpan _requestTimeout;
     private readonly TimeSpan _overallTimeout;
     private readonly IBoundedGitHubOperationClock _operation;
     private readonly SemaphoreSlim _responseReadGate = new(1, 1);
-    private readonly R4PublicationIdentityV1 _stickyIdentity;
+    private readonly R4PublicationIdentityV1? _stickyIdentity;
     private readonly AuthorizedStickyPublicationRequest? _stickyRequest;
     private int _requestCount;
     private long _aggregateBytes;
@@ -62,23 +74,25 @@ internal sealed class BoundedGitHubPublisherTransport :
     private bool _stickyDiscoveryComplete;
     private bool _stickyDiscoveryInvalid;
     private int _mutationDispatched;
+    private int _inlineBatchDispatched;
+    private int _inlineIndividualDispatched;
     private bool _disposed;
 
     private BoundedGitHubPublisherTransport(string token,
         ActionHostAuthorizer.AuthorizedInvocation authorization,
-        R4PublicationIdentityV1 stickyIdentity,
+        R4PublicationIdentityV1? stickyIdentity,
         AuthorizedStickyPublicationRequest? stickyRequest,
         HttpMessageHandler handler, TimeSpan requestTimeout,
         TimeSpan overallTimeout, IBoundedGitHubOperationClock operation)
     {
         Validate(token, authorization);
-        _stickyIdentity = stickyIdentity ?? throw new ArgumentNullException(
-            nameof(stickyIdentity));
+        _stickyIdentity = stickyIdentity;
         _stickyRequest = stickyRequest;
         _token = token;
         _repositoryName = authorization.PullRequest.BaseRepositoryName;
         _repositoryPath = RepositoryPath(_repositoryName);
         _pullRequestNumber = authorization.PullRequest.Number;
+        _headSha = authorization.PullRequest.HeadSha;
         _requestTimeout = requestTimeout;
         _overallTimeout = overallTimeout;
         _operation = operation ?? throw new ArgumentNullException(
@@ -98,6 +112,25 @@ internal sealed class BoundedGitHubPublisherTransport :
             BoundedGitHubPublisherPolicy.RequestTimeout,
             BoundedGitHubPublisherPolicy.OverallTimeout,
             new StopwatchBoundedGitHubOperationClock());
+
+    internal static BoundedGitHubPublisherTransport CreateInline(string token,
+        AuthorizedInlinePublicationRequest request) => new(token,
+            request.Authorization, null, null,
+            ActionHostGitHubAuthorizationTransport.CreateHandler(
+                TimeSpan.FromSeconds(10)),
+            BoundedGitHubPublisherPolicy.RequestTimeout,
+            BoundedGitHubPublisherPolicy.OverallTimeout,
+            new StopwatchBoundedGitHubOperationClock());
+
+    internal static BoundedGitHubPublisherTransport CreateInlineForTesting(
+        string token, AuthorizedInlinePublicationRequest request,
+        HttpMessageHandler handler, TimeSpan? requestTimeout = null,
+        TimeSpan? overallTimeout = null,
+        IBoundedGitHubOperationClock? operation = null) => new(token,
+            request.Authorization, null, null, handler,
+            requestTimeout ?? BoundedGitHubPublisherPolicy.RequestTimeout,
+            overallTimeout ?? BoundedGitHubPublisherPolicy.OverallTimeout,
+            operation ?? new StopwatchBoundedGitHubOperationClock());
 
     internal static IStickyGitHubReadbackTransport CreateReadback(string token,
         AuthorizedStickyReadbackRequest request) =>
@@ -143,7 +176,9 @@ internal sealed class BoundedGitHubPublisherTransport :
                     .BoundedGitHubIssueCommentDocumentArray);
             if (docs is null ||
                 docs.Length > BoundedGitHubPublisherPolicy.PerPage ||
-                !TryNextPage(captured.Value.Links, page, out var next,
+                !TryNextPage(captured.Value.Links, page,
+                    $"/repos/{_repositoryPath}/issues/" +
+                    $"{_pullRequestNumber}/comments", out var next,
                     out var last))
                 return Fail<BoundedGitHubIssueCommentPage>(
                     BoundedGitHubHttpOutcome.KnownNotSent,
@@ -213,6 +248,128 @@ internal sealed class BoundedGitHubPublisherTransport :
         return MapComment(captured, false);
     }
 
+    public async Task<BoundedGitHubHttpResult<
+        BoundedGitHubReviewCommentPage>> ListReviewCommentsAsync(
+            int page,
+            CancellationToken cancellationToken)
+    {
+        if (page is < 1 or > BoundedGitHubPublisherPolicy.MaximumPages)
+        {
+            return Fail<BoundedGitHubReviewCommentPage>(
+                BoundedGitHubHttpOutcome.KnownNotSent,
+                BoundedGitHubPublisherReason.InvalidRequest);
+        }
+
+        var endpoint = $"/repos/{_repositoryPath}/pulls/" +
+            $"{_pullRequestNumber}/comments";
+        var captured = await SendAsync(HttpMethod.Get,
+            $"{endpoint}?per_page={BoundedGitHubPublisherPolicy.PerPage}" +
+            $"&page={page}", null, HttpStatusCode.OK, false,
+            cancellationToken);
+        if (captured.Value is null)
+        {
+            return Fail<BoundedGitHubReviewCommentPage>(captured.Outcome,
+                captured.Reason, captured.ValidationEvidence);
+        }
+
+        try
+        {
+            var docs = JsonSerializer.Deserialize(captured.Value.Body,
+                BoundedGitHubPublisherJsonContext.Default
+                    .BoundedGitHubReviewCommentDocumentArray);
+            if (docs is null ||
+                docs.Length > BoundedGitHubPublisherPolicy.PerPage ||
+                !TryNextPage(captured.Value.Links, page, endpoint,
+                    out var next, out var last))
+            {
+                return Fail<BoundedGitHubReviewCommentPage>(
+                    BoundedGitHubHttpOutcome.KnownNotSent,
+                    BoundedGitHubPublisherReason.InvalidPagination);
+            }
+
+            var comments = new List<BoundedGitHubReviewComment>(docs.Length);
+            foreach (var doc in docs)
+            {
+                if (doc is null || !TryMap(doc, out var comment))
+                {
+                    return Fail<BoundedGitHubReviewCommentPage>(
+                        BoundedGitHubHttpOutcome.KnownNotSent,
+                        BoundedGitHubPublisherReason.InvalidResponse);
+                }
+
+                comments.Add(comment!);
+            }
+
+            return BoundedGitHubHttpResult<BoundedGitHubReviewCommentPage>
+                .Success(new(comments, next, last));
+        }
+        catch (JsonException)
+        {
+            return Fail<BoundedGitHubReviewCommentPage>(
+                BoundedGitHubHttpOutcome.KnownNotSent,
+                BoundedGitHubPublisherReason.InvalidResponse);
+        }
+    }
+
+    public async Task<BoundedGitHubHttpResult<
+        BoundedGitHubPullRequestReview>> CreateBatchReviewAsync(
+            ReadOnlyMemory<byte> body,
+            CancellationToken cancellationToken)
+    {
+        if (body.IsEmpty || body.Length >
+                BoundedGitHubPublisherPolicy.MaximumInlineBatchRequestBytes ||
+            Interlocked.Exchange(ref _inlineBatchDispatched, 1) != 0)
+        {
+            return Fail<BoundedGitHubPullRequestReview>(
+                BoundedGitHubHttpOutcome.KnownNotSent,
+                BoundedGitHubPublisherReason.InvalidRequest);
+        }
+
+        var captured = await SendAsync(HttpMethod.Post,
+            $"/repos/{_repositoryPath}/pulls/{_pullRequestNumber}/reviews",
+            body, HttpStatusCode.OK, true, cancellationToken,
+            exactBatchValidation: true);
+        return MapReview(captured);
+    }
+
+    public async Task<BoundedGitHubHttpResult<
+        BoundedGitHubReviewComment>> CreateReviewCommentAsync(
+            ReadOnlyMemory<byte> body,
+            CancellationToken cancellationToken)
+    {
+        if (body.IsEmpty || body.Length > BoundedGitHubPublisherPolicy
+                .MaximumIndividualInlineRequestBytes ||
+            Interlocked.Increment(ref _inlineIndividualDispatched) > 5)
+        {
+            return Fail<BoundedGitHubReviewComment>(
+                BoundedGitHubHttpOutcome.KnownNotSent,
+                BoundedGitHubPublisherReason.InvalidRequest);
+        }
+
+        var captured = await SendAsync(HttpMethod.Post,
+            $"/repos/{_repositoryPath}/pulls/" +
+            $"{_pullRequestNumber}/comments", body,
+            HttpStatusCode.Created, true, cancellationToken);
+        return MapReviewComment(captured, mutation: true);
+    }
+
+    public async Task<BoundedGitHubHttpResult<BoundedGitHubReviewComment>>
+        GetReviewCommentAsync(long commentId,
+            CancellationToken cancellationToken)
+    {
+        if (commentId <= 0)
+        {
+            return Fail<BoundedGitHubReviewComment>(
+                BoundedGitHubHttpOutcome.KnownNotSent,
+                BoundedGitHubPublisherReason.InvalidRequest);
+        }
+
+        var captured = await SendAsync(HttpMethod.Get,
+            $"/repos/{_repositoryPath}/pulls/comments/{commentId}", null,
+            HttpStatusCode.OK, false, cancellationToken);
+        return MapReviewComment(captured, mutation: false);
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
@@ -262,7 +419,7 @@ internal sealed class BoundedGitHubPublisherTransport :
             if (inspection.Kind == R4StickyInspectionKind.ValidR4 &&
                 StringComparer.Ordinal.Equals(
                     inspection.Identity!.ScopeSha256,
-                    _stickyIdentity.ScopeSha256))
+                    _stickyIdentity?.ScopeSha256))
             {
                 if (_stickyTargetId is not null)
                 {
@@ -328,10 +485,90 @@ internal sealed class BoundedGitHubPublisherTransport :
         }
     }
 
+    private BoundedGitHubHttpResult<BoundedGitHubReviewComment>
+        MapReviewComment(BoundedGitHubHttpResult<CapturedResponse> captured,
+            bool mutation)
+    {
+        if (captured.Value is null)
+        {
+            return Fail<BoundedGitHubReviewComment>(captured.Outcome,
+                captured.Reason, captured.ValidationEvidence);
+        }
+
+        try
+        {
+            var doc = JsonSerializer.Deserialize(captured.Value.Body,
+                BoundedGitHubPublisherJsonContext.Default
+                    .BoundedGitHubReviewCommentDocument);
+            if (doc is null || !TryMap(doc, out var comment))
+            {
+                return Fail<BoundedGitHubReviewComment>(mutation
+                        ? BoundedGitHubHttpOutcome.OutcomeUnknown
+                        : BoundedGitHubHttpOutcome.KnownNotSent,
+                    BoundedGitHubPublisherReason.InvalidResponse);
+            }
+
+            return BoundedGitHubHttpResult<BoundedGitHubReviewComment>
+                .Success(comment!);
+        }
+        catch (JsonException)
+        {
+            return Fail<BoundedGitHubReviewComment>(mutation
+                    ? BoundedGitHubHttpOutcome.OutcomeUnknown
+                    : BoundedGitHubHttpOutcome.KnownNotSent,
+                BoundedGitHubPublisherReason.InvalidResponse);
+        }
+    }
+
+    private BoundedGitHubHttpResult<BoundedGitHubPullRequestReview>
+        MapReview(BoundedGitHubHttpResult<CapturedResponse> captured)
+    {
+        if (captured.Value is null)
+        {
+            return Fail<BoundedGitHubPullRequestReview>(captured.Outcome,
+                captured.Reason, captured.ValidationEvidence);
+        }
+
+        try
+        {
+            var doc = JsonSerializer.Deserialize(captured.Value.Body,
+                BoundedGitHubPublisherJsonContext.Default
+                    .BoundedGitHubPullRequestReviewDocument);
+            if (doc?.Id is not > 0 || doc.Url is null ||
+                doc.PullRequestUrl is null || doc.HtmlUrl is null ||
+                doc.CommitId is null ||
+                !StringComparer.Ordinal.Equals(doc.Url,
+                    $"{BoundedGitHubPublisherPolicy.Origin}/repos/" +
+                    $"{_repositoryName}/pulls/{_pullRequestNumber}/" +
+                    $"reviews/{doc.Id}") ||
+                !StringComparer.Ordinal.Equals(doc.PullRequestUrl,
+                    $"{BoundedGitHubPublisherPolicy.Origin}/repos/" +
+                    $"{_repositoryName}/pulls/{_pullRequestNumber}") ||
+                !StringComparer.Ordinal.Equals(doc.CommitId, _headSha) ||
+                !IsCanonicalReviewHtmlUrl(doc.HtmlUrl, doc.Id.Value))
+            {
+                return Fail<BoundedGitHubPullRequestReview>(
+                    BoundedGitHubHttpOutcome.OutcomeUnknown,
+                    BoundedGitHubPublisherReason.InvalidResponse);
+            }
+
+            return BoundedGitHubHttpResult<BoundedGitHubPullRequestReview>
+                .Success(new(doc.Id.Value, doc.Url, doc.PullRequestUrl,
+                    doc.HtmlUrl, doc.CommitId));
+        }
+        catch (JsonException)
+        {
+            return Fail<BoundedGitHubPullRequestReview>(
+                BoundedGitHubHttpOutcome.OutcomeUnknown,
+                BoundedGitHubPublisherReason.InvalidResponse);
+        }
+    }
+
     private async Task<BoundedGitHubHttpResult<CapturedResponse>> SendAsync(
         HttpMethod method, string path, ReadOnlyMemory<byte>? body,
         HttpStatusCode expected, bool mutation,
-        CancellationToken callerCancellation)
+        CancellationToken callerCancellation,
+        bool exactBatchValidation = false)
     {
         if (callerCancellation.IsCancellationRequested)
             return Fail<CapturedResponse>(
@@ -388,6 +625,16 @@ internal sealed class BoundedGitHubPublisherTransport :
                     BoundedGitHubPublisherReason.Deadline);
             if (response.StatusCode != expected)
             {
+                if (exactBatchValidation && response.StatusCode ==
+                        HttpStatusCode.UnprocessableEntity &&
+                    HasJsonContentType(response.Content.Headers.ContentType) &&
+                    InlineBatchValidationParser.IsExactKnownNotSent(read.Body))
+                {
+                    return Fail<CapturedResponse>(
+                        BoundedGitHubHttpOutcome.KnownNotSent,
+                        BoundedGitHubPublisherReason.BatchValidationRejected);
+                }
+
                 if (IsRecognized4xx(response.StatusCode) &&
                     HasJsonContentType(response.Content.Headers.ContentType) &&
                     TryErrorEvidence(response.StatusCode, read.Body,
@@ -522,8 +769,88 @@ internal sealed class BoundedGitHubPublisherTransport :
         return true;
     }
 
+    private bool TryMap(BoundedGitHubReviewCommentDocument doc,
+        out BoundedGitHubReviewComment? comment)
+    {
+        comment = null;
+        if (doc.Id is not > 0 || doc.PullRequestReviewId is not > 0 ||
+            doc.Url is null || doc.PullRequestUrl is null ||
+            doc.HtmlUrl is null || doc.Body is null || doc.Path is null ||
+            doc.CommitId is null || doc.Line is < 1 ||
+            doc.Side is not (null or "LEFT" or "RIGHT") ||
+            !AgenticPrReview.Runtime.Agent.Tools.RepositoryPath.IsValid(
+                doc.Path) ||
+            R4Markdown.ValidateBodyText(doc.Body) !=
+                R4BodyTextValidation.Valid ||
+            !IsLowerHex(doc.CommitId!, 40) ||
+            !StringComparer.Ordinal.Equals(doc.Url,
+                $"{BoundedGitHubPublisherPolicy.Origin}/repos/" +
+                $"{_repositoryName}/pulls/comments/{doc.Id}") ||
+            !StringComparer.Ordinal.Equals(doc.PullRequestUrl,
+                $"{BoundedGitHubPublisherPolicy.Origin}/repos/" +
+                $"{_repositoryName}/pulls/{_pullRequestNumber}") ||
+            !IsCanonicalCommentHtmlUrl(doc.HtmlUrl!, doc.Id!.Value))
+        {
+            return false;
+        }
+
+        comment = new(doc.Id!.Value, doc.PullRequestReviewId!.Value, doc.Url!,
+            doc.PullRequestUrl!, doc.HtmlUrl!, doc.Body!, doc.Path!,
+            doc.Line, doc.Side, doc.CommitId!);
+        return true;
+    }
+
+    private bool IsCanonicalReviewHtmlUrl(string value, long reviewId) =>
+        TryPullRequestHtmlUrl(value, out var fragment) &&
+        StringComparer.Ordinal.Equals(fragment,
+            $"#pullrequestreview-{reviewId}");
+
+    private bool IsCanonicalCommentHtmlUrl(string value, long commentId)
+    {
+        if (!TryPullRequestHtmlUrl(value, out var fragment))
+        {
+            return false;
+        }
+
+        if (StringComparer.Ordinal.Equals(fragment,
+                $"#discussion_r{commentId}"))
+        {
+            return true;
+        }
+
+        const string prefix = "#discussion-diff-";
+        return fragment.StartsWith(prefix, StringComparison.Ordinal) &&
+            IsCanonicalUnsignedDecimal(fragment[prefix.Length..]);
+    }
+
+    private bool TryPullRequestHtmlUrl(string value, out string fragment)
+    {
+        fragment = string.Empty;
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
+            uri.Scheme != Uri.UriSchemeHttps ||
+            !StringComparer.OrdinalIgnoreCase.Equals(uri.Host, "github.com") ||
+            !uri.IsDefaultPort || !string.IsNullOrEmpty(uri.Query) ||
+            string.IsNullOrEmpty(uri.Fragment))
+        {
+            return false;
+        }
+
+        if (!StringComparer.Ordinal.Equals(uri.AbsolutePath,
+                $"/{_repositoryName}/pull/{_pullRequestNumber}"))
+        {
+            return false;
+        }
+
+        fragment = uri.Fragment;
+        return true;
+    }
+
+    private static bool IsLowerHex(string value, int length) =>
+        value.Length == length && value.All(static character =>
+            character is >= '0' and <= '9' or >= 'a' and <= 'f');
+
     private bool TryNextPage(IReadOnlyList<string> values, int current,
-        out int? next, out int? lastPage)
+        string endpointPath, out int? next, out int? lastPage)
     {
         next = null;
         lastPage = null;
@@ -545,8 +872,7 @@ internal sealed class BoundedGitHubPublisherTransport :
                     BoundedGitHubPublisherPolicy.Origin) ||
                 !string.IsNullOrEmpty(uri.Fragment) ||
                 !StringComparer.Ordinal.Equals(uri.AbsolutePath,
-                    $"/repos/{_repositoryPath}/issues/" +
-                    $"{_pullRequestNumber}/comments") ||
+                    endpointPath) ||
                 !TryPageQuery(uri.Query, out var linked)) return false;
             pages.Add(relation, linked);
         }

@@ -1166,9 +1166,9 @@ public sealed class ActionHostCompositionTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls++;
-            CandidateCount = request.CandidateMap.Candidates.Length;
-            FirstConsumption = request.TryConsume();
-            ReplayConsumption = request.TryConsume();
+            FirstConsumption = request.TryConsume(out var operation);
+            CandidateCount = operation?.CandidateMap.Candidates.Length ?? 0;
+            ReplayConsumption = request.TryConsume(out _);
             return Task.FromResult(ActionHostInlineHookResult.Complete);
         }
     }

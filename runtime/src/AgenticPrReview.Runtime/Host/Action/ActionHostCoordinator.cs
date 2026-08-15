@@ -1664,6 +1664,8 @@ internal sealed class ActionHostCoordinator
                     ComputeMapIdentity(map));
                 var authorization = MintPostAcceptanceInlineAuthorization(
                     invocation,
+                    launch.Inputs.GitHubToken!,
+                    revalidationFactory,
                     policy,
                     snapshot,
                     scope,
@@ -2230,19 +2232,64 @@ internal sealed class ActionHostCoordinator
 
         internal InlineCandidateMap CandidateMap { get; }
 
-        internal bool TryConsume() => authorization.TryConsume(
-            transaction,
-            CandidateMap);
+        internal bool TryConsume(
+            out PostAcceptanceInlineOperation? operation) =>
+            authorization.TryConsume(transaction, CandidateMap, out operation);
+    }
+
+    internal sealed class PostAcceptanceInlineOperation
+    {
+        private PostAcceptanceInlineOperation(
+            ActionHostGitHubToken token,
+            ActionHostAuthorizer.AuthorizedInvocation invocation,
+            IActionHostReviewedSnapshotTransportFactory revalidationFactory,
+            InlineCandidateMap candidateMap)
+        {
+            Token = token;
+            Invocation = invocation;
+            RevalidationFactory = revalidationFactory;
+            CandidateMap = candidateMap;
+        }
+
+        internal ActionHostGitHubToken Token { get; }
+
+        internal ActionHostAuthorizer.AuthorizedInvocation Invocation { get; }
+
+        internal IActionHostReviewedSnapshotTransportFactory
+            RevalidationFactory { get; }
+
+        internal InlineCandidateMap CandidateMap { get; }
+
+        internal static PostAcceptanceInlineOperation Create(
+            object issuer,
+            ActionHostGitHubToken token,
+            ActionHostAuthorizer.AuthorizedInvocation invocation,
+            IActionHostReviewedSnapshotTransportFactory revalidationFactory,
+            InlineCandidateMap candidateMap)
+        {
+            if (!ReferenceEquals(issuer, PostAcceptanceIssuer))
+            {
+                throw new InvalidOperationException();
+            }
+
+            return new(token, invocation, revalidationFactory, candidateMap);
+        }
     }
 
     private sealed class PostAcceptanceInlineAuthorization
     {
         private readonly PostAcceptanceInlineTransactionIdentity transaction;
+        private readonly ActionHostGitHubToken token;
+        private readonly ActionHostAuthorizer.AuthorizedInvocation invocation;
+        private readonly IActionHostReviewedSnapshotTransportFactory
+            revalidationFactory;
         private int usable = 1;
         private int consumed;
 
         internal PostAcceptanceInlineAuthorization(
             ActionHostAuthorizer.AuthorizedInvocation invocation,
+            ActionHostGitHubToken token,
+            IActionHostReviewedSnapshotTransportFactory revalidationFactory,
             ActionHostTrustedPolicy policy,
             BoundedReviewedSnapshotLease snapshot,
             R4PublicationScopeV1 scope,
@@ -2251,6 +2298,11 @@ internal sealed class ActionHostCoordinator
             StickyCommentPublisher.StickyPublicationReceipt receipt,
             InlineCandidateMap map)
         {
+            this.invocation = invocation ??
+                throw new ArgumentNullException(nameof(invocation));
+            this.token = token ?? throw new ArgumentNullException(nameof(token));
+            this.revalidationFactory = revalidationFactory ??
+                throw new ArgumentNullException(nameof(revalidationFactory));
             transaction = new(
                 invocation.PullRequest.RepositoryId,
                 invocation.PullRequest.Number,
@@ -2290,8 +2342,10 @@ internal sealed class ActionHostCoordinator
 
         internal bool TryConsume(
             PostAcceptanceInlineTransactionIdentity presented,
-            InlineCandidateMap map)
+            InlineCandidateMap map,
+            out PostAcceptanceInlineOperation? operation)
         {
+            operation = null;
             var matches = presented is not null &&
                 presented == transaction &&
                 map is not null &&
@@ -2336,6 +2390,12 @@ internal sealed class ActionHostCoordinator
             if (matches)
             {
                 Volatile.Write(ref consumed, 1);
+                operation = PostAcceptanceInlineOperation.Create(
+                    PostAcceptanceIssuer,
+                    token,
+                    invocation,
+                    revalidationFactory,
+                    map!);
             }
 
             return matches;
@@ -2345,6 +2405,8 @@ internal sealed class ActionHostCoordinator
     private static PostAcceptanceInlineAuthorization
         MintPostAcceptanceInlineAuthorization(
             ActionHostAuthorizer.AuthorizedInvocation invocation,
+            ActionHostGitHubToken token,
+            IActionHostReviewedSnapshotTransportFactory revalidationFactory,
             ActionHostTrustedPolicy policy,
             BoundedReviewedSnapshotLease snapshot,
             R4PublicationScopeV1 scope,
@@ -2354,6 +2416,8 @@ internal sealed class ActionHostCoordinator
             InlineCandidateMap map)
         => new(
                 invocation,
+                token,
+                revalidationFactory,
                 policy,
                 snapshot,
                 scope,
