@@ -205,6 +205,7 @@ async function runIsolatedBundle(buildDiscriminator: string) {
   const eventPath = path.join(trustedRoot, 'event.json');
   await copyFile(path.join(repoRoot, bundleRelativePath), bundlePath);
   await writeFile(eventPath, '{}\n');
+  await writeFile(summaryPath, '');
   await writeFile(hostPath, syntheticHostSource(markerPath));
   await chmod(hostPath, 0o700);
   const payloadSha256 = createHash('sha256')
