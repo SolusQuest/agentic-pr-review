@@ -309,6 +309,33 @@ internal static class AgentSessionValidation
         out string failureCode) =>
         TryValidateRecordGrammar(document, out _, out failureCode);
 
+    internal static bool TryProjectCurrentReview(
+        AgentSessionArtifact artifact,
+        out ReviewedIdentity? reviewedIdentity,
+        out AgentTerminalReview? review)
+    {
+        reviewedIdentity = null;
+        review = null;
+        if (artifact is null ||
+            !TryValidateRoot(artifact.Document, out _) ||
+            !TryValidateRecordGrammar(
+                artifact.Document,
+                out var state,
+                out _) ||
+            state is null ||
+            state.TerminalReviews.IsDefaultOrEmpty ||
+            state.TerminalReviews.Length !=
+                artifact.Document.CompletedRuns.Length)
+        {
+            return false;
+        }
+
+        reviewedIdentity = artifact.Document.CompletedRuns[^1]
+            .ReviewedIdentity;
+        review = state.TerminalReviews[^1];
+        return review is not null;
+    }
+
     private static bool TryValidateRecordGrammar(
         AgentSessionDocument document,
         out RecordGrammarState? state,
@@ -321,7 +348,9 @@ internal static class AgentSessionValidation
             .ToHashSet(StringComparer.Ordinal);
         var assistantMessages = ImmutableArray.CreateBuilder<
             IReadOnlyDictionary<string, AgentSessionAssistantMessageRecord>>(
-                document.CompletedRuns.Length);
+            document.CompletedRuns.Length);
+        var terminalReviews = ImmutableArray.CreateBuilder<
+            AgentTerminalReview>(document.CompletedRuns.Length);
         long sessionRecords = 0;
         foreach (var run in document.CompletedRuns)
         {
@@ -340,17 +369,20 @@ internal static class AgentSessionValidation
                     run,
                     identifiers,
                     out var runAssistantMessages,
+                    out var terminalReview,
                     out failureCode))
             {
                 return false;
             }
 
             assistantMessages.Add(runAssistantMessages!);
+            terminalReviews.Add(terminalReview!);
         }
 
         state = new RecordGrammarState(
             identifiers,
             assistantMessages.MoveToImmutable(),
+            terminalReviews.MoveToImmutable(),
             sessionRecords);
         failureCode = string.Empty;
         return true;
@@ -384,9 +416,11 @@ internal static class AgentSessionValidation
         out IReadOnlyDictionary<
             string,
             AgentSessionAssistantMessageRecord>? assistantMessages,
+        out AgentTerminalReview? terminalReview,
         out string failureCode)
     {
         assistantMessages = null;
+        terminalReview = null;
         failureCode = AgentSessionCodes.RecordInvalid;
         if (run.Records.Length is < 3 or > AgentLimits.SessionRecords)
         {
@@ -460,7 +494,8 @@ internal static class AgentSessionValidation
                         message,
                         terminalCall,
                         outcome,
-                        observations))
+                        observations,
+                        out terminalReview))
                 {
                     failureCode = AgentSessionCodes.AssociationInvalid;
                     return false;
@@ -541,6 +576,7 @@ internal static class AgentSessionValidation
         ImmutableArray<IReadOnlyDictionary<
             string,
             AgentSessionAssistantMessageRecord>> AssistantMessages,
+        ImmutableArray<AgentTerminalReview> TerminalReviews,
         long RecordCount);
 
     private static bool TryValidateMessageContents(
@@ -696,8 +732,10 @@ internal static class AgentSessionValidation
         AgentSessionAssistantMessageRecord message,
         AgentSessionTerminalCallContent terminal,
         AgentSessionReviewOutcomeRecord outcome,
-        IReadOnlyList<AgentObservation> observations)
+        IReadOnlyList<AgentObservation> observations,
+        out AgentTerminalReview? projectedReview)
     {
+        projectedReview = null;
         if (!StringComparer.Ordinal.Equals(
                 outcome.TerminalMessageId,
                 message.Id) ||
@@ -714,8 +752,8 @@ internal static class AgentSessionValidation
                 arguments!,
                 reviewedIdentity,
                 observations,
-                out var review) ||
-            review is null ||
+                out projectedReview) ||
+            projectedReview is not { } review ||
             !StringComparer.Ordinal.Equals(
                 review.TerminalSha256,
                 terminal.ArgumentsSha256) ||

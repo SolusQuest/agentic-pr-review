@@ -135,8 +135,7 @@ internal static class PublicationRecoveryInventoryFactory
             {
                 return Fail();
             }
-            if (pendingSet.Failure is not null &&
-                pendingSet.Intent is null)
+            if (!ValidAttemptGraph(pendingSet))
             {
                 return Fail();
             }
@@ -145,14 +144,22 @@ internal static class PublicationRecoveryInventoryFactory
             MatchedRetainedStateRecoveryAcceptance? matched = null;
             if (acceptedRecordCount > 0)
             {
+                var activeFailure = acceptedSet.RetryFailure is { } retry
+                    ? (retry.Outcome, HasIntent: acceptedSet.RetryIntent is not null)
+                    : acceptedSet.Failure is { } initial
+                        ? (initial.Outcome, HasIntent: acceptedSet.Intent is not null)
+                        : ((BoundedGitHubPublisherOutcome?)null, HasIntent: true);
                 var failureIsResolvedOutcomeUnknown =
-                    acceptedSet.Failure is null ||
-                    acceptedSet.Failure.Outcome ==
+                    activeFailure.Item1 is null ||
+                    activeFailure.Item1 ==
                         BoundedGitHubPublisherOutcome.OutcomeUnknown &&
-                    acceptedSet.Intent is not null;
+                    activeFailure.HasIntent;
                 if (inventory.CurrentAcceptance is null ||
                     acceptedIdentity is null ||
                     acceptedSet.Recovery is null ||
+                    !ValidAttemptGraph(
+                        acceptedSet,
+                        allowTerminalCleanupSubgraph: true) ||
                     !failureIsResolvedOutcomeUnknown ||
                     acceptedSet.Abandonment is not null ||
                     acceptedSet.StickyReadback is not null &&
@@ -305,8 +312,10 @@ internal static class PublicationRecoveryInventoryFactory
                 selectedIdentity,
                 selectedPublication,
                 selected.Intent,
+                selected.RetryIntent,
                 selected.StickyReadback ?? selected.Recovery?.StickyReadback,
                 selected.Failure,
+                selected.RetryFailure,
                 selected.Abandonment,
                 selected.Recovery,
                 selectedMatched,
@@ -386,8 +395,8 @@ internal static class PublicationRecoveryInventoryFactory
         {
             PublicationStickyWriteTransition.InitialIntent =>
                 observation?.Intent?.RecordIdentity,
-            PublicationStickyWriteTransition.KnownNotWrittenRetry =>
-                observation?.Failure?.RecordIdentity,
+            PublicationStickyWriteTransition.RetryIntent =>
+                observation?.RetryIntent?.RecordIdentity,
             _ => null,
         };
         return observation is not null &&
@@ -411,6 +420,71 @@ internal static class PublicationRecoveryInventoryFactory
             authorization.TryConsume(CapabilityIssuer);
     }
 
+    internal static bool TryCreateRetryTransitionAuthorization(
+        PublicationRecoveryObservation? observation,
+        out PublicationRetryTransitionAuthorization? authorization)
+    {
+        authorization = null;
+        if (observation is null ||
+            !observation.IsLive ||
+            observation.CandidateObjectIdentity is not { } candidate ||
+            observation.Intent is not { } intent ||
+            observation.Failure is not
+            {
+                Outcome: BoundedGitHubPublisherOutcome.KnownNotWritten,
+            } failure ||
+            observation.RetryIntent is not null ||
+            observation.RetryFailure is not null ||
+            observation.StickyReadback is not null ||
+            observation.Abandonment is not null ||
+            observation.Recovery is not null ||
+            observation.Anchors != PublicationRecoveryAnchorState.None ||
+            observation.Records.Length != 2 ||
+            !StringComparer.Ordinal.Equals(
+                failure.AttemptIntentRecordIdentity,
+                intent.RecordIdentity))
+        {
+            return false;
+        }
+
+        authorization = new PublicationRetryTransitionAuthorization(
+            CapabilityIssuer,
+            candidate,
+            observation.InventoryDigest,
+            intent.RecordIdentity,
+            failure.RecordIdentity);
+        return true;
+    }
+
+    internal static bool TryConsumeRetryTransitionAuthorization(
+        PublicationRecoveryObservation observation,
+        PublicationRetryTransitionAuthorization authorization) =>
+        observation is not null &&
+        authorization is not null &&
+        observation.IsLive &&
+        observation.CandidateObjectIdentity is { } candidate &&
+        observation.Intent is { } intent &&
+        observation.Failure is
+        {
+            Outcome: BoundedGitHubPublisherOutcome.KnownNotWritten,
+        } failure &&
+        observation.RetryIntent is null &&
+        observation.RetryFailure is null &&
+        observation.StickyReadback is null &&
+        observation.Abandonment is null &&
+        observation.Recovery is null &&
+        observation.Anchors == PublicationRecoveryAnchorState.None &&
+        observation.Records.Length == 2 &&
+        StringComparer.Ordinal.Equals(
+            failure.AttemptIntentRecordIdentity,
+            intent.RecordIdentity) &&
+        authorization.TryConsume(
+            CapabilityIssuer,
+            candidate,
+            observation.InventoryDigest,
+            intent.RecordIdentity,
+            failure.RecordIdentity);
+
     internal static PublicationStaleAbandonmentAuthorization
         CreateStaleAbandonmentAuthorization(
         PublicationRecoveryObservation observation,
@@ -420,8 +494,10 @@ internal static class PublicationRecoveryInventoryFactory
             absenceEvidence is null ||
             observation.Candidate is not { MatchesCurrentReviewedHead: false } ||
             observation.Intent is not null ||
+            observation.RetryIntent is not null ||
             observation.StickyReadback is not null ||
             observation.Failure is not null ||
+            observation.RetryFailure is not null ||
             observation.Abandonment is not null ||
             observation.Recovery is not null ||
             observation.Anchors != PublicationRecoveryAnchorState.None ||
@@ -606,18 +682,28 @@ internal static class PublicationRecoveryInventoryFactory
                     evidenceRecordIdentity) &&
                 observation.StickyReadback is null &&
                 observation.Failure is null &&
+                observation.RetryIntent is null &&
+                observation.RetryFailure is null &&
                 observation.Abandonment is null &&
                 observation.Recovery is null,
-            PublicationStickyWriteTransition.KnownNotWrittenRetry =>
-                observation.Records.Length == 2 &&
+            PublicationStickyWriteTransition.RetryIntent =>
+                observation.Records.Length == 3 &&
                 observation.Intent is not null &&
                 observation.Failure is
                 {
                     Outcome: BoundedGitHubPublisherOutcome.KnownNotWritten,
                 } failure &&
+                observation.RetryIntent is { } retryIntent &&
                 StringComparer.Ordinal.Equals(
-                    failure.RecordIdentity,
+                    retryIntent.InitialIntentRecordIdentity,
+                    observation.Intent.RecordIdentity) &&
+                StringComparer.Ordinal.Equals(
+                    retryIntent.InitialFailureRecordIdentity,
+                    failure.RecordIdentity) &&
+                StringComparer.Ordinal.Equals(
+                    retryIntent.RecordIdentity,
                     evidenceRecordIdentity) &&
+                observation.RetryFailure is null &&
                 observation.StickyReadback is null &&
                 observation.Abandonment is null &&
                 observation.Recovery is null,
@@ -858,6 +944,65 @@ internal static class PublicationRecoveryInventoryFactory
         RetainedStateTransactionResult<PublicationRecoveryObservation>.Fail(
             RetainedStateTransactionCodes.Conflict);
 
+    private static bool ValidAttemptGraph(
+        ParsedRecordSet records,
+        bool allowTerminalCleanupSubgraph = false)
+    {
+        if (records.Failure is { } initialFailure &&
+            (records.Intent is null ||
+                !StringComparer.Ordinal.Equals(
+                    initialFailure.AttemptIntentRecordIdentity,
+                    records.Intent.RecordIdentity)) &&
+            !allowTerminalCleanupSubgraph)
+        {
+            return false;
+        }
+
+        if (records.RetryIntent is { } retryIntent &&
+            (records.Intent is null ||
+                records.Failure is not
+                {
+                    Outcome: BoundedGitHubPublisherOutcome.KnownNotWritten,
+                } retryInitialFailure ||
+                !StringComparer.Ordinal.Equals(
+                    retryIntent.InitialIntentRecordIdentity,
+                    records.Intent.RecordIdentity) ||
+                !StringComparer.Ordinal.Equals(
+                    retryIntent.InitialFailureRecordIdentity,
+                    retryInitialFailure.RecordIdentity)) &&
+            !allowTerminalCleanupSubgraph)
+        {
+            return false;
+        }
+
+        if (records.RetryFailure is { } retryFailure &&
+            (records.RetryIntent is null ||
+                !StringComparer.Ordinal.Equals(
+                    retryFailure.RetryIntentRecordIdentity,
+                    records.RetryIntent.RecordIdentity)) &&
+            !allowTerminalCleanupSubgraph)
+        {
+            return false;
+        }
+
+        var activeIntentIdentity = records.RetryIntent?.RecordIdentity ??
+            records.Intent?.RecordIdentity;
+        var readback = records.StickyReadback ??
+            records.Recovery?.StickyReadback;
+        return (allowTerminalCleanupSubgraph ||
+                records.RetryIntent is null || records.Failure is not null) &&
+            (allowTerminalCleanupSubgraph ||
+                records.RetryFailure is null ||
+                records.RetryIntent is not null) &&
+            (readback is null ||
+                allowTerminalCleanupSubgraph &&
+                    activeIntentIdentity is null ||
+                activeIntentIdentity is not null &&
+                StringComparer.Ordinal.Equals(
+                    readback.AttemptIntentRecordIdentity,
+                    activeIntentIdentity));
+    }
+
     private static bool TryAddAcceptedCleanupRecords(
         ParsedRecordSet acceptedSet,
         ImmutableArray<RetainedStateOpaqueRecord>.Builder acceptedRecords,
@@ -865,6 +1010,14 @@ internal static class PublicationRecoveryInventoryFactory
     {
         var initialCount = cleanupOrder.Count;
         return TryAddAcceptedCleanupRecord(
+                acceptedSet.RetryFailureMetadata,
+                acceptedRecords,
+                cleanupOrder) &&
+            TryAddAcceptedCleanupRecord(
+                acceptedSet.RetryIntentMetadata,
+                acceptedRecords,
+                cleanupOrder) &&
+            TryAddAcceptedCleanupRecord(
                 acceptedSet.FailureMetadata,
                 acceptedRecords,
                 cleanupOrder) &&
@@ -932,6 +1085,14 @@ internal static class PublicationRecoveryInventoryFactory
                     value = intent;
                     matches++;
                 }
+                if (PublicationRetryIntentV1Codec.TryDecode(
+                        payload.AsSpan(),
+                        out var retryIntent) &&
+                    retryIntent is not null)
+                {
+                    value = retryIntent;
+                    matches++;
+                }
                 if (StickyReadbackRecordV1Codec.TryDecode(
                         payload.AsSpan(),
                         out var readback) &&
@@ -952,14 +1113,24 @@ internal static class PublicationRecoveryInventoryFactory
                 }
             }
             else if (record.ObjectClass ==
-                    StateObjectClass.PublicationFailure &&
-                PublicationFailureV1Codec.TryDecode(
-                    payload.AsSpan(),
-                    out var failure) &&
-                failure is not null)
+                StateObjectClass.PublicationFailure)
             {
-                value = failure;
-                matches++;
+                if (PublicationFailureV1Codec.TryDecode(
+                        payload.AsSpan(),
+                        out var failure) &&
+                    failure is not null)
+                {
+                    value = failure;
+                    matches++;
+                }
+                if (PublicationRetryFailureV1Codec.TryDecode(
+                        payload.AsSpan(),
+                        out var retryFailure) &&
+                    retryFailure is not null)
+                {
+                    value = retryFailure;
+                    matches++;
+                }
             }
             else if (record.ObjectClass == StateObjectClass.Abandonment &&
                 AbandonmentV1Codec.TryDecode(
@@ -996,8 +1167,10 @@ internal static class PublicationRecoveryInventoryFactory
         internal PublicationRecoveryPublicationV1 Publication => Value switch
         {
             PublicationIntentV1 value => value.Publication,
+            PublicationRetryIntentV1 value => value.Publication,
             StickyReadbackRecordV1 value => value.Publication,
             PublicationFailureV1 value => value.Publication,
+            PublicationRetryFailureV1 value => value.Publication,
             AbandonmentV1 value => value.Publication,
             RecoveryRecordV1 value => value.Publication,
             _ => throw new InvalidOperationException(),
@@ -1023,6 +1196,12 @@ internal static class PublicationRecoveryInventoryFactory
             get;
             private set;
         }
+        internal PublicationRetryIntentV1? RetryIntent { get; private set; }
+        internal OpaqueStoreObjectMetadata? RetryIntentMetadata
+        {
+            get;
+            private set;
+        }
         internal StickyReadbackRecordV1? StickyReadback { get; private set; }
         internal OpaqueStoreObjectMetadata? StickyReadbackMetadata
         {
@@ -1031,6 +1210,12 @@ internal static class PublicationRecoveryInventoryFactory
         }
         internal PublicationFailureV1? Failure { get; private set; }
         internal OpaqueStoreObjectMetadata? FailureMetadata
+        {
+            get;
+            private set;
+        }
+        internal PublicationRetryFailureV1? RetryFailure { get; private set; }
+        internal OpaqueStoreObjectMetadata? RetryFailureMetadata
         {
             get;
             private set;
@@ -1054,6 +1239,11 @@ internal static class PublicationRecoveryInventoryFactory
                     IntentMetadata = decoded.Metadata;
                     added = true;
                     break;
+                case PublicationRetryIntentV1 value when RetryIntent is null:
+                    RetryIntent = value;
+                    RetryIntentMetadata = decoded.Metadata;
+                    added = true;
+                    break;
                 case StickyReadbackRecordV1 value
                     when StickyReadback is null:
                     StickyReadback = value;
@@ -1063,6 +1253,12 @@ internal static class PublicationRecoveryInventoryFactory
                 case PublicationFailureV1 value when Failure is null:
                     Failure = value;
                     FailureMetadata = decoded.Metadata;
+                    added = true;
+                    break;
+                case PublicationRetryFailureV1 value
+                    when RetryFailure is null:
+                    RetryFailure = value;
+                    RetryFailureMetadata = decoded.Metadata;
                     added = true;
                     break;
                 case AbandonmentV1 value when Abandonment is null:

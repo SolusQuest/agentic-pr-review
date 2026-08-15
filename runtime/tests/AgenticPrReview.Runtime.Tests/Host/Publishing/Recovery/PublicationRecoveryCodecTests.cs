@@ -25,6 +25,7 @@ public sealed class PublicationRecoveryCodecTests
         var receipt = Receipt();
         Assert.True(StickyReadbackRecordV1Codec.TryCreate(
             publication,
+            intent!.RecordIdentity,
             receipt,
             Now + 1,
             out var readback));
@@ -37,6 +38,7 @@ public sealed class PublicationRecoveryCodecTests
 
         Assert.True(PublicationFailureV1Codec.TryCreate(
             publication,
+            intent.RecordIdentity,
             BoundedGitHubPublisherOutcome.KnownNotWritten,
             StickyPublicationReason.Deadline,
             Now + 2,
@@ -45,6 +47,29 @@ public sealed class PublicationRecoveryCodecTests
             failure!,
             PublicationFailureV1Codec.TryEncode,
             PublicationFailureV1Codec.TryDecode);
+
+        Assert.True(PublicationRetryIntentV1Codec.TryCreate(
+            publication,
+            intent.RecordIdentity,
+            failure!.RecordIdentity,
+            Now + 3,
+            out var retryIntent));
+        AssertRoundTrip(
+            retryIntent!,
+            PublicationRetryIntentV1Codec.TryEncode,
+            PublicationRetryIntentV1Codec.TryDecode);
+
+        Assert.True(PublicationRetryFailureV1Codec.TryCreate(
+            publication,
+            retryIntent!.RecordIdentity,
+            BoundedGitHubPublisherOutcome.KnownNotWritten,
+            StickyPublicationReason.Deadline,
+            Now + 4,
+            out var retryFailure));
+        AssertRoundTrip(
+            retryFailure!,
+            PublicationRetryFailureV1Codec.TryEncode,
+            PublicationRetryFailureV1Codec.TryDecode);
 
         Assert.True(AbandonmentV1Codec.TryCreate(
             publication,
@@ -108,11 +133,13 @@ public sealed class PublicationRecoveryCodecTests
         var mismatched = publication with { BodySha256 = Hex('8') };
         Assert.False(StickyReadbackRecordV1Codec.TryCreate(
             mismatched,
+            Hex('1'),
             Receipt(),
             Now,
             out _));
         Assert.False(PublicationFailureV1Codec.TryCreate(
             publication,
+            Hex('1'),
             BoundedGitHubPublisherOutcome.WrittenAndReadBack,
             StickyPublicationReason.None,
             Now,
@@ -140,6 +167,7 @@ public sealed class PublicationRecoveryCodecTests
         {
             Assert.False(PublicationFailureV1Codec.TryCreate(
                 Publication(),
+                Hex('1'),
                 outcome,
                 reason,
                 Now,

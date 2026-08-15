@@ -67,7 +67,7 @@ public sealed class PublicationRecoveryClassifierTests
 
         Assert.Equal(PublicationRecoveryAction.ResumeBeforeIntent,
             candidate.Action);
-        Assert.False(candidate.HasStickyAuthorization);
+        Assert.False(candidate.HasRetryTransitionAuthorization);
         Assert.True(intent.Action ==
             PublicationRecoveryAction.StickyOutcomeUnknown,
             intent.ToString());
@@ -121,12 +121,245 @@ public sealed class PublicationRecoveryClassifierTests
         var retry = await EvaluateAsync(RecoveryState.KnownNotWritten);
 
         Assert.True(none.AllowsProvider);
-        Assert.False(none.HasStickyAuthorization);
+        Assert.False(none.HasRetryTransitionAuthorization);
         Assert.False(candidate.AllowsProvider);
-        Assert.False(candidate.HasStickyAuthorization);
+        Assert.False(candidate.HasRetryTransitionAuthorization);
         Assert.False(retry.AllowsProvider);
-        Assert.True(retry.HasStickyAuthorization, retry.ToString());
-        Assert.True(retry.StickyAuthorizationConsumedOnce, retry.ToString());
+        Assert.True(retry.HasRetryTransitionAuthorization, retry.ToString());
+        Assert.True(retry.RetryTransitionIsNotStickyWrite, retry.ToString());
+    }
+
+    [Fact]
+    public async Task DurableRetryIntentCannotReauthorizeAndRetryKnownNotWrittenIsTerminal()
+    {
+        var fixture = await RetainedStateTransactionEndToEndTests
+            .CreateFixtureAsync();
+        using var context = fixture.Context;
+        var run = await RetainedStateTransactionEndToEndTests
+            .CompleteRunAsync(fixture);
+        Assert.True(R4PreparedPublication.TryCreate(
+            run.Outcome,
+            fixture.PublicationScope,
+            out var publication));
+        var preparedResult = await RestrictedStateService
+            .PrepareRetainedCandidateAsync(
+                context,
+                run.Run,
+                publication!,
+                CancellationToken.None);
+        using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
+            preparedResult.Value);
+        var candidateResult = await RestrictedStateService
+            .PersistRetainedCandidateAsync(
+                context,
+                prepared,
+                CancellationToken.None);
+        var candidate = Assert.IsType<RetainedStatePersistedCandidate>(
+            candidateResult.Value);
+
+        var absent = new FakePublisherTransportFactory();
+        absent.Transport.Enqueue();
+        using var before = await new PublicationRecoveryService(
+                new StickyCommentPublisher(absent))
+            .ClassifyBeforeProviderAsync(
+                fixture.Launch.Inputs.GitHubToken!,
+                fixture.Invocation,
+                fixture.PublicationScope,
+                context,
+                CancellationToken.None);
+        var intentResult = await PublicationRecoveryPersistence
+            .PersistIntentAndAuthorizeAsync(
+                context,
+                before.Observation!,
+                CancellationToken.None);
+        using var intent = Assert.IsType<PublicationIntentPersistenceResult>(
+            intentResult.Value);
+        Assert.True(PublicationRecoveryService.TryRestoreRendered(
+            intent.Observation.StoredPublication,
+            out var rendered));
+        Assert.True(AuthorizedStickyPublicationRequest.TryCreateRecovery(
+            fixture.Invocation,
+            fixture.PublicationScope,
+            rendered,
+            intent.Observation,
+            intent.StickyWriteAuthorization,
+            out var initialRequest));
+        Assert.NotNull(initialRequest);
+
+        var initialOwnershipResult = await RestrictedStateService
+            .RenewRetainedStateOwnershipAsync(
+                context,
+                candidate,
+                prior: null,
+                intent.Observation.Records,
+                CancellationToken.None);
+        using var initialOwnership = Assert.IsType<RetainedStateOwnership>(
+            initialOwnershipResult.Value);
+        Assert.True(PublicationRecoveryPersistence.TryCreateFailureWrite(
+            candidate,
+            intent.Intent.RecordIdentity,
+            BoundedGitHubPublisherOutcome.KnownNotWritten,
+            StickyPublicationReason.Deadline,
+            fixture.Time.UnixSeconds,
+            prepared.Header.LogicalExpiresAtUnixSeconds,
+            out var initialFailure,
+            out var initialFailureRequest));
+        var initialFailureAttemptResult = await RestrictedStateService
+            .PrepareRetainedOpaqueWriteAsync(
+                context,
+                initialOwnership,
+                initialFailureRequest!,
+                CancellationToken.None);
+        using var initialFailureAttempt = Assert.IsType<
+            RetainedStateOpaqueWriteAttempt>(initialFailureAttemptResult.Value);
+        var initialFailurePersisted = await RestrictedStateService
+            .PersistPreparedRetainedOpaqueWriteAsync(
+                context,
+                initialFailureAttempt,
+                CancellationToken.None);
+        using var initialFailureRecord = Assert.IsType<RetainedStateOpaqueRecord>(
+            initialFailurePersisted.Value);
+        var initialAnchorCleanup = await PublicationRecoveryPersistence
+            .CleanupCompletedWriteAnchorAsync(
+                context,
+                initialFailureAttempt,
+                CancellationToken.None);
+        Assert.True(initialAnchorCleanup.Completed, initialAnchorCleanup.Code);
+
+        var retryDiscovery = new FakePublisherTransportFactory();
+        retryDiscovery.Transport.Enqueue();
+        using var retryEvaluation = await new PublicationRecoveryService(
+                new StickyCommentPublisher(retryDiscovery))
+            .ClassifyBeforeProviderAsync(
+                fixture.Launch.Inputs.GitHubToken!,
+                fixture.Invocation,
+                fixture.PublicationScope,
+                context,
+                CancellationToken.None);
+        Assert.Equal(
+            PublicationRecoveryAction.ResumeKnownNotWritten,
+            retryEvaluation.Decision.Action);
+        Assert.NotNull(retryEvaluation.RetryTransitionAuthorization);
+        Assert.Null(retryEvaluation.StickyWriteAuthorization);
+        Assert.True(PublicationRecoveryService
+            .TryTerminalizeFreshKnownNotWritten(
+                retryEvaluation,
+                out var cancelledTerminal));
+        Assert.Equal(
+            PublicationRecoveryAction.KnownNotWrittenTerminal,
+            cancelledTerminal!.Action);
+        Assert.False(PublicationRecoveryService
+            .TryTerminalizeFreshKnownNotWritten(
+                retryEvaluation,
+                out _));
+
+        var retryDispatchDiscovery = new FakePublisherTransportFactory();
+        retryDispatchDiscovery.Transport.Enqueue();
+        using var retryDispatchEvaluation =
+            await new PublicationRecoveryService(
+                    new StickyCommentPublisher(retryDispatchDiscovery))
+                .ClassifyBeforeProviderAsync(
+                    fixture.Launch.Inputs.GitHubToken!,
+                    fixture.Invocation,
+                    fixture.PublicationScope,
+                    context,
+                    CancellationToken.None);
+        Assert.Equal(
+            PublicationRecoveryAction.ResumeKnownNotWritten,
+            retryDispatchEvaluation.Decision.Action);
+
+        var retryIntentResult = await PublicationRecoveryPersistence
+            .PersistRetryIntentAndAuthorizeAsync(
+                context,
+                retryDispatchEvaluation.Observation!,
+                retryDispatchEvaluation.RetryTransitionAuthorization!,
+                CancellationToken.None);
+        using var retryIntent = Assert.IsType<
+            PublicationRetryIntentPersistenceResult>(retryIntentResult.Value);
+        Assert.Equal(3, retryIntent.Observation.Records.Length);
+
+        var crashDiscovery = new FakePublisherTransportFactory();
+        crashDiscovery.Transport.Enqueue();
+        using var afterRetryIntent = await new PublicationRecoveryService(
+                new StickyCommentPublisher(crashDiscovery))
+            .ClassifyBeforeProviderAsync(
+                fixture.Launch.Inputs.GitHubToken!,
+                fixture.Invocation,
+                fixture.PublicationScope,
+                context,
+                CancellationToken.None);
+        Assert.Equal(
+            PublicationRecoveryAction.StickyOutcomeUnknown,
+            afterRetryIntent.Decision.Action);
+        Assert.Null(afterRetryIntent.RetryTransitionAuthorization);
+        Assert.Null(afterRetryIntent.StickyWriteAuthorization);
+
+        Assert.True(AuthorizedStickyPublicationRequest.TryCreateRecovery(
+            fixture.Invocation,
+            fixture.PublicationScope,
+            rendered,
+            retryIntent.Observation,
+            retryIntent.StickyWriteAuthorization,
+            out var retryRequest));
+        Assert.NotNull(retryRequest);
+        var retryOwnershipResult = await RestrictedStateService
+            .RenewRetainedStateOwnershipAsync(
+                context,
+                candidate,
+                prior: null,
+                retryIntent.Observation.Records,
+                CancellationToken.None);
+        using var retryOwnership = Assert.IsType<RetainedStateOwnership>(
+            retryOwnershipResult.Value);
+        Assert.True(PublicationRecoveryPersistence
+            .TryCreateRetryFailureWrite(
+                candidate,
+                retryIntent.RetryIntent,
+                BoundedGitHubPublisherOutcome.KnownNotWritten,
+                StickyPublicationReason.Deadline,
+                fixture.Time.UnixSeconds,
+                prepared.Header.LogicalExpiresAtUnixSeconds,
+                out var retryFailure,
+                out var retryFailureRequest));
+        var retryFailureAttemptResult = await RestrictedStateService
+            .PrepareRetainedOpaqueWriteAsync(
+                context,
+                retryOwnership,
+                retryFailureRequest!,
+                CancellationToken.None);
+        using var retryFailureAttempt = Assert.IsType<
+            RetainedStateOpaqueWriteAttempt>(retryFailureAttemptResult.Value);
+        var retryFailurePersisted = await RestrictedStateService
+            .PersistPreparedRetainedOpaqueWriteAsync(
+                context,
+                retryFailureAttempt,
+                CancellationToken.None);
+        using var retryFailureRecord = Assert.IsType<RetainedStateOpaqueRecord>(
+            retryFailurePersisted.Value);
+        var retryAnchorCleanup = await PublicationRecoveryPersistence
+            .CleanupCompletedWriteAnchorAsync(
+                context,
+                retryFailureAttempt,
+                CancellationToken.None);
+        Assert.True(retryAnchorCleanup.Completed, retryAnchorCleanup.Code);
+
+        var terminalDiscovery = new FakePublisherTransportFactory();
+        terminalDiscovery.Transport.Enqueue();
+        using var terminal = await new PublicationRecoveryService(
+                new StickyCommentPublisher(terminalDiscovery))
+            .ClassifyBeforeProviderAsync(
+                fixture.Launch.Inputs.GitHubToken!,
+                fixture.Invocation,
+                fixture.PublicationScope,
+                context,
+                CancellationToken.None);
+        Assert.Equal(initialFailure, terminal.Observation!.Failure);
+        Assert.Equal(retryFailure, terminal.Observation.RetryFailure);
+        Assert.Equal(
+            PublicationRecoveryAction.KnownNotWrittenTerminal,
+            terminal.Decision.Action);
+        Assert.Null(terminal.RetryTransitionAuthorization);
+        Assert.Null(terminal.StickyWriteAuthorization);
     }
 
     [Fact]
@@ -664,7 +897,8 @@ public sealed class PublicationRecoveryClassifierTests
         Assert.False(recovery.Decision.AllowsProvider);
         Assert.Equal(
             state == PreviousAcceptedRecoveryState.KnownNotWritten,
-            recovery.StickyWriteAuthorization is not null);
+            recovery.RetryTransitionAuthorization is not null);
+        Assert.Null(recovery.StickyWriteAuthorization);
         Assert.Equal(3, factory.Transport.Lists);
         Assert.Equal(1, factory.Transport.Reads);
         Assert.Equal(0, factory.Transport.Creates);
@@ -725,6 +959,7 @@ public sealed class PublicationRecoveryClassifierTests
             Assert.True(PublicationRecoveryPersistence
                 .TryCreateStickyReadbackWrite(
                     continuation.Candidate,
+                    intent.Observation.Intent!.RecordIdentity,
                     receipt!,
                     continuation.Fixture.Time.UnixSeconds,
                     prepared.Header.LogicalExpiresAtUnixSeconds,
@@ -1168,6 +1403,7 @@ public sealed class PublicationRecoveryClassifierTests
                 ownershipResult.Value);
             Assert.True(PublicationRecoveryPersistence.TryCreateFailureWrite(
                 candidate,
+                new string('0', 64),
                 BoundedGitHubPublisherOutcome.KnownNotWritten,
                 StickyPublicationReason.Deadline,
                 fixture.Time.UnixSeconds,
@@ -1513,6 +1749,7 @@ public sealed class PublicationRecoveryClassifierTests
             Assert.True(PublicationRecoveryPersistence
                 .TryCreateStickyReadbackWrite(
                     candidate,
+                    intent.Intent.RecordIdentity,
                     receipt!,
                     fixture.Time.UnixSeconds,
                     prepared.Header.LogicalExpiresAtUnixSeconds,
@@ -1687,6 +1924,7 @@ public sealed class PublicationRecoveryClassifierTests
             ownershipResult.Value);
         Assert.True(PublicationRecoveryPersistence.TryCreateFailureWrite(
             candidate,
+            intent.Intent.RecordIdentity,
             BoundedGitHubPublisherOutcome.OutcomeUnknown,
             StickyPublicationReason.ReconciliationIncomplete,
             fixture.Time.UnixSeconds,
@@ -1776,6 +2014,7 @@ public sealed class PublicationRecoveryClassifierTests
             ownershipResult.Value);
         Assert.True(PublicationRecoveryPersistence.TryCreateFailureWrite(
             candidate,
+            intent.Intent.RecordIdentity,
             outcome,
             reason,
             fixture.Time.UnixSeconds,
@@ -2108,6 +2347,7 @@ public sealed class PublicationRecoveryClassifierTests
             };
             Assert.True(PublicationRecoveryPersistence.TryCreateFailureWrite(
                 candidate,
+                persistedIntent.Intent.RecordIdentity,
                 outcome,
                 reason,
                 fixture.Time.UnixSeconds,
@@ -2219,7 +2459,7 @@ public sealed class PublicationRecoveryClassifierTests
             evaluation.Decision.Action,
             evaluation.Decision.Lifecycle,
             evaluation.Decision.AllowsProvider,
-            evaluation.StickyWriteAuthorization is not null,
+            evaluation.RetryTransitionAuthorization is not null,
             evaluation.DiscoveryKind,
             evaluation.DiscoveryReason,
             evaluation.Observation?.Anchors,
@@ -2228,7 +2468,8 @@ public sealed class PublicationRecoveryClassifierTests
                 .CurrentAcceptancePublicationReceipt is not null,
             evaluation.Observation?.Intent is not null,
             evaluation.Observation?.Failure?.Outcome,
-            consumedOnce);
+            evaluation.RetryTransitionAuthorization is not null &&
+                evaluation.StickyWriteAuthorization is null);
     }
 
     private static string RecoveryInventorySummary(
@@ -2289,7 +2530,7 @@ public sealed class PublicationRecoveryClassifierTests
         PublicationRecoveryAction Action,
         PublicationRecoveryLifecycleState Lifecycle,
         bool AllowsProvider,
-        bool HasStickyAuthorization,
+        bool HasRetryTransitionAuthorization,
         StickyDiscoveryKind DiscoveryKind,
         StickyPublicationReason DiscoveryReason,
         PublicationRecoveryAnchorState? Anchors,
@@ -2297,7 +2538,7 @@ public sealed class PublicationRecoveryClassifierTests
         bool AcceptanceReceiptPresent,
         bool IntentPresent,
         BoundedGitHubPublisherOutcome? FailureOutcome,
-        bool StickyAuthorizationConsumedOnce);
+        bool RetryTransitionIsNotStickyWrite);
 
     private sealed class SimulatedProcessCrashException : Exception
     {

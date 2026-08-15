@@ -20,7 +20,7 @@ internal sealed class ReviewedTreeReader
     {
     }
 
-    private ReviewedTreeReader(
+    internal ReviewedTreeReader(
         IReviewedGitObjectTransportFactory transportFactory,
         TimeProvider timeProvider)
     {
