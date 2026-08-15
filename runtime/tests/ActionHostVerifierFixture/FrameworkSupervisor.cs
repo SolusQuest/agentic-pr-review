@@ -958,19 +958,13 @@ internal static class FrameworkSupervisor
         }
 
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var text in items.EnumerateArray().Select(item =>
-                     item.ValueKind == JsonValueKind.String
-                         ? item.GetString()
-                         : null))
-        {
-            if (string.IsNullOrWhiteSpace(text) || !seen.Add(text) ||
-                predicate is not null && !predicate(text))
-            {
-                return false;
-            }
-        }
-
-        return true;
+        return items.EnumerateArray()
+            .Select(item => item.ValueKind == JsonValueKind.String
+                ? item.GetString()
+                : null)
+            .All(text => !string.IsNullOrWhiteSpace(text) &&
+                seen.Add(text) &&
+                (predicate is null || predicate(text)));
     }
 
     private static bool IsClosedPath(string value) =>
