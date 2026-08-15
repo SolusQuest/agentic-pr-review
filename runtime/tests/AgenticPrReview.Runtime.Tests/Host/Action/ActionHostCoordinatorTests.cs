@@ -235,6 +235,37 @@ public sealed class ActionHostCoordinatorTests
     }
 
     [Fact]
+    public void StickyReadbackPersistenceReturnsToTheBoundedDispatcher()
+    {
+        var source = File.ReadAllText(Path.Join(
+            FindRepositoryRoot(),
+            "runtime",
+            "src",
+            "AgenticPrReview.Runtime",
+            "Host",
+            "Action",
+            "ActionHostCoordinator.cs"));
+        var branchStart = source.IndexOf(
+            "case PublicationRecoveryAction.CompleteAcceptance:",
+            StringComparison.Ordinal);
+        var branchEnd = source.IndexOf(
+            "case PublicationRecoveryAction.StickyOutcomeUnknown:",
+            branchStart,
+            StringComparison.Ordinal);
+
+        Assert.True(branchStart >= 0);
+        Assert.True(branchEnd > branchStart);
+        var branch = source[branchStart..branchEnd];
+        Assert.Contains("PersistResultAsync(", branch,
+            StringComparison.Ordinal);
+        Assert.Contains("journal.RecordTransactionAdvance();", branch,
+            StringComparison.Ordinal);
+        Assert.Contains("break;", branch, StringComparison.Ordinal);
+        Assert.DoesNotContain("await RunAsync(", source,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ProviderProjectionCannotCarryGitHubStateOrPublicationAuthority()
     {
         var properties = typeof(ActionHostProviderPolicy)

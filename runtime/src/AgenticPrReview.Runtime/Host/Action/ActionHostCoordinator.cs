@@ -781,6 +781,50 @@ internal sealed class ActionHostCoordinator
                         ActionHostStatus.StickyPublicationFailed);
 
                 case PublicationRecoveryAction.CompleteAcceptance:
+                {
+                    if (observation is null ||
+                        evaluation.ExactReadbackReceipt is null)
+                    {
+                        return Failure(
+                            launch,
+                            ActionHostStatus.StateConflict);
+                    }
+
+                    if (observation.StickyReadback is null)
+                    {
+                        var activeAttempt = observation.RetryIntent?
+                                .RecordIdentity ??
+                            observation.Intent?.RecordIdentity;
+                        if (activeAttempt is null)
+                        {
+                            return Failure(
+                                launch,
+                                ActionHostStatus.StateConflict);
+                        }
+
+                        var persistence = await PersistResultAsync(
+                                state,
+                                observation,
+                                activeAttempt,
+                                observation.RetryIntent,
+                                evaluation.ExactReadbackReceipt,
+                                BoundedGitHubPublisherOutcome
+                                    .WrittenAndReadBack,
+                                StickyPublicationReason.None)
+                            .ConfigureAwait(false);
+                        using var persisted = persistence.Record;
+                        if (persisted is null)
+                        {
+                            return Failure(
+                                launch,
+                                P5WriteStatus(persistence.Code));
+                        }
+
+                        journal.RecordTransactionAdvance();
+
+                        break;
+                    }
+
                     return await CompleteAcceptanceAsync(
                             launch,
                             invocation,
@@ -791,6 +835,7 @@ internal sealed class ActionHostCoordinator
                             evaluation,
                             cancellationToken)
                         .ConfigureAwait(false);
+                }
 
                 case PublicationRecoveryAction.StickyOutcomeUnknown:
                     return Failure(
@@ -1208,43 +1253,10 @@ internal sealed class ActionHostCoordinator
     {
         var observation = evaluation.Observation;
         var receipt = evaluation.ExactReadbackReceipt;
-        if (observation is null || receipt is null)
+        var stickyReadback = observation?.StickyReadback;
+        if (observation is null || receipt is null || stickyReadback is null)
         {
             return Failure(launch, ActionHostStatus.StateConflict);
-        }
-
-        if (observation.StickyReadback is null)
-        {
-            var activeAttempt = observation.RetryIntent?.RecordIdentity ??
-                observation.Intent?.RecordIdentity;
-            if (activeAttempt is null)
-            {
-                return Failure(launch, ActionHostStatus.StateConflict);
-            }
-
-            var persistence = await PersistResultAsync(
-                    state,
-                    observation,
-                    activeAttempt,
-                    observation.RetryIntent,
-                    receipt,
-                    BoundedGitHubPublisherOutcome.WrittenAndReadBack,
-                    StickyPublicationReason.None)
-                .ConfigureAwait(false);
-            using var persisted = persistence.Record;
-            return persisted is null
-                ? Failure(
-                    launch,
-                    P5WriteStatus(persistence.Code))
-                : await RunAsync(
-                        launch,
-                        invocation,
-                        policy,
-                        snapshot,
-                        state,
-                        scope,
-                        callerCancellationToken)
-                    .ConfigureAwait(false);
         }
 
         _ = journal.TryBeginBusinessOperation(
@@ -1314,7 +1326,7 @@ internal sealed class ActionHostCoordinator
         if (!preparationResult.Succeeded || preparation is null ||
             !PublicationRecoveryPersistence.TryCreateAcceptanceRecoveryWrite(
                 preparation,
-                observation.StickyReadback,
+                stickyReadback,
                 out _,
                 out var recoveryWrite) ||
             recoveryWrite is null)
