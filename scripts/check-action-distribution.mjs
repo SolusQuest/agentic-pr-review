@@ -170,6 +170,9 @@ async function inspectPackageOwnership(repoRoot, report) {
   const packageLock = await readJson(repoRoot, 'package-lock.json', report);
   const installedEsbuild = await readJson(repoRoot, 'node_modules/esbuild/package.json', report);
   if (packageJson) {
+    if (packageJson.type !== 'module') {
+      report('package.json', 'action-package-module-scope-invalid');
+    }
     if (!sameStringRecord(packageJson.dependencies, exactRuntimeDependencies)) {
       report('package.json', 'action-runtime-dependencies-invalid');
     }

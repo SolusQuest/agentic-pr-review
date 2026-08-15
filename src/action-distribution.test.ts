@@ -153,7 +153,7 @@ describe('R4 Action distribution', () => {
   });
 
   it.runIf(process.platform === 'linux')(
-    'runs the checked CommonJS bundle without node_modules and reaches the lazy executor locally',
+    'runs the checked ESM bundle in its real package scope without node_modules and reaches the lazy executor locally',
     async () => {
       const execution = await runIsolatedBundle('r4-w2');
 
@@ -199,11 +199,12 @@ async function createDistributionFixture() {
 async function runIsolatedBundle(buildDiscriminator: string) {
   const trustedRoot = await temporaryDirectory('apr-isolated-action-');
   const bundlePath = path.join(trustedRoot, 'index.js');
-  const hostPath = path.join(trustedRoot, 'synthetic-host');
+  const hostPath = path.join(trustedRoot, 'synthetic-host.cjs');
   const markerPath = path.join(trustedRoot, 'executor-marker.txt');
   const summaryPath = path.join(trustedRoot, 'step-summary.md');
   const eventPath = path.join(trustedRoot, 'event.json');
   await copyFile(path.join(repoRoot, bundleRelativePath), bundlePath);
+  await writeFile(path.join(trustedRoot, 'package.json'), '{"type":"module"}\n');
   await writeFile(eventPath, '{}\n');
   await writeFile(summaryPath, '');
   await writeFile(hostPath, syntheticHostSource(markerPath));

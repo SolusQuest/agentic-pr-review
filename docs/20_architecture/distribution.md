@@ -42,7 +42,7 @@ Run:
 npm run dist:check
 ```
 
-This read-only command verifies the exact metadata surface, package and lockfile ownership, generated-wrapper source/import inventory, byte-for-byte checked bundle, and retired root-alias/local-runner/workflow-invocation guards. Run `npm run build:action` only when intentionally regenerating the checked bundle.
+This read-only command verifies the exact metadata surface, package and lockfile ownership, generated-wrapper source/import inventory, byte-for-byte checked bundle, and retired root-alias/local-runner/workflow-invocation guards. It is the sole owner of the derived bundle's exact bytes and bounded source graph, so the repository residual-reference audit excludes that one generated file while continuing to fail closed for every other tracked path. Run `npm run build:action` only when intentionally regenerating the checked bundle.
 
 ## .NET Payload
 

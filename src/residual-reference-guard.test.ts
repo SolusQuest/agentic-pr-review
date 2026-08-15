@@ -6,7 +6,8 @@ import {
   residualReferenceDiscovery,
   residualReferenceRules,
 } from './residual-reference-allowlist.js';
-const metadataPaths = new Set([
+const scanExclusions = new Set([
+  // W2 dist:check owns this derived file's exact bytes and bounded source graph.
   '.github/actions/agentic-pr-review/dist/index.js',
   'src/residual-reference-allowlist.ts',
   'src/residual-reference-guard.test.ts',
@@ -43,14 +44,8 @@ describe('R1 residual reference allowlist', () => {
     const multiplyOwned: string[] = [];
 
     for (const relative of trackedFiles(root)) {
-      if (metadataPaths.has(relative)) continue;
-      let bytes: Uint8Array;
-      try {
-        bytes = await readFile(path.join(root, relative));
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
-        throw error;
-      }
+      if (scanExclusions.has(relative)) continue;
+      const bytes = await readFile(path.join(root, relative));
       const text = decodeTrackedText(bytes);
       if (text === undefined) continue;
       const lines = text.split(/\r?\n/u);
