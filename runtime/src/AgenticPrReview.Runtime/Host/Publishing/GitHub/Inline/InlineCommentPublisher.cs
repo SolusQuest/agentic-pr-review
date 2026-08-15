@@ -155,17 +155,30 @@ internal sealed class InlineCommentPublisher
                     BoundedGitHubPublisherOutcome.WrittenAndReadBack);
             }
 
-            result.Fail(pending.Count - reconciled,
+            var unresolved = pending.Count - reconciled;
+            if (batchResult.Outcome ==
+                BoundedGitHubHttpOutcome.CancelledBeforeSend)
+            {
+                result.Fail(unresolved, InlineFailureKind.Cancelled);
+                return result.Build(BoundedGitHubPublisherOutcome
+                    .CancelledBeforeSend);
+            }
+
+            result.Fail(unresolved,
                 batchResult.Outcome is BoundedGitHubHttpOutcome.Success or
                     BoundedGitHubHttpOutcome.OutcomeUnknown
                     ? InlineFailureKind.BatchOutcomeUnknown
                     : InlineFailureKind.BatchKnownFailure);
-            return result.Build(batchResult.Outcome ==
-                    BoundedGitHubHttpOutcome.OutcomeUnknown ||
-                batchResult.Outcome == BoundedGitHubHttpOutcome.Success
-                    ? BoundedGitHubPublisherOutcome.OutcomeUnknown
-                    : BoundedGitHubPublisherOutcome
-                        .AuthorizationOrValidationFailure);
+            return result.Build(batchResult.Outcome switch
+            {
+                BoundedGitHubHttpOutcome.Success or
+                    BoundedGitHubHttpOutcome.OutcomeUnknown =>
+                    BoundedGitHubPublisherOutcome.OutcomeUnknown,
+                BoundedGitHubHttpOutcome.KnownNotSent =>
+                    BoundedGitHubPublisherOutcome.KnownNotWritten,
+                _ => BoundedGitHubPublisherOutcome
+                    .AuthorizationOrValidationFailure,
+            });
         }
     }
 
@@ -189,7 +202,7 @@ internal sealed class InlineCommentPublisher
             result.Fail(pending.Count,
                 InlineFailureKind.ReadbackIncomplete);
             return result.Build(BoundedGitHubPublisherOutcome
-                .AuthorizationOrValidationFailure);
+                .OutcomeUnknown);
         }
 
         var stillAbsent = new List<RenderedInlineComment>(pending.Count);
@@ -217,13 +230,20 @@ internal sealed class InlineCommentPublisher
             result.Fail(stillAbsent.Count,
                 InlineFailureKind.ReadbackIncomplete);
             return result.Build(BoundedGitHubPublisherOutcome
-                .AuthorizationOrValidationFailure);
+                .OutcomeUnknown);
         }
 
         if (stillAbsent.Count == 0)
         {
             return result.Build(
                 BoundedGitHubPublisherOutcome.WrittenAndReadBack);
+        }
+
+        if (stillAbsent.Count != pending.Count)
+        {
+            result.Fail(stillAbsent.Count,
+                InlineFailureKind.ReadbackIncomplete);
+            return result.Build(BoundedGitHubPublisherOutcome.OutcomeUnknown);
         }
 
         if (!await ExactHeadAsync(request, cancellationToken)

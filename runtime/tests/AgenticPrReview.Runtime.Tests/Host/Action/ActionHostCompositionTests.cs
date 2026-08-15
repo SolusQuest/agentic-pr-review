@@ -11,6 +11,7 @@ using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
+using AgenticPrReview.Runtime.Host.Publishing.GitHub.Inline;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.State.Locator;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
@@ -735,6 +736,82 @@ public sealed class ActionHostCompositionTests
     }
 
     [Fact]
+    public async Task ProductionInlineWarningPreservesAcceptedStickyAndState()
+    {
+        var authorization = ActionHostAuthorizationScenario.Valid(
+            ActionHostAuthorizationRoute.WorkflowDispatch);
+        var launch = FullLaunch(authorization.Launch);
+        var github = new FullPathGitHubFactory(
+            authorization.Transport.PullRequest,
+            withInlineFile: true);
+        var store = new ScriptedLocatorStore
+        {
+            FilterListsByName = true,
+            UseNumericObjectIds = true,
+            ProducingRunIdentity = launch.RunId.ToString(
+                System.Globalization.CultureInfo.InvariantCulture),
+            ProducingRunAttempt = launch.RunAttempt,
+        };
+        var publisher = new FakePublisherTransportFactory();
+        for (var index = 0; index < 32; index++)
+        {
+            publisher.Transport.Enqueue();
+        }
+
+        publisher.Transport.OnMutation = () =>
+        {
+            var request = Assert.IsType<AuthorizedStickyPublicationRequest>(
+                publisher.Transport.Request);
+            var comment = StickyPublicationTestData.Comment(
+                772,
+                request.Rendered.Comment);
+            publisher.Transport.Mutation =
+                BoundedGitHubHttpResult<BoundedGitHubIssueComment>.Success(
+                    comment);
+            publisher.Transport.Read =
+                BoundedGitHubHttpResult<BoundedGitHubIssueComment>.Success(
+                    comment);
+            publisher.Transport.Pages.Clear();
+            for (var index = 0; index < 32; index++)
+            {
+                publisher.Transport.Enqueue(comment);
+            }
+        };
+        var inline = new CompositionInlineTransportFactory();
+        inline.Transport.EnqueuePage();
+        inline.Transport.EnqueuePage();
+        var staging = Path.Join(
+            Path.GetTempPath(),
+            "agentic-pr-review-r4-tests",
+            Guid.NewGuid().ToString("N"));
+        var completion = await new ActionHostComposition(
+                new ActionHostCompositionDependencies(
+                    authorization.EventReader,
+                    authorization.Factory,
+                    github,
+                    github,
+                    new FullPathStateDependencies(store, github),
+                    publisher,
+                    new FullPathProviderFactory(withFinding: true),
+                    new FrozenLocatorTimeProvider(LocatorTestData.Now),
+                    () => staging,
+                    new PostAcceptanceInlinePublisherHook(inline)))
+            .RunAsync(launch, CancellationToken.None);
+
+        Assert.Equal(ActionHostStatus.ReviewedWithInlineWarnings,
+            completion.Status);
+        Assert.Equal(ActionHostStateDisposition.Accepted,
+            completion.Summary.StateDisposition);
+        Assert.Contains(completion.Annotations,
+            static annotation => annotation.Code ==
+                ActionHostAnnotationCode.InlinePublicationIncomplete);
+        Assert.Equal(1, inline.Creates);
+        Assert.Equal(1, inline.Transport.BatchCalls);
+        Assert.Equal(0, inline.Transport.IndividualCalls);
+        Assert.False(Directory.Exists(staging));
+    }
+
+    [Fact]
     public async Task MissingGitHubCredentialClosesBeforeAnyLaterProducer()
     {
         var scenario = ActionHostAuthorizationScenario.Valid(
@@ -1171,6 +1248,68 @@ public sealed class ActionHostCompositionTests
             ReplayConsumption = request.TryConsume(out _);
             return Task.FromResult(ActionHostInlineHookResult.Complete);
         }
+    }
+
+    private sealed class CompositionInlineTransportFactory :
+        IInlineGitHubPublisherTransportFactory
+    {
+        internal CompositionInlineTransport Transport { get; } = new();
+        internal int Creates { get; private set; }
+
+        public IInlineGitHubPublisherTransport Create(
+            AuthorizedInlinePublicationRequest request)
+        {
+            Creates++;
+            return Transport;
+        }
+    }
+
+    private sealed class CompositionInlineTransport :
+        IInlineGitHubPublisherTransport
+    {
+        private readonly Queue<BoundedGitHubHttpResult<
+            BoundedGitHubReviewCommentPage>> pages = new();
+
+        internal int BatchCalls { get; private set; }
+        internal int IndividualCalls { get; private set; }
+        public bool IsWithinOverallDeadline => true;
+
+        internal void EnqueuePage() => pages.Enqueue(
+            BoundedGitHubHttpResult<BoundedGitHubReviewCommentPage>.Success(
+                new([], null, null)));
+
+        public Task<BoundedGitHubHttpResult<BoundedGitHubReviewCommentPage>>
+            ListReviewCommentsAsync(int page,
+                CancellationToken cancellationToken) =>
+            Task.FromResult(pages.Dequeue());
+
+        public Task<BoundedGitHubHttpResult<BoundedGitHubPullRequestReview>>
+            CreateBatchReviewAsync(ReadOnlyMemory<byte> body,
+                CancellationToken cancellationToken)
+        {
+            BatchCalls++;
+            return Task.FromResult(BoundedGitHubHttpResult<
+                BoundedGitHubPullRequestReview>.Failed(
+                    BoundedGitHubHttpOutcome.OutcomeUnknown,
+                    BoundedGitHubPublisherReason.TransportFailure));
+        }
+
+        public Task<BoundedGitHubHttpResult<BoundedGitHubReviewComment>>
+            CreateReviewCommentAsync(ReadOnlyMemory<byte> body,
+                CancellationToken cancellationToken)
+        {
+            IndividualCalls++;
+            throw new InvalidOperationException(
+                "Ambiguous batch outcomes cannot fan out.");
+        }
+
+        public Task<BoundedGitHubHttpResult<BoundedGitHubReviewComment>>
+            GetReviewCommentAsync(long commentId,
+                CancellationToken cancellationToken) =>
+            throw new InvalidOperationException(
+                "No individual comment was created.");
+
+        public void Dispose() { }
     }
 
     private sealed class NoToolExecutor : IAgentToolExecutor
