@@ -1,4 +1,7 @@
+using System.Diagnostics;
 using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using AgenticPrReview.Runtime.ActionHost;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
@@ -78,7 +81,7 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
 
         var packages = replacement.RootElement.GetProperty("entries")
             .EnumerateArray()
-            .Select(value => value.GetProperty("work_package").GetString())
+            .Select(value => value.GetProperty("leaf_id").GetString())
             .ToArray();
         Assert.Equal(new[]
         {
@@ -88,8 +91,28 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         Assert.DoesNotContain("W13", packages);
         Assert.Equal("e698fb1df6daf49f393e87fac4f00e3a2ec2c716",
             inventory.RootElement.GetProperty("base_sha").GetString());
-        Assert.Equal(331, inventory.RootElement.GetProperty("files")
+        Assert.Equal("apr.action-host.replacement-record.v2",
+            replacement.RootElement.GetProperty("schema").GetString());
+        Assert.Equal(339, inventory.RootElement.GetProperty("files")
             .GetArrayLength());
+
+        var framing = new StringBuilder();
+        foreach (var file in inventory.RootElement.GetProperty("files")
+                     .EnumerateArray())
+        {
+            var path = file.GetProperty("path").GetString()!;
+            var digest = file.GetProperty("sha256").GetString()!;
+            Assert.Equal(digest, BaseBlobDigest(root,
+                inventory.RootElement.GetProperty("base_sha").GetString()!,
+                path));
+            framing.Append(path).Append('\0').Append(digest).Append('\n');
+        }
+
+        Assert.Equal(
+            inventory.RootElement.GetProperty("aggregate_sha256").GetString(),
+            Convert.ToHexString(SHA256.HashData(
+                Encoding.UTF8.GetBytes(framing.ToString())))
+                .ToLowerInvariant());
     }
 
     [Fact]
@@ -118,6 +141,30 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         }
 
         return count;
+    }
+
+    private static string BaseBlobDigest(
+        string repository,
+        string revision,
+        string path)
+    {
+        var info = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = repository,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        info.ArgumentList.Add("show");
+        info.ArgumentList.Add(revision + ":" + path);
+        using var process = Process.Start(info);
+        Assert.NotNull(process);
+        using var bytes = new MemoryStream();
+        process.StandardOutput.BaseStream.CopyTo(bytes);
+        process.WaitForExit();
+        Assert.Equal(0, process.ExitCode);
+        return Convert.ToHexString(SHA256.HashData(bytes.ToArray()))
+            .ToLowerInvariant();
     }
 
     private static string FindRepositoryRoot()

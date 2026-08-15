@@ -38,6 +38,8 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     private readonly object gate = new();
     private readonly string evidenceRoot;
     private Task? pump;
+    private string activeMode = "sticky";
+    private int inFlight;
     private string pendingName = "";
     private DateTimeOffset pendingExpiry;
     private long nextId = 1000;
@@ -51,9 +53,19 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
 
     internal string BaseUrl { get; }
 
+    internal int InFlight => Volatile.Read(ref inFlight);
+
+    internal void BeginScenario(string mode)
+    {
+        lock (gate)
+        {
+            activeMode = mode;
+        }
+    }
+
     internal static SyntheticOfficialPlatform Start(string evidenceRoot)
     {
-        var socket = new TcpListener(IPAddress.Loopback, 0);
+        using var socket = new TcpListener(IPAddress.Loopback, 0);
         socket.Start();
         var port = ((IPEndPoint)socket.LocalEndpoint).Port;
         socket.Stop();
@@ -129,6 +141,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
 
     private async Task HandleAsync(HttpListenerContext context)
     {
+        Interlocked.Increment(ref inFlight);
         try
         {
             var path = context.Request.Url?.AbsolutePath ?? "";
@@ -161,7 +174,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
 
             await HandleRestAsync(context).ConfigureAwait(false);
         }
-        catch (Exception error)
+        catch (Exception error) when (IsNonFatal(error))
         {
             Directory.CreateDirectory(evidenceRoot);
             await File.AppendAllTextAsync(
@@ -174,11 +187,16 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                     .ConfigureAwait(false);
             }
         }
+        finally
+        {
+            Interlocked.Decrement(ref inFlight);
+        }
     }
 
     private async Task HandleTwirpAsync(HttpListenerContext context)
     {
         Increment("official-twirp-count");
+        RecordObservation("actions-runtime-jwt", "results.authorization");
         if (!HasBearer(context.Request, FrameworkSupervisor.RuntimeToken))
         {
             await WriteJsonAsync(context.Response,
@@ -257,7 +275,25 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                 artifactNames.Add(pendingName);
             }
 
+            if (!CanariesAbsent(archive))
+            {
+                File.WriteAllText(
+                    Path.Join(evidenceRoot, "canary-route-violation"),
+                    "plaintext_in_artifact_archive");
+            }
+            RecordObservation("artifact-ciphertext", "artifact.archive");
+
             Increment("official-finalize-count");
+            if (Mode() == "artifact-upload-outcome-unknown")
+            {
+                File.WriteAllText(
+                    Path.Join(evidenceRoot, "upload-outcome-unknown-committed"),
+                    id.ToString(CultureInfo.InvariantCulture));
+                await WriteJsonAsync(context.Response,
+                    HttpStatusCode.InternalServerError,
+                    "{\"ok\":true}").ConfigureAwait(false);
+                return;
+            }
             await WriteJsonAsync(context.Response, HttpStatusCode.OK,
                 JsonSerializer.Serialize(new
                 {
@@ -274,6 +310,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     private async Task HandleUploadAsync(HttpListenerContext context)
     {
         Increment("official-blob-count");
+        RecordObservation("signed-url-sig", "blob.query");
         if (context.Request.QueryString["sig"] != FrameworkCanaries.SignedUrl ||
             context.Request.Headers["Authorization"] is not null)
         {
@@ -325,6 +362,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     private async Task HandleSignedDownloadAsync(HttpListenerContext context)
     {
         Increment("official-signed-download-count");
+        RecordObservation("signed-url-sig", "blob.query");
         if (context.Request.QueryString["sig"] != FrameworkCanaries.SignedUrl ||
             context.Request.Headers["Authorization"] is not null ||
             !long.TryParse(
@@ -350,6 +388,7 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
     private async Task HandleRestAsync(HttpListenerContext context)
     {
         Increment("official-rest-count");
+        RecordObservation("github-token", "artifact-rest.authorization");
         var path = context.Request.Url!.AbsolutePath;
         var prefix = "/repos/" + FrameworkCanaries.Repository +
             "/actions/artifacts";
@@ -366,8 +405,61 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                     .ToArray();
             }
 
+            var mode = Mode();
+            if (values.Length > 0 && mode == "artifact-list-duplicate")
+            {
+                var duplicate = MetadataDocument(values[0]);
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK,
+                    JsonSerializer.Serialize(new
+                    {
+                        total_count = 2,
+                        artifacts = new[] { duplicate, duplicate },
+                    })).ConfigureAwait(false);
+                return;
+            }
+
+            if (values.Length > 0 && mode is
+                "artifact-pagination-changed" or "artifact-pagination-late")
+            {
+                if (page == 1)
+                {
+                    var firstPage = Enumerable.Range(0, 100)
+                        .Select(index => MetadataDocument(values[0],
+                            10_000 + index)).ToArray();
+                    await WriteJsonAsync(context.Response, HttpStatusCode.OK,
+                        JsonSerializer.Serialize(new
+                        {
+                            total_count = 101,
+                            artifacts = firstPage,
+                        })).ConfigureAwait(false);
+                    return;
+                }
+
+                if (mode == "artifact-pagination-late")
+                {
+                    await WriteJsonAsync(context.Response,
+                        HttpStatusCode.InternalServerError, "{}")
+                        .ConfigureAwait(false);
+                    return;
+                }
+
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK,
+                    JsonSerializer.Serialize(new
+                    {
+                        total_count = 102,
+                        artifacts = new[]
+                        {
+                            MetadataDocument(values[0], 10_100),
+                        },
+                    })).ConfigureAwait(false);
+                return;
+            }
+
             var selected = values.Skip((page - 1) * 100).Take(100)
-                .Select(MetadataDocument).ToArray();
+                .Select(value => MetadataDocument(value,
+                    overrideDigest: mode == "artifact-digest-mismatch",
+                    overrideExpiry: mode == "artifact-expired"))
+                .ToArray();
             await WriteJsonAsync(context.Response, HttpStatusCode.OK,
                 JsonSerializer.Serialize(new
                 {
@@ -404,8 +496,35 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
         {
             if (context.Request.HttpMethod == "DELETE")
             {
-                lock (gate) artifacts.Remove(id);
+                int before;
+                int after;
+                lock (gate)
+                {
+                    before = artifacts.Count;
+                    artifacts.Remove(id);
+                    after = artifacts.Count;
+                }
                 Increment("official-delete-count");
+                if (Mode() == "delete-exact" &&
+                    before > 1 && after == before - 1 &&
+                    !TryArtifact(id, out _))
+                {
+                    File.WriteAllText(
+                        Path.Join(evidenceRoot, "exact-delete-proof"),
+                        before.ToString(CultureInfo.InvariantCulture) + "\t" +
+                        after.ToString(CultureInfo.InvariantCulture));
+                }
+                if (Mode() == "artifact-delete-outcome-unknown")
+                {
+                    File.WriteAllText(
+                        Path.Join(evidenceRoot,
+                            "delete-outcome-unknown-committed"),
+                        id.ToString(CultureInfo.InvariantCulture));
+                    await WriteJsonAsync(context.Response,
+                        HttpStatusCode.InternalServerError, "{}")
+                        .ConfigureAwait(false);
+                    return;
+                }
                 context.Response.StatusCode = (int)HttpStatusCode.NoContent;
                 context.Response.Close();
                 return;
@@ -414,8 +533,11 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             if (context.Request.HttpMethod == "GET" &&
                 TryArtifact(id, out var artifact))
             {
+                var mode = Mode();
                 await WriteJsonAsync(context.Response, HttpStatusCode.OK,
-                    JsonSerializer.Serialize(MetadataDocument(artifact!)))
+                    JsonSerializer.Serialize(MetadataDocument(artifact!,
+                        overrideDigest: mode == "artifact-digest-mismatch",
+                        overrideExpiry: mode == "artifact-expired")))
                     .ConfigureAwait(false);
                 return;
             }
@@ -445,15 +567,23 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             .ConfigureAwait(false);
     }
 
-    private static object MetadataDocument(Artifact artifact) => new
+    private static object MetadataDocument(
+        Artifact artifact,
+        long? overrideId = null,
+        bool overrideDigest = false,
+        bool overrideExpiry = false) => new
     {
-        id = artifact.Id,
+        id = overrideId ?? artifact.Id,
         name = artifact.Name,
         size_in_bytes = artifact.Archive.Length,
-        expired = false,
-        expires_at = artifact.ExpiresAt.UtcDateTime.ToString(
+        expired = overrideExpiry,
+        expires_at = (overrideExpiry
+                ? DateTimeOffset.FromUnixTimeSeconds(1_700_000_000)
+                : artifact.ExpiresAt).UtcDateTime.ToString(
             "O", CultureInfo.InvariantCulture),
-        digest = "sha256:" + artifact.Digest,
+        digest = "sha256:" + (overrideDigest
+            ? new string('0', 64)
+            : artifact.Digest),
         workflow_run = new { id = artifact.ProducingRunId },
     };
 
@@ -604,4 +734,46 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
                 value.ToString(CultureInfo.InvariantCulture));
         }
     }
+
+    private void RecordObservation(string canaryClass, string sink)
+    {
+        lock (gate)
+        {
+            File.AppendAllText(
+                Path.Join(evidenceRoot, "canary-observations.tsv"),
+                canaryClass + "\t" + sink + "\n");
+        }
+    }
+
+    private string Mode()
+    {
+        lock (gate) return activeMode;
+    }
+
+    private static bool CanariesAbsent(byte[] bytes)
+    {
+        var text = Encoding.UTF8.GetString(bytes);
+        string[] forbidden =
+        [
+            FrameworkCanaries.ProviderKey,
+            FrameworkCanaries.GitHubToken,
+            FrameworkCanaries.StateKey,
+            FrameworkCanaries.PreviousStateKey,
+            FrameworkCanaries.Prompt,
+            FrameworkCanaries.ToolData,
+            FrameworkCanaries.ContinuationMarker,
+            FrameworkCanaries.PublicResult,
+        ];
+        return forbidden.All(value =>
+            !text.Contains(value, StringComparison.Ordinal) &&
+            !text.Contains(Convert.ToBase64String(Encoding.UTF8.GetBytes(value)),
+                StringComparison.Ordinal) &&
+            !text.Contains(Uri.EscapeDataString(value),
+                StringComparison.Ordinal));
+    }
+
+    private static bool IsNonFatal(Exception error) =>
+        error is not OutOfMemoryException and
+        not StackOverflowException and
+        not AccessViolationException;
 }

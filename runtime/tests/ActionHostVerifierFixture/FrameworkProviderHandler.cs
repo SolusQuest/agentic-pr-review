@@ -30,21 +30,26 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot) :
         var mode = ReadMode();
         Record("provider-request-count", Increment("provider-request-count"));
         Record("provider-auth-count", Increment("provider-auth-count"));
+        RecordObservation("provider-key", "provider.authorization");
         if (Contains(body, FrameworkCanaries.Prompt))
         {
             Record("provider-prompt-observed", 1);
+            RecordObservation("prompt", "provider.request");
         }
 
         if (Contains(body, FrameworkCanaries.ToolData))
         {
             Record("provider-tool-data-observed", 1);
+            RecordObservation("tool-data", "provider.request");
         }
 
         if (File.Exists(Path.Join(scenarioRoot, "expect-continuation")) &&
-            (Contains(body, "framework-finish") ||
-             Contains(body, FrameworkCanaries.Plaintext)))
+            Contains(body, FrameworkCanaries.ContinuationMarker) &&
+            !File.Exists(Path.Join(scenarioRoot,
+                "provider-continuation-observed")))
         {
             Record("provider-continuation-observed", 1);
+            RecordObservation("session-plaintext", "provider.continuation");
         }
 
         if (mode == "provider-error")
@@ -65,7 +70,8 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot) :
         }
 
         var call = Increment("provider-sequence");
-        if (mode == "continuation-seed" && call == 4)
+        if (mode == "continuation-seed" && call == 4 && File.Exists(
+                Path.Join(scenarioRoot, "crash-after-provider-checkpoint")))
         {
             Record("provider-checkpoint-ready", 1);
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)
@@ -92,7 +98,10 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot) :
                 "read_diff",
                 "{\"path\":\"" + FrameworkCanaries.ReviewedPath +
                     "\",\"start_hunk\":1,\"hunk_count\":20}",
-                call),
+                call,
+                mode == "continuation-seed"
+                    ? FrameworkCanaries.ContinuationMarker
+                    : null),
             4 => Tool(
                 prefix + "read-file",
                 "read_file",
@@ -143,6 +152,7 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot) :
         string arguments;
         if (mode == "public-result")
         {
+            RecordObservation("public-result", "agent.validation");
             arguments = "{\"summary\":\"rejected\",\"findings\":[{" +
                 "\"severity\":\"high\",\"title\":\"" +
                 FrameworkCanaries.PublicResult +
@@ -210,7 +220,8 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot) :
         string callId,
         string name,
         string arguments,
-        int sequence)
+        int sequence,
+        string? privateMarker = null)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
@@ -225,7 +236,8 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot) :
             writer.WriteString(
                 "reasoning_content",
                 "framework-reasoning-" + sequence.ToString(
-                    System.Globalization.CultureInfo.InvariantCulture));
+                    System.Globalization.CultureInfo.InvariantCulture) +
+                (privateMarker is null ? string.Empty : " " + privateMarker));
             writer.WriteStartArray("tool_calls");
             writer.WriteStartObject();
             writer.WriteString("id", callId);
@@ -281,6 +293,11 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot) :
     private void Record(string name, int value) => File.WriteAllText(
         Path.Join(scenarioRoot, name),
         value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    private void RecordObservation(string canaryClass, string sink) =>
+        File.AppendAllText(
+            Path.Join(scenarioRoot, "canary-observations.tsv"),
+            canaryClass + "\t" + sink + "\n");
 
     private static bool Contains(byte[] bytes, string value) =>
         Encoding.UTF8.GetString(bytes).Contains(value, StringComparison.Ordinal);

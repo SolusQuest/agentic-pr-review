@@ -2,6 +2,7 @@
   "schema": "apr.action-host.e1-base-inventory.v1",
   "base_sha": "e698fb1df6daf49f393e87fac4f00e3a2ec2c716",
   "selection": "W3-W12, W14, and W15 superseded surfaces at the accepted E1 base",
+  "aggregate_sha256": "804927c350fbf57ce08c477196c99c42b5c72781be4a81a532f0c45fdfc01dfe",
   "files": [
     {
       "path": "protocol/fixtures/prefix-contract/v1/append/bootstrap-continuation.json",
@@ -582,6 +583,38 @@
     {
       "path": "protocol/fixtures/provider-run-metadata/v1/valid-standard-zero-attempt.json",
       "sha256": "dbf0dfc6e33de0aeeffa416229af2ea28cc5e83a313635da97231479e557d720"
+    },
+    {
+      "path": "protocol/fixtures/state-manifest-v2-compat/compat-base-change.json",
+      "sha256": "cb76d3cf907171c50659d7c245ba9d31979c0eae8305cd3cd4141c533f3c24e4"
+    },
+    {
+      "path": "protocol/fixtures/state-manifest-v2-compat/compat-cache-contract-change.json",
+      "sha256": "81be2dec842a9c06be0d96e00ed336850f8a005aab6004ebbf9be9c79da69798"
+    },
+    {
+      "path": "protocol/fixtures/state-manifest-v2-compat/compat-continuation.json",
+      "sha256": "b1ecded44382f8b6adde22829782e40aac0eb416adb9acb77b5ecc48866a1926"
+    },
+    {
+      "path": "protocol/fixtures/state-manifest-v2-compat/compat-contract-version-mismatch.json",
+      "sha256": "46ae92ecb528016faef4df283f874c0a45ba5060c27eeca0b55336eadbccdc38"
+    },
+    {
+      "path": "protocol/fixtures/state-manifest-v2-compat/compat-nondescendant-head.json",
+      "sha256": "ed19ad4972c9ce82a00add2a3b95226a4fef1dea0fd4ecd98e242f358a012513"
+    },
+    {
+      "path": "protocol/fixtures/state-manifest-v2-compat/compat-state-key-mismatch.json",
+      "sha256": "c48f941e7179dd477835c9cbcf276433169e6cac6e44e436dd0dc48997447a83"
+    },
+    {
+      "path": "protocol/fixtures/state-manifest-v2-compat/compat-unknown-ancestry.json",
+      "sha256": "286876c954ebbffd91de5284eb5bda24f969af6b19f6ee7e2900a4b09442a7a3"
+    },
+    {
+      "path": "protocol/fixtures/state-manifest-v2-compat/compat-unsafe-provenance.json",
+      "sha256": "eb1777879d4936bb43bede6c3637ef03a8fbc0dfd5df4a24c0cba38ab455b741"
     },
     {
       "path": "protocol/fixtures/state-manifest-v2/positive-bootstrap/bundle/ledger.json",

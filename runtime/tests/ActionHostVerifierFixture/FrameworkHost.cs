@@ -62,6 +62,29 @@ internal static class FrameworkHost
             Path.Join(scenarioRoot, "host-environment.keys"),
             ExpectedEnvironment,
             CancellationToken.None).ConfigureAwait(false);
+        RecordObservation(scenarioRoot, "repository", "host.launch");
+        RecordObservation(scenarioRoot, "workflow-source", "host.launch");
+        if (launch.Inputs.StateKey is not null)
+        {
+            RecordObservation(scenarioRoot, "state-key-current",
+                "state.cryptographic-memory");
+        }
+        if (launch.Inputs.PreviousStateKey is not null)
+        {
+            RecordObservation(scenarioRoot, "state-key-previous",
+                "state.cryptographic-memory");
+        }
+
+        var mode = File.ReadAllText(Path.Join(scenarioRoot, "mode")).Trim();
+        if (mode == "cancel-before-side-effect")
+        {
+            await File.WriteAllTextAsync(
+                Path.Join(scenarioRoot, "cancel-before-side-effect-ready"),
+                "1",
+                CancellationToken.None).ConfigureAwait(false);
+            await WaitForCancellationAsync(cancellation.Token)
+                .ConfigureAwait(false);
+        }
 
         if (File.Exists(Path.Join(scenarioRoot, "stall-after-signal")))
         {
@@ -220,6 +243,13 @@ internal static class FrameworkHost
             completion);
         await completion.Task.ConfigureAwait(false);
     }
+
+    private static void RecordObservation(
+        string scenarioRoot,
+        string canaryClass,
+        string sink) => File.AppendAllText(
+            Path.Join(scenarioRoot, "canary-observations.tsv"),
+            canaryClass + "\t" + sink + "\n");
 
     private sealed class FrameworkTimeProvider : TimeProvider
     {

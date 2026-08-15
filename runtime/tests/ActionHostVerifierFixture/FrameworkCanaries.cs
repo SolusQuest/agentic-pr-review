@@ -22,6 +22,8 @@ internal static class FrameworkCanaries
         "APR178_TOOL_DATA_CANARY";
     internal const string Plaintext =
         "APR178_SESSION_PLAINTEXT_CANARY";
+    internal const string ContinuationMarker =
+        "APR178_PRIOR_SESSION_ONLY_CANARY";
     internal const string PublicResult =
         "APR178_PUBLIC_RESULT_CANARY";
     internal const string SignedUrl =

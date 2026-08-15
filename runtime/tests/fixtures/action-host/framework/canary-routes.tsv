@@ -1,15 +1,15 @@
-class	source	private_transit	terminal	forbidden_terminal	cardinality
-provider-key	fixture supervisor	H1 input to provider credential and Bearer header	DeepSeek handler authorization	logs summary GitHub state artifact	one per wrapper process
-github-token	fixture supervisor	H1 input to GitHub authorization publisher and artifact bridge	GitHub handler or Octokit Bearer header	logs summary provider state artifact	one per wrapper process
-state-key-current	fixture supervisor	H1 input to accepted-state key ring	state encryption boundary	logs summary provider GitHub public result	one per wrapper process
-state-key-previous	fixture supervisor	H1 input to accepted-state rotation key ring	state decryption boundary	logs summary provider GitHub public result	zero or one per wrapper process
-actions-runtime-jwt	fixture supervisor	Node process environment	Twirp Authorization header	blob URL GitHub API provider Host child summary	one per wrapper process
-signed-url-sig	official platform	Twirp response and Node blob transport	blob query string	Twirp Authorization GitHub API provider Host child summary	one per blob operation
-repository	fixture supervisor	event runtime facts H1 GitHub requests	trusted authorization and reviewed identity	provider secret state key	one trusted identity
-reviewed-path	GitHub snapshot handler	real snapshot and tool observations	grounded finding and inline candidate	state key artifact credential	one changed path
-workflow-source	GitHub handler	workflow content response and policy materializer	trusted workflow authorization	provider and state secret channels	one exact blob
-prompt	Git object instructions blob	policy prompt and provider request	DeepSeek handler observation	workflow summary GitHub comments artifacts	one exact instructions blob
-tool-data	Git snapshot blob	tool result and provider continuation	DeepSeek handler observation	logs summary GitHub comments state metadata	one exact changed file
-session-plaintext	trusted instructions and prior session	Agent session and state encryption input	restored provider continuation	logs summary GitHub provider HTTP artifact archive	one logical session
-artifact-ciphertext	state encryption boundary	private bridge staging official artifact upload	artifact archive bytes	provider GitHub comments summary plaintext channels	bounded by state transaction
-public-result	untrusted provider response	result parser and admission	invalid-result rejection	sticky inline summary annotations state artifact	one negative scenario
+class	source	approved_private_sinks	terminal_sinks	forbidden_sinks	cardinality
+provider-key	wrapper.input.provider-api-key	host.credential	provider.authorization	github.*;artifact-rest.*;results.*;blob.*;state.*;public.*;evidence.*	equals-provider-requests
+github-token	wrapper.input.github-token	host.credential	github.authorization;artifact-rest.authorization	provider.*;results.*;blob.*;state.*;public.*;evidence.*	equals-github-and-artifact-rest-requests
+state-key-current	wrapper.input.state-key	host.launch;state.cryptographic-memory	-	http.*;provider.*;github.*;artifact.*;public.*;evidence.*	at-least-one
+state-key-previous	wrapper.input.previous-state-key	host.launch;state.cryptographic-memory	-	http.*;provider.*;github.*;artifact.*;public.*;evidence.*	at-least-one
+actions-runtime-jwt	wrapper.environment.actions-runtime-token	results.client	results.authorization	blob.*;github.*;provider.*;host.*;public.*;evidence.*	equals-twirp-requests
+signed-url-sig	results.create-response	blob.client	blob.query	results.authorization;github.*;provider.*;host.*;artifact.content;public.*;evidence.*	equals-blob-requests
+repository	event.repository	host.launch;github.repository;state.scope;publication.scope	github.public-url	secret.*;artifact.metadata;evidence.raw	at-least-one
+reviewed-path	github.changed-tree	github.changed-files;snapshot.path;provider.context	public.grounded-finding	artifact.metadata;host.summary;evidence.raw	at-least-one
+workflow-source	event.workflow	host.launch;github.workflow-source;policy.identity;state.scope	-	provider.repository-content;artifact.metadata;public.prose;evidence.raw	at-least-one
+prompt	trusted.instructions	policy.prompt;agent.context	provider.request;artifact.encrypted	public.*;artifact.metadata;evidence.raw	at-least-one
+tool-data	provider.tool-call	agent.tool-history;snapshot.tool-result	provider.request;public.grounded-finding	artifact.metadata;host.summary;evidence.raw	at-least-one
+session-plaintext	agent.session	state.encryption-input	provider.continuation	artifact.raw;github.*;public.*;host.environment;evidence.raw	exactly-one
+artifact-ciphertext	state.encryption-output	bridge.staging;blob.body	artifact.archive	provider.*;github.*;public.*;evidence.raw	at-least-one
+public-result	provider.response	agent.validation	-	state.*;artifact.*;github.*;public.*;evidence.raw	exactly-one
