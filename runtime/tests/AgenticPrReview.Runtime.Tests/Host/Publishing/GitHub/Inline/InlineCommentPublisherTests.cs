@@ -324,11 +324,74 @@ public sealed class InlineCommentPublisherTests
                 new FakeInlineFactory(transport))
             .PublishAsync(data.Request, cancellation.Token);
 
-        Assert.Equal(BoundedGitHubPublisherOutcome.KnownNotWritten,
+        Assert.Equal(BoundedGitHubPublisherOutcome.OutcomeUnknown,
             result.Outcome);
-        Assert.Equal(1, result.Reasons.FallbackExcluded);
+        Assert.Equal(1, result.Reasons.Cancelled);
         Assert.Equal(1, transport.ListCalls);
         Assert.Equal(0, transport.IndividualCalls);
+    }
+
+    [Fact]
+    public async Task CancellationDuringFallbackHeadCheckIsOutcomeUnknown()
+    {
+        var data = await CreateAsync();
+        using var cancellation = new CancellationTokenSource();
+        data.Revalidation.OnRequest = (call, _) =>
+        {
+            if (call == 2) cancellation.Cancel();
+        };
+        var transport = new FakeInlineTransport
+        {
+            Batch = BoundedGitHubHttpResult<BoundedGitHubPullRequestReview>
+                .Failed(BoundedGitHubHttpOutcome.KnownNotSent,
+                    BoundedGitHubPublisherReason.BatchValidationRejected),
+        };
+        transport.EnqueuePage();
+        transport.EnqueuePage();
+
+        var result = await new InlineCommentPublisher(
+                new FakeInlineFactory(transport))
+            .PublishAsync(data.Request, cancellation.Token);
+
+        Assert.Equal(BoundedGitHubPublisherOutcome.OutcomeUnknown,
+            result.Outcome);
+        Assert.Equal(1, result.Reasons.Cancelled);
+        Assert.Equal(2, data.Revalidation.Calls);
+        Assert.Equal(0, transport.IndividualCalls);
+    }
+
+    [Fact]
+    public async Task CancellationAfterFirstIndividualPreservesSuccessAndStops()
+    {
+        var data = await CreateAsync(candidateCount: 2);
+        var rendered = Render(data.Request);
+        using var cancellation = new CancellationTokenSource();
+        var first = Comment(data.Request, rendered[0], 12);
+        var transport = new FakeInlineTransport
+        {
+            Batch = BoundedGitHubHttpResult<BoundedGitHubPullRequestReview>
+                .Failed(BoundedGitHubHttpOutcome.KnownNotSent,
+                    BoundedGitHubPublisherReason.BatchValidationRejected),
+            OnRead = cancellation.Cancel,
+        };
+        transport.EnqueuePage();
+        transport.EnqueuePage();
+        transport.Creates.Enqueue(BoundedGitHubHttpResult<
+            BoundedGitHubReviewComment>.Success(first));
+        transport.Reads.Enqueue(BoundedGitHubHttpResult<
+            BoundedGitHubReviewComment>.Success(first));
+
+        var result = await new InlineCommentPublisher(
+                new FakeInlineFactory(transport))
+            .PublishAsync(data.Request, cancellation.Token);
+
+        Assert.Equal(BoundedGitHubPublisherOutcome.OutcomeUnknown,
+            result.Outcome);
+        Assert.Equal(1, result.Reasons.IndividualPublished);
+        Assert.Equal(1, result.Reasons.Cancelled);
+        Assert.Equal(1, result.IndividualAttempts);
+        Assert.Equal(1, transport.IndividualCalls);
+        Assert.Equal(1, transport.ReadCalls);
     }
 
     [Fact]
@@ -706,6 +769,57 @@ public sealed class InlineCommentPublisherTests
     }
 
     [Fact]
+    public async Task OrdinaryFileLevelCommentAllowsNullTargetAndArbitraryBody()
+    {
+        var data = await CreateAsync();
+        const string ordinary = "ordinary\0body with bidi \u202e and markdown <!--";
+        using var transport = BoundedGitHubPublisherTransport
+            .CreateInlineForTesting("token-canary", data.Request,
+                new DelegateHandler(_ => Json(HttpStatusCode.OK,
+                    "[" + OrdinaryFileReviewCommentDocument(
+                        data.Request, 71, ordinary) + "]")));
+
+        var result = await transport.ListReviewCommentsAsync(
+            1, CancellationToken.None);
+
+        var comment = Assert.Single(Assert.IsType<
+            BoundedGitHubReviewCommentPage>(result.Value).Comments);
+        Assert.Equal(ordinary, comment.Body);
+        Assert.Null(comment.ReviewId);
+        Assert.Null(comment.Path);
+        Assert.Null(comment.Line);
+        Assert.Null(comment.Side);
+        Assert.Null(comment.CommitId);
+    }
+
+    [Fact]
+    public async Task MalformedCurrentMarkerStillClosesBeforeAnyWrite()
+    {
+        var data = await CreateAsync();
+        var transport = new FakeInlineTransport();
+        transport.EnqueuePage(new BoundedGitHubReviewComment(
+            72,
+            null,
+            "https://api.github.com/repos/owner/repository/pulls/comments/72",
+            "https://api.github.com/repos/owner/repository/pulls/17",
+            "https://github.com/owner/repository/pull/17#discussion_r72",
+            "ordinary\n\n<!-- agentic-pr-review:r4:inline:v1 malformed -->",
+            null,
+            null,
+            null,
+            null));
+
+        var result = await new InlineCommentPublisher(
+                new FakeInlineFactory(transport))
+            .PublishAsync(data.Request, CancellationToken.None);
+
+        Assert.False(result.IsComplete);
+        Assert.Equal(1, result.Reasons.ListingIncomplete);
+        Assert.Equal(0, transport.BatchCalls);
+        Assert.Equal(0, transport.IndividualCalls);
+    }
+
+    [Fact]
     public async Task CommonInlineTransportSharesRequestBudgetAcrossOperations()
     {
         var data = await CreateAsync();
@@ -831,6 +945,131 @@ public sealed class InlineCommentPublisherTests
         Assert.Equal(BoundedGitHubPublisherReason.AggregateResponseLimit,
             overflow.Reason);
         Assert.Equal(65, aggregateCalls);
+    }
+
+    [Fact]
+    public async Task CommonInlineTransportRechecksDeadlineAfterMapping()
+    {
+        var data = await CreateAsync();
+        using (var listing = BoundedGitHubPublisherTransport
+            .CreateInlineForTesting("token-canary", data.Request,
+                new DelegateHandler(_ => Json(HttpStatusCode.OK,
+                    "[" + ReviewCommentDocument(data.Request, 81) + "]")),
+                overallTimeout: TimeSpan.FromSeconds(180),
+                operation: new ExpiringReadClock(6)))
+        {
+            var result = await listing.ListReviewCommentsAsync(
+                1, CancellationToken.None);
+            Assert.Equal(BoundedGitHubHttpOutcome.KnownNotSent,
+                result.Outcome);
+            Assert.Equal(BoundedGitHubPublisherReason.Deadline,
+                result.Reason);
+        }
+
+        using (var mutation = BoundedGitHubPublisherTransport
+            .CreateInlineForTesting("token-canary", data.Request,
+                new DelegateHandler(_ => Json(HttpStatusCode.Created,
+                    ReviewCommentDocument(data.Request, 82))),
+                overallTimeout: TimeSpan.FromSeconds(180),
+                operation: new ExpiringReadClock(5)))
+        {
+            var result = await mutation.CreateReviewCommentAsync(
+                "{}"u8.ToArray(), CancellationToken.None);
+            Assert.Equal(BoundedGitHubHttpOutcome.OutcomeUnknown,
+                result.Outcome);
+            Assert.Equal(BoundedGitHubPublisherReason.Deadline,
+                result.Reason);
+        }
+
+        using var readback = BoundedGitHubPublisherTransport
+            .CreateInlineForTesting("token-canary", data.Request,
+                new DelegateHandler(_ => Json(HttpStatusCode.OK,
+                    ReviewCommentDocument(data.Request, 83))),
+                overallTimeout: TimeSpan.FromSeconds(180),
+                operation: new ExpiringReadClock(5));
+        var read = await readback.GetReviewCommentAsync(
+            83, CancellationToken.None);
+
+        Assert.Equal(BoundedGitHubHttpOutcome.KnownNotSent, read.Outcome);
+        Assert.Equal(BoundedGitHubPublisherReason.Deadline, read.Reason);
+    }
+
+    [Fact]
+    public async Task CommonInlineRequestBodiesEnforceExactCaps()
+    {
+        var data = await CreateAsync();
+        var batchCalls = 0;
+        using (var exactBatch = BoundedGitHubPublisherTransport
+            .CreateInlineForTesting("token-canary", data.Request,
+                new DelegateHandler(_ =>
+                {
+                    batchCalls++;
+                    return Json(HttpStatusCode.OK,
+                        ReviewDocument(data.Request, 91));
+                })))
+        {
+            var result = await exactBatch.CreateBatchReviewAsync(
+                new byte[BoundedGitHubPublisherPolicy
+                    .MaximumInlineBatchRequestBytes],
+                CancellationToken.None);
+            Assert.NotNull(result.Value);
+            Assert.Equal(1, batchCalls);
+        }
+
+        using (var oversizedBatch = BoundedGitHubPublisherTransport
+            .CreateInlineForTesting("token-canary", data.Request,
+                new DelegateHandler(_ =>
+                {
+                    batchCalls++;
+                    return Json(HttpStatusCode.OK,
+                        ReviewDocument(data.Request, 92));
+                })))
+        {
+            var result = await oversizedBatch.CreateBatchReviewAsync(
+                new byte[BoundedGitHubPublisherPolicy
+                    .MaximumInlineBatchRequestBytes + 1],
+                CancellationToken.None);
+            Assert.Equal(BoundedGitHubHttpOutcome.KnownNotSent,
+                result.Outcome);
+            Assert.Equal(BoundedGitHubPublisherReason.InvalidRequest,
+                result.Reason);
+            Assert.Equal(1, batchCalls);
+        }
+
+        var individualCalls = 0;
+        using (var exactIndividual = BoundedGitHubPublisherTransport
+            .CreateInlineForTesting("token-canary", data.Request,
+                new DelegateHandler(_ =>
+                {
+                    individualCalls++;
+                    return Json(HttpStatusCode.Created,
+                        ReviewCommentDocument(data.Request, 93));
+                })))
+        {
+            var result = await exactIndividual.CreateReviewCommentAsync(
+                new byte[BoundedGitHubPublisherPolicy
+                    .MaximumIndividualInlineRequestBytes],
+                CancellationToken.None);
+            Assert.NotNull(result.Value);
+            Assert.Equal(1, individualCalls);
+        }
+
+        using var oversizedIndividual = BoundedGitHubPublisherTransport
+            .CreateInlineForTesting("token-canary", data.Request,
+                new DelegateHandler(_ =>
+                {
+                    individualCalls++;
+                    return Json(HttpStatusCode.Created,
+                        ReviewCommentDocument(data.Request, 94));
+                }));
+        var over = await oversizedIndividual.CreateReviewCommentAsync(
+            new byte[BoundedGitHubPublisherPolicy
+                .MaximumIndividualInlineRequestBytes + 1],
+            CancellationToken.None);
+
+        Assert.Equal(BoundedGitHubHttpOutcome.KnownNotSent, over.Outcome);
+        Assert.Equal(BoundedGitHubPublisherReason.InvalidRequest, over.Reason);
+        Assert.Equal(1, individualCalls);
     }
 
     [Fact]
@@ -963,6 +1202,30 @@ public sealed class InlineCommentPublisherTests
             commit_id = request.Authorization.PullRequest.HeadSha,
         });
 
+    private static string OrdinaryFileReviewCommentDocument(
+        AuthorizedInlinePublicationRequest request,
+        long id,
+        string body) => JsonSerializer.Serialize(new
+        {
+            id,
+            pull_request_review_id = (long?)null,
+            url = $"https://api.github.com/repos/" +
+                $"{ActionHostAuthorizationScenario.RepositoryName}/pulls/" +
+                $"comments/{id}",
+            pull_request_url = $"https://api.github.com/repos/" +
+                $"{ActionHostAuthorizationScenario.RepositoryName}/pulls/" +
+                $"{ActionHostAuthorizationScenario.PullRequestNumber}",
+            html_url = $"https://github.com/" +
+                $"{ActionHostAuthorizationScenario.RepositoryName}/pull/" +
+                $"{ActionHostAuthorizationScenario.PullRequestNumber}" +
+                $"#discussion_r{id}",
+            body,
+            path = (string?)null,
+            line = (int?)null,
+            side = (string?)null,
+            commit_id = (string?)null,
+        });
+
     private static async Task<TestData> CreateAsync(
         AgentFinding? suppliedFinding = null,
         int candidateCount = 1)
@@ -1047,8 +1310,10 @@ public sealed class InlineCommentPublisherTests
         internal int IndividualCalls { get; private set; }
         internal int ReadCalls { get; private set; }
         internal System.Action? OnBatch { get; set; }
+        internal System.Action? OnRead { get; set; }
+        internal bool WithinOverallDeadline { get; set; } = true;
 
-        public bool IsWithinOverallDeadline => true;
+        public bool IsWithinOverallDeadline => WithinOverallDeadline;
 
         internal void EnqueuePage(
             params BoundedGitHubReviewComment[] comments) =>
@@ -1097,6 +1362,7 @@ public sealed class InlineCommentPublisherTests
                 CancellationToken cancellationToken)
         {
             ReadCalls++;
+            OnRead?.Invoke();
             return Task.FromResult(Reads.Dequeue());
         }
 
@@ -1115,6 +1381,10 @@ public sealed class InlineCommentPublisherTests
             get; set;
         }
         internal ActionHostGitObjectFailure? Failure { get; set; }
+        internal System.Action<int, CancellationToken>? OnRequest
+        {
+            get; set;
+        }
 
         public IActionHostReviewedSnapshotTransport
             CreateReviewedSnapshotTransport(ActionHostGitHubToken token) =>
@@ -1130,6 +1400,8 @@ public sealed class InlineCommentPublisherTests
                     CancellationToken cancellationToken)
             {
                 owner.Calls++;
+                owner.OnRequest?.Invoke(owner.Calls, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
                 if (owner.Failure is { } failure)
                 {
                     return Task.FromResult(ActionHostGitObjectResult<
@@ -1188,5 +1460,15 @@ public sealed class InlineCommentPublisherTests
             HttpRequestMessage request,
             CancellationToken cancellationToken) =>
             Task.FromResult(callback(request));
+    }
+
+    private sealed class ExpiringReadClock(int allowedReads) :
+        IBoundedGitHubOperationClock
+    {
+        private int _reads;
+
+        public TimeSpan Elapsed => ++_reads <= allowedReads
+            ? TimeSpan.Zero
+            : TimeSpan.FromSeconds(181);
     }
 }

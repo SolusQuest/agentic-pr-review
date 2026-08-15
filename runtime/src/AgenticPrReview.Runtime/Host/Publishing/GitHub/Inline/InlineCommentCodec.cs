@@ -38,8 +38,18 @@ internal static class InlineCommentMarker
 
     internal static InlineMarkerInspection Inspect(string? body)
     {
-        if (body is null ||
-            R4Markdown.ValidateBodyText(body) != R4BodyTextValidation.Valid)
+        if (body is null)
+        {
+            return new(InlineMarkerInspectionKind.Invalid, null);
+        }
+
+        if (!body.Contains("agentic-pr-review:r4:inline",
+                StringComparison.Ordinal))
+        {
+            return new(InlineMarkerInspectionKind.NoMarker, null);
+        }
+
+        if (R4Markdown.ValidateBodyText(body) != R4BodyTextValidation.Valid)
         {
             return new(InlineMarkerInspectionKind.Invalid, null);
         }
@@ -47,10 +57,7 @@ internal static class InlineCommentMarker
         var first = body.IndexOf(Prefix, StringComparison.Ordinal);
         if (first < 0)
         {
-            return body.Contains("agentic-pr-review:r4:inline",
-                    StringComparison.Ordinal)
-                ? new(InlineMarkerInspectionKind.Invalid, null)
-                : new(InlineMarkerInspectionKind.NoMarker, null);
+            return new(InlineMarkerInspectionKind.Invalid, null);
         }
 
         if (first != body.LastIndexOf(Prefix, StringComparison.Ordinal) ||

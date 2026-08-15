@@ -287,6 +287,13 @@ internal sealed class BoundedGitHubPublisherTransport :
                     BoundedGitHubPublisherReason.InvalidPagination);
             }
 
+            if (!IsWithinOverallDeadline)
+            {
+                return Fail<BoundedGitHubReviewCommentPage>(
+                    BoundedGitHubHttpOutcome.KnownNotSent,
+                    BoundedGitHubPublisherReason.Deadline);
+            }
+
             var comments = new List<BoundedGitHubReviewComment>(docs.Length);
             foreach (var doc in docs)
             {
@@ -298,6 +305,12 @@ internal sealed class BoundedGitHubPublisherTransport :
                 }
 
                 comments.Add(comment!);
+                if (!IsWithinOverallDeadline)
+                {
+                    return Fail<BoundedGitHubReviewCommentPage>(
+                        BoundedGitHubHttpOutcome.KnownNotSent,
+                        BoundedGitHubPublisherReason.Deadline);
+                }
             }
 
             return BoundedGitHubHttpResult<BoundedGitHubReviewCommentPage>
@@ -508,6 +521,14 @@ internal sealed class BoundedGitHubPublisherTransport :
                     BoundedGitHubPublisherReason.InvalidResponse);
             }
 
+            if (!IsWithinOverallDeadline)
+            {
+                return Fail<BoundedGitHubReviewComment>(mutation
+                        ? BoundedGitHubHttpOutcome.OutcomeUnknown
+                        : BoundedGitHubHttpOutcome.KnownNotSent,
+                    BoundedGitHubPublisherReason.Deadline);
+            }
+
             return BoundedGitHubHttpResult<BoundedGitHubReviewComment>
                 .Success(comment!);
         }
@@ -550,6 +571,13 @@ internal sealed class BoundedGitHubPublisherTransport :
                 return Fail<BoundedGitHubPullRequestReview>(
                     BoundedGitHubHttpOutcome.OutcomeUnknown,
                     BoundedGitHubPublisherReason.InvalidResponse);
+            }
+
+            if (!IsWithinOverallDeadline)
+            {
+                return Fail<BoundedGitHubPullRequestReview>(
+                    BoundedGitHubHttpOutcome.OutcomeUnknown,
+                    BoundedGitHubPublisherReason.Deadline);
             }
 
             return BoundedGitHubHttpResult<BoundedGitHubPullRequestReview>
@@ -773,16 +801,9 @@ internal sealed class BoundedGitHubPublisherTransport :
         out BoundedGitHubReviewComment? comment)
     {
         comment = null;
-        if (doc.Id is not > 0 || doc.PullRequestReviewId is not > 0 ||
-            doc.Url is null || doc.PullRequestUrl is null ||
-            doc.HtmlUrl is null || doc.Body is null || doc.Path is null ||
-            doc.CommitId is null || doc.Line is < 1 ||
-            doc.Side is not (null or "LEFT" or "RIGHT") ||
-            !AgenticPrReview.Runtime.Agent.Tools.RepositoryPath.IsValid(
-                doc.Path) ||
-            R4Markdown.ValidateBodyText(doc.Body) !=
-                R4BodyTextValidation.Valid ||
-            !IsLowerHex(doc.CommitId!, 40) ||
+        if (doc.Id is not > 0 || doc.Url is null ||
+            doc.PullRequestUrl is null || doc.HtmlUrl is null ||
+            doc.Body is null ||
             !StringComparer.Ordinal.Equals(doc.Url,
                 $"{BoundedGitHubPublisherPolicy.Origin}/repos/" +
                 $"{_repositoryName}/pulls/comments/{doc.Id}") ||
@@ -794,8 +815,22 @@ internal sealed class BoundedGitHubPublisherTransport :
             return false;
         }
 
-        comment = new(doc.Id!.Value, doc.PullRequestReviewId!.Value, doc.Url!,
-            doc.PullRequestUrl!, doc.HtmlUrl!, doc.Body!, doc.Path!,
+        var marker = InlineCommentMarker.Inspect(doc.Body);
+        if (marker.Kind == InlineMarkerInspectionKind.Valid &&
+            (doc.PullRequestReviewId is not > 0 || doc.Path is null ||
+                doc.CommitId is null || doc.Line is < 1 ||
+                doc.Side != "RIGHT" ||
+                !AgenticPrReview.Runtime.Agent.Tools.RepositoryPath.IsValid(
+                    doc.Path) ||
+                R4Markdown.ValidateBodyText(doc.Body) !=
+                    R4BodyTextValidation.Valid ||
+                !IsLowerHex(doc.CommitId, 40)))
+        {
+            return false;
+        }
+
+        comment = new(doc.Id.Value, doc.PullRequestReviewId, doc.Url,
+            doc.PullRequestUrl, doc.HtmlUrl, doc.Body, doc.Path,
             doc.Line, doc.Side, doc.CommitId!);
         return true;
     }

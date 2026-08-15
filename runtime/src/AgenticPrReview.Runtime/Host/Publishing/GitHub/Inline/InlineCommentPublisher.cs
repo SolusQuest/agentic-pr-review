@@ -100,12 +100,18 @@ internal sealed class InlineCommentPublisher
                     BoundedGitHubPublisherOutcome.WrittenAndReadBack);
             }
 
-            if (!await ExactHeadAsync(request, cancellationToken)
-                    .ConfigureAwait(false))
+            var initialHead = await RevalidateHeadAsync(
+                request, cancellationToken).ConfigureAwait(false);
+            if (!IsExactHead(request, initialHead))
             {
-                result.Fail(pending.Count, InlineFailureKind.HeadNotExact);
-                return result.Build(BoundedGitHubPublisherOutcome
-                    .AuthorizationOrValidationFailure);
+                var cancelled = IsCancellation(initialHead.Status);
+                result.Fail(pending.Count, cancelled
+                    ? InlineFailureKind.Cancelled
+                    : InlineFailureKind.HeadNotExact);
+                return result.Build(cancelled
+                    ? BoundedGitHubPublisherOutcome.CancelledBeforeSend
+                    : BoundedGitHubPublisherOutcome
+                        .AuthorizationOrValidationFailure);
             }
 
             if (cancellationToken.IsCancellationRequested ||
@@ -191,8 +197,8 @@ internal sealed class InlineCommentPublisher
     {
         if (cancellationToken.IsCancellationRequested)
         {
-            result.Fail(pending.Count, InlineFailureKind.FallbackExcluded);
-            return result.Build(BoundedGitHubPublisherOutcome.KnownNotWritten);
+            result.Fail(pending.Count, InlineFailureKind.Cancelled);
+            return result.Build(BoundedGitHubPublisherOutcome.OutcomeUnknown);
         }
 
         var relisted = await DiscoverAsync(transport, cancellationToken)
@@ -246,12 +252,18 @@ internal sealed class InlineCommentPublisher
             return result.Build(BoundedGitHubPublisherOutcome.OutcomeUnknown);
         }
 
-        if (!await ExactHeadAsync(request, cancellationToken)
-                .ConfigureAwait(false))
+        var fallbackHead = await RevalidateHeadAsync(
+            request, cancellationToken).ConfigureAwait(false);
+        if (!IsExactHead(request, fallbackHead))
         {
-            result.Fail(stillAbsent.Count, InlineFailureKind.HeadNotExact);
-            return result.Build(BoundedGitHubPublisherOutcome
-                .AuthorizationOrValidationFailure);
+            var cancelled = IsCancellation(fallbackHead.Status);
+            result.Fail(stillAbsent.Count, cancelled
+                ? InlineFailureKind.Cancelled
+                : InlineFailureKind.HeadNotExact);
+            return result.Build(cancelled
+                ? BoundedGitHubPublisherOutcome.OutcomeUnknown
+                : BoundedGitHubPublisherOutcome
+                    .AuthorizationOrValidationFailure);
         }
 
         for (var index = 0; index < stillAbsent.Count; index++)
@@ -263,7 +275,7 @@ internal sealed class InlineCommentPublisher
                 result.Fail(stillAbsent.Count - index,
                     InlineFailureKind.Cancelled);
                 return result.Build(BoundedGitHubPublisherOutcome
-                    .CancelledBeforeSend);
+                    .OutcomeUnknown);
             }
 
             result.IndividualAttempts++;
@@ -272,13 +284,15 @@ internal sealed class InlineCommentPublisher
                 .ConfigureAwait(false);
             if (created.Value is null)
             {
-                var failure = created.Outcome ==
-                        BoundedGitHubHttpOutcome.OutcomeUnknown
+                var unknown = created.Outcome is
+                        BoundedGitHubHttpOutcome.OutcomeUnknown or
+                        BoundedGitHubHttpOutcome.CancelledBeforeSend ||
+                    created.Reason == BoundedGitHubPublisherReason.Deadline;
+                var failure = unknown
                     ? InlineFailureKind.IndividualOutcomeUnknown
                     : InlineFailureKind.IndividualKnownFailure;
                 result.Fail(stillAbsent.Count - index, failure);
-                return result.Build(created.Outcome ==
-                        BoundedGitHubHttpOutcome.OutcomeUnknown
+                return result.Build(unknown
                     ? BoundedGitHubPublisherOutcome.OutcomeUnknown
                     : BoundedGitHubPublisherOutcome
                         .AuthorizationOrValidationFailure);
@@ -310,19 +324,24 @@ internal sealed class InlineCommentPublisher
         return result.Build(BoundedGitHubPublisherOutcome.WrittenAndReadBack);
     }
 
-    private static async Task<bool> ExactHeadAsync(
+    private static Task<ExactHeadRevalidationResult> RevalidateHeadAsync(
         AuthorizedInlinePublicationRequest request,
-        CancellationToken cancellationToken)
-    {
-        var exact = await request.RevalidateHeadAsync(cancellationToken)
-            .ConfigureAwait(false);
-        return exact.Status == ExactHeadRevalidationStatus.Exact &&
+        CancellationToken cancellationToken) =>
+        request.RevalidateHeadAsync(cancellationToken);
+
+    private static bool IsExactHead(
+        AuthorizedInlinePublicationRequest request,
+        ExactHeadRevalidationResult exact) =>
+        exact.Status == ExactHeadRevalidationStatus.Exact &&
             exact.MayMutate &&
             StringComparer.Ordinal.Equals(exact.FrozenHeadSha,
                 request.Authorization.PullRequest.HeadSha) &&
             StringComparer.Ordinal.Equals(exact.ObservedHeadSha,
                 request.Authorization.PullRequest.HeadSha);
-    }
+
+    private static bool IsCancellation(ExactHeadRevalidationStatus status) =>
+        status is ExactHeadRevalidationStatus.Cancelled or
+            ExactHeadRevalidationStatus.DeadlineExceeded;
 
     private static int Reconcile(
         AuthorizedInlinePublicationRequest request,
@@ -421,6 +440,13 @@ internal sealed class InlineCommentPublisher
                 {
                     return new(false, false, byKey);
                 }
+            }
+
+            if (!transport.IsWithinOverallDeadline ||
+                cancellationToken.IsCancellationRequested)
+            {
+                return new(false,
+                    cancellationToken.IsCancellationRequested, byKey);
             }
 
             if (response.Value.NextPage is null)

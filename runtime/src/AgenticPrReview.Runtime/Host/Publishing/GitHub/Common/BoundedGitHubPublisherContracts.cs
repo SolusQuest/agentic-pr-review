@@ -148,15 +148,15 @@ internal sealed record BoundedGitHubIssueCommentPage(
 
 internal sealed record BoundedGitHubReviewComment(
     long Id,
-    long ReviewId,
+    long? ReviewId,
     string ApiUrl,
     string PullRequestUrl,
     string HtmlUrl,
     string Body,
-    string Path,
+    string? Path,
     int? Line,
     string? Side,
-    string CommitId);
+    string? CommitId);
 
 internal sealed record BoundedGitHubReviewCommentPage(
     IReadOnlyList<BoundedGitHubReviewComment> Comments,
