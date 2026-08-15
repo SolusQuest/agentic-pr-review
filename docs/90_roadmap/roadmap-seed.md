@@ -93,7 +93,7 @@ The near-term roadmap does not include:
 
 The current implementation on `main` includes:
 
-- no public Action metadata or generated wrapper on the development head;
+- nested seven-input/no-output Action metadata and a generated Node 24 wrapper for repository-controlled prepared-payload proof, without downstream support, release delivery, or a public default before R7;
 - no Claude Code CLI, legacy TypeScript coordinator, or superseded single-request C# product route;
 - one project-minimal C# chat seam and bounded multi-turn Agent with six read-only repository tools;
 - validated tool arguments/results, canonical SESSION history, grounded structured findings, and must-find/must-not-find quality evaluation;

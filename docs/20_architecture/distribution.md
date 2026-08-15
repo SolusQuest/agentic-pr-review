@@ -1,6 +1,6 @@
 # Distribution Direction
 
-The development head is currently between public Action generations. R1 removed the mixed JavaScript Action metadata and bundle while retaining direct TypeScript/C# validation. The selected target is a thin bundled Node.js Action wrapper plus pinned, self-contained .NET payloads.
+The development head now contains the replacement nested Action metadata and reproducibly generated Node 24 wrapper for repository-controlled proof with an explicitly prepared payload. It is not a supported downstream Action: automatic payload download, release assets, root alias, stable outputs, and public-default promotion remain R7 work.
 
 See [`agent-runtime-rebaseline.md`](./agent-runtime-rebaseline.md) for component ownership and migration sequencing and [`r4-actionhost-wrapper-plan.md`](./r4-actionhost-wrapper-plan.md) for the prospective R4 product contract.
 
@@ -29,20 +29,20 @@ The wrapper may:
 - launch the .NET application;
 - forward cancellation;
 - bridge the official Actions artifact client;
-- set outputs, annotations, and step summary;
+- render bounded Host-approved annotations and step summary without stable Action outputs;
 - forward the host exit code.
 
 Business behavior does not belong in the distribution wrapper.
 
 The wrapper and Host still require one minimal lockstep process contract for cancellation, bounded outcome/output handoff, exit status, and executable build identity. This is an atomically maintained launcher seam, not a review-domain cross-language protocol or public compatibility matrix.
 
-During the no-public-Action interval, run:
+Run:
 
 ```bash
 npm run dist:check
 ```
 
-This command verifies that the retired Action directory, bundle builder, local runner, and local workflow invocation remain absent. It does not build product code. R4 restores generated-wrapper reproducibility validation when the replacement wrapper exists.
+This read-only command verifies the exact metadata surface, package and lockfile ownership, generated-wrapper source/import inventory, byte-for-byte checked bundle, and retired root-alias/local-runner/workflow-invocation guards. Run `npm run build:action` only when intentionally regenerating the checked bundle.
 
 ## .NET Payload
 

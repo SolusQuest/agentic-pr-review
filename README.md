@@ -13,11 +13,10 @@ provide a stable public API.
 
 ## Development Head Status
 
-The current development head intentionally has no supported public GitHub Action. R1 retired the mixed legacy Action metadata, bundled JavaScript entrypoint, and Action-dependent workflows before the replacement runtime is ready. R3 is complete; the prospective R4 contract is documented in [`r4-actionhost-wrapper-plan.md`](docs/20_architecture/r4-actionhost-wrapper-plan.md), but its Action metadata and wrapper do not exist yet.
+The current development head contains the nested R4 Action metadata and generated Node 24 wrapper only for repository-controlled proof with an explicitly prepared payload. It is not a supported downstream Action: there is no release payload selection, automatic download, root Action alias, or stable output surface. R7 owns release assets, checksums, automatic payload resolution, and promotion of a supported public default. See [`r4-actionhost-wrapper-plan.md`](docs/20_architecture/r4-actionhost-wrapper-plan.md).
 
 Do not reference `main` or another moving development-head commit as an Action.
-There is no compatibility wrapper or supported bootstrap/reset path during this
-transition.
+There is no compatibility wrapper or supported downstream bootstrap/reset path during this transition.
 
 The immutable [`v0.1.0`](https://github.com/SolusQuest/agentic-pr-review/tree/v0.1.0)
 tag remains the historical, unmaintained legacy implementation. Consumers pinned
@@ -40,11 +39,7 @@ npm run dist:check
 npm run runtime:integration
 ```
 
-During the R1-R3 no-public-Action interval, `npm run dist:check` is an absence
-guard. It fails if the retired Action directory, bundle builder, local Action
-runner, or a local workflow invocation of the retired Action is reintroduced.
-R4 will restore generated-wrapper reproducibility checks when the replacement
-thin wrapper exists.
+`npm run dist:check` validates the exact seven-input/no-output metadata, package and lockfile ownership, generated-wrapper input and external-import inventory, byte-for-byte bundle reproducibility, and retired root-alias/local-runner/workflow-invocation drift. The command is read-only; use `npm run build:action` to regenerate the checked bundle intentionally.
 
 `npm run runtime:integration` publishes the framework-dependent C# runtime and
 test fixture outside the repository workspace, then exercises the direct
@@ -90,4 +85,4 @@ owning roadmap phase records them.
 
 Historical M1-M4 contract documents remain implementation and migration evidence
 for the source still present on the development head. They do not re-enable the
-retired public Action or override the R0-R7 roadmap.
+retired legacy Action surface or override the R0-R7 roadmap.

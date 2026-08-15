@@ -10,7 +10,7 @@ The target runtime architecture and migration sequence are defined in [`agent-ru
 
 The selected initial target has two executable domains:
 
-1. **Thin Node.js wrapper**: Actions toolkit, secret masking, payload launch, cancellation, artifact bridge, outputs, annotations, and summary.
+1. **Thin Node.js wrapper**: Actions toolkit, secret masking, payload launch, cancellation, artifact bridge, and bounded Host-approved annotations and summary; R4 declares no stable Action outputs.
 2. **Single .NET application**: Host, Agent, tools, provider adapters, state, and deterministic publisher.
 
 Inside the C# process, narrow capability domains remain explicit:
