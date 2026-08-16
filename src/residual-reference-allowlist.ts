@@ -135,17 +135,6 @@ export const residualReferenceRules = [
     deletionGate: 'replace StateManifestV2 in R4',
     milestone: 'R4',
   },
-  {
-    id: 'RR-013',
-    term: stateOrMarkerLegacy,
-    path: /^src\/live-provider\/deepseek-contract\.ts$/u,
-    lifecycleClass: 'state-migration',
-    currentConsumer: 'temporary M4 live-provider contract',
-    owner: 'R4 Host',
-    interpretation: 'internal migration vocabulary, not a supported public state identity',
-    deletionGate: 'replace the temporary TypeScript live-provider host boundary',
-    milestone: 'R4',
-  },
   permanent(
     'RR-014',
     /^README\.md$/u,
