@@ -13,6 +13,7 @@ public sealed class PrefixFixtureManifestRejectionTests
         { "unlisted-file", "manifest file set must exactly match" },
         { "unsafe-path", "unsafe fixture path" },
         { "id-mismatch", "vector id mismatch" },
+        { "kind-mismatch", "vector kind mismatch" },
         { "self-reference", "must not self-reference" },
         { "missing-reference", "missing-vector must resolve" },
         { "wrong-reference-kind", "must resolve to a materialization-vector" },
@@ -23,6 +24,7 @@ public sealed class PrefixFixtureManifestRejectionTests
         { "malformed-manifest-entry", "manifest entry id kind and file must be strings" },
         { "unknown-invalidation-mode", "unknown mode unknown" },
         { "missing-historical-typescript-code", "canonical-json must carry typescriptCode" },
+        { "identity-missing-historical-typescript-code", "historical TypeScript diagnostic provenance" },
         { "invalid-expected-union", "historical TypeScript diagnostic provenance" },
         { "framing-tag-wrong-type", "input.tag: unexpected JSON kind Number" },
         { "append-expected-wrong-type", "expected.logicalStrictPrefix: unexpected JSON kind String" },
@@ -168,7 +170,8 @@ public sealed class PrefixFixtureManifestRejectionTests
                 FindEntry(vectors, kind: "invalidation-vector", idContains: "template-content"),
             "missing-historical-typescript-code" =>
                 FindEntry(vectors, kind: "invalid-vector", fileContains: "canonical-non-finite"),
-            "invalid-expected-union" or "invalid-diagnostic-field" =>
+            "kind-mismatch" or "identity-missing-historical-typescript-code" or
+                "invalid-expected-union" or "invalid-diagnostic-field" =>
                 FindEntry(vectors, kind: "invalid-vector", fileContains: "identity-empty"),
             "materialization-nested-input" or "materialization-invalid-expected" or
                 "materialization-boundary" =>
@@ -185,6 +188,9 @@ public sealed class PrefixFixtureManifestRejectionTests
         {
             case "id-mismatch":
                 vector["id"] = "mismatched-id";
+                break;
+            case "kind-mismatch":
+                vector["kind"] = "digest-vector";
                 break;
             case "self-reference":
                 vector["successorVectorId"] = entry["id"]!.GetValue<string>();
@@ -206,6 +212,9 @@ public sealed class PrefixFixtureManifestRejectionTests
                 vector["mode"] = "unknown";
                 break;
             case "missing-historical-typescript-code":
+                vector["expected"]!.AsObject().Remove("typescriptCode");
+                break;
+            case "identity-missing-historical-typescript-code":
                 vector["expected"]!.AsObject().Remove("typescriptCode");
                 break;
             case "invalid-expected-union":
