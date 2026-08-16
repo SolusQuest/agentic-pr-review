@@ -75,7 +75,7 @@ Successful result and trace files report the same canonical binary version.
 | 40        | protocol-file I/O            | input unreadable, staging/flush/rename/commit failure               |
 
 All other exit values are reserved and must not be emitted by the runtime. An unknown non-zero exit
-observed by issue #33 is generic runtime-process failure and fails closed. Host-enforced timeouts,
+observed by the historical issue #33 adapter was a generic runtime-process failure and failed closed. Host-enforced timeouts,
 signals, and operating-system termination are host/process events, not runtime exit classes.
 
 ## Stable Process Diagnostics
@@ -118,8 +118,9 @@ input, output, and trace. The contract does not claim detection of symlink, junc
 Unicode, or other aliases beyond what the implementation actually enforces.
 
 Output and trace final paths must not exist at preflight; an existing destination is invocation
-error. Missing destination parents are file I/O error because issue #33 materializes its bounded
-host-owned invocation directory before invoking the runtime.
+error. Missing destination parents are file I/O error because the caller must materialize its
+bounded invocation directory before invoking the runtime. The removed issue #33 adapter formerly
+owned that preparation step.
 
 The runtime stages each complete, self-validated JSON file in the same parent as its final path.
 It commits with the platform's same-filesystem, no-replace move/rename primitive and never uses a
@@ -142,10 +143,10 @@ The successful hash shape is intentionally one-way:
 - ReviewResultV1.trace.path is omitted.
 
 trace.path is artifact-relative in the schema, while this CLI produces a file at a host-supplied
-invocation path and does not own artifact layout. Issue #33 retains the runtime-supplied path only
-during validation and returns the exact validated bytes and parsed data; it does not enrich or
-reserialize runtime output and does not expose the invocation path on its return value. The
-adapter verifies the trace bytes it read against ReviewResultV1.trace.sha256. A future
+invocation path and does not own artifact layout. The historical issue #33 adapter retained the
+runtime-supplied path only during validation and returned exact validated bytes and parsed data; it
+did not enrich or reserialize runtime output or expose the invocation path on its return value. It
+verified the trace bytes against ReviewResultV1.trace.sha256. A future
 artifact-relative reference belongs to a separately defined host-owned representation unless the
 protocol changes. Omitting ReviewTraceV1.resultSha256 avoids an exact-byte circular dependency.
 
@@ -177,8 +178,8 @@ self-validation/staging/commit failure.
 
 If result commit fails after trace commit, the trace may remain as an orphan. It has no
 resultSha256 and does not assert successful review completion. The runtime may attempt rollback
-but cannot promise success without weakening no-overwrite guarantees; issue #33 uses the non-zero
-exit as authoritative and ignores the orphan as successful output.
+but cannot promise success without weakening no-overwrite guarantees; the historical issue #33
+adapter used the non-zero exit as authoritative and ignored the orphan as successful output.
 
 ## Required Implementation Evidence
 

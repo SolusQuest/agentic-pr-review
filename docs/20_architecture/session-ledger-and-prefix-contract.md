@@ -1,8 +1,10 @@
 # M4 Session Ledger And Provider Request Prefix Contract
 
-> **Rebaseline note (2026-07-24):** This document is the contract for the
-> current M4 implementation, not a requirement to retain its class, schema, or
-> cross-language boundaries forever. The durable behaviors that survive the
+> **R4-W3 supersession note (2026-08-16):** This document preserves the pre-W3
+> M4 TypeScript-host and live-invocation contract; those route and ownership
+> statements are historical after W3 unless a section explicitly identifies a
+> retained later-leaf contract. The W2 Node wrapper/C# ActionHost now owns the
+> trusted launch and lifecycle boundary. The durable behaviors that survive the
 > rebaseline are continuity, deterministic reconstruction, bounded growth,
 > prefix stability, and fail-closed validation. Their target ownership and
 > simpler versioning policy are defined in
@@ -10,7 +12,7 @@
 > This document's former M4 cost-harness and milestone-closure requirements are
 > superseded; issue #54 and PR #74 are historical inputs for later R6
 > refinement, not remaining prerequisites for closing M4.
-> The current sanitized M4 ledger may use its existing transport, but new Agent
+> The retained sanitized M4 ledger contract may continue through its named later-leaf transport, but new Agent
 > reasoning, repository tool results, and provider continuation artifacts must
 > not be stored as repository-visible plaintext.
 
@@ -22,7 +24,7 @@ This document defines the cross-issue semantics for the project-owned live provi
 
 - The C# runtime core owns the provider-neutral canonical session ledger, canonical logical projection, deterministic prefix construction, append and ledger validation. It never owns GitHub side effects.
 - Provider adapters own provider-specific request envelopes, cache markers, capability detection, telemetry mapping, and provider invocation. The core ledger schema remains provider-neutral. M4's reference profile is DeepSeek first-party OpenAI-compatible Chat Completions with automatic provider-owned prefix caching, no cache marker, no cache-disable claim, and no stateless mode; exact transport and model choices are frozen by the adapter issue.
-- TypeScript remains the GitHub Action host. It owns workflow facts, target and provenance validation, secret/trust-mode selection, state artifact transport, publishing, and the final fail-closed side-effect barrier.
+- The W2 Node wrapper and C# ActionHost own the current trusted launch boundary. Remaining TypeScript state and publisher families are migration evidence for their named R4 leaves, not the removed invocation host or a supported public Host.
 - M4 implementation must prove one explicit, default-off, trusted-workflow-only live path. Its deterministic and trusted live gates each use two separate workflow runs. It remains sticky-only, does not replace `claude-code-cli`, does not implement the full tool loop, and does not require production Native AOT release packaging.
 - M4 introduces `StateManifestV2`, which references an independent ledger file in the same state artifact bundle. The M4 live path writes and fully validates v2. Existing v1 paths remain outside this ledger contract until a separately documented breaking cutover.
 - A pre-v2 manifest is not migrated or used to construct a ledger. In the M4 live path, v1 is recognized as `unsupported_legacy_v1` and follows the safe bootstrap policy. A v1 rejection fixture prevents accidental reuse.
@@ -70,9 +72,9 @@ In the historical M4 split, the TypeScript host owned:
 
 The runtime never receives `GITHUB_TOKEN`, never calls GitHub APIs, and never publishes comments or artifacts.
 
-## M4 Runnable Surface And Trust Mode
+## Historical M4 Runnable Surface And Trust Mode
 
-The first M4 live path is experimental and explicit:
+The first M4 live path was experimental and explicit:
 
 - it is default-off and selected by a distinct live-provider runtime mode;
 - it runs only from a trusted workflow and trusted/immutable runtime source;

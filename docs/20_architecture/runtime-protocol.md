@@ -1,9 +1,11 @@
 # Runtime Protocol
 
-> **Rebaseline note (2026-07-24):** This document describes the current
-> TypeScript-to-.NET implementation contract. It remains authoritative for the
-> code that exists today, but it is not the target process boundary. The
-> selected replacement is defined in
+> **R4-W3 supersession note (2026-08-16):** This document preserves the pre-W3
+> TypeScript-to-.NET protocol and conformance contract. The TypeScript launcher
+> and issue #33 adapter route described below are historical after W3; they are
+> not a current executable path. The retained schemas and TypeScript protocol
+> conformance family remain current until their named later leaves. Current
+> launch ownership is defined in
 > [Agent Runtime Architecture Rebaseline](./agent-runtime-rebaseline.md): a
 > thin Node action wrapper starts one .NET application with explicit Host,
 > Agent, tool, provider, state, and publisher modules. Preserve this protocol
@@ -73,7 +75,7 @@ Key result conventions:
 
 ## Trace Contract (ReviewTraceV1)
 
-ReviewTraceV1 is defined (#16) and carries sanitized execution evidence for deterministic validation and as one input to a future replay bundle. The trace is runtime-produced and optional - a review can complete without one. The adapter materializes the trace temporarily, validates it in memory, and does not persist or upload it in the #34 deterministic host path. The M2 `review` CLI is stricter: it requires `--trace` and commits a valid trace before returning success; see [runtime-cli-process-contract.md](./runtime-cli-process-contract.md).
+ReviewTraceV1 is defined (#16) and carries sanitized execution evidence for deterministic validation and as one input to a future replay bundle. The trace is runtime-produced and optional - a review can complete without one. The historical issue #33 adapter materialized the trace temporarily, validated it in memory, and did not persist or upload it in the #34 deterministic host path. The retained M2 `review` CLI is stricter: it requires `--trace` and commits a valid trace before returning success; see [runtime-cli-process-contract.md](./runtime-cli-process-contract.md).
 
 ReviewTraceV1 includes:
 
@@ -150,9 +152,9 @@ Paired cases verify non-circular hash links over exact file bytes (no canonical 
 
 The protocol uses JSON Schema (draft-07) files as the single source of truth, avoiding two independently drifting definitions of business behavior across TypeScript and C#. TypeScript interfaces are developer ergonomics only; the schemas are authoritative.
 
-## TypeScript Builders and Mappers (M1 test-only, wired in M2)
+## TypeScript Builders and Mappers (retained conformance, historical M2 wiring)
 
-Two pure helpers bridge existing host structures and the protocol contracts. They are added in #18 as M1 test-only functions and are wired into the action execution path in M2 via #33; they are not called by `src/main.ts` in M1.
+Two pure helpers bridge existing host structures and the protocol contracts. They were added in #18 as M1 test-only functions and were wired into the historical action execution path in M2 via #33. W3 removed that adapter route; the retained helpers and tests remain protocol-conformance evidence for the later W10 owner, not a current launcher.
 
 ### `buildReviewInputV1` (`src/protocol/build-review-input.ts`)
 
@@ -197,9 +199,9 @@ Replay must not require GitHub credentials or live GitHub state. Replay material
 
 The current protocol defines `ReviewInputV1`, `ReviewResultV1`, and `ReviewTraceV1`. M4 defines the additional restricted durable artifact `ProviderSessionLedgerV1`, its `StateManifestV2` binding, and the separate `ProviderRunMetadataV1` sidecar. See [`session-ledger-and-prefix-contract.md`](session-ledger-and-prefix-contract.md) for the cross-issue contract.
 
-## Deterministic C# Host Integration
+## Historical Issue #33 Deterministic C# Host Integration
 
-The default-off `runtime_backend=deterministic-csharp` path constructs and validates `ReviewInputV1`, invokes the trusted command through `invokeRuntime()`, validates the deterministic trace semantics, and maps `ReviewResultV1` with `mapReviewResultV1ToRuntimeContent()`. The host then assembles the typed content into the existing `StructuredReviewEnvelopeV1`; it does not round-trip typed content through the legacy `modelReviewJson` parser. Runtime warnings and diagnostics remain side-channel metadata, while phase, SHA, state, lineage, usage-budget, fingerprints, and publishing facts remain host-owned.
+The removed default-off `runtime_backend=deterministic-csharp` path constructed and validated `ReviewInputV1`, invoked the trusted command through `invokeRuntime()`, validated deterministic trace semantics, and mapped `ReviewResultV1` with `mapReviewResultV1ToRuntimeContent()`. W3 deleted that TypeScript adapter and added no alias or replacement route. The retained schemas and conformance helpers remain later W10 inputs; the W2 Node wrapper/C# ActionHost route owns current launch, lifecycle, and result handling.
 
 This ledger artifact is distinct from `ReviewTraceV1`:
 
