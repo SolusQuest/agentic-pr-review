@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO.Compression;
+using System.Net;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -62,6 +63,16 @@ internal static class FrameworkSupervisor
         }
 
         Directory.CreateDirectory(root);
+        var artifactMetadataRouteProbeCount =
+            await VerifyArtifactMetadataRouteCaptureAsync(root, canaries)
+                .ConfigureAwait(false);
+        if (artifactMetadataRouteProbeCount != 3)
+        {
+            Console.Error.WriteLine(
+                "APR_ACTION_HOST_FRAMEWORK_INVALID artifact-metadata-route");
+            return 1;
+        }
+
         await using var platform = SyntheticOfficialPlatform.Start(root);
         var cases = new List<CaseResult>();
 
@@ -301,6 +312,8 @@ internal static class FrameworkSupervisor
             canary_route_coverage_digest = CanaryRouteCoverageDigest(root),
             canary_negative_injection_count = ReadInt(root,
                 "canary-negative-injection-count"),
+            artifact_metadata_route_probe_count =
+                artifactMetadataRouteProbeCount,
             normalized_exact_delete_identity_digest =
                 CanonicalizedIdentityDigest(
                 Path.Join(root, "exact-delete-proof")),
@@ -331,6 +344,128 @@ internal static class FrameworkSupervisor
             .ConfigureAwait(false);
         Console.WriteLine("APR_ACTION_HOST_FRAMEWORK_VERIFY_OK");
         return 0;
+    }
+
+    private static async Task<int> VerifyArtifactMetadataRouteCaptureAsync(
+        string root,
+        string canaryTable)
+    {
+        var probeRoot = Path.Join(Path.GetTempPath(),
+            "apr-artifact-metadata-probe-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(probeRoot);
+        try
+        {
+            await using (var platform = SyntheticOfficialPlatform.Start(probeRoot))
+            using (var client = new HttpClient
+                   {
+                       Timeout = TimeSpan.FromSeconds(10),
+                   })
+            {
+                using var create = new HttpRequestMessage(HttpMethod.Post,
+                    platform.BaseUrl +
+                    "/twirp/github.actions.results.api.v1.ArtifactService/" +
+                    "CreateArtifact");
+                create.Headers.TryAddWithoutValidation("Authorization",
+                    "Bearer " + RuntimeToken);
+                create.Content = new StringContent(JsonSerializer.Serialize(new
+                {
+                    workflowRunBackendId = FrameworkCanaries.RunBackendId,
+                    workflowJobRunBackendId = FrameworkCanaries.JobBackendId,
+                    name = FrameworkCanaries.ToolData,
+                }), Encoding.UTF8, "application/json");
+                using var createResponse = await client.SendAsync(create)
+                    .ConfigureAwait(false);
+
+                using var finalize = new HttpRequestMessage(HttpMethod.Post,
+                    platform.BaseUrl +
+                    "/twirp/github.actions.results.api.v1.ArtifactService/" +
+                    "FinalizeArtifact");
+                finalize.Headers.TryAddWithoutValidation("Authorization",
+                    "Bearer " + RuntimeToken);
+                finalize.Content = new StringContent(JsonSerializer.Serialize(new
+                {
+                    workflowRunBackendId = FrameworkCanaries.RunBackendId,
+                    workflowJobRunBackendId = FrameworkCanaries.JobBackendId,
+                    name = FrameworkCanaries.Prompt,
+                }), Encoding.UTF8, "application/json");
+                using var finalizeResponse = await client.SendAsync(finalize)
+                    .ConfigureAwait(false);
+
+                using var rest = new HttpRequestMessage(HttpMethod.Get,
+                    platform.BaseUrl + "/repos/" + FrameworkCanaries.Repository +
+                    "/actions/artifacts?name=" +
+                    Uri.EscapeDataString(FrameworkCanaries.StateKey));
+                rest.Headers.TryAddWithoutValidation("Authorization",
+                    "Bearer " + FrameworkCanaries.GitHubToken);
+                using var restResponse = await client.SendAsync(rest)
+                    .ConfigureAwait(false);
+
+                if (createResponse.StatusCode != HttpStatusCode.OK ||
+                    finalizeResponse.StatusCode != HttpStatusCode.BadRequest ||
+                    restResponse.StatusCode != HttpStatusCode.OK)
+                {
+                    return -1;
+                }
+
+                for (var attempt = 0;
+                     attempt < 100 && platform.InFlight != 0;
+                     attempt++)
+                {
+                    await Task.Delay(10).ConfigureAwait(false);
+                }
+                if (platform.InFlight != 0) return -1;
+            }
+
+            var observationPath = Path.Join(probeRoot,
+                "canary-observations.tsv");
+            if (!File.Exists(observationPath)) return -1;
+            var observations = File.ReadAllLines(observationPath)
+                .Where(line => line.EndsWith("\tartifact.metadata",
+                    StringComparison.Ordinal))
+                .Order(StringComparer.Ordinal)
+                .ToArray();
+            string[] expected =
+            [
+                "prompt\tartifact.metadata",
+                "state-key-current\tartifact.metadata",
+                "tool-data\tartifact.metadata",
+            ];
+            if (!observations.SequenceEqual(expected, StringComparer.Ordinal))
+            {
+                return -1;
+            }
+
+            var forbiddenByClass = File.ReadAllLines(canaryTable).Skip(1)
+                .Select(line => line.Split('\t'))
+                .Where(fields => fields.Length == 6)
+                .ToDictionary(fields => fields[0], fields => fields[4]
+                    .Split(';', StringSplitOptions.RemoveEmptyEntries),
+                    StringComparer.Ordinal);
+            if (expected.Select(line => line.Split('\t')[0]).Any(canaryClass =>
+                    !forbiddenByClass.TryGetValue(canaryClass,
+                        out var forbidden) ||
+                    !forbidden.Any(pattern =>
+                        SinkMatches(pattern, "artifact.metadata"))))
+            {
+                return -1;
+            }
+
+            File.WriteAllLines(Path.Join(root,
+                "artifact-metadata-route-probes.tsv"), observations);
+            return observations.Length;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or
+            TaskCanceledException or IOException)
+        {
+            return -1;
+        }
+        finally
+        {
+            if (Directory.Exists(probeRoot))
+            {
+                Directory.Delete(probeRoot, recursive: true);
+            }
+        }
     }
 
     private static async Task<CaseResult> RunCaseAsync(

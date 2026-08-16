@@ -211,6 +211,8 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
         }
 
         var body = await ReadBodyAsync(context.Request).ConfigureAwait(false);
+        FrameworkCanaryCapture.CaptureAll(evidenceRoot,
+            "artifact.metadata", body);
         if (!body.Contains(FrameworkCanaries.RunBackendId,
                 StringComparison.Ordinal) ||
             !body.Contains(FrameworkCanaries.JobBackendId,
@@ -406,6 +408,8 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
         FrameworkCanaryCapture.CaptureAll(evidenceRoot,
             "artifact-rest.authorization",
             context.Request.Headers["Authorization"]);
+        FrameworkCanaryCapture.CaptureAll(evidenceRoot,
+            "artifact.metadata", context.Request.Url?.Query);
         var path = context.Request.Url!.AbsolutePath;
         var prefix = "/repos/" + FrameworkCanaries.Repository +
             "/actions/artifacts";
