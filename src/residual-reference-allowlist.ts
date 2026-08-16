@@ -149,17 +149,6 @@ export const residualReferenceRules = [
     'an accepted replacement must preserve the same S2 negative and transport evidence',
   ),
   {
-    id: 'RR-010',
-    term: stateOrMarkerLegacy,
-    path: /^src\/ledger-csharp\.ts$/u,
-    lifecycleClass: 'state-migration',
-    currentConsumer: 'temporary unreachable M4 live-provider ledger boundary',
-    owner: 'R4 Host',
-    interpretation: 'internal configuration vocabulary only',
-    deletionGate: 'replace the temporary TypeScript ledger host boundary',
-    milestone: 'R4',
-  },
-  {
     id: 'RR-011',
     term: stateOrMarkerLegacy,
     path: /^src\/state-acceptance\/(?:store|github-state-store|contract\.test)\.ts$/u,

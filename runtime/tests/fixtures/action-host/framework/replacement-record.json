@@ -28,7 +28,6 @@
       ],
       "referenced_tests_and_docs": [
         ".github/workflows/ci.yml",
-        "src/ledger-csharp.test.ts",
         "src/runtime-integration/runtime-integration.test.ts",
         "src/prefix-contract/import-boundary.test.ts",
         "src/state-v2/import-boundary.test.ts",
