@@ -44,14 +44,21 @@ internal static class PrefixFixtureLoader
         Assert.Matches(
             "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
             root.GetProperty("creationCrossCheck").GetProperty("checkedAt").GetString()!);
-        Assert.Equal(JsonValueKind.Array, root.GetProperty("vectors").ValueKind);
+        Assert.True(root.GetProperty("vectors").ValueKind == JsonValueKind.Array,
+            "manifest vectors must be an array");
 
         var entries = ImmutableArray.CreateBuilder<ManifestEntry>();
         var ids = new HashSet<string>(StringComparer.Ordinal);
         var files = new HashSet<string>(StringComparer.Ordinal);
         foreach (var entry in root.GetProperty("vectors").EnumerateArray())
         {
+            Assert.True(entry.ValueKind == JsonValueKind.Object,
+                "manifest entry must be an object");
             AssertAllowedKeys(entry, "id", "kind", "file");
+            Assert.True(entry.GetProperty("id").ValueKind == JsonValueKind.String
+                && entry.GetProperty("kind").ValueKind == JsonValueKind.String
+                && entry.GetProperty("file").ValueKind == JsonValueKind.String,
+                "manifest entry id kind and file must be strings");
             var id = entry.GetProperty("id").GetString()!;
             var kind = entry.GetProperty("kind").GetString()!;
             var file = entry.GetProperty("file").GetString()!;
@@ -68,15 +75,19 @@ internal static class PrefixFixtureLoader
             .Select(path => Path.GetRelativePath(rootPath, path).Replace('\\', '/'))
             .Where(rel => rel != "manifest.json")
             .ToHashSet(StringComparer.Ordinal);
-        Assert.Equal(onDisk, files);
+        Assert.True(onDisk.SetEquals(files),
+            "manifest file set must exactly match the corpus directory");
 
         // id/kind equality between manifest entry and vector file content.
         foreach (var entry in entries)
         {
             var vector = LoadVector(entry.File, rootPath);
-            Assert.Equal(JsonValueKind.Object, vector.ValueKind);
-            Assert.Equal(entry.Id, vector.GetProperty("id").GetString());
-            Assert.Equal(entry.Kind, vector.GetProperty("kind").GetString());
+            Assert.True(vector.ValueKind == JsonValueKind.Object,
+                $"{entry.Id}: vector must be an object");
+            Assert.True(entry.Id == vector.GetProperty("id").GetString(),
+                $"{entry.Id}: vector id mismatch");
+            Assert.True(entry.Kind == vector.GetProperty("kind").GetString(),
+                $"{entry.Id}: vector kind mismatch");
             AssertVectorShape(entry, vector);
         }
 
@@ -91,8 +102,9 @@ internal static class PrefixFixtureLoader
                 if (vector.TryGetProperty(refProperty, out var refElement))
                 {
                     var referenced = refElement.GetString()!;
+                    Assert.True(entry.Id != referenced,
+                        $"{entry.Id}: {refProperty} must not self-reference");
                     Assert.True(materializationIds.Contains(referenced), $"{entry.Id}: {refProperty} -> {referenced} must resolve to a materialization-vector");
-                    Assert.NotEqual(entry.Id, referenced);
                 }
             }
 
@@ -136,7 +148,8 @@ internal static class PrefixFixtureLoader
 
     private static void AssertVectorShape(ManifestEntry entry, JsonElement vector)
     {
-        Assert.Equal(JsonValueKind.Object, vector.ValueKind);
+        Assert.True(vector.ValueKind == JsonValueKind.Object,
+            $"{entry.Id}: vector must be an object");
         var allowed = new HashSet<string>(StringComparer.Ordinal) { "id", "kind" };
         void Require(params string[] keys)
         {
@@ -216,7 +229,8 @@ internal static class PrefixFixtureLoader
                 AssertAllowedKeys(expected, "csharpCode", "typescriptCode", "causeCode", "path");
                 foreach (var property in expected.EnumerateObject())
                 {
-                    Assert.Equal(JsonValueKind.String, property.Value.ValueKind);
+                    Assert.True(property.Value.ValueKind == JsonValueKind.String,
+                        $"{entry.Id}: expected.{property.Name} must be a string");
                 }
                 var target = vector.GetProperty("target").GetString()!;
                 var hasCsharp = expected.TryGetProperty("csharpCode", out _);
@@ -523,7 +537,8 @@ internal static class PrefixFixtureLoader
             ("digests", JsonValueKind.Object),
             ("stableBoundary", JsonValueKind.Object),
             ("dynamicSuffix", JsonValueKind.Object));
-        AssertHex(expected.GetProperty("logicalStreamHex").GetString()!);
+        AssertHex(expected.GetProperty("logicalStreamHex").GetString()!,
+            label: $"{id}.expected.logicalStreamHex");
         AssertHex(expected.GetProperty("providerStreamHex").GetString()!);
         AssertHex(expected.GetProperty("logicalPrefixSha256").GetString()!, 64);
         AssertHex(expected.GetProperty("prefixSha256").GetString()!, 64);
@@ -645,12 +660,14 @@ internal static class PrefixFixtureLoader
         string label,
         params (string Name, JsonValueKind Kind)[] fields)
     {
-        Assert.Equal(JsonValueKind.Object, element.ValueKind);
+        Assert.True(element.ValueKind == JsonValueKind.Object,
+            $"{label}: expected object");
         AssertAllowedKeys(element, fields.Select(field => field.Name).ToArray());
         foreach (var field in fields)
         {
             Assert.True(element.TryGetProperty(field.Name, out var value), $"{label}: missing {field.Name}");
-            Assert.Equal(field.Kind, value.ValueKind);
+            Assert.True(field.Kind == value.ValueKind,
+                $"{label}.{field.Name}: unexpected JSON kind {value.ValueKind}");
         }
     }
 
@@ -659,7 +676,8 @@ internal static class PrefixFixtureLoader
         string label,
         params (string Name, JsonValueKind First, JsonValueKind Second)[] fields)
     {
-        Assert.Equal(JsonValueKind.Object, element.ValueKind);
+        Assert.True(element.ValueKind == JsonValueKind.Object,
+            $"{label}: expected object");
         AssertAllowedKeys(element, fields.Select(field => field.Name).ToArray());
         foreach (var field in fields)
         {
@@ -788,6 +806,14 @@ internal static class PrefixFixtureLoader
         Assert.True(valid, $"{id}: mutation {mutation} does not match its exact input diff predicate ({string.Join(',', diffs.Select(FormatDiffPath))})");
     }
 
+    internal static void AssertMutationDiffs(
+        string id,
+        string mutation,
+        JsonElement baseInput,
+        JsonElement successorInput) =>
+        AssertMutationDiffs(id, mutation,
+            JsonDiffPaths(baseInput, successorInput));
+
     private static string FormatDiffPath(ImmutableArray<DiffPathSegment> path) =>
         path.Length == 0 ? "$" : string.Join('/', path.Select(segment => segment.IsIndex ? $"#{segment.Name}" : segment.Name));
 
@@ -813,11 +839,11 @@ internal static class PrefixFixtureLoader
 
     internal static void AssertSafeRelativePath(string file)
     {
-        Assert.False(string.IsNullOrEmpty(file));
-        Assert.DoesNotContain('\\', file);
-        Assert.DoesNotContain("..", file);
-        Assert.False(Path.IsPathRooted(file));
-        Assert.DoesNotContain(':', file);
+        Assert.True(!string.IsNullOrEmpty(file)
+            && !file.Contains('\\')
+            && !file.Contains("..", StringComparison.Ordinal)
+            && !Path.IsPathRooted(file)
+            && !file.Contains(':'), $"unsafe fixture path {file}");
     }
 
     internal static void AssertAllowedKeys(JsonElement element, params string[] allowed)
@@ -829,10 +855,14 @@ internal static class PrefixFixtureLoader
         }
     }
 
-    internal static void AssertHex(string value, int? exactLength = null)
+    internal static void AssertHex(
+        string value,
+        int? exactLength = null,
+        string? label = null)
     {
         Assert.NotNull(value);
-        Assert.Equal(0, value.Length % 2);
+        Assert.True(value.Length % 2 == 0,
+            $"{label ?? "hex"}: expected an even number of characters");
         if (exactLength is not null)
         {
             Assert.Equal(exactLength.Value, value.Length);
