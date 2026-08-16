@@ -34,7 +34,7 @@ Deleted source families:
 Coordinator routing, Action outputs, step summaries, artifact upload ordering, legacy manifest restoration, provider skip routing, and sticky-disabled/inline coupling are deleted with the no-public-Action interval. Their surviving product invariants are owned by narrower evidence:
 
 - direct framework and Native AOT runtime integration owns command, output validation, failure taxonomy, cleanup, diagnostics, privacy, and child-environment behavior;
-- the production `ledger-csharp` pre-acceptance stage owns runtime/result/trace/cancellation-to-zero-write composition;
+- at the R1 handoff, the production `ledger-csharp` pre-acceptance stage owned runtime/result/trace/cancellation-to-zero-write composition; R4-W7 later removed that TypeScript coordinator after P6/S6/E1 replacement evidence passed;
 - state selection owns exact-v1 automatic recovery and explicit fail-closed restore without predecessor replay;
 - state acceptance owns candidate, registration, marker, selector, cancellation, stale, conflict, CAS, idempotency, publication, and receipt behavior;
 - comments, inline comments, fingerprints, target snapshots, ledger planning, and protocol suites retain their narrow contracts.
@@ -91,7 +91,7 @@ Ported vectors remain until equivalent R4 artifact-bridge conformance coverage e
 | `src/state-v2/`                                         | Unsupported-v1 classifier and StateManifestV2 conformance                    | R4 state bridge         |
 | `src/state-acceptance/`                                 | Temporary candidate-to-receipt state transaction evidence                    | R4 state bridge         |
 | `src/comments.ts`, inline comments, and fingerprints    | Temporary deterministic publisher and lineage evidence                       | R4 Host/publisher       |
-| `src/ledger-csharp.ts`                                  | Temporary internal ledger composition evidence; no public Action caller      | R4 Host                 |
+| removed `src/ledger-csharp.ts` and root tests           | Historical internal ledger composition evidence; no public Action caller     | Replaced by R4 Host W7  |
 | `protocol/` and protocol TypeScript DTOs                | Frozen migration/conformance evidence                                        | R2 protocol replacement |
 | Artifact provenance vectors                             | R4 security input manifest                                                   | R4 artifact bridge      |
 
@@ -99,18 +99,19 @@ Ported vectors remain until equivalent R4 artifact-bridge conformance coverage e
 
 `src/residual-reference-allowlist.ts` and `src/residual-reference-guard.test.ts` are lifecycle machinery and are excluded from match discovery to avoid recursive self-matches. The guard enumerates every Git-tracked file, skips only binary or invalid-UTF-8 content plus those two machinery files, and scans all remaining text. It enforces both directions: every executable, contract, or documentary match has exactly one narrow rule, and every rule still matches at least one owned line.
 
-| Rules       | Owned residual                                                     | Consumer and deletion gate                                                                                                     |
-| ----------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| RR-001..004 | Exact retired runtime-selector vocabulary                          | Frozen protocol inputs and a retained non-executing fixture; delete with the respective named R2 Protocol/runtime-input owners |
-| RR-005..006 | Historical provider credential names                               | Generic child-environment canaries; delete with the R2/R4 invocation replacement                                               |
-| RR-007..010 | M4 marker, state, artifact-vector, ledger, and provider vocabulary | Internal transition evidence only; delete with R4 owners                                                                       |
-| RR-011..012 | Unsupported-v1 state selection/classifier vocabulary               | Rejection and non-replay evidence; delete with R4 state replacement                                                            |
-| RR-013      | Temporary live-provider vocabulary                                 | Internal M4 contract and retained non-executing fixture; delete with the R4 Host boundary                                      |
-| RR-014..030 | Governing or historical documentation                              | Permanent path-specific status, owner, interpretation, and supersession records                                                |
-| RR-031..033 | Claude provider/model identity fixtures                            | Opaque protocol/state fixture evidence; delete with the R2/R4 owners                                                           |
-| RR-034      | Root `CLAUDE.md` entrypoint                                        | Supported thin agent instruction entrypoint governed by collaboration policy                                                   |
-| RR-035      | C# integration canary                                              | Child-environment privacy evidence; delete with the R4 Host boundary                                                           |
-| RR-037      | R3 single-shot removal handoff                                     | Permanent checked deletion, retained-consumer, and later-owner record                                                          |
+| Rules       | Owned residual                                             | Consumer and deletion gate                                                                                                     |
+| ----------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| RR-001..004 | Exact retired runtime-selector vocabulary                  | Frozen protocol inputs and a retained non-executing fixture; delete with the respective named R2 Protocol/runtime-input owners |
+| RR-005..006 | Historical provider credential names                       | Generic child-environment canaries; delete with the R2/R4 invocation replacement                                               |
+| RR-007..009 | M4 marker, state, artifact-vector, and provider vocabulary | Internal transition evidence only; delete with R4 owners                                                                       |
+| RR-010      | Removed TypeScript ledger vocabulary                       | Removed with R4-W7 after P6/S6/E1 replacement evidence passed                                                                  |
+| RR-011..012 | Unsupported-v1 state selection/classifier vocabulary       | Rejection and non-replay evidence; delete with R4 state replacement                                                            |
+| RR-013      | Temporary live-provider vocabulary                         | Internal M4 contract and retained non-executing fixture; delete with the R4 Host boundary                                      |
+| RR-014..030 | Governing or historical documentation                      | Permanent path-specific status, owner, interpretation, and supersession records                                                |
+| RR-031..033 | Claude provider/model identity fixtures                    | Opaque protocol/state fixture evidence; delete with the R2/R4 owners                                                           |
+| RR-034      | Root `CLAUDE.md` entrypoint                                | Supported thin agent instruction entrypoint governed by collaboration policy                                                   |
+| RR-035      | C# integration canary                                      | Child-environment privacy evidence; delete with the R4 Host boundary                                                           |
+| RR-037      | R3 single-shot removal handoff                             | Permanent checked deletion, retained-consumer, and later-owner record                                                          |
 
 Temporary matches are not supported public runtime selectors. The exact retired runtime selector is retained only in frozen protocol/conformance inputs and a retained non-active R4 migration/rejection fixture; unsupported legacy state is retained only to prove rejection; credential names are canaries whose values must not reach the generic child. Permanent documentation matches describe current governing boundaries or are explicitly marked historical, with their controlling supersession rule in the allowlist.
 

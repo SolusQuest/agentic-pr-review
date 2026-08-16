@@ -47,11 +47,9 @@ jobs:
           npm test -- --run
           src/state-acceptance/contract.test.ts
           src/state-acceptance/github-state-store.test.ts
-          src/ledger-csharp.test.ts
           src/target.test.ts
           src/comments.test.ts
           src/inline-comments.test.ts
-          src/ledger-pre-acceptance.test.ts
           src/runtime-invocation/import-boundary.test.ts
           src/artifact-provenance-vectors.test.ts
           src/residual-reference-guard.test.ts
