@@ -1139,6 +1139,12 @@ internal static class FrameworkSupervisor
             {
                 return false;
             }
+
+            if (entry.GetProperty("leaf_id").GetString() == "W4" &&
+                !ValidateW4Ownership(entry, repository))
+            {
+                return false;
+            }
         }
 
         return entries.Length == expectedLeaves.Length &&
@@ -1204,6 +1210,78 @@ internal static class FrameworkSupervisor
         [
             "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs",
             "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj",
+        ]);
+    }
+
+    private static bool ValidateW4Ownership(
+        JsonElement entry,
+        string repository)
+    {
+        var inventory = InventoryPaths(Path.Join(repository,
+            "runtime", "tests", "fixtures", "action-host", "framework",
+            "e1-base-inventory.json"));
+        if (entry.GetProperty("disposition").GetString() != "removed" ||
+            !RequiredTextArray(entry, "removed_paths", value =>
+                IsClosedPath(value) && !LandingPathExists(repository, value)) ||
+            !RequiredTextArray(entry, "retained_evidence_paths", value =>
+                IsClosedPath(value) && LandingPathExists(repository, value)) ||
+            !RequiredTextArray(entry, "inventory_evidence_paths", value =>
+                IsClosedPath(value) && LandingPathExists(repository, value) &&
+                InventoryCovers(inventory, value)) ||
+            !RequiredTextArray(entry, "retained_assertion_groups") ||
+            !RequiredTextArray(entry, "superseded_assertion_groups") ||
+            !RequiredTextArray(entry, "later_leaf_assertion_owners"))
+        {
+            return false;
+        }
+
+        var removedPaths = TextArray(entry, "removed_paths")
+            .ToHashSet(StringComparer.Ordinal);
+        var retainedEvidence = TextArray(entry, "retained_evidence_paths")
+            .ToHashSet(StringComparer.Ordinal);
+        var inventoryEvidence = TextArray(entry, "inventory_evidence_paths")
+            .ToHashSet(StringComparer.Ordinal);
+        var retainedAssertions = TextArray(entry, "retained_assertion_groups")
+            .ToHashSet(StringComparer.Ordinal);
+        var supersededAssertions = TextArray(entry, "superseded_assertion_groups")
+            .ToHashSet(StringComparer.Ordinal);
+        var laterOwners = TextArray(entry, "later_leaf_assertion_owners")
+            .ToHashSet(StringComparer.Ordinal);
+        return removedPaths.SetEquals(["src/live-provider/"]) &&
+            retainedEvidence.SetEquals(
+        [
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekRequestWriterTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekTransportTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekTransportArchitectureTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekResponseParserTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekResponseParserArchitectureTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekChatBackendTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/LiveAgentVerifierRetirementArchitectureTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Policy/ActionHostTrustedPolicyArchitectureTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+            "docs/20_architecture/r4-actionhost-wrapper-plan.md",
+        ]) &&
+            inventoryEvidence.SetEquals(
+        [
+            "docs/20_architecture/r4-actionhost-wrapper-plan.md",
+        ]) &&
+            retainedAssertions.SetEquals(
+        [
+            "current request projection, message and tool ordering, bounds, and untrusted-data treatment",
+            "endpoint, authorization-only credential placement, transport policy, cancellation, and sanitized failures",
+            "response parsing, bounded provider-private failures, usage extraction, and terminal Agent validation",
+            "provider-to-Agent state transaction, fake-provider canaries, and public result presentation",
+        ]) &&
+            supersededAssertions.SetEquals(
+        [
+            "disabled-thinking no-tool fixed-JSON request shape with temperature and response_format",
+            "M4 request-contract digest and TypeScript cache-envelope identities",
+        ]) &&
+            laterOwners.SetEquals(
+        [
+            "W11: src/prefix-contract/",
+            "W12: src/provider-metadata/",
+            "W14: src/canonical-json/",
         ]);
     }
 

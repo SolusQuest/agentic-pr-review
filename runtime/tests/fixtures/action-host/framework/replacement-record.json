@@ -71,6 +71,36 @@
       "owned_paths": ["src/live-provider/"],
       "retained_paths": ["runtime/src/AgenticPrReview.Runtime/Execution/DeepSeek/"],
       "classification": "remove_after_framework_gate",
+      "disposition": "removed",
+      "removed_paths": ["src/live-provider/"],
+      "retained_evidence_paths": [
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekRequestWriterTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekTransportTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekTransportArchitectureTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekResponseParserTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekResponseParserArchitectureTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekChatBackendTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/LiveAgentVerifierRetirementArchitectureTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Policy/ActionHostTrustedPolicyArchitectureTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+        "docs/20_architecture/r4-actionhost-wrapper-plan.md"
+      ],
+      "inventory_evidence_paths": ["docs/20_architecture/r4-actionhost-wrapper-plan.md"],
+      "retained_assertion_groups": [
+        "current request projection, message and tool ordering, bounds, and untrusted-data treatment",
+        "endpoint, authorization-only credential placement, transport policy, cancellation, and sanitized failures",
+        "response parsing, bounded provider-private failures, usage extraction, and terminal Agent validation",
+        "provider-to-Agent state transaction, fake-provider canaries, and public result presentation"
+      ],
+      "superseded_assertion_groups": [
+        "disabled-thinking no-tool fixed-JSON request shape with temperature and response_format",
+        "M4 request-contract digest and TypeScript cache-envelope identities"
+      ],
+      "later_leaf_assertion_owners": [
+        "W11: src/prefix-contract/",
+        "W12: src/provider-metadata/",
+        "W14: src/canonical-json/"
+      ],
       "protective_behaviors": [
         "provider request identity and privacy",
         "provider failure and cancellation taxonomy",

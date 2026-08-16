@@ -89,6 +89,23 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             "W11", "W12", "W14", "W15",
         }, packages);
         Assert.DoesNotContain("W13", packages);
+        var w4 = replacement.RootElement.GetProperty("entries")
+            .EnumerateArray().Single(value =>
+                value.GetProperty("leaf_id").GetString() == "W4");
+        Assert.Equal("removed",
+            w4.GetProperty("disposition").GetString());
+        Assert.Equal(new[] { "src/live-provider/" },
+            w4.GetProperty("removed_paths").EnumerateArray()
+                .Select(value => value.GetString()).ToArray());
+        Assert.False(Directory.Exists(Path.Join(root, "src", "live-provider")));
+        Assert.Contains(
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/LiveAgentVerifierRetirementArchitectureTests.cs",
+            w4.GetProperty("retained_evidence_paths").EnumerateArray()
+                .Select(value => value.GetString()));
+        Assert.Contains(
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Policy/ActionHostTrustedPolicyArchitectureTests.cs",
+            w4.GetProperty("retained_evidence_paths").EnumerateArray()
+                .Select(value => value.GetString()));
         Assert.Equal("e698fb1df6daf49f393e87fac4f00e3a2ec2c716",
             inventory.RootElement.GetProperty("base_sha").GetString());
         Assert.Equal("apr.action-host.replacement-record.v2",
