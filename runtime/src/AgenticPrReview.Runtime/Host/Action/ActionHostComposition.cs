@@ -8,6 +8,7 @@ using AgenticPrReview.Runtime.ActionHost.Snapshot.GitObjects;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
+using AgenticPrReview.Runtime.Host.Publishing.GitHub.Inline;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.State;
@@ -466,15 +467,17 @@ internal sealed class ActionHostCompositionDependencies
     internal static ActionHostCompositionDependencies Production()
     {
         var github = new ActionHostGitHubAuthorizationTransportFactory();
+        var publisher = new BoundedGitHubPublisherTransportFactory();
         return new ActionHostCompositionDependencies(
             new ActionHostExactPathEventReader(),
             github,
             github,
             github,
-            new AcceptedStateProductionDependencies(),
-            new BoundedGitHubPublisherTransportFactory(),
+            new AcceptedStateProductionDependencies(github),
+            publisher,
             new ActionHostDeepSeekProviderRunnerFactory(),
-            TimeProvider.System);
+            TimeProvider.System,
+            inlineHook: new PostAcceptanceInlinePublisherHook(publisher));
     }
 
     private static string CreateStagingParent() => Path.Join(

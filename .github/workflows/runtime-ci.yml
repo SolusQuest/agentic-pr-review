@@ -16,6 +16,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/setup-node@v6
         with:
@@ -51,12 +52,20 @@ jobs:
       - name: R3 Linux x64 Native AOT live-agent replacement proof
         run: bash runtime/scripts/verify-live-agent.sh aot
 
+      - name: R4 framework ActionHost replacement proof first fresh process
+        run: bash runtime/scripts/verify-action-host.sh framework
+
+      - name: R4 framework ActionHost replacement proof second fresh process
+        run: bash runtime/scripts/verify-action-host.sh framework
+
   integration:
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v6
         with:

@@ -11,7 +11,10 @@ export const ARTIFACT_BRIDGE_LIMITS = Object.freeze({
   requestTimeoutMs: 30_000,
   logicalOperationTimeoutMs: 120_000,
   maximumActiveCorrelations: 32,
-  maximumTerminalCorrelations: 512,
+  // One complete state transaction can legitimately cross the former 512-entry
+  // boundary while retaining both current and previous state keys. Keep the
+  // registry bounded, but leave enough room for the real Host route to finish.
+  maximumTerminalCorrelations: 2_048,
 });
 
 export const ARTIFACT_ENVELOPE_DISCRIMINATOR = 'apr.private-artifact-envelope.s2';

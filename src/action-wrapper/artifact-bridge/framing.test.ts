@@ -95,6 +95,10 @@ describe('artifact bridge framing', () => {
 });
 
 describe('artifact bridge correlation registry', () => {
+  it('retains enough completed correlations for a rotated-key Host transaction', () => {
+    expect(ARTIFACT_BRIDGE_LIMITS.maximumTerminalCorrelations).toBeGreaterThanOrEqual(1_024);
+  });
+
   it('rejects active and completed duplicates', () => {
     const registry = new ArtifactBridgeCorrelationRegistry();
     expect(registry.admit('one')).toEqual({ accepted: true });

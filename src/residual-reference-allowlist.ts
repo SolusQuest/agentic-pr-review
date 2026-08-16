@@ -423,4 +423,13 @@ export const residualReferenceRules = [
     'legacy vocabulary occurs only in the readable R1 handoff link; retired runtime names and selectors are inventory or negative evidence',
     'an accepted later-milestone handoff may supersede retained-consumer ownership but not the R3 deletion record',
   ),
+  permanent(
+    'RR-038',
+    /^runtime\/tests\/fixtures\/action-host\/framework\/(?:e1-base-inventory|replacement-record)\.json$/u,
+    'conformance',
+    'R4 E1 framework verifier',
+    'checked framework source inventory and deletion replacement evidence',
+    'legacy vocabulary occurs only in the exact path of the authoritative R1 historical handoff consumed by W3 replacement validation',
+    'W13 may replace this inventory and record only after preserving the same historical-reference ownership and framework proof',
+  ),
 ] as const satisfies readonly ResidualReferenceRule[];

@@ -114,8 +114,17 @@ internal interface IAcceptedStateProductionDependencies
 internal sealed class AcceptedStateProductionDependencies :
     IAcceptedStateProductionDependencies
 {
-    private readonly IActionHostGitObjectTransportFactory gitFactory =
-        new ActionHostGitHubAuthorizationTransportFactory();
+    private readonly IActionHostGitObjectTransportFactory gitFactory;
+
+    internal AcceptedStateProductionDependencies()
+        : this(new ActionHostGitHubAuthorizationTransportFactory())
+    {
+    }
+
+    internal AcceptedStateProductionDependencies(
+        IActionHostGitObjectTransportFactory gitFactory) =>
+        this.gitFactory = gitFactory ??
+            throw new ArgumentNullException(nameof(gitFactory));
 
     public IRestrictedStateStore CreateArtifactStore(
         ActionHostLaunchContract launch) =>

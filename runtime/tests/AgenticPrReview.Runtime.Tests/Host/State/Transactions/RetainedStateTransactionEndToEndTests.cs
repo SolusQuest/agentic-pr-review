@@ -1684,6 +1684,30 @@ public sealed class RetainedStateTransactionEndToEndTests
     }
 
     [Fact]
+    public async Task VerifiedAheadSuccessorRefreshesSelectedLineageAndAccepts()
+    {
+        var fixture = await CreateFixtureAsync(
+            extraRetentionSeconds: 0,
+            route: ActionHostAuthorizationRoute.WorkflowDispatch);
+        var first = await AcceptGenerationAsync(fixture, commentId: 710);
+        Assert.Equal(0, first.Generation);
+        fixture.Context.Dispose();
+
+        var nextHead = new string('f', 40);
+        var successor = await RestoreFixtureAsync(
+            fixture,
+            newWorkflowRun: true,
+            reviewedHeadSha: nextHead);
+        using var successorContext = successor.Context;
+
+        var second = await AcceptGenerationAsync(successor, commentId: 711);
+
+        Assert.Equal(1, second.Generation);
+        Assert.Equal(nextHead, second.Publication.ReviewedHeadSha);
+        Assert.Equal(nextHead, successor.Invocation.PullRequest.HeadSha);
+    }
+
+    [Fact]
     public async Task DurableAcceptanceAttemptAndVerifiedReceiptRecoverAcrossProcesses()
     {
         var fixture = await CreateFixtureAsync();

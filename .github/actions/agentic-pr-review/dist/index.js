@@ -97595,7 +97595,10 @@ var ARTIFACT_BRIDGE_LIMITS = Object.freeze({
   requestTimeoutMs: 3e4,
   logicalOperationTimeoutMs: 12e4,
   maximumActiveCorrelations: 32,
-  maximumTerminalCorrelations: 512
+  // One complete state transaction can legitimately cross the former 512-entry
+  // boundary while retaining both current and previous state keys. Keep the
+  // registry bounded, but leave enough room for the real Host route to finish.
+  maximumTerminalCorrelations: 2048
 });
 var ARTIFACT_ENVELOPE_DISCRIMINATOR = "apr.private-artifact-envelope.s2";
 var ARTIFACT_ENVELOPE_ENTRY = "artifact-envelope.json";
@@ -100586,4 +100589,4 @@ void runPrivateActionWrapper({
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: ddc3931dcf72ac9a6cfc334e6b4755427273bb042e56fabf2cc1ec74efaef3d0
+// Action source inventory sha256: 4d113b3208722281fa7e5c8db17803e8b2c1c048522e34737d41a3d2250da755

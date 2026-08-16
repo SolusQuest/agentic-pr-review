@@ -1,0 +1,299 @@
+{
+  "schema": "apr.action-host.replacement-record.v2",
+  "issue_number": 178,
+  "framework_verifier": "runtime/scripts/verify-action-host.sh framework",
+  "entries": [
+    {
+      "leaf_id": "W3",
+      "issue_number": 165,
+      "owned_paths": [
+        "src/runtime-invocation/",
+        "src/live-runtime-invocation/",
+        "protocol/schemas/live-runtime-invocation-context.v1.json",
+        "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj"
+      ],
+      "retained_paths": ["src/action-wrapper/", "runtime/src/AgenticPrReview.Runtime/Host/Action/"],
+      "classification": "remove_after_framework_gate",
+      "protective_behaviors": [
+        "command and frame rejection",
+        "bounded child lifecycle and signal escalation",
+        "closed child environment and secret isolation"
+      ],
+      "csharp_owners": ["ActionHostComposition", "ActionHostLaunchContract"],
+      "owned_csharp_members": [
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs#SchemaKind.LiveContext",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs#ReadSchema(assembly, \"AgenticPrReview.Protocol.live-runtime-invocation-context.v1.json\")",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs#SchemaKind.LiveContext => liveContext",
+        "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj#EmbeddedResource Include=\"..\\..\\..\\protocol\\schemas\\live-runtime-invocation-context.v1.json\""
+      ],
+      "referenced_tests_and_docs": [
+        ".github/workflows/ci.yml",
+        "src/ledger-csharp.test.ts",
+        "src/runtime-integration/runtime-integration.test.ts",
+        "src/prefix-contract/import-boundary.test.ts",
+        "src/state-v2/import-boundary.test.ts",
+        "src/residual-reference-allowlist.ts",
+        "docs/20_architecture/agent-runtime-rebaseline.md",
+        "docs/20_architecture/r1-legacy-removal-handoff.md",
+        "docs/20_architecture/r3-single-shot-removal-handoff.md",
+        "docs/20_architecture/r4-actionhost-wrapper-plan.md",
+        "docs/50_ai/agent-context.md"
+      ],
+      "framework_scenario_ids": [
+        "dispatch-bootstrap",
+        "cancel-before-side-effect",
+        "cancel-escalation"
+      ],
+      "deletion_prerequisites": [
+        "W7 merged",
+        "W2 wrapper route merged",
+        "E1 framework verifier green"
+      ],
+      "deletion_gate": "No launcher import, executable route, live-context resource, or current documentation remains."
+    },
+    {
+      "leaf_id": "W4",
+      "issue_number": 166,
+      "owned_paths": ["src/live-provider/"],
+      "retained_paths": ["runtime/src/AgenticPrReview.Runtime/Execution/DeepSeek/"],
+      "classification": "remove_after_framework_gate",
+      "protective_behaviors": [
+        "provider request identity and privacy",
+        "provider failure and cancellation taxonomy",
+        "single authorized provider composition"
+      ],
+      "csharp_owners": ["ActionHostDeepSeekProviderRunnerFactory", "DeepSeekTransport"],
+      "framework_scenario_ids": ["dispatch-continuation", "provider-malformed", "public-result"],
+      "deletion_prerequisites": ["W7 merged", "E1 real provider request and parser route green"],
+      "deletion_gate": "No TypeScript live-provider business path, oracle, export, or current documentation remains."
+    },
+    {
+      "leaf_id": "W5",
+      "issue_number": 167,
+      "owned_paths": [
+        "src/state-v2/",
+        "protocol/schemas/state-manifest.v2.json",
+        "protocol/fixtures/state-manifest-v2/",
+        "protocol/fixtures/state-manifest-v2-compat/"
+      ],
+      "retained_paths": ["runtime/src/AgenticPrReview.Runtime/Host/State/"],
+      "classification": "remove_after_state_and_publication_gate",
+      "protective_behaviors": [
+        "strict state parsing and bounded diagnostics",
+        "ancestry provenance and key mismatch",
+        "stale writer and outcome-unknown recovery"
+      ],
+      "csharp_owners": ["AuthorizedAcceptedStateComposer", "RestrictedStateService"],
+      "framework_scenario_ids": [
+        "artifact-digest-mismatch",
+        "artifact-expired",
+        "artifact-upload-outcome-unknown"
+      ],
+      "deletion_prerequisites": ["S6 merged", "P6 merged", "E1 artifact failure matrix green"],
+      "deletion_gate": "No StateV2 reader, converter, dual format, fixture consumer, or current claim remains."
+    },
+    {
+      "leaf_id": "W6",
+      "issue_number": 168,
+      "owned_paths": [
+        "src/state-acceptance/",
+        "protocol/schemas/candidate-registration.v1.json",
+        "protocol/schemas/accepted-state-marker.v1.json",
+        "protocol/schemas/state-selector.v1.json",
+        "protocol/schemas/state-publication-receipt.v1.json"
+      ],
+      "retained_paths": [
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/"
+      ],
+      "classification": "remove_after_state_transaction_gate",
+      "protective_behaviors": [
+        "candidate and acceptance concurrency",
+        "scope and ancestry validation",
+        "mutation outcome reconciliation"
+      ],
+      "csharp_owners": ["AuthorizedAcceptedStateComposer", "RetainedStatePersistence"],
+      "framework_scenario_ids": ["dispatch-continuation", "crash-recovery", "stale-head"],
+      "deletion_prerequisites": ["S6 merged", "P6 merged", "E1 recovery pair green"],
+      "deletion_gate": "No Git-ref, cache, plaintext, compatibility, or dual state writer remains."
+    },
+    {
+      "leaf_id": "W7",
+      "issue_number": 169,
+      "owned_paths": [
+        "src/ledger-csharp.ts",
+        "src/ledger-csharp.test.ts",
+        "src/ledger-pre-acceptance.test.ts"
+      ],
+      "retained_paths": [
+        "runtime/src/AgenticPrReview.Runtime/Ledger/",
+        "runtime/src/AgenticPrReview.Runtime/Agent/"
+      ],
+      "classification": "remove_after_coordinator_gate",
+      "protective_behaviors": [
+        "invocation and pre-acceptance sequencing",
+        "SESSION continuation and result mapping",
+        "target and outcome-unknown validation"
+      ],
+      "csharp_owners": ["ActionHostCoordinator", "AgentLoop"],
+      "framework_scenario_ids": ["dispatch-bootstrap", "dispatch-continuation", "crash-recovery"],
+      "deletion_prerequisites": ["P6 merged", "S6 merged", "E1 continuation and recovery green"],
+      "deletion_gate": "No TypeScript ledger coordinator, root pre-acceptance test, caller, export, or helper remains."
+    },
+    {
+      "leaf_id": "W8",
+      "issue_number": 170,
+      "owned_paths": ["src/comments.ts", "src/comments.test.ts"],
+      "retained_paths": ["runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/"],
+      "classification": "remove_after_sticky_gate",
+      "protective_behaviors": [
+        "bounded sticky rendering and marker identity",
+        "create update dedup and readback",
+        "publication outcome recovery"
+      ],
+      "csharp_owners": ["StickyCommentPublisher", "PublicationRecoveryService"],
+      "framework_scenario_ids": ["workflow-run", "crash-recovery"],
+      "deletion_prerequisites": ["P2 merged", "P6 merged", "E1 sticky recovery green"],
+      "deletion_gate": "No TypeScript sticky publisher, renderer, fingerprint, export, or current marker owner remains."
+    },
+    {
+      "leaf_id": "W9",
+      "issue_number": 171,
+      "owned_paths": [
+        "src/inline-comments.ts",
+        "src/inline-comments.test.ts",
+        "src/target.ts",
+        "src/target.test.ts"
+      ],
+      "retained_paths": ["runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Inline/"],
+      "classification": "remove_after_inline_gate",
+      "protective_behaviors": [
+        "right-side target mapping and bounds",
+        "severity cap dedup batch and readback",
+        "stale-head and warning-only failure"
+      ],
+      "csharp_owners": ["PostAcceptanceInlinePublisherHook", "InlineCommentPublisher"],
+      "framework_scenario_ids": ["inline", "inline-warning", "stale-head"],
+      "deletion_prerequisites": ["P4 merged", "P6 merged", "E1 inline branch green"],
+      "deletion_gate": "No TypeScript inline or target publisher path remains and sticky-only behavior stays complete."
+    },
+    {
+      "leaf_id": "W10",
+      "issue_number": 172,
+      "owned_paths": ["src/protocol/", "src/structured.ts", "src/structured.test.ts"],
+      "retained_paths": [
+        "protocol/schemas/review-input.v1.json",
+        "protocol/schemas/review-result.v1.json",
+        "protocol/schemas/review-trace.v1.json",
+        "protocol/fixtures/v1/",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/"
+      ],
+      "classification": "remove_typescript_and_retain_csharp_contracts",
+      "protective_behaviors": [
+        "credential exclusion and host-owned fields",
+        "safe paths bounds grounding and fingerprints",
+        "trace privacy and usage lineage"
+      ],
+      "csharp_owners": ["RuntimeApplication", "RuntimeJson", "AgentLoop"],
+      "framework_scenario_ids": ["dispatch-continuation", "inline", "public-result"],
+      "deletion_prerequisites": ["W3 merged", "W7 merged", "H1 H5 P1 P6 and E1 green"],
+      "deletion_gate": "Only TypeScript review and structured implementations are removed; C# schemas, resources, and golden fixtures remain."
+    },
+    {
+      "leaf_id": "W11",
+      "issue_number": 173,
+      "owned_paths": ["src/prefix-contract/"],
+      "retained_paths": [
+        "protocol/fixtures/prefix-contract/",
+        "runtime/src/AgenticPrReview.Runtime/Prefix/"
+      ],
+      "classification": "remove_typescript_and_retain_byte_identical_corpus",
+      "protective_behaviors": [
+        "canonical framing and identities",
+        "alias cycle bounds and TOCTOU snapshot",
+        "continuation prefix invalidation"
+      ],
+      "csharp_owners": ["PrefixMaterializer", "PrefixGoldenVectorTests"],
+      "framework_scenario_ids": ["dispatch-continuation"],
+      "deletion_prerequisites": [
+        "W3 W4 and W7 merged",
+        "E1 continuation green",
+        "C# corpus digest unchanged"
+      ],
+      "deletion_gate": "No TypeScript prefix implementation or generator remains and the retained corpus bytes and hashes are unchanged."
+    },
+    {
+      "leaf_id": "W12",
+      "issue_number": 174,
+      "owned_paths": [
+        "src/provider-metadata/",
+        "protocol/schemas/provider-run-metadata.v1.json",
+        "protocol/fixtures/provider-run-metadata/"
+      ],
+      "retained_paths": ["runtime/src/AgenticPrReview.Runtime/Execution/DeepSeek/"],
+      "classification": "remove_after_no_consumer_gate",
+      "protective_behaviors": [
+        "strict provider metadata parsing and bounds",
+        "attempt ordering usage and capability evidence",
+        "provider failure cancellation and privacy"
+      ],
+      "csharp_owners": ["DeepSeekChatBackend", "ActionHostDeepSeekProviderRunnerFactory"],
+      "framework_scenario_ids": ["dispatch-continuation", "provider-malformed"],
+      "deletion_prerequisites": [
+        "W3 merged",
+        "W7 merged",
+        "refreshed C# no-consumer evidence",
+        "E1 provider route green"
+      ],
+      "deletion_gate": "No provider metadata TypeScript surface, schema resource consumer, fixture consumer, or compatibility reader remains."
+    },
+    {
+      "leaf_id": "W14",
+      "issue_number": 176,
+      "owned_paths": ["src/canonical-json/"],
+      "retained_paths": [
+        "runtime/src/AgenticPrReview.Runtime/Canonical/",
+        "protocol/fixtures/prefix-contract/"
+      ],
+      "classification": "remove_after_last_consumer_gate",
+      "protective_behaviors": [
+        "RFC 8785 numeric string and key ordering",
+        "invalid Unicode and number rejection",
+        "canonical bounds and canary behavior"
+      ],
+      "csharp_owners": ["CanonicalJsonWriter", "PrefixGoldenVectorTests"],
+      "framework_scenario_ids": ["dispatch-continuation"],
+      "deletion_prerequisites": [
+        "W3 W4 W5 W6 W11 and W12 merged",
+        "repository-wide no-import proof",
+        "E1 green"
+      ],
+      "deletion_gate": "No TypeScript canonicalizer, import, alias, generator, export, or current documentation claim remains."
+    },
+    {
+      "leaf_id": "W15",
+      "issue_number": 177,
+      "owned_paths": ["src/types.ts", "src/utils.ts"],
+      "retained_paths": [
+        "runtime/src/AgenticPrReview.Runtime/Application/",
+        "runtime/src/AgenticPrReview.Runtime/Cli/",
+        "runtime/src/AgenticPrReview.Runtime/Storage/",
+        "runtime/src/AgenticPrReview.Runtime/Protocol/RuntimeJson.cs"
+      ],
+      "classification": "remove_after_root_consumer_gate",
+      "protective_behaviors": [
+        "safe path normalization and SHA-256",
+        "bounded truncation and review DTOs",
+        "target usage and lineage behavior"
+      ],
+      "csharp_owners": ["RuntimeApplication", "RuntimeJson", "AgentLoop"],
+      "framework_scenario_ids": ["workflow-run", "inline", "dispatch-continuation"],
+      "deletion_prerequisites": [
+        "W7 W8 W9 and W10 merged",
+        "root import inventory empty",
+        "E1 green"
+      ],
+      "deletion_gate": "No root types or utils import, export, test, compatibility barrel, or duplicate shared utility remains."
+    }
+  ]
+}
