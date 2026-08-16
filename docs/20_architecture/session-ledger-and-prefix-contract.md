@@ -60,7 +60,7 @@ The provider adapter owns:
 - provider errors, retries, and provider request invocation;
 - adapter version and provider/model identity in the prefix hash domain.
 
-The TypeScript host owns:
+In the historical M4 split, the TypeScript host owned:
 
 - trusted invocation selection and provider-secret policy;
 - GitHub repository, PR, head SHA, workflow event, and artifact provenance;
@@ -82,9 +82,9 @@ The first M4 live path is experimental and explicit:
 - the current deterministic path remains provider-secret-free;
 - the path produces sticky-only output and leaves the default runtime path unchanged.
 
-The exact environment variable name, direct HTTP construction, selected model string, and provider request contract are implementation decisions under the live adapter issue. The reference adapter must conform to the DeepSeek OpenAI-compatible profile; Anthropic Messages-style behavior and gateway-specific behavior are not implicitly covered. The trust category and fail-closed rules are design decisions in #29.
+The exact environment variable name, direct HTTP construction, selected model string, and provider request contract are implementation decisions under the live adapter issue. The reference adapter must conform to the DeepSeek OpenAI-compatible profile; Anthropic Messages-style behavior and gateway-specific behavior are not implicitly covered. The trust category and fail-closed rules are design decisions in #29. R4-W3 removed the TypeScript invocation hosts and their `LiveRuntimeInvocationContextV1` schema; current launch authority belongs to the W2 wrapper/C# ActionHost boundary.
 
-The closed `ReviewInputV1.host.review.runtimeProvider` enum is not expanded by M4. The #55 synthetic live-process bridge uses the existing `"test"` value as a compatibility sentinel only; it is not a provider identity and must never be copied into `ProviderRunMetadataV1`, the ledger, the manifest cache-contract identity, or published host metadata. The live provider/model/adapter identity is authoritative only from `LiveRuntimeInvocationContextV1`, the provider metadata sidecar, and the v2 manifest. A future decision to represent a real provider in `ReviewInputV1` requires a separately versioned protocol change and is outside #55.
+The closed `ReviewInputV1.host.review.runtimeProvider` enum is not expanded by M4. The #55 synthetic live-process bridge historically used the existing `"test"` value as a compatibility sentinel only; it was not a provider identity and must never be copied into `ProviderRunMetadataV1`, the ledger, the manifest cache-contract identity, or published host metadata. After W3, the removed `LiveRuntimeInvocationContextV1` has no current authority; retained provider metadata, the v2 manifest, and C# Host-owned configuration carry the remaining internal identity inputs. A future decision to represent a real provider in `ReviewInputV1` requires a separately versioned protocol change and is outside #55.
 
 ## StateManifestV2 And Legacy Policy
 
@@ -367,7 +367,7 @@ This section is normative for the first foundational M4 implementation batch (is
 
 ### Review subject and record cache-contract digests
 
-The M4 `review_context` record carries two derived digests whose algorithms are shared between the TypeScript host and the C# runtime:
+The historical M4 `review_context` record carried two derived digests whose algorithms were shared between the TypeScript host and the C# runtime:
 
 ```text
 subjectDigest = SHA256(

@@ -14,6 +14,22 @@
       ],
       "retained_paths": ["src/action-wrapper/", "runtime/src/AgenticPrReview.Runtime/Host/Action/"],
       "classification": "remove_after_framework_gate",
+      "disposition": "removed",
+      "removed_paths": [
+        "src/runtime-invocation/",
+        "src/live-runtime-invocation/",
+        "protocol/schemas/live-runtime-invocation-context.v1.json",
+        "src/runtime-integration/runtime-integration.test.ts",
+        "runtime/tests/IntegrationFixtures/"
+      ],
+      "removed_consumer_paths": [
+        "src/runtime-integration/runtime-integration.test.ts",
+        "runtime/tests/IntegrationFixtures/"
+      ],
+      "retained_carrier_paths": [
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs",
+        "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj"
+      ],
       "protective_behaviors": [
         "command and frame rejection",
         "bounded child lifecycle and signal escalation",
@@ -28,7 +44,6 @@
       ],
       "referenced_tests_and_docs": [
         ".github/workflows/ci.yml",
-        "src/runtime-integration/runtime-integration.test.ts",
         "src/prefix-contract/import-boundary.test.ts",
         "src/state-v2/import-boundary.test.ts",
         "src/residual-reference-allowlist.ts",

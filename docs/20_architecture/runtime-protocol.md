@@ -14,7 +14,7 @@ The runtime boundary is protocol-first and file-based.
 
 ## Direction
 
-The TypeScript host writes review input JSON. The runtime reads that input and writes structured result JSON plus optional trace output. Both sides validate protocol version and fail closed on incompatible contracts. The M2 CLI process contract, including version comparison, exit classes, output commits, and sanitized diagnostics, is defined in [runtime-cli-process-contract.md](./runtime-cli-process-contract.md).
+The host boundary writes review input JSON. The runtime reads that input and writes structured result JSON plus optional trace output. Both sides validate protocol version and fail closed on incompatible contracts. The historical TypeScript launcher was removed by R4-W3 after the W2 wrapper/C# ActionHost replacement proof; the retained protocol and M2 CLI behavior remain defined in [runtime-cli-process-contract.md](./runtime-cli-process-contract.md).
 
 ## Protocol Files
 

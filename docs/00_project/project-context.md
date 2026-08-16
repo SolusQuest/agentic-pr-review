@@ -42,7 +42,7 @@ The engineering goals are to:
 - publish pinned, verifiable, self-contained runtime payloads;
 - keep compatibility machinery proportional to actual independently released or durable boundaries.
 
-Cross-language contract implementation is no longer an objective by itself. TypeScript remains as narrow runtime, state, publisher, migration, and conformance evidence plus the R4 thin wrapper and official artifact bridge. Business decisions remain in the C# Host.
+Cross-language contract implementation is no longer an objective by itself. TypeScript remains as narrow state, publisher, migration, and conformance evidence plus the R4 thin wrapper and official artifact bridge. Business decisions remain in the C# Host.
 
 C# and Native AOT are architecture commitments, not product success criteria. Review quality, grounded evidence, safety, resumability, cache economics, and operational reliability decide whether the runtime succeeds.
 
@@ -58,7 +58,7 @@ The current implementation contains:
 - authenticated encrypted local STATE, independent Host lineage, same-head and verified-ahead admission, and framework-dependent plus Linux x64 Native AOT validation;
 - must-find, must-not-find, invalid-tool, tamper, replay, scope, continuation, and secret-canary evaluation;
 - a protected, default-branch, no-publication live-provider proof at the final R3 commit;
-- retained internal TypeScript state, publisher, invocation, protocol, prefix, and metadata families only as named R4 replacement evidence.
+- retained internal TypeScript state, publisher, protocol, prefix, and metadata families only as named R4 replacement evidence; the W3 invocation families and obsolete live-context schema are removed after W2/W7/E1 replacement proof.
 
 R3 is complete. R4 has restored the bounded wrapper and its official artifact bridge over an explicitly prepared payload. The development head is still not a supported downstream Action and does not yet provide the complete trusted two-run proof, release payload delivery, or R7 public default.
 

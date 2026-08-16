@@ -1,8 +1,9 @@
 # Runtime CLI Process Contract
 
 This document defines the M2 deterministic CLI's externally observable contract. It is the design
-output of issue #20: issue #19 implements it, issue #21 exercises it in CI, and issue #33 consumes
-it from the TypeScript host.
+output of issue #20: issue #19 implements it, issue #21 exercises it in CI, and issue #33 historically
+consumed it from the TypeScript host. R4-W3 removed that launcher after the W2 wrapper/C# ActionHost
+replacement proof; the retained CLI contract still governs direct runtime validation.
 
 The contract applies only to:
 
@@ -16,11 +17,11 @@ host-side timeout, cancellation, process capture, or invocation-directory lifecy
 The C# runtime owns command parsing, input validation, output construction and self-validation,
 staging, no-replace final commits, rollback of files it created, and best-effort failure traces.
 
-The TypeScript host owns executable resolution, a fresh bounded invocation directory, subprocess
-lifetime, timeout/cancellation, bounded stream capture, and removal of its invocation directory
-after process exit. On non-zero exit, the host must not return, publish, upload, or otherwise treat
-result or trace files as successful output. It may inspect a schema-valid failure/orphan trace for
-bounded diagnostics before cleanup.
+The historical TypeScript host owned executable resolution, a fresh bounded invocation directory,
+subprocess lifetime, timeout/cancellation, bounded stream capture, and cleanup. The current W2 Node
+wrapper and C# ActionHost replacement own those launch and lifecycle protections, including the rule
+that non-zero execution must not produce publishable successful output. W1/W2/E1 tests are authoritative
+for current process, cancellation, diagnostics, closed-environment, and privacy behavior.
 
 ## Command And Validation Sequence
 

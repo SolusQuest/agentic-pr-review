@@ -41,10 +41,11 @@ npm run runtime:integration
 
 `npm run dist:check` validates the exact seven-input/no-output metadata, package and lockfile ownership, generated-wrapper input and external-import inventory, byte-for-byte bundle reproducibility, and retired root-alias/local-runner/workflow-invocation drift. The command is read-only; use `npm run build:action` to regenerate the checked bundle intentionally.
 
-`npm run runtime:integration` publishes the framework-dependent C# runtime and
-test fixture outside the repository workspace, then exercises the direct
-source-host/process boundary. On Linux it also publishes and executes the
-`linux-x64` Native AOT path. The complete runtime validation command is:
+`npm run runtime:integration` publishes the framework-dependent C# runtime
+outside the repository workspace and exercises the retained Input/Result/Trace
+CLI boundary directly. On Linux it also publishes and executes the `linux-x64`
+Native AOT path. Wrapper lifecycle and privacy behavior is covered separately
+by the ActionHost framework verifier. The complete runtime validation command is:
 
 ```bash
 bash runtime/scripts/verify-runtime.sh all
