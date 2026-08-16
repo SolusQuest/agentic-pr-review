@@ -100,9 +100,9 @@ The current implementation on `main` includes:
 - the project-owned DeepSeek thinking adapter with exact provider continuation and a protected no-publication official-endpoint proof;
 - authenticated encrypted local STATE with same-head/verified-ahead admission and two-fresh-process continuation;
 - framework-dependent and Linux x64 Native AOT product validation;
-- retained TypeScript invocation, state, publisher, prefix, protocol, and provider-metadata families only as named R4 replacement evidence; R4-W7 removed the TypeScript ledger coordinator after P6/S6/E1 replacement evidence passed.
+- retained TypeScript state, publisher, prefix, protocol, and provider-metadata families only as named R4 replacement evidence; R4-W3 removed the TypeScript invocation families and obsolete live-context schema after W2/W7/E1 replacement evidence passed, and R4-W7 removed the TypeScript ledger coordinator after P6/S6/E1 passed.
 
-R3 is complete at `736508728acc6b2064b75f2e1da81b9342aac70b`. Production GitHub/Actions authorization, exact GitHub snapshot acquisition, downstream artifact-backed encrypted state, C# publication, the thin wrapper, and downstream release delivery remain absent and belong to R4 and R7 as allocated below.
+R3 is complete at `736508728acc6b2064b75f2e1da81b9342aac70b`. The nested thin wrapper now exists for repository-controlled prepared-payload proof; downstream artifact-backed encrypted state, complete C# publication, supported release payload delivery, and the public default remain later R4/R7 work as allocated below.
 
 ## Historical Milestones
 

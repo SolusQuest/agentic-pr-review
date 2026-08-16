@@ -1155,8 +1155,16 @@ internal static class FrameworkSupervisor
         var inventory = InventoryPaths(Path.Join(repository,
             "runtime", "tests", "fixtures", "action-host", "framework",
             "e1-base-inventory.json"));
-        if (!RequiredTextArray(entry, "owned_csharp_members", member =>
-                MemberExists(repository, member) &&
+        if (entry.GetProperty("disposition").GetString() != "removed" ||
+            !RequiredTextArray(entry, "removed_paths", value =>
+                IsClosedPath(value) && !LandingPathExists(repository, value)) ||
+            !RequiredTextArray(entry, "removed_consumer_paths", value =>
+                IsClosedPath(value) && !LandingPathExists(repository, value)) ||
+            !RequiredTextArray(entry, "retained_carrier_paths", value =>
+                IsClosedPath(value) && LandingPathExists(repository, value) &&
+                InventoryCovers(inventory, value)) ||
+            !RequiredTextArray(entry, "owned_csharp_members", member =>
+                !MemberExists(repository, member) &&
                 InventoryCovers(inventory, member.Split('#', 2)[0])) ||
             !RequiredTextArray(entry, "referenced_tests_and_docs", value =>
                 IsClosedPath(value) && LandingPathExists(repository, value) &&
@@ -1168,7 +1176,31 @@ internal static class FrameworkSupervisor
         var memberPaths = TextArray(entry, "owned_csharp_members")
             .Select(value => value.Split('#', 2)[0])
             .ToHashSet(StringComparer.Ordinal);
-        return memberPaths.SetEquals(
+        var removedPaths = TextArray(entry, "removed_paths")
+            .ToHashSet(StringComparer.Ordinal);
+        var removedConsumers = TextArray(entry, "removed_consumer_paths")
+            .ToHashSet(StringComparer.Ordinal);
+        var retainedCarriers = TextArray(entry, "retained_carrier_paths")
+            .ToHashSet(StringComparer.Ordinal);
+        return removedPaths.SetEquals(
+        [
+            "src/runtime-invocation/",
+            "src/live-runtime-invocation/",
+            "protocol/schemas/live-runtime-invocation-context.v1.json",
+            "src/runtime-integration/runtime-integration.test.ts",
+            "runtime/tests/IntegrationFixtures/",
+        ]) &&
+            removedConsumers.SetEquals(
+        [
+            "src/runtime-integration/runtime-integration.test.ts",
+            "runtime/tests/IntegrationFixtures/",
+        ]) &&
+            retainedCarriers.SetEquals(
+        [
+            "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs",
+            "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj",
+        ]) &&
+            memberPaths.SetEquals(
         [
             "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs",
             "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj",

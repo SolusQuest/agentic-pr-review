@@ -22,7 +22,6 @@ export interface PermanentResidualReferenceRule extends ResidualReferenceRuleBas
 export type ResidualReferenceRule = TemporaryResidualReferenceRule | PermanentResidualReferenceRule;
 
 const retiredSelector = /claude-code-cli/u;
-const anthropicCanary = /ANTHROPIC_/u;
 const stateOrMarkerLegacy = /runtime_backend|runtime_provider|live_provider|legacy/iu;
 const claudeBrandEvidence = /\bClaude\b(?!-code-cli\b)/iu;
 export const residualReferenceDiscovery =
@@ -84,40 +83,6 @@ export const residualReferenceRules = [
     milestone: 'R2',
   },
   {
-    id: 'RR-004',
-    term: retiredSelector,
-    path: /^src\/live-runtime-invocation\/invoke-live-runtime\.integration\.test\.ts$/u,
-    lifecycleClass: 'protocol-migration',
-    currentConsumer: 'retained R4 migration fixture excluded from active runtime integration',
-    owner: 'R2 runtime input replacement',
-    interpretation:
-      'historical exact rejection vector, not executable product integration evidence',
-    deletionGate: 'replace the R1 runtime input contract and its exact rejection vector',
-    milestone: 'R2',
-  },
-  {
-    id: 'RR-005',
-    term: anthropicCanary,
-    path: /^src\/runtime-invocation\/(?:process-runner\.ts|invoke-runtime\.lifecycle\.test\.ts|__test-fixtures__\/fake-runtime\.mjs)$/u,
-    lifecycleClass: 'credential-canary',
-    currentConsumer: 'generic child-environment privacy boundary',
-    owner: 'R2 runtime invocation',
-    interpretation: 'credential name only; value must remain absent from the child',
-    deletionGate: 'replace the R1 generic runtime invocation boundary',
-    milestone: 'R2',
-  },
-  {
-    id: 'RR-006',
-    term: anthropicCanary,
-    path: /^src\/runtime-integration\/runtime-integration\.test\.ts$/u,
-    lifecycleClass: 'credential-canary',
-    currentConsumer: 'published runtime integration privacy probe',
-    owner: 'R4 Host integration',
-    interpretation: 'credential name only; value must remain absent from the generic child',
-    deletionGate: 'replace the R1 integration harness with R4 Host integration',
-    milestone: 'R4',
-  },
-  {
     id: 'RR-007',
     term: stateOrMarkerLegacy,
     path: /^src\/comments(?:\.test)?\.ts$/u,
@@ -173,12 +138,11 @@ export const residualReferenceRules = [
   {
     id: 'RR-013',
     term: stateOrMarkerLegacy,
-    path: /^src\/(?:live-provider\/deepseek-contract\.ts|live-runtime-invocation\/invoke-live-runtime\.integration\.test\.ts)$/u,
+    path: /^src\/live-provider\/deepseek-contract\.ts$/u,
     lifecycleClass: 'state-migration',
-    currentConsumer: 'temporary M4 live-provider contract and retained non-executing fixture',
+    currentConsumer: 'temporary M4 live-provider contract',
     owner: 'R4 Host',
-    interpretation:
-      'internal migration vocabulary; the retained fixture is not active product evidence',
+    interpretation: 'internal migration vocabulary, not a supported public state identity',
     deletionGate: 'replace the temporary TypeScript live-provider host boundary',
     milestone: 'R4',
   },
@@ -378,18 +342,6 @@ export const residualReferenceRules = [
     'Claude references define repository instruction routing only, not provider/runtime execution',
     'AGENTS.md and docs/50_ai/collaboration-layers.md govern its scope; an accepted collaboration-policy revision supersedes this entrypoint',
   ),
-  {
-    id: 'RR-035',
-    term: anthropicCanary,
-    path: /^runtime\/tests\/IntegrationFixtures\/Program\.cs$/u,
-    lifecycleClass: 'credential-canary',
-    currentConsumer: 'published C# runtime integration child-environment privacy probe',
-    owner: 'R4 Host integration',
-    interpretation:
-      'credential name and presence bit only; the value must remain absent from the generic child',
-    deletionGate: 'replace the R1 integration fixture with R4 Host integration',
-    milestone: 'R4',
-  },
   {
     id: 'RR-036',
     term: /distinct from legacy lineage metadata/iu,

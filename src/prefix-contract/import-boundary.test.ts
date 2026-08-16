@@ -53,14 +53,4 @@ describe('prefix-contract import boundary', () => {
       }
     }
   });
-
-  it('retained production entry points do not import the oracle generator', () => {
-    // Static one-hop check: retained production entry files do not import
-    // anything under prefix-contract test tooling.
-    const entries = ['src/runtime-invocation/invoke-runtime.ts'];
-    for (const entry of entries) {
-      const text = readFileSync(entry, 'utf8');
-      expect(text, entry).not.toContain('generate-fixtures.testhelper');
-    }
-  });
 });
