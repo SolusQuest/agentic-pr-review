@@ -9,6 +9,28 @@ public sealed class LedgerBuilderTests
     private static readonly ExpectedIdentities Identities = LedgerTestBaseline.Identities;
 
     [Fact]
+    public void CacheContractDigestMatchesIndependentSevenFieldKnownAnswer()
+    {
+        var identities = new ExpectedIdentities(
+            Repository: "unused/repository",
+            HeadRepository: "unused/head",
+            PullRequest: 1,
+            WorkflowIdentity: "unused-workflow",
+            TrustedExecutionDomain: "unused-domain",
+            ProviderId: "v",
+            ModelId: "m",
+            AdapterId: "a",
+            TemplateId: "t",
+            PolicyId: "p",
+            ToolDefinitionId: "d",
+            CacheConfigId: "c");
+
+        Assert.Equal(
+            "7e0c4adc9cc9b64a9866a37d6be4e007d727059117dd467aa1488a8f67a4f666",
+            LedgerCanonicalizer.ComputeCacheContractDigest(identities));
+    }
+
+    [Fact]
     public void BuildBootstrapCandidateSucceeds()
     {
         var context = BuildContext(interactionOrdinal: 0);

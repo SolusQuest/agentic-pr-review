@@ -106,6 +106,58 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Policy/ActionHostTrustedPolicyArchitectureTests.cs",
             w4.GetProperty("retained_evidence_paths").EnumerateArray()
                 .Select(value => value.GetString()));
+        var w3 = replacement.RootElement.GetProperty("entries")
+            .EnumerateArray().Single(value =>
+                value.GetProperty("leaf_id").GetString() == "W3");
+        Assert.Equal(new[]
+        {
+            ".github/workflows/ci.yml",
+            "src/state-v2/import-boundary.test.ts",
+            "src/residual-reference-allowlist.ts",
+            "docs/20_architecture/agent-runtime-rebaseline.md",
+            "docs/20_architecture/r1-legacy-removal-handoff.md",
+            "docs/20_architecture/r3-single-shot-removal-handoff.md",
+            "docs/20_architecture/r4-actionhost-wrapper-plan.md",
+            "docs/50_ai/agent-context.md",
+        }, w3.GetProperty("referenced_tests_and_docs").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
+        var w11 = replacement.RootElement.GetProperty("entries")
+            .EnumerateArray().Single(value =>
+                value.GetProperty("leaf_id").GetString() == "W11");
+        Assert.Equal("removed", w11.GetProperty("disposition").GetString());
+        Assert.Equal(new[]
+        {
+            "src/prefix-contract/",
+            "scripts/regenerate-prefix-contract-fixtures.mjs",
+        }, w11.GetProperty("removed_paths").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
+        Assert.False(Directory.Exists(Path.Join(root, "src", "prefix-contract")));
+        Assert.False(File.Exists(Path.Join(root, "scripts",
+            "regenerate-prefix-contract-fixtures.mjs")));
+
+        const string prefixCorpus = "protocol/fixtures/prefix-contract/";
+        var expectedCorpus = inventory.RootElement.GetProperty("files")
+            .EnumerateArray()
+            .Where(value => value.GetProperty("path").GetString()!
+                .StartsWith(prefixCorpus, StringComparison.Ordinal))
+            .ToDictionary(
+                value => value.GetProperty("path").GetString()!,
+                value => value.GetProperty("sha256").GetString()!,
+                StringComparer.Ordinal);
+        var corpusRoot = Path.Join(root, "protocol", "fixtures", "prefix-contract");
+        var currentCorpus = Directory.GetFiles(corpusRoot, "*",
+                SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/'))
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.Equal(expectedCorpus.Keys.Order(StringComparer.Ordinal),
+            currentCorpus.Order(StringComparer.Ordinal));
+        foreach (var (path, digest) in expectedCorpus)
+        {
+            Assert.Equal(digest, Convert.ToHexString(SHA256.HashData(
+                File.ReadAllBytes(Path.Join(root,
+                    path.Replace('/', Path.DirectorySeparatorChar)))))
+                .ToLowerInvariant());
+        }
         Assert.Equal("e698fb1df6daf49f393e87fac4f00e3a2ec2c716",
             inventory.RootElement.GetProperty("base_sha").GetString());
         Assert.Equal("apr.action-host.replacement-record.v2",

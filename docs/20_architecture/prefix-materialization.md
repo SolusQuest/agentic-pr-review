@@ -10,7 +10,7 @@
 
 `prefix-materialization` is the canonical logical projection and append-safe provider-prefix contract implementation for the M4 live path. Its shared framing, hash preimages, domain tags, envelope field sets, and identity domains are owned by the [session ledger and prefix contract](session-ledger-and-prefix-contract.md) (`## Prefix Contract`, `## M4 Batch #1 Frozen Vocabulary`); this document records only the workstream surface owned by issue #50 and does not restate the shared algorithms.
 
-Production C# (`AgenticPrReview.Runtime.Prefix`) owns full materialization. Production TypeScript (`src/prefix-contract/`) owns the host-side digest / interaction-id / identity helpers. Full-stream golden vectors under `protocol/fixtures/prefix-contract/v1/` are produced by the test-only TS oracle (`src/prefix-contract/generate-fixtures.testhelper.ts`, run via `scripts/regenerate-prefix-contract-fixtures.mjs`) and verified read-only by the C# test suite.
+Production C# (`AgenticPrReview.Runtime.Prefix`) owns materialization, digests, interaction identities, and identity validation. Full-stream golden vectors under `protocol/fixtures/prefix-contract/v1/` are an immutable, C#-consumed corpus. Their manifest retains the deleted TypeScript generator path only as historical creation provenance; no executable generator or TypeScript prefix implementation remains after R4-W11.
 
 ## C# API surface
 
@@ -30,17 +30,9 @@ The dynamic `review_context` segment is never projected from a caller-fabricated
 
 `PrefixMaterialization` is deeply immutable: stable logical stream, stable provider-block stream, dynamic suffix (both representations), `StableSegmentCount`, stable byte lengths per stream, both prefix hashes, and the five recomputed cache-contract digests. Both prefix hashes cover the stable streams only.
 
-## TypeScript API surface
+## Retired TypeScript surface
 
-Module `src/prefix-contract/`:
-
-- `PrefixResult<T> = { ok: true; value: T } | { ok: false; errors: readonly PrefixError[] }`; `PrefixError = { code, path }`, with `path: ""` when no path applies. No throw crosses the public boundary.
-- `computeTemplateId / computePolicyId / computeToolDefinitionId / computeCacheConfigId / computeAdapterId(envelope): PrefixResult<string>`.
-- `deriveInteractionId(predecessor, consumedInputSha256, currentHeadSha, interactionOrdinal): PrefixResult<string>` with `predecessor = { kind: 'bootstrap' } | { kind: 'ledger'; sha256Hex }`.
-- `validateIdentity(value)`, `validateModelSnapshot(modelId)` (rejects `latest`).
-- Shared identity strings must be non-empty, well-formed UTF-16, free of C0/DEL controls, and at most 256 UTF-8 bytes; both implementations count bytes with an allocation-bounded code-unit scan and reject unpaired surrogates before framing.
-- Envelope validators accept `unknown`, enforce the exact key set on the raw value, then project.
-- The public module exports only the D9 entry points and result/predecessor types; validators, constants, validated snapshots, and domain predicates remain internal.
+R4-W11 removed `src/prefix-contract/` and its regeneration script after mapping language-neutral protections to the retained C# implementation, corpus tests, Ledger known-answer coverage, and E1 continuation proof. JavaScript-only Proxy, descriptor, getter, sparse-array, alias/cycle, and mutable-object TOCTOU mechanics are obsolete because the surviving C# boundary consumes `JsonElement`, not mutable ECMAScript object graphs. The immutable corpus may still contain kebab-case TypeScript diagnostic values as historical metadata; they are not current runtime ownership claims.
 
 ## Segment projection (D3/D5)
 
@@ -106,4 +98,4 @@ Reachability notes (frozen classification):
 
 `protocol/fixtures/prefix-contract/v1/` holds JSON vector files plus a closed-index `manifest.json` (`{schemaVersion, generatedBy{tool,version}, creationCrossCheck{tool,version,checkedAt}, vectors:[{id, kind, file}]}`). Entry `id`/`kind` equal the vector file's own; `file` is a relative safe path; every file is referenced exactly once; append/invalidation references resolve to materialization vectors; cycles and self-references are rejected. Vector kinds: `framing-vector`, `digest-vector`, `interaction-vector`, `materialization-vector`, `append-vector`, `invalidation-vector` (`mode` ∈ `materializer|hash-framing`), `invalid-vector` (target-sensitive expected: `materialize` asserts only `csharpCode`; shared helpers assert both languages; defensive codes use seam targets). `creationCrossCheck.checkedAt` is fixed creation evidence and is never rewritten by generator reruns.
 
-Both consumers validate the complete recursive `materialization-vector.input` schema, compare materializer mutations using structured property/index segments (never dotted strings), and assert the exact D13 boolean row instead of trusting fixture-declared change flags. Hash-framing invalidation vectors are closed to the two named version mutations, require byte-identical base/mutated streams, fix the D13 row to `false,false,true,true`, and are independently consumed in both languages. Framing vectors include the required `["ab", "c"]` versus `["a", "bc"]` identity-concatenation proof.
+The retained C# loader validates the complete recursive `materialization-vector.input` schema, compares materializer mutations using structured property/index segments (never dotted strings), and asserts the exact D13 boolean row instead of trusting fixture-declared change flags. Synthetic malformed-corpus tests exercise its failure branches. Hash-framing invalidation vectors are closed to the two named version mutations, require byte-identical base/mutated streams, and fix the D13 row to `false,false,true,true`. Framing vectors include the required `["ab", "c"]` versus `["a", "bc"]` identity-concatenation proof.

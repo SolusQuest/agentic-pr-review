@@ -362,4 +362,13 @@ export const residualReferenceRules = [
     'legacy vocabulary occurs only in the exact path of the authoritative R1 historical handoff consumed by W3 replacement validation',
     'W13 may replace this inventory and record only after preserving the same historical-reference ownership and framework proof',
   ),
+  permanent(
+    'RR-039',
+    /^runtime\/tests\/AgenticPrReview\.Runtime\.Tests\/Host\/Action\/ActionHostFrameworkVerifierArchitectureTests\.cs$/u,
+    'conformance',
+    'R4 E1 framework verifier architecture tests',
+    'exact W3 and W11 replacement-record assertions',
+    'legacy vocabulary occurs only in the authoritative R1 handoff path retained by the exact W3 reference-set assertion',
+    'W13 may replace this assertion only after preserving the same historical-reference ownership and framework proof',
+  ),
 ] as const satisfies readonly ResidualReferenceRule[];

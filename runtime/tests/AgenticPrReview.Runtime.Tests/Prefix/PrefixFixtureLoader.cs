@@ -25,14 +25,21 @@ internal static class PrefixFixtureLoader
 
     internal sealed record ManifestEntry(string Id, string Kind, string File);
 
-    internal static ImmutableArray<ManifestEntry> LoadManifest()
+    internal static ImmutableArray<ManifestEntry> LoadManifest(string? fixtureRoot = null)
     {
-        var manifestPath = ResolveFixturePath("manifest.json");
+        var rootPath = fixtureRoot ?? FixtureRoot;
+        var manifestPath = ResolveFixturePath(rootPath, "manifest.json");
         using var doc = JsonDocument.Parse(File.ReadAllText(manifestPath));
         var root = doc.RootElement;
         AssertAllowedKeys(root, "schemaVersion", "generatedBy", "creationCrossCheck", "vectors");
         Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
         AssertExactObject(root.GetProperty("generatedBy"), "generatedBy", ("tool", JsonValueKind.String), ("version", JsonValueKind.Number));
+        // These values are immutable creation provenance, not a current
+        // executable TypeScript generator claim.
+        Assert.Equal("src/prefix-contract/generate-fixtures.testhelper.ts",
+            root.GetProperty("generatedBy").GetProperty("tool").GetString());
+        Assert.Equal(1,
+            root.GetProperty("generatedBy").GetProperty("version").GetInt32());
         AssertExactObject(root.GetProperty("creationCrossCheck"), "creationCrossCheck", ("tool", JsonValueKind.String), ("version", JsonValueKind.String), ("checkedAt", JsonValueKind.String));
         Assert.Matches(
             "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
@@ -57,8 +64,8 @@ internal static class PrefixFixtureLoader
         // Full-directory coverage: every file under the root (except manifest.json)
         // is referenced exactly once.
         var onDisk = Directory
-            .GetFiles(FixtureRoot, "*", SearchOption.AllDirectories)
-            .Select(path => Path.GetRelativePath(FixtureRoot, path).Replace('\\', '/'))
+            .GetFiles(rootPath, "*", SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(rootPath, path).Replace('\\', '/'))
             .Where(rel => rel != "manifest.json")
             .ToHashSet(StringComparer.Ordinal);
         Assert.Equal(onDisk, files);
@@ -66,7 +73,7 @@ internal static class PrefixFixtureLoader
         // id/kind equality between manifest entry and vector file content.
         foreach (var entry in entries)
         {
-            var vector = LoadVector(entry.File);
+            var vector = LoadVector(entry.File, rootPath);
             Assert.Equal(JsonValueKind.Object, vector.ValueKind);
             Assert.Equal(entry.Id, vector.GetProperty("id").GetString());
             Assert.Equal(entry.Kind, vector.GetProperty("kind").GetString());
@@ -78,7 +85,7 @@ internal static class PrefixFixtureLoader
         var entriesById = entries.ToDictionary(entry => entry.Id, StringComparer.Ordinal);
         foreach (var entry in entries.Where(e => e.Kind is "append-vector" or "invalidation-vector"))
         {
-            var vector = LoadVector(entry.File);
+            var vector = LoadVector(entry.File, rootPath);
             foreach (var refProperty in new[] { "baseVectorId", "successorVectorId" })
             {
                 if (vector.TryGetProperty(refProperty, out var refElement))
@@ -94,8 +101,8 @@ internal static class PrefixFixtureLoader
             {
                 var baseEntry = entriesById[vector.GetProperty("baseVectorId").GetString()!];
                 var successorEntry = entriesById[vector.GetProperty("successorVectorId").GetString()!];
-                var baseInput = LoadVector(baseEntry.File).GetProperty("input");
-                var successorInput = LoadVector(successorEntry.File).GetProperty("input");
+                var baseInput = LoadVector(baseEntry.File, rootPath).GetProperty("input");
+                var successorInput = LoadVector(successorEntry.File, rootPath).GetProperty("input");
                 var diffs = JsonDiffPaths(baseInput, successorInput);
                 AssertMutationDiffs(entry.Id, vector.GetProperty("mutation").GetString()!, diffs);
             }
@@ -107,15 +114,15 @@ internal static class PrefixFixtureLoader
     internal static IEnumerable<ManifestEntry> OfKind(string kind) =>
         LoadManifest().Where(entry => entry.Kind == kind);
 
-    internal static JsonElement LoadVector(string relative)
+    internal static JsonElement LoadVector(string relative, string? fixtureRoot = null)
     {
-        var text = File.ReadAllText(ResolveFixturePath(relative));
+        var text = File.ReadAllText(ResolveFixturePath(fixtureRoot ?? FixtureRoot, relative));
         return JsonDocument.Parse(text).RootElement.Clone();
     }
 
-    private static string ResolveFixturePath(string relativePath)
+    private static string ResolveFixturePath(string fixtureRoot, string relativePath)
     {
-        var normalizedRoot = Path.GetFullPath(FixtureRoot)
+        var normalizedRoot = Path.GetFullPath(fixtureRoot)
             .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var resolved = Path.GetFullPath(relativePath, normalizedRoot);
         var rootBoundary = normalizedRoot + Path.DirectorySeparatorChar;
@@ -221,7 +228,8 @@ internal static class PrefixFixtureLoader
                 {
                     case "identity":
                     case "model-snapshot":
-                        Assert.True(hasTs && !hasCsharp, $"{entry.Id}: TS-only targets must carry only typescriptCode");
+                        Assert.True(hasTs && !hasCsharp,
+                            $"{entry.Id}: historical TypeScript diagnostic provenance must carry only typescriptCode");
                         break;
                     case "materialize":
                     case "length-guard":

@@ -13,8 +13,9 @@ using Xunit.Sdk;
 namespace AgenticPrReview.Runtime.Tests.Prefix;
 
 /// <summary>
-/// Golden-vector conformance: the C# production implementation reproduces
-/// every committed TS-oracle vector (issue #50, D12).
+/// Golden-vector conformance: the C# production implementation consumes the
+/// retained language-neutral corpus. TypeScript diagnostic values in the
+/// immutable corpus are historical creation provenance (issue #50, D12).
 /// </summary>
 public sealed class PrefixGoldenVectorTests
 {
@@ -343,9 +344,21 @@ public sealed class PrefixGoldenVectorTests
             var input = vector.GetProperty("input");
             var expected = vector.GetProperty("expected");
 
-            // TS-only targets are exercised by the TypeScript suite.
-            if (target is "identity" or "model-snapshot")
+            if (target == "identity")
             {
+                Assert.Equal("prefix-identity-invalid",
+                    expected.GetProperty("typescriptCode").GetString());
+                Assert.False(PrefixIdentityValidation.IsValidIdentity(
+                    input.GetProperty("value").GetString()));
+                continue;
+            }
+
+            if (target == "model-snapshot")
+            {
+                Assert.Equal("prefix-model-alias-literal",
+                    expected.GetProperty("typescriptCode").GetString());
+                Assert.True(PrefixIdentityValidation.IsModelAliasLiteral(
+                    input.GetProperty("value").GetString()));
                 continue;
             }
 
