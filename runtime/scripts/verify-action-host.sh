@@ -14,8 +14,24 @@ fi
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/apr-action-host-framework.XXXXXXXX")"
 cleanup() {
+  local exit_code=$?
+  trap - EXIT
+  if [[ "$exit_code" -ne 0 && -n "${evidence_root:-}" && -d "$evidence_root" ]]; then
+    local failed_case_found=false
+    while IFS= read -r result_path; do
+      if [[ "$(tr -d '\r\n' < "$result_path")" == "fail" ]]; then
+        local relative_result="${result_path#"$evidence_root"/}"
+        echo "APR_ACTION_HOST_FRAMEWORK_FAILED_CASE ${relative_result%/case-result.txt}" >&2
+        failed_case_found=true
+      fi
+    done < <(find "$evidence_root" -type f -name case-result.txt -print | sort)
+    if [[ "$failed_case_found" == false ]]; then
+      echo "APR_ACTION_HOST_FRAMEWORK_SUPERVISOR_FAILED" >&2
+    fi
+  fi
   chmod -R u+rwX "$temporary_root" 2>/dev/null || true
   rm -rf -- "$temporary_root"
+  exit "$exit_code"
 }
 trap cleanup EXIT
 

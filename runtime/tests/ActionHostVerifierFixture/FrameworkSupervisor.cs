@@ -1145,6 +1145,12 @@ internal static class FrameworkSupervisor
             {
                 return false;
             }
+
+            if (entry.GetProperty("leaf_id").GetString() == "W11" &&
+                !ValidateW11Ownership(entry, repository, inventoryPath))
+            {
+                return false;
+            }
         }
 
         return entries.Length == expectedLeaves.Length &&
@@ -1285,6 +1291,135 @@ internal static class FrameworkSupervisor
         ]);
     }
 
+    private static bool ValidateW11Ownership(
+        JsonElement entry,
+        string repository,
+        string inventoryPath)
+    {
+        if (entry.GetProperty("disposition").GetString() != "removed" ||
+            !RequiredTextArray(entry, "removed_paths", value =>
+                IsClosedPath(value) && !LandingPathExists(repository, value)) ||
+            !RequiredTextArray(entry, "retained_evidence_paths", value =>
+                IsClosedPath(value) && LandingPathExists(repository, value)) ||
+            !RequiredTextArray(entry, "historical_provenance_paths", value =>
+                IsClosedPath(value) && LandingPathExists(repository, value)) ||
+            !RequiredTextArray(entry, "retained_assertion_groups") ||
+            !RequiredTextArray(entry, "superseded_assertion_groups") ||
+            !RequiredTextArray(entry, "manifest_test_dispositions") ||
+            !RequiredTextArray(entry, "digest_test_dispositions") ||
+            !RequiredTextArray(entry, "later_leaf_assertion_owners"))
+        {
+            return false;
+        }
+
+        var removed = TextArray(entry, "removed_paths")
+            .ToHashSet(StringComparer.Ordinal);
+        var retainedEvidence = TextArray(entry, "retained_evidence_paths")
+            .ToHashSet(StringComparer.Ordinal);
+        var provenance = TextArray(entry, "historical_provenance_paths")
+            .ToHashSet(StringComparer.Ordinal);
+        var retainedAssertions = TextArray(entry, "retained_assertion_groups")
+            .ToHashSet(StringComparer.Ordinal);
+        var supersededAssertions = TextArray(entry, "superseded_assertion_groups")
+            .ToHashSet(StringComparer.Ordinal);
+        var digestDispositions = TextArray(entry, "digest_test_dispositions")
+            .ToHashSet(StringComparer.Ordinal);
+        var laterOwners = TextArray(entry, "later_leaf_assertion_owners")
+            .ToHashSet(StringComparer.Ordinal);
+        var manifestNames = TextArray(entry, "manifest_test_dispositions")
+            .Select(value => value.Split(':', 2)[0])
+            .ToHashSet(StringComparer.Ordinal);
+
+        if (!removed.SetEquals(
+            [
+                "src/prefix-contract/",
+                "scripts/regenerate-prefix-contract-fixtures.mjs",
+            ]) ||
+            !retainedEvidence.SetEquals(
+            [
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixFixtureLoader.cs",
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixGoldenVectorTests.cs",
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixFixtureManifestRejectionTests.cs",
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Ledger/LedgerBuilderTests.cs",
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+                "docs/20_architecture/r4-actionhost-wrapper-plan.md",
+            ]) ||
+            !provenance.SetEquals(
+            [
+                "protocol/fixtures/prefix-contract/v1/manifest.json",
+                "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json",
+            ]) ||
+            !retainedAssertions.SetEquals(
+            [
+                "framing identities digests materialization append invalidation bounds diagnostics and continuation",
+                "closed corpus manifest vector shapes references and mutation semantics",
+                "immutable historical TypeScript diagnostic provenance",
+                "seven-field Ledger cache-contract digest known answer",
+            ]) ||
+            !supersededAssertions.SetEquals(
+            [
+                "TypeScript barrel exports import restrictions and generator execution",
+                "review-subject digest with no current C# producer or consumer",
+                "JavaScript Proxy descriptor getter sparse-array alias cycle and mutable-object TOCTOU mechanics",
+            ]) ||
+            !digestDispositions.SetEquals(
+            [
+                "uses the review-subject domain tag and one NUL separator: obsolete M4 TypeScript behavior with no current producer or consumer",
+                "uses the exact untagged seven-field cache-contract object: retained C# Ledger known-answer test",
+            ]) ||
+            !laterOwners.SetEquals(
+            [
+                "W14: RFC 8785 canonical JSON production and retirement evidence",
+            ]) ||
+            !manifestNames.SetEquals(
+            [
+                "real corpus satisfies every manifest rule",
+                "rejects duplicate ids",
+                "rejects duplicate file references",
+                "rejects missing listed files",
+                "rejects unlisted files on disk",
+                "rejects unsafe paths",
+                "rejects id/kind mismatch with vector content",
+                "rejects bad references",
+                "rejects wrong-kind references",
+                "rejects unknown vector fields",
+                "rejects missing per-kind required fields",
+                "returns stable violations for malformed top-level manifest containers",
+                "returns a stable violation for malformed manifest entries",
+                "rejects unknown invalidation mode",
+                "rejects canonical vectors missing typescriptCode",
+                "rejects invalid expected union on invalid-vectors",
+                "rejects wrong recursive value types in framing and append unions",
+                "rejects malformed nested materialization fields and invalid diagnostics",
+                "requires envelope mutations and their matching digest updates together",
+                "keeps dotted property names distinct from nested mutation paths",
+                "locks the declared invalidation matrix instead of trusting fixture booleans",
+                "closes hash-framing mutation stream and boolean semantics",
+                "rejects non-object vector files with a stable rule id",
+            ]))
+        {
+            return false;
+        }
+
+        const string corpusPrefix = "protocol/fixtures/prefix-contract/";
+        var expected = InventoryDigests(inventoryPath)
+            .Where(pair => pair.Key.StartsWith(corpusPrefix,
+                StringComparison.Ordinal))
+            .ToDictionary(pair => pair.Key, pair => pair.Value,
+                StringComparer.Ordinal);
+        var corpusRoot = Path.Join(repository,
+            corpusPrefix.TrimEnd('/').Replace('/', Path.DirectorySeparatorChar));
+        var actual = Directory.EnumerateFiles(corpusRoot, "*",
+                SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(repository, path)
+                .Replace('\\', '/'))
+            .ToHashSet(StringComparer.Ordinal);
+        return expected.Count > 0 && actual.SetEquals(expected.Keys) &&
+            expected.All(pair => Sha256(Path.Join(repository,
+                    pair.Key.Replace('/', Path.DirectorySeparatorChar))) ==
+                pair.Value);
+    }
+
     private static bool MemberExists(string repository, string member)
     {
         var parts = member.Split('#', 2);
@@ -1310,6 +1445,16 @@ internal static class FrameworkSupervisor
         return document.RootElement.GetProperty("files").EnumerateArray()
             .Select(entry => entry.GetProperty("path").GetString() ?? "")
             .ToHashSet(StringComparer.Ordinal);
+    }
+
+    private static Dictionary<string, string> InventoryDigests(string path)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+        return document.RootElement.GetProperty("files").EnumerateArray()
+            .ToDictionary(
+                entry => entry.GetProperty("path").GetString() ?? "",
+                entry => entry.GetProperty("sha256").GetString() ?? "",
+                StringComparer.Ordinal);
     }
 
     private static bool InventoryCovers(

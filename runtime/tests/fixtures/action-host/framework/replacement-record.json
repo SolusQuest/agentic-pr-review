@@ -44,7 +44,6 @@
       ],
       "referenced_tests_and_docs": [
         ".github/workflows/ci.yml",
-        "src/prefix-contract/import-boundary.test.ts",
         "src/state-v2/import-boundary.test.ts",
         "src/residual-reference-allowlist.ts",
         "docs/20_architecture/agent-runtime-rebaseline.md",
@@ -252,6 +251,63 @@
         "runtime/src/AgenticPrReview.Runtime/Prefix/"
       ],
       "classification": "remove_typescript_and_retain_byte_identical_corpus",
+      "disposition": "removed",
+      "removed_paths": ["src/prefix-contract/", "scripts/regenerate-prefix-contract-fixtures.mjs"],
+      "retained_evidence_paths": [
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixFixtureLoader.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixGoldenVectorTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Prefix/PrefixFixtureManifestRejectionTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Ledger/LedgerBuilderTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+        "docs/20_architecture/r4-actionhost-wrapper-plan.md"
+      ],
+      "historical_provenance_paths": [
+        "protocol/fixtures/prefix-contract/v1/manifest.json",
+        "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json"
+      ],
+      "retained_assertion_groups": [
+        "framing identities digests materialization append invalidation bounds diagnostics and continuation",
+        "closed corpus manifest vector shapes references and mutation semantics",
+        "immutable historical TypeScript diagnostic provenance",
+        "seven-field Ledger cache-contract digest known answer"
+      ],
+      "superseded_assertion_groups": [
+        "TypeScript barrel exports import restrictions and generator execution",
+        "review-subject digest with no current C# producer or consumer",
+        "JavaScript Proxy descriptor getter sparse-array alias cycle and mutable-object TOCTOU mechanics"
+      ],
+      "manifest_test_dispositions": [
+        "real corpus satisfies every manifest rule: retained by ManifestIsWellFormed and E1 immutable hashes",
+        "rejects duplicate ids: retained C# synthetic rejection",
+        "rejects duplicate file references: retained C# synthetic rejection",
+        "rejects missing listed files: retained C# synthetic rejection",
+        "rejects unlisted files on disk: retained C# synthetic rejection",
+        "rejects unsafe paths: retained C# synthetic rejection",
+        "rejects id/kind mismatch with vector content: retained C# synthetic rejection",
+        "rejects bad references: retained C# synthetic rejection",
+        "rejects wrong-kind references: retained C# synthetic rejection",
+        "rejects unknown vector fields: retained C# synthetic rejection",
+        "rejects missing per-kind required fields: retained C# synthetic rejection",
+        "returns stable violations for malformed top-level manifest containers: retained fail-closed C# rejection",
+        "returns a stable violation for malformed manifest entries: retained fail-closed C# rejection",
+        "rejects unknown invalidation mode: retained C# synthetic rejection",
+        "rejects canonical vectors missing typescriptCode: retained historical-provenance rejection",
+        "rejects invalid expected union on invalid-vectors: retained C# synthetic rejection",
+        "rejects wrong recursive value types in framing and append unions: retained C# synthetic rejection",
+        "rejects malformed nested materialization fields and invalid diagnostics: retained C# synthetic rejection",
+        "requires envelope mutations and their matching digest updates together: retained C# synthetic rejection",
+        "keeps dotted property names distinct from nested mutation paths: retained C# synthetic rejection",
+        "locks the declared invalidation matrix instead of trusting fixture booleans: retained C# tamper test",
+        "closes hash-framing mutation stream and boolean semantics: retained C# tamper test",
+        "rejects non-object vector files with a stable rule id: retained fail-closed C# rejection"
+      ],
+      "digest_test_dispositions": [
+        "uses the review-subject domain tag and one NUL separator: obsolete M4 TypeScript behavior with no current producer or consumer",
+        "uses the exact untagged seven-field cache-contract object: retained C# Ledger known-answer test"
+      ],
+      "later_leaf_assertion_owners": [
+        "W14: RFC 8785 canonical JSON production and retirement evidence"
+      ],
       "protective_behaviors": [
         "canonical framing and identities",
         "alias cycle bounds and TOCTOU snapshot",
