@@ -99,38 +99,3 @@ export {
   type HeadRelationship,
   type IncompatibilityCode,
 } from './compatibility.js';
-
-export {
-  buildSemanticEnvelope,
-  computeMetadataSemanticSha256,
-  deriveAggregate,
-  identityAgrees,
-  MAX_METADATA_ERRORS,
-  METADATA_ERROR_CODES,
-  parseProviderRunMetadata,
-} from '../provider-metadata/index.js';
-
-export type {
-  AggregateCapability,
-  Attempt,
-  CacheStatus,
-  DeriveAggregateInput,
-  DeriveAggregateResult,
-  DerivedProviderRunMetadataAggregate,
-  HostMetadataIdentity,
-  MetadataError,
-  MetadataErrorCode,
-  NormalizedUsage,
-  ParseProviderRunMetadataResult,
-  ProviderErrorCode,
-  ProviderRunMetadataV1,
-  ObservedCapability,
-  RequestUsage,
-  RetryObservations,
-  SemanticEnvelope,
-  StatelessProof,
-  TelemetryCompleteness,
-  UsageCompleteness,
-  ValidatedAttempt,
-  ValidatedProviderRunMetadataV1,
-} from '../provider-metadata/types.js';

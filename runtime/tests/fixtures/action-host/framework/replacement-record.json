@@ -332,6 +332,33 @@
       ],
       "retained_paths": ["runtime/src/AgenticPrReview.Runtime/Execution/DeepSeek/"],
       "classification": "remove_after_no_consumer_gate",
+      "disposition": "removed",
+      "removed_paths": [
+        "src/provider-metadata/",
+        "protocol/schemas/provider-run-metadata.v1.json",
+        "protocol/fixtures/provider-run-metadata/"
+      ],
+      "removed_csharp_members": [
+        "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs#SchemaKind.ProviderRunMetadata",
+        "runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj#AgenticPrReview.Protocol.provider-run-metadata.v1.json"
+      ],
+      "retained_evidence_paths": [
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekRequestWriterTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekTransportTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekResponseParserTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekChatBackendTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs"
+      ],
+      "retained_owner_groups": [
+        "request identity privacy bounds ordering and cancellation",
+        "response identity usage cache observations and malformed failures",
+        "continuation SESSION restoration and provider-private failures",
+        "W5/W6 opaque sidecar bytes descriptors hashes and fixtures remain under their current owners"
+      ],
+      "obsolete_groups": [
+        "raw JSON schema semantic aggregate telemetry and hash sidecar representation",
+        "provider metadata fixture manifest corpus and TypeScript diagnostics"
+      ],
       "protective_behaviors": [
         "strict provider metadata parsing and bounds",
         "attempt ordering usage and capability evidence",
