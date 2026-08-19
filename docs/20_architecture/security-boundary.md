@@ -403,7 +403,7 @@ Existing legacy raw-debug behavior does not automatically migrate to the new run
 
 ## Current Implementation Compatibility
 
-The current TypeScript host, deterministic C# bridge, `StateManifestV2`, `ProviderSessionLedgerV1`, provider metadata, state-acceptance, and prefix contracts retain their documented safeguards while they remain in the codebase.
+The current TypeScript host, deterministic C# bridge, `StateManifestV2`, `ProviderSessionLedgerV1`, provider metadata, and prefix contracts retain their documented safeguards while they remain in the codebase. The retired state-acceptance Git-ref route is historical evidence only and cannot be selected as current state.
 
 Migration work may simplify or replace their shape, but it must not remove:
 

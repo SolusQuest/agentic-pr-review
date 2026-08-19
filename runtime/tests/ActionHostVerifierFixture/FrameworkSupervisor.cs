@@ -1146,6 +1146,12 @@ internal static class FrameworkSupervisor
                 return false;
             }
 
+            if (entry.GetProperty("leaf_id").GetString() == "W6" &&
+                !ValidateW6Ownership(entry, repository))
+            {
+                return false;
+            }
+
             if (entry.GetProperty("leaf_id").GetString() == "W11" &&
                 !ValidateW11Ownership(entry, repository, inventoryPath))
             {
@@ -1436,6 +1442,84 @@ internal static class FrameworkSupervisor
             IsClosedPath(value) && LandingPathExists(repository, value)) &&
         RequiredTextArray(entry, "retained_owner_groups") &&
         RequiredTextArray(entry, "obsolete_groups");
+
+    private static bool ValidateW6Ownership(JsonElement entry, string repository) =>
+        entry.GetProperty("disposition").GetString() == "removed" &&
+        RequiredTextArray(entry, "removed_paths", value =>
+            IsClosedPath(value) && !LandingPathExists(repository, value)) &&
+        RequiredTextArray(entry, "owner_members", member =>
+            MemberExists(repository, member)) &&
+        RequiredTextArray(entry, "retained_evidence_paths", value =>
+            IsClosedPath(value) && LandingPathExists(repository, value)) &&
+        RequiredTextArray(entry, "retained_owner_groups") &&
+        RequiredTextArray(entry, "obsolete_groups") &&
+        ValidateW6LegacyManifest(entry, repository) &&
+        !Directory.Exists(Path.Join(repository, "src", "state-acceptance")) &&
+        !File.Exists(Path.Join(repository, "protocol", "schemas",
+            "candidate-registration.v1.json")) &&
+        !File.Exists(Path.Join(repository, "protocol", "schemas",
+            "accepted-state-marker.v1.json")) &&
+        !File.Exists(Path.Join(repository, "protocol", "schemas",
+            "state-selector.v1.json")) &&
+        !File.Exists(Path.Join(repository, "protocol", "schemas",
+            "state-publication-receipt.v1.json"));
+
+    private static bool ValidateW6LegacyManifest(JsonElement entry,
+        string repository)
+    {
+        var manifest = entry.GetProperty("legacy_test_manifest")
+            .EnumerateArray().ToArray();
+        var expected = new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            ["github-git-data.test.ts"] = 3,
+            ["github-state-paths.test.ts"] = 1,
+            ["contract.test.ts"] = 28,
+            ["github-state-store.test.ts"] = 13,
+            ["schema.test.ts"] = 2,
+            ["lock-child.mjs"] = 1,
+            ["store-child.mjs"] = 1,
+        };
+        var actual = manifest.ToDictionary(value =>
+            value.GetProperty("file").GetString() ?? "", value => value,
+            StringComparer.Ordinal);
+        if (!actual.Keys.ToHashSet(StringComparer.Ordinal)
+                .SetEquals(expected.Keys) ||
+            manifest.Length != expected.Count ||
+            manifest.Where(value => value.GetProperty("file").GetString()!
+                    .EndsWith(".test.ts", StringComparison.Ordinal))
+                .Sum(value => value.GetProperty("case_count").GetInt32()) != 47)
+        {
+            return false;
+        }
+
+        foreach (var (file, count) in expected)
+        {
+            var value = actual[file];
+            if (value.GetProperty("case_count").GetInt32() != count ||
+                !IsClosedPath("src/state-acceptance/" + file) ||
+                value.GetProperty("disposition").GetString() is not (
+                    "retained" or "reviewed_obsolete"))
+            {
+                return false;
+            }
+
+            var retained = value.GetProperty("disposition").GetString() ==
+                "retained";
+            if (retained != value.TryGetProperty("evidence_path", out var path) ||
+                retained && (!IsClosedPath(path.GetString() ?? "") ||
+                    !LandingPathExists(repository, path.GetString() ?? "")) ||
+                !retained && (!value.TryGetProperty("reason", out var reason) ||
+                    string.IsNullOrWhiteSpace(reason.GetString())))
+            {
+                return false;
+            }
+        }
+
+        return actual["contract.test.ts"].GetProperty("parameterized_cases")
+            .EnumerateArray().Select(value => value.GetString())
+            .ToHashSet(StringComparer.Ordinal).SetEquals(
+                ["legacy-v1", "unknown-version"]);
+    }
 
     private static bool MemberExists(string repository, string member)
     {

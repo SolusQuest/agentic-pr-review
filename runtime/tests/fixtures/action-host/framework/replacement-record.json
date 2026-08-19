@@ -146,19 +146,142 @@
         "protocol/schemas/state-publication-receipt.v1.json"
       ],
       "retained_paths": [
+        "runtime/src/AgenticPrReview.Runtime/Host/State/OpaqueStore/",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/GitHubArtifacts/",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Locator/",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Lineage/",
         "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/",
-        "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/"
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/",
+        "runtime/src/AgenticPrReview.Runtime/Host/Action/"
       ],
-      "classification": "remove_after_state_transaction_gate",
+      "classification": "removed_after_encrypted_state_transaction_gate",
+      "disposition": "removed",
+      "removed_paths": [
+        "src/state-acceptance/",
+        "protocol/schemas/candidate-registration.v1.json",
+        "protocol/schemas/accepted-state-marker.v1.json",
+        "protocol/schemas/state-selector.v1.json",
+        "protocol/schemas/state-publication-receipt.v1.json"
+      ],
       "protective_behaviors": [
         "candidate and acceptance concurrency",
         "scope and ancestry validation",
         "mutation outcome reconciliation"
       ],
-      "csharp_owners": ["AuthorizedAcceptedStateComposer", "RetainedStatePersistence"],
-      "framework_scenario_ids": ["dispatch-continuation", "crash-recovery", "stale-head"],
-      "deletion_prerequisites": ["S6 merged", "P6 merged", "E1 recovery pair green"],
-      "deletion_gate": "No Git-ref, cache, plaintext, compatibility, or dual state writer remains."
+      "csharp_owners": [
+        "OpaqueStoreValidation",
+        "GitHubArtifactRestrictedStateStore",
+        "LocatorRootService",
+        "LineageService",
+        "AuthorizedAcceptedStateComposer",
+        "RetainedStateTransactionAuthority",
+        "StickyCommentPublisher",
+        "PublicationRecoveryService",
+        "ActionHostCoordinator"
+      ],
+      "owner_members": [
+        "runtime/src/AgenticPrReview.Runtime/Host/State/OpaqueStore/RestrictedStateOpaqueStoreContracts.cs#OpaqueStoreValidation",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/GitHubArtifacts/GitHubArtifactRestrictedStateStore.cs#GitHubArtifactRestrictedStateStore",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Locator/LocatorRootService.cs#LocatorRootService",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Lineage/LineageService.cs#LineageService",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AuthorizedAcceptedStateComposer.cs#AuthorizedAcceptedStateComposer",
+        "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/RetainedStateTransactionAuthority.cs#RetainedStateTransactionAuthority",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#StickyCommentPublisher",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#StickyPublicationReceipt",
+        "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/PublicationRecoveryService.cs#PublicationRecoveryService",
+        "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs#ActionHostCoordinator"
+      ],
+      "retained_evidence_paths": [
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/GitHubArtifacts/GitHubArtifactBridgeConformanceTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Locator/LocatorCodecAndSelectionTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Lineage/LineageConcurrencyTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyCommentPublisherTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyPublicationContractsTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Recovery/PublicationRecoveryServiceTests.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCoordinatorTests.cs"
+      ],
+      "framework_scenario_ids": [
+        "dispatch-continuation",
+        "dispatch-cross-head-conflict",
+        "stale-head",
+        "artifact-upload-outcome-unknown",
+        "artifact-delete-outcome-unknown",
+        "crash-mutation",
+        "crash-recovery",
+        "cancel-known-commit",
+        "cancel-outcome-unknown",
+        "delete-exact"
+      ],
+      "deletion_prerequisites": [
+        "S6 / #156 merged",
+        "P6 / #162 merged",
+        "W7 / #169 merged",
+        "E1 / #178 framework evidence green"
+      ],
+      "retained_owner_groups": [
+        "encrypted immutable artifact and complete enumeration",
+        "locator lineage and stale-authority admission",
+        "accepted-state candidate reconciliation and cleanup",
+        "sticky mutation/readback receipt identity",
+        "publication recovery and P6 ordering"
+      ],
+      "obsolete_groups": [
+        "Unix socket lock naming and retry",
+        "Git ref CAS tree blob and plaintext namespace",
+        "registration counter contiguous sequence and child harness",
+        "selector-before-sticky acceptance order"
+      ],
+      "legacy_test_manifest": [
+        {
+          "file": "github-git-data.test.ts",
+          "case_count": 3,
+          "disposition": "reviewed_obsolete",
+          "reason": "Git tree/blob/ref transport is retired rather than reproduced."
+        },
+        {
+          "file": "github-state-paths.test.ts",
+          "case_count": 1,
+          "disposition": "reviewed_obsolete",
+          "reason": "The frozen M4 Git path grammar is no longer a state route."
+        },
+        {
+          "file": "contract.test.ts",
+          "case_count": 28,
+          "parameterized_cases": ["legacy-v1", "unknown-version"],
+          "disposition": "retained",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Transactions/RetainedStateTransactionEndToEndTests.cs"
+        },
+        {
+          "file": "github-state-store.test.ts",
+          "case_count": 13,
+          "disposition": "retained",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/GitHubArtifacts/GitHubArtifactBridgeConformanceTests.cs"
+        },
+        {
+          "file": "schema.test.ts",
+          "case_count": 2,
+          "disposition": "retained",
+          "evidence_path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/RestrictedStateStoreConformanceTests.cs"
+        },
+        {
+          "file": "lock-child.mjs",
+          "case_count": 1,
+          "disposition": "reviewed_obsolete",
+          "reason": "The Unix-socket lock harness belongs only to the retired local reference store."
+        },
+        {
+          "file": "store-child.mjs",
+          "case_count": 1,
+          "disposition": "reviewed_obsolete",
+          "reason": "The local reference-store child harness belongs only to the retired route."
+        }
+      ],
+      "deletion_gate": "No callable Git-ref, cache, plaintext, compatibility, or dual state writer remains."
     },
     {
       "leaf_id": "W7",
@@ -353,7 +476,7 @@
         "request identity privacy bounds ordering and cancellation",
         "response identity usage cache observations and malformed failures",
         "continuation SESSION restoration and provider-private failures",
-        "W5/W6 opaque sidecar bytes descriptors hashes and fixtures remain under their current owners"
+        "W5 opaque sidecar bytes descriptors hashes and fixtures remain under its current owner"
       ],
       "obsolete_groups": [
         "raw JSON schema semantic aggregate telemetry and hash sidecar representation",

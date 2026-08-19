@@ -1,12 +1,16 @@
-# M4 stateful review action
+# M4 stateful review action (historical)
 
+> **Retirement note (R4-W6):** The Git-data state route, including
+> `agentic-pr-review-m4-state-v1`, is retired. The detailed state/ref mechanics
+> below are historical evidence, not a current state, selector, or receipt route.
+>
 > **Rebaseline note (2026-07-24):** This document records the completed M4
 > implementation baseline. It is useful migration evidence, but its current
 > TypeScript orchestration and one-shot provider runtime are not the selected
 > end state. The replacement sequence and ownership boundaries are defined in
 > [Agent Runtime Architecture Rebaseline](./agent-runtime-rebaseline.md).
-> The public Git-data state ref remains suitable only for the current sanitized
-> M4 records. It must not carry plaintext Agent reasoning, repository tool
+> The former public Git-data state ref was suitable only for sanitized M4
+> records. It must not carry plaintext Agent reasoning, repository tool
 > results, or provider continuation artifacts under the target architecture.
 > R1 issue #79 retired the checked-in Action and M4 workflow entrypoints; all
 > invocation and workflow details below describe the pre-removal M4 baseline.
@@ -25,7 +29,7 @@ Both controlled workflows require `contents: write`, `pull-requests: write`, and
 
 ## Durable state and acceptance
 
-The Git-data state ref is `agentic-pr-review-m4-state-v1`. It is a public, durable M4 record: every candidate, registration, marker, probe, and publication receipt committed to it is retained for the M4 lifetime. Do not pass secrets, provider request payloads, tokens, URLs, or unreviewed private content to this path.
+The former Git-data state ref was `agentic-pr-review-m4-state-v1`. It was a public, durable M4 record: every candidate, registration, marker, probe, and publication receipt committed to it was retained for the M4 lifetime. Do not pass secrets, provider request payloads, tokens, URLs, or unreviewed private content to any current state route.
 
 Initialization writes and rereads a sentinel through the same retry budget as selector updates. A pre-existing partial M4 namespace is rejected rather than silently repaired. Recursive Git trees are accepted only for explicit tree entries; blobs are validated by their exact M4 path and registrations cannot hide transport failures as malformed optional data. Candidate upload is successful only after an exact readback of all three candidate files.
 

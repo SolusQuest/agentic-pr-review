@@ -114,17 +114,6 @@ export const residualReferenceRules = [
     'an accepted replacement must preserve the same S2 negative and transport evidence',
   ),
   {
-    id: 'RR-011',
-    term: stateOrMarkerLegacy,
-    path: /^src\/state-acceptance\/(?:store|github-state-store|contract\.test)\.ts$/u,
-    lifecycleClass: 'state-migration',
-    currentConsumer: 'selection-level unsupported-v1 rejection and recovery evidence',
-    owner: 'R4 state bridge',
-    interpretation: 'legacy state is rejected and never replayed',
-    deletionGate: 'replace StateManifestV2 acceptance in R4',
-    milestone: 'R4',
-  },
-  {
     id: 'RR-012',
     term: stateOrMarkerLegacy,
     path: /^src\/state-v2\/(?:index|diagnostics|classifier|schema|serializer|public-surface\.test|builder-string-safety\.test|core\.test|import-boundary\.test|aggregation\.test|short-circuit-and-exhaustive\.test)\.ts$/u,
@@ -370,5 +359,14 @@ export const residualReferenceRules = [
     'exact W3 and W11 replacement-record assertions',
     'legacy vocabulary occurs only in the authoritative R1 handoff path retained by the exact W3 reference-set assertion',
     'W13 may replace this assertion only after preserving the same historical-reference ownership and framework proof',
+  ),
+  permanent(
+    'RR-040',
+    /^runtime\/tests\/ActionHostVerifierFixture\/FrameworkSupervisor\.cs$/u,
+    'conformance',
+    'R4 E1 framework verifier',
+    'W6 exact deleted-route and replacement-evidence assertions',
+    'legacy vocabulary occurs only in negative deletion checks and the closed W6 historical-test manifest',
+    'W13 may replace this assertion only after preserving the same W6 absence proof and mapped replacement evidence',
   ),
 ] as const satisfies readonly ResidualReferenceRule[];

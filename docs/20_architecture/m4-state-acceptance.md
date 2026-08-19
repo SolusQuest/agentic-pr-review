@@ -1,7 +1,9 @@
-# M4 v2 state acceptance
+# M4 v2 state acceptance (historical)
 
-> **Rebaseline note (2026-07-24):** These checks define the safety baseline of
-> the current M4 state implementation. The target architecture may simplify the
+> **Retirement note (R4-W6):** The Git-ref state-acceptance route was removed after
+> its replacement evidence passed. This document preserves the former M4 safety
+> semantics as historical evidence; it is not a current callable contract. The
+> target architecture may simplify the
 > stored shapes and move ownership into the .NET Host and Agent modules,
 > but it must retain equivalent acceptance coverage for integrity, identity,
 > lineage, bounds, race handling, and recovery. See
@@ -10,7 +12,7 @@
 > restricted Agent continuation content as plaintext in the M4 Git-data
 > namespace or another repository-visible ref.
 
-This document is the implementation handoff for issue #67 and the contract consumed by issue #53. The TypeScript surface is isolated under `src/state-acceptance/`; the default action path does not import it.
+This document is the historical implementation handoff for issue #67 and the former contract consumed by issue #53. The TypeScript surface was isolated under `src/state-acceptance/`; the default action path did not import it.
 
 ## Durable records
 
