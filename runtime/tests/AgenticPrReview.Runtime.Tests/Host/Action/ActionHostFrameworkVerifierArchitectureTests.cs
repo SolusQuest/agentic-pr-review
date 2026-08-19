@@ -143,16 +143,56 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyPublicationContractsTests.cs",
             w6.GetProperty("retained_evidence_paths").EnumerateArray()
                 .Select(value => value.GetString()));
-        var w6Manifest = w6.GetProperty("legacy_test_manifest")
+        var w6Cases = w6.GetProperty("legacy_test_cases")
             .EnumerateArray().ToArray();
-        Assert.Equal(7, w6Manifest.Length);
-        Assert.Equal(47, w6Manifest.Where(value => value.GetProperty("file")
-                .GetString()!.EndsWith(".test.ts", StringComparison.Ordinal))
-            .Sum(value => value.GetProperty("case_count").GetInt32()));
-        Assert.Equal(new[] { "legacy-v1", "unknown-version" },
-            w6Manifest.Single(value => value.GetProperty("file").GetString() ==
-                "contract.test.ts").GetProperty("parameterized_cases")
-                .EnumerateArray().Select(value => value.GetString()).ToArray());
+        var w6CaseIds = w6Cases.Select(value => value.GetProperty("id")
+            .GetString()).ToArray();
+        Assert.Equal(47, w6CaseIds.Length);
+        Assert.Equal(47, w6CaseIds.Distinct(StringComparer.Ordinal).Count());
+        Assert.Contains("contract.test.ts::contract-version-legacy-v1", w6CaseIds);
+        Assert.Contains("contract.test.ts::contract-version-unknown-version", w6CaseIds);
+        Assert.Contains("contract.test.ts::kernel-lock", w6CaseIds);
+        Assert.Contains("github-state-store.test.ts::counter-transaction", w6CaseIds);
+        Assert.All(w6Cases, value =>
+        {
+            var retained = value.GetProperty("disposition").GetString() == "retained";
+            Assert.True(retained || value.GetProperty("disposition").GetString() ==
+                "reviewed_obsolete");
+            Assert.Equal(retained, value.TryGetProperty("evidence_path", out _));
+            Assert.Equal(retained, value.TryGetProperty("owner", out _));
+            Assert.Equal(!retained, value.TryGetProperty("reason", out _));
+        });
+        var w6Helpers = w6.GetProperty("legacy_helper_cases")
+            .EnumerateArray().ToArray();
+        Assert.Equal(new[] { "lock-child.mjs::unix-socket-lock",
+                "store-child.mjs::reference-store-child" },
+            w6Helpers.Select(value => value.GetProperty("id").GetString())
+                .Order(StringComparer.Ordinal).ToArray());
+        var receipt = w6.GetProperty("receipt_disposition");
+        Assert.Equal("protocol/schemas/state-publication-receipt.v1.json",
+            receipt.GetProperty("legacy_schema").GetString());
+        Assert.Equal(new[] { "P2", "P5", "P6", "S5", "S6" },
+            receipt.GetProperty("owners").EnumerateArray()
+                .Select(value => value.GetString()).Order(StringComparer.Ordinal).ToArray());
+        Assert.Contains(
+            "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#StickyPublicationReceipt",
+            receipt.GetProperty("owner_members").EnumerateArray()
+                .Select(value => value.GetString()));
+        Assert.Contains(
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Recovery/PublicationRecoveryServiceTests.cs",
+            receipt.GetProperty("evidence_paths").EnumerateArray()
+                .Select(value => value.GetString()));
+        var residual = w6.GetProperty("w6_residual_scan");
+        Assert.Equal(new[] { "GitDataStateTransport", "GitHubGitStateAcceptanceStore",
+                "heads/agentic-pr-review-m4-state-v1", "m4-state/v1",
+                "restoreCache", "saveCache" },
+            residual.GetProperty("forbidden_tokens").EnumerateArray()
+                .Select(value => value.GetString()).ToArray());
+        Assert.Contains("src/comments.ts", residual.GetProperty("w8_marker_paths")
+            .EnumerateArray().Select(value => value.GetString()));
+        Assert.Contains("runtime/tests/fixtures/action-host/framework/e1-base-inventory.json",
+            residual.GetProperty("immutable_provenance_paths").EnumerateArray()
+                .Select(value => value.GetString()));
         var w11 = replacement.RootElement.GetProperty("entries")
             .EnumerateArray().Single(value =>
                 value.GetProperty("leaf_id").GetString() == "W11");
