@@ -86,7 +86,7 @@ The first M4 live path was experimental and explicit:
 
 The exact environment variable name, direct HTTP construction, selected model string, and provider request contract are implementation decisions under the live adapter issue. The reference adapter must conform to the DeepSeek OpenAI-compatible profile; Anthropic Messages-style behavior and gateway-specific behavior are not implicitly covered. The trust category and fail-closed rules are design decisions in #29. R4-W3 removed the TypeScript invocation hosts and their `LiveRuntimeInvocationContextV1` schema; current launch authority belongs to the W2 wrapper/C# ActionHost boundary.
 
-The closed `ReviewInputV1.host.review.runtimeProvider` enum is not expanded by M4. The #55 synthetic live-process bridge historically used the existing `"test"` value as a compatibility sentinel only; it was not a provider identity and must never be copied into `ProviderRunMetadataV1`, the ledger, the manifest cache-contract identity, or published host metadata. After W3, the removed `LiveRuntimeInvocationContextV1` has no current authority; retained provider metadata, the v2 manifest, and C# Host-owned configuration carry the remaining internal identity inputs. A future decision to represent a real provider in `ReviewInputV1` requires a separately versioned protocol change and is outside #55.
+The closed `ReviewInputV1.host.review.runtimeProvider` enum is not expanded by M4. The #55 synthetic live-process bridge historically used the existing `"test"` value as a compatibility sentinel only; it was not a provider identity and must never be copied into the historical `ProviderRunMetadataV1`, the ledger, the manifest cache-contract identity, or published host metadata. After W3 and W12, neither `LiveRuntimeInvocationContextV1` nor provider-run metadata has current authority; the v2 manifest and C# Host-owned configuration carry the remaining historical identity inputs. A future decision to represent a real provider in `ReviewInputV1` requires a separately versioned protocol change and is outside #55.
 
 ## StateManifestV2 And Legacy Policy
 
@@ -1045,7 +1045,7 @@ For the purposes of V3, "observationally equivalent to `UnknownPosition`" means:
 
 ### Aggregate token overflow
 
-The TypeScript ProviderRunMetadataV1 realization is documented in [`provider-run-metadata-v1.md`](provider-run-metadata-v1.md); this link is non-normative and does not duplicate the shared algorithms below.
+The TypeScript `ProviderRunMetadataV1` realization was removed by R4-W12; this historical section records its former aggregate-token semantics and does not define a current schema, parser, or compatibility reader.
 
 `invalid-metadata-token-out-of-range` is produced by two distinct stages:
 

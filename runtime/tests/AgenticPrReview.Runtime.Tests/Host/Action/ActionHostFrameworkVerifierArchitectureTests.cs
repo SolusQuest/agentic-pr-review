@@ -135,6 +135,32 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         Assert.False(File.Exists(Path.Join(root, "scripts",
             "regenerate-prefix-contract-fixtures.mjs")));
 
+        var w12 = replacement.RootElement.GetProperty("entries")
+            .EnumerateArray().Single(value =>
+                value.GetProperty("leaf_id").GetString() == "W12");
+        Assert.Equal("removed",
+            w12.GetProperty("disposition").GetString());
+        Assert.Equal(new[]
+        {
+            "src/provider-metadata/",
+            "protocol/schemas/provider-run-metadata.v1.json",
+            "protocol/fixtures/provider-run-metadata/",
+        }, w12.GetProperty("removed_paths").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
+        Assert.False(Directory.Exists(Path.Join(root, "src", "provider-metadata")));
+        Assert.False(File.Exists(Path.Join(root, "protocol", "schemas",
+            "provider-run-metadata.v1.json")));
+        Assert.False(Directory.Exists(Path.Join(root, "protocol", "fixtures",
+            "provider-run-metadata")));
+        Assert.Contains(
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekChatBackendTests.cs",
+            w12.GetProperty("retained_evidence_paths").EnumerateArray()
+                .Select(value => value.GetString()));
+        Assert.Contains(
+            "W5/W6 opaque sidecar bytes descriptors hashes and fixtures remain under their current owners",
+            w12.GetProperty("retained_owner_groups").EnumerateArray()
+                .Select(value => value.GetString()));
+
         const string prefixCorpus = "protocol/fixtures/prefix-contract/";
         var expectedCorpus = inventory.RootElement.GetProperty("files")
             .EnumerateArray()

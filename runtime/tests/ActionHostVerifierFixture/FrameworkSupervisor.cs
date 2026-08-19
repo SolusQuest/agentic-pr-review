@@ -1151,6 +1151,12 @@ internal static class FrameworkSupervisor
             {
                 return false;
             }
+
+            if (entry.GetProperty("leaf_id").GetString() == "W12" &&
+                !ValidateW12Ownership(entry, repository))
+            {
+                return false;
+            }
         }
 
         return entries.Length == expectedLeaves.Length &&
@@ -1419,6 +1425,17 @@ internal static class FrameworkSupervisor
                     pair.Key.Replace('/', Path.DirectorySeparatorChar))) ==
                 pair.Value);
     }
+
+    private static bool ValidateW12Ownership(JsonElement entry, string repository) =>
+        entry.GetProperty("disposition").GetString() == "removed" &&
+        RequiredTextArray(entry, "removed_paths", value =>
+            IsClosedPath(value) && !LandingPathExists(repository, value)) &&
+        RequiredTextArray(entry, "removed_csharp_members", member =>
+            !MemberExists(repository, member)) &&
+        RequiredTextArray(entry, "retained_evidence_paths", value =>
+            IsClosedPath(value) && LandingPathExists(repository, value)) &&
+        RequiredTextArray(entry, "retained_owner_groups") &&
+        RequiredTextArray(entry, "obsolete_groups");
 
     private static bool MemberExists(string repository, string member)
     {

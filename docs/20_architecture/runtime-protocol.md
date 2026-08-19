@@ -197,7 +197,7 @@ Replay must not require GitHub credentials or live GitHub state. Replay material
 
 ## M4: Session Ledger Artifact
 
-The current protocol defines `ReviewInputV1`, `ReviewResultV1`, and `ReviewTraceV1`. M4 defines the additional restricted durable artifact `ProviderSessionLedgerV1`, its `StateManifestV2` binding, and the separate `ProviderRunMetadataV1` sidecar. See [`session-ledger-and-prefix-contract.md`](session-ledger-and-prefix-contract.md) for the cross-issue contract.
+The current protocol defines `ReviewInputV1`, `ReviewResultV1`, and `ReviewTraceV1`. M4 historically added the restricted durable `ProviderSessionLedgerV1`, its `StateManifestV2` binding, and a separate `ProviderRunMetadataV1` sidecar. R4-W12 removed the provider-metadata TypeScript surface, schema resource, and dedicated fixture corpus after the retained C# DeepSeek and ActionHost evidence passed. See [`session-ledger-and-prefix-contract.md`](session-ledger-and-prefix-contract.md) for the historical cross-issue contract.
 
 ## Historical Issue #33 Deterministic C# Host Integration
 
@@ -214,4 +214,4 @@ The existing `Review*V1` schemas remain unchanged. The ledger artifact, provider
 
 The implementation-level `StateManifestV2` contract library (issue #48) is documented in [`state-manifest-v2.md`](state-manifest-v2.md); it owns the manifest schema, byte-stable serializer, closed-shape validator, pure builder, pure classifier, and host-compatibility comparator. Filesystem I/O and manifest-last commit are owned by workstream 8 (#55).
 
-Provider-run metadata is the bounded telemetry sidecar described in [`provider-run-metadata-v1.md`](provider-run-metadata-v1.md); its shared vocabulary and safe diagnostics remain governed by [`session-ledger-and-prefix-contract.md`](session-ledger-and-prefix-contract.md).
+The retired provider-run-metadata sidecar is recorded in the historical [`session-ledger-and-prefix-contract.md`](session-ledger-and-prefix-contract.md); it has no current TypeScript schema, parser, fixture corpus, or compatibility reader.
