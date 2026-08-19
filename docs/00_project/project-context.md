@@ -58,7 +58,7 @@ The current implementation contains:
 - authenticated encrypted local STATE, independent Host lineage, same-head and verified-ahead admission, and framework-dependent plus Linux x64 Native AOT validation;
 - must-find, must-not-find, invalid-tool, tamper, replay, scope, continuation, and secret-canary evaluation;
 - a protected, default-branch, no-publication live-provider proof at the final R3 commit;
-- retained internal TypeScript state, publisher, protocol, and metadata families only as named R4 replacement evidence; W3 removed the invocation families and obsolete live-context schema, and W11 removed the prefix family and generator after C# ownership, immutable-corpus, and E1 continuation proof.
+- retained internal TypeScript state, publisher, and protocol families only as named R4 replacement evidence; W3 removed the invocation families and obsolete live-context schema, W11 removed the prefix family and generator after C# ownership, immutable-corpus, and E1 continuation proof, and W12 removed the provider-metadata TypeScript surface, schema resource, and dedicated fixture corpus. W5/W6 retain ownership of their distinct opaque sidecar bytes, descriptors, hashes, and fixtures.
 
 R3 is complete. R4 has restored the bounded wrapper and its official artifact bridge over an explicitly prepared payload. The development head is still not a supported downstream Action and does not yet provide the complete trusted two-run proof, release payload delivery, or R7 public default.
 
