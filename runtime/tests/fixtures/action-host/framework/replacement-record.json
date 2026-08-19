@@ -554,8 +554,24 @@
         "forbidden_tokens": [
           "GitDataStateTransport",
           "GitHubGitStateAcceptanceStore",
+          "StateAcceptanceStore",
+          "ReferenceStateStore",
+          "OctokitGitDataClient",
+          "acceptLocalCandidate",
           "heads/agentic-pr-review-m4-state-v1",
+          "agentic-pr-review-m4-state-v1",
           "m4-state/v1",
+          "m4-state-v1",
+          "candidate-registration.v1.json",
+          "accepted-state-marker.v1.json",
+          "state-selector.v1.json",
+          "state-publication-receipt.v1.json",
+          "CandidateRegistrationV1",
+          "AcceptedStateMarkerV1",
+          "StateSelectorV1",
+          "StatePublicationReceiptV1",
+          "@actions/cache",
+          "actions/cache",
           "restoreCache",
           "saveCache"
         ],
@@ -582,7 +598,8 @@
           "docs/20_architecture/r4-actionhost-wrapper-plan.md",
           "docs/20_architecture/security-boundary.md",
           "docs/90_roadmap/roadmap-seed.md"
-        ]
+        ],
+        "retained_unrelated_policy_paths": ["scripts/check-r3-live-proof.mjs"]
       },
       "deletion_gate": "No callable Git-ref, cache, plaintext, compatibility, or dual state writer remains."
     },

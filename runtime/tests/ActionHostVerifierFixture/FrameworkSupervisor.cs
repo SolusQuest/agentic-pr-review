@@ -1596,14 +1596,22 @@ internal static class FrameworkSupervisor
         var scan = entry.GetProperty("w6_residual_scan");
         var forbidden = new HashSet<string>([
             "GitDataStateTransport", "GitHubGitStateAcceptanceStore",
-            "heads/agentic-pr-review-m4-state-v1", "m4-state/v1",
+            "StateAcceptanceStore", "ReferenceStateStore", "OctokitGitDataClient",
+            "acceptLocalCandidate", "heads/agentic-pr-review-m4-state-v1",
+            "agentic-pr-review-m4-state-v1", "m4-state/v1", "m4-state-v1",
+            "candidate-registration.v1.json", "accepted-state-marker.v1.json",
+            "state-selector.v1.json", "state-publication-receipt.v1.json",
+            "CandidateRegistrationV1", "AcceptedStateMarkerV1", "StateSelectorV1",
+            "StatePublicationReceiptV1", "@actions/cache", "actions/cache",
             "restoreCache", "saveCache"
         ], StringComparer.Ordinal);
         var allowed = new HashSet<string>(StringComparer.Ordinal);
         foreach (var property in new[] { "w8_marker_paths", "deletion_evidence_paths",
-                     "immutable_provenance_paths", "retired_document_paths" })
+                     "immutable_provenance_paths", "retired_document_paths",
+                     "retained_unrelated_policy_paths" })
         {
-            if (!RequiredTextArray(scan, property)) return false;
+            if (!RequiredExactTextArray(scan, property,
+                    ExpectedW6ResidualPaths(property))) return false;
             foreach (var path in TextArray(scan, property)) allowed.Add(path);
         }
         if (!TextArray(scan, "forbidden_tokens").ToHashSet(StringComparer.Ordinal)
@@ -1620,6 +1628,38 @@ internal static class FrameworkSupervisor
         }
         return true;
     }
+
+    private static IReadOnlySet<string> ExpectedW6ResidualPaths(string property) =>
+        property switch
+        {
+            "w8_marker_paths" => new HashSet<string>([
+                "src/comments.ts", "src/comments.test.ts",
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyCommentPublisherTests.cs"
+            ], StringComparer.Ordinal),
+            "deletion_evidence_paths" => new HashSet<string>([
+                "src/residual-reference-allowlist.ts",
+                "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
+                "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+                "runtime/tests/fixtures/action-host/framework/replacement-record.json"
+            ], StringComparer.Ordinal),
+            "immutable_provenance_paths" => new HashSet<string>([
+                "docs/20_architecture/r1-legacy-removal-handoff.md",
+                "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json"
+            ], StringComparer.Ordinal),
+            "retired_document_paths" => new HashSet<string>([
+                "docs/00_project/project-context.md",
+                "docs/20_architecture/agent-runtime-rebaseline.md",
+                "docs/20_architecture/m4-state-acceptance.md",
+                "docs/20_architecture/m4-stateful-action.md",
+                "docs/20_architecture/r4-actionhost-wrapper-plan.md",
+                "docs/20_architecture/security-boundary.md",
+                "docs/90_roadmap/roadmap-seed.md"
+            ], StringComparer.Ordinal),
+            "retained_unrelated_policy_paths" => new HashSet<string>([
+                "scripts/check-r3-live-proof.mjs"
+            ], StringComparer.Ordinal),
+            _ => throw new ArgumentOutOfRangeException(nameof(property)),
+        };
 
     private static IEnumerable<string> TrackedPaths(string repository)
     {

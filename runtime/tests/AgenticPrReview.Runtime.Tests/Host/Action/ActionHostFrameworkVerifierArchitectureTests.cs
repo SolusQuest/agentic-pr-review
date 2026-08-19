@@ -183,16 +183,25 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             receipt.GetProperty("evidence_paths").EnumerateArray()
                 .Select(value => value.GetString()));
         var residual = w6.GetProperty("w6_residual_scan");
-        Assert.Equal(new[] { "GitDataStateTransport", "GitHubGitStateAcceptanceStore",
-                "heads/agentic-pr-review-m4-state-v1", "m4-state/v1",
-                "restoreCache", "saveCache" },
-            residual.GetProperty("forbidden_tokens").EnumerateArray()
-                .Select(value => value.GetString()).ToArray());
+        var forbiddenTokens = residual.GetProperty("forbidden_tokens")
+            .EnumerateArray().Select(value => value.GetString()).ToArray();
+        Assert.Equal(22, forbiddenTokens.Length);
+        Assert.Contains("StateAcceptanceStore", forbiddenTokens);
+        Assert.Contains("ReferenceStateStore", forbiddenTokens);
+        Assert.Contains("OctokitGitDataClient", forbiddenTokens);
+        Assert.Contains("acceptLocalCandidate", forbiddenTokens);
+        Assert.Contains("candidate-registration.v1.json", forbiddenTokens);
+        Assert.Contains("state-publication-receipt.v1.json", forbiddenTokens);
+        Assert.Contains("@actions/cache", forbiddenTokens);
+        Assert.Contains("actions/cache", forbiddenTokens);
         Assert.Contains("src/comments.ts", residual.GetProperty("w8_marker_paths")
             .EnumerateArray().Select(value => value.GetString()));
         Assert.Contains("runtime/tests/fixtures/action-host/framework/e1-base-inventory.json",
             residual.GetProperty("immutable_provenance_paths").EnumerateArray()
                 .Select(value => value.GetString()));
+        Assert.Equal(new[] { "scripts/check-r3-live-proof.mjs" },
+            residual.GetProperty("retained_unrelated_policy_paths").EnumerateArray()
+                .Select(value => value.GetString()).ToArray());
         var w11 = replacement.RootElement.GetProperty("entries")
             .EnumerateArray().Single(value =>
                 value.GetProperty("leaf_id").GetString() == "W11");
