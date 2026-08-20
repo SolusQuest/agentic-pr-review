@@ -273,18 +273,6 @@ export const residualReferenceRules = [
       'an accepted protocol or ledger contract change replaces the manifest and owning C# tests',
     milestone: 'R4',
   },
-  {
-    id: 'RR-033',
-    term: claudeBrandEvidence,
-    path: /^src\/protocol\/review-trace\.test\.ts$/u,
-    lifecycleClass: 'state-migration',
-    currentConsumer: 'TypeScript protocol model-identity fixtures',
-    owner: 'R2 protocol replacement',
-    interpretation:
-      'opaque provider/model identity test data, not an executable Claude runtime route',
-    deletionGate: 'replace the corresponding protocol fixture family',
-    milestone: 'R2',
-  },
   permanent(
     'RR-034',
     /^CLAUDE\.md$/u,
