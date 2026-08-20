@@ -83,17 +83,6 @@ export const residualReferenceRules = [
     milestone: 'R2',
   },
   {
-    id: 'RR-007',
-    term: stateOrMarkerLegacy,
-    path: /^src\/comments(?:\.test)?\.ts$/u,
-    lifecycleClass: 'state-migration',
-    currentConsumer: 'M4 sticky-lineage marker parsing and rendering',
-    owner: 'R4 Host and publisher',
-    interpretation: 'retained marker compatibility evidence, not a runtime selector',
-    deletionGate: 'replace M4 marker publication in R4',
-    milestone: 'R4',
-  },
-  {
     id: 'RR-008',
     term: stateOrMarkerLegacy,
     path: /^src\/types\.ts$/u,
@@ -320,19 +309,6 @@ export const residualReferenceRules = [
     'Claude references define repository instruction routing only, not provider/runtime execution',
     'AGENTS.md and docs/50_ai/collaboration-layers.md govern its scope; an accepted collaboration-policy revision supersedes this entrypoint',
   ),
-  {
-    id: 'RR-036',
-    term: /distinct from legacy lineage metadata/iu,
-    path: /^runtime\/tests\/AgenticPrReview\.Runtime\.Tests\/Host\/Publishing\/Rendering\/R4TypeScriptReplacementLedgerTests\.cs$/u,
-    lifecycleClass: 'state-migration',
-    currentConsumer: 'named R4 TypeScript replacement ledger conformance evidence',
-    owner: 'R4 deterministic sticky rendering',
-    interpretation:
-      'exact historical M4 lineage comparison only, not accepted publication metadata',
-    deletionGate:
-      'issue #170 removes the TypeScript replacement ledger after R4 migration acceptance',
-    milestone: 'R4',
-  },
   permanent(
     'RR-037',
     /^docs\/20_architecture\/r3-single-shot-removal-handoff\.md$/u,

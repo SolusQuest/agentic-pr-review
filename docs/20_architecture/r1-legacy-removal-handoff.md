@@ -15,7 +15,7 @@ Deleted source families:
 - `src/artifacts.ts` and `src/artifacts.test.ts`;
 - `src/prompt.ts`, `src/prompt.test.ts`, and `src/context-blocks.ts`.
 
-`@actions/core` and `@actions/artifact` are removed because no production importer survives. `@actions/github` remains for the temporary M4 ledger/state/publisher evidence. `esbuild` remains for fixture and acceptance-test generation.
+At the R1 handoff, `@actions/core` and `@actions/artifact` were removed because no production importer survived, while `@actions/github` remained for the temporary M4 ledger/state/publisher evidence and `esbuild` remained for fixture and acceptance-test generation. R4 later restored the checked wrapper and artifact bridge dependency set; W8 removes only the superseded TypeScript sticky publisher and does not change current wrapper package ownership.
 
 ## Prompt and context disposition
 
@@ -36,10 +36,11 @@ Coordinator routing, Action outputs, step summaries, artifact upload ordering, l
 - direct framework and Native AOT runtime integration owns command, output validation, failure taxonomy, cleanup, diagnostics, privacy, and child-environment behavior;
 - at the R1 handoff, the production `ledger-csharp` pre-acceptance stage owned runtime/result/trace/cancellation-to-zero-write composition; R4-W7 later removed that TypeScript coordinator after P6/S6/E1 replacement evidence passed;
 - state selection owns exact-v1 automatic recovery and explicit fail-closed restore without predecessor replay;
-- state acceptance owns candidate, registration, marker, selector, cancellation, stale, conflict, CAS, idempotency, publication, and receipt behavior;
-- comments and fingerprints retain their narrow sticky contracts; R4-W9 removed inline comments and target snapshots after the H2/H5/P3/P4/P6/E1 disposition map passed; ledger planning and protocol suites retain their separately owned contracts.
+- at the R1 handoff, state acceptance owned candidate, registration, marker, selector, cancellation, stale, conflict, CAS, idempotency, publication, and receipt behavior; R4-W6 later removed that TypeScript family after the encrypted state transaction and recovery evidence passed;
+- R4-W8 later removed the TypeScript sticky comment family after its rendering, marker, fingerprint, mutation/readback, and recovery contracts moved to checked C# evidence;
+- R4-W9 later removed inline comments and target snapshots after the H2/H5/P3/P4/P6/E1 disposition map passed; remaining protocol suites retain their narrower owners.
 
-Under the retained M4 contract, sticky publication occurs after selector acceptance. A failed or unknown sticky publication can therefore coexist with accepted state and a receipt outcome; the deleted Action artifact-ordering assertion is not carried forward.
+Under the historical M4 contract at this handoff, sticky publication occurred after selector acceptance. A failed or unknown sticky publication could therefore coexist with accepted state and a receipt outcome; R4's retained C# transaction instead proves sticky readback before acceptance.
 
 ## Artifact provenance vector handoff
 
@@ -84,35 +85,35 @@ Ported vectors remain until equivalent R4 artifact-bridge conformance coverage e
 
 ## Retained family ownership
 
-| Retained family                                         | Current role                                                                 | Lifecycle owner         |
-| ------------------------------------------------------- | ---------------------------------------------------------------------------- | ----------------------- |
-| `src/runtime-invocation/` and direct integration        | Runtime process, file, validation, cleanup, privacy, and capability evidence | R2 runtime and R4 Host  |
-| `src/live-runtime-invocation/` and `src/live-provider/` | Temporary M4 live-provider evidence                                          | R2/R4 replacement       |
-| `src/state-v2/`                                         | Unsupported-v1 classifier and StateManifestV2 conformance                    | R4 state bridge         |
-| `src/state-acceptance/`                                 | Temporary candidate-to-receipt state transaction evidence                    | R4 state bridge         |
-| `src/comments.ts` and sticky fingerprints               | Temporary deterministic sticky publisher and lineage evidence                | R4 Host/publisher W8    |
-| removed inline-comment and target root files/tests      | Historical mapped inline/target evidence; no current TypeScript caller       | Replaced by R4 Host W9  |
-| removed `src/ledger-csharp.ts` and root tests           | Historical internal ledger composition evidence; no public Action caller     | Replaced by R4 Host W7  |
-| `protocol/` and protocol TypeScript DTOs                | Frozen migration/conformance evidence                                        | R2 protocol replacement |
-| Artifact provenance vectors                             | R4 security input manifest                                                   | R4 artifact bridge      |
+| Retained family                                     | Current role                                                                 | Lifecycle owner         |
+| --------------------------------------------------- | ---------------------------------------------------------------------------- | ----------------------- |
+| `src/runtime-invocation/` and direct integration    | Runtime process, file, validation, cleanup, privacy, and capability evidence | R2 runtime and R4 Host  |
+| `src/live-runtime-invocation/` and `src/live-provider/` | Temporary M4 live-provider evidence                                       | R2/R4 replacement       |
+| `src/state-v2/`                                     | Unsupported-v1 classifier and StateManifestV2 conformance                    | R4 state bridge         |
+| removed `src/state-acceptance/`                     | Historical candidate-to-receipt transaction evidence; replacement is checked | Replaced by R4 Host W6  |
+| removed sticky root files/tests                     | Historical sticky evidence; replacement is checked in C#                     | Replaced by R4 Host W8  |
+| removed inline-comment and target root files/tests  | Historical mapped inline/target evidence; replacement is checked in C#       | Replaced by R4 Host W9  |
+| removed `src/ledger-csharp.ts` and root tests       | Historical internal ledger composition evidence; no public Action caller     | Replaced by R4 Host W7  |
+| `protocol/` and protocol TypeScript DTOs            | Frozen migration/conformance evidence                                        | R2 protocol replacement |
+| Artifact provenance vectors                         | R4 security input manifest                                                   | R4 artifact bridge      |
 
 ## Residual-reference ownership
 
 `src/residual-reference-allowlist.ts` and `src/residual-reference-guard.test.ts` are lifecycle machinery and are excluded from match discovery to avoid recursive self-matches. The guard enumerates every Git-tracked file, skips only binary or invalid-UTF-8 content plus those two machinery files, and scans all remaining text. It enforces both directions: every executable, contract, or documentary match has exactly one narrow rule, and every rule still matches at least one owned line.
 
-| Rules       | Owned residual                                             | Consumer and deletion gate                                                                                                     |
-| ----------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| RR-001..004 | Exact retired runtime-selector vocabulary                  | Frozen protocol inputs and a retained non-executing fixture; delete with the respective named R2 Protocol/runtime-input owners |
-| RR-005..006 | Historical provider credential names                       | Generic child-environment canaries; delete with the R2/R4 invocation replacement                                               |
-| RR-007..009 | M4 marker, state, artifact-vector, and provider vocabulary | Internal transition evidence only; delete with R4 owners                                                                       |
-| RR-010      | Removed TypeScript ledger vocabulary                       | Removed with R4-W7 after P6/S6/E1 replacement evidence passed                                                                  |
-| RR-011..012 | Unsupported-v1 state selection/classifier vocabulary       | Rejection and non-replay evidence; delete with R4 state replacement                                                            |
-| RR-013      | Temporary live-provider vocabulary                         | Internal M4 contract and retained non-executing fixture; delete with the R4 Host boundary                                      |
-| RR-014..030 | Governing or historical documentation                      | Permanent path-specific status, owner, interpretation, and supersession records                                                |
-| RR-031..033 | Claude provider/model identity fixtures                    | Opaque protocol/state fixture evidence; delete with the R2/R4 owners                                                           |
-| RR-034      | Root `CLAUDE.md` entrypoint                                | Supported thin agent instruction entrypoint governed by collaboration policy                                                   |
-| RR-035      | C# integration canary                                      | Child-environment privacy evidence; delete with the R4 Host boundary                                                           |
-| RR-037      | R3 single-shot removal handoff                             | Permanent checked deletion, retained-consumer, and later-owner record                                                          |
+| Rules       | Owned residual                                       | Consumer and deletion gate                                                                                                     |
+| ----------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| RR-001..004 | Exact retired runtime-selector vocabulary            | Frozen protocol inputs and a retained non-executing fixture; delete with the respective named R2 Protocol/runtime-input owners |
+| RR-005..006 | Historical provider credential names                 | Generic child-environment canaries; delete with the R2/R4 invocation replacement                                               |
+| RR-008..009 | M4 state, artifact-vector, and provider vocabulary   | Internal transition evidence only; delete with R4 owners                                                                       |
+| RR-010      | Removed TypeScript ledger vocabulary                 | Removed with R4-W7 after P6/S6/E1 replacement evidence passed                                                                  |
+| RR-011..012 | Unsupported-v1 state selection/classifier vocabulary | Rejection and non-replay evidence; delete with R4 state replacement                                                            |
+| RR-013      | Temporary live-provider vocabulary                   | Internal M4 contract and retained non-executing fixture; delete with the R4 Host boundary                                      |
+| RR-014..030 | Governing or historical documentation                | Permanent path-specific status, owner, interpretation, and supersession records                                                |
+| RR-031..033 | Claude provider/model identity fixtures              | Opaque protocol/state fixture evidence; delete with the R2/R4 owners                                                           |
+| RR-034      | Root `CLAUDE.md` entrypoint                          | Supported thin agent instruction entrypoint governed by collaboration policy                                                   |
+| RR-035      | C# integration canary                                | Child-environment privacy evidence; delete with the R4 Host boundary                                                           |
+| RR-037      | R3 single-shot removal handoff                       | Permanent checked deletion, retained-consumer, and later-owner record                                                          |
 
 Temporary matches are not supported public runtime selectors. The exact retired runtime selector is retained only in frozen protocol/conformance inputs and a retained non-active R4 migration/rejection fixture; unsupported legacy state is retained only to prove rejection; credential names are canaries whose values must not reach the generic child. Permanent documentation matches describe current governing boundaries or are explicitly marked historical, with their controlling supersession rule in the allowlist.
 

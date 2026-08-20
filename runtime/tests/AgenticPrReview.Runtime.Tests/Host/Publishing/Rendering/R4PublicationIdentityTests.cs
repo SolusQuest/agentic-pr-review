@@ -246,6 +246,7 @@ public sealed class R4PublicationIdentityTests
         var invalid = new[]
         {
             R4PublicationTestData.Finding(severity: "urgent"),
+            R4PublicationTestData.Finding(evidence: []),
             R4PublicationTestData.Finding(
                 evidence: [R4PublicationTestData.Evidence(path: "src:bad.cs")]),
             R4PublicationTestData.Finding(

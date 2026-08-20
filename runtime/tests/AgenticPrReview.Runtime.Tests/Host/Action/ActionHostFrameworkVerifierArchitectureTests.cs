@@ -7,7 +7,13 @@ using AgenticPrReview.Runtime.ActionHost;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Inline;
+using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
+using AgenticPrReview.Runtime.Host.Publishing.Recovery;
+using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.State.Restore;
+using AgenticPrReview.Runtime.Tests.Host.Publishing.GitHub.Sticky;
+using AgenticPrReview.Runtime.Tests.Host.Publishing.Recovery;
+using AgenticPrReview.Runtime.Tests.Host.Publishing.Rendering;
 using Xunit;
 
 namespace AgenticPrReview.Runtime.Tests.Host.Action;
@@ -106,6 +112,95 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Policy/ActionHostTrustedPolicyArchitectureTests.cs",
             w4.GetProperty("retained_evidence_paths").EnumerateArray()
                 .Select(value => value.GetString()));
+        var w8 = replacement.RootElement.GetProperty("entries")
+            .EnumerateArray().Single(value =>
+                value.GetProperty("leaf_id").GetString() == "W8");
+        Assert.Equal("removed", w8.GetProperty("disposition").GetString());
+        Assert.Equal(new[] { "src/comments.ts", "src/comments.test.ts" },
+            w8.GetProperty("removed_paths").EnumerateArray()
+                .Select(value => value.GetString()).ToArray());
+        Assert.False(File.Exists(Path.Join(root, "src", "comments.ts")));
+        Assert.False(File.Exists(Path.Join(root, "src", "comments.test.ts")));
+        Assert.Equal(new[]
+        {
+            "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/",
+            "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/",
+            "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/",
+        }, w8.GetProperty("retained_paths").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
+        Assert.Equal(new[]
+        {
+            nameof(R4StickyRenderer),
+            nameof(R4StickyMarker),
+            nameof(R4PublicationIdentityV1),
+            nameof(StickyCommentPublisher),
+            nameof(PublicationRecoveryService),
+            nameof(ActionHostCoordinator),
+            nameof(ActionHostComposition),
+        }, w8.GetProperty("csharp_owners").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
+        Assert.Equal(new[]
+        {
+            $"runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4StickyRenderer.cs#{nameof(R4StickyRenderer)}",
+            $"runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4StickyMarker.cs#{nameof(R4StickyMarker)}",
+            $"runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4PublicationIdentityV1.cs#{nameof(R4PublicationIdentityV1)}",
+            $"runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Sticky/StickyCommentPublisher.cs#{nameof(StickyCommentPublisher)}",
+            $"runtime/src/AgenticPrReview.Runtime/Host/Publishing/Recovery/PublicationRecoveryService.cs#{nameof(PublicationRecoveryService)}",
+            $"runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs#{nameof(ActionHostCoordinator)}",
+            $"runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostComposition.cs#{nameof(ActionHostComposition)}",
+        }, w8.GetProperty("owner_members").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
+        Assert.Equal(new[]
+        {
+            "P2 / #158 merged",
+            "P6 / #162 merged",
+            "W7 / #169 merged",
+            "E1 / #178 framework evidence green",
+        }, w8.GetProperty("deletion_prerequisites").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
+        Assert.Equal(new[]
+        {
+            "complete ordered projection with whole-block public truncation and an explicit omission notice",
+            "grounded findings reject empty evidence before identity or rendering",
+            "bounded-complete discovery fails closed on page item and completeness overflow",
+        }, w8.GetProperty("retained_assertion_groups").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
+        Assert.Equal(new[]
+        {
+            $"rendering:P1:{nameof(R4StickyRendererTests)}.{nameof(R4StickyRendererTests.NonEmptyReviewFreezesExactMarkdownAndBodyDigest)}",
+            $"rendering:P1:{nameof(R4StickyRendererTests)}.{nameof(R4StickyRendererTests.ProductionTruncationKeepsCompleteProjectionAndWholeBlocks)}",
+            $"marker:P1:{nameof(R4StickyMarkerTests)}.{nameof(R4StickyMarkerTests.OrdinaryAndHistoricalCommentsAreNotR4Targets)}",
+            $"fingerprint:P1:{nameof(R4PublicationIdentityTests)}.{nameof(R4PublicationIdentityTests.FindingFingerprintMatchesIndependentGoldenAndEvidenceOrderMatters)}",
+            $"fingerprint:P1:{nameof(R4PublicationIdentityTests)}.{nameof(R4PublicationIdentityTests.UnicodeNormalizationDoesNotParticipateInFindingIdentity)}",
+            $"pathless_rejection:P1:{nameof(R4PublicationIdentityTests)}.{nameof(R4PublicationIdentityTests.MalformedInternalFindingValuesFailClosed)}",
+            $"target_discovery:P2:{nameof(StickyCommentPublisherTests)}.{nameof(StickyCommentPublisherTests.HistoricalAndForeignScopeCommentsAreNotAdopted)}",
+            $"target_discovery:P2:{nameof(StickyCommentPublisherTests)}.{nameof(StickyCommentPublisherTests.DiscoveryAcceptsExactlyFiftyPagesAndFiveThousandRecords)}",
+            $"target_discovery:P2:{nameof(StickyCommentPublisherTests)}.{nameof(StickyCommentPublisherTests.PageItemAndCompletenessCapPlusOneFailClosed)}",
+            $"target_discovery:P2:{nameof(StickyCommentPublisherTests)}.{nameof(StickyCommentPublisherTests.CrossPageLastEvidenceIsRequiredForCompleteDiscovery)}",
+            $"duplicate_handling:P1:{nameof(R4PublicationIdentityTests)}.{nameof(R4PublicationIdentityTests.DuplicateFingerprintsFailClosedWithoutAlternateIdentity)}",
+            $"duplicate_handling:P2:{nameof(StickyCommentPublisherTests)}.{nameof(StickyCommentPublisherTests.MultipleOrMalformedR4TargetsFailBeforeWrite)}",
+            $"create_update:P2:{nameof(StickyCommentPublisherTests)}.{nameof(StickyCommentPublisherTests.ZeroCreatesAndExactResponseGetRelistProduceReceipt)}",
+            $"create_update:P2:{nameof(StickyCommentPublisherTests)}.{nameof(StickyCommentPublisherTests.OneUpdatesEvenWhenExistingBodyIsAlreadyExact)}",
+            $"empty_result:P1:{nameof(R4StickyMarkerTests)}.{nameof(R4StickyMarkerTests.EmptyReviewFreezesExactBodyDigestMarkerAndPlacement)}",
+            $"escaping:P1:{nameof(R4StickyRendererTests)}.{nameof(R4StickyRendererTests.EveryFreeTextRenderContextKeepsTheFullCanaryCorpusInert)}",
+            $"escaping:P1:{nameof(R4StickyRendererTests)}.{nameof(R4StickyRendererTests.EvidencePathsStayInertInRepeatedListPositions)}",
+            $"bounds:P1:{nameof(R4StickyRendererTests)}.{nameof(R4StickyRendererTests.ExactFiftyThousandScalarBoundaryIsAccepted)}",
+            $"bounds:P1:{nameof(R4StickyRendererTests)}.{nameof(R4StickyRendererTests.Utf8BudgetCountsFourByteScalarsIndependently)}",
+            $"bounds:P1:{nameof(R4StickyRendererTests)}.{nameof(R4StickyRendererTests.TwentyFindingsAreAcceptedAndTwentyOneFailClosed)}",
+            $"bounds:P2:{nameof(StickyCommentSerializerTests)}.{nameof(StickyCommentSerializerTests.SerializedRequestAcceptsExactCapAndRejectsCapPlusOne)}",
+            $"response_validation_readback:P2:{nameof(StickyCommentPublisherTests)}.{nameof(StickyCommentPublisherTests.ZeroCreatesAndExactResponseGetRelistProduceReceipt)}",
+            $"response_validation_readback:P2:{nameof(StickyCommentPublisherTests)}.{nameof(StickyCommentPublisherTests.ReadOnlyExactDiscoveryReturnsObservedReceiptWithoutMutation)}",
+            $"response_validation_readback:P2:{nameof(StickyPublicationContractsTests)}.{nameof(StickyPublicationContractsTests.PersistedP1OrReceiptCanAuthorizeReadOnlyDiscovery)}",
+            $"outcome_unknown:P2:{nameof(StickyCommentPublisherTests)}.{nameof(StickyCommentPublisherTests.LostCreateResponseReconcilesWithoutSecondWrite)}",
+            $"outcome_unknown:P2:{nameof(StickyCommentPublisherTests)}.{nameof(StickyCommentPublisherTests.UnresolvedMutationNeverRetriesAndHasNoReceipt)}",
+            $"outcome_unknown:P5:{nameof(PublicationRecoveryClassifierTests)}.{nameof(PublicationRecoveryClassifierTests.AcceptedOutcomeUnknownConvergesOnExactMarkerAfterRestart)}",
+            $"outcome_unknown:P5:{nameof(PublicationRecoveryClassifierTests)}.{nameof(PublicationRecoveryClassifierTests.DurableStickyReceiptPinsCommentIdAcrossProcessRestart)}",
+            $"outcome_unknown:P5:{nameof(PublicationRecoveryServiceTests)}.{nameof(PublicationRecoveryServiceTests.ExactStoredPayloadDiscoveryCompletesAcceptanceWithoutMutation)}",
+            $"outcome_unknown:P6:{nameof(ActionHostCompositionTests)}.{nameof(ActionHostCompositionTests.P2FailureClassesConvergeThroughDurableRecovery)}",
+            $"outcome_unknown:P6:{nameof(ActionHostCompositionTests)}.{nameof(ActionHostCompositionTests.RecoversAcceptanceCrashWithoutProviderKeyOrDuplicateSticky)}",
+        }, w8.GetProperty("named_replacement_vectors").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
         var w3 = replacement.RootElement.GetProperty("entries")
             .EnumerateArray().Single(value =>
                 value.GetProperty("leaf_id").GetString() == "W3");
@@ -194,8 +289,11 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         Assert.Contains("state-publication-receipt.v1.json", forbiddenTokens);
         Assert.Contains("@actions/cache", forbiddenTokens);
         Assert.Contains("actions/cache", forbiddenTokens);
-        Assert.Contains("src/comments.ts", residual.GetProperty("w8_marker_paths")
-            .EnumerateArray().Select(value => value.GetString()));
+        Assert.Equal(new[]
+        {
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Sticky/StickyCommentPublisherTests.cs",
+        }, residual.GetProperty("w8_marker_paths").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
         Assert.Contains("runtime/tests/fixtures/action-host/framework/e1-base-inventory.json",
             residual.GetProperty("immutable_provenance_paths").EnumerateArray()
                 .Select(value => value.GetString()));
@@ -302,8 +400,6 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
                 retained.Replace('/', Path.DirectorySeparatorChar))),
                 $"Missing W9 retained evidence: {retained}");
         }
-        Assert.True(File.Exists(Path.Join(root, "src", "comments.ts")));
-        Assert.True(File.Exists(Path.Join(root, "src", "comments.test.ts")));
         var w11 = replacement.RootElement.GetProperty("entries")
             .EnumerateArray().Single(value =>
                 value.GetProperty("leaf_id").GetString() == "W11");
@@ -343,6 +439,40 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             "W5 opaque sidecar bytes descriptors hashes and fixtures remain under its current owner",
             w12.GetProperty("retained_owner_groups").EnumerateArray()
                 .Select(value => value.GetString()));
+
+        var w10 = replacement.RootElement.GetProperty("entries")
+            .EnumerateArray().Single(value =>
+                value.GetProperty("leaf_id").GetString() == "W10");
+        var structuredHandoffs = w10.GetProperty(
+            "inherited_w8_replacement_handoffs").EnumerateArray().ToArray();
+        Assert.Equal(5, structuredHandoffs.Length);
+        Assert.All(structuredHandoffs, handoff =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(handoff.GetProperty(
+                "prior_typescript_assertion").GetString()));
+            Assert.False(string.IsNullOrWhiteSpace(handoff.GetProperty(
+                "later_owner").GetString()));
+            Assert.False(string.IsNullOrWhiteSpace(handoff.GetProperty(
+                "replacement").GetString()));
+            Assert.False(string.IsNullOrWhiteSpace(handoff.GetProperty(
+                "deliberate_difference").GetString()));
+        });
+        var w15 = replacement.RootElement.GetProperty("entries")
+            .EnumerateArray().Single(value =>
+                value.GetProperty("leaf_id").GetString() == "W15");
+        var rootHandoffs = w15.GetProperty(
+            "retired_w8_consumer_handoffs").EnumerateArray().ToArray();
+        Assert.Equal(2, rootHandoffs.Length);
+        Assert.All(rootHandoffs, handoff =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(handoff.GetProperty(
+                "prior_typescript_consumer").GetString()));
+            Assert.Equal("W15", handoff.GetProperty("later_owner").GetString());
+            Assert.False(string.IsNullOrWhiteSpace(handoff.GetProperty(
+                "disposition").GetString()));
+            Assert.False(string.IsNullOrWhiteSpace(handoff.GetProperty(
+                "deliberate_difference").GetString()));
+        });
 
         const string prefixCorpus = "protocol/fixtures/prefix-contract/";
         var expectedCorpus = inventory.RootElement.GetProperty("files")

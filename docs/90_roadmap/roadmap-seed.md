@@ -351,6 +351,7 @@ In scope:
 - no stable public outputs until a named consumer requires one;
 - official JavaScript artifact bridge where retained;
 - deletion of duplicate TypeScript business modules, review-domain cross-language protocols, duplicate validators, and parity-only fixtures;
+- R4-W8 has removed the TypeScript sticky publisher and its tests after checked P1/P2/P5/P6 plus E1 replacement proof; W9 inline/target paths remain independently owned;
 - one minimal lockstep launcher/Host contract for cancellation, bounded outcome/output handoff, exit status, and executable build identity;
 - a two-run trusted-workflow proof using an explicitly prepared trusted payload path;
 - a downstream-repository-owned encrypted GitHub Actions artifact adapter satisfying the scope-bound state class while allowing public metadata/ciphertext visibility;
