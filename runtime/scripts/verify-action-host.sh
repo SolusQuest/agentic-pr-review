@@ -27,6 +27,11 @@ cleanup() {
     done < <(find "$evidence_root" -type f -name case-result.txt -print | sort)
     if [[ "$failed_case_found" == false ]]; then
       echo "APR_ACTION_HOST_FRAMEWORK_SUPERVISOR_FAILED" >&2
+      while IFS= read -r scenario_path; do
+        if [[ ! -f "$scenario_path/case-result.txt" ]]; then
+          echo "APR_ACTION_HOST_FRAMEWORK_INCOMPLETE_CASE ${scenario_path##*/}" >&2
+        fi
+      done < <(find "$evidence_root" -mindepth 1 -maxdepth 1 -type d -print | sort)
     fi
   fi
   chmod -R u+rwX "$temporary_root" 2>/dev/null || true
