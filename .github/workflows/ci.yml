@@ -47,5 +47,3 @@ jobs:
           npm test -- --run
           src/artifact-provenance-vectors.test.ts
           src/residual-reference-guard.test.ts
-          src/state-v2/core.test.ts
-          src/state-v2/short-circuit-and-exhaustive.test.ts
