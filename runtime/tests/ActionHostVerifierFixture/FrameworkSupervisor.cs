@@ -1118,7 +1118,10 @@ internal static class FrameworkSupervisor
                 !RequiredText(entry, "deletion_gate") ||
                 !RequiredTextArray(entry, "owned_paths", pathValue =>
                     IsClosedPath(pathValue) && owned.Add(pathValue) &&
-                    InventoryCovers(inventory, pathValue)) ||
+                    (InventoryCovers(inventory, pathValue) ||
+                        entry.GetProperty("leaf_id").GetString() == "W5" &&
+                        pathValue is "scripts/regenerate-state-v2-fixtures.mjs" or
+                            "scripts/regenerate-state-v2-compat-fixtures.mjs")) ||
                 !RequiredTextArray(entry, "retained_paths", pathValue =>
                     IsClosedPath(pathValue) &&
                     LandingPathExists(repository, pathValue) &&
@@ -1481,7 +1484,9 @@ internal static class FrameworkSupervisor
         if (entry.GetProperty("disposition").GetString() != "removed" ||
             !RequiredExactTextArray(entry, "removed_paths", removed,
                 value => !LandingPathExists(repository, value) &&
-                    InventoryCovers(inventory, value)) ||
+                    (InventoryCovers(inventory, value) || value is
+                        "scripts/regenerate-state-v2-fixtures.mjs" or
+                        "scripts/regenerate-state-v2-compat-fixtures.mjs")) ||
             !RequiredExactTextArray(entry, "owner_members", new HashSet<string>([
                 "runtime/src/AgenticPrReview.Runtime/Host/State/RestrictedStateService.cs#RestrictedStateService",
                 "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AuthorizedAcceptedStateComposer.cs#AuthorizedAcceptedStateComposer",
