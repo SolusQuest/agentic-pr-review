@@ -727,6 +727,7 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             $"{nameof(PrefixCanonicalBoundaryTests)}#{nameof(PrefixCanonicalBoundaryTests.InvalidPropertyNameAtOpenJsonRoot)}",
             $"{nameof(PrefixMaterializerTests)}#{nameof(PrefixMaterializerTests.SameInputProducesByteIdenticalOutput)}",
             $"{nameof(PrefixGoldenVectorTests)}#{nameof(PrefixGoldenVectorTests.FramingVectorsMatch)}",
+            $"{nameof(CanonicalWriterTests)}#{nameof(CanonicalWriterTests.CanonicalizationRoundTripsSemanticallyAndIsIdempotent)}",
             $"{nameof(CanonicalWriterTests)}#{nameof(CanonicalWriterTests.StringEscapingMatchesRfc8785)}",
             $"{nameof(PrefixCanonicalBoundaryTests)}#{nameof(PrefixCanonicalBoundaryTests.InvalidPropertyNameUnderUnknownAncestor)}",
             $"{nameof(LenientJsonObjectEnumeratorTests)}#{nameof(LenientJsonObjectEnumeratorTests.LongCommonPrefixSortingHasLinearDecodedWork)}",
@@ -751,6 +752,20 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
                 .EnumerateArray().Select(method => method.GetString()!))
             .ToHashSet(StringComparer.Ordinal);
         Assert.True(recordedW14Methods.SetEquals(expectedW14Methods));
+        var exactRoundTripMethod =
+            $"{nameof(CanonicalWriterTests)}#{nameof(CanonicalWriterTests.CanonicalizationRoundTripsSemanticallyAndIsIdempotent)}";
+        foreach (var id in new[]
+                 {
+                     "edge-cases.test.ts::canonicalize parse canonicalize is byte-stable",
+                     "edge-cases.test.ts::output parses to an equal JSON value",
+                 })
+        {
+            var disposition = w14Dispositions.Single(value =>
+                value.GetProperty("id").GetString() == id);
+            Assert.Equal(new[] { exactRoundTripMethod },
+                disposition.GetProperty("evidence_methods").EnumerateArray()
+                    .Select(value => value.GetString()).ToArray());
+        }
         Assert.All(w14Dispositions.Where(value =>
                 value.GetProperty("disposition").GetString() == "reviewed_obsolete"),
             value => Assert.False(string.IsNullOrWhiteSpace(

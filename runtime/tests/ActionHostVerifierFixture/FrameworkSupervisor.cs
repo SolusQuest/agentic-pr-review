@@ -2048,6 +2048,7 @@ internal static class FrameworkSupervisor
             "PrefixCanonicalBoundaryTests#InvalidPropertyNameAtOpenJsonRoot",
             "PrefixMaterializerTests#SameInputProducesByteIdenticalOutput",
             "PrefixGoldenVectorTests#FramingVectorsMatch",
+            "CanonicalWriterTests#CanonicalizationRoundTripsSemanticallyAndIsIdempotent",
             "CanonicalWriterTests#StringEscapingMatchesRfc8785",
             "PrefixCanonicalBoundaryTests#InvalidPropertyNameUnderUnknownAncestor",
             "LenientJsonObjectEnumeratorTests#LongCommonPrefixSortingHasLinearDecodedWork",
@@ -2083,6 +2084,22 @@ internal static class FrameworkSupervisor
                     "reviewed_obsolete" &&
                 RequiredText(disposition, "reason")) continue;
             return false;
+        }
+
+        var exactRoundTripMethod = new HashSet<string>([
+            "CanonicalWriterTests#CanonicalizationRoundTripsSemanticallyAndIsIdempotent",
+        ], StringComparer.Ordinal);
+        foreach (var id in new[]
+                 {
+                     "edge-cases.test.ts::canonicalize parse canonicalize is byte-stable",
+                     "edge-cases.test.ts::output parses to an equal JSON value",
+                 })
+        {
+            var disposition = dispositions.Single(value =>
+                value.GetProperty("id").GetString() == id);
+            if (!RequiredExactTextArray(disposition, "evidence_methods",
+                    exactRoundTripMethod, method =>
+                        EvidenceMethodExists(repository, method))) return false;
         }
         return true;
     }

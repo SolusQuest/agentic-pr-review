@@ -1766,13 +1766,17 @@
           "id": "edge-cases.test.ts::canonicalize parse canonicalize is byte-stable",
           "source_path": "src/canonical-json/edge-cases.test.ts",
           "disposition": "retained",
-          "evidence_methods": ["PrefixGoldenVectorTests#FramingVectorsMatch"]
+          "evidence_methods": [
+            "CanonicalWriterTests#CanonicalizationRoundTripsSemanticallyAndIsIdempotent"
+          ]
         },
         {
           "id": "edge-cases.test.ts::output parses to an equal JSON value",
           "source_path": "src/canonical-json/edge-cases.test.ts",
           "disposition": "retained",
-          "evidence_methods": ["PrefixGoldenVectorTests#FramingVectorsMatch"]
+          "evidence_methods": [
+            "CanonicalWriterTests#CanonicalizationRoundTripsSemanticallyAndIsIdempotent"
+          ]
         },
         {
           "id": "edge-cases.test.ts::near-cap performance smoke",
