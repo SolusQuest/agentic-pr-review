@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.ActionHost;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
@@ -528,8 +529,8 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
                 .EnumerateArray().Select(value =>
                     value.GetProperty("path").GetString()));
         }
-        Assert.True(File.Exists(Path.Join(root, "src", "types.ts")));
-        Assert.True(File.Exists(Path.Join(root, "src", "utils.ts")));
+        Assert.False(File.Exists(Path.Join(root, "src", "types.ts")));
+        Assert.False(File.Exists(Path.Join(root, "src", "utils.ts")));
 
         Assert.Equal(new[]
         {
@@ -634,6 +635,12 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             Convert.ToHexString(SHA256.HashData(
                     Encoding.UTF8.GetBytes(corpusFraming.ToString())))
                 .ToLowerInvariant());
+        AssertDescriptionOnlySchemaChange(root,
+            "2c6f94dd39941794ff3f59f6663ce0c31113e6c1",
+            "protocol/schemas/review-input.v1.json", "repoRelativePath");
+        AssertDescriptionOnlySchemaChange(root,
+            "2c6f94dd39941794ff3f59f6663ce0c31113e6c1",
+            "protocol/schemas/review-result.v1.json", "safeRelativePath");
         Assert.Equal("ordinal path + NUL + lowercase file sha256 + LF",
             corpus.GetProperty("framing").GetString());
         Assert.True(File.Exists(Path.Join(fixtureDirectory,
@@ -703,6 +710,129 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         var w15 = replacement.RootElement.GetProperty("entries")
             .EnumerateArray().Single(value =>
                 value.GetProperty("leaf_id").GetString() == "W15");
+        Assert.Equal("removed", w15.GetProperty("disposition").GetString());
+        Assert.Equal(new[] { "src/types.ts", "src/utils.ts" },
+            w15.GetProperty("removed_paths").EnumerateArray()
+                .Select(value => value.GetString()).ToArray());
+        Assert.False(File.Exists(Path.Join(root, "src", "types.ts")));
+        Assert.False(File.Exists(Path.Join(root, "src", "utils.ts")));
+        var baseSha = inventory.RootElement.GetProperty("base_sha").GetString()!;
+        Assert.Equal(baseSha, w15.GetProperty("historical_base_sha").GetString());
+        var baseFiles = inventory.RootElement.GetProperty("files")
+            .EnumerateArray().ToDictionary(
+                value => value.GetProperty("path").GetString()!,
+                value => value.GetProperty("sha256").GetString()!,
+                StringComparer.Ordinal);
+        foreach (var removed in w15.GetProperty("removed_path_inventory")
+                     .EnumerateArray())
+        {
+            var path = removed.GetProperty("path").GetString()!;
+            var digest = removed.GetProperty("sha256").GetString()!;
+            Assert.Equal(baseFiles[path], digest);
+            Assert.Equal(digest, BaseBlobDigest(root, baseSha, path));
+        }
+
+        var historicalConsumers = w15.GetProperty("historical_consumers")
+            .EnumerateArray().ToArray();
+        Assert.Equal(new[]
+        {
+            "W7|src/ledger-csharp.test.ts|8a9e830718b91c4db76dbccf2e56f4af83d016e34f37a6fe25e0249b922e3b0a|ReviewTarget|",
+            "W7|src/ledger-csharp.ts|60c12013ca7e40de45bbbbefce603a6d687b8d3dccf61cc6187e3961157282dc|LiveProvider,Phase,ReviewMode,ReviewTarget,StructuredReviewEnvelopeV1|",
+            "W8|src/comments.test.ts|72dd8d97e2d3bfeb7f8cdc9a10ade2b4783a6196e919dc475675df7906917400|StructuredReviewEnvelopeV1|",
+            "W8|src/comments.ts|ca44ceede088c1d5fcc689a11113e9f70d8b27bb046ff4b46d90863c59e2af48|LineageAction,LineageReason,Phase,ReviewTarget,RuntimeBackend,RuntimeLineageTotals,RuntimeUsage,StructuredFindingV1,StructuredReviewEnvelopeV1|sha256,truncateText",
+            "W9|src/inline-comments.test.ts|cfd95b65b3b6d193846299376b2d7d8dbac6e5a8c02f0fe909f5f24c61c42ac8|InlineCommentsPolicy,StructuredFindingV1,StructuredReviewEnvelopeV1|",
+            "W9|src/inline-comments.ts|815492896d1801e6dcbf3a052ff48a58469c4b34bfa0b577a181f64f35207659|ChangedFile,InlineCommentsMetadata,InlineCommentsPolicy,StructuredFindingV1,StructuredReviewEnvelopeV1|sha256,truncateText",
+            "W9|src/target.test.ts|890c1dfed0ef95fb2fa23c6f4debd22e65aaf75deef9dfc298138c34c07a2ba0||sha256",
+            "W9|src/target.ts|5940223675c3e6aa87dd6abdfc6b8467d2be378d1262a344b840cbfa8780df5a|ChangedFile,PullRequestDiffSnapshotDeltaV1,PullRequestDiffSnapshotEntryV1,PullRequestDiffSnapshotV1,ReviewTarget,RuntimeProvider,TargetMode|normalizeRepoRelativePath,sha256",
+            "W10|src/protocol/build-review-input.test.ts|a6b210dcefcb61082ba04579e3775b1ac3b539948509f5dbbcc0e5ca65f32df3|ChangedFile,LoadedBlock,RestoredState,ReviewTarget|sha256",
+            "W10|src/protocol/build-review-input.ts|6f2b43f270b978f9d025a5f119e8f8ad70565430082d5d5eed5889716042ca17|InlineCommentConfidence,InlineCommentSeverity,LoadedBlock,Phase,RestoredState,ReviewTarget,RuntimeProvider,ToolMode|sha256",
+            "W10|src/protocol/map-review-result.test.ts|9515091147b09a9ae43ad177b23a1b56ed557dfae8712e50fe8c368be59d744a|StructuredFindingV1|",
+            "W10|src/protocol/review-input.test.ts|9aecf1e1d279eb3774edb76328251a6a074abca03d125fc2c25069b9f14a9006||sha256",
+            "W10|src/structured.test.ts|ffa1d0b6335e42a5f9bd863ab134679485dea3db959b62cecc0da00448a22926|ReviewTarget,RuntimeLineageTotals,RuntimeUsage|",
+            "W10|src/structured.ts|79e7e7bba6c6ae61fe70b9c520e8b8e15ecffe6edcd757652e6bebe9e764f320|InlineCommentsMetadata,Phase,ReviewTarget,ReviewedRange,RuntimeLineageTotals,RuntimeProvider,RuntimeUsage,StructuredFindingV1,StructuredReviewEnvelopeV1,ToolMode|normalizeRepoRelativePath,sha256",
+        }, historicalConsumers.Select(value => string.Join('|',
+            value.GetProperty("leaf_id").GetString(),
+            value.GetProperty("path").GetString(),
+            value.GetProperty("sha256").GetString(),
+            JsonStrings(value, "types"),
+            JsonStrings(value, "utils"))).ToArray());
+        foreach (var consumer in historicalConsumers)
+        {
+            var path = consumer.GetProperty("path").GetString()!;
+            var digest = consumer.GetProperty("sha256").GetString()!;
+            Assert.False(File.Exists(Path.Join(root,
+                path.Replace('/', Path.DirectorySeparatorChar))));
+            Assert.Equal(baseFiles[path], digest);
+            Assert.Equal(digest, BaseBlobDigest(root, baseSha, path));
+        }
+
+        var dispositionGroups = w15.GetProperty("symbol_dispositions")
+            .EnumerateArray().ToArray();
+        Assert.Equal(new[]
+        {
+            "removed-selectors|reviewed_obsolete",
+            "protocol-control-fields|superseded",
+            "review-content-envelope|superseded",
+            "inline-policy-metadata|superseded",
+            "trusted-context-blocks|superseded",
+            "target-changed-files-snapshots|superseded",
+            "state-usage-lineage|superseded",
+            "generic-configuration-helpers|reviewed_obsolete",
+            "safe-path-handling|superseded",
+            "hashing|retained_replacement",
+            "state-key-sanitization|reviewed_obsolete",
+            "bounds-truncation|superseded",
+            "generic-filesystem-json-helpers|reviewed_obsolete",
+        }, dispositionGroups.Select(value => string.Join('|',
+            value.GetProperty("id").GetString(),
+            value.GetProperty("typescript_alias_disposition").GetString()))
+            .ToArray());
+        var expectedSymbols = new[]
+        {
+            "RuntimeProvider", "LiveProvider", "RuntimeBackend", "TargetMode",
+            "ReviewMode", "Phase", "EffectiveDiffSource", "ToolMode",
+            "InlineCommentSeverity", "InlineCommentConfidence",
+            "ModelReviewFindingV1", "ModelReviewContentV1", "StructuredFindingV1",
+            "ReviewedRange", "StructuredReviewEnvelopeV1", "InlineCommentsPolicy",
+            "InlineCommentsMetadata", "LoadedBlock", "ChangedFile",
+            "PullRequestDiffSnapshotV1", "PullRequestDiffSnapshotEntryV1",
+            "PullRequestDiffSnapshotChangedEntryV1",
+            "PullRequestDiffSnapshotRemovedEntryV1", "PullRequestDiffSnapshotDeltaV1",
+            "ReviewTarget", "RestoredState", "RuntimeUsage", "RuntimeUsageTotals",
+            "RuntimeLineageTotals", "LineageReason", "LineageAction", "required",
+            "parseInteger", "parseOptionalInteger", "parsePositiveInteger",
+            "parseOptionalPositiveInteger", "parseBoolean", "oneOf", "clamp",
+            "sha256", "normalizeRepoRelativePath", "sanitizeStateKey",
+            "assertWithinLimit", "truncateText", "resolveWorkspacePath",
+            "readTextFile", "ensureDir", "writeTextFile", "writeJsonFile",
+            "readJsonFile", "walkFiles", "relativePosix",
+        };
+        var actualSymbols = dispositionGroups.SelectMany(value =>
+                value.GetProperty("symbols").EnumerateArray()
+                    .Select(symbol => symbol.GetString()!))
+            .ToArray();
+        Assert.Equal(expectedSymbols.Length, actualSymbols.Length);
+        Assert.Equal(expectedSymbols.Order(StringComparer.Ordinal),
+            actualSymbols.Order(StringComparer.Ordinal));
+        Assert.Equal(actualSymbols.Length,
+            actualSymbols.Distinct(StringComparer.Ordinal).Count());
+        var scenarios = w15.GetProperty("framework_scenario_ids")
+            .EnumerateArray().Select(value => value.GetString()!)
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.All(dispositionGroups, group =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(group.GetProperty(
+                "deliberate_semantic_difference").GetString()));
+            var scenario = group.GetProperty("framework_scenario_id").GetString()!;
+            Assert.Contains(scenario, scenarios);
+            Assert.All(group.GetProperty("evidence_paths").EnumerateArray(), evidence =>
+            {
+                var path = evidence.GetString()!;
+                Assert.True(File.Exists(Path.Join(root,
+                    path.Replace('/', Path.DirectorySeparatorChar))),
+                    $"Missing W15 evidence: {path}");
+            });
+        });
         var rootHandoffs = w15.GetProperty(
             "retired_w8_consumer_handoffs").EnumerateArray().ToArray();
         Assert.Equal(2, rootHandoffs.Length);
@@ -716,6 +846,10 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             Assert.False(string.IsNullOrWhiteSpace(handoff.GetProperty(
                 "deliberate_difference").GetString()));
         });
+        var residualAllowlist = File.ReadAllText(Path.Join(root, "src",
+            "residual-reference-allowlist.ts"));
+        Assert.DoesNotContain("RR-003", residualAllowlist, StringComparison.Ordinal);
+        Assert.DoesNotContain("RR-008", residualAllowlist, StringComparison.Ordinal);
 
         const string prefixCorpus = "protocol/fixtures/prefix-contract/";
         var expectedCorpus = inventory.RootElement.GetProperty("files")
@@ -794,7 +928,41 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         return count;
     }
 
+    private static string JsonStrings(JsonElement value, string property) =>
+        value.TryGetProperty(property, out var array)
+            ? string.Join(',', array.EnumerateArray()
+                .Select(item => item.GetString()))
+            : string.Empty;
+
     private static string BaseBlobDigest(
+        string repository,
+        string revision,
+        string path)
+        => Convert.ToHexString(SHA256.HashData(
+                BaseBlobBytes(repository, revision, path)))
+            .ToLowerInvariant();
+
+    private static void AssertDescriptionOnlySchemaChange(
+        string repository,
+        string revision,
+        string path,
+        string definition)
+    {
+        var prior = JsonNode.Parse(BaseBlobBytes(repository, revision, path))!;
+        var current = JsonNode.Parse(File.ReadAllBytes(Path.Join(repository,
+            path.Replace('/', Path.DirectorySeparatorChar))))!;
+        var priorDescription = prior["definitions"]![definition]!["description"]!
+            .GetValue<string>();
+        var currentDescription = current["definitions"]![definition]!["description"]!
+            .GetValue<string>();
+        Assert.NotEqual(priorDescription, currentDescription);
+        Assert.Contains("SchemaContracts", currentDescription,
+            StringComparison.Ordinal);
+        prior["definitions"]![definition]!["description"] = currentDescription;
+        Assert.True(JsonNode.DeepEquals(prior, current));
+    }
+
+    private static byte[] BaseBlobBytes(
         string repository,
         string revision,
         string path)
@@ -814,8 +982,7 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         process.StandardOutput.BaseStream.CopyTo(bytes);
         process.WaitForExit();
         Assert.Equal(0, process.ExitCode);
-        return Convert.ToHexString(SHA256.HashData(bytes.ToArray()))
-            .ToLowerInvariant();
+        return bytes.ToArray();
     }
 
     private static string FindRepositoryRoot()

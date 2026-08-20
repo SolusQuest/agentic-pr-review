@@ -1311,7 +1311,7 @@
         ],
         "fixture_root": "protocol/fixtures/v1/",
         "file_count": 148,
-        "aggregate_sha256": "15b1b49367cc652d324d48004d61472ba1274ccb8556588b045cf8480b65323a",
+        "aggregate_sha256": "c66e3194f27d902add70f950a4cfdfeaff67221aa1e7ad82527d9bdf6a5a1680",
         "framing": "ordinal path + NUL + lowercase file sha256 + LF"
       },
       "legacy_assertion_dispositions": [
@@ -1580,6 +1580,19 @@
         "runtime/src/AgenticPrReview.Runtime/Protocol/RuntimeJson.cs"
       ],
       "classification": "remove_after_root_consumer_gate",
+      "disposition": "removed",
+      "removed_paths": ["src/types.ts", "src/utils.ts"],
+      "historical_base_sha": "e698fb1df6daf49f393e87fac4f00e3a2ec2c716",
+      "removed_path_inventory": [
+        {
+          "path": "src/types.ts",
+          "sha256": "f4fd4340c8ab050550e96d6459f89c66fce3a4fef2429073523a19804dd709fe"
+        },
+        {
+          "path": "src/utils.ts",
+          "sha256": "198104fb678ff3cd451ca96a2b2582c1a5d96073d5f1fb042b3ad2ac5f5666e6"
+        }
+      ],
       "retired_w8_consumer_handoffs": [
         {
           "prior_typescript_consumer": "src/comments.ts imported review lineage target usage and structured review DTOs from src/types.ts",
@@ -1594,13 +1607,443 @@
           "deliberate_difference": "C# publication uses its own strict hashing and bounded rendering implementations."
         }
       ],
+      "historical_consumers": [
+        {
+          "leaf_id": "W7",
+          "path": "src/ledger-csharp.test.ts",
+          "sha256": "8a9e830718b91c4db76dbccf2e56f4af83d016e34f37a6fe25e0249b922e3b0a",
+          "types": ["ReviewTarget"]
+        },
+        {
+          "leaf_id": "W7",
+          "path": "src/ledger-csharp.ts",
+          "sha256": "60c12013ca7e40de45bbbbefce603a6d687b8d3dccf61cc6187e3961157282dc",
+          "types": [
+            "LiveProvider",
+            "Phase",
+            "ReviewMode",
+            "ReviewTarget",
+            "StructuredReviewEnvelopeV1"
+          ]
+        },
+        {
+          "leaf_id": "W8",
+          "path": "src/comments.test.ts",
+          "sha256": "72dd8d97e2d3bfeb7f8cdc9a10ade2b4783a6196e919dc475675df7906917400",
+          "types": ["StructuredReviewEnvelopeV1"]
+        },
+        {
+          "leaf_id": "W8",
+          "path": "src/comments.ts",
+          "sha256": "ca44ceede088c1d5fcc689a11113e9f70d8b27bb046ff4b46d90863c59e2af48",
+          "types": [
+            "LineageAction",
+            "LineageReason",
+            "Phase",
+            "ReviewTarget",
+            "RuntimeBackend",
+            "RuntimeLineageTotals",
+            "RuntimeUsage",
+            "StructuredFindingV1",
+            "StructuredReviewEnvelopeV1"
+          ],
+          "utils": ["sha256", "truncateText"]
+        },
+        {
+          "leaf_id": "W9",
+          "path": "src/inline-comments.test.ts",
+          "sha256": "cfd95b65b3b6d193846299376b2d7d8dbac6e5a8c02f0fe909f5f24c61c42ac8",
+          "types": ["InlineCommentsPolicy", "StructuredFindingV1", "StructuredReviewEnvelopeV1"]
+        },
+        {
+          "leaf_id": "W9",
+          "path": "src/inline-comments.ts",
+          "sha256": "815492896d1801e6dcbf3a052ff48a58469c4b34bfa0b577a181f64f35207659",
+          "types": [
+            "ChangedFile",
+            "InlineCommentsMetadata",
+            "InlineCommentsPolicy",
+            "StructuredFindingV1",
+            "StructuredReviewEnvelopeV1"
+          ],
+          "utils": ["sha256", "truncateText"]
+        },
+        {
+          "leaf_id": "W9",
+          "path": "src/target.test.ts",
+          "sha256": "890c1dfed0ef95fb2fa23c6f4debd22e65aaf75deef9dfc298138c34c07a2ba0",
+          "utils": ["sha256"]
+        },
+        {
+          "leaf_id": "W9",
+          "path": "src/target.ts",
+          "sha256": "5940223675c3e6aa87dd6abdfc6b8467d2be378d1262a344b840cbfa8780df5a",
+          "types": [
+            "ChangedFile",
+            "PullRequestDiffSnapshotDeltaV1",
+            "PullRequestDiffSnapshotEntryV1",
+            "PullRequestDiffSnapshotV1",
+            "ReviewTarget",
+            "RuntimeProvider",
+            "TargetMode"
+          ],
+          "utils": ["normalizeRepoRelativePath", "sha256"]
+        },
+        {
+          "leaf_id": "W10",
+          "path": "src/protocol/build-review-input.test.ts",
+          "sha256": "a6b210dcefcb61082ba04579e3775b1ac3b539948509f5dbbcc0e5ca65f32df3",
+          "types": ["ChangedFile", "LoadedBlock", "RestoredState", "ReviewTarget"],
+          "utils": ["sha256"]
+        },
+        {
+          "leaf_id": "W10",
+          "path": "src/protocol/build-review-input.ts",
+          "sha256": "6f2b43f270b978f9d025a5f119e8f8ad70565430082d5d5eed5889716042ca17",
+          "types": [
+            "InlineCommentConfidence",
+            "InlineCommentSeverity",
+            "LoadedBlock",
+            "Phase",
+            "RestoredState",
+            "ReviewTarget",
+            "RuntimeProvider",
+            "ToolMode"
+          ],
+          "utils": ["sha256"]
+        },
+        {
+          "leaf_id": "W10",
+          "path": "src/protocol/map-review-result.test.ts",
+          "sha256": "9515091147b09a9ae43ad177b23a1b56ed557dfae8712e50fe8c368be59d744a",
+          "types": ["StructuredFindingV1"]
+        },
+        {
+          "leaf_id": "W10",
+          "path": "src/protocol/review-input.test.ts",
+          "sha256": "9aecf1e1d279eb3774edb76328251a6a074abca03d125fc2c25069b9f14a9006",
+          "utils": ["sha256"]
+        },
+        {
+          "leaf_id": "W10",
+          "path": "src/structured.test.ts",
+          "sha256": "ffa1d0b6335e42a5f9bd863ab134679485dea3db959b62cecc0da00448a22926",
+          "types": ["ReviewTarget", "RuntimeLineageTotals", "RuntimeUsage"]
+        },
+        {
+          "leaf_id": "W10",
+          "path": "src/structured.ts",
+          "sha256": "79e7e7bba6c6ae61fe70b9c520e8b8e15ecffe6edcd757652e6bebe9e764f320",
+          "types": [
+            "InlineCommentsMetadata",
+            "Phase",
+            "ReviewTarget",
+            "ReviewedRange",
+            "RuntimeLineageTotals",
+            "RuntimeProvider",
+            "RuntimeUsage",
+            "StructuredFindingV1",
+            "StructuredReviewEnvelopeV1",
+            "ToolMode"
+          ],
+          "utils": ["normalizeRepoRelativePath", "sha256"]
+        }
+      ],
+      "symbol_dispositions": [
+        {
+          "id": "removed-selectors",
+          "symbols": ["LiveProvider", "RuntimeBackend", "ReviewMode", "EffectiveDiffSource"],
+          "typescript_alias_disposition": "reviewed_obsolete",
+          "actionhost_owners": ["ActionHostComposition"],
+          "evidence_paths": [
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostComposition.cs"
+          ],
+          "deliberate_semantic_difference": "The single trusted C# composition replaces TypeScript provider backend and review-route selector dispatch.",
+          "framework_scenario_id": "workflow-run"
+        },
+        {
+          "id": "protocol-control-fields",
+          "symbols": ["RuntimeProvider", "TargetMode", "Phase", "ToolMode"],
+          "typescript_alias_disposition": "superseded",
+          "retained_direct_runtime_owners": [
+            "RuntimeReview",
+            "RuntimeOptions",
+            "RuntimeApplication",
+            "RuntimeJsonContext"
+          ],
+          "actionhost_owners": ["ActionHostComposition"],
+          "evidence_paths": [
+            "runtime/src/AgenticPrReview.Runtime/Protocol/Models/ReviewInput.cs",
+            "runtime/src/AgenticPrReview.Runtime/Application/RuntimeApplication.cs",
+            "runtime/src/AgenticPrReview.Runtime/Protocol/RuntimeJson.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Protocol/ProtocolFixtureTests.cs"
+          ],
+          "deliberate_semantic_difference": "The direct runtime retains phase provider and tool-mode fields while ActionHost uses one provider route and independent trusted policy.",
+          "framework_scenario_id": "workflow-run"
+        },
+        {
+          "id": "review-content-envelope",
+          "symbols": [
+            "ModelReviewFindingV1",
+            "ModelReviewContentV1",
+            "StructuredFindingV1",
+            "ReviewedRange",
+            "StructuredReviewEnvelopeV1"
+          ],
+          "typescript_alias_disposition": "superseded",
+          "retained_direct_runtime_owners": [
+            "RuntimeFinding",
+            "RuntimeJsonContext",
+            "RuntimeApplication"
+          ],
+          "actionhost_owners": ["TerminalReviewValidator", "AgentLoop", "R4PublicationIdentityV1"],
+          "evidence_paths": [
+            "protocol/schemas/review-result.v1.json",
+            "runtime/src/AgenticPrReview.Runtime/Protocol/RuntimeJson.cs",
+            "runtime/src/AgenticPrReview.Runtime/Agent/Tools/TerminalReviewValidator.cs",
+            "runtime/src/AgenticPrReview.Runtime/Agent/Loop/AgentLoop.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4PublicationIdentityV1.cs"
+          ],
+          "deliberate_semantic_difference": "Direct-runtime finding fields remain live; grounded Agent evidence and Host identity replace TypeScript envelope mechanics.",
+          "framework_scenario_id": "public-result"
+        },
+        {
+          "id": "inline-policy-metadata",
+          "symbols": [
+            "InlineCommentSeverity",
+            "InlineCommentConfidence",
+            "InlineCommentsPolicy",
+            "InlineCommentsMetadata"
+          ],
+          "typescript_alias_disposition": "superseded",
+          "retained_direct_runtime_owners": ["RuntimeInlineCommentsPolicy", "RuntimeApplication"],
+          "actionhost_owners": [
+            "ActionHostTrustedPolicy",
+            "InlineCandidateMapper",
+            "ActionHostCoordinator"
+          ],
+          "evidence_paths": [
+            "protocol/schemas/review-input.v1.json",
+            "runtime/src/AgenticPrReview.Runtime/Protocol/Models/ReviewInput.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/Policy/ActionHostTrustedPolicyMaterializer.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Inline/InlineCandidateMapper.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs"
+          ],
+          "deliberate_semantic_difference": "Direct runtime retains inline inputs while ActionHost uses trusted fixed policy targeting and mutation accounting.",
+          "framework_scenario_id": "inline"
+        },
+        {
+          "id": "trusted-context-blocks",
+          "symbols": ["LoadedBlock"],
+          "typescript_alias_disposition": "superseded",
+          "retained_direct_runtime_owners": ["RuntimeContextDocument", "RuntimeApplication"],
+          "actionhost_owners": ["ActionHostTrustedPolicy"],
+          "evidence_paths": [
+            "protocol/schemas/review-input.v1.json",
+            "runtime/src/AgenticPrReview.Runtime/Protocol/Models/ReviewInput.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/Policy/ActionHostTrustedPolicyMaterializer.cs"
+          ],
+          "deliberate_semantic_difference": "Direct runtime retains context documents while H3 independently bounds trusted ActionHost policy blobs.",
+          "framework_scenario_id": "workflow-run"
+        },
+        {
+          "id": "target-changed-files-snapshots",
+          "symbols": [
+            "ChangedFile",
+            "PullRequestDiffSnapshotV1",
+            "PullRequestDiffSnapshotEntryV1",
+            "PullRequestDiffSnapshotChangedEntryV1",
+            "PullRequestDiffSnapshotRemovedEntryV1",
+            "PullRequestDiffSnapshotDeltaV1",
+            "ReviewTarget"
+          ],
+          "typescript_alias_disposition": "superseded",
+          "retained_direct_runtime_owners": ["RuntimeChangedFile", "RuntimeApplication"],
+          "actionhost_owners": [
+            "ReviewedChangedFileSet",
+            "BoundedReviewedSnapshotBuilder",
+            "ReviewedExactDiffBuilder",
+            "ReviewedTreePath"
+          ],
+          "evidence_paths": [
+            "protocol/schemas/review-input.v1.json",
+            "runtime/src/AgenticPrReview.Runtime/Protocol/Models/ReviewInput.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/Snapshot/ChangedFiles/ReviewedChangedFileSet.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/Snapshot/BoundedReviewedSnapshotBuilder.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/Snapshot/Diff/ReviewedExactDiffBuilder.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/Snapshot/ReviewedTreeSnapshot.cs"
+          ],
+          "deliberate_semantic_difference": "Direct runtime retains changed-file fields while ActionHost exact snapshots replace the old target and delta model.",
+          "framework_scenario_id": "dispatch-continuation"
+        },
+        {
+          "id": "state-usage-lineage",
+          "symbols": [
+            "RestoredState",
+            "RuntimeUsage",
+            "RuntimeUsageTotals",
+            "RuntimeLineageTotals",
+            "LineageReason",
+            "LineageAction"
+          ],
+          "typescript_alias_disposition": "superseded",
+          "retained_direct_runtime_owners": ["RuntimeApplication", "RuntimeJsonContext"],
+          "actionhost_owners": [
+            "LiveAgentFreshProcessLineage",
+            "LineageService",
+            "AuthorizedAcceptedStateComposer"
+          ],
+          "evidence_paths": [
+            "protocol/schemas/review-result.v1.json",
+            "protocol/schemas/review-trace.v1.json",
+            "runtime/src/AgenticPrReview.Runtime/Application/RuntimeApplication.cs",
+            "runtime/src/AgenticPrReview.Runtime/Application/LiveAgentFreshProcessLineage.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/State/Lineage/LineageService.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AuthorizedAcceptedStateComposer.cs"
+          ],
+          "deliberate_semantic_difference": "Direct runtime retains current-run usage schemas while encrypted accepted state replaces TypeScript lineage mechanics.",
+          "framework_scenario_id": "dispatch-continuation"
+        },
+        {
+          "id": "generic-configuration-helpers",
+          "symbols": [
+            "required",
+            "parseInteger",
+            "parseOptionalInteger",
+            "parsePositiveInteger",
+            "parseOptionalPositiveInteger",
+            "parseBoolean",
+            "oneOf",
+            "clamp"
+          ],
+          "typescript_alias_disposition": "reviewed_obsolete",
+          "actionhost_owners": ["RuntimeApplication", "SchemaContracts"],
+          "evidence_paths": [
+            "runtime/src/AgenticPrReview.Runtime/Application/RuntimeApplication.cs",
+            "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs"
+          ],
+          "deliberate_semantic_difference": "Closed schema and C# parsing reject invalid values; generic parsing and silent clamp are not retained APIs.",
+          "framework_scenario_id": "workflow-run"
+        },
+        {
+          "id": "safe-path-handling",
+          "symbols": ["normalizeRepoRelativePath"],
+          "typescript_alias_disposition": "superseded",
+          "retained_direct_runtime_owners": ["SchemaContracts"],
+          "actionhost_owners": ["ReviewedTreePath"],
+          "evidence_paths": [
+            "protocol/schemas/review-input.v1.json",
+            "protocol/schemas/review-result.v1.json",
+            "runtime/src/AgenticPrReview.Runtime/Protocol/SchemaContracts.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Protocol/ProtocolFixtureTests.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/Snapshot/ReviewedTreeSnapshot.cs"
+          ],
+          "deliberate_semantic_difference": "Schemas retain path syntax; H5 rejects unsafe paths instead of normalizing input. SemanticValidation only checks path-line relations.",
+          "framework_scenario_id": "inline"
+        },
+        {
+          "id": "hashing",
+          "symbols": ["sha256"],
+          "typescript_alias_disposition": "retained_replacement",
+          "actionhost_owners": ["R4PublicationIdentityV1", "ReviewedTreePath", "LineageService"],
+          "evidence_paths": [
+            "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4PublicationIdentityV1.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/Snapshot/ReviewedTreeSnapshot.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/State/Lineage/LineageService.cs"
+          ],
+          "deliberate_semantic_difference": "Feature-specific framed byte identities replace a generic shared hashing helper.",
+          "framework_scenario_id": "dispatch-continuation"
+        },
+        {
+          "id": "state-key-sanitization",
+          "symbols": ["sanitizeStateKey"],
+          "typescript_alias_disposition": "reviewed_obsolete",
+          "actionhost_owners": ["AuthorizedAcceptedStateComposer", "LineageService"],
+          "evidence_paths": [
+            "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AuthorizedAcceptedStateComposer.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/State/Lineage/LineageService.cs"
+          ],
+          "deliberate_semantic_difference": "Scope-bound state identity rejects mismatches instead of sanitizing caller text into a key.",
+          "framework_scenario_id": "dispatch-continuation"
+        },
+        {
+          "id": "bounds-truncation",
+          "symbols": ["assertWithinLimit", "truncateText"],
+          "typescript_alias_disposition": "superseded",
+          "actionhost_owners": [
+            "TerminalReviewValidator",
+            "ReviewedContentLimits",
+            "R4StickyRenderer"
+          ],
+          "evidence_paths": [
+            "runtime/src/AgenticPrReview.Runtime/Agent/Tools/TerminalReviewValidator.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/Snapshot/ReviewedContentLimits.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Rendering/R4StickyRenderer.cs"
+          ],
+          "deliberate_semantic_difference": "Scalar UTF-8 and complete-block fail-closed rendering replace UTF-16 slicing.",
+          "framework_scenario_id": "public-result"
+        },
+        {
+          "id": "generic-filesystem-json-helpers",
+          "symbols": [
+            "resolveWorkspacePath",
+            "readTextFile",
+            "ensureDir",
+            "writeTextFile",
+            "writeJsonFile",
+            "readJsonFile",
+            "walkFiles",
+            "relativePosix"
+          ],
+          "typescript_alias_disposition": "reviewed_obsolete",
+          "actionhost_owners": [
+            "BoundedReviewedSnapshotBuilder",
+            "AuthorizedAcceptedStateComposer"
+          ],
+          "evidence_paths": [
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/Snapshot/BoundedReviewedSnapshotBuilder.cs",
+            "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/AuthorizedAcceptedStateComposer.cs"
+          ],
+          "deliberate_semantic_difference": "No generic utility barrel survives; feature-local C# code owns bounded I/O.",
+          "framework_scenario_id": "workflow-run"
+        }
+      ],
       "protective_behaviors": [
         "safe path normalization and SHA-256",
         "bounded truncation and review DTOs",
         "target usage and lineage behavior"
       ],
-      "csharp_owners": ["RuntimeApplication", "RuntimeJson", "AgentLoop"],
-      "framework_scenario_ids": ["workflow-run", "inline", "dispatch-continuation"],
+      "csharp_owners": [
+        "RuntimeApplication",
+        "RuntimeJsonContext",
+        "SchemaContracts",
+        "RuntimeFinding",
+        "RuntimeInlineCommentsPolicy",
+        "RuntimeContextDocument",
+        "RuntimeChangedFile",
+        "ActionHostComposition",
+        "ActionHostTrustedPolicy",
+        "ReviewedChangedFileSet",
+        "BoundedReviewedSnapshotBuilder",
+        "ReviewedExactDiffBuilder",
+        "ReviewedTreePath",
+        "TerminalReviewValidator",
+        "AgentLoop",
+        "R4PublicationIdentityV1",
+        "InlineCandidateMapper",
+        "ActionHostCoordinator",
+        "LiveAgentFreshProcessLineage",
+        "LineageService",
+        "AuthorizedAcceptedStateComposer",
+        "ReviewedContentLimits",
+        "R4StickyRenderer"
+      ],
+      "framework_scenario_ids": [
+        "workflow-run",
+        "inline",
+        "dispatch-continuation",
+        "public-result"
+      ],
       "deletion_prerequisites": [
         "W7 W8 W9 and W10 merged",
         "root import inventory empty",

@@ -22,7 +22,6 @@ export interface PermanentResidualReferenceRule extends ResidualReferenceRuleBas
 export type ResidualReferenceRule = TemporaryResidualReferenceRule | PermanentResidualReferenceRule;
 
 const retiredSelector = /claude-code-cli/u;
-const stateOrMarkerLegacy = /runtime_backend|runtime_provider|live_provider|legacy/iu;
 const claudeBrandEvidence = /\bClaude\b(?!-code-cli\b)/iu;
 export const residualReferenceDiscovery =
   /\bClaude\b|@anthropic-ai\/claude-code|\bCLAUDE_[A-Z0-9_]+\b|ClaudeCodeRuntime|ANTHROPIC_|claude_code|claude-code-cli|--resume|stream-json|runtime_backend|runtime_provider|live_provider|legacy/iu;
@@ -74,28 +73,6 @@ export const residualReferenceRules = [
       'historical provider vocabulary is synthetic fixture data validated by current C# owners',
     deletionGate:
       'an accepted protocol or ledger contract change replaces the manifest and owning C# tests',
-    milestone: 'R4',
-  },
-  {
-    id: 'RR-003',
-    term: retiredSelector,
-    path: /^src\/types\.ts$/u,
-    lifecycleClass: 'state-migration',
-    currentConsumer: 'shared root TypeScript DTO vocabulary pending W15',
-    owner: 'R4-W15 issue #177',
-    interpretation: 'typed migration marker outside W10 ownership',
-    deletionGate: 'complete the W15 root shared-surface cleanup',
-    milestone: 'R4',
-  },
-  {
-    id: 'RR-008',
-    term: stateOrMarkerLegacy,
-    path: /^src\/types\.ts$/u,
-    lifecycleClass: 'state-migration',
-    currentConsumer: 'temporary M4 marker and state DTO vocabulary',
-    owner: 'R4 Host and state bridge',
-    interpretation: 'typed compatibility marker only',
-    deletionGate: 'replace retained M4 TypeScript DTO surfaces',
     milestone: 'R4',
   },
   permanent(

@@ -11,6 +11,8 @@ const scanExclusions = new Set([
   '.github/actions/agentic-pr-review/dist/index.js',
   'src/residual-reference-allowlist.ts',
   'src/residual-reference-guard.test.ts',
+  // W15 owns these synthetic legacy-module references as detector test vectors.
+  'src/root-shared-module-retirement.test.ts',
 ]);
 
 function trackedFiles(root: string): string[] {
