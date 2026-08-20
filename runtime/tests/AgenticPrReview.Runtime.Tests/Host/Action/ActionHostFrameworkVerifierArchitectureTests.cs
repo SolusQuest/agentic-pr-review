@@ -205,6 +205,105 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         Assert.Equal(new[] { ".github/actions/agentic-pr-review/dist/index.js" },
             residual.GetProperty("bundled_dependency_artifact_paths").EnumerateArray()
                 .Select(value => value.GetString()).ToArray());
+        var w9 = replacement.RootElement.GetProperty("entries")
+            .EnumerateArray().Single(value =>
+                value.GetProperty("leaf_id").GetString() == "W9");
+        Assert.Equal("removed", w9.GetProperty("disposition").GetString());
+        Assert.Equal(new[]
+        {
+            "src/inline-comments.ts",
+            "src/inline-comments.test.ts",
+            "src/target.ts",
+            "src/target.test.ts",
+        }, w9.GetProperty("removed_paths").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
+        Assert.Equal(new[]
+        {
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/Authorization/",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/Snapshot/",
+            "runtime/src/AgenticPrReview.Runtime/Host/Publishing/Inline/",
+            "runtime/src/AgenticPrReview.Runtime/Host/Publishing/GitHub/Inline/",
+            "runtime/src/AgenticPrReview.Runtime/Host/Action/",
+        }, w9.GetProperty("retained_paths").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
+        Assert.Equal(new[]
+        {
+            "ActionHostAuthorizer",
+            "ActionHostGitHubAuthorizationJson",
+            "BoundedReviewedSnapshotBuilder",
+            "ReviewedChangedFileReader",
+            "InlineCandidateMapper",
+            "InlineCommentPublisher",
+            "PostAcceptanceInlinePublisherHook",
+            "ActionHostComposition",
+        }, w9.GetProperty("csharp_owners").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
+        Assert.Equal(new[] { "inline", "inline-warning", "stale-head" },
+            w9.GetProperty("framework_scenario_ids").EnumerateArray()
+                .Select(value => value.GetString()).ToArray());
+        Assert.Equal(new[]
+        {
+            "P3 merged",
+            "P4 merged",
+            "P6 merged",
+            "E1 inline branch green",
+        }, w9.GetProperty("deletion_prerequisites").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
+        Assert.Equal(new[]
+        {
+            "same-repository open pull-request admission and frozen identity",
+            "exact reviewed diff construction unavailable classifications and right-side coordinates",
+            "trusted severity deterministic ordering fingerprint inline key and fixed cap five",
+            "complete enumeration exact dedup one batch relist readback and retry idempotency",
+            "exact closed 422-only fallback bounded individual writes and both head barriers",
+            "sticky acceptance before inline authorization and post-acceptance warning-only completion",
+        }, w9.GetProperty("retained_assertion_groups").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
+        Assert.Equal(new[]
+        {
+            "raw GitHub patch hashing and TypeScript incremental snapshot deltas",
+            "file-SHA-only patch-unavailable comparison and synthetic target resolution",
+            "caller-derived state key confidence gate configurable cap and post-list refill",
+            "M4 marker state identity and original multi-line range presentation",
+            "generic fallback after 5xx or outcome unknown and historical 3000-entry bounds",
+            "TypeScript metadata reason DTO target interfaces helpers and compatibility exports",
+        }, w9.GetProperty("superseded_assertion_groups").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
+        Assert.Equal(new[]
+        {
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Authorization/ActionHostAuthorizationFactTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/GitHub/ActionHostGitHubAuthorizationTransportTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Snapshot/BoundedReviewedSnapshotBuilderTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Snapshot/ChangedFiles/ReviewedChangedFileReaderTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Inline/InlineCandidateMapperTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/Inline/InlineCandidateReplacementVectorTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Inline/InlineCommentCodecTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Publishing/GitHub/Inline/InlineCommentPublisherTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCompositionTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+            "docs/20_architecture/r4-actionhost-wrapper-plan.md",
+        }, w9.GetProperty("retained_evidence_paths").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
+        Assert.Equal(new[]
+        {
+            "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json",
+        }, w9.GetProperty("inventory_evidence_paths").EnumerateArray()
+            .Select(value => value.GetString()).ToArray());
+        foreach (var removed in w9.GetProperty("removed_paths")
+                     .EnumerateArray().Select(value => value.GetString()!))
+        {
+            Assert.False(File.Exists(Path.Join(root,
+                removed.Replace('/', Path.DirectorySeparatorChar))));
+        }
+        foreach (var retained in w9.GetProperty("retained_evidence_paths")
+                     .EnumerateArray().Select(value => value.GetString()!))
+        {
+            Assert.True(File.Exists(Path.Join(root,
+                retained.Replace('/', Path.DirectorySeparatorChar))),
+                $"Missing W9 retained evidence: {retained}");
+        }
+        Assert.True(File.Exists(Path.Join(root, "src", "comments.ts")));
+        Assert.True(File.Exists(Path.Join(root, "src", "comments.test.ts")));
         var w11 = replacement.RootElement.GetProperty("entries")
             .EnumerateArray().Single(value =>
                 value.GetProperty("leaf_id").GetString() == "W11");
